@@ -198,9 +198,20 @@ CloudKit (той самий Apple ID)
   стежити, щоб не роздувати без потреби.
 - **Демон 24/7.** Застосунок без іконки в Dock (`LSUIElement = true`), автозапуск при логіні
   (`SMAppService`), перемалювання menu bar лише при зміні даних (енергоефективність).
-- **Sandbox.** Доступ до Keychain-айтема `Claude Code-credentials` поза App Store — без проблем;
-  у разі майбутнього App Store-розповсюдження menu bar-версії sandbox/entitlements треба
-  перевірити окремо.
+- **Доступ до Keychain — головний технічний ризик Фази 1.** Токен лежить у `login.keychain` як
+  generic-password айтем (`class: genp`, `svce: "Claude Code-credentials"`, `acct: <user>`),
+  створений Claude Code. `statusline.sh` читає його через CLI `security` з-під терміналу.
+  Нативний **підписаний** .app, який читає **чужий** (створений іншим застосунком) айтем,
+  найімовірніше отримає системний діалог «cc-timer wants to use confidential information…» при
+  першому доступі. Це керовано (користувач один раз тисне «Always Allow»), але треба:
+  - закласти в UX перший запуск (пояснити, чому з'являється діалог);
+  - **перевірити фактично** на ранньому етапі, чи доступ тихий після першого дозволу, чи
+    повторюється. Це **не залежить від системи збірки** (SPM чи Xcode — однаково).
+  - Примітка: це питання ACL айтема, а не `keychain-access-groups` entitlement (той — лише для
+    айтемів, створених самим застосунком).
+- **Sandbox.** Поза App Store sandbox не обов'язковий. У разі майбутнього App Store-розповсюдження
+  sandbox + доступ до чужого Keychain-айтема стають проблемними — перевірити окремо (ще один
+  аргумент тримати menu bar-версію поза App Store).
 - **Дистрибуція — поки не вирішено.** Для себе/перших користувачів — локальна збірка. Варіанти
   на майбутнє: GitHub Releases (.dmg/.app, потребує Apple notarization інакше Gatekeeper
   блокує), Homebrew cask (теж потребує notarization), Mac App Store (review + sandbox-ризик із
@@ -280,6 +291,17 @@ TTL-кеш 180 с). Перемальовувати menu bar лише при зм
   опитування 180 с з експоненційним backoff при 429. Підстава — джерело #202 (UA-quirk:
   невідомий UA → агресивний rate-limit). Зверни увагу: наш statusline-плагін UA не шле — варто
   виправити і там, щоб уникнути можливих 429.
+- **Мінімальна версія: macOS 15 Sequoia.** Для особистого MVP охоплення аудиторії не важливе, а
+  свіжий target прибирає legacy-код і workaround'и. Знизити target (якщо знадобиться ширше
+  охоплення при публічному релізі) — тривіальна зміна, на архітектуру не впливає.
+- **Menu bar API: `NSStatusItem` (AppKit) з кастомною `NSView`/`NSHostingView`.** Потрібен повний
+  контроль над малюванням двох кольорових смужок, idle-режимом і шириною item. `MenuBarExtra`
+  (SwiftUI) обмежує кастомізацію самого label — не підходить для нетривіальної графіки.
+- **Збірка Фази 1: Swift Package Manager + build-скрипт.** Логіка тестовна й git-friendly;
+  build-скрипт автоматизує складання `.app` bundle (структура + `Info.plist` з `LSUIElement`),
+  `codesign --options runtime`, notarization (`notarytool` + `stapler`). У **Фазі 2**
+  приєднується Xcode project для iOS/watchOS таргетів (SPM їх не тягне). Див.
+  [ADR-0004](docs/adr/0004-build-system.md).
 
 ## Результати Phase 0 spike (підтверджено)
 
