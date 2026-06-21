@@ -83,6 +83,6 @@ ck ..> compl : Phase 2: read
 | **AppLogger** | Наскрізна обгортка над `os.Logger` (3 категорії: `network`/`keychain`/`lifecycle`, subsystem `com.artem-n.cc-timer`). Токен і секрети **ніколи не логуються** — дефолтний `<private>` redaction; лише безпечні діагностичні поля позначаються `.public`. |
 | **TokenProvider** | Читання токена з Keychain; fallback-refresh при протуханні (рідко) |
 | **UsageClient** | Запити до usage API з обов'язковим `User-Agent`; backoff при 429 |
-| **PacingModel** | Порт `calc_time_pct` / `build_progress_bar` / `get_limit_indicator` зі statusline |
+| **PacingModel** | Порт `calc_time_pct` / `get_limit_indicator` зі statusline. Зони смужки — **безперервні частки [0,1]** (`BarLayout`) для піксельного малювання, не блоки; блокова квантизація — опційна похідна `blockIndex(fraction:cells:)` для popup (div. ADR-0005) |
 | **StatusItemView** | Кастомна `NSView` (смужки + час); idle-режим; стани помилок |
 | **Popup** | Деталі лімітів, розбивка по моделях, службовий рядок (останнє оновлення + інтервал) |
