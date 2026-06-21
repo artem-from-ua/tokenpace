@@ -9,3 +9,4 @@
 | [0002](0002-ukrainian-documentation.md) | Українська як мова документації | accepted |
 | [0003](0003-agent-closed-source-for-now.md) | Mac-агент поки закритий; ліцензія — відкрите питання | accepted |
 | [0004](0004-build-system.md) | Збірка Фази 1 — SPM + build-скрипт; Xcode у Фазі 2 | accepted |
+| [0005](0005-pacing-fractions-not-blocks.md) | PacingModel — зони у відсотках замість блоків | accepted |
