@@ -81,7 +81,7 @@ ck ..> compl : Phase 2: read
 | Компонент | Відповідальність |
 |---|---|
 | **AppLogger** | Наскрізна обгортка над `os.Logger` (3 категорії: `network`/`keychain`/`lifecycle`, subsystem `com.artem-n.cc-timer`). Токен і секрети **ніколи не логуються** — дефолтний `<private>` redaction; лише безпечні діагностичні поля позначаються `.public`. |
-| **TokenProvider** | Читання токена з Keychain; fallback-refresh при протуханні (рідко) |
+| **TokenProvider** | Читання токена з Keychain (`SecItemCopyMatching` за service, декодування обгортки `claudeAiOauth`, перевірка `expiresAt`). Протухлий токен **не йде на API** — `currentAccessToken` кидає `.expired`, а polling-шар чекає на свіжий від Claude Code. Fallback-refresh при протуханні — наступний крок (PR 8b). Свідомий вибір `throws`+enum і розбивка обсягу — див. ADR-0007 |
 | **UsageClient** | Запити до usage API з обов'язковим `User-Agent`; backoff при 429 |
 | **PacingModel** | Порт `calc_time_pct` / `get_limit_indicator` зі statusline. Зони смужки — **безперервні частки [0,1]** (`BarLayout`) для піксельного малювання, не блоки; блокова квантизація — опційна похідна `blockIndex(fraction:cells:)` для popup (div. ADR-0005) |
 | **ResetClock** | Парсинг `resets_at` (мікросекунди + `+00:00`, нормалізація як `parse_reset_epoch`) → `Date`; вибір найближчого ресету (5h vs 7d); форматування часу до ресету (`TimeToReset`): абсолютний `hh:mm` за локаллю (12/24-год) і локальним TZ з авто-DST якщо >90 хв, інакше відносний `1h10m`/`45m`/`40s`, або `.resetNow` при ресеті. Свідоме розходження зі statusline — див. ADR-0006 |
