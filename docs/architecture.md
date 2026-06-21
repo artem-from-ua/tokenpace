@@ -80,6 +80,7 @@ ck ..> compl : Phase 2: read
 
 | Компонент | Відповідальність |
 |---|---|
+| **AppLogger** | Наскрізна обгортка над `os.Logger` (3 категорії: `network`/`keychain`/`lifecycle`, subsystem `com.artem-n.cc-timer`). Токен і секрети **ніколи не логуються** — дефолтний `<private>` redaction; лише безпечні діагностичні поля позначаються `.public`. |
 | **TokenProvider** | Читання токена з Keychain; fallback-refresh при протуханні (рідко) |
 | **UsageClient** | Запити до usage API з обов'язковим `User-Agent`; backoff при 429 |
 | **PacingModel** | Порт `calc_time_pct` / `build_progress_bar` / `get_limit_indicator` зі statusline |

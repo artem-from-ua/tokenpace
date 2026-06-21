@@ -1,11 +1,8 @@
 import AppKit
-import OSLog
 import CCTimerKit
 
 @main
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let log = Logger(subsystem: "com.artem-n.cc-timer", category: "lifecycle")
-
     static func main() {
         let app = NSApplication.shared
         let delegate = AppDelegate()
@@ -17,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        log.info(
+        AppLogger.lifecycle.info(
             "cc-timer scaffold launched (\(CCTimerKit.version, privacy: .public)); status item arrives in #10"
         )
         // No UI yet. Process stays alive via the AppKit run loop.
