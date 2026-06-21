@@ -14,6 +14,9 @@
 - **Swift** для всього проєкту (menu bar app, згодом iOS/watchOS). Див.
   [ADR-0001](adr/0001-swift-stack.md).
 - macOS: AppKit (`NSStatusItem`) + SwiftUI всередині (`NSHostingView`).
+- **Мінімальний target: macOS 15 Sequoia.**
+- **Збірка Фази 1:** Swift Package Manager + build-скрипт (bundle/sign/notarize). Xcode —
+  у Фазі 2 для iOS/watchOS. Див. [ADR-0004](adr/0004-build-system.md).
 
 ## Git
 
