@@ -387,16 +387,20 @@ TTL-кеш 180 с). Перемальовувати menu bar лише при зм
    - **Мова тікетів — українська** (узгоджено з [ADR-0002](docs/adr/0002-ukrainian-documentation.md)).
 3. **Виконання** — реалізовувати тікети **по одному в окремих сесіях**, у визначеному порядку.
 
-Орієнтовні компоненти Фази 1 (стануть основою тікетів):
+Компоненти Фази 1 у **рекомендованому порядку виконання** (стануть основою тікетів):
 
-- `TokenProvider` — читання Keychain + fallback-refresh.
-- `UsageClient` — запити до usage API (обов'язковий `User-Agent`, backoff).
-- `PacingModel` — порт `calc_time_pct`/`build_progress_bar`/`get_limit_indicator` + unit-тести.
-- Парсинг/форматування часу (`resets_at` → локальний `hh:mm`/`1h10m`) + unit-тести.
-- `StatusItemView` — `NSStatusItem` з кастомним малюванням смужок + idle-режим.
-- Popup — деталі лімітів, розбивка по моделях, службовий рядок (останнє оновлення + інтервал).
-- Стани помилок (⚠️ після 30 хв, ворнінг у popup).
-- Поведінка sleep/wake + мережа (`NSWorkspace`).
-- launch-at-login (`SMAppService`, best-effort на unsigned) + Quit.
-- Build-скрипт (SPM → `.app` bundle, опційний підпис/notarization).
-- Логування (`os.Logger`).
+1. **SPM scaffold + build-скрипт** — структура пакета, `.app` bundle, опційний підпис/notarization.
+2. **Логування (`os.Logger`)** — наскрізне, додається **на початку**, щоб одразу діагностувати
+   решту (зокрема Keychain-діалоги).
+3. **`PacingModel`** — порт `calc_time_pct`/`build_progress_bar`/`get_limit_indicator` + unit-тести.
+4. **Форматування часу** — `resets_at` → локальний `hh:mm`/`1h10m` (DST) + unit-тести.
+5. **`TokenProvider`** — читання Keychain + fallback-refresh (головний ризик — раніше перевірити).
+6. **`UsageClient`** — запити до usage API (обов'язковий `User-Agent`, backoff). Залежить від #5.
+7. **`StatusItemView`** — `NSStatusItem` з кастомним малюванням смужок + idle-режим. Залежить від
+   #3, #4, #6.
+8. **Popup** — деталі лімітів, розбивка по моделях, службовий рядок. Залежить від #7.
+9. **Стани помилок** — ⚠️ після 30 хв, ворнінг у popup. Залежить від #7.
+10. **Sleep/wake + мережа** (`NSWorkspace`). Залежить від #6.
+11. **launch-at-login** (`SMAppService`, best-effort на unsigned) + Quit. Залежить від #1.
+
+Точний граф залежностей — у Epic-issue Фази 1 та `docs/architecture.md`.
