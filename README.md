@@ -19,6 +19,43 @@ Claude Code з macOS Keychain. **Токен ніколи не покидає Mac
 
 🚧 Рання розробка. Фаза 1 — menu bar app для macOS.
 
+## Збірка
+
+**Передумова:** Swift 6.1+ і Command Line Tools. Повний Xcode **не потрібен** у Фазі 1.
+
+```sh
+swift build        # збірка
+swift test         # unit-тести
+swift run          # запуск агента (без вікна; зупинити — Ctrl-C)
+```
+
+Зібрати `.app` bundle:
+
+```sh
+./scripts/build-app.sh    # → ./build/cc-timer.app
+open ./build/cc-timer.app # запуск (іконки в Dock немає — LSUIElement)
+```
+
+Застосунок запускається як **accessory-агент** без іконки в Dock (`LSUIElement = true`).
+У цьому каркасі UI (статус-айтем у menu bar) ще відсутній — він з'явиться у пізнішому тікеті.
+
+**Непідписана збірка / Gatekeeper:** локальна збірка непідписана. При першому запуску Gatekeeper
+може заблокувати — `права кнопка → Відкрити` (Open anyway), або:
+
+```sh
+xattr -dr com.apple.quarantine ./build/cc-timer.app
+```
+
+Підпис + notarization вмикаються автоматично у `build-app.sh`, лише якщо є Developer ID identity.
+
+**Перегляд логів:**
+
+```sh
+log stream --predicate 'subsystem == "com.artem-n.cc-timer"' --info
+```
+
+або Console.app з фільтром `com.artem-n.cc-timer`.
+
 ## Документація
 
 - [SPEC.md](SPEC.md) — продуктовий спек (проблема, архітектура, UI, фази, монетизація).

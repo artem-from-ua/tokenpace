@@ -74,6 +74,10 @@ ck ..> compl : Phase 2: read
 
 ## Компоненти (Фаза 1)
 
+**SPM-розкладка:** `CCTimerKit` (library-таргет — вся логіка, що тестується і реюзується у Фазі 2)
++ `cc-timer` (executable-таргет — AppKit entry point). Збірка `.app` bundle: `scripts/build-app.sh`
+→ `./build/cc-timer.app`.
+
 | Компонент | Відповідальність |
 |---|---|
 | **TokenProvider** | Читання токена з Keychain; fallback-refresh при протуханні (рідко) |

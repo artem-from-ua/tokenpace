@@ -17,6 +17,8 @@
 - **Мінімальний target: macOS 15 Sequoia.**
 - **Збірка Фази 1:** Swift Package Manager + build-скрипт (bundle/sign/notarize). Xcode —
   у Фазі 2 для iOS/watchOS. Див. [ADR-0004](adr/0004-build-system.md).
+- **Тести:** `swift-testing` (`import Testing`, `@Test func`, `#expect(…)`) — `XCTest` недоступний
+  на Command Line Tools без повного Xcode. `swift-testing` вбудований у Swift 6.1 CLT.
 
 ## Git
 
@@ -27,6 +29,10 @@
 ## Версіонування
 
 - SemVer 2.0.0.
+- **Єдине джерело істини для версії застосунку** — файл `VERSION` у корені репозиторію
+  (`CFBundleShortVersionString`). Старт: `0.1.0`. Build-number = кількість git-комітів
+  (`git rev-list --count HEAD`). `CCTimerKit.version` у коді дублює значення з `VERSION`
+  і оновлюється разом із ним.
 
 ## Безпека
 
