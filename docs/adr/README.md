@@ -11,3 +11,4 @@
 | [0004](0004-build-system.md) | Збірка Фази 1 — SPM + build-скрипт; Xcode у Фазі 2 | accepted |
 | [0005](0005-pacing-fractions-not-blocks.md) | PacingModel — зони у відсотках замість блоків | accepted |
 | [0006](0006-reset-time-absolute-vs-relative.md) | ResetClock — абсолютний `hh:mm` для далеких ресетів, не лише відносний час | accepted |
+| [0007](0007-token-provider-throws-and-scope-split.md) | TokenProvider — `throws`+enum та розбивка обсягу #8 | accepted |
