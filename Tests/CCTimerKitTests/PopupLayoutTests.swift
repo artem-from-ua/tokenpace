@@ -198,3 +198,65 @@ struct PopupLayoutServiceTests {
         #expect(p.intervalSeconds == 6 * 60)
     }
 }
+
+// MARK: - health-aware make (warning banner, issue #12)
+
+@Suite("PopupLayout.make health-aware")
+struct PopupLayoutHealthTests {
+
+    private let snap = snapshot(fiveHourUtil: 50, sevenDayUtil: 30)
+
+    private func health(failingFor age: TimeInterval?, reason: FailureReason = .notSignedIn) -> UsageHealth {
+        guard let age else { return .healthy(lastSuccess: now) }
+        return UsageHealth(
+            lastSuccess: now.addingTimeInterval(-age),
+            failingSince: now.addingTimeInterval(-age),
+            reason: reason
+        )
+    }
+
+    @Test func healthyHasNoWarning() {
+        let p = PopupLayout.make(from: snap, health: health(failingFor: nil), now: now,
+                                 interval: PollingBackoff.defaultInterval)
+        #expect(p.warning == nil)
+    }
+
+    @Test func warningAppearsImmediatelyOnFailure() {
+        // Even 1 s of failure surfaces the popup warning — no 30-min wait (acceptance #2).
+        let p = PopupLayout.make(from: snap, health: health(failingFor: 1), now: now,
+                                 interval: PollingBackoff.defaultInterval)
+        #expect(p.warning == .notSignedIn)
+    }
+
+    @Test func warningCarriesReasonAndBody() {
+        let p = PopupLayout.make(
+            from: snap, health: health(failingFor: 5, reason: .authHTTP(status: 401, body: "Bad token")),
+            now: now, interval: PollingBackoff.defaultInterval)
+        #expect(p.warning == .authHTTP(status: 401, body: "Bad token"))
+    }
+
+    @Test func staleRowsComeFromLastSnapshot() {
+        // While failing, the last known snapshot still populates the sections (stale display).
+        let p = PopupLayout.make(from: snap, health: health(failingFor: 10 * 60), now: now,
+                                 interval: PollingBackoff.defaultInterval)
+        #expect(p.rows.count == 2)
+        #expect(p.warning != nil)
+    }
+
+    @Test func coldStartFailureHasEmptyRowsButWarning() {
+        // No snapshot yet → the warning stands alone, no sections.
+        let coldHealth = UsageHealth(lastSuccess: nil, failingSince: now.addingTimeInterval(-60), reason: .notSignedIn)
+        let p = PopupLayout.make(from: nil, health: coldHealth, now: now,
+                                 interval: PollingBackoff.defaultInterval)
+        #expect(p.rows.isEmpty)
+        #expect(p.warning == .notSignedIn)
+        #expect(p.lastUpdateAge == 0)   // never succeeded → 0, not negative
+    }
+
+    @Test func lastUpdateAgeMeasuresFromLastSuccess() {
+        // Service line shows staleness from the last 200 (acceptance #3): 20 min ago → 1200 s.
+        let p = PopupLayout.make(from: snap, health: health(failingFor: 20 * 60), now: now,
+                                 interval: PollingBackoff.defaultInterval)
+        #expect(p.lastUpdateAge == 20 * 60)
+    }
+}

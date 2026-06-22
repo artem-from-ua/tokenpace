@@ -30,14 +30,14 @@ public struct BarView: Sendable, Equatable {
 /// What the menu-bar item should currently show — the discriminated result `StatusItemView`
 /// switches on when drawing.
 ///
-/// Two cases ship in issue #10:
+/// Cases:
 /// - ``idle``: both limits are deep in the normal band, so the widget collapses to a single
 ///   compact glyph (a bold `*`) to save menu-bar space (SPEC "Компактний режим при idle").
 /// - ``expanded(fiveHour:sevenDay:reset:which:)``: the full widget — two stacked bars (5h top,
 ///   7d bottom) plus the countdown to the nearest reset.
-///
-/// **Reserved for #12:** error states (`⚠️` / stale-data warning) get their own case there; the
-/// enum is left open for that addition rather than overloading ``idle``.
+/// - ``error(fiveHour:sevenDay:reset:which:)``: polling has been failing long enough to surface a
+///   ⚠️ glyph (issue #12). The bars are **optional**: present during the 30–60 min "stale" phase
+///   (⚠️ drawn alongside the last known bars), `nil` past 60 min or on a cold start (⚠️ alone).
 public enum MenuBarMode: Sendable, Equatable {
     /// Both windows under the idle threshold and no pacing warning — draw the compact glyph.
     case idle
@@ -49,6 +49,18 @@ public enum MenuBarMode: Sendable, Equatable {
     ///   - reset: Formatted countdown to whichever window resets first (`ResetClock`).
     ///   - which: Which window drives `reset` (so the view can label/associate it).
     case expanded(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset, which: LimitWindow)
+    /// Error state: a ⚠️ glyph, optionally with the last known bars beside it.
+    ///
+    /// All associated values are `nil` together (⚠️ only) or all non-`nil` together (⚠️ + bars) —
+    /// the view treats a `nil` `fiveHour` as "draw the glyph alone". The split mirrors
+    /// ``expanded`` so the view reuses the same bar/reset drawing.
+    ///
+    /// - Parameters:
+    ///   - fiveHour: The last known 5-hour bar, or `nil` to draw the glyph alone.
+    ///   - sevenDay: The last known 7-day bar, or `nil`.
+    ///   - reset: The last known nearest-reset countdown, or `nil`.
+    ///   - which: Which window drove `reset`, or `nil`.
+    case error(fiveHour: BarView?, sevenDay: BarView?, reset: TimeToReset?, which: LimitWindow?)
 }
 
 // MARK: - MenuBarLayout
@@ -135,6 +147,47 @@ public struct MenuBarLayout: Sendable, Equatable {
         return MenuBarLayout(
             mode: .expanded(fiveHour: five, sevenDay: seven, reset: reset, which: which)
         )
+    }
+
+    // MARK: make (health-aware, issue #12)
+
+    /// Build the menu-bar layout from the **last known** snapshot plus the polling health at `now`.
+    ///
+    /// This is the entry point the live loop (#13) calls; the plain ``make(from:now:)`` stays the
+    /// healthy-path core that this delegates to. Decision order, by how long polling has been
+    /// failing (`health.failureAge(now:)`, thresholds in ``UsageHealth``):
+    ///
+    /// 1. **Healthy** (`!isFailing`) → the normal ``make(from:now:)`` result.
+    /// 2. **Failing ≤ 30 min**, snapshot present → still ``make(from:now:)``: the bars are stale but
+    ///    fresh enough to show; the menu bar gives no error signal (the popup already warns).
+    /// 3. **Failing 30–60 min**, snapshot present → ``MenuBarMode/error`` carrying the last bars and
+    ///    reset (⚠️ drawn beside them).
+    /// 4. **Failing > 60 min, or no snapshot at all** (cold start) → ``MenuBarMode/error`` with all
+    ///    values `nil` (⚠️ alone — the data is too old, or there is none).
+    ///
+    /// - Parameters:
+    ///   - snapshot: The last successfully decoded poll, or `nil` if none has ever succeeded.
+    ///   - health: The polling-health context (last success, failure start, reason).
+    ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
+    public static func make(from snapshot: UsageSnapshot?, health: UsageHealth, now: Date) -> MenuBarLayout {
+        // Healthy, or stale within the grace window: show the (possibly stale) bars unchanged.
+        guard let age = health.failureAge(now: now) else {
+            return snapshot.map { make(from: $0, now: now) } ?? MenuBarLayout(mode: .idle)
+        }
+        if let snapshot, age <= UsageHealth.glyphAfter {
+            return make(from: snapshot, now: now)
+        }
+
+        // Failing past the glyph threshold. Keep the bars only in the 30–60 min stale window and
+        // only if we have a snapshot; otherwise the glyph stands alone.
+        let keepBars = snapshot != nil && age <= UsageHealth.hideBarsAfter
+        guard keepBars, let snapshot,
+              case let .expanded(five, seven, reset, which) = make(from: snapshot, now: now).mode else {
+            AppLogger.ui.notice("menu-bar mode=error bars=none")
+            return MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
+        }
+        AppLogger.ui.notice("menu-bar mode=error bars=stale")
+        return MenuBarLayout(mode: .error(fiveHour: five, sevenDay: seven, reset: reset, which: which))
     }
 
     // MARK: - Private

@@ -162,3 +162,99 @@ struct MenuBarLayoutExpandedTests {
         #expect(expanded(layout) != nil)
     }
 }
+
+// MARK: - health-aware make (error phases, issue #12)
+
+@Suite("MenuBarLayout.make health-aware")
+struct MenuBarLayoutHealthTests {
+
+    /// A representative non-idle snapshot (so the healthy/stale path is `.expanded`, not `.idle`).
+    private let snap = UsageSnapshot(
+        fiveHour: UsageWindow(utilization: 50, resetsAt: resetsAt(inSeconds: 4 * 3600)),
+        sevenDay: UsageWindow(utilization: 30, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600))
+    )
+
+    /// A health value failing for `age` seconds (with a matching last success in the past).
+    private func failing(for age: TimeInterval) -> UsageHealth {
+        UsageHealth(
+            lastSuccess: now.addingTimeInterval(-age),
+            failingSince: now.addingTimeInterval(-age),
+            reason: .notSignedIn
+        )
+    }
+
+    private func isError(_ layout: MenuBarLayout) -> Bool {
+        if case .error = layout.mode { return true }
+        return false
+    }
+
+    @Test func healthyDelegatesToPlainMake() {
+        // Healthy health-aware make must equal the plain make on the same snapshot.
+        let viaHealth = MenuBarLayout.make(from: snap, health: .healthy(lastSuccess: now), now: now)
+        let plain = MenuBarLayout.make(from: snap, now: now)
+        #expect(viaHealth == plain)
+    }
+
+    @Test func failingWithinGraceShowsBarsNotError() {
+        // 10 min of failure → still the stale bars, no ⚠️ (the popup warns instead).
+        let layout = MenuBarLayout.make(from: snap, health: failing(for: 10 * 60), now: now)
+        #expect(!isError(layout))
+        guard case .expanded = layout.mode else {
+            Issue.record("expected .expanded, got \(layout.mode)")
+            return
+        }
+    }
+
+    @Test func exactlyThirtyMinutesStillShowsBars() {
+        // Boundary: at exactly 30:00 the glyph has NOT appeared yet (`age <= glyphAfter`).
+        let layout = MenuBarLayout.make(from: snap, health: failing(for: UsageHealth.glyphAfter), now: now)
+        #expect(!isError(layout))
+    }
+
+    @Test func pastThirtyMinutesIsErrorWithBars() {
+        // 31 min → ⚠️ + stale bars (the error case carries the bars).
+        let layout = MenuBarLayout.make(from: snap, health: failing(for: 31 * 60), now: now)
+        guard case let .error(five, seven, reset, which) = layout.mode else {
+            Issue.record("expected .error, got \(layout.mode)")
+            return
+        }
+        #expect(five != nil && seven != nil && reset != nil && which != nil)
+    }
+
+    @Test func exactlySixtyMinutesStillKeepsBars() {
+        // Boundary: at exactly 60:00 the bars are still kept (`age <= hideBarsAfter`).
+        let layout = MenuBarLayout.make(from: snap, health: failing(for: UsageHealth.hideBarsAfter), now: now)
+        guard case let .error(five, _, _, _) = layout.mode else {
+            Issue.record("expected .error, got \(layout.mode)")
+            return
+        }
+        #expect(five != nil)
+    }
+
+    @Test func pastSixtyMinutesDropsBars() {
+        // 61 min → ⚠️ alone (the data is too stale to show).
+        let layout = MenuBarLayout.make(from: snap, health: failing(for: 61 * 60), now: now)
+        guard case let .error(five, seven, reset, which) = layout.mode else {
+            Issue.record("expected .error, got \(layout.mode)")
+            return
+        }
+        #expect(five == nil && seven == nil && reset == nil && which == nil)
+    }
+
+    @Test func coldStartFailingIsErrorWithoutBars() {
+        // No snapshot ever decoded → ⚠️ alone regardless of how short the failure has been.
+        let health = UsageHealth(lastSuccess: nil, failingSince: now.addingTimeInterval(-60), reason: .notSignedIn)
+        let layout = MenuBarLayout.make(from: nil, health: health, now: now)
+        guard case let .error(five, _, _, _) = layout.mode else {
+            Issue.record("expected .error, got \(layout.mode)")
+            return
+        }
+        #expect(five == nil)
+    }
+
+    @Test func coldStartHealthyIsIdle() {
+        // No snapshot and not failing (the instant before the first poll completes) → idle, no crash.
+        let layout = MenuBarLayout.make(from: nil, health: .healthy(lastSuccess: now), now: now)
+        #expect(layout.mode == .idle)
+    }
+}

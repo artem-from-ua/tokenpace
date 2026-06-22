@@ -18,16 +18,23 @@ public enum UsageError: Error, Equatable {
     /// into an aggressively rate-limited bucket and returns constant 429s.
     case missingUserAgent
     /// Transport-level failure (no connectivity, DNS, TLS, cancellation). `message` is a
-    /// `.public`-safe description and never carries the token.
-    case transport(String)
+    /// `.public`-safe description and never carries the token; `code` is the underlying
+    /// `URLError.Code` when the failure was a `URLError` (else `nil`), so the error UI can
+    /// distinguish a timeout from a DNS failure precisely instead of parsing the message
+    /// string (issue #12). `URLError.Code` is `Sendable`/`Equatable`, so this stays both.
+    case transport(message: String, code: URLError.Code?)
     /// The response was not an `HTTPURLResponse`.
     case nonHTTPResponse
     /// HTTP 429. Carries the parsed `Retry-After` seconds when the server sent them, so
     /// the backoff layer can honor a hint longer than its own schedule; `nil` → use the
     /// schedule's next step.
     case rateLimited(retryAfter: TimeInterval?)
-    /// Any other non-2xx status (401 / 403 / 5xx). Carries the `.public`-safe status code.
-    case http(status: Int)
+    /// Any other non-2xx status (401 / 403 / 5xx). Carries the `.public`-safe status code
+    /// and the response `body` (when present) so the error UI can surface the server's own
+    /// message — e.g. the popup shows "Auth error (HTTP 401)" on one line and the body text
+    /// on the next (issue #12). The body is plain text, truncated, and never carries the
+    /// bearer token (it is the *response*, not the request).
+    case http(status: Int, body: String?)
     /// The 200 body decoded as non-JSON, or a required window (`five_hour`/`seven_day`)
     /// was missing.
     case decode

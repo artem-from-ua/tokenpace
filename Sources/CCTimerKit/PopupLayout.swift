@@ -61,21 +61,32 @@ public struct LimitRow: Sendable, Equatable {
 /// The service-line values (`lastUpdateAge`, `intervalSeconds`) are **raw seconds** — the view
 /// formats them ("just now", "3m") so a future localisation touches only the view.
 ///
-/// **Reserved for #12:** the no-data / auth-failure warning gets its own representation there;
-/// this type describes a *successful* snapshot.
+/// Issue #12 adds ``warning``: when a poll is failing, the popup shows a two-line banner
+/// **immediately** (no 30-min threshold — that gate is the menu bar's, not the popup's), above the
+/// possibly-stale ``rows``. A healthy layout leaves it `nil`.
 public struct PopupLayout: Sendable, Equatable {
     /// Age of the last successful 200, in seconds (clamped ≥ 0). Drives "Last update: …".
     public let lastUpdateAge: TimeInterval
     /// Current polling interval in seconds (`PollingBackoff.interval`). Drives "Update interval: …".
     public let intervalSeconds: TimeInterval
     /// The limit sections, in display order: `5h`, `7d`, then any present per-model rows
-    /// (`Opus`, `Sonnet`). Absent models are simply not in the array (null-safe).
+    /// (`Opus`, `Sonnet`). Absent models are simply not in the array (null-safe). Empty on a
+    /// cold-start failure (no snapshot yet — the warning stands alone).
     public let rows: [LimitRow]
+    /// The current failure cause when a poll is failing, else `nil`. Drives the popup warning banner
+    /// (issue #12); the view turns it into the two-line title/detail (the localisation seam).
+    public let warning: FailureReason?
 
-    public init(lastUpdateAge: TimeInterval, intervalSeconds: TimeInterval, rows: [LimitRow]) {
+    public init(
+        lastUpdateAge: TimeInterval,
+        intervalSeconds: TimeInterval,
+        rows: [LimitRow],
+        warning: FailureReason? = nil
+    ) {
         self.lastUpdateAge = lastUpdateAge
         self.intervalSeconds = intervalSeconds
         self.rows = rows
+        self.warning = warning
     }
 
     // MARK: make
@@ -93,18 +104,7 @@ public struct PopupLayout: Sendable, Equatable {
         lastUpdate: Date,
         interval: TimeInterval
     ) -> PopupLayout {
-        var rows: [LimitRow] = [
-            row(title: "5-hour limit", window: snapshot.fiveHour, as: .fiveHour, now: now),
-            row(title: "7-day limit", window: snapshot.sevenDay, as: .sevenDay, now: now),
-        ]
-        // Per-model sub-windows of the weekly limit — paced as .sevenDay, null-safe (skip absent).
-        if let opus = snapshot.sevenDayOpus {
-            rows.append(row(title: "Opus (7-day)", window: opus, as: .sevenDay, now: now))
-        }
-        if let sonnet = snapshot.sevenDaySonnet {
-            rows.append(row(title: "Sonnet (7-day)", window: sonnet, as: .sevenDay, now: now))
-        }
-
+        let rows = self.rows(from: snapshot, now: now)
         AppLogger.ui.notice("popup layout built rows=\(rows.count, privacy: .public)")
         return PopupLayout(
             lastUpdateAge: max(0, now.timeIntervalSince(lastUpdate)),
@@ -113,7 +113,61 @@ public struct PopupLayout: Sendable, Equatable {
         )
     }
 
+    // MARK: make (health-aware, issue #12)
+
+    /// Build the popup from the last known snapshot **and** the polling health.
+    ///
+    /// The entry point the live loop (#13) calls. Unlike the menu bar's staged thresholds, the popup
+    /// warns the moment a failure is in progress (SPEC: "за будь-якої непрацюючої авторизації …
+    /// одразу"):
+    /// - ``warning`` = `health.reason` whenever `health.isFailing`, else `nil`.
+    /// - ``lastUpdateAge`` is measured from `health.lastSuccess` so the service line shows how stale
+    ///   the data is (clamped `≥ 0`; `0` on a cold start where there is no last success).
+    /// - ``rows`` come from the last known `snapshot` (stale data, shown with its timestamp), or are
+    ///   empty on a cold-start failure (no snapshot yet — the warning stands alone).
+    ///
+    /// - Parameters:
+    ///   - snapshot: The last successfully decoded poll, or `nil` if none has ever succeeded.
+    ///   - health: The polling-health context (last success, failure start, reason).
+    ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
+    ///   - interval: Current polling interval in seconds (`PollingBackoff.interval`).
+    public static func make(
+        from snapshot: UsageSnapshot?,
+        health: UsageHealth,
+        now: Date,
+        interval: TimeInterval
+    ) -> PopupLayout {
+        let rows = snapshot.map { self.rows(from: $0, now: now) } ?? []
+        let lastUpdateAge = health.lastSuccess.map { max(0, now.timeIntervalSince($0)) } ?? 0
+        let warning = health.isFailing ? health.reason : nil
+        AppLogger.ui.notice(
+            "popup layout built rows=\(rows.count, privacy: .public) failing=\(health.isFailing, privacy: .public)")
+        return PopupLayout(
+            lastUpdateAge: lastUpdateAge,
+            intervalSeconds: interval,
+            rows: rows,
+            warning: warning
+        )
+    }
+
     // MARK: - Private
+
+    /// The ordered limit sections for a snapshot: `5h`, `7d`, then any present per-model rows
+    /// (`Opus`/`Sonnet`, paced as `.sevenDay`, null-safe — absent models are skipped). Shared by
+    /// both ``make`` overloads.
+    private static func rows(from snapshot: UsageSnapshot, now: Date) -> [LimitRow] {
+        var rows: [LimitRow] = [
+            row(title: "5-hour limit", window: snapshot.fiveHour, as: .fiveHour, now: now),
+            row(title: "7-day limit", window: snapshot.sevenDay, as: .sevenDay, now: now),
+        ]
+        if let opus = snapshot.sevenDayOpus {
+            rows.append(row(title: "Opus (7-day)", window: opus, as: .sevenDay, now: now))
+        }
+        if let sonnet = snapshot.sevenDaySonnet {
+            rows.append(row(title: "Sonnet (7-day)", window: sonnet, as: .sevenDay, now: now))
+        }
+        return rows
+    }
 
     /// Build one `LimitRow`, delegating all arithmetic to tested pure logic. An unparseable
     /// `resets_at` falls back to `now` for the bar geometry (→ `elapsedFraction == 1.0`, matching
