@@ -34,8 +34,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         // MOCK — replaced by live polling in #13. Drives the custom view with a representative
-        // snapshot so the bars/idle/reset rendering is visible under `swift run` today.
-        let layout = MenuBarLayout.make(from: Self.mockSnapshot(now: Date()), now: Date())
+        // snapshot + health so the bars/idle/reset and the #12 error states are visible under
+        // `swift run` today. Flip `Self.demoMode` to preview the failure phases.
+        let now = Date()
+        let snapshot = Self.mockSnapshot(now: now)
+        let health = Self.mockHealth(now: now)
+        let layout = MenuBarLayout.make(from: snapshot, health: health, now: now)
         let view = StatusItemView(frame: NSRect(origin: .zero, size: NSSize(width: 0, height: 22)))
         view.layout = layout
         self.statusView = view
@@ -52,14 +56,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.refreshStatusImage() }
         }
 
-        // Build the popup content from the same snapshot. MOCK — #13 supplies the real
-        // lastUpdate (time of the last successful 200) and interval (PollingBackoff.interval);
-        // until then the service line reads a fresh poll at the healthy 180 s cadence.
+        // Build the popup content from the same snapshot + health. MOCK — #13 supplies the real
+        // health (last success, failure start, reason) and interval (PollingBackoff.interval);
+        // until then the service line reads from the mock health's lastSuccess.
         popupVC.loadView()   // realise the view so it can be sized before the menu measures it
         popupVC.layout = PopupLayout.make(
-            from: Self.mockSnapshot(now: Date()),
-            now: Date(),
-            lastUpdate: Date(),
+            from: snapshot,
+            health: health,
+            now: now,
             interval: PollingBackoff.defaultInterval
         )
         // A menu item's hosted view must have a concrete non-zero frame — NSMenu reads `frame`, not
@@ -92,6 +96,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Mock data (#13 replaces this with a live poll)
+
+    /// Which mock state `swift run` renders. Default `.healthy` keeps the normal bars (issue #11
+    /// behaviour); flip to a failure case to preview the issue #12 error states by eye:
+    /// - `.failing30m` → ⚠️ **plus** stale bars (the 30–60 min phase) + the popup warning banner.
+    /// - `.failing70m` → ⚠️ **alone** (past 60 min) + the popup warning banner.
+    private enum DemoMode { case healthy, failing30m, failing70m }
+    private static let demoMode: DemoMode = .healthy
+
+    /// A mock ``UsageHealth`` matching ``demoMode`` — healthy, or failing for a duration that lands
+    /// in the requested menu-bar phase. `lastSuccess` is set in the past so the popup's "Last
+    /// update" line shows the data ageing.
+    private static func mockHealth(now: Date) -> UsageHealth {
+        switch demoMode {
+        case .healthy:
+            return .healthy(lastSuccess: now)
+        case .failing30m:
+            return UsageHealth(
+                lastSuccess: now.addingTimeInterval(-35 * 60),
+                failingSince: now.addingTimeInterval(-35 * 60),
+                reason: .authHTTP(status: 401, body: "Invalid or expired access token"))
+        case .failing70m:
+            return UsageHealth(
+                lastSuccess: now.addingTimeInterval(-70 * 60),
+                failingSince: now.addingTimeInterval(-70 * 60),
+                reason: .notSignedIn)
+        }
+    }
 
     /// A representative `UsageSnapshot` for visual verification, deliberately exercising **both**
     /// pacing colours so the green/red palette can be judged at a glance:

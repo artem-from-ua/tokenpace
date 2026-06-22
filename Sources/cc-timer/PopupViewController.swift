@@ -126,6 +126,9 @@ final class PopupViewController: NSViewController {
         static let vPadding: CGFloat = 10
         static let rowSpacing: CGFloat = 3
         static let sectionSpacing: CGFloat = 7
+        /// Extra breathing room on **both** sides of a horizontal rule, so each separator sits in
+        /// its own white space rather than hugging the lines above/below it.
+        static let separatorPadding: CGFloat = 10
         static let barWidth: CGFloat = 200
     }
 
@@ -158,8 +161,21 @@ final class PopupViewController: NSViewController {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard let layout else { return }
 
-        // Header block.
+        // Title (first line), then a horizontal rule separating it from what follows.
         addLabel(Self.appTitle, font: .boldSystemFont(ofSize: 13))
+        addSeparator()
+
+        // Error block (when failing): two lines — a bold title led by the ⚠️ symbol, then the
+        // detail — followed by its own rule. Shown immediately on any failure (SPEC), so the
+        // problem is read before the service lines.
+        if let reason = layout.warning {
+            addWarningTitle(Self.warningTitle(reason))
+            addLabel(Self.warningDetail(reason), font: .systemFont(ofSize: 11), secondary: true)
+            addSeparator()
+        }
+
+        // Service lines: last update + interval. The next rule comes from the first limit section
+        // below (or none, on a cold-start failure with no sections).
         addLabel(Self.lastUpdateText(layout.lastUpdateAge), font: .systemFont(ofSize: 11), secondary: true)
         addLabel(Self.intervalText(layout.intervalSeconds), font: .systemFont(ofSize: 11), secondary: true)
 
@@ -172,11 +188,40 @@ final class PopupViewController: NSViewController {
         }
     }
 
-    private func addLabel(_ text: String, font: NSFont, secondary: Bool = false) {
+    @discardableResult
+    private func addLabel(_ text: String, font: NSFont, secondary: Bool = false) -> NSView {
         let label = NSTextField(labelWithString: text)
         label.font = font
         label.textColor = secondary ? .secondaryLabelColor : .labelColor
         stack.addArrangedSubview(label)
+        return label
+    }
+
+    /// The error block's bold first line: a ⚠️ symbol attachment followed by `text`, both in the
+    /// system red so the failure reads at a glance. The symbol is the popup counterpart of the
+    /// menu-bar glyph (issue #12); using `.systemRed` (not the fixed palette sRGB) lets the popup,
+    /// which is appearance-aware, keep contrast on light and dark panels alike.
+    @discardableResult
+    private func addWarningTitle(_ text: String) -> NSView {
+        let font = NSFont.boldSystemFont(ofSize: 12)
+        let color = NSColor.systemRed
+        let attributed = NSMutableAttributedString()
+
+        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+            .applying(.init(paletteColors: [color]))
+        if let symbol = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "warning")?
+            .withSymbolConfiguration(symbolConfig) {
+            let attachment = NSTextAttachment()
+            attachment.image = symbol
+            attributed.append(NSAttributedString(attachment: attachment))
+            attributed.append(NSAttributedString(string: "  "))
+        }
+        attributed.append(NSAttributedString(
+            string: text, attributes: [.font: font, .foregroundColor: color]))
+
+        let label = NSTextField(labelWithAttributedString: attributed)
+        stack.addArrangedSubview(label)
+        return label
     }
 
     private func addBar(_ bar: BarLayout) {
@@ -190,12 +235,16 @@ final class PopupViewController: NSViewController {
     }
 
     private func addSeparator() {
+        // Pad the element above the rule (if any) so the gap is symmetric on both sides.
+        if let previous = stack.arrangedSubviews.last {
+            stack.setCustomSpacing(Metrics.separatorPadding, after: previous)
+        }
         let box = NSBox()
         box.boxType = .separator
         box.translatesAutoresizingMaskIntoConstraints = false
         box.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.hPadding).isActive = true
         stack.addArrangedSubview(box)
-        stack.setCustomSpacing(Metrics.sectionSpacing, after: box)
+        stack.setCustomSpacing(Metrics.separatorPadding, after: box)
     }
 
     // MARK: - Pure text formatters (the localisation seam)
@@ -224,6 +273,43 @@ final class PopupViewController: NSViewController {
     /// `"Update interval: 3m"` — the current dynamic polling cadence.
     static func intervalText(_ intervalSeconds: TimeInterval) -> String {
         "Update interval: \(duration(Int(intervalSeconds)))"
+    }
+
+    // MARK: Warning banner (issue #12)
+
+    /// The bold first line of the warning banner — a short title per failure cause. For an HTTP
+    /// auth error it embeds the status code; the body text goes on the detail line below.
+    static func warningTitle(_ reason: FailureReason) -> String {
+        switch reason {
+        case .notSignedIn:               return "Missing auth token"
+        case let .authHTTP(status, _):   return "Auth error (HTTP \(status))"
+        case .timeout, .cannotResolveHost, .network:
+            return "Claude API connectivity issue"
+        case .serverProblem:             return "Usage API unavailable"
+        case .unknown:                   return "Could not fetch usage"
+        }
+    }
+
+    /// The detail (second) line of the warning banner — the explanation/next step. For an HTTP auth
+    /// error this is the server's own response body (sans status code) when present, else a generic
+    /// line.
+    static func warningDetail(_ reason: FailureReason) -> String {
+        switch reason {
+        case .notSignedIn:
+            return "You need to authenticate in Claude Code console app first"
+        case let .authHTTP(_, body):
+            return body ?? "Your authorization was rejected — sign in to Claude Code again"
+        case .timeout:
+            return "Authentication API timeout"
+        case .cannotResolveHost:
+            return "Unable to resolve API endpoint hostname"
+        case let .network(message):
+            return message
+        case .serverProblem:
+            return "The usage API is unavailable right now — retrying automatically"
+        case .unknown:
+            return "Could not fetch usage data"
+        }
     }
 
     // MARK: Formatter helpers

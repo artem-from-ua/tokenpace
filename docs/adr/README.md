@@ -14,3 +14,4 @@
 | [0007](0007-token-provider-throws-and-scope-split.md) | TokenProvider — `throws`+enum та розбивка обсягу #8 | accepted |
 | [0008](0008-usageclient-pure-backoff-and-transport-seam.md) | UsageClient — чистий backoff, інжекція токена і transport-seam | accepted |
 | [0009](0009-statusitemview-pure-layout-and-thin-shell.md) | StatusItemView — чиста MenuBarLayout + тонкий AppKit-shell; idle-поріг 5% | accepted |
+| [0010](0010-usage-health-and-error-states.md) | UsageHealth — стани помилок (⚠️ menu bar + банер popup + stale); пороги 30/60 хв | accepted |

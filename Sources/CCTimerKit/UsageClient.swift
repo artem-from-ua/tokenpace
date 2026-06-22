@@ -110,9 +110,10 @@ public enum UsageClient {
         do {
             (data, response) = try await transport.data(for: request)
         } catch {
+            let code = (error as? URLError)?.code
             AppLogger.network.error(
                 "usage request transport error: \(error.localizedDescription, privacy: .public)")
-            throw UsageError.transport(error.localizedDescription)
+            throw UsageError.transport(message: error.localizedDescription, code: code)
         }
 
         guard let http = response as? HTTPURLResponse else {
@@ -131,10 +132,25 @@ public enum UsageClient {
                 "usage rate-limited: HTTP 429 retryAfter=\(retryAfter ?? -1, privacy: .public)")
             throw UsageError.rateLimited(retryAfter: retryAfter)
         default:
+            let body = responseText(from: data)
             AppLogger.network.error(
                 "usage request failed: HTTP \(http.statusCode, privacy: .public)")
-            throw UsageError.http(status: http.statusCode)
+            throw UsageError.http(status: http.statusCode, body: body)
         }
+    }
+
+    /// The longest response body kept for the error UI. The server's error messages are short;
+    /// the cap stops a stray large/HTML body from bloating a `UsageError` (and the popup).
+    static let maxBodyLength = 500
+
+    /// Decode an error response body to trimmed, length-capped plain text for the popup's detail
+    /// line, or `nil` when it is empty / not UTF-8. This is the **response** body — it never
+    /// carries the request's bearer token, so it is `.public`-safe to surface to the user.
+    static func responseText(from data: Data) -> String? {
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.count > maxBodyLength ? String(trimmed.prefix(maxBodyLength)) : trimmed
     }
 
     /// Parse the `Retry-After` header (seconds form) if present. The HTTP-date form is not

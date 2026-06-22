@@ -51,6 +51,11 @@ final class StatusItemView: NSView {
         static let tickStroke: CGFloat = 1
         /// Corner radius of each bar.
         static let barCorner: CGFloat = 1.5
+        /// Point size of the ⚠️ error glyph (`exclamationmark.triangle.fill`). Tuned to read at the
+        /// same weight as the idle `*` and the bars block.
+        static let errorGlyphSize: CGFloat = 13
+        /// Gap between the ⚠️ glyph and the (stale) bars block when both are drawn (30–60 min phase).
+        static let errorGlyphGap: CGFloat = 4
     }
 
     // MARK: Colour mapping (exact statusline 256-colour palette → NSColor)
@@ -101,6 +106,8 @@ final class StatusItemView: NSView {
             drawIdleGlyph(in: rect)
         case let .expanded(fiveHour, sevenDay, reset, _):
             drawExpanded(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: rect)
+        case let .error(fiveHour, sevenDay, reset, _):
+            drawError(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: rect)
         }
     }
 
@@ -153,10 +160,17 @@ final class StatusItemView: NSView {
     // MARK: Expanded
 
     private func drawExpanded(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset, in rect: NSRect) {
+        drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, originX: rect.minX + Metrics.hPadding, in: rect)
+    }
+
+    /// Draw the stacked 5h/7d bars + reset label, with the bars block starting at `originX`.
+    /// Shared by ``drawExpanded(fiveHour:sevenDay:reset:in:)`` and the bars-beside-⚠️ error phase so
+    /// the geometry is identical; only the left origin differs (the error glyph shifts it right).
+    private func drawBars(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset, originX: CGFloat, in rect: NSRect) {
         // Two bars stacked, vertically centred as a block.
         let blockHeight = Metrics.barHeight * 2 + Metrics.barGap
         let topY = rect.minY + (rect.height - blockHeight) / 2
-        let barsRect = NSRect(x: rect.minX + Metrics.hPadding, y: topY, width: Metrics.barWidth, height: blockHeight)
+        let barsRect = NSRect(x: originX, y: topY, width: Metrics.barWidth, height: blockHeight)
 
         drawBar(fiveHour, in: NSRect(
             x: barsRect.minX, y: barsRect.minY,
@@ -168,6 +182,44 @@ final class StatusItemView: NSView {
         ))
 
         drawResetLabel(reset, leftOf: barsRect.maxX + Metrics.labelGap, in: rect)
+    }
+
+    // MARK: Error (issue #12)
+
+    /// Draw the error state: the ⚠️ glyph at the left, and — during the 30–60 min stale phase —
+    /// the last known bars + reset beside it (all bars `nil` past 60 min / cold start → glyph alone).
+    private func drawError(fiveHour: BarView?, sevenDay: BarView?, reset: TimeToReset?, in rect: NSRect) {
+        let glyphRight = drawErrorGlyph(in: rect)
+        if let fiveHour, let sevenDay, let reset {
+            drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset,
+                     originX: glyphRight + Metrics.errorGlyphGap, in: rect)
+        }
+    }
+
+    /// Draw the ⚠️ glyph (`exclamationmark.triangle`) at the left of `rect`, in the **foreground
+    /// (label) colour** so it matches the menu-bar text, and return its right edge x so the caller
+    /// can place stale bars beside it. The non-`.fill` outline keeps the exclamation mark legible
+    /// even as a single-colour fill. Centred on `rect.midY` (the bars block's vertical centre) and
+    /// drawn with `respectFlipped: true` — this view is `isFlipped`, so a plain `draw(in:)` mirrors
+    /// the image vertically (the triangle came out upside-down / crooked); the flag fixes that.
+    @discardableResult
+    private func drawErrorGlyph(in rect: NSRect) -> CGFloat {
+        let originX = rect.minX + Metrics.hPadding
+        let config = NSImage.SymbolConfiguration(pointSize: Metrics.errorGlyphSize, weight: .semibold)
+            .applying(.init(paletteColors: [Palette.foreground]))
+        guard let symbol = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "error")?
+            .withSymbolConfiguration(config) else {
+            return originX
+        }
+        let size = symbol.size
+        let drawRect = NSRect(
+            x: originX,
+            y: rect.midY - size.height / 2,
+            width: size.width, height: size.height
+        )
+        symbol.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1,
+                    respectFlipped: true, hints: nil)
+        return originX + ceil(size.width)
     }
 
     /// Draw one pacing bar: used (grey) → gap (green/red) → future (teal), plus the time-indicator
@@ -254,17 +306,39 @@ final class StatusItemView: NSView {
         }
     }
 
-    /// The item width for a given layout — narrow for idle, wider for the bars + label.
+    /// The item width for a given layout — narrow for idle/glyph-only, wider for the bars + label,
+    /// widest for the ⚠️ + stale-bars phase (the glyph adds its own width). Driven dynamically so the
+    /// item hugs exactly the content currently drawn.
     private func itemWidth(for layout: MenuBarLayout?) -> CGFloat {
         switch layout?.mode {
         case .none, .idle:
             return Metrics.height                       // square-ish compact item
         case let .expanded(_, _, reset, _):
-            let labelWidth = (resetText(reset) as NSString).size(withAttributes: [
-                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-            ]).width
-            return Metrics.hPadding + Metrics.barWidth + Metrics.labelGap
-                + ceil(labelWidth) + Metrics.hPadding
+            return Metrics.hPadding + barsBlockWidth(reset: reset) + Metrics.hPadding
+        case let .error(five, _, reset, _):
+            // ⚠️ alone (cold start / >60 min) → compact; ⚠️ + stale bars (30–60 min) → glyph + bars.
+            guard five != nil, let reset else { return Metrics.height }
+            return Metrics.hPadding + errorGlyphWidth() + Metrics.errorGlyphGap
+                + barsBlockWidth(reset: reset) + Metrics.hPadding
         }
+    }
+
+    /// Width of the bars block + its reset label (no outer padding) — shared by the expanded and
+    /// error-with-bars widths so they stay in sync with ``drawBars(fiveHour:sevenDay:reset:originX:in:)``.
+    private func barsBlockWidth(reset: TimeToReset) -> CGFloat {
+        let labelWidth = (resetText(reset) as NSString).size(withAttributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        ]).width
+        return Metrics.barWidth + Metrics.labelGap + ceil(labelWidth)
+    }
+
+    /// Rendered width of the ⚠️ glyph at ``Metrics/errorGlyphSize`` — measured the same way it is
+    /// drawn (the configured symbol image) so the item width matches exactly. Falls back to the
+    /// glyph point size if the symbol is unavailable, so the item never collapses to zero.
+    private func errorGlyphWidth() -> CGFloat {
+        let config = NSImage.SymbolConfiguration(pointSize: Metrics.errorGlyphSize, weight: .semibold)
+        let symbol = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+        return ceil(symbol?.size.width ?? Metrics.errorGlyphSize)
     }
 }

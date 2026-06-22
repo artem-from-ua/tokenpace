@@ -257,17 +257,34 @@ struct FetchTests {
     }
 
     @Test func status401ThrowsHTTP() async {
+        // No body → `.http(status:body:)` with a nil body.
         let transport = StubTransport.http(401)
-        await #expect(throws: UsageError.http(status: 401)) {
+        await #expect(throws: UsageError.http(status: 401, body: nil)) {
             try await UsageClient.fetch(accessToken: "acc", now: now, transport: transport)
         }
     }
 
     @Test func status500ThrowsHTTP() async {
         let transport = StubTransport.http(500)
-        await #expect(throws: UsageError.http(status: 500)) {
+        await #expect(throws: UsageError.http(status: 500, body: nil)) {
             try await UsageClient.fetch(accessToken: "acc", now: now, transport: transport)
         }
+    }
+
+    @Test func httpErrorCarriesResponseBody() async {
+        // The server's plain-text error message rides along in `body` for the popup detail line.
+        let transport = StubTransport.http(401, body: "Invalid bearer token".data(using: .utf8)!)
+        await #expect(throws: UsageError.http(status: 401, body: "Invalid bearer token")) {
+            try await UsageClient.fetch(accessToken: "acc", now: now, transport: transport)
+        }
+    }
+
+    @Test func httpErrorBodyIsTrimmedAndCapped() {
+        // Whitespace trimmed; over-long bodies truncated to `maxBodyLength`.
+        #expect(UsageClient.responseText(from: "  hi  \n".data(using: .utf8)!) == "hi")
+        #expect(UsageClient.responseText(from: Data()) == nil)
+        let long = String(repeating: "x", count: UsageClient.maxBodyLength + 50)
+        #expect(UsageClient.responseText(from: long.data(using: .utf8)!)?.count == UsageClient.maxBodyLength)
     }
 
     @Test func transportErrorThrowsTransport() async {
@@ -275,15 +292,16 @@ struct FetchTests {
         await #expect(throws: (any Error).self) {
             try await UsageClient.fetch(accessToken: "acc", now: now, transport: transport)
         }
-        // Assert the specific case.
+        // Assert the specific case and that the underlying URLError.Code is carried through.
         do {
             _ = try await UsageClient.fetch(accessToken: "acc", now: now, transport: transport)
             Issue.record("expected a thrown error")
         } catch let error as UsageError {
-            guard case .transport = error else {
+            guard case let .transport(_, code) = error else {
                 Issue.record("expected .transport, got \(error)")
                 return
             }
+            #expect(code == .notConnectedToInternet)
         } catch {
             Issue.record("expected UsageError.transport, got \(error)")
         }
