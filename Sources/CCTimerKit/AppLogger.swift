@@ -33,4 +33,7 @@ public enum AppLogger {
     public static let keychain  = Logger(subsystem: subsystem, category: "keychain")
     /// App launch, sleep/wake (NSWorkspace), state transitions. (Ticket: #13)
     public static let lifecycle = Logger(subsystem: subsystem, category: "lifecycle")
+    /// Menu-bar rendering: layout mode transitions (idle↔expanded), redraw triggers. Diagnostic
+    /// only — never logs full layout data (high-volume, not secret). (Ticket: StatusItemView, #10)
+    public static let ui        = Logger(subsystem: subsystem, category: "ui")
 }
