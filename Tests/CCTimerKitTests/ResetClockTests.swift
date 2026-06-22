@@ -317,3 +317,86 @@ struct ResetDisplayTests {
         #expect(got == nil)
     }
 }
+
+// MARK: - relativeDuration (popup countdown, with a days band)
+
+@Suite("ResetClock.relativeDuration")
+struct RelativeDurationTests {
+    private let now = Date(timeIntervalSince1970: 1_000_000)
+    private func at(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(seconds) }
+
+    @Test func secondsBand() {
+        #expect(ResetClock.relativeDuration(resetsAt: at(40), now: now) == "40s")
+    }
+
+    @Test func minutesBand() {
+        #expect(ResetClock.relativeDuration(resetsAt: at(45 * 60), now: now) == "45m")
+    }
+
+    @Test func hoursAndMinutes() {
+        #expect(ResetClock.relativeDuration(resetsAt: at(90 * 60), now: now) == "1h30m")
+    }
+
+    @Test func exactHourDropsZeroMinutes() {
+        #expect(ResetClock.relativeDuration(resetsAt: at(2 * 3600), now: now) == "2h")
+    }
+
+    @Test func daysBand() {
+        // 3 days exactly → "3d" (no trailing hours).
+        #expect(ResetClock.relativeDuration(resetsAt: at(3 * 86_400), now: now) == "3d")
+    }
+
+    @Test func daysAndHours() {
+        // 3 days + 5 h → "3d5h".
+        #expect(ResetClock.relativeDuration(resetsAt: at(3 * 86_400 + 5 * 3600), now: now) == "3d5h")
+    }
+
+    @Test func dayBoundary() {
+        // Exactly 24 h is the start of the days band → "1d".
+        #expect(ResetClock.relativeDuration(resetsAt: at(86_400), now: now) == "1d")
+    }
+
+    @Test func nilWhenPastOrNow() {
+        #expect(ResetClock.relativeDuration(resetsAt: at(0), now: now) == nil)
+        #expect(ResetClock.relativeDuration(resetsAt: at(-60), now: now) == nil)
+    }
+}
+
+// MARK: - absoluteWithin (clock time only inside the threshold)
+
+@Suite("ResetClock.absoluteWithin")
+struct AbsoluteWithinTests {
+    private let now = Date(timeIntervalSince1970: 1_000_000)
+    private func at(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(seconds) }
+    private let utc = TimeZone(identifier: "UTC")!
+    private let gb = Locale(identifier: "en_GB")   // 24-hour
+
+    @Test func withinThresholdReturnsClock() {
+        let s = ResetClock.absoluteWithin(resetsAt: at(5 * 3600), now: now, locale: gb, timeZone: utc)
+        #expect(s != nil)
+    }
+
+    @Test func beyondThresholdReturnsNil() {
+        // 3 days out → no clock time.
+        #expect(ResetClock.absoluteWithin(resetsAt: at(3 * 86_400), now: now, locale: gb, timeZone: utc) == nil)
+    }
+
+    @Test func exactlyAtThresholdIsExcluded() {
+        // Strict `<` 24 h: exactly 24 h away → nil.
+        #expect(ResetClock.absoluteWithin(resetsAt: at(24 * 3600), now: now, locale: gb, timeZone: utc) == nil)
+    }
+
+    @Test func justInsideThresholdIncluded() {
+        #expect(ResetClock.absoluteWithin(resetsAt: at(24 * 3600 - 60), now: now, locale: gb, timeZone: utc) != nil)
+    }
+
+    @Test func nilWhenPast() {
+        #expect(ResetClock.absoluteWithin(resetsAt: at(-60), now: now) == nil)
+    }
+
+    @Test func customThreshold() {
+        // withinHours: 1 → 90 min away is outside.
+        #expect(ResetClock.absoluteWithin(resetsAt: at(90 * 60), now: now, withinHours: 1, locale: gb, timeZone: utc) == nil)
+        #expect(ResetClock.absoluteWithin(resetsAt: at(30 * 60), now: now, withinHours: 1, locale: gb, timeZone: utc) != nil)
+    }
+}

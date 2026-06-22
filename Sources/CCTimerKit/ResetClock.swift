@@ -221,6 +221,52 @@ public enum ResetClock {
         return (nearest.window, display)
     }
 
+    // MARK: - Popup countdown (relative-always + bounded absolute)
+
+    /// A compact relative countdown for **any** positive remaining time, extended with a **days**
+    /// band that ``timeToReset(resetsAt:now:)`` lacks (it only spans ≤ 90 min): `"3d"`, `"5h"`,
+    /// `"20m"`, `"1h30m"`, `"40s"`.
+    ///
+    /// Unlike `timeToReset`, this never switches to an absolute clock — it is the always-shown
+    /// "resets in …" part of the popup detail line (#11); the absolute "@ hh:mm" is a separate,
+    /// bounded piece (see ``absoluteWithin(resetsAt:now:withinHours:locale:timeZone:)``).
+    ///
+    /// - Returns: The duration string, or `nil` when the reset is now/past (`remaining ≤ 0`) —
+    ///   the caller renders that as a stale signal, matching ``TimeToReset/resetNow``.
+    public static func relativeDuration(resetsAt: Date, now: Date) -> String? {
+        let remaining = Int(resetsAt.timeIntervalSince(now))   // truncate toward zero
+        guard remaining > 0 else { return nil }
+        if remaining >= 86_400 {
+            let days = remaining / 86_400
+            let hours = (remaining % 86_400) / 3_600
+            return hours == 0 ? "\(days)d" : "\(days)d\(hours)h"
+        }
+        return relativeString(seconds: remaining)
+    }
+
+    /// The absolute local wall-clock `hh:mm` of the reset — but **only when it is within
+    /// `withinHours`** of `now`; otherwise `nil`.
+    ///
+    /// The popup shows "resets in <relative> @ <absolute>" only when a clock time is actually
+    /// useful (the reset is soon); for a reset days away the "@ hh:mm" is noise, so the caller
+    /// omits it. 5h windows are always within 24 h (→ always a time); 7d windows and per-model
+    /// sub-windows show the time only in their final day. Locale/zone drive 12/24h + DST, reusing
+    /// the same formatter as ``timeToReset(resetsAt:now:)``.
+    ///
+    /// - Parameter withinHours: The threshold; default 24 h (SPEC: per the user's popup spec).
+    /// - Returns: `"10:30"` / `"5:30 PM"` when within the window, else `nil`.
+    public static func absoluteWithin(
+        resetsAt: Date,
+        now: Date,
+        withinHours: Double = 24,
+        locale: Locale = .current,
+        timeZone: TimeZone = .current
+    ) -> String? {
+        let remaining = resetsAt.timeIntervalSince(now)
+        guard remaining > 0, remaining < withinHours * 3_600 else { return nil }
+        return absoluteString(for: resetsAt, locale: locale, timeZone: timeZone)
+    }
+
     // MARK: - Private formatting
 
     /// Compact relative duration for a strictly-positive `seconds` remaining (≤ 90 min).
