@@ -223,25 +223,30 @@ public enum ResetClock {
 
     // MARK: - Popup countdown (relative-always + bounded absolute)
 
-    /// A compact relative countdown for **any** positive remaining time, extended with a **days**
-    /// band that ``timeToReset(resetsAt:now:)`` lacks (it only spans ≤ 90 min): `"3d"`, `"5h"`,
-    /// `"20m"`, `"1h30m"`, `"40s"`.
+    /// A **single-unit, rounded** relative countdown for the popup's "resets in ~…" line (#11, #38):
+    /// one of `"1m"`, `"20m"`, `"3h"`, `"3d"` — the unit picked by how far off the reset is, the
+    /// magnitude **rounded to the nearest** unit. The caller prepends `"~"` (every value is an
+    /// approximation) and the `"resets in …"` / `"at hh:mm"` prose (the localisation seam, ADR-0009).
     ///
-    /// Unlike `timeToReset`, this never switches to an absolute clock — it is the always-shown
-    /// "resets in …" part of the popup detail line (#11); the absolute "@ hh:mm" is a separate,
-    /// bounded piece (see ``absoluteWithin(resetsAt:now:withinHours:locale:timeZone:)``).
+    /// Bands (remaining time → output):
+    /// - `≤ 0`          → `nil` (reset now/past — the caller renders a stale signal)
+    /// - `< 30 s`       → `"1m"` (floor of the display; never `"0m"`)
+    /// - `< 50 min`     → `"\(round(min))m"` — nearest whole minute
+    /// - `< 23 h`       → `"\(round(hours))h"` — nearest whole hour
+    /// - otherwise      → `"\(round(days))d"` — nearest whole day
     ///
-    /// - Returns: The duration string, or `nil` when the reset is now/past (`remaining ≤ 0`) —
-    ///   the caller renders that as a stale signal, matching ``TimeToReset/resetNow``.
-    public static func relativeDuration(resetsAt: Date, now: Date) -> String? {
-        let remaining = Int(resetsAt.timeIntervalSince(now))   // truncate toward zero
+    /// The 50-min and 23-h cut-offs (rather than 60/24) leave headroom so rounding never prints a
+    /// value that reads as the next unit — e.g. 55 min rounds to `1h`, not `60m`; 23.5 h → `1d`.
+    ///
+    /// Unlike `timeToReset`, this never switches to an absolute clock — the absolute "at hh:mm" is a
+    /// separate, bounded piece (see ``absoluteWithin(resetsAt:now:withinHours:locale:timeZone:)``).
+    public static func relativeRounded(resetsAt: Date, now: Date) -> String? {
+        let remaining = resetsAt.timeIntervalSince(now)
         guard remaining > 0 else { return nil }
-        if remaining >= 86_400 {
-            let days = remaining / 86_400
-            let hours = (remaining % 86_400) / 3_600
-            return hours == 0 ? "\(days)d" : "\(days)d\(hours)h"
-        }
-        return relativeString(seconds: remaining)
+        if remaining < 30 { return "1m" }                                   // sub-30s floors up to ~1m
+        if remaining < 50 * 60 { return "\(Int((remaining / 60).rounded()))m" }     // nearest minute
+        if remaining < 23 * 3_600 { return "\(Int((remaining / 3_600).rounded()))h" } // nearest hour
+        return "\(Int((remaining / 86_400).rounded()))d"                    // nearest day
     }
 
     /// The absolute local wall-clock `hh:mm` of the reset — but **only when it is within

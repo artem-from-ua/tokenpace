@@ -20,6 +20,18 @@ public enum LimitWindow: Sendable, Equatable {
         case .sevenDay: return 604_800
         }
     }
+
+    /// Number of equal sub-intervals the popup bar's tick ruler splits this window into:
+    /// 5 hour-boundaries for `.fiveHour`, 7 day-boundaries for `.sevenDay`. The bar draws
+    /// `subdivisions - 1` interior ticks at `k / subdivisions` (issue #38). The day-boundary
+    /// ticks are anchored to `resets_at` (the window is `[resets_at - 7d … resets_at]`), so
+    /// they sit at even `k/7` fractions — not at calendar midnight.
+    public var subdivisions: Int {
+        switch self {
+        case .fiveHour: return 5
+        case .sevenDay: return 7
+        }
+    }
 }
 
 // MARK: - PacingState

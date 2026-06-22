@@ -318,47 +318,49 @@ struct ResetDisplayTests {
     }
 }
 
-// MARK: - relativeDuration (popup countdown, with a days band)
+// MARK: - relativeRounded (popup "resets in ~…", single-unit, nearest-rounded)
 
-@Suite("ResetClock.relativeDuration")
-struct RelativeDurationTests {
+@Suite("ResetClock.relativeRounded")
+struct RelativeRoundedTests {
     private let now = Date(timeIntervalSince1970: 1_000_000)
     private func at(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(seconds) }
 
-    @Test func secondsBand() {
-        #expect(ResetClock.relativeDuration(resetsAt: at(40), now: now) == "40s")
+    @Test func subThirtySecondsFloorsToOneMinute() {
+        #expect(ResetClock.relativeRounded(resetsAt: at(10), now: now) == "1m")
+        #expect(ResetClock.relativeRounded(resetsAt: at(29), now: now) == "1m")
     }
 
-    @Test func minutesBand() {
-        #expect(ResetClock.relativeDuration(resetsAt: at(45 * 60), now: now) == "45m")
+    @Test func minutesRoundToNearest() {
+        #expect(ResetClock.relativeRounded(resetsAt: at(20 * 60), now: now) == "20m")        // 20m exactly
+        #expect(ResetClock.relativeRounded(resetsAt: at(20 * 60 + 20), now: now) == "20m")   // 20m20s → 20m
+        #expect(ResetClock.relativeRounded(resetsAt: at(20 * 60 + 40), now: now) == "21m")   // 20m40s → 21m
     }
 
-    @Test func hoursAndMinutes() {
-        #expect(ResetClock.relativeDuration(resetsAt: at(90 * 60), now: now) == "1h30m")
+    @Test func minutesBandEndsAtFiftyMinutes() {
+        // 49 min stays in minutes; 55 min crosses into the hours band and rounds to 1h (not 60m).
+        #expect(ResetClock.relativeRounded(resetsAt: at(49 * 60), now: now) == "49m")
+        #expect(ResetClock.relativeRounded(resetsAt: at(55 * 60), now: now) == "1h")
     }
 
-    @Test func exactHourDropsZeroMinutes() {
-        #expect(ResetClock.relativeDuration(resetsAt: at(2 * 3600), now: now) == "2h")
+    @Test func hoursRoundToNearest() {
+        #expect(ResetClock.relativeRounded(resetsAt: at(3 * 3_600), now: now) == "3h")            // 3h exactly
+        #expect(ResetClock.relativeRounded(resetsAt: at(3 * 3_600 + 40 * 60), now: now) == "4h")  // 3h40m → 4h
     }
 
-    @Test func daysBand() {
-        // 3 days exactly → "3d" (no trailing hours).
-        #expect(ResetClock.relativeDuration(resetsAt: at(3 * 86_400), now: now) == "3d")
+    @Test func hoursBandEndsAtTwentyThreeHours() {
+        // 22 h stays in hours; 23.5 h crosses into days and rounds to 1d (not 24h).
+        #expect(ResetClock.relativeRounded(resetsAt: at(22 * 3_600), now: now) == "22h")
+        #expect(ResetClock.relativeRounded(resetsAt: at(23 * 3_600 + 1_800), now: now) == "1d")
     }
 
-    @Test func daysAndHours() {
-        // 3 days + 5 h → "3d5h".
-        #expect(ResetClock.relativeDuration(resetsAt: at(3 * 86_400 + 5 * 3600), now: now) == "3d5h")
-    }
-
-    @Test func dayBoundary() {
-        // Exactly 24 h is the start of the days band → "1d".
-        #expect(ResetClock.relativeDuration(resetsAt: at(86_400), now: now) == "1d")
+    @Test func daysRoundToNearest() {
+        #expect(ResetClock.relativeRounded(resetsAt: at(3 * 86_400), now: now) == "3d")                 // 3d exactly
+        #expect(ResetClock.relativeRounded(resetsAt: at(3 * 86_400 + 18 * 3_600), now: now) == "4d")    // 3d18h → 4d
     }
 
     @Test func nilWhenPastOrNow() {
-        #expect(ResetClock.relativeDuration(resetsAt: at(0), now: now) == nil)
-        #expect(ResetClock.relativeDuration(resetsAt: at(-60), now: now) == nil)
+        #expect(ResetClock.relativeRounded(resetsAt: at(0), now: now) == nil)
+        #expect(ResetClock.relativeRounded(resetsAt: at(-60), now: now) == nil)
     }
 }
 

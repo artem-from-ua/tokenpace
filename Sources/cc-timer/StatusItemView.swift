@@ -68,12 +68,17 @@ final class StatusItemView: NSView {
     // non-template so macOS does not retint it.
 
     private enum Palette {
-        /// Used zone — statusline `dark_gray` 236 = #303030.
-        static let used = NSColor(srgbRed: 48/255, green: 48/255, blue: 48/255, alpha: 1)
+        /// Used zone — statusline `dark_gray` 236 = #303030, nudged a touch lighter for legibility.
+        static let used = NSColor(srgbRed: 56/255, green: 56/255, blue: 56/255, alpha: 1)
         /// Pacing gap when on pace or behind — statusline `bright_green` 71 = #5faf5f (good).
         static let gapGreen = NSColor(srgbRed: 95/255, green: 175/255, blue: 95/255, alpha: 1)
         /// Pacing gap when ahead of pace — statusline `bright_red` 167 = #d75f5f (bad).
         static let gapRed = NSColor(srgbRed: 215/255, green: 95/255, blue: 95/255, alpha: 1)
+        /// Time-indicator dot colours — the gap colours lightened ~30 % (white-mixed) so the dot
+        /// reads brighter than the pacing gap it sits over. Only the dot uses these; the gap zones
+        /// keep `gapGreen`/`gapRed`.
+        static let dotGreen = NSColor(srgbRed: 143/255, green: 199/255, blue: 143/255, alpha: 1)
+        static let dotRed = NSColor(srgbRed: 227/255, green: 143/255, blue: 143/255, alpha: 1)
         /// Future / unused zone — statusline `dark_blue` 23 = #005f5f (a dark teal), darkened ~20%
         /// (#004c4c) so it recedes more as background behind the used/pacing zones.
         static let future = NSColor(srgbRed: 0/255, green: 76/255, blue: 76/255, alpha: 1)
@@ -268,8 +273,8 @@ final class StatusItemView: NSView {
     /// This is a finer split than `PacingState` (whose `.onPaceOrBehind` folds the tie into green),
     /// so the dot is computed from the raw fractions here rather than reusing `bar.layout.pacing`.
     private func indicatorColor(usage: Double, time: Double) -> NSColor {
-        if usage > time { return Palette.gapRed }
-        if usage < time { return Palette.gapGreen }
+        if usage > time { return Palette.dotRed }
+        if usage < time { return Palette.dotGreen }
         return Palette.future
     }
 

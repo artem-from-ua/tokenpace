@@ -96,6 +96,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             title: "Configure…", action: #selector(openConfigure), keyEquivalent: "")
         configureItem.target = self
         menu.addItem(configureItem)
+        // Separate Quit from Configure… so the terminating action sits in its own group (standard
+        // macOS menu grouping).
+        menu.addItem(.separator())
         let quitItem = NSMenuItem(
             title: "Quit cc-timer", action: #selector(quit), keyEquivalent: "")
         quitItem.target = self
