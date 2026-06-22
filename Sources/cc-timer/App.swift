@@ -20,6 +20,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// highlighted while it is open (both come free with `NSMenu`, unlike `NSPopover`).
     private let popupVC = PopupViewController()
 
+    /// The "Configure…" settings window (#14), created lazily on first use and kept alive so a
+    /// second click focuses the existing window rather than opening a duplicate (single-instance).
+    private var configureWC: ConfigureWindowController?
+
     // MARK: live polling (#13)
 
     /// Fan-in of sleep/wake (`NSWorkspace`) and network (`NWPathMonitor`) signals into the loop.
@@ -84,13 +88,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let popupItem = NSMenuItem()
         popupItem.view = popupVC.view
         menu.addItem(popupItem)
+
+        // Action items at the bottom of the same menu (#14). `keyEquivalent: ""` keeps a shortcut
+        // glyph off the right edge — none is wanted, and there is no main menu to host a default ⌘Q.
+        menu.addItem(.separator())
+        let configureItem = NSMenuItem(
+            title: "Configure…", action: #selector(openConfigure), keyEquivalent: "")
+        configureItem.target = self
+        menu.addItem(configureItem)
+        let quitItem = NSMenuItem(
+            title: "Quit cc-timer", action: #selector(quit), keyEquivalent: "")
+        quitItem.target = self
+        menu.addItem(quitItem)
+
         item.menu = menu
 
         startPolling()
 
+        // Opt-out auto-registration of launch-at-login (#14): register on the first launch only,
+        // log the outcome, never crash on an unsigned build.
+        registerLaunchAtLoginIfNeeded()
+
         AppLogger.lifecycle.info(
             "cc-timer status item attached (\(CCTimerKit.version, privacy: .public)); live polling started"
         )
+    }
+
+    // MARK: - Menu actions (#14)
+
+    /// Open (or focus) the Configure… settings window. Lazily creates the single instance.
+    @objc private func openConfigure() {
+        if configureWC == nil { configureWC = ConfigureWindowController() }
+        configureWC?.show()
+    }
+
+    /// Quit the app via the standard terminate path, which triggers `applicationWillTerminate`.
+    @objc private func quit() {
+        NSApplication.shared.terminate(nil)
+    }
+
+    /// Register launch-at-login on the first launch only (opt-out): if the item is not registered
+    /// yet, register it; otherwise leave the user's/system's existing choice alone. Best-effort —
+    /// `register()` may throw on an unsigned build, which is caught and logged, never fatal.
+    private func registerLaunchAtLoginIfNeeded() {
+        let status = LaunchAtLoginController.currentStatus()
+        guard LaunchAtLogin.shouldRegisterOnFirstLaunch(status) else {
+            AppLogger.lifecycle.notice(
+                "launch-at-login: status=\(String(describing: status), privacy: .public), no auto-register")
+            return
+        }
+        do {
+            try LaunchAtLoginController.enable()
+            AppLogger.lifecycle.notice("launch-at-login: auto-registered on first launch (opt-out)")
+        } catch {
+            AppLogger.lifecycle.error(
+                "launch-at-login: auto-register failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
