@@ -39,12 +39,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Mock data (#13 replaces this with a live poll)
 
-    /// A representative `UsageSnapshot` for visual verification: mid-range 5h usage running a touch
-    /// ahead of pace (red gap likely), lighter 7d usage, with both resets a few hours/days out.
+    /// A representative `UsageSnapshot` for visual verification, deliberately exercising **both**
+    /// pacing colours so the green/red palette can be judged at a glance:
+    /// - 5h: 40% used, ~60% of the window elapsed → on pace → **green** gap.
+    /// - 7d: 75% used, ~57% of the window elapsed → ahead of pace → **red** gap.
     private static func mockSnapshot(now: Date) -> UsageSnapshot {
         UsageSnapshot(
-            fiveHour: UsageWindow(utilization: 62, resetsAt: iso(now.addingTimeInterval(2 * 3600))),
-            sevenDay: UsageWindow(utilization: 28, resetsAt: iso(now.addingTimeInterval(3 * 24 * 3600)))
+            fiveHour: UsageWindow(utilization: 40, resetsAt: iso(now.addingTimeInterval(2 * 3600))),
+            sevenDay: UsageWindow(utilization: 75, resetsAt: iso(now.addingTimeInterval(3 * 24 * 3600)))
         )
     }
 
