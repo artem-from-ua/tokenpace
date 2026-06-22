@@ -35,14 +35,14 @@ final class PopupBarView: NSView {
         static let gapRed = NSColor(srgbRed: 215/255, green: 95/255, blue: 95/255, alpha: 1)
 
         /// Used zone: dark grey on dark, much lighter grey on light.
-        static let used = dynamic(dark: gray(48), light: gray(200))
+        static let used = dynamic(dark: gray(48), light: gray(130))
         /// Future / unused zone: dark teal on dark, lighter teal on light.
         static let future = dynamic(
             dark: NSColor(srgbRed: 0/255, green: 76/255, blue: 76/255, alpha: 1),
-            light: NSColor(srgbRed: 153/255, green: 204/255, blue: 204/255, alpha: 1)
+            light: NSColor(srgbRed: 55/255, green: 110/255, blue: 110/255, alpha: 1)
         )
         /// Indicator-dot ring: near-black on dark, mid grey on light.
-        static let indicatorStroke = dynamic(dark: gray(24), light: gray(144))
+        static let indicatorStroke = NSColor.windowBackgroundColor
 
         private static func gray(_ v: CGFloat) -> NSColor {
             NSColor(srgbRed: v/255, green: v/255, blue: v/255, alpha: 1)
