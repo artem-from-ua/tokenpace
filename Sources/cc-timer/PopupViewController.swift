@@ -16,12 +16,33 @@ final class PopupBarView: NSView {
         }
     }
 
-    private enum Metrics {
-        static let height: CGFloat = 6
-        static let corner: CGFloat = 2
-        static let tickDiameter: CGFloat = 8
-        static let tickStroke: CGFloat = 1
+    /// Number of equal sub-intervals the tick ruler splits this window into (`LimitRow.subdivisions`:
+    /// 5 for the 5-hour bar, 7 for the 7-day/per-model bars). Draws `subdivisions - 1` interior
+    /// ticks; `0` (the default) draws none (issue #38).
+    var subdivisions: Int = 0 {
+        didSet {
+            guard subdivisions != oldValue else { return }
+            needsDisplay = true
+        }
     }
+
+    private enum Metrics {
+        /// Height of the pacing bar itself (the coloured zones + indicator dot).
+        static let barHeight: CGFloat = 6
+        static let corner: CGFloat = 2
+        static let indicatorDiameter: CGFloat = 8
+        static let indicatorStroke: CGFloat = 1
+        // Tick ruler, drawn *below* the bar like an axis (issue #38, "under-bar ruler" style).
+        static let tickLength: CGFloat = 3
+        static let tickGap: CGFloat = 2
+        static let tickWidth: CGFloat = 1
+        /// Total view height: bar + gap + tick teeth hanging beneath it.
+        static let height: CGFloat = barHeight + tickGap + tickLength
+    }
+
+    /// The fixed view height (bar + under-bar tick ruler), exposed so `PopupViewController` can pin
+    /// the hosted bar's height constraint to the same value the view draws into.
+    static var viewHeight: CGFloat { Metrics.height }
 
     // Statusline 256-colour palette (ADR-0005), appearance-aware in the popup: on a dark theme the
     // bars keep the exact menu-bar colours; on a light theme the dark zones (used grey, future
@@ -38,8 +59,17 @@ final class PopupBarView: NSView {
         )
         static let gapRed = NSColor(srgbRed: 215/255, green: 95/255, blue: 95/255, alpha: 1)
 
+        /// Time-indicator dot colours — the gap colours lightened ~30 % (white-mixed) so the dot
+        /// reads brighter than the pacing gap it sits over. Only the dot uses these; the gap zones
+        /// keep `gapGreen`/`gapRed`. Green stays appearance-aware (lightened from each theme's base).
+        static let dotGreen = dynamic(
+            dark: NSColor(srgbRed: 143/255, green: 199/255, blue: 143/255, alpha: 1),
+            light: NSColor(srgbRed: 133/255, green: 185/255, blue: 133/255, alpha: 1)
+        )
+        static let dotRed = NSColor(srgbRed: 227/255, green: 143/255, blue: 143/255, alpha: 1)
+
         /// Used zone: dark grey on dark, lighter grey on light (still clearly darker than the panel).
-        static let used = dynamic(dark: gray(48), light: gray(110))
+        static let used = dynamic(dark: gray(72), light: gray(110))
         /// Future / unused zone: dark teal on dark, lighter teal on light.
         static let future = dynamic(
             dark: NSColor(srgbRed: 0/255, green: 76/255, blue: 76/255, alpha: 1),
@@ -47,6 +77,13 @@ final class PopupBarView: NSView {
         )
         /// Indicator-dot ring: near-black on dark, mid grey on light.
         static let indicatorStroke = NSColor.windowBackgroundColor
+
+        /// Tick-ruler marks below the bar: a muted neutral, translucent so it stays clearly weaker
+        /// than the indicator dot. Appearance-aware so the ruler reads on both light and dark panels.
+        static let tick = dynamic(
+            dark: NSColor(white: 1, alpha: 0.55),
+            light: NSColor(white: 0, alpha: 0.45)
+        )
 
         private static func gray(_ v: CGFloat) -> NSColor {
             NSColor(srgbRed: v/255, green: v/255, blue: v/255, alpha: 1)
@@ -63,7 +100,9 @@ final class PopupBarView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let l = bar else { return }
-        let rect = bounds
+        // The bar occupies the top `barHeight` of the view (flipped coords → minY is the top); the
+        // tick ruler hangs in the remaining strip below it.
+        let rect = NSRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: Metrics.barHeight)
         let w = rect.width
 
         let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner)
@@ -77,21 +116,41 @@ final class PopupBarView: NSView {
         fillZone(from: l.gapStart, to: l.gapEnd, in: rect, width: w, color: gapColor)
         NSGraphicsContext.restoreGraphicsState()
 
+        // Tick ruler: `subdivisions - 1` interior marks at k/subdivisions, drawn below the bar and
+        // *under* the indicator dot in z-order (so the dot always reads as the primary marker).
+        drawTicks(in: rect, width: w)
+
         // Time-indicator dot at timeFraction, coloured by the raw usage-vs-time relationship.
         let cx = rect.minX + CGFloat(l.timeFraction) * w
         let cy = rect.midY
-        let d = Metrics.tickDiameter
+        let d = Metrics.indicatorDiameter
         let dot = NSBezierPath(ovalIn: NSRect(x: cx - d / 2, y: cy - d / 2, width: d, height: d))
         indicatorColor(usage: l.usageFraction, time: l.timeFraction).setFill()
         dot.fill()
         Palette.indicatorStroke.setStroke()
-        dot.lineWidth = Metrics.tickStroke
+        dot.lineWidth = Metrics.indicatorStroke
         dot.stroke()
     }
 
+    /// Draw the under-bar tick ruler: vertical teeth at each interior window boundary
+    /// (`k / subdivisions` for `k` in `1 ..< subdivisions`), pixel-snapped on x. No-op when
+    /// `subdivisions < 2` (nothing to subdivide).
+    private func drawTicks(in barRect: NSRect, width: CGFloat) {
+        guard subdivisions >= 2 else { return }
+        let top = barRect.maxY + Metrics.tickGap           // flipped: just below the bar
+        let bottom = top + Metrics.tickLength
+        Palette.tick.setFill()
+        for k in 1 ..< subdivisions {
+            let f = CGFloat(k) / CGFloat(subdivisions)
+            // Pixel-snap a 1.5px-wide tooth so it stays crisp at @1x and @2x.
+            let cx = (barRect.minX + f * width).rounded()
+            NSRect(x: cx - Metrics.tickWidth / 2, y: top, width: Metrics.tickWidth, height: bottom - top).fill()
+        }
+    }
+
     private func indicatorColor(usage: Double, time: Double) -> NSColor {
-        if usage > time { return Palette.gapRed }
-        if usage < time { return Palette.gapGreen }
+        if usage > time { return Palette.dotRed }
+        if usage < time { return Palette.dotGreen }
         return Palette.future
     }
 
@@ -183,13 +242,29 @@ final class PopupViewController: NSViewController {
         addLabel(Self.lastUpdateText(layout.lastUpdateAge), font: .systemFont(ofSize: 11), secondary: true)
         addLabel(Self.intervalText(layout.intervalSeconds), font: .systemFont(ofSize: 11), secondary: true)
 
-        // One section per limit row: separator + bold heading + detail + bar.
+        // One section per limit row: separator + "title · status" line + "% used · resets" line + bar.
         for row in layout.rows {
             addSeparator()
-            addLabel(row.title, font: .boldSystemFont(ofSize: 12))
+            addTitleStatusLine(title: row.title, status: Self.statusText(row.indicator, row.pacing))
             addLabel(Self.detailText(row), font: .systemFont(ofSize: 11), secondary: true)
-            addBar(row.bar)
+            addBar(row)
         }
+    }
+
+    /// The section's first line: the **bold** window title, then the separator and the pacing status
+    /// in **normal** weight — both in `labelColor` (variant A: the status is de-emphasised by weight
+    /// only, not colour). Built as one attributed string so the two weights sit on a single line.
+    @discardableResult
+    private func addTitleStatusLine(title: String, status: String) -> NSView {
+        let attributed = NSMutableAttributedString(string: title, attributes: [
+            .font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.labelColor,
+        ])
+        attributed.append(NSAttributedString(string: Self.separator + status, attributes: [
+            .font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.labelColor,
+        ]))
+        let label = NSTextField(labelWithAttributedString: attributed)
+        stack.addArrangedSubview(label)
+        return label
     }
 
     @discardableResult
@@ -228,12 +303,13 @@ final class PopupViewController: NSViewController {
         return label
     }
 
-    private func addBar(_ bar: BarLayout) {
+    private func addBar(_ row: LimitRow) {
         let view = PopupBarView()
-        view.bar = bar
+        view.bar = row.bar
+        view.subdivisions = row.subdivisions
         view.translatesAutoresizingMaskIntoConstraints = false
         view.widthAnchor.constraint(equalToConstant: Metrics.barWidth).isActive = true
-        view.heightAnchor.constraint(equalToConstant: 6).isActive = true
+        view.heightAnchor.constraint(equalToConstant: PopupBarView.viewHeight).isActive = true
         stack.addArrangedSubview(view)
         stack.setCustomSpacing(Metrics.sectionSpacing, after: view)
     }
@@ -253,19 +329,25 @@ final class PopupViewController: NSViewController {
 
     // MARK: - Pure text formatters (the localisation seam)
 
-    /// `"50% used · on pace · resets in 20m @ 10:30"` — the per-limit detail line. The "@ hh:mm"
-    /// is appended only when the model carries an absolute time (reset < 24 h away). A reset that
-    /// is now/past (no relative string) reads as "resetting…".
+    /// The separator between fields on both popup lines: two spaces, a middle dot (U+00B7), two
+    /// spaces. A single constant so line 1 ("title · status") and line 2 ("% used · resets") match.
+    static let separator = "  \u{00B7}  "
+
+    /// `"20% used  ·  resets in ~20m at 05:30"` — the per-limit **second** line (the first line is
+    /// "title · status", built in `addTitleStatusLine`). The relative countdown is always prefixed
+    /// `~` (every value is rounded, ``ResetClock/relativeRounded``); the " at hh:mm" is appended only
+    /// when the model carries an absolute time (reset < 24 h away). A reset that is now/past (no
+    /// relative string) reads as "resetting…".
     static func detailText(_ row: LimitRow) -> String {
-        var parts = ["\(percent(row.utilization)) used", statusText(row.indicator, row.pacing)]
+        var parts = ["\(percent(row.utilization)) used"]
         if let rel = row.resetRelative {
-            var reset = "resets in \(rel)"
-            if let abs = row.resetAbsolute { reset += " @ \(abs)" }
+            var reset = "resets in ~\(rel)"
+            if let abs = row.resetAbsolute { reset += " at \(abs)" }
             parts.append(reset)
         } else {
             parts.append("resetting…")
         }
-        return parts.joined(separator: " · ")
+        return parts.joined(separator: separator)
     }
 
     /// `"Last update: 2m ago"`, or `"just now"` for anything under a full minute — the "Last update"

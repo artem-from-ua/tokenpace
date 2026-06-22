@@ -22,6 +22,10 @@ public struct LimitRow: Sendable, Equatable {
     public let indicator: LimitIndicator
     /// Continuous bar geometry for drawing the pacing bar (same `BarLayout` the menu bar draws).
     public let bar: BarLayout
+    /// Number of equal sub-intervals the popup bar's tick ruler splits this window into
+    /// (`LimitWindow.subdivisions`): `5` for the 5-hour window, `7` for the 7-day and per-model
+    /// windows. The view draws `subdivisions - 1` interior ticks (issue #38).
+    public let subdivisions: Int
     /// Always-shown relative countdown — `"20m"`, `"3d"`, `"1h30m"` — or `nil` when the reset is
     /// now/past or `resets_at` was unparseable (the view shows a stale signal).
     public let resetRelative: String?
@@ -35,6 +39,7 @@ public struct LimitRow: Sendable, Equatable {
         pacing: PacingState,
         indicator: LimitIndicator,
         bar: BarLayout,
+        subdivisions: Int,
         resetRelative: String?,
         resetAbsolute: String?
     ) {
@@ -43,6 +48,7 @@ public struct LimitRow: Sendable, Equatable {
         self.pacing = pacing
         self.indicator = indicator
         self.bar = bar
+        self.subdivisions = subdivisions
         self.resetRelative = resetRelative
         self.resetAbsolute = resetAbsolute
     }
@@ -181,7 +187,7 @@ public struct PopupLayout: Sendable, Equatable {
             utilization: window.utilization,
             timePercent: bar.timeFraction * 100
         )
-        let relative = parsed.flatMap { ResetClock.relativeDuration(resetsAt: $0, now: now) }
+        let relative = parsed.flatMap { ResetClock.relativeRounded(resetsAt: $0, now: now) }
         let absolute = parsed.flatMap { ResetClock.absoluteWithin(resetsAt: $0, now: now) }
         return LimitRow(
             title: title,
@@ -189,6 +195,7 @@ public struct PopupLayout: Sendable, Equatable {
             pacing: bar.pacing,
             indicator: indicator,
             bar: bar,
+            subdivisions: kind.subdivisions,
             resetRelative: relative,
             resetAbsolute: absolute
         )

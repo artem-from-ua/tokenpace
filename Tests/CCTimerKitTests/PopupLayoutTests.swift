@@ -71,6 +71,33 @@ struct PopupLayoutRowsTests {
     }
 }
 
+// MARK: - Tick-ruler subdivisions (issue #38)
+
+@Suite("PopupLayout tick subdivisions")
+struct PopupLayoutSubdivisionsTests {
+
+    @Test func fiveHourSplitsIntoFive() {
+        let p = layout(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30))
+        #expect(p.rows[0].subdivisions == 5)   // 5-hour limit → hour boundaries
+    }
+
+    @Test func sevenDaySplitsIntoSeven() {
+        let p = layout(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30))
+        #expect(p.rows[1].subdivisions == 7)   // 7-day limit → day boundaries
+    }
+
+    @Test func perModelRowsUseSevenDaySubdivisions() {
+        // Opus/Sonnet windows are paced as `.sevenDay`, so their ruler also splits into 7.
+        let p = layout(from: snapshot(
+            fiveHourUtil: 50, sevenDayUtil: 30,
+            opus: (util: 5, resetsIn: 3 * 24 * 3600),
+            sonnet: (util: 2, resetsIn: 3 * 24 * 3600)
+        ))
+        #expect(p.rows[2].subdivisions == 7)   // Opus (7-day)
+        #expect(p.rows[3].subdivisions == 7)   // Sonnet (7-day)
+    }
+}
+
 // MARK: - Reset split: relative always, absolute only within 24 h
 
 @Suite("PopupLayout reset split")
@@ -99,7 +126,7 @@ struct PopupLayoutResetTests {
     @Test func relativeMatchesResetClock() {
         let snap = snapshot(fiveHourUtil: 50, sevenDayUtil: 30, sevenDayResetsIn: 3 * 24 * 3600)
         let p = layout(from: snap)
-        let expected = ResetClock.relativeDuration(resetsAt: ResetClock.parse(snap.sevenDay.resetsAt)!, now: now)
+        let expected = ResetClock.relativeRounded(resetsAt: ResetClock.parse(snap.sevenDay.resetsAt)!, now: now)
         #expect(p.rows[1].resetRelative == expected)
     }
 
