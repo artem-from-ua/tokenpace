@@ -25,17 +25,21 @@ final class PopupBarView: NSView {
 
     // Statusline 256-colour palette (ADR-0005), appearance-aware in the popup: on a dark theme the
     // bars keep the exact menu-bar colours; on a light theme the dark zones (used grey, future
-    // teal) and the indicator ring are lightened so they read on a light panel. The pacing gap
-    // (green/red) is the limit signal and stays identical in both themes.
+    // teal) and the indicator ring are lightened so they read on a light panel. The pacing-gap green
+    // is darkened on light to read against the pale panel; the red stays identical in both themes.
     //
     // NSColor(name:dynamicProvider:) resolves per-appearance and AppKit re-draws on theme change
     // automatically (PopupBarView draws in its real appearance — no manual observation needed).
     private enum Palette {
-        static let gapGreen = NSColor(srgbRed: 95/255, green: 175/255, blue: 95/255, alpha: 1)
+        /// Pacing gap "on pace": menu-bar green on dark, a deeper green on light for contrast.
+        static let gapGreen = dynamic(
+            dark: NSColor(srgbRed: 95/255, green: 175/255, blue: 95/255, alpha: 1),
+            light: NSColor(srgbRed: 80/255, green: 155/255, blue: 80/255, alpha: 1)
+        )
         static let gapRed = NSColor(srgbRed: 215/255, green: 95/255, blue: 95/255, alpha: 1)
 
-        /// Used zone: dark grey on dark, much lighter grey on light.
-        static let used = dynamic(dark: gray(48), light: gray(130))
+        /// Used zone: dark grey on dark, lighter grey on light (still clearly darker than the panel).
+        static let used = dynamic(dark: gray(48), light: gray(110))
         /// Future / unused zone: dark teal on dark, lighter teal on light.
         static let future = dynamic(
             dark: NSColor(srgbRed: 0/255, green: 76/255, blue: 76/255, alpha: 1),
