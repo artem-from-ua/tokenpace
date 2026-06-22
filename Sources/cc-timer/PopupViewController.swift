@@ -264,10 +264,29 @@ final class PopupViewController: NSViewController {
         return parts.joined(separator: " · ")
     }
 
-    /// `"Last update: 2m ago"` (or `"just now"` for a fresh poll).
+    /// `"Last update: 2m ago"`, or `"just now"` for anything under a full minute — the "Last update"
+    /// line never shows seconds (user preference), so a sub-minute age reads as "just now", not "40s".
+    static let justNowThreshold = 60
     static func lastUpdateText(_ ageSeconds: TimeInterval) -> String {
         let age = Int(ageSeconds)
-        return age < 1 ? "Last update: just now" : "Last update: \(duration(age)) ago"
+        return age < justNowThreshold
+            ? "Last update: just now"
+            : "Last update: \(durationMinutes(age)) ago"
+    }
+
+    /// Like ``duration`` but **never** emits a seconds component — minutes are the finest unit, so
+    /// the "Last update" line stays second-free even just past the minute boundary.
+    private static func durationMinutes(_ seconds: Int) -> String {
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        if hours < 24 {
+            let m = minutes % 60
+            return m == 0 ? "\(hours)h" : "\(hours)h \(m)m"
+        }
+        let days = hours / 24
+        let h = hours % 24
+        return h == 0 ? "\(days)d" : "\(days)d \(h)h"
     }
 
     /// `"Update interval: 3m"` — the current dynamic polling cadence.

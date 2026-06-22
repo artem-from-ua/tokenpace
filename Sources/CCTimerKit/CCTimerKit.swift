@@ -3,7 +3,8 @@ public enum CCTimerKit {
     /// This namespace is the home for shared Phase-1 logic. Landed so far: AppLogger (#5),
     /// PacingModel (#6), ResetClock (#7), TokenProvider (#8, Keychain read),
     /// UsageClient (#9, usage API + 429 backoff), MenuBarLayout (#10, menu-bar view model),
-    /// PopupLayout (#11, click-to-open detail popup), UsageHealth (#12, error states).
+    /// PopupLayout (#11, click-to-open detail popup), UsageHealth (#12, error states),
+    /// AdaptiveCadence + PollingEngine (#13, live loop: sleep/wake, network, adaptive interval).
     /// Still to come: TokenProvider fallback-refresh (#8b).
-    public static let version = "0.8.0"
+    public static let version = "0.9.0"
 }

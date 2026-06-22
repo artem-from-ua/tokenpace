@@ -1,0 +1,412 @@
+import Foundation
+
+// MARK: - Seams (injected dependencies)
+
+/// A signal pushed into the loop from outside — system sleep/wake (`NSWorkspace`) or a network
+/// transition (`NWPathMonitor`). The shell owns the platform observers and feeds these to the
+/// scheduler; the engine stays free of AppKit/Network so it is unit-tested with a stub scheduler.
+public enum PollSignal: Sendable, Equatable {
+    /// The system is about to sleep → pause polling (no fetch while asleep).
+    case sleep
+    /// The system just woke → poll immediately (data may be stale; AC #1).
+    case wake
+    /// Connectivity returned after a drop → poll immediately so the bars refresh within seconds
+    /// instead of waiting out the cadence (AC #2 "auto-recovery").
+    case networkRestored
+}
+
+/// Why a `waitForNextPoll` returned — the interval elapsed normally, or a signal cut it short.
+public enum PollWakeReason: Sendable, Equatable {
+    /// The full interval passed → this is a scheduled poll.
+    case elapsed
+    /// A signal fired before the interval elapsed → an off-schedule poll (`.wake` / `.networkRestored`),
+    /// or a request to park (`.sleep`).
+    case interrupted(PollSignal)
+}
+
+/// The wait-between-polls seam. Production races `Task.sleep(interval)` against the next
+/// `PollSignal`; tests drive it deterministically (hand back `.elapsed` or `.interrupted(...)`),
+/// so the loop's "wake → immediate poll" / "sleep → park" behaviour is unit-tested without real
+/// time, real sleep, or a real network.
+public protocol PollScheduler: Sendable {
+    /// Suspend up to `interval` seconds, returning early as soon as a signal arrives.
+    func waitForNextPoll(interval: TimeInterval) async -> PollWakeReason
+    /// Park indefinitely after a `.sleep` signal, returning once `.wake`/`.networkRestored` fires —
+    /// so no fetch runs while the Mac is asleep.
+    func waitWhileAsleep() async
+}
+
+/// The token seam — a one-method protocol over `TokenProvider.currentAccessToken(now:)` so the
+/// engine is tested without touching the Keychain (`Security`). Production is
+/// ``KeychainTokenProvider``; tests inject a stub that returns a literal or throws a `TokenError`.
+public protocol TokenProviding: Sendable {
+    func currentAccessToken(now: Date) throws -> String
+}
+
+/// Production token seam — a thin `struct` wrapper over the static `TokenProvider` (a `static enum`
+/// cannot conform to a protocol directly). Reads the Keychain on every poll, so a token refreshed
+/// by Claude Code is picked up on the next cycle (ADR-0008 §2).
+public struct KeychainTokenProvider: TokenProviding {
+    public init() {}
+    public func currentAccessToken(now: Date) throws -> String {
+        try TokenProvider.currentAccessToken(now: now)
+    }
+}
+
+/// Whether a Claude **Code** session is running on this Mac — the gate for the 30-min idle override
+/// (no active session → poll rarely; a session → adaptive 3–15 min). A seam because process
+/// enumeration is a platform side-effect; production is `ProcessClaudeActivityProbe` in the shell,
+/// tests inject a `StubProbe` returning a fixed `Bool`.
+public protocol ClaudeActivityProbe: Sendable {
+    func isClaudeRunning() -> Bool
+}
+
+// MARK: - PollOutput
+
+/// One iteration's result, mapped by the shell into `MenuBarLayout`/`PopupLayout`. Carries the
+/// **last known** snapshot (stale-safe: kept across failures) so the bars survive an outage, the
+/// `health` driving error states, and the **effective** interval for the popup's "Update interval"
+/// line.
+public struct PollOutput: Sendable, Equatable {
+    public let snapshot: UsageSnapshot?
+    public let health: UsageHealth
+    public let interval: TimeInterval
+
+    public init(snapshot: UsageSnapshot?, health: UsageHealth, interval: TimeInterval) {
+        self.snapshot = snapshot
+        self.health = health
+        self.interval = interval
+    }
+}
+
+// MARK: - Pure core: PollState / PollOutcome / advance
+
+/// The outcome of one poll attempt — the input to the pure ``PollingEngine/advance(previous:outcome:claudeActive:now:)``.
+public enum PollOutcome: Sendable, Equatable {
+    case success(UsageSnapshot)
+    case tokenError(TokenError)
+    case usageError(UsageError)
+}
+
+/// The engine's accumulated state between polls — the pure value the loop threads through
+/// ``PollingEngine/advance(previous:outcome:claudeActive:now:)``. Holds both interval dimensions
+/// (``PollingBackoff`` for 429, ``AdaptiveCadence`` for content), the latest activity reading, and
+/// the inputs ``UsageHealth`` needs (`lastSuccess`/`failingSince`/`reason`) plus the stale-safe
+/// `lastSnapshot`.
+public struct PollState: Sendable, Equatable {
+    public var backoff: PollingBackoff
+    public var adaptive: AdaptiveCadence
+    public var claudeActive: Bool
+    public var lastSuccess: Date?
+    public var failingSince: Date?
+    public var lastSnapshot: UsageSnapshot?
+    public var reason: FailureReason?
+
+    /// Cold start: healthy backoff, fastest adaptive cadence, no data yet. `claudeActive` defaults
+    /// to `true` so the very first interval is the responsive adaptive one until the first probe.
+    public init(
+        backoff: PollingBackoff = PollingBackoff(),
+        adaptive: AdaptiveCadence = AdaptiveCadence(),
+        claudeActive: Bool = true,
+        lastSuccess: Date? = nil,
+        failingSince: Date? = nil,
+        lastSnapshot: UsageSnapshot? = nil,
+        reason: FailureReason? = nil
+    ) {
+        self.backoff = backoff
+        self.adaptive = adaptive
+        self.claudeActive = claudeActive
+        self.lastSuccess = lastSuccess
+        self.failingSince = failingSince
+        self.lastSnapshot = lastSnapshot
+        self.reason = reason
+    }
+
+    /// The `UsageHealth` view-model input derived from this state.
+    public var health: UsageHealth {
+        UsageHealth(lastSuccess: lastSuccess, failingSince: failingSince, reason: reason)
+    }
+}
+
+// MARK: - Interval decision (for logging)
+
+/// Why the effective interval changed between two polls — the payload of the **one log line per
+/// interval change** the user asked for. Computed by ``PollingEngine/intervalDecision(previous:next:)``,
+/// which returns `nil` when the interval did not move (so the loop logs only real changes, never spam —
+/// the same "only on change" discipline as `StatusItemView.layout`, ADR-0009).
+public struct IntervalDecision: Sendable, Equatable {
+    public enum Cause: Sendable, Equatable {
+        /// No Claude Code session running → the 30-min idle override took effect.
+        case claudeInactive
+        /// A Claude Code session reappeared → back to the adaptive cadence.
+        case claudeActiveResumed
+        /// The snapshot moved → adaptive snapped to the 3-min floor.
+        case contentChanged
+        /// Two adjacent snapshots matched → adaptive doubled the interval.
+        case contentUnchanged
+        /// HTTP 429 → the server backoff took over (overrides adaptive/idle).
+        case rateLimited
+        /// A 200 cleared an active 429 backoff → back to adaptive/idle.
+        case rateLimitCleared
+    }
+
+    public let from: TimeInterval
+    public let to: TimeInterval
+    public let cause: Cause
+
+    public init(from: TimeInterval, to: TimeInterval, cause: IntervalDecision.Cause) {
+        self.from = from
+        self.to = to
+        self.cause = cause
+    }
+
+    /// A `.public`-safe one-liner for `AppLogger.lifecycle`, e.g. "interval 3m→6m: usage unchanged".
+    public var logMessage: String {
+        "interval \(Self.mins(from))→\(Self.mins(to)): \(Self.phrase(cause))"
+    }
+
+    private static func mins(_ seconds: TimeInterval) -> String {
+        let m = seconds / 60
+        // Whole minutes render as "3m"; anything else falls back to seconds for honesty.
+        return m == m.rounded() ? "\(Int(m))m" : "\(Int(seconds))s"
+    }
+
+    private static func phrase(_ cause: Cause) -> String {
+        switch cause {
+        case .claudeInactive:      return "no Claude Code session — idle override"
+        case .claudeActiveResumed: return "Claude Code session active — resuming adaptive cadence"
+        case .contentChanged:      return "usage changed — tracking closely"
+        case .contentUnchanged:    return "usage unchanged — backing off"
+        case .rateLimited:         return "rate-limited (HTTP 429) — server backoff"
+        case .rateLimitCleared:    return "rate-limit cleared — resuming adaptive cadence"
+        }
+    }
+}
+
+// MARK: - PollingEngine
+
+/// The live polling loop's brain — drives `Keychain → UsageClient` on a schedule, reacting to
+/// sleep/wake, network changes, the data changing, and whether a Claude Code session is running.
+///
+/// **Pure core + thin shell** (the ADR-0008/0009/0010 pattern): all decision logic
+/// (``advance(previous:outcome:claudeActive:now:)``, ``effectiveInterval(_:)``,
+/// ``intervalDecision(previous:next:)``) is pure and table-tested; the `async` ``run()`` loop wires
+/// it to injected seams (`UsageTransport`, `TokenProviding`, `PollScheduler`, `ClaudeActivityProbe`,
+/// a `now` clock). The shell (`AppDelegate`) supplies the live seams and consumes the output stream
+/// on `@MainActor`. The engine itself is **not** `@MainActor`, so tests never need the main actor.
+///
+/// ## Interval model — two independent dimensions plus an override
+/// ``effectiveInterval(_:)`` combines them with a fixed priority:
+/// 1. **429 backoff** (``PollingBackoff``) — if escalating, it wins outright (server told us to slow
+///    down; honour it above any optimisation).
+/// 2. **Claude-inactive 30-min override** — no session → poll rarely, regardless of adaptive state.
+/// 3. **Adaptive cadence** (``AdaptiveCadence``) — otherwise, 3–15 min by whether the data is moving.
+public struct PollingEngine: Sendable {
+
+    /// The interval used when no Claude Code session is running — a hard override above the adaptive
+    /// cadence. 30 min (user decision).
+    public static let inactiveInterval: TimeInterval = 30 * 60
+
+    /// The **hard floor** on the gap between any two polls — a safety rail independent of the
+    /// scheduler. Even if a scheduler returned instantly (a bug we shipped once: a broken signal
+    /// iterator made `waitForNextPoll` return with no delay, hammering the API ~50×/s and tripping a
+    /// 429), the loop sleeps at least this long between requests. 60 s is comfortably below the
+    /// 180 s base cadence, so it never slows normal operation; it only caps the worst case.
+    /// Enforced twice: `effectiveInterval` never returns less, and `run()` re-checks elapsed wall
+    /// time after every wait. `minIntervalNeverBelowFloor` and `loopNeverPollsFasterThanFloor` guard
+    /// both rails in tests.
+    public static let minInterval: TimeInterval = 60
+
+    let transport: UsageTransport
+    let tokenProvider: TokenProviding
+    let scheduler: PollScheduler
+    let probe: ClaudeActivityProbe
+    let now: @Sendable () -> Date
+
+    public init(
+        transport: UsageTransport,
+        tokenProvider: TokenProviding = KeychainTokenProvider(),
+        scheduler: PollScheduler,
+        probe: ClaudeActivityProbe,
+        now: @escaping @Sendable () -> Date
+    ) {
+        self.transport = transport
+        self.tokenProvider = tokenProvider
+        self.scheduler = scheduler
+        self.probe = probe
+        self.now = now
+    }
+
+    // MARK: Pure transitions
+
+    /// Fold one poll outcome into the next state. No clock, no I/O — `now` is injected. The single
+    /// source of the engine's behaviour, exhaustively table-tested.
+    ///
+    /// - `success`: reset the 429 backoff, mark `lastSuccess = now`, clear the failure; compare the
+    ///   new snapshot's 5h/7d utilisation against the previous one to step the adaptive cadence
+    ///   (changed → floor, unchanged → double); keep the snapshot as the new `lastSnapshot`.
+    /// - `usageError(.rateLimited)`: escalate the 429 backoff (honouring `Retry-After`); leave the
+    ///   adaptive cadence untouched; begin/continue the failure run; **keep** `lastSnapshot` (stale).
+    /// - other `usageError`: same as above but **do not** escalate the backoff (offline/timeout/5xx
+    ///   are not a 429 — staying at the current cadence lets recovery happen promptly).
+    /// - `tokenError`: the loop skipped the network entirely; record the failure, touch neither
+    ///   interval dimension, keep the snapshot.
+    public static func advance(
+        previous: PollState,
+        outcome: PollOutcome,
+        claudeActive: Bool,
+        now: Date
+    ) -> PollState {
+        var next = previous
+        next.claudeActive = claudeActive
+
+        switch outcome {
+        case let .success(snapshot):
+            next.backoff = previous.backoff.reset()
+            next.adaptive = changed(previous.lastSnapshot, snapshot)
+                ? previous.adaptive.changed()
+                : previous.adaptive.unchanged()
+            next.lastSuccess = now
+            next.failingSince = nil
+            next.reason = nil
+            next.lastSnapshot = snapshot
+
+        case let .usageError(error):
+            if case let .rateLimited(retryAfter) = error {
+                next.backoff = previous.backoff.escalated(retryAfter: retryAfter)
+            }
+            // adaptive cadence is content-driven; a failed poll observes no new content → unchanged.
+            recordFailure(into: &next, previous: previous, reason: FailureReason(error), now: now)
+
+        case let .tokenError(error):
+            recordFailure(into: &next, previous: previous, reason: FailureReason(error), now: now)
+        }
+
+        return next
+    }
+
+    /// Set `failingSince` on the **first** failure after a success, preserve it on subsequent
+    /// consecutive failures, and record the reason. `lastSuccess`/`lastSnapshot` are left as-is so
+    /// the menu bar can show stale data and age it.
+    private static func recordFailure(
+        into next: inout PollState,
+        previous: PollState,
+        reason: FailureReason,
+        now: Date
+    ) {
+        next.failingSince = previous.failingSince ?? now
+        next.reason = reason
+    }
+
+    /// Whether the 5h/7d utilisation moved between two successful snapshots (the user's definition of
+    /// "change"). The first success (no previous snapshot) counts as a change, so the cadence starts
+    /// at the responsive floor rather than immediately doubling.
+    static func changed(_ previous: UsageSnapshot?, _ current: UsageSnapshot) -> Bool {
+        guard let previous else { return true }
+        return previous.fiveHour.utilization != current.fiveHour.utilization
+            || previous.sevenDay.utilization != current.sevenDay.utilization
+    }
+
+    /// The interval to wait before the next poll, combining the two dimensions with the priority:
+    /// 429 backoff > Claude-inactive 30-min override > adaptive cadence. Never returns below
+    /// ``minInterval`` — the first of two rails that make a tight request loop impossible.
+    public static func effectiveInterval(_ state: PollState) -> TimeInterval {
+        max(minInterval, rawInterval(state))
+    }
+
+    /// The interval before the ``minInterval`` floor is applied — the pure dimension combination.
+    private static func rawInterval(_ state: PollState) -> TimeInterval {
+        if state.backoff.level != nil {           // an active 429 backoff overrides everything
+            return state.backoff.interval
+        }
+        if !state.claudeActive {                  // no Claude Code session → hard 30-min override
+            return inactiveInterval
+        }
+        return state.adaptive.interval            // otherwise: content-driven 3–15 min
+    }
+
+    /// Why the effective interval changed from `previous` to `next`, or `nil` if it did not move.
+    /// The loop logs exactly the non-nil results, one line per real change.
+    public static func intervalDecision(previous: PollState, next: PollState) -> IntervalDecision? {
+        let from = effectiveInterval(previous)
+        let to = effectiveInterval(next)
+        guard from != to else { return nil }
+        return IntervalDecision(from: from, to: to, cause: cause(previous: previous, next: next))
+    }
+
+    /// Attribute an interval change to the dimension that drove it, checked in priority order so the
+    /// reported cause matches which dimension actually owns the new interval.
+    private static func cause(previous: PollState, next: PollState) -> IntervalDecision.Cause {
+        let wasRateLimited = previous.backoff.level != nil
+        let isRateLimited = next.backoff.level != nil
+        if isRateLimited { return .rateLimited }
+        if wasRateLimited { return .rateLimitCleared }       // 429 just cleared on a 200
+
+        if previous.claudeActive != next.claudeActive {
+            return next.claudeActive ? .claudeActiveResumed : .claudeInactive
+        }
+        // Same activity, no 429 churn → the adaptive cadence moved.
+        return next.adaptive.level <= previous.adaptive.level ? .contentChanged : .contentUnchanged
+    }
+
+    // MARK: Live loop
+
+    /// Run the polling loop, emitting one ``PollOutput`` per iteration. The stream ends only when the
+    /// task is cancelled (the shell holds it for the process lifetime).
+    public func run() -> AsyncStream<PollOutput> {
+        AsyncStream { continuation in
+            let task = Task {
+                var state = PollState()
+                while !Task.isCancelled {
+                    let active = probe.isClaudeRunning()
+                    let outcome = await pollOnce(state: state, claudeActive: active)
+                    let previous = state
+                    state = Self.advance(
+                        previous: previous, outcome: outcome, claudeActive: active, now: now())
+
+                    if let decision = Self.intervalDecision(previous: previous, next: state) {
+                        AppLogger.lifecycle.notice("\(decision.logMessage, privacy: .public)")
+                    }
+
+                    let interval = Self.effectiveInterval(state)
+                    continuation.yield(PollOutput(
+                        snapshot: state.lastSnapshot, health: state.health, interval: interval))
+
+                    let reason = await scheduler.waitForNextPoll(interval: interval)
+                    if case .interrupted(.sleep) = reason {
+                        await scheduler.waitWhileAsleep()   // park: no fetch while asleep
+                    }
+                    // .elapsed → scheduled poll; .interrupted(.wake/.networkRestored) → immediate poll.
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// One read-token-then-fetch attempt, collapsed to a `PollOutcome`. An expired/absent token
+    /// short-circuits **before** the network (ADR-0007: a stale token guarantees a 401 and burns
+    /// rate-limit), so a token error means no request was sent.
+    func pollOnce(state: PollState, claudeActive: Bool) async -> PollOutcome {
+        let token: String
+        do {
+            token = try tokenProvider.currentAccessToken(now: now())
+        } catch let error as TokenError {
+            return .tokenError(error)
+        } catch {
+            // currentAccessToken only throws TokenError; bucket anything else defensively
+            // (no Security import needed — `.malformedData` carries no OSStatus).
+            return .tokenError(.malformedData)
+        }
+
+        do {
+            let snapshot = try await UsageClient.fetch(
+                accessToken: token, now: now(), transport: transport)
+            return .success(snapshot)
+        } catch let error as UsageError {
+            return .usageError(error)
+        } catch {
+            return .usageError(.transport(message: "\(error)", code: nil))
+        }
+    }
+}

@@ -1,0 +1,173 @@
+import AppKit
+import CCTimerKit
+import Darwin
+import Network
+
+// MARK: - SignalHub
+
+/// Fan-in for `PollSignal`s from the platform observers (`WorkspaceSleepWake`, `NetworkMonitor`)
+/// into the single stream the `LivePollScheduler` listens on. A thin wrapper over
+/// `AsyncStream.makeStream` so the observers — which fire on arbitrary threads — can `send` without
+/// touching the scheduler's state directly.
+///
+/// Bounded buffer (`bufferingPolicy: .bufferingNewest(1)`): a burst of path/power notifications
+/// collapses to the most recent signal instead of queueing dozens that would each cut a wait short.
+/// Only the latest matters — the loop reacts to "we are awake / online now", not to history.
+final class SignalHub: Sendable {
+    let stream: AsyncStream<PollSignal>
+    private let continuation: AsyncStream<PollSignal>.Continuation
+
+    init() {
+        (stream, continuation) = AsyncStream.makeStream(
+            of: PollSignal.self, bufferingPolicy: .bufferingNewest(1))
+    }
+
+    func send(_ signal: PollSignal) {
+        continuation.yield(signal)
+    }
+}
+
+// MARK: - WorkspaceSleepWake
+
+/// Bridges `NSWorkspace` sleep/wake notifications to `PollSignal`s. Observers live on
+/// **`NSWorkspace.shared.notificationCenter`** — workspace power notifications are posted there, not
+/// on `NotificationCenter.default`.
+@MainActor
+final class WorkspaceSleepWake {
+    private let onSignal: @Sendable (PollSignal) -> Void
+    private var tokens: [NSObjectProtocol] = []
+
+    init(onSignal: @escaping @Sendable (PollSignal) -> Void) {
+        self.onSignal = onSignal
+        let center = NSWorkspace.shared.notificationCenter
+        tokens.append(center.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { [onSignal] _ in
+            AppLogger.lifecycle.notice("system will sleep, pausing polling")
+            onSignal(.sleep)
+        })
+        tokens.append(center.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [onSignal] _ in
+            AppLogger.lifecycle.notice("system did wake, polling immediately")
+            onSignal(.wake)
+        })
+    }
+
+    func stop() {
+        let center = NSWorkspace.shared.notificationCenter
+        tokens.forEach(center.removeObserver)
+        tokens.removeAll()
+    }
+}
+
+// MARK: - NetworkMonitor
+
+/// Wraps `NWPathMonitor`, emitting `.networkRestored` on each `.unsatisfied → .satisfied`
+/// transition so the loop can poll immediately when connectivity returns (AC #2 "auto-recovery").
+/// It does **not** build health or decide staleness — that stays sourced from the fetch result
+/// (`UsageError.transport → FailureReason.network`), keeping one source of truth.
+final class NetworkMonitor: @unchecked Sendable {
+    private let monitor = NWPathMonitor()
+    private let queue = DispatchQueue(label: "com.artem-n.cc-timer.network-monitor")
+    /// Whether the previous path was satisfied — to detect the down→up edge (and suppress the very
+    /// first callback, which is just the initial reading, not a restoration).
+    private var wasSatisfied: Bool?
+
+    /// Begin monitoring; `onRestored` fires on each connectivity restoration.
+    func start(onRestored: @escaping @Sendable () -> Void) {
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard let self else { return }
+            let satisfied = path.status == .satisfied
+            defer { self.wasSatisfied = satisfied }
+            switch self.wasSatisfied {
+            case .none:
+                AppLogger.lifecycle.notice("network monitor started (satisfied=\(satisfied, privacy: .public))")
+            case .some(false) where satisfied:
+                AppLogger.lifecycle.notice("network restored, polling immediately")
+                onRestored()
+            case .some(true) where !satisfied:
+                AppLogger.lifecycle.notice("network lost, showing stale data")
+            default:
+                break
+            }
+        }
+        monitor.start(queue: queue)
+    }
+
+    func stop() {
+        monitor.cancel()
+    }
+}
+
+// MARK: - ProcessClaudeActivityProbe
+
+/// Production `ClaudeActivityProbe`: reports whether a **Claude Code** CLI session is running by
+/// scanning the process table for an executable named exactly `claude`.
+///
+/// The match is on the **exact process name** (not a substring), so it tracks the CLI that consumes
+/// the subscription limits and does **not** false-positive on the Claude Desktop app, whose helper
+/// processes are named "Claude Helper" and only show up under a full `-f` command-line match.
+struct ProcessClaudeActivityProbe: ClaudeActivityProbe {
+    /// The exact executable name that marks a Claude Code session.
+    static let processName = "claude"
+
+    func isClaudeRunning() -> Bool {
+        Self.runningProcessNames().contains(Self.processName)
+    }
+
+    /// All running process names via `sysctl(KERN_PROC_ALL)` — no subprocess spawn, no `pgrep` path
+    /// dependency. Returns an empty set on any sysctl failure (fail-safe: treated as "inactive" →
+    /// the 30-min override, which is the conservative cadence).
+    private static func runningProcessNames() -> Set<String> {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+        var size = 0
+        guard sysctl(&mib, UInt32(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return [] }
+
+        let count = size / MemoryLayout<kinfo_proc>.stride
+        var procs = [kinfo_proc](repeating: kinfo_proc(), count: count)
+        guard sysctl(&mib, UInt32(mib.count), &procs, &size, nil, 0) == 0 else { return [] }
+
+        // sysctl may report fewer entries than the sized buffer; trust the returned `size`.
+        let actual = size / MemoryLayout<kinfo_proc>.stride
+        var names = Set<String>()
+        for i in 0..<min(actual, procs.count) {
+            var comm = procs[i].kp_proc.p_comm   // fixed-size CChar tuple (MAXCOMLEN+1)
+            let commSize = MemoryLayout.size(ofValue: comm)
+            let name = withUnsafePointer(to: &comm) { ptr in
+                ptr.withMemoryRebound(to: CChar.self, capacity: commSize) {
+                    String(cString: $0)
+                }
+            }
+            if !name.isEmpty { names.insert(name) }
+        }
+        return names
+    }
+}
+
+// MARK: - StubUsageTransport (verification only — CC_TIMER_STUB=1)
+
+/// A canned `UsageTransport` for end-to-end verification without hitting the usage API. Returns a
+/// 200 whose utilisation nudges upward every few polls, so the popup text, the bars, and the
+/// adaptive cadence (changed → reset, unchanged → double) can all be seen by eye. **Never** used on
+/// the default path — only when `CC_TIMER_STUB=1` is set.
+actor StubUsageTransport: UsageTransport {
+    private var calls = 0
+
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        let n = calls
+        calls += 1
+        // Step utilisation every 3rd poll so some adjacent polls are "unchanged" (cadence doubles)
+        // and some "changed" (cadence resets) — exercising the live interval logic on screen.
+        let five = 20.0 + Double((n / 3) * 5)
+        let seven = 55.0 + Double((n / 3) * 3)
+        let body = """
+        {"five_hour":{"utilization":\(five),"resets_at":"2026-06-23T05:30:00+00:00"},\
+        "seven_day":{"utilization":\(seven),"resets_at":"2026-06-29T00:00:00+00:00"},\
+        "seven_day_sonnet":{"utilization":2.0,"resets_at":"2026-06-29T00:00:00+00:00"},"limits":[]}
+        """.data(using: .utf8)!
+        let response = HTTPURLResponse(
+            url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+        return (body, response)
+    }
+}

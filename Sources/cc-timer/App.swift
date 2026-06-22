@@ -20,6 +20,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// highlighted while it is open (both come free with `NSMenu`, unlike `NSPopover`).
     private let popupVC = PopupViewController()
 
+    // MARK: live polling (#13)
+
+    /// Fan-in of sleep/wake (`NSWorkspace`) and network (`NWPathMonitor`) signals into the loop.
+    private let signals = SignalHub()
+    /// System sleep/wake observers, feeding `.sleep`/`.wake` into `signals`.
+    private var sleepWake: WorkspaceSleepWake?
+    /// Connectivity monitor, feeding `.networkRestored` into `signals`.
+    private let network = NetworkMonitor()
+    /// The running poll loop's consumer task — cancelled on terminate.
+    private var pollTask: Task<Void, Never>?
+
+    /// The most recent poll result, retained so the popup's "Last update …" line can be re-aged
+    /// between polls (the data is unchanged; only `now` advances).
+    private var lastOutput: PollOutput?
+
+    /// Re-renders the popup/menu bar from `lastOutput` on a fixed cadence so the "Last update" age
+    /// grows ("just now" → "1m ago") without waiting for the next 180 s poll. **Never** fetches — it
+    /// only recomputes the view models against the current time.
+    private var ageTimer: Timer?
+
     static func main() {
         let app = NSApplication.shared
         let delegate = AppDelegate()
@@ -33,15 +53,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
-        // MOCK — replaced by live polling in #13. Drives the custom view with a representative
-        // snapshot + health so the bars/idle/reset and the #12 error states are visible under
-        // `swift run` today. Flip `Self.demoMode` to preview the failure phases.
+        // Cold start: no data yet — render the structure (idle/empty), not fake bars. The first
+        // poll replaces this within a moment.
         let now = Date()
-        let snapshot = Self.mockSnapshot(now: now)
-        let health = Self.mockHealth(now: now)
-        let layout = MenuBarLayout.make(from: snapshot, health: health, now: now)
+        let coldHealth = UsageHealth(lastSuccess: nil, failingSince: nil, reason: nil)
         let view = StatusItemView(frame: NSRect(origin: .zero, size: NSSize(width: 0, height: 22)))
-        view.layout = layout
+        view.layout = MenuBarLayout.make(from: nil, health: coldHealth, now: now)
         self.statusView = view
         self.statusItem = item
 
@@ -56,19 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.refreshStatusImage() }
         }
 
-        // Build the popup content from the same snapshot + health. MOCK — #13 supplies the real
-        // health (last success, failure start, reason) and interval (PollingBackoff.interval);
-        // until then the service line reads from the mock health's lastSuccess.
         popupVC.loadView()   // realise the view so it can be sized before the menu measures it
-        popupVC.layout = PopupLayout.make(
-            from: snapshot,
-            health: health,
-            now: now,
-            interval: PollingBackoff.defaultInterval
-        )
-        // A menu item's hosted view must have a concrete non-zero frame — NSMenu reads `frame`, not
-        // Auto Layout, to lay the item out (otherwise: "menu item's height should never be 0").
-        popupVC.view.frame = NSRect(origin: .zero, size: popupVC.view.fittingSize)
+        setPopupLayout(PopupLayout.make(
+            from: nil, health: coldHealth, now: now, interval: PollingBackoff.defaultInterval))
 
         // Host the content in a menu item. Attaching the menu to the status item gives the native
         // menu-bar behaviour: clicking opens it (no target/action needed), there is no popover
@@ -79,70 +86,101 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(popupItem)
         item.menu = menu
 
+        startPolling()
+
         AppLogger.lifecycle.info(
-            "cc-timer status item attached (\(CCTimerKit.version, privacy: .public)); live polling arrives in #13"
+            "cc-timer status item attached (\(CCTimerKit.version, privacy: .public)); live polling started"
         )
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        pollTask?.cancel()
+        ageTimer?.invalidate()
+        sleepWake?.stop()
+        network.stop()
+    }
+
+    // MARK: - Live polling wiring (#13)
+
+    /// Wire the platform signal sources to the engine and consume its output on the main actor.
+    private func startPolling() {
+        // Sleep/wake and network observers push signals into the shared hub.
+        sleepWake = WorkspaceSleepWake { [signals] signal in signals.send(signal) }
+        network.start { [signals] in signals.send(.networkRestored) }
+
+        // CC_TIMER_STUB=1 swaps the live URLSession for a canned-response transport so the app can be
+        // driven end-to-end (popup text, interval logs) without touching the usage API. Verification
+        // aid only — never set in normal use; the default path is the real network.
+        let transport: UsageTransport = ProcessInfo.processInfo.environment["CC_TIMER_STUB"] == "1"
+            ? StubUsageTransport()
+            : URLSession.shared
+        let engine = PollingEngine(
+            transport: transport,
+            scheduler: LivePollScheduler(signals: signals.stream),
+            probe: ProcessClaudeActivityProbe(),
+            now: { Date() })
+
+        // Consume on the main actor — every PollOutput drives the menu bar + popup.
+        pollTask = Task { [weak self] in
+            for await output in engine.run() {
+                guard let self else { break }
+                self.apply(output)
+            }
+        }
+
+        // Re-render on a fixed cadence so time-derived text ages without waiting for the next poll:
+        // the popup's "Last update" line ("just now" → "1m ago") and the menu bar's stale ⚠️
+        // thresholds (30/60 min) both depend on `now`, not on new data. 30 s is fine-grained enough
+        // for minute-resolution text and costs nothing — it only recomputes view models, never fetches.
+        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reRenderForCurrentTime() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        ageTimer = timer
+    }
+
+    /// Map one poll result into the menu-bar image and the popup model, and retain it so the age
+    /// timer can re-render it against a later `now`.
+    private func apply(_ output: PollOutput) {
+        lastOutput = output
+        render(output, at: Date())
+    }
+
+    /// Re-render the retained last poll against the current time — grows the "Last update" age and
+    /// advances the menu bar's stale thresholds. No-op before the first poll. **Never fetches.**
+    private func reRenderForCurrentTime() {
+        guard let output = lastOutput else { return }
+        render(output, at: Date())
+    }
+
+    /// Render a poll result into the menu-bar image and popup model at instant `now`.
+    private func render(_ output: PollOutput, at now: Date) {
+        statusView?.layout = MenuBarLayout.make(
+            from: output.snapshot, health: output.health, now: now)
+        refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
+        setPopupLayout(PopupLayout.make(
+            from: output.snapshot, health: output.health, now: now, interval: output.interval))
+    }
+
+    /// Set the popup model **and** resize the hosted view to fit. A menu item's hosted view must
+    /// carry a concrete non-zero frame — `NSMenu` lays the item out from `frame`, not Auto Layout —
+    /// and it does **not** re-measure when the content rebuilds. So every layout change (cold start
+    /// *and* each live poll) must re-fit the frame, otherwise sections added later (e.g. the bars +
+    /// their labels once the first snapshot lands) are clipped to the older, smaller frame — leaving
+    /// the fixed-width bars visible but the intrinsic-width text rows cut off.
+    private func setPopupLayout(_ layout: PopupLayout) {
+        popupVC.layout = layout
+        popupVC.view.frame = NSRect(origin: .zero, size: popupVC.view.fittingSize)
     }
 
     // MARK: - Menu-bar image
 
     /// Re-render the menu-bar image in the button's current appearance and resize the item to fit.
-    /// Called at launch and whenever the menu-bar theme changes.
+    /// Called at launch, on every poll, and whenever the menu-bar theme changes.
     private func refreshStatusImage() {
         guard let button = statusItem?.button, let view = statusView else { return }
         let image = view.snapshotImage(appearance: button.effectiveAppearance)
         button.image = image
         statusItem?.length = image.size.width
-    }
-
-    // MARK: - Mock data (#13 replaces this with a live poll)
-
-    /// Which mock state `swift run` renders. Default `.healthy` keeps the normal bars (issue #11
-    /// behaviour); flip to a failure case to preview the issue #12 error states by eye:
-    /// - `.failing30m` → ⚠️ **plus** stale bars (the 30–60 min phase) + the popup warning banner.
-    /// - `.failing70m` → ⚠️ **alone** (past 60 min) + the popup warning banner.
-    private enum DemoMode { case healthy, failing30m, failing70m }
-    private static let demoMode: DemoMode = .healthy
-
-    /// A mock ``UsageHealth`` matching ``demoMode`` — healthy, or failing for a duration that lands
-    /// in the requested menu-bar phase. `lastSuccess` is set in the past so the popup's "Last
-    /// update" line shows the data ageing.
-    private static func mockHealth(now: Date) -> UsageHealth {
-        switch demoMode {
-        case .healthy:
-            return .healthy(lastSuccess: now)
-        case .failing30m:
-            return UsageHealth(
-                lastSuccess: now.addingTimeInterval(-35 * 60),
-                failingSince: now.addingTimeInterval(-35 * 60),
-                reason: .authHTTP(status: 401, body: "Invalid or expired access token"))
-        case .failing70m:
-            return UsageHealth(
-                lastSuccess: now.addingTimeInterval(-70 * 60),
-                failingSince: now.addingTimeInterval(-70 * 60),
-                reason: .notSignedIn)
-        }
-    }
-
-    /// A representative `UsageSnapshot` for visual verification, deliberately exercising **both**
-    /// pacing colours so the green/red palette can be judged at a glance:
-    /// - 5h: 40% used, ~60% of the window elapsed → on pace → **green** gap.
-    /// - 7d: 75% used, ~57% of the window elapsed → ahead of pace → **red** gap.
-    ///
-    /// `seven_day_sonnet` is populated (Opus left absent) so the popup shows one per-model row and
-    /// the null-safe handling of the other — matching the common "Sonnet only" settings view.
-    private static func mockSnapshot(now: Date) -> UsageSnapshot {
-        UsageSnapshot(
-            fiveHour: UsageWindow(utilization: 40, resetsAt: iso(now.addingTimeInterval(2 * 3600))),
-            sevenDay: UsageWindow(utilization: 75, resetsAt: iso(now.addingTimeInterval(3 * 24 * 3600))),
-            sevenDaySonnet: UsageWindow(utilization: 2, resetsAt: iso(now.addingTimeInterval(3 * 24 * 3600)))
-        )
-    }
-
-    /// Format a `Date` as the ISO-8601 string the usage API emits (and `ResetClock.parse` accepts).
-    private static func iso(_ date: Date) -> String {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f.string(from: date)
     }
 }
