@@ -36,11 +36,13 @@ final class StatusItemView: NSView {
         static let barWidth: CGFloat = 34
         /// Height of one pacing bar. Kept slim so the two bars read as separate rows.
         static let barHeight: CGFloat = 5
-        /// Vertical gap between the stacked 5h and 7d bars — wider than the bars are tall, so the
-        /// pair reads as two distinct limits rather than one block.
-        static let barGap: CGFloat = 7
-        /// Horizontal padding inside the item.
-        static let hPadding: CGFloat = 5
+        /// Vertical gap between the stacked 5h and 7d bars. Kept just enough to read as two rows
+        /// without spreading the pair out — a tight stack sits more like a single compact widget.
+        static let barGap: CGFloat = 4
+        /// Horizontal padding inside the item. Kept tight (2 pt) so the item hugs its neighbours
+        /// the way native status items do — the menu bar adds its own inter-item spacing on top,
+        /// so a wide internal pad reads as an oversized gap to the clock/battery beside us.
+        static let hPadding: CGFloat = 2
         /// Gap between the bars block and the reset-time label.
         static let labelGap: CGFloat = 5
         /// Diameter of the time-indicator dot (slightly taller than the bar so it stands proud).
@@ -111,11 +113,21 @@ final class StatusItemView: NSView {
     /// layout and paints over added subviews), so the robust path for fully custom menu-bar
     /// graphics is to hand the button a ready image. `isTemplate = false` stops macOS recolouring
     /// the pacing colours under Dark/Light tinting (SPEC "Технічні зауваги", ADR-0009).
-    func snapshotImage() -> NSImage {
+    ///
+    /// Because the image is non-template, macOS does **not** re-tint it for the menu-bar theme, so
+    /// the semantic foreground colour (`labelColor` for the idle glyph / reset label) must be
+    /// resolved against the **menu bar's** appearance — not the ambient appearance an off-screen
+    /// `NSImage` draws in (which defaults to Aqua → dark text on a dark menu bar). The caller passes
+    /// `item.button?.effectiveAppearance` and re-snapshots when the theme changes.
+    ///
+    /// - Parameter appearance: Appearance to resolve dynamic colours in; the view's own when `nil`.
+    func snapshotImage(appearance: NSAppearance? = nil) -> NSImage {
         let size = intrinsicContentSize
         let image = NSImage(size: size)
         image.lockFocusFlipped(true)        // draw eagerly now (no lazy handler)
-        render(in: NSRect(origin: .zero, size: size))
+        (appearance ?? effectiveAppearance).performAsCurrentDrawingAppearance {
+            render(in: NSRect(origin: .zero, size: size))
+        }
         image.unlockFocus()
         image.isTemplate = false
         return image
