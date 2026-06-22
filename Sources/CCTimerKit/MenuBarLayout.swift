@@ -133,7 +133,6 @@ public struct MenuBarLayout: Sendable, Equatable {
             && snapshot.sevenDay.utilization < idleUtilizationThreshold
 
         if bothLow {
-            AppLogger.ui.notice("menu-bar mode=idle")
             return MenuBarLayout(mode: .idle)
         }
 
@@ -143,7 +142,6 @@ public struct MenuBarLayout: Sendable, Equatable {
             now: now
         ) ?? (.fiveHour, .resetNow)
 
-        AppLogger.ui.notice("menu-bar mode=expanded which=\(String(describing: which), privacy: .public)")
         return MenuBarLayout(
             mode: .expanded(fiveHour: five, sevenDay: seven, reset: reset, which: which)
         )
@@ -183,10 +181,8 @@ public struct MenuBarLayout: Sendable, Equatable {
         let keepBars = snapshot != nil && age <= UsageHealth.hideBarsAfter
         guard keepBars, let snapshot,
               case let .expanded(five, seven, reset, which) = make(from: snapshot, now: now).mode else {
-            AppLogger.ui.notice("menu-bar mode=error bars=none")
             return MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
         }
-        AppLogger.ui.notice("menu-bar mode=error bars=stale")
         return MenuBarLayout(mode: .error(fiveHour: five, sevenDay: seven, reset: reset, which: which))
     }
 

@@ -288,6 +288,18 @@ public enum ResetClock {
         f.locale = locale
         f.timeZone = timeZone
         f.setLocalizedDateFormatFromTemplate("jmm")
-        return f.string(from: date)
+        return f.string(from: ceilToMinute(date))
+    }
+
+    /// Round a reset instant **up** to the next whole minute, so the displayed `hh:mm` never shows a
+    /// reset earlier than it actually happens. The API emits sub-minute seconds (e.g. `…:59:59`,
+    /// `…:00:00`) that differ per window; truncating would render two near-simultaneous resets as
+    /// `08:59` vs `09:00`. Ceiling collapses both to `09:00`: any non-zero seconds (or fractional
+    /// seconds) advance to the next minute; an exact whole minute is left as-is.
+    static func ceilToMinute(_ date: Date) -> Date {
+        let epoch = date.timeIntervalSince1970
+        let minutes = epoch / 60
+        let rounded = minutes.rounded(.up)   // ceil; an exact minute stays put
+        return Date(timeIntervalSince1970: rounded * 60)
     }
 }

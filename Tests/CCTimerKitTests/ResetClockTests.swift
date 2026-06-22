@@ -209,7 +209,7 @@ struct AbsoluteTests {
         f.locale = locale
         f.timeZone = tz
         f.setLocalizedDateFormatFromTemplate("jmm")
-        return f.string(from: date)
+        return f.string(from: ResetClock.ceilToMinute(date))   // mirror the production ceil-to-minute
     }
 
     /// Far-future reset (well over 90 min) so we are unambiguously in the absolute band.
@@ -398,5 +398,54 @@ struct AbsoluteWithinTests {
         // withinHours: 1 → 90 min away is outside.
         #expect(ResetClock.absoluteWithin(resetsAt: at(90 * 60), now: now, withinHours: 1, locale: gb, timeZone: utc) == nil)
         #expect(ResetClock.absoluteWithin(resetsAt: at(30 * 60), now: now, withinHours: 1, locale: gb, timeZone: utc) != nil)
+    }
+}
+
+// MARK: - ceilToMinute (round reset display up to the next whole minute)
+
+@Suite("ResetClock.ceilToMinute")
+struct CeilToMinuteTests {
+
+    /// Exact whole minute stays put — no spurious advance.
+    @Test func exactMinuteUnchanged() {
+        let d = Date(timeIntervalSince1970: 1_800_000_000)   // multiple of 60
+        #expect(ResetClock.ceilToMinute(d) == d)
+    }
+
+    /// One second past the minute rounds up to the next minute.
+    @Test func oneSecondRoundsUp() {
+        let base = Date(timeIntervalSince1970: 1_800_000_000)
+        let plus1 = base.addingTimeInterval(1)
+        #expect(ResetClock.ceilToMinute(plus1) == base.addingTimeInterval(60))
+    }
+
+    /// 59 seconds past the minute rounds up to the next minute (the `…:59` API case).
+    @Test func fiftyNineSecondsRoundsUp() {
+        let base = Date(timeIntervalSince1970: 1_800_000_000)
+        let plus59 = base.addingTimeInterval(59)
+        #expect(ResetClock.ceilToMinute(plus59) == base.addingTimeInterval(60))
+    }
+
+    /// Fractional sub-second also advances (the API emits microseconds).
+    @Test func fractionalSecondRoundsUp() {
+        let base = Date(timeIntervalSince1970: 1_800_000_000)
+        let plusFraction = base.addingTimeInterval(0.5)
+        #expect(ResetClock.ceilToMinute(plusFraction) == base.addingTimeInterval(60))
+    }
+
+    /// End-to-end: two near-simultaneous API resets (`…:59:59` and the next `…:00:00`) render as the
+    /// SAME wall-clock minute, the bug the user reported (`08:59` vs `09:00`).
+    @Test func adjacentResetsCollapseToSameMinute() {
+        let utc = TimeZone(identifier: "UTC")!
+        let gb = Locale(identifier: "en_GB")
+        let nowEarly = Date(timeIntervalSince1970: 1_781_000_000)   // well before, so absolute band
+        // 06:59:59 and 07:00:00 on the same far-future day.
+        let a = ResetClock.parse("2026-06-23T06:59:59.013864+00:00")!
+        let b = ResetClock.parse("2026-06-23T07:00:00.013870+00:00")!
+        guard case let .absolute(sa) = ResetClock.timeToReset(resetsAt: a, now: nowEarly, locale: gb, timeZone: utc),
+              case let .absolute(sb) = ResetClock.timeToReset(resetsAt: b, now: nowEarly, locale: gb, timeZone: utc)
+        else { Issue.record("expected absolute band"); return }
+        #expect(sa == sb, "adjacent resets should render the same minute, got \(sa) vs \(sb)")
+        #expect(sa.contains("07:00"))
     }
 }

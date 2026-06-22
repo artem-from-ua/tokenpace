@@ -124,7 +124,14 @@ public enum UsageClient {
         switch http.statusCode {
         case 200:
             let snapshot = try decode(from: data)
-            AppLogger.network.notice("usage 200 ok")
+            // One line per success: status **and** the full JSON body, so there is no duplicate
+            // "200 ok" / "200 body" pair. `.notice` so it shows at the default log level (no
+            // `--level info` needed). The usage payload carries no secrets — the token rides only in
+            // the request's Authorization header, which is never logged — so the body is `.public`.
+            // Logged in full (not capped) so the per-model breakdown is visible; once per poll
+            // (≈180 s) the volume is negligible.
+            let bodyText = String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
+            AppLogger.network.notice("usage 200 ok body=\(bodyText, privacy: .public)")
             return snapshot
         case 429:
             let retryAfter = retryAfterSeconds(from: http)

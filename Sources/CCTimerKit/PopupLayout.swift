@@ -105,7 +105,6 @@ public struct PopupLayout: Sendable, Equatable {
         interval: TimeInterval
     ) -> PopupLayout {
         let rows = self.rows(from: snapshot, now: now)
-        AppLogger.ui.notice("popup layout built rows=\(rows.count, privacy: .public)")
         return PopupLayout(
             lastUpdateAge: max(0, now.timeIntervalSince(lastUpdate)),
             intervalSeconds: interval,
@@ -140,8 +139,6 @@ public struct PopupLayout: Sendable, Equatable {
         let rows = snapshot.map { self.rows(from: $0, now: now) } ?? []
         let lastUpdateAge = health.lastSuccess.map { max(0, now.timeIntervalSince($0)) } ?? 0
         let warning = health.isFailing ? health.reason : nil
-        AppLogger.ui.notice(
-            "popup layout built rows=\(rows.count, privacy: .public) failing=\(health.isFailing, privacy: .public)")
         return PopupLayout(
             lastUpdateAge: lastUpdateAge,
             intervalSeconds: interval,
