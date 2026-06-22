@@ -36,17 +36,20 @@ swift run          # запуск агента (без вікна; зупини�
 open ./build/cc-timer.app # запуск (іконки в Dock немає — LSUIElement)
 ```
 
-Застосунок запускається як **accessory-агент** без іконки в Dock (`LSUIElement = true`).
-У цьому каркасі UI (статус-айтем у menu bar) ще відсутній — він з'явиться у пізнішому тікеті.
+Застосунок запускається як **accessory-агент** без іконки в Dock (`LSUIElement = true`):
+дві pacing-смужки в menu bar, клік відкриває popup із деталями, а внизу — `Configure…` (toggle
+автозапуску, версія, GitHub-лінк) і `Quit cc-timer`.
 
-**Непідписана збірка / Gatekeeper:** локальна збірка непідписана. При першому запуску Gatekeeper
-може заблокувати — `права кнопка → Відкрити` (Open anyway), або:
+**Підпис і нотаризація.** `build-app.sh` автоматично підписує bundle Developer ID identity (якщо є)
+з `--options runtime` і, якщо налаштовано notarytool-профіль `cc-timer-notary`, нотаризує та
+прикріплює (staple) квиток. Перевірити: `spctl -a -t exec ./build/cc-timer.app` → `accepted
+(Notarized Developer ID)`. Без Developer ID identity збірка лишається непідписаною — Gatekeeper
+може заблокувати при першому запуску (`права кнопка → Відкрити`, або
+`xattr -dr com.apple.quarantine ./build/cc-timer.app`).
 
-```sh
-xattr -dr com.apple.quarantine ./build/cc-timer.app
-```
-
-Підпис + notarization вмикаються автоматично у `build-app.sh`, лише якщо є Developer ID identity.
+**Launch-at-login.** `SMAppService` реєструє автозапуск надійно лише для **підписаного** `.app`,
+**запущеного з `/Applications`** (через Finder/Launchpad). На `swift run` чи прямому запуску
+бінарника статус буде `.notFound` і toggle у `Configure…` — неактивний (з поясненням).
 
 **Перегляд логів:**
 
