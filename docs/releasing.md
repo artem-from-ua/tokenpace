@@ -40,20 +40,25 @@ VERSION="$(tr -d ' \t\n\r' < VERSION)"   # напр. 0.9.0
 ./scripts/build-app.sh
 ```
 
-Скрипт сам: збирає release-бінар, складає `.app`, підписує Developer ID
-(`--options runtime`), нотаризує (`notarytool submit --wait`) і прикріплює
-квиток (`stapler staple`). Нотаризація може зайняти кілька хвилин.
+Скрипт сам: збирає release-бінар як **universal** (arm64 + x86_64 — кожна арка
+окремо за `--triple`, потім `lipo -create`, щоб `.app` працював і на Apple
+Silicon, і на Intel), складає `.app`, підписує Developer ID (`--options
+runtime`), нотаризує (`notarytool submit --wait`) і прикріплює квиток (`stapler
+staple`). Нотаризація може зайняти кілька хвилин.
 
-Очікувати в логах: `status: Accepted` і `The staple and validate action worked!`.
+Очікувати в логах: `lipo archs: x86_64 arm64`, `status: Accepted` і
+`The staple and validate action worked!`.
 
 ### 3. Перевірити нотаризацію
 
 ```sh
 spctl -a -vvv -t exec ./build/cc-timer.app   # → accepted (Notarized Developer ID)
 xcrun stapler validate ./build/cc-timer.app  # → The validate action worked!
+lipo -archs ./build/cc-timer.app/Contents/MacOS/cc-timer   # → x86_64 arm64
 ```
 
 Якщо `spctl` дає `rejected` — реліз **не** публікувати, спершу розібратися.
+Якщо `lipo` показує лише одну арку — бінар не universal, перебудувати.
 
 ### 4. Спакувати реліз-архів
 

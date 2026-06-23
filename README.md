@@ -38,6 +38,10 @@ swift run          # запуск агента (без вікна; зупини�
 open ./build/cc-timer.app # запуск (іконки в Dock немає — LSUIElement)
 ```
 
+Скрипт збирає **universal binary** (arm64 + x86_64), тож `.app` запускається нативно і на Apple
+Silicon, і на Intel-Mac (SwiftPM не має єдиного `--arch`, тож кожна арка збирається окремо за
+`--triple` і зливається через `lipo`).
+
 Застосунок запускається як **accessory-агент** без іконки в Dock (`LSUIElement = true`):
 дві pacing-смужки в menu bar, клік відкриває popup із деталями, а внизу — `Configure…` (toggle
 автозапуску, версія, GitHub-лінк) і `Quit cc-timer`.
