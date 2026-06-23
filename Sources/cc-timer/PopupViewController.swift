@@ -308,7 +308,7 @@ final class PopupViewController: NSViewController {
         // problem is read before the limit sections.
         if let reason = layout.warning {
             addWarningTitle(Self.warningTitle(reason))
-            addLabel(Self.warningDetail(reason), font: .systemFont(ofSize: 11), secondary: true)
+            addWrappingLabel(Self.warningDetail(reason), font: .systemFont(ofSize: 11), secondary: true)
             addSeparator()
         }
 
@@ -319,6 +319,15 @@ final class PopupViewController: NSViewController {
             addTitleStatusLine(title: row.title, status: Self.statusText(row.indicator, row.pacing))
             addLabel(Self.detailText(row), font: .systemFont(ofSize: 11), secondary: true)
             addBar(row)
+        }
+
+        // Drop a trailing rule. When there are no limit rows (e.g. an auth failure before any
+        // snapshot ever landed) the status/warning block ends in its own separator, which would
+        // then sit flush against the native NSMenu `.separator()` placed before "Settings…" — two
+        // stacked rules. The popup's last visible element should be content, never a rule; the menu
+        // supplies the divider to the action items below.
+        if let last = stack.arrangedSubviews.last as? NSBox, last.boxType == .separator {
+            last.removeFromSuperview()
         }
     }
 
@@ -344,6 +353,27 @@ final class PopupViewController: NSViewController {
         let label = NSTextField(labelWithString: text)
         label.font = font
         label.textColor = secondary ? .secondaryLabelColor : .labelColor
+        stack.addArrangedSubview(label)
+        return label
+    }
+
+    /// A label that **wraps** onto multiple lines instead of clipping — for the error detail, whose
+    /// text can be the server's own response body (`authHTTP`) and so be arbitrarily long. A plain
+    /// `labelWithString:` is single-line and would truncate; `wrappingLabelWithString:` wraps, but
+    /// only once pinned to a concrete width — `NSMenu` lays the hosted view out from its frame, not
+    /// Auto Layout, so without a width anchor the field grows to its intrinsic single-line width and
+    /// never breaks. We pin it to the content width (`width − 2·hPadding`) and set
+    /// `preferredMaxLayoutWidth` to match, so it wraps at word boundaries within the popup.
+    @discardableResult
+    private func addWrappingLabel(_ text: String, font: NSFont, secondary: Bool = false) -> NSView {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = font
+        label.textColor = secondary ? .secondaryLabelColor : .labelColor
+        label.lineBreakMode = .byWordWrapping
+        label.translatesAutoresizingMaskIntoConstraints = false
+        let contentWidth = Metrics.width - 2 * Metrics.hPadding
+        label.preferredMaxLayoutWidth = contentWidth
+        label.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
         stack.addArrangedSubview(label)
         return label
     }
