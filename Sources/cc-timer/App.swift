@@ -185,10 +185,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // aid only — never set in normal use; the default path is the real network.
         //  • `=1`          → climbing utilisation (exercises adaptive cadence on screen).
         //  • `=screenshot` → frozen, hand-picked values (a stable frame for the README).
+        //  • `=error`      → 401 auth failure + both Claude services degraded (the warning block).
         let stubMode = ProcessInfo.processInfo.environment["CC_TIMER_STUB"]
         let transport: UsageTransport = switch stubMode {
-        case "1":          StubUsageTransport()
-        case "screenshot": StubUsageTransport(fixed: true)
+        case "1":          StubUsageTransport(mode: .climbing)
+        case "screenshot": StubUsageTransport(mode: .screenshot)
+        case "error":      StubUsageTransport(mode: .authError)
         default:           URLSession.shared
         }
         // The status poll uses the same transport seam (the stub answers the status endpoint too).
