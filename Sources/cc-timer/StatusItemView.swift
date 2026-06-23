@@ -301,14 +301,13 @@ final class StatusItemView: NSView {
     /// Colour of the time-indicator dot from the usage-vs-time relationship:
     /// - `usage < time` → behind pace (good) → green
     /// - `usage > time` → ahead of pace (bad) → red
-    /// - `usage == time` → exactly on the line → teal (the future colour)
+    /// - `usage == time` → exactly on the line → green (a tie is still on pace, not behind)
     ///
     /// This is a finer split than `PacingState` (whose `.onPaceOrBehind` folds the tie into green),
     /// so the dot is computed from the raw fractions here rather than reusing `bar.layout.pacing`.
     private func indicatorColor(usage: Double, time: Double) -> NSColor {
         if usage > time { return Palette.dotRed }
-        if usage < time { return Palette.dotGreen }
-        return Palette.future
+        return Palette.dotGreen
     }
 
     /// Fill the sub-rect spanning the fraction range `[from, to)` of a bar.
