@@ -30,14 +30,20 @@ final class PopupBarView: NSView {
         /// Height of the pacing bar itself (the coloured zones + indicator dot).
         static let barHeight: CGFloat = 6
         static let corner: CGFloat = 2
-        static let indicatorDiameter: CGFloat = 8
+        /// Diameter of the time-indicator dot — 2× the bar height so it reads clearly as the primary
+        /// time marker over the pacing zones.
+        static let indicatorDiameter: CGFloat = 12
         static let indicatorStroke: CGFloat = 1
         // Tick ruler, drawn *below* the bar like an axis (issue #38, "under-bar ruler" style).
         static let tickLength: CGFloat = 3
         static let tickGap: CGFloat = 2
         static let tickWidth: CGFloat = 1
-        /// Total view height: bar + gap + tick teeth hanging beneath it.
-        static let height: CGFloat = barHeight + tickGap + tickLength
+        /// Total view height: tall enough for the bar + under-bar tick ruler **and** for the dot,
+        /// which is centred on the bar and so overhangs it by `indicatorDiameter/2 − barHeight/2`
+        /// on top; without that headroom a larger dot would be clipped by the view's frame.
+        static let height: CGFloat = max(
+            barHeight + tickGap + tickLength,
+            indicatorDiameter + tickGap + tickLength)
     }
 
     /// The fixed view height (bar + under-bar tick ruler), exposed so `PopupViewController` can pin
@@ -59,15 +65,6 @@ final class PopupBarView: NSView {
         )
         static let gapRed = NSColor(srgbRed: 215/255, green: 95/255, blue: 95/255, alpha: 1)
 
-        /// Time-indicator dot colours — the gap colours lightened ~30 % (white-mixed) so the dot
-        /// reads brighter than the pacing gap it sits over. Only the dot uses these; the gap zones
-        /// keep `gapGreen`/`gapRed`. Green stays appearance-aware (lightened from each theme's base).
-        static let dotGreen = dynamic(
-            dark: NSColor(srgbRed: 143/255, green: 199/255, blue: 143/255, alpha: 1),
-            light: NSColor(srgbRed: 133/255, green: 185/255, blue: 133/255, alpha: 1)
-        )
-        static let dotRed = NSColor(srgbRed: 227/255, green: 143/255, blue: 143/255, alpha: 1)
-
         /// Used zone: dark grey on dark, lighter grey on light (still clearly darker than the panel).
         static let used = dynamic(dark: gray(72), light: gray(110))
         /// Future / unused zone: dark teal on dark, lighter teal on light.
@@ -75,8 +72,9 @@ final class PopupBarView: NSView {
             dark: NSColor(srgbRed: 0/255, green: 76/255, blue: 76/255, alpha: 1),
             light: NSColor(srgbRed: 55/255, green: 110/255, blue: 110/255, alpha: 1)
         )
-        /// Indicator-dot ring: near-black on dark, mid grey on light.
-        static let indicatorStroke = NSColor.windowBackgroundColor
+        /// Indicator-dot ring: the panel background at reduced opacity, so the ring reads as a soft
+        /// separation between the dot and the bar beneath it rather than a hard opaque outline.
+        static let indicatorStroke = NSColor.windowBackgroundColor.withAlphaComponent(0.4)
 
         /// Tick-ruler marks below the bar: a muted neutral, translucent so it stays clearly weaker
         /// than the indicator dot. Appearance-aware so the ruler reads on both light and dark panels.
@@ -100,9 +98,12 @@ final class PopupBarView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let l = bar else { return }
-        // The bar occupies the top `barHeight` of the view (flipped coords → minY is the top); the
-        // tick ruler hangs in the remaining strip below it.
-        let rect = NSRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: Metrics.barHeight)
+        // The bar sits below a top margin equal to the dot's overhang — the dot is centred on the
+        // bar, so a dot taller than the bar sticks out by `(diameter − barHeight)/2` on each side;
+        // the margin keeps that top overhang inside the view (the tick ruler fills the strip below).
+        let overhang = max(0, (Metrics.indicatorDiameter - Metrics.barHeight) / 2)
+        let rect = NSRect(
+            x: bounds.minX, y: bounds.minY + overhang, width: bounds.width, height: Metrics.barHeight)
         let w = rect.width
 
         let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner)
@@ -149,8 +150,10 @@ final class PopupBarView: NSView {
     }
 
     private func indicatorColor(usage: Double, time: Double) -> NSColor {
-        if usage > time { return Palette.dotRed }
-        if usage < time { return Palette.dotGreen }
+        // The dot uses the exact pacing-bar colours (gapGreen/gapRed) so it reads as the same
+        // green/red as the gap zone it sits over, not a separate lighter shade.
+        if usage > time { return Palette.gapRed }
+        if usage < time { return Palette.gapGreen }
         return Palette.future
     }
 
