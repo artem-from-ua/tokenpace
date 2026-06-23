@@ -158,13 +158,44 @@ struct ProcessClaudeActivityProbe: ClaudeActivityProbe {
 actor StubUsageTransport: UsageTransport {
     private var calls = 0
 
-    /// ISO-8601 string for `now + seconds`, matching the API's `+00:00` offset form.
-    private static func resetsAt(inSeconds seconds: TimeInterval) -> String {
+    /// When `true`, utilisation stays at a fixed, hand-picked set of values instead of stepping up
+    /// every few polls — a stable frame for the README screenshot (`CC_TIMER_STUB=screenshot`). The
+    /// pacing states are still one-of-each (green / red / no-gap); only the climbing is frozen.
+    private let fixed: Bool
+
+    init(fixed: Bool = false) {
+        self.fixed = fixed
+    }
+
+    /// ISO-8601 string for a `Date`, matching the API's `+00:00` offset form.
+    private static func isoString(_ date: Date) -> String {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
         iso.timeZone = TimeZone(identifier: "UTC")
-        return iso.string(from: Date().addingTimeInterval(seconds))
-            .replacingOccurrences(of: "Z", with: "+00:00")
+        return iso.string(from: date).replacingOccurrences(of: "Z", with: "+00:00")
+    }
+
+    /// ISO-8601 string for `now + seconds`, matching the API's `+00:00` offset form.
+    private static func resetsAt(inSeconds seconds: TimeInterval) -> String {
+        isoString(Date().addingTimeInterval(seconds))
+    }
+
+    /// `now + seconds`, rounded to the nearest 10-minute mark, as a UTC ISO string — gives the
+    /// screenshot a clean absolute reset (`…:x0`) while keeping the elapsed fraction ≈ the target.
+    private static func resetsAtRounded10(inSeconds seconds: TimeInterval) -> String {
+        let raw = Date().addingTimeInterval(seconds).timeIntervalSince1970
+        let rounded = (raw / 600).rounded() * 600
+        return isoString(Date(timeIntervalSince1970: rounded))
+    }
+
+    /// `daysFromNow` days ahead, snapped to the next top-of-the-hour, as a UTC ISO string — a clean
+    /// `…:00` absolute reset shared by the 7-day window and its Sonnet sub-window in the screenshot.
+    private static func hourBoundary(daysFromNow days: Int) -> Date {
+        let cal = Calendar.current
+        let target = Date().addingTimeInterval(Double(days) * 86_400)
+        let nextHour = cal.nextDate(after: target, matching: DateComponents(minute: 0, second: 0),
+                                    matchingPolicy: .nextTime) ?? target
+        return nextHour
     }
 
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
@@ -189,22 +220,47 @@ actor StubUsageTransport: UsageTransport {
 
         let n = calls
         calls += 1
-        // Step utilisation every 3rd poll so some adjacent polls are "unchanged" (cadence doubles)
-        // and some "changed" (cadence resets) — exercising the live interval logic on screen.
-        let five = 20.0 + Double((n / 3) * 5)
-        let seven = 55.0 + Double((n / 3) * 3)
-        // Windows anchored to "now", chosen to show one of each pacing state on screen:
-        //  • 5h resets in ~2 h → ≈60 % elapsed > 20 % used → behind pace → GREEN gap.
-        //  • 7d resets in ~5 d → only ≈29 % elapsed < 55 % used → ahead of pace → RED gap.
-        //  • Sonnet resets so that elapsed ≈ 2 % == 2 % used → NO gap (indicator sits on the used
-        //    edge). 7d window = 604800 s, so elapsed 2 % ⇒ remaining ≈ 0.98·604800 ≈ 592704 s.
-        let fiveReset = Self.resetsAt(inSeconds: 2 * 3600)
-        let sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
-        let sonnetReset = Self.resetsAt(inSeconds: 0.98 * 604_800)
+
+        let five: Double
+        let seven: Double
+        let sonnet: Double
+        let fiveReset: String
+        let sevenReset: String
+        let sonnetReset: String
+
+        if fixed {
+            // Hand-picked, frozen frame for the README screenshot. Pacing states on screen:
+            //  • 5h: 40 % used vs ≈65 % elapsed (resets ~35 % of the window out, now + 1.75 h, snapped
+            //    to a 10-minute mark) → GREEN gap, time indicator past the bar's two-thirds point.
+            //  • 7d: 60 % used vs ≈29 % elapsed (resets ~5 d out on the hour) → ahead → RED gap (wide).
+            //  • Sonnet: 2 % used, the SAME reset as 7d (so they end together) → behind pace → GREEN.
+            five = 40.0
+            seven = 60.0
+            sonnet = 2.0
+            // 5h window = 18000 s; reset at ≈ now + 6300 s ⇒ elapsed ≈ 65 %, snapped to :x0.
+            fiveReset = Self.resetsAtRounded10(inSeconds: 6300)
+            let weekly = Self.isoString(Self.hourBoundary(daysFromNow: 5))
+            sevenReset = weekly
+            sonnetReset = weekly                       // 7d and Sonnet end at the same hour boundary
+        } else {
+            // Step utilisation every 3rd poll so some adjacent polls are "unchanged" (cadence
+            // doubles) and some "changed" (cadence resets) — exercising the live interval logic.
+            five = 20.0 + Double((n / 3) * 5)
+            seven = 55.0 + Double((n / 3) * 3)
+            sonnet = 2.0
+            // Windows anchored to "now", chosen to show one of each pacing state on screen:
+            //  • 5h resets in ~2 h → ≈60 % elapsed > 20 % used → behind pace → GREEN gap.
+            //  • 7d resets in ~5 d → only ≈29 % elapsed < 55 % used → ahead of pace → RED gap.
+            //  • Sonnet resets so that elapsed ≈ 2 % == 2 % used → NO gap (indicator on the used
+            //    edge). 7d window = 604800 s, so elapsed 2 % ⇒ remaining ≈ 0.98·604800 ≈ 592704 s.
+            fiveReset = Self.resetsAt(inSeconds: 2 * 3600)
+            sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
+            sonnetReset = Self.resetsAt(inSeconds: 0.98 * 604_800)
+        }
         let body = """
         {"five_hour":{"utilization":\(five),"resets_at":"\(fiveReset)"},\
         "seven_day":{"utilization":\(seven),"resets_at":"\(sevenReset)"},\
-        "seven_day_sonnet":{"utilization":2.0,"resets_at":"\(sonnetReset)"},"limits":[]}
+        "seven_day_sonnet":{"utilization":\(sonnet),"resets_at":"\(sonnetReset)"},"limits":[]}
         """.data(using: .utf8)!
         let response = HTTPURLResponse(
             url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
