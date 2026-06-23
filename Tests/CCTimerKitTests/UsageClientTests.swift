@@ -104,6 +104,33 @@ struct UsageDecodeTests {
         #expect(snapshot.sevenDaySonnet?.utilization == 7.5)
     }
 
+    // A present sub-window with `resets_at: null` (the live reset-boundary case) must NOT render a
+    // bogus "resetting…" — it borrows the 7-day reset (they reset together) and keeps its util.
+    @Test func sonnetPresentButNullResetBorrowsSevenDayReset() throws {
+        let snapshot = try UsageClient.decode(from: usageJSON(
+            sevenDaySonnet: #"{"utilization":0.0,"resets_at":null}"#))
+        #expect(snapshot.sevenDaySonnet != nil)            // present, not nil-ed out
+        #expect(snapshot.sevenDaySonnet?.utilization == 0.0)
+        // resets_at filled from seven_day (default fixture value).
+        #expect(snapshot.sevenDaySonnet?.resetsAt == snapshot.sevenDay.resetsAt)
+        #expect(ResetClock.parse(snapshot.sevenDaySonnet!.resetsAt) != nil)  // parseable now
+    }
+
+    @Test func opusPresentButNullResetBorrowsSevenDayReset() throws {
+        let snapshot = try UsageClient.decode(from: usageJSON(
+            sevenDayOpus: #"{"utilization":3.0,"resets_at":null}"#))
+        #expect(snapshot.sevenDayOpus?.utilization == 3.0)
+        #expect(snapshot.sevenDayOpus?.resetsAt == snapshot.sevenDay.resetsAt)
+    }
+
+    @Test func sonnetNonzeroUtilNullResetKeepsUtil() throws {
+        // util preserved (not zeroed) when only resets_at was null.
+        let snapshot = try UsageClient.decode(from: usageJSON(
+            sevenDaySonnet: #"{"utilization":42.0,"resets_at":null}"#))
+        #expect(snapshot.sevenDaySonnet?.utilization == 42.0)
+        #expect(!snapshot.sevenDaySonnet!.resetsAt.isEmpty)
+    }
+
     @Test func limitsArrayDecodes() throws {
         let limits = """
         [{"kind":"five_hour","group":"default","percent":13.0,"severity":"normal",\
