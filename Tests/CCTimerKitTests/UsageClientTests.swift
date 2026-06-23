@@ -137,16 +137,81 @@ struct UsageDecodeTests {
         #expect(snapshot.fiveHour.utilization == 13.0)
     }
 
-    @Test func missingFiveHourThrowsDecode() {
-        #expect(throws: UsageError.decode) {
-            try UsageClient.decode(from: usageJSON(fiveHour: nil))
-        }
+    // MARK: reset-boundary synthesis
+    //
+    // On a window reset the API may send a core window as `null`, missing, or with
+    // `utilization: null`. The decoder must synthesize a fresh zero-usage window instead of
+    // failing the whole snapshot (which surfaced as a false "Usage API unavailable").
+
+    @Test func utilizationNullSynthesizesZeroKeepingResetsAt() throws {
+        // `utilization: null` but `resets_at` present → util defaults to 0, resets_at kept verbatim.
+        let snapshot = try UsageClient.decode(
+            from: usageJSON(fiveHour: #"{"utilization":null,"resets_at":"2026-06-23T05:40:00+00:00"}"#),
+            now: now)
+        #expect(snapshot.fiveHour.utilization == 0)
+        #expect(snapshot.fiveHour.resetsAt == "2026-06-23T05:40:00+00:00")
     }
 
-    @Test func missingSevenDayThrowsDecode() {
-        #expect(throws: UsageError.decode) {
-            try UsageClient.decode(from: usageJSON(sevenDay: nil))
-        }
+    @Test func nullFiveHourPullsResetsAtFromSessionLimit() throws {
+        // Whole window null → resets_at from the matching limits[] entry (live API kind="session").
+        let limits = """
+        [{"kind":"session","group":"session","percent":0,"severity":"normal",\
+        "resets_at":"2026-06-23T05:40:00+00:00","is_active":false}]
+        """
+        let snapshot = try UsageClient.decode(
+            from: usageJSON(fiveHour: "null", limits: limits), now: now)
+        #expect(snapshot.fiveHour.utilization == 0)
+        #expect(snapshot.fiveHour.resetsAt == "2026-06-23T05:40:00+00:00")
+    }
+
+    @Test func nullFiveHourPullsResetsAtFromFiveHourLimit() throws {
+        // Older/fixture kind="five_hour" must also map to the five-hour window.
+        let limits = """
+        [{"kind":"five_hour","group":"default","percent":0,"severity":"normal",\
+        "resets_at":"2026-06-23T05:40:00+00:00","is_active":true}]
+        """
+        let snapshot = try UsageClient.decode(
+            from: usageJSON(fiveHour: "null", limits: limits), now: now)
+        #expect(snapshot.fiveHour.resetsAt == "2026-06-23T05:40:00+00:00")
+    }
+
+    @Test func nullSevenDayPullsResetsAtFromWeeklyAllLimit() throws {
+        let limits = """
+        [{"kind":"weekly_all","group":"weekly","percent":36,"severity":"normal",\
+        "resets_at":"2026-06-23T06:59:59+00:00","is_active":true}]
+        """
+        let snapshot = try UsageClient.decode(
+            from: usageJSON(sevenDay: "null", limits: limits), now: now)
+        #expect(snapshot.sevenDay.utilization == 0)
+        #expect(snapshot.sevenDay.resetsAt == "2026-06-23T06:59:59+00:00")
+    }
+
+    @Test func nullWindowWithoutMatchingLimitUsesLocalEstimate() throws {
+        // No usable limits[] entry → fall back to ResetClock.nextReset (now + 5h, ceil to 10 min).
+        let snapshot = try UsageClient.decode(
+            from: usageJSON(fiveHour: "null", limits: "[]"), now: now)
+        #expect(snapshot.fiveHour.utilization == 0)
+        let expected = ResetClock.nextReset(now: now, window: .fiveHour)
+        #expect(ResetClock.parse(snapshot.fiveHour.resetsAt) == expected)
+    }
+
+    @Test func missingFiveHourSynthesizes() throws {
+        // Key omitted entirely (not just null) → still synthesized, snapshot does not fail.
+        let snapshot = try UsageClient.decode(from: usageJSON(fiveHour: nil), now: now)
+        #expect(snapshot.fiveHour.utilization == 0)
+        #expect(!snapshot.fiveHour.resetsAt.isEmpty)
+    }
+
+    @Test func limitEntryWithNullFieldsDoesNotFailSnapshot() throws {
+        // A limits[] entry missing severity / with null percent must not crash the whole decode.
+        let limits = """
+        [{"kind":"weekly_all","group":"weekly","percent":null,\
+        "resets_at":"2026-06-23T06:59:59+00:00","is_active":true}]
+        """
+        let snapshot = try UsageClient.decode(from: usageJSON(limits: limits), now: now)
+        #expect(snapshot.limits.count == 1)
+        #expect(snapshot.limits[0].percent == 0)        // null → 0
+        #expect(snapshot.limits[0].severity == "normal") // absent → default
     }
 
     @Test func garbageBytesThrowDecode() {
@@ -162,6 +227,24 @@ struct UsageDecodeTests {
         let data = usageJSON(
             fiveHour: #"{"utilization":"13","resets_at":"2026-06-21T05:30:00+00:00"}"#)
         #expect(throws: UsageError.decode) { try UsageClient.decode(from: data) }
+    }
+
+    /// Regression: a verbatim live API body captured during a real 5-hour reset — it carries the
+    /// fields that newer servers added (`scope`, `seven_day_oauth_apps`, `tangelo`, `extra_usage`,
+    /// `spend`, per-window `*_dollars`) plus `scope` objects inside `limits[]`. It must decode
+    /// cleanly; this is the exact shape that previously surfaced as "Usage API unavailable".
+    @Test func liveBodyWithNewFieldsDecodes() throws {
+        let body = #"""
+        {"five_hour":{"utilization":0.0,"resets_at":"2026-06-23T05:39:59.278084+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day":{"utilization":36.0,"resets_at":"2026-06-23T06:59:59.278110+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day_oauth_apps":null,"seven_day_opus":null,"seven_day_sonnet":{"utilization":2.0,"resets_at":"2026-06-23T07:00:00.278117+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day_cowork":null,"seven_day_omelette":null,"tangelo":null,"iguana_necktie":null,"omelette_promotional":null,"cinder_cove":null,"amber_ladder":null,"extra_usage":{"is_enabled":false,"monthly_limit":null,"used_credits":null,"utilization":null,"currency":null,"decimal_places":null,"disabled_reason":null,"daily":null,"weekly":null},"limits":[{"kind":"session","group":"session","percent":0,"severity":"normal","resets_at":"2026-06-23T05:39:59.278084+00:00","scope":null,"is_active":false},{"kind":"weekly_all","group":"weekly","percent":36,"severity":"normal","resets_at":"2026-06-23T06:59:59.278110+00:00","scope":null,"is_active":true},{"kind":"weekly_scoped","group":"weekly","percent":2,"severity":"normal","resets_at":"2026-06-23T07:00:00.278117+00:00","scope":{"model":{"id":null,"display_name":"Sonnet"},"surface":null},"is_active":false}],"spend":{"used":{"amount_minor":0,"currency":"USD","exponent":2},"limit":null,"percent":0,"severity":"normal","enabled":false,"disabled_reason":null}}
+        """#
+        let snapshot = try UsageClient.decode(from: Data(body.utf8), now: now)
+        #expect(snapshot.fiveHour.utilization == 0.0)
+        #expect(snapshot.fiveHour.resetsAt == "2026-06-23T05:39:59.278084+00:00")
+        #expect(snapshot.sevenDay.utilization == 36.0)
+        #expect(snapshot.sevenDaySonnet?.utilization == 2.0)
+        #expect(snapshot.sevenDayOpus == nil)
+        #expect(snapshot.limits.count == 3)
+        #expect(snapshot.limits.contains { $0.kind == "weekly_scoped" })  // scope object tolerated
     }
 }
 

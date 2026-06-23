@@ -76,14 +76,26 @@ public enum UsageClient {
 
     // MARK: decode (pure seam)
 
-    /// Decode a 200 body into a ``UsageSnapshot``. Any `DecodingError` (non-JSON, or a
-    /// missing required `five_hour`/`seven_day`) maps to ``UsageError/decode``. Null model
-    /// windows decode to `nil`; unknown keys (`extra_usage`, `spend`) are ignored.
-    public static func decode(from data: Data) throws -> UsageSnapshot {
+    /// Decode a 200 body into a ``UsageSnapshot``. Unknown keys (`extra_usage`, `spend`, `scope`,
+    /// …) are ignored; `null` model windows decode to `nil`. On a reset boundary the API may send
+    /// the core `five_hour`/`seven_day` windows as `null` — ``UsageSnapshot`` synthesizes a fresh
+    /// zero-usage window for those (it needs `now`, threaded through `userInfo`) rather than
+    /// failing. A genuinely malformed body (non-JSON, truncated) still maps to ``UsageError/decode``,
+    /// and the (capped) body is logged so the failure is diagnosable.
+    ///
+    /// - Parameter now: The poll instant, forwarded to the synthesis fallback
+    ///   (``ResetClock/nextReset(now:window:)``). Defaults to `Date()` for call sites (e.g. tests)
+    ///   that do not thread a clock; the live path (`fetch`) passes the real `now`.
+    public static func decode(from data: Data, now: Date = Date()) throws -> UsageSnapshot {
+        let decoder = JSONDecoder()
+        decoder.userInfo[.usageNow] = now
         do {
-            return try JSONDecoder().decode(UsageSnapshot.self, from: data)
+            return try decoder.decode(UsageSnapshot.self, from: data)
         } catch is DecodingError {
-            AppLogger.network.error("usage decode failed")
+            // Log the (capped, token-free) body so the next genuine decode failure — e.g. an
+            // unannounced schema change — is diagnosable, instead of just "usage decode failed".
+            let body = responseText(from: data) ?? "<empty/non-utf8 \(data.count) bytes>"
+            AppLogger.network.error("usage decode failed body=\(body, privacy: .public)")
             throw UsageError.decode
         }
     }
@@ -123,7 +135,7 @@ public enum UsageClient {
 
         switch http.statusCode {
         case 200:
-            let snapshot = try decode(from: data)
+            let snapshot = try decode(from: data, now: now)
             // One line per success: status **and** the full JSON body, so there is no duplicate
             // "200 ok" / "200 body" pair. `.notice` so it shows at the default log level (no
             // `--level info` needed). The usage payload carries no secrets — the token rides only in
