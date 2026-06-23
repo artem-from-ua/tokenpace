@@ -1,9 +1,9 @@
 import AppKit
 import CCTimerKit
 
-// MARK: - ConfigureWindowController
+// MARK: - SettingsWindowController
 
-/// The "Configure…" settings window (#14): a small, single-instance panel reached from the bottom
+/// The "Settings…" window (#14): a small, single-instance panel reached from the bottom
 /// of the popup menu. It carries the minimal Phase-1 settings the user asked for — a launch-at-login
 /// toggle, the app version, and a link to the repository.
 ///
@@ -15,7 +15,7 @@ import CCTimerKit
 /// level to come to the front, rather than switching the activation policy to `.regular` (which
 /// would flash a Dock icon for one window — see `show()`).
 @MainActor
-final class ConfigureWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController {
 
     private static let repoURL = URL(string: "https://github.com/artem-from-ua/cc-timer")!
 
@@ -48,7 +48,7 @@ final class ConfigureWindowController: NSWindowController {
 
     /// Show or re-focus the window. Re-syncs the toggle from the system, brings the app forward, and
     /// centres on first display. Calling this while the window is already on screen just focuses it —
-    /// the single instance is never duplicated (see `AppDelegate.openConfigure`).
+    /// the single instance is never duplicated (see `AppDelegate.openSettings`).
     func show() {
         syncToggleFromSystem()
         NSApp.activate(ignoringOtherApps: true)

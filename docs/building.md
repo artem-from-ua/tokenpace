@@ -27,7 +27,7 @@ Silicon, і на Intel-Mac (SwiftPM не має єдиного `--arch`, тож 
 `--triple` і зливається через `lipo`).
 
 Застосунок запускається як **accessory-агент** без іконки в Dock (`LSUIElement = true`):
-дві pacing-смужки в menu bar, клік відкриває popup із деталями, а внизу — `Configure…` (toggle
+дві pacing-смужки в menu bar, клік відкриває popup із деталями, а внизу — `Settings…` (toggle
 автозапуску, версія, GitHub-лінк) і `Quit cc-timer`.
 
 ## Підпис і нотаризація
@@ -44,7 +44,7 @@ Developer ID identity збірка лишається непідписаною �
 
 `SMAppService` реєструє автозапуск надійно лише для **підписаного** `.app`, **запущеного з
 `/Applications`** (через Finder/Launchpad). На `swift run` чи прямому запуску бінарника статус буде
-`.notFound` і toggle у `Configure…` — неактивний (з поясненням).
+`.notFound` і toggle у `Settings…` — неактивний (з поясненням).
 
 ## Перегляд логів
 

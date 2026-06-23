@@ -20,9 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// highlighted while it is open (both come free with `NSMenu`, unlike `NSPopover`).
     private let popupVC = PopupViewController()
 
-    /// The "Configure…" settings window (#14), created lazily on first use and kept alive so a
+    /// The "Settings…" window (#14), created lazily on first use and kept alive so a
     /// second click focuses the existing window rather than opening a duplicate (single-instance).
-    private var configureWC: ConfigureWindowController?
+    private var settingsWC: SettingsWindowController?
 
     // MARK: live polling (#13)
 
@@ -107,11 +107,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Action items at the bottom of the same menu (#14). `keyEquivalent: ""` keeps a shortcut
         // glyph off the right edge — none is wanted, and there is no main menu to host a default ⌘Q.
         menu.addItem(.separator())
-        let configureItem = NSMenuItem(
-            title: "Configure…", action: #selector(openConfigure), keyEquivalent: "")
-        configureItem.target = self
-        menu.addItem(configureItem)
-        // Separate Quit from Configure… so the terminating action sits in its own group (standard
+        let settingsItem = NSMenuItem(
+            title: "Settings…", action: #selector(openSettings), keyEquivalent: "")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+        // Separate Quit from Settings… so the terminating action sits in its own group (standard
         // macOS menu grouping).
         menu.addItem(.separator())
         let quitItem = NSMenuItem(
@@ -134,10 +134,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Menu actions (#14)
 
-    /// Open (or focus) the Configure… settings window. Lazily creates the single instance.
-    @objc private func openConfigure() {
-        if configureWC == nil { configureWC = ConfigureWindowController() }
-        configureWC?.show()
+    /// Open (or focus) the Settings… window. Lazily creates the single instance.
+    @objc private func openSettings() {
+        if settingsWC == nil { settingsWC = SettingsWindowController() }
+        settingsWC?.show()
     }
 
     /// Quit the app via the standard terminate path, which triggers `applicationWillTerminate`.

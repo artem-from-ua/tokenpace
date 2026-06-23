@@ -5,6 +5,10 @@ date: 2026-06-22
 
 # ADR-0012: Вікно «Configure…» та launch-at-login (SMAppService)
 
+> **Примітка (пізніша зміна):** пункт меню та вікно пізніше перейменовано `Configure…` → `Settings…`
+> (тип `ConfigureWindowController` → `SettingsWindowController`). Рішення лишається чинним — змінилася
+> лише назва-мітка; тіло цього ADR збережено в історичному вигляді.
+
 ## Контекст
 
 Issue #14 («launch-at-login + Quit») — останній інфраструктурний пункт Фази 1. Потрібні мінімальні
