@@ -151,10 +151,10 @@ final class PopupBarView: NSView {
 
     private func indicatorColor(usage: Double, time: Double) -> NSColor {
         // The dot uses the exact pacing-bar colours (gapGreen/gapRed) so it reads as the same
-        // green/red as the gap zone it sits over, not a separate lighter shade.
+        // green/red as the gap zone it sits over, not a separate lighter shade. A tie (usage ==
+        // time) is still on pace, so it reads green rather than the future teal.
         if usage > time { return Palette.gapRed }
-        if usage < time { return Palette.gapGreen }
-        return Palette.future
+        return Palette.gapGreen
     }
 
     private func fillZone(from: Double, to: Double, in rect: NSRect, width: CGFloat, color: NSColor) {
