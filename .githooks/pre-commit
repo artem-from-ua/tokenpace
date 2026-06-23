@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# Swift build + test gate — runs only when the commit touches Swift code, so doc-only or
+# config-only commits stay fast. Mirrors CLAUDE.md's "swift build / swift test" commands.
+# Set CC_TIMER_SKIP_SWIFT_HOOK=1 to bypass (e.g. an intentional WIP commit).
+SWIFT_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- '*.swift' 'Package.swift' 'Package.resolved')
+
+if [ -n "$SWIFT_STAGED" ] && [ "$CC_TIMER_SKIP_SWIFT_HOOK" != "1" ]; then
+    if command -v swift >/dev/null 2>&1; then
+        echo "Swift sources changed — running swift build…"
+        if ! swift build; then
+            echo ""
+            echo "Commit blocked: swift build failed."
+            exit 1
+        fi
+        echo "Running swift test…"
+        if ! swift test; then
+            echo ""
+            echo "Commit blocked: swift test failed."
+            echo "  Bypass (WIP only): CC_TIMER_SKIP_SWIFT_HOOK=1 git commit …"
+            exit 1
+        fi
+    else
+        echo "warning: swift not found on PATH — skipping build/test gate." >&2
+    fi
+fi
+
+# >>> artem-from-ua/plantuml >>>
+# PlantUML URL sync check — installed by plantuml Claude Code plugin.
+# Do not edit between markers; managed automatically by setup-project.sh.
+PLANTUML_STAGED_MD=$(git diff --cached --name-only --diff-filter=ACM -- '*.md')
+
+if [ -n "$PLANTUML_STAGED_MD" ]; then
+    PLANTUML_ENCODER=""
+    for candidate in \
+        "$HOME/.claude/plugins/cache/artem-from-ua/plantuml/scripts/plantuml-encode.py" \
+        "$HOME/.claude/plugins/marketplaces/artem-from-ua/plugins/plantuml/scripts/plantuml-encode.py" \
+        "$(git rev-parse --show-toplevel 2>/dev/null)/scripts/plantuml-encode.py"; do
+        if [ -f "$candidate" ]; then
+            PLANTUML_ENCODER="$candidate"
+            break
+        fi
+    done
+
+    if [ -n "$PLANTUML_ENCODER" ]; then
+        echo "Checking PlantUML diagrams in: $PLANTUML_STAGED_MD"
+        if ! python3 "$PLANTUML_ENCODER" --check $PLANTUML_STAGED_MD; then
+            echo ""
+            echo "Commit blocked: PlantUML URLs out of sync."
+            echo "  Fix: python3 $PLANTUML_ENCODER --sync <file.md>"
+            exit 1
+        fi
+    fi
+fi
+# <<< artem-from-ua/plantuml <<<
