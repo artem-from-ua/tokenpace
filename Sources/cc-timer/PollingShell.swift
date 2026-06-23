@@ -145,12 +145,10 @@ struct ProcessClaudeActivityProbe: ClaudeActivityProbe {
     }
 }
 
-// MARK: - StubUsageTransport (verification only — CC_TIMER_STUB=1)
+// MARK: - StubUsageTransport (verification only — CC_TIMER_STUB)
 
-/// A canned `UsageTransport` for end-to-end verification without hitting the usage API. Returns a
-/// 200 whose utilisation nudges upward every few polls, so the popup text, the bars, and the
-/// adaptive cadence (changed → reset, unchanged → double) can all be seen by eye. **Never** used on
-/// the default path — only when `CC_TIMER_STUB=1` is set.
+/// A canned `UsageTransport` for end-to-end verification without hitting the usage API. **Never**
+/// used on the default path — only when `CC_TIMER_STUB` is set; the value selects the ``Mode``.
 ///
 /// `resets_at` is computed **relative to the current instant** (5 h / 7 d windows that are partway
 /// elapsed), not hard-coded — otherwise the dates drift into the past and `elapsedFraction` pins to
@@ -158,13 +156,22 @@ struct ProcessClaudeActivityProbe: ClaudeActivityProbe {
 actor StubUsageTransport: UsageTransport {
     private var calls = 0
 
-    /// When `true`, utilisation stays at a fixed, hand-picked set of values instead of stepping up
-    /// every few polls — a stable frame for the README screenshot (`CC_TIMER_STUB=screenshot`). The
-    /// pacing states are still one-of-each (green / red / no-gap); only the climbing is frozen.
-    private let fixed: Bool
+    /// What the stub returns, selected by the `CC_TIMER_STUB` value:
+    ///  • `.climbing` (`=1`)        — utilisation nudges upward every few polls, so the popup text,
+    ///    the bars, and the adaptive cadence (changed → reset, unchanged → double) can all be seen.
+    ///  • `.screenshot` (`=screenshot`) — frozen, hand-picked values; a stable frame for the README.
+    ///    The pacing states are still one-of-each (green / red / no-gap); only the climbing is frozen.
+    ///  • `.authError` (`=error`)   — usage returns **401** with a long body (→ `authHTTP`), and the
+    ///    status endpoint reports **both** Claude services degraded, so the warning block, the
+    ///    service-status dots, and the long-message wrapping can all be seen at once.
+    enum Mode {
+        case climbing, screenshot, authError
+    }
 
-    init(fixed: Bool = false) {
-        self.fixed = fixed
+    private let mode: Mode
+
+    init(mode: Mode = .climbing) {
+        self.mode = mode
     }
 
     /// ISO-8601 string for a `Date`, matching the API's `+00:00` offset form.
@@ -199,15 +206,17 @@ actor StubUsageTransport: UsageTransport {
     }
 
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
-        // Status endpoint (#31): a canned summary where Claude API is degraded and an active major
-        // incident lists both components — so the popup shows a green Code dot + a yellow API dot,
-        // and the incident is *ignored* (both lines still come from component.status). Lets the
-        // status line be seen end-to-end without the live status page.
+        // Status endpoint (#31): a canned summary. In `.authError` mode **both** Claude services are
+        // degraded (the failure frame); otherwise Claude Code is operational and only the API is
+        // degraded — so the popup shows a green Code dot + a yellow API dot, while the incident is
+        // *ignored* (both lines still come from component.status). Lets the status line be seen
+        // end-to-end without the live status page.
         if request.url == StatusClient.endpoint {
+            let codeStatus = mode == .authError ? "degraded_performance" : "operational"
             let body = """
             {"status":{"indicator":"major","description":"Degraded"},\
             "components":[\
-            {"name":"Claude Code","status":"operational"},\
+            {"name":"Claude Code","status":"\(codeStatus)"},\
             {"name":"Claude API (api.anthropic.com)","status":"degraded_performance"},\
             {"name":"claude.ai","status":"operational"}],\
             "incidents":[{"name":"Stubbed incident","status":"monitoring","impact":"major",\
@@ -215,6 +224,20 @@ actor StubUsageTransport: UsageTransport {
             """.data(using: .utf8)!
             let response = HTTPURLResponse(
                 url: StatusClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
+        // Auth-failure frame: a 401 with a long, server-style body. UsageClient maps this to
+        // `UsageError.http(401, body)` → `FailureReason.authHTTP`, exercising the popup's warning
+        // block and the word-wrapping of a long error detail.
+        if mode == .authError {
+            let body = """
+            Your OAuth token was rejected by the usage API (HTTP 401 Unauthorized). \
+            The credentials in your macOS Keychain may have expired or been revoked — \
+            sign in to Claude Code again so a fresh token is issued, then reopen this popup.
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: UsageClient.endpoint, statusCode: 401, httpVersion: "HTTP/1.1", headerFields: [:])!
             return (body, response)
         }
 
@@ -228,7 +251,7 @@ actor StubUsageTransport: UsageTransport {
         let sevenReset: String
         let sonnetReset: String
 
-        if fixed {
+        if mode == .screenshot {
             // Hand-picked, frozen frame for the README screenshot. Pacing states on screen:
             //  • 5h: 40 % used vs ≈65 % elapsed (resets ~35 % of the window out, now + 1.75 h, snapped
             //    to a 10-minute mark) → GREEN gap, time indicator past the bar's two-thirds point.
