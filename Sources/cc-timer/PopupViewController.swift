@@ -163,6 +163,61 @@ final class PopupBarView: NSView {
     }
 }
 
+// MARK: - StatusLineLabel
+
+/// A status line whose status **word** is a clickable link to the Claude status page (issue #31).
+///
+/// `NSTextField`'s built-in `.link` handling needs first-responder/field-editor plumbing that does
+/// not work reliably for a label inside an `NSMenu`-hosted view, so the click is handled here: a
+/// `mouseDown` whose point falls within ``linkRange`` opens ``linkURL`` via `NSWorkspace`. A
+/// tracking area shows the pointing-hand cursor over that range so it reads as a link.
+final class StatusLineLabel: NSTextField {
+
+    /// Character range of the linked status word within the attributed string.
+    var linkRange: NSRange?
+    /// The URL the linked word opens.
+    var linkURL: URL?
+
+    override func mouseDown(with event: NSEvent) {
+        guard let url = linkURL, hitTestLink(event) else {
+            super.mouseDown(with: event)
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        // Pointing-hand cursor over the whole label — but only when there is a link (operational
+        // rows carry no link, so they keep the default arrow). The label is sized to its content
+        // and the linked word sits at its trailing edge, so a label-wide hand is a fine
+        // approximation and avoids per-glyph rect math.
+        guard linkURL != nil else { return }
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    /// Whether `event`'s location falls on the linked word. Uses a `TextKit` layout pass over the
+    /// attributed string to map the click point to a character index, then tests membership in
+    /// ``linkRange``.
+    private func hitTestLink(_ event: NSEvent) -> Bool {
+        guard let linkRange, let attributed = attributedStringValue.mutableCopy() as? NSMutableAttributedString else {
+            return false
+        }
+        let point = convert(event.locationInWindow, from: nil)
+
+        let textStorage = NSTextStorage(attributedString: attributed)
+        let layoutManager = NSLayoutManager()
+        let textContainer = NSTextContainer(size: bounds.size)
+        textContainer.lineFragmentPadding = 0
+        layoutManager.addTextContainer(textContainer)
+        textStorage.addLayoutManager(layoutManager)
+
+        let index = layoutManager.characterIndex(
+            for: point, in: textContainer, fractionOfDistanceBetweenInsertionPoints: nil)
+        return NSLocationInRange(index, linkRange)
+    }
+}
+
 // MARK: - PopupViewController
 
 /// The click-to-open detail popup's content — the thin AppKit shell of issue #11, styled after
@@ -189,10 +244,15 @@ final class PopupViewController: NSViewController {
         static let vPadding: CGFloat = 10
         static let rowSpacing: CGFloat = 3
         static let sectionSpacing: CGFloat = 7
+        /// Gap between the bold title and the dim "Updated … · interval …" line beneath it — wider
+        /// than `rowSpacing` so the title reads as its own line, not crowded by the service line.
+        static let titleSpacing: CGFloat = 11
         /// Extra breathing room on **both** sides of a horizontal rule, so each separator sits in
         /// its own white space rather than hugging the lines above/below it.
         static let separatorPadding: CGFloat = 10
-        static let barWidth: CGFloat = 200
+        /// Pacing-bar width. 240 = the original 200 widened by 20 % (user preference); still inside
+        /// the 252 pt content width (`width − 2·hPadding`), with ~12 pt to spare.
+        static let barWidth: CGFloat = 240
     }
 
     private let stack = NSStackView()
@@ -224,43 +284,55 @@ final class PopupViewController: NSViewController {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard let layout else { return }
 
-        // Title (first line), then a horizontal rule separating it from what follows.
-        addLabel(Self.appTitle, font: .boldSystemFont(ofSize: 13))
+        // Title (first line), then — directly beneath it, before any rule — a single dim service
+        // line: "Updated 2m ago  ·  interval 3m". A wider gap separates it from the bold title.
+        let title = addLabel(Self.appTitle, font: .boldSystemFont(ofSize: 13))
+        stack.setCustomSpacing(Metrics.titleSpacing, after: title)
+        addLabel(
+            Self.serviceLineText(lastUpdateAge: layout.lastUpdateAge, intervalSeconds: layout.intervalSeconds),
+            font: .systemFont(ofSize: 11), secondary: true)
         addSeparator()
+
+        // Claude service status (issue #31): one line per component, directly under the title block
+        // and before the limit sections. Shown only once the first status poll has landed (`nil` on
+        // cold start → no lines). Each line carries a colour dot and a status word that links to the
+        // status page (unless operational).
+        if let status = layout.serviceStatus {
+            addServiceStatusRow(label: "Claude Code", status: status.claudeCode)
+            addServiceStatusRow(label: "Claude API", status: status.claudeAPI)
+            addSeparator()
+        }
 
         // Error block (when failing): two lines — a bold title led by the ⚠️ symbol, then the
         // detail — followed by its own rule. Shown immediately on any failure (SPEC), so the
-        // problem is read before the service lines.
+        // problem is read before the limit sections.
         if let reason = layout.warning {
             addWarningTitle(Self.warningTitle(reason))
             addLabel(Self.warningDetail(reason), font: .systemFont(ofSize: 11), secondary: true)
             addSeparator()
         }
 
-        // Service lines: last update + interval. The next rule comes from the first limit section
-        // below (or none, on a cold-start failure with no sections).
-        addLabel(Self.lastUpdateText(layout.lastUpdateAge), font: .systemFont(ofSize: 11), secondary: true)
-        addLabel(Self.intervalText(layout.intervalSeconds), font: .systemFont(ofSize: 11), secondary: true)
-
         // One section per limit row: separator + "title · status" line + "% used · resets" line + bar.
+        // The first section reuses the title-block rule when no status/warning block sits between.
         for row in layout.rows {
-            addSeparator()
+            addSeparatorIfNeeded()
             addTitleStatusLine(title: row.title, status: Self.statusText(row.indicator, row.pacing))
             addLabel(Self.detailText(row), font: .systemFont(ofSize: 11), secondary: true)
             addBar(row)
         }
     }
 
-    /// The section's first line: the **bold** window title, then the separator and the pacing status
-    /// in **normal** weight — both in `labelColor` (variant A: the status is de-emphasised by weight
-    /// only, not colour). Built as one attributed string so the two weights sit on a single line.
+    /// The section's first line: the **bold** window title in `labelColor`, then the separator and
+    /// the pacing status in **normal** weight and a **dim** `secondaryLabelColor` — the status is
+    /// de-emphasised by both weight and colour, matching the dim service line under the title. Built
+    /// as one attributed string so the two parts sit on a single line.
     @discardableResult
     private func addTitleStatusLine(title: String, status: String) -> NSView {
         let attributed = NSMutableAttributedString(string: title, attributes: [
             .font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.labelColor,
         ])
         attributed.append(NSAttributedString(string: Self.separator + status, attributes: [
-            .font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.labelColor,
+            .font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.secondaryLabelColor,
         ]))
         let label = NSTextField(labelWithAttributedString: attributed)
         stack.addArrangedSubview(label)
@@ -327,6 +399,89 @@ final class PopupViewController: NSViewController {
         stack.setCustomSpacing(Metrics.separatorPadding, after: box)
     }
 
+    /// Add a rule **unless** the last element already is one — so consecutive optional blocks (the
+    /// title rule, then status / warning / first limit) never produce two stacked separators when an
+    /// in-between block is absent.
+    private func addSeparatorIfNeeded() {
+        if let last = stack.arrangedSubviews.last as? NSBox, last.boxType == .separator { return }
+        addSeparator()
+    }
+
+    // MARK: Service status row (issue #31)
+
+    /// One Claude-service status line: a colour dot for `status`, the component `label`, then the
+    /// status **word**. When the component is **not** `operational`, the word is a link to the
+    /// status page (there is something to go look at); when it *is* operational, the word is plain
+    /// secondary text — no link, since the status page would add nothing. The dot mirrors
+    /// `addWarningTitle`'s symbol-attachment technique (`circle.fill` tinted via `paletteColors`);
+    /// the link, when present, is handled explicitly by `StatusLineLabel` because `NSTextField`'s
+    /// built-in `.link` handling is unreliable inside an `NSMenu`-hosted view.
+    @discardableResult
+    private func addServiceStatusRow(label: String, status: ServiceStatus) -> NSView {
+        let font = NSFont.systemFont(ofSize: 11)
+        let attributed = NSMutableAttributedString()
+
+        // Colour dot — same attachment approach as the warning triangle, tinted by status.
+        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
+            .applying(.init(paletteColors: [Self.dotColor(status)]))
+        if let symbol = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: status == .operational ? "operational" : "issue")?
+            .withSymbolConfiguration(symbolConfig) {
+            let attachment = NSTextAttachment()
+            attachment.image = symbol
+            attributed.append(NSAttributedString(attachment: attachment))
+            attributed.append(NSAttributedString(string: "  "))
+        }
+
+        // Prefix "Claude Code: " in the normal label colour.
+        attributed.append(NSAttributedString(string: "\(label): ", attributes: [
+            .font: font, .foregroundColor: NSColor.labelColor,
+        ]))
+
+        // Status word. Operational → plain secondary text (no link). Otherwise → underlined link
+        // colour, opened on click by StatusLineLabel over the word's range.
+        let word = Self.word(status)
+        let isLink = status != .operational
+        let wordStart = attributed.length
+        attributed.append(NSAttributedString(string: word, attributes: isLink
+            ? [.font: font, .foregroundColor: NSColor.linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
+            : [.font: font, .foregroundColor: NSColor.secondaryLabelColor]))
+
+        let field = StatusLineLabel(labelWithAttributedString: attributed)
+        if isLink {
+            field.linkRange = NSRange(location: wordStart, length: (word as NSString).length)
+            field.linkURL = StatusHealth.pageURL
+        }
+        stack.addArrangedSubview(field)
+        return field
+    }
+
+    /// AppKit colour for one service status — the popup's indicator palette. Appearance-aware
+    /// `system*` colours (not the fixed sRGB bar palette) so the dot keeps contrast on light and
+    /// dark panels, exactly like the warning triangle's `.systemRed`. Exhaustive, no `default`.
+    static func dotColor(_ status: ServiceStatus) -> NSColor {
+        switch status {
+        case .operational:      return .systemGreen
+        case .degraded:         return .systemYellow
+        case .partialOutage:    return .systemOrange
+        case .majorOutage:      return .systemRed
+        case .underMaintenance: return .systemBlue
+        case .unknown:          return .systemGray
+        }
+    }
+
+    /// The human status word shown after the component name. Exhaustive, no `default`, so a new
+    /// `ServiceStatus` case breaks the build until consciously worded (like `warningTitle`).
+    static func word(_ status: ServiceStatus) -> String {
+        switch status {
+        case .operational:      return "operational"
+        case .degraded:         return "degraded"
+        case .partialOutage:    return "partial outage"
+        case .majorOutage:      return "major outage"
+        case .underMaintenance: return "maintenance"
+        case .unknown:          return "unknown"
+        }
+    }
+
     // MARK: - Pure text formatters (the localisation seam)
 
     /// The separator between fields on both popup lines: two spaces, a middle dot (U+00B7), two
@@ -350,14 +505,21 @@ final class PopupViewController: NSViewController {
         return parts.joined(separator: separator)
     }
 
-    /// `"Last update: 2m ago"`, or `"just now"` for anything under a full minute — the "Last update"
-    /// line never shows seconds (user preference), so a sub-minute age reads as "just now", not "40s".
+    /// The single dim line under the title: `"Updated 2m ago  ·  interval 3m"` — combines data age
+    /// and the current polling cadence on one line (replacing the former two "Last update" /
+    /// "Update interval" rows). Uses the shared middle-dot ``separator``.
+    static func serviceLineText(lastUpdateAge: TimeInterval, intervalSeconds: TimeInterval) -> String {
+        "\(updatedText(lastUpdateAge))\(separator)interval \(duration(Int(intervalSeconds)))"
+    }
+
+    /// `"Updated 2m ago"`, or `"Updated just now"` for anything under a full minute — the age never
+    /// shows seconds (user preference), so a sub-minute age reads as "just now", not "40s".
     static let justNowThreshold = 60
-    static func lastUpdateText(_ ageSeconds: TimeInterval) -> String {
+    static func updatedText(_ ageSeconds: TimeInterval) -> String {
         let age = Int(ageSeconds)
         return age < justNowThreshold
-            ? "Last update: just now"
-            : "Last update: \(durationMinutes(age)) ago"
+            ? "Updated just now"
+            : "Updated \(durationMinutes(age)) ago"
     }
 
     /// Like ``duration`` but **never** emits a seconds component — minutes are the finest unit, so
@@ -373,11 +535,6 @@ final class PopupViewController: NSViewController {
         let days = hours / 24
         let h = hours % 24
         return h == 0 ? "\(days)d" : "\(days)d \(h)h"
-    }
-
-    /// `"Update interval: 3m"` — the current dynamic polling cadence.
-    static func intervalText(_ intervalSeconds: TimeInterval) -> String {
-        "Update interval: \(duration(Int(intervalSeconds)))"
     }
 
     // MARK: Warning banner (issue #12)

@@ -258,3 +258,37 @@ struct MenuBarLayoutHealthTests {
         #expect(layout.mode == .idle)
     }
 }
+
+// MARK: - Service problem dot (#31)
+
+@Suite("MenuBarLayout serviceProblem")
+struct MenuBarLayoutServiceProblemTests {
+
+    private let snap = UsageSnapshot(
+        fiveHour: UsageWindow(utilization: 50, resetsAt: resetsAt(inSeconds: 4 * 3600)),
+        sevenDay: UsageWindow(utilization: 30, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600)))
+
+    @Test func nilByDefault() {
+        let layout = MenuBarLayout.make(from: snap, health: .healthy(lastSuccess: now), now: now)
+        #expect(layout.serviceProblem == nil)
+    }
+
+    @Test func threadedThroughHealthyPath() {
+        let layout = MenuBarLayout.make(
+            from: snap, health: .healthy(lastSuccess: now), now: now, serviceProblem: .degraded)
+        #expect(layout.serviceProblem == .degraded)
+        // The usage mode is unaffected by the service problem.
+        if case .expanded = layout.mode {} else { Issue.record("expected expanded mode") }
+    }
+
+    @Test func threadedThroughErrorPath() {
+        // A long-failing usage poll → error mode; the service dot still rides along.
+        let failing = UsageHealth(
+            lastSuccess: now.addingTimeInterval(-2 * 3600),
+            failingSince: now.addingTimeInterval(-2 * 3600), reason: .timeout)
+        let layout = MenuBarLayout.make(
+            from: nil, health: failing, now: now, serviceProblem: .majorOutage)
+        #expect(layout.serviceProblem == .majorOutage)
+        if case .error = layout.mode {} else { Issue.record("expected error mode") }
+    }
+}

@@ -82,17 +82,25 @@ public struct PopupLayout: Sendable, Equatable {
     /// The current failure cause when a poll is failing, else `nil`. Drives the popup warning banner
     /// (issue #12); the view turns it into the two-line title/detail (the localisation seam).
     public let warning: FailureReason?
+    /// The Claude service status (two component states), or `nil` until the first status poll has
+    /// succeeded (issue #31). When `nil`, the view shows **no** status lines (cold start); otherwise
+    /// it renders one line per component with a colour dot and a linked status word — the view is
+    /// the localisation/colour seam, this layer carries only the semantic ``ServiceStatus`` values.
+    /// Independent of `warning`: the usage poll and the status poll fail and succeed separately.
+    public let serviceStatus: StatusHealth?
 
     public init(
         lastUpdateAge: TimeInterval,
         intervalSeconds: TimeInterval,
         rows: [LimitRow],
-        warning: FailureReason? = nil
+        warning: FailureReason? = nil,
+        serviceStatus: StatusHealth? = nil
     ) {
         self.lastUpdateAge = lastUpdateAge
         self.intervalSeconds = intervalSeconds
         self.rows = rows
         self.warning = warning
+        self.serviceStatus = serviceStatus
     }
 
     // MARK: make
@@ -136,11 +144,15 @@ public struct PopupLayout: Sendable, Equatable {
     ///   - health: The polling-health context (last success, failure start, reason).
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
     ///   - interval: Current polling interval in seconds (`PollingBackoff.interval`).
+    ///   - serviceStatus: The latest Claude service status (issue #31), or `nil` until the first
+    ///     status poll has succeeded (the status loop is independent of the usage poll). Threaded
+    ///     through unchanged — the view renders it.
     public static func make(
         from snapshot: UsageSnapshot?,
         health: UsageHealth,
         now: Date,
-        interval: TimeInterval
+        interval: TimeInterval,
+        serviceStatus: StatusHealth? = nil
     ) -> PopupLayout {
         let rows = snapshot.map { self.rows(from: $0, now: now) } ?? []
         let lastUpdateAge = health.lastSuccess.map { max(0, now.timeIntervalSince($0)) } ?? 0
@@ -149,7 +161,8 @@ public struct PopupLayout: Sendable, Equatable {
             lastUpdateAge: lastUpdateAge,
             intervalSeconds: interval,
             rows: rows,
-            warning: warning
+            warning: warning,
+            serviceStatus: serviceStatus
         )
     }
 

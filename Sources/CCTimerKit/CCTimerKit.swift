@@ -7,5 +7,5 @@ public enum CCTimerKit {
     /// AdaptiveCadence + PollingEngine (#13, live loop: sleep/wake, network, adaptive interval),
     /// LaunchAtLogin (#14, pure decision core for the launch-at-login toggle).
     /// Still to come: TokenProvider fallback-refresh (#8b).
-    public static let version = "0.9.0"
+    public static let version = "0.10.0"
 }

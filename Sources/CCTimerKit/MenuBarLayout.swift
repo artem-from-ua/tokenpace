@@ -87,8 +87,15 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// The mode `StatusItemView` switches on to draw.
     public let mode: MenuBarMode
 
-    public init(mode: MenuBarMode) {
+    /// The most severe non-operational Claude service state, or `nil` when both tracked components
+    /// are operational / no status is known yet (issue #31). When non-`nil`, `StatusItemView` draws
+    /// a small colour dot as the **leftmost** element of the widget, ahead of the bars/glyph; when
+    /// `nil`, no dot. Orthogonal to `mode` — a service problem and the usage state are independent.
+    public let serviceProblem: ServiceStatus?
+
+    public init(mode: MenuBarMode, serviceProblem: ServiceStatus? = nil) {
         self.mode = mode
+        self.serviceProblem = serviceProblem
     }
 
     // MARK: idle threshold
@@ -167,7 +174,18 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///   - snapshot: The last successfully decoded poll, or `nil` if none has ever succeeded.
     ///   - health: The polling-health context (last success, failure start, reason).
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
-    public static func make(from snapshot: UsageSnapshot?, health: UsageHealth, now: Date) -> MenuBarLayout {
+    ///   - serviceProblem: The worst non-operational Claude service state (issue #31), or `nil` when
+    ///     all services are operational / unknown-cold. Threaded onto the result so the view can draw
+    ///     the leftmost dot; it does not affect the usage `mode`.
+    public static func make(
+        from snapshot: UsageSnapshot?, health: UsageHealth, now: Date, serviceProblem: ServiceStatus? = nil
+    ) -> MenuBarLayout {
+        usageMode(from: snapshot, health: health, now: now).withServiceProblem(serviceProblem)
+    }
+
+    /// The usage-driven `mode` only (no service dot) — the existing #12 decision tree, factored out
+    /// so ``make(from:health:now:serviceProblem:)`` can graft the service dot onto its result.
+    private static func usageMode(from snapshot: UsageSnapshot?, health: UsageHealth, now: Date) -> MenuBarLayout {
         // Healthy, or stale within the grace window: show the (possibly stale) bars unchanged.
         guard let age = health.failureAge(now: now) else {
             return snapshot.map { make(from: $0, now: now) } ?? MenuBarLayout(mode: .idle)
@@ -184,6 +202,11 @@ public struct MenuBarLayout: Sendable, Equatable {
             return MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
         }
         return MenuBarLayout(mode: .error(fiveHour: five, sevenDay: seven, reset: reset, which: which))
+    }
+
+    /// A copy of this layout carrying `serviceProblem` (the `mode` is unchanged).
+    func withServiceProblem(_ serviceProblem: ServiceStatus?) -> MenuBarLayout {
+        MenuBarLayout(mode: mode, serviceProblem: serviceProblem)
     }
 
     // MARK: - Private
