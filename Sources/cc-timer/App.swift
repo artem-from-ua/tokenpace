@@ -180,12 +180,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sleepWake = WorkspaceSleepWake { [signals] signal in signals.send(signal) }
         network.start { [signals] in signals.send(.networkRestored) }
 
-        // CC_TIMER_STUB=1 swaps the live URLSession for a canned-response transport so the app can be
+        // CC_TIMER_STUB swaps the live URLSession for a canned-response transport so the app can be
         // driven end-to-end (popup text, interval logs) without touching the usage API. Verification
         // aid only — never set in normal use; the default path is the real network.
-        let transport: UsageTransport = ProcessInfo.processInfo.environment["CC_TIMER_STUB"] == "1"
-            ? StubUsageTransport()
-            : URLSession.shared
+        //  • `=1`          → climbing utilisation (exercises adaptive cadence on screen).
+        //  • `=screenshot` → frozen, hand-picked values (a stable frame for the README).
+        let stubMode = ProcessInfo.processInfo.environment["CC_TIMER_STUB"]
+        let transport: UsageTransport = switch stubMode {
+        case "1":          StubUsageTransport()
+        case "screenshot": StubUsageTransport(fixed: true)
+        default:           URLSession.shared
+        }
         // The status poll uses the same transport seam (the stub answers the status endpoint too).
         statusTransport = transport
         let engine = PollingEngine(
