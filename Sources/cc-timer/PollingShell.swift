@@ -290,3 +290,13 @@ actor StubUsageTransport: UsageTransport {
         return (body, response)
     }
 }
+
+// MARK: - StubTokenProvider (verification only — paired with CC_TIMER_STUB)
+
+/// A `TokenProviding` that returns a literal placeholder token without touching the Keychain. Used
+/// only under `CC_TIMER_STUB`: the stub transport answers canned responses and never validates the
+/// bearer, so reading the real Keychain would be pointless — and would pop the system's Keychain
+/// access prompt for an unsigned `swift run` / dev build. Skipping it keeps the stub run silent.
+struct StubTokenProvider: TokenProviding {
+    func currentAccessToken(now: Date) throws -> String { "stub-token" }
+}
