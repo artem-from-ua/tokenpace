@@ -195,8 +195,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // The status poll uses the same transport seam (the stub answers the status endpoint too).
         statusTransport = transport
+        // Under the stub the bearer token is never validated (canned responses), so skip the
+        // Keychain entirely — reading it would only pop the system access prompt on a dev build.
+        let tokenProvider: TokenProviding = stubMode == nil ? KeychainTokenProvider() : StubTokenProvider()
         let engine = PollingEngine(
             transport: transport,
+            tokenProvider: tokenProvider,
             scheduler: LivePollScheduler(signals: signals.stream),
             probe: ProcessClaudeActivityProbe(),
             now: { Date() })
