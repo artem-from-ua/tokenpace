@@ -4,7 +4,7 @@ import Foundation
 
 // MARK: - Shared fixtures
 
-/// A fixed "current time" so the idle decision and reset countdown are deterministic.
+/// A fixed "current time" so the reset countdown is deterministic.
 private let now = Date(timeIntervalSince1970: 1_000_000)
 
 /// An ISO-8601 `resets_at` string `seconds` in the future relative to ``now`` — the same shape the
@@ -29,51 +29,35 @@ private func snapshot(
     )
 }
 
-// MARK: - idle vs expanded
+// MARK: - always expanded (no idle/compact mode — ADR-0014)
 
 @Suite("MenuBarLayout.make")
 struct MenuBarLayoutMakeTests {
 
-    @Test func bothWindowsLowIsIdle() {
-        // Both under 5 % and far from any cap → compact glyph.
+    @Test func bothWindowsLowStillExpands() {
+        // Even with both windows near zero the widget shows the full bars — there is no idle
+        // collapse to a glyph (the bug: a just-reset state showed a `*` while Claude was in use).
         let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 2, sevenDayUtil: 1), now: now)
-        #expect(layout.mode == .idle)
+        guard case .expanded = layout.mode else {
+            Issue.record("expected .expanded for low utilisation, got \(layout.mode)")
+            return
+        }
     }
 
-    @Test func zeroUtilizationIsIdle() {
+    @Test func zeroUtilizationStillExpands() {
         let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 0, sevenDayUtil: 0), now: now)
-        #expect(layout.mode == .idle)
+        guard case .expanded = layout.mode else {
+            Issue.record("expected .expanded at 0%, got \(layout.mode)")
+            return
+        }
     }
 
-    @Test func fiveHourAboveThresholdExpands() {
-        // One window crossing the threshold is enough to expand.
-        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 12, sevenDayUtil: 1), now: now)
+    @Test func highUtilizationExpands() {
+        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 12, sevenDayUtil: 40), now: now)
         guard case .expanded = layout.mode else {
             Issue.record("expected .expanded, got \(layout.mode)")
             return
         }
-    }
-
-    @Test func sevenDayAboveThresholdExpands() {
-        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 1, sevenDayUtil: 40), now: now)
-        guard case .expanded = layout.mode else {
-            Issue.record("expected .expanded, got \(layout.mode)")
-            return
-        }
-    }
-
-    @Test func exactlyThresholdExpands() {
-        // Boundary: utilisation == 5.0 is NOT idle (strict `<`), so the widget expands.
-        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 5, sevenDayUtil: 5), now: now)
-        guard case .expanded = layout.mode else {
-            Issue.record("expected .expanded at exactly 5%, got \(layout.mode)")
-            return
-        }
-    }
-
-    @Test func justBelowThresholdIsIdle() {
-        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 4.999, sevenDayUtil: 4.999), now: now)
-        #expect(layout.mode == .idle)
     }
 }
 
@@ -168,7 +152,7 @@ struct MenuBarLayoutExpandedTests {
 @Suite("MenuBarLayout.make health-aware")
 struct MenuBarLayoutHealthTests {
 
-    /// A representative non-idle snapshot (so the healthy/stale path is `.expanded`, not `.idle`).
+    /// A representative snapshot (the healthy/stale path is `.expanded`).
     private let snap = UsageSnapshot(
         fiveHour: UsageWindow(utilization: 50, resetsAt: resetsAt(inSeconds: 4 * 3600)),
         sevenDay: UsageWindow(utilization: 30, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600))
@@ -252,10 +236,11 @@ struct MenuBarLayoutHealthTests {
         #expect(five == nil)
     }
 
-    @Test func coldStartHealthyIsIdle() {
-        // No snapshot and not failing (the instant before the first poll completes) → idle, no crash.
+    @Test func coldStartHealthyIsBareError() {
+        // No snapshot and not failing (the instant before the first poll completes) → the bare ⚠️
+        // error glyph (no data to draw), not a compact glyph. No crash.
         let layout = MenuBarLayout.make(from: nil, health: .healthy(lastSuccess: now), now: now)
-        #expect(layout.mode == .idle)
+        #expect(layout.mode == .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
     }
 }
 

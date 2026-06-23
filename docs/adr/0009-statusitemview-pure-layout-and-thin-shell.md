@@ -1,9 +1,14 @@
 ---
-status: accepted
+status: superseded
 date: 2026-06-22
+superseded_by: [0015]
 ---
 
 # ADR-0009: StatusItemView — чиста MenuBarLayout + тонкий AppKit-shell
+
+> **Частково superseded [ADR-0015](0015-no-idle-mode.md):** рішення §2 (поріг idle 5 %) і §4
+> (idle-гліф `*`) скасовано — компактного/idle-режиму більше немає. Решта цього ADR (розкол
+> pure/shell, `MenuBarMode` як відкритий enum, малювання смужок, monochrome ⚠️) лишається чинною.
 
 ## Контекст
 
