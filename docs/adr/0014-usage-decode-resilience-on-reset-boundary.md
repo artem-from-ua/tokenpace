@@ -73,6 +73,16 @@ Claude були operational, а бари застигали на старих д
    [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md)). `UsageClient.decode(from:now:)`
    прокидає реальний `now`; default — `Date()` лише для call-site без годинника (тести).
 
+6. **Per-model під-вікна (`seven_day_opus`/`seven_day_sonnet`) — окремий, простіший випадок.** Вони
+   **optional**: відсутній ключ або весь об'єкт `null` → `nil` (модель не використовувалась цього
+   вікна) — це лишається. Але **присутній** об'єкт із `resets_at: null` (жива відповідь шле
+   `seven_day_sonnet: {"utilization":0.0,"resets_at":null}`) — це той самий reset-boundary, і його
+   треба не плутати з «модель не використовувалась». Тут `utilization` зберігається як прийшов, а
+   `resets_at` **береться від `seven_day`** — під-вікно є частиною 7-денного вікна, тож вони
+   ресетяться разом (простіше й точніше за повний fallback-ланцюг core-вікон). Без цього popup малював
+   хибне «resetting…» при elapsed 100 % (бо `resets_at=""` → `ResetClock.parse=nil` → reset = now).
+   Реалізовано як `UsageSnapshot.subWindow(...)`; кожне заповнення логується.
+
 Повідомлення «unavailable» **не** змінюється: після стійкого decode гілка `.decode` спрацьовуватиме
 лише на справді зламаному тілі (не-JSON, обрізане), де «server problem» доречне. Окрему причину
 `malformedResponse` свідомо не вводимо зараз — якщо гілка все ж з'явиться в логах, заведемо окремо.

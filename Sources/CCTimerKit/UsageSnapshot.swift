@@ -185,9 +185,37 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
             in: container, key: .sevenDay, window: .sevenDay,
             limitKinds: ["weekly_all", "seven_day"], limits: limits, now: now)
 
-        // Per-model sub-windows stay optional: absent/`null` → `nil` (model unused this window).
-        self.sevenDayOpus = try container.decodeIfPresent(UsageWindow.self, forKey: .sevenDayOpus)
-        self.sevenDaySonnet = try container.decodeIfPresent(UsageWindow.self, forKey: .sevenDaySonnet)
+        // Per-model sub-windows stay optional: an absent key or an all-`null` object → `nil` (the
+        // model was not used this window). But a **present** sub-window with `resets_at: null` is the
+        // same reset-boundary case as the core windows (live API sends e.g.
+        // `seven_day_sonnet: {"utilization":0.0,"resets_at":null}`): keep its `utilization` and
+        // borrow `resets_at` from `seven_day` — the sub-window is part of the 7-day window, so they
+        // reset together. Without this the bar rendered a bogus "resetting…" at 100 % elapsed.
+        self.sevenDayOpus = try Self.subWindow(
+            in: container, key: .sevenDayOpus, parentResetsAt: sevenDay.resetsAt)
+        self.sevenDaySonnet = try Self.subWindow(
+            in: container, key: .sevenDaySonnet, parentResetsAt: sevenDay.resetsAt)
+    }
+
+    /// Decode an optional per-model sub-window (`seven_day_opus` / `seven_day_sonnet`).
+    ///
+    /// - An absent key or an all-`null` object → `nil` (the model was unused this window).
+    /// - A present object **with** a `resets_at` → returned as-is.
+    /// - A present object **without** a `resets_at` (the reset-boundary `resets_at: null` case) →
+    ///   `utilization` kept, `resets_at` borrowed from `parentResetsAt` (the 7-day window they
+    ///   reset with). Logged once.
+    private static func subWindow(
+        in container: KeyedDecodingContainer<CodingKeys>,
+        key: CodingKeys,
+        parentResetsAt: String
+    ) throws -> UsageWindow? {
+        guard let decoded = try container.decodeIfPresent(UsageWindow.self, forKey: key) else {
+            return nil   // absent / null → model unused
+        }
+        if decoded.hasResetsAt { return decoded }
+        AppLogger.network.notice(
+            "filled \(key.stringValue, privacy: .public) sub-window resets_at from seven_day (was null)")
+        return UsageWindow(utilization: decoded.utilization, resetsAt: parentResetsAt)
     }
 
     /// Decode a core window, synthesizing a fresh zero-usage window when the API omits its
