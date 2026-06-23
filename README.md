@@ -1,72 +1,45 @@
 # cc-timer
 
-Мінівіджет для **menu bar macOS**, що показує використання лімітів підписки Claude Code —
-**5-годинного** та **7-денного** вікон — з *pacing* (випереджаєш чи відстаєш від норми витрат)
-і часом до найближчого ресету. Згодом — віджети iPhone та комплікейшен Apple Watch.
+> 👀 *Найвитонченіша форма прокрастинації — стежити за власним лімітом.*
 
-> Документація проєкту — **українською** (рішення проєкту, див.
-> [SPEC.md](SPEC.md#%D1%83%D1%85%D0%B2%D0%B0%D0%BB%D0%B5%D0%BD%D1%96-%D1%80%D1%96%D1%88%D0%B5%D0%BD%D0%BD%D1%8F)).
+Лаконічні ліміти твоєї підписки Claude Code у menu bar macOS.
 
-## Що це
+cc-timer показує, скільки ти вже витратив у **5-годинному** та **7-денному** вікнах ліміту, чи
+**випереджаєш чи відстаєш** від рівномірної норми витрат (*pacing*) і скільки лишилось до
+найближчого ресету — двома смужками просто в menu bar, без переходу в термінал.
 
-Те саме, що показує statusline-плагін у терміналі, але **на один погляд** у menu bar:
-дві горизонтальні смужки (5h / 7d) з кольоровим pacing і час до ресету.
+Це для тих, хто працює в Claude Code на Mac і не хоче зненацька впертися в «ліміт вичерпано»: видно
+залишок у кожному вікні, тож можна спланувати роботу під найближчий ресет, вчасно помітити, що йдеш
+надто швидко, і не перервати сесію посеред задачі. Колір смужки одразу підказує темп: **червоне**,
+коли витрачаєш швидше за рівномірну норму (ризикуєш вичерпати вікно зарано), **зелене**, коли йдеш у
+межах лімітів або забагато прокрастинуєш.
 
 <img src="docs/assets/cc-timer-demo.png" alt="cc-timer у menu bar: дві pacing-смужки + статус-крапка, а в попапі — статуси сервісів, ліміти 5h/7d/Sonnet із кольоровим pacing і часом до ресету" width="240">
+
+Окремо cc-timer стежить за **статусом сервісів Claude** (Claude Code та Claude API) зі сторінки
+status.claude.com: у попапі видно стан кожного кольоровою крапкою, а коли є проблема — крапка
+з'являється і в menu bar, тож зрозуміло, що сповільнення чи помилки на боці Anthropic, а не в тебе.
 
 Джерело даних — офіційний endpoint Anthropic `GET /api/oauth/usage`, авторизація — OAuth-токен
 Claude Code з macOS Keychain. **Токен ніколи не покидає Mac.**
 
-## Статус
+> 🚧 Рання розробка. Фаза 1 — menu bar app для macOS; згодом — віджети iPhone та комплікейшен
+> Apple Watch.
 
-🚧 Рання розробка. Фаза 1 — menu bar app для macOS.
+## Встановлення
 
-## Збірка
+1. Завантаж `cc-timer-X.Y.Z.zip` з [останнього релізу](https://github.com/artem-from-ua/cc-timer/releases/latest)
+   і розпакуй (подвійний клік).
+2. Перетягни **cc-timer.app** у теку **Applications**.
+3. Запусти з **Launchpad** або Finder. Іконки в Dock не буде — застосунок живе в menu bar.
 
-**Передумова:** Swift 6.1+ і Command Line Tools. Повний Xcode **не потрібен** у Фазі 1.
-
-```sh
-swift build        # збірка
-swift test         # unit-тести
-swift run          # запуск агента (без вікна; зупинити — Ctrl-C)
-```
-
-Зібрати `.app` bundle:
-
-```sh
-./scripts/build-app.sh    # → ./build/cc-timer.app
-open ./build/cc-timer.app # запуск (іконки в Dock немає — LSUIElement)
-```
-
-Скрипт збирає **universal binary** (arm64 + x86_64), тож `.app` запускається нативно і на Apple
-Silicon, і на Intel-Mac (SwiftPM не має єдиного `--arch`, тож кожна арка збирається окремо за
-`--triple` і зливається через `lipo`).
-
-Застосунок запускається як **accessory-агент** без іконки в Dock (`LSUIElement = true`):
-дві pacing-смужки в menu bar, клік відкриває popup із деталями, а внизу — `Configure…` (toggle
-автозапуску, версія, GitHub-лінк) і `Quit cc-timer`.
-
-**Підпис і нотаризація.** `build-app.sh` автоматично підписує bundle Developer ID identity (якщо є)
-з `--options runtime` і, якщо налаштовано notarytool-профіль `cc-timer-notary`, нотаризує та
-прикріплює (staple) квиток. Перевірити: `spctl -a -t exec ./build/cc-timer.app` → `accepted
-(Notarized Developer ID)`. Без Developer ID identity збірка лишається непідписаною — Gatekeeper
-може заблокувати при першому запуску (`права кнопка → Відкрити`, або
-`xattr -dr com.apple.quarantine ./build/cc-timer.app`).
-
-**Launch-at-login.** `SMAppService` реєструє автозапуск надійно лише для **підписаного** `.app`,
-**запущеного з `/Applications`** (через Finder/Launchpad). На `swift run` чи прямому запуску
-бінарника статус буде `.notFound` і toggle у `Configure…` — неактивний (з поясненням).
-
-**Перегляд логів:**
-
-```sh
-log stream --predicate 'subsystem == "com.artem-n.cc-timer"' --info
-```
-
-або Console.app з фільтром `com.artem-n.cc-timer`.
+Застосунок нотаризований Apple, тож Gatekeeper не лаятиметься. Працює на Apple Silicon та Intel
+(universal binary). **Launch-at-login** (автозапуск) умикається в `Configure…` і працює для копії,
+запущеної з `/Applications`.
 
 ## Документація
 
+- [docs/building.md](docs/building.md) — збірка з джерел (для контриб'юторів).
 - [SPEC.md](SPEC.md) — продуктовий спек (проблема, архітектура, UI, фази, монетизація).
 - [docs/architecture.md](docs/architecture.md) — архітектура та потік даних.
 - [docs/conventions.md](docs/conventions.md) — конвенції розробки.
