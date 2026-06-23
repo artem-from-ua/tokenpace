@@ -287,3 +287,36 @@ struct PopupLayoutHealthTests {
         #expect(p.lastUpdateAge == 20 * 60)
     }
 }
+
+// MARK: - Service status pass-through (#31)
+
+@Suite("PopupLayout service status")
+struct PopupLayoutServiceStatusTests {
+
+    private let healthy = UsageHealth.healthy(lastSuccess: now)
+    private let snap = snapshot(fiveHourUtil: 50, sevenDayUtil: 30)
+
+    @Test func nilByDefault() {
+        // Cold start / not passed → no status lines.
+        let p = PopupLayout.make(from: snap, health: healthy, now: now,
+                                 interval: PollingBackoff.defaultInterval)
+        #expect(p.serviceStatus == nil)
+    }
+
+    @Test func passesThroughUnchanged() {
+        let status = StatusHealth(claudeCode: .operational, claudeAPI: .degraded)
+        let p = PopupLayout.make(from: snap, health: healthy, now: now,
+                                 interval: PollingBackoff.defaultInterval, serviceStatus: status)
+        #expect(p.serviceStatus == status)
+    }
+
+    @Test func independentOfUsageWarning() {
+        // A failing usage poll still carries the (separately-polled) service status.
+        let failing = UsageHealth(lastSuccess: now, failingSince: now.addingTimeInterval(-60), reason: .timeout)
+        let status = StatusHealth.unknown
+        let p = PopupLayout.make(from: snap, health: failing, now: now,
+                                 interval: PollingBackoff.defaultInterval, serviceStatus: status)
+        #expect(p.warning == .timeout)
+        #expect(p.serviceStatus == .unknown)
+    }
+}

@@ -168,6 +168,25 @@ actor StubUsageTransport: UsageTransport {
     }
 
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        // Status endpoint (#31): a canned summary where Claude API is degraded and an active major
+        // incident lists both components — so the popup shows a green Code dot + a yellow API dot,
+        // and the incident is *ignored* (both lines still come from component.status). Lets the
+        // status line be seen end-to-end without the live status page.
+        if request.url == StatusClient.endpoint {
+            let body = """
+            {"status":{"indicator":"major","description":"Degraded"},\
+            "components":[\
+            {"name":"Claude Code","status":"operational"},\
+            {"name":"Claude API (api.anthropic.com)","status":"degraded_performance"},\
+            {"name":"claude.ai","status":"operational"}],\
+            "incidents":[{"name":"Stubbed incident","status":"monitoring","impact":"major",\
+            "components":[{"name":"Claude Code"},{"name":"Claude API (api.anthropic.com)"}]}]}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: StatusClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
         let n = calls
         calls += 1
         // Step utilisation every 3rd poll so some adjacent polls are "unchanged" (cadence doubles)

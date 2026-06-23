@@ -39,6 +39,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// between polls (the data is unchanged; only `now` advances).
     private var lastOutput: PollOutput?
 
+    // MARK: Claude service status (#31)
+
+    /// The transport used for status polls — the same seam as the usage transport (real
+    /// `URLSession.shared`, or the stub under `CC_TIMER_STUB=1`). Set in `startPolling`.
+    private var statusTransport: UsageTransport = URLSession.shared
+    /// The latest mapped service status, or `nil` until the first status poll lands (cold start →
+    /// no status lines in the popup).
+    private var lastStatusHealth: StatusHealth?
+    /// Instant of the last **successful** status poll, driving `StatusCadence.isDue`. A failed poll
+    /// does not advance it, so the next usage tick retries.
+    private var lastStatusSuccess: Date?
+    /// The in-flight status fetch, if any — held so a new tick can cancel a slow one rather than
+    /// overlap (the status loop hangs off the usage poll's heartbeat, it owns no timer).
+    private var statusTask: Task<Void, Never>?
+
     /// Re-renders the popup/menu bar from `lastOutput` on a fixed cadence so the "Last update" age
     /// grows ("just now" → "1m ago") without waiting for the next 180 s poll. **Never** fetches — it
     /// only recomputes the view models against the current time.
@@ -151,6 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         pollTask?.cancel()
+        statusTask?.cancel()
         ageTimer?.invalidate()
         sleepWake?.stop()
         network.stop()
@@ -170,6 +186,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let transport: UsageTransport = ProcessInfo.processInfo.environment["CC_TIMER_STUB"] == "1"
             ? StubUsageTransport()
             : URLSession.shared
+        // The status poll uses the same transport seam (the stub answers the status endpoint too).
+        statusTransport = transport
         let engine = PollingEngine(
             transport: transport,
             scheduler: LivePollScheduler(signals: signals.stream),
@@ -196,10 +214,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Map one poll result into the menu-bar image and the popup model, and retain it so the age
-    /// timer can re-render it against a later `now`.
+    /// timer can re-render it against a later `now`. Also rides this heartbeat to poll the Claude
+    /// status page when due (#31) — no separate timer.
     private func apply(_ output: PollOutput) {
         lastOutput = output
         render(output, at: Date())
+        pollStatusIfDue(usageInterval: output.interval)
+    }
+
+    /// Fetch the Claude status page when `StatusCadence` says it is due — riding the usage poll's
+    /// heartbeat with a 5-min politeness floor (`max(floor, usageInterval)`), so it never hammers a
+    /// third-party page even when the usage cadence is fast or thrashing on 429.
+    private func pollStatusIfDue(usageInterval: TimeInterval) {
+        // While a service problem is in progress, poll faster (down to the 60-s problem floor) to
+        // catch escalation/recovery quickly; otherwise the polite 5-min floor applies.
+        let hasProblem = lastStatusHealth?.worstProblem != nil
+        guard StatusCadence.isDue(
+            lastSuccess: lastStatusSuccess, usageInterval: usageInterval,
+            hasProblem: hasProblem, now: Date()) else { return }
+        // Cancel any slow in-flight fetch rather than overlap.
+        statusTask?.cancel()
+        let transport = statusTransport
+        statusTask = Task { [weak self] in
+            let health: StatusHealth
+            let succeeded: Bool
+            do {
+                let summary = try await StatusClient.fetch(transport: transport)
+                health = .from(summary)
+                succeeded = true
+            } catch {
+                // Any failure → honest "unknown" (grey), and don't advance lastStatusSuccess so the
+                // next usage tick retries.
+                health = .unknown
+                succeeded = false
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.lastStatusHealth = health
+            if succeeded { self.lastStatusSuccess = Date() }
+            // Re-render with the new status against the retained usage output.
+            self.reRenderForCurrentTime()
+        }
     }
 
     /// Re-render the retained last poll against the current time — grows the "Last update" age and
@@ -212,10 +266,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Render a poll result into the menu-bar image and popup model at instant `now`.
     private func render(_ output: PollOutput, at now: Date) {
         statusView?.layout = MenuBarLayout.make(
-            from: output.snapshot, health: output.health, now: now)
+            from: output.snapshot, health: output.health, now: now,
+            serviceProblem: lastStatusHealth?.worstProblem)
         refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
         setPopupLayout(PopupLayout.make(
-            from: output.snapshot, health: output.health, now: now, interval: output.interval))
+            from: output.snapshot, health: output.health, now: now, interval: output.interval,
+            serviceStatus: lastStatusHealth))
     }
 
     /// Set the popup model **and** resize the hosted view to fit. A menu item's hosted view must

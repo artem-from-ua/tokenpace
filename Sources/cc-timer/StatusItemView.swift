@@ -56,6 +56,11 @@ final class StatusItemView: NSView {
         static let errorGlyphSize: CGFloat = 13
         /// Gap between the ⚠️ glyph and the (stale) bars block when both are drawn (30–60 min phase).
         static let errorGlyphGap: CGFloat = 4
+        /// Diameter of the leftmost service-status dot (issue #31), drawn only when a service is
+        /// non-operational. Small — a glance signal, not a primary element.
+        static let statusDotDiameter: CGFloat = 6
+        /// Gap between the service-status dot and the content to its right (bars / glyph).
+        static let statusDotGap: CGFloat = 4
     }
 
     // MARK: Colour mapping (exact statusline 256-colour palette → NSColor)
@@ -86,6 +91,29 @@ final class StatusItemView: NSView {
         static let indicatorStroke = NSColor(srgbRed: 24/255, green: 24/255, blue: 24/255, alpha: 1)
         /// Idle glyph + reset label — follow the menu-bar foreground.
         static let foreground = NSColor.labelColor
+
+        // Service-status dot (issue #31). Fixed sRGB (not the dynamic `system*` colours) because the
+        // status image is non-template and drawn in a resolved appearance, so a fixed, vivid value
+        // reads consistently on both light and dark menu bars. Tuned to be saturated enough to pop at
+        // 6 pt. `operational` is never drawn (the dot appears only for a problem), so it is omitted.
+        static let statusYellow = NSColor(srgbRed: 240/255, green: 190/255, blue: 50/255, alpha: 1)
+        static let statusOrange = NSColor(srgbRed: 240/255, green: 140/255, blue: 40/255, alpha: 1)
+        static let statusRed    = NSColor(srgbRed: 225/255, green: 70/255, blue: 70/255, alpha: 1)
+        static let statusBlue   = NSColor(srgbRed: 70/255, green: 140/255, blue: 230/255, alpha: 1)
+        static let statusGray   = NSColor(srgbRed: 150/255, green: 150/255, blue: 150/255, alpha: 1)
+    }
+
+    /// The dot colour for a non-operational service state. `operational` should never reach here
+    /// (the dot is drawn only for a problem) but maps to gray defensively.
+    private func statusDotColor(_ status: ServiceStatus) -> NSColor {
+        switch status {
+        case .degraded:         return Palette.statusYellow
+        case .partialOutage:    return Palette.statusOrange
+        case .majorOutage:      return Palette.statusRed
+        case .underMaintenance: return Palette.statusBlue
+        case .unknown:          return Palette.statusGray
+        case .operational:      return Palette.statusGray
+        }
     }
 
     // MARK: NSView overrides
@@ -105,15 +133,38 @@ final class StatusItemView: NSView {
     /// Shared by ``draw(_:)`` and ``snapshotImage()`` so the menu-bar image and a hosted view
     /// draw identically.
     private func render(in rect: NSRect) {
-        guard let mode = layout?.mode else { return }
-        switch mode {
-        case .idle:
-            drawIdleGlyph(in: rect)
-        case let .expanded(fiveHour, sevenDay, reset, _):
-            drawExpanded(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: rect)
-        case let .error(fiveHour, sevenDay, reset, _):
-            drawError(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: rect)
+        guard let layout else { return }
+
+        // Leftmost service-status dot (issue #31): drawn first, then everything else is rendered in a
+        // content rect inset from the left by the dot + gap, so the bars/glyph shift right. When there
+        // is no problem, the inset is zero and the layout is exactly as before.
+        var contentRect = rect
+        if let problem = layout.serviceProblem {
+            drawStatusDot(problem, in: rect)
+            let inset = Metrics.statusDotDiameter + Metrics.statusDotGap
+            contentRect = NSRect(x: rect.minX + inset, y: rect.minY, width: rect.width - inset, height: rect.height)
         }
+
+        switch layout.mode {
+        case .idle:
+            drawIdleGlyph(in: contentRect)
+        case let .expanded(fiveHour, sevenDay, reset, _):
+            drawExpanded(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: contentRect)
+        case let .error(fiveHour, sevenDay, reset, _):
+            drawError(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: contentRect)
+        }
+    }
+
+    /// Draw the small service-status dot at the **left edge** of `rect`, vertically centred — the
+    /// leftmost element of the widget. `hPadding` keeps it off the very edge, matching the bars'
+    /// inset. Drawn only when a service is non-operational (issue #31).
+    private func drawStatusDot(_ status: ServiceStatus, in rect: NSRect) {
+        let d = Metrics.statusDotDiameter
+        let x = rect.minX + Metrics.hPadding
+        let y = rect.midY - d / 2
+        let dot = NSBezierPath(ovalIn: NSRect(x: x, y: y, width: d, height: d))
+        statusDotColor(status).setFill()
+        dot.fill()
     }
 
     // MARK: NSImage snapshot
@@ -315,15 +366,17 @@ final class StatusItemView: NSView {
     /// widest for the ⚠️ + stale-bars phase (the glyph adds its own width). Driven dynamically so the
     /// item hugs exactly the content currently drawn.
     private func itemWidth(for layout: MenuBarLayout?) -> CGFloat {
+        // The leftmost service dot, when present, widens every mode by the same dot + gap inset.
+        let dotInset = layout?.serviceProblem != nil ? Metrics.statusDotDiameter + Metrics.statusDotGap : 0
         switch layout?.mode {
         case .none, .idle:
-            return Metrics.height                       // square-ish compact item
+            return Metrics.height + dotInset            // square-ish compact item
         case let .expanded(_, _, reset, _):
-            return Metrics.hPadding + barsBlockWidth(reset: reset) + Metrics.hPadding
+            return dotInset + Metrics.hPadding + barsBlockWidth(reset: reset) + Metrics.hPadding
         case let .error(five, _, reset, _):
             // ⚠️ alone (cold start / >60 min) → compact; ⚠️ + stale bars (30–60 min) → glyph + bars.
-            guard five != nil, let reset else { return Metrics.height }
-            return Metrics.hPadding + errorGlyphWidth() + Metrics.errorGlyphGap
+            guard five != nil, let reset else { return Metrics.height + dotInset }
+            return dotInset + Metrics.hPadding + errorGlyphWidth() + Metrics.errorGlyphGap
                 + barsBlockWidth(reset: reset) + Metrics.hPadding
         }
     }

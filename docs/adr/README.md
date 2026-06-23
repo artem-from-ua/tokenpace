@@ -17,3 +17,4 @@
 | [0010](0010-usage-health-and-error-states.md) | UsageHealth — стани помилок (⚠️ menu bar + банер popup + stale); пороги 30/60 хв | accepted |
 | [0011](0011-polling-engine-adaptive-cadence-and-signal-seams.md) | PollingEngine — async-цикл, адаптивний інтервал і seam'и sleep/wake/мережі | accepted |
 | [0012](0012-configure-window-and-launch-at-login.md) | Вікно «Configure…» та launch-at-login (SMAppService); opt-out, best-effort на unsigned | accepted |
+| [0013](0013-claude-status-line.md) | Рядок статусу сервісів Claude у попапі — лише `component.status` двох компонентів, окрема ввічлива cadence | accepted |
