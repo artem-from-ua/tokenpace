@@ -146,8 +146,6 @@ final class StatusItemView: NSView {
         }
 
         switch layout.mode {
-        case .idle:
-            drawIdleGlyph(in: contentRect)
         case let .expanded(fiveHour, sevenDay, reset, _):
             drawExpanded(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: contentRect)
         case let .error(fiveHour, sevenDay, reset, _):
@@ -196,22 +194,6 @@ final class StatusItemView: NSView {
         return image
     }
 
-    // MARK: Idle
-
-    /// Compact idle form: a bold `*` centred in the item (SPEC "мала іконка"; the chosen glyph).
-    private func drawIdleGlyph(in rect: NSRect) {
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 15, weight: .bold),
-            .foregroundColor: Palette.foreground,
-        ]
-        let glyph = NSAttributedString(string: "*", attributes: attrs)
-        let size = glyph.size()
-        let origin = NSPoint(
-            x: rect.minX + (rect.width - size.width) / 2,
-            y: rect.minY + (rect.height - size.height) / 2
-        )
-        glyph.draw(at: origin)
-    }
 
     // MARK: Expanded
 
@@ -362,15 +344,15 @@ final class StatusItemView: NSView {
         }
     }
 
-    /// The item width for a given layout — narrow for idle/glyph-only, wider for the bars + label,
-    /// widest for the ⚠️ + stale-bars phase (the glyph adds its own width). Driven dynamically so the
-    /// item hugs exactly the content currently drawn.
+    /// The item width for a given layout — narrow for the glyph-only error/cold-start case, wider for
+    /// the bars + label, widest for the ⚠️ + stale-bars phase (the glyph adds its own width). Driven
+    /// dynamically so the item hugs exactly the content currently drawn.
     private func itemWidth(for layout: MenuBarLayout?) -> CGFloat {
         // The leftmost service dot, when present, widens every mode by the same dot + gap inset.
         let dotInset = layout?.serviceProblem != nil ? Metrics.statusDotDiameter + Metrics.statusDotGap : 0
         switch layout?.mode {
-        case .none, .idle:
-            return Metrics.height + dotInset            // square-ish compact item
+        case .none:
+            return Metrics.height + dotInset            // square-ish compact item (no layout yet)
         case let .expanded(_, _, reset, _):
             return dotInset + Metrics.hPadding + barsBlockWidth(reset: reset) + Metrics.hPadding
         case let .error(five, _, reset, _):

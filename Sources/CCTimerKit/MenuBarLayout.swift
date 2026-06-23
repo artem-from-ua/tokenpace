@@ -31,16 +31,16 @@ public struct BarView: Sendable, Equatable {
 /// switches on when drawing.
 ///
 /// Cases:
-/// - ``idle``: both limits are deep in the normal band, so the widget collapses to a single
-///   compact glyph (a bold `*`) to save menu-bar space (SPEC "Компактний режим при idle").
-/// - ``expanded(fiveHour:sevenDay:reset:which:)``: the full widget — two stacked bars (5h top,
-///   7d bottom) plus the countdown to the nearest reset.
-/// - ``error(fiveHour:sevenDay:reset:which:)``: polling has been failing long enough to surface a
-///   ⚠️ glyph (issue #12). The bars are **optional**: present during the 30–60 min "stale" phase
-///   (⚠️ drawn alongside the last known bars), `nil` past 60 min or on a cold start (⚠️ alone).
+/// - ``expanded(fiveHour:sevenDay:reset:which:)``: the normal widget — two stacked bars (5h top,
+///   7d bottom) plus the countdown to the nearest reset. Shown whenever there is a usable snapshot,
+///   at any `utilization` — the widget never collapses to a compact glyph (ADR-0015 supersedes the
+///   earlier idle mode).
+/// - ``error(fiveHour:sevenDay:reset:which:)``: there is no usable data to show — polling has been
+///   failing long enough to surface a ⚠️ glyph (issue #12), **or** it is a cold start before the
+///   first poll resolves (e.g. token expired, API unreachable). The bars are **optional**: present
+///   during the 30–60 min "stale" phase (⚠️ drawn alongside the last known bars), `nil` past 60 min
+///   or on a cold start (⚠️ alone).
 public enum MenuBarMode: Sendable, Equatable {
-    /// Both windows under the idle threshold and no pacing warning — draw the compact glyph.
-    case idle
     /// Full widget: 5h bar, 7d bar, and the nearest-reset countdown.
     ///
     /// - Parameters:
@@ -69,9 +69,9 @@ public enum MenuBarMode: Sendable, Equatable {
 /// behind `StatusItemView` (issue #10).
 ///
 /// Like `PacingModel`/`ResetClock`, ``make(from:now:)`` is **stateless and deterministic**: `now`
-/// is injected so the idle decision and the reset countdown are reproducible in tests without a
-/// clock. The struct does no drawing — it computes *what* to draw (`MenuBarMode`); the thin
-/// `NSView` shell in the `cc-timer` target does *how* (ADR-0009).
+/// is injected so the reset countdown is reproducible in tests without a clock. The struct does no
+/// drawing — it computes *what* to draw (`MenuBarMode`); the thin `NSView` shell in the `cc-timer`
+/// target does *how* (ADR-0009).
 ///
 /// ## Data flow
 /// ```
@@ -82,7 +82,8 @@ public enum MenuBarMode: Sendable, Equatable {
 /// - `PacingModel.limitIndicator(...)` → each `BarView.indicator`
 /// - `ResetClock.resetDisplay(...)` → the `reset`/`which` of ``MenuBarMode/expanded``
 ///
-/// The only fresh decision is the **idle vs. expanded** split (see ``idleUtilizationThreshold``).
+/// On the healthy path the result is always ``MenuBarMode/expanded`` — there is no compact/idle
+/// collapse (ADR-0015 removed it). The only mode variation is the error state (issue #12).
 public struct MenuBarLayout: Sendable, Equatable {
     /// The mode `StatusItemView` switches on to draw.
     public let mode: MenuBarMode
@@ -98,18 +99,6 @@ public struct MenuBarLayout: Sendable, Equatable {
         self.serviceProblem = serviceProblem
     }
 
-    // MARK: idle threshold
-
-    /// Utilisation percent (per window) below which a window counts as "idle".
-    ///
-    /// The widget collapses to the compact glyph only when **both** windows are under this. `5.0`
-    /// matches the SPEC orientation value ("обидва ліміти < ~5% і нема pacing-попередження") — the
-    /// "no warning" half is automatic, since a warning needs `utilization > 90` (see ``make``).
-    /// The comparison is strict `<` — exactly `5.0` is **not** idle —
-    /// matching the strict boundary convention elsewhere (`OAuthCredentials.isExpired`'s `<=`,
-    /// `PacingModel`'s `> 90`). Recorded in ADR-0009.
-    static let idleUtilizationThreshold = 5.0
-
     // MARK: make
 
     /// Build the menu-bar layout from one usage snapshot at instant `now`.
@@ -117,13 +106,8 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// Steps, all delegating to tested pure logic:
     /// 1. Compute the 5h and 7d `BarLayout` + `LimitIndicator` via `PacingModel`.
     /// 2. Resolve the nearest-reset countdown via `ResetClock.resetDisplay`.
-    /// 3. Decide ``MenuBarMode``: ``MenuBarMode/idle`` when both windows are under
-    ///    ``idleUtilizationThreshold``; otherwise ``MenuBarMode/expanded``.
-    ///
-    /// A pacing warning cannot coexist with idle, so it is not a separate condition: both
-    /// `LimitIndicator` alerts require `utilization > 90` (`.warning`) or `== 100` (`.critical`)
-    /// — far above the 5 % idle threshold — so any warned window is already non-idle. The widget
-    /// therefore always shows the full bars whenever the user is anywhere near a cap.
+    /// 3. Return ``MenuBarMode/expanded`` — the healthy path always shows both bars (there is no
+    ///    idle/compact collapse; ADR-0015).
     ///
     /// When neither `resets_at` parses (both `nil`/malformed), the reset display falls back to
     /// ``TimeToReset/resetNow`` — the snapshot is unusable for a countdown, which the view renders
@@ -135,13 +119,6 @@ public struct MenuBarLayout: Sendable, Equatable {
     public static func make(from snapshot: UsageSnapshot, now: Date) -> MenuBarLayout {
         let five = bar(for: snapshot.fiveHour, window: .fiveHour, now: now)
         let seven = bar(for: snapshot.sevenDay, window: .sevenDay, now: now)
-
-        let bothLow = snapshot.fiveHour.utilization < idleUtilizationThreshold
-            && snapshot.sevenDay.utilization < idleUtilizationThreshold
-
-        if bothLow {
-            return MenuBarLayout(mode: .idle)
-        }
 
         let (which, reset) = ResetClock.resetDisplay(
             fiveHourResetsAt: snapshot.fiveHour.resetsAt,
@@ -187,8 +164,11 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// so ``make(from:health:now:serviceProblem:)`` can graft the service dot onto its result.
     private static func usageMode(from snapshot: UsageSnapshot?, health: UsageHealth, now: Date) -> MenuBarLayout {
         // Healthy, or stale within the grace window: show the (possibly stale) bars unchanged.
+        // A healthy state with no snapshot only happens at the very first tick before the first
+        // poll resolves; with no data to draw, fall back to the bare ⚠️ error glyph.
         guard let age = health.failureAge(now: now) else {
-            return snapshot.map { make(from: $0, now: now) } ?? MenuBarLayout(mode: .idle)
+            return snapshot.map { make(from: $0, now: now) }
+                ?? MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
         }
         if let snapshot, age <= UsageHealth.glyphAfter {
             return make(from: snapshot, now: now)
