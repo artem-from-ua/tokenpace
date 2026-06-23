@@ -56,12 +56,21 @@ Issue #12 («Стани помилок») робить помилки видим
 
 4. **Причина мапиться в семантичний `FailureReason` (у `CCTimerKit`); рядок збирає view.**
    `TokenError`/`UsageError` несуть деталі не для користувача (`OSStatus`, HTTP-код); `FailureReason`
-   (`notSignedIn` / `authHTTP(status:body:)` / `timeout` / `cannotResolveHost` / `network` /
-   `serverProblem` / `unknown`) — семантичний сигнал, як `PacingState`/`TimeToReset`. `init(_:)` —
-   exhaustive `switch` **без `default`** (новий case помилки ламає компіляцію → свідомий мапінг).
-   Локалізований текст (`warningTitle`/`warningDetail`) живе у `PopupViewController` (seam, ADR-0009).
-   `http(401/403)` → `.authHTTP`, інші коди → `.serverProblem`. Popup показує **два рядки**: жирний
-   title (для HTTP — `Auth error (HTTP <код>)`) і detail (для HTTP — тіло відповіді сервера).
+   (`notSignedIn` / `tokenStale` / `authHTTP(status:body:)` / `timeout` / `cannotResolveHost` /
+   `network` / `serverProblem` / `unknown`) — семантичний сигнал, як `PacingState`/`TimeToReset`.
+   `init(_:)` — exhaustive `switch` **без `default`** (новий case помилки ламає компіляцію → свідомий
+   мапінг). Локалізований текст (`warningTitle`/`warningDetail`) живе у `PopupViewController` (seam,
+   ADR-0009). `http(401/403)` → `.authHTTP`, інші коди → `.serverProblem`. Popup показує **два рядки**:
+   жирний title (для HTTP — `Auth error (HTTP <код>)`) і detail (для HTTP — тіло відповіді сервера).
+
+   **Уточнення (2026-06-23): протухлий токен — окремий `tokenStale`, а не синтетичний 401.**
+   Спочатку `TokenError.expired` мапилось у `authHTTP(status: 401, body: nil)` разом із `.accessDenied`.
+   Це показувало користувачу «Auth error (HTTP 401) — авторизацію відхилено» для протухлого локального
+   токена — хоча API навіть **не викликався**, а стан **сам лікується** (Claude Code перезаписує
+   Keychain свіжою парою). Тепер `.expired → .tokenStale` («Token expired — waiting for Claude Code to
+   refresh it»), а `.accessDenied` (ACL-блок Keychain — справжнє відхилення доступу) лишається
+   синтетичним 401. Розділення мапінгу і split doc-коментаря на `authHTTP`. Активний self-refresh —
+   наступний крок (PR 8b / ADR-0015).
 
 5. **`UsageError` розширено, щоб донести текст до popup.** `http(status:)` → **`http(status:body:)`**
    (тіло відповіді, `.public`-safe — це *відповідь*, не запит, тож токена не несе; обрізане до

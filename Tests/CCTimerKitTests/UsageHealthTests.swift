@@ -25,11 +25,13 @@ struct FailureReasonFromTokenErrorTests {
         #expect(FailureReason(TokenError.itemNotFound) == .notSignedIn)
     }
 
-    @Test func expiredIsAuthHTTP401() {
-        #expect(FailureReason(TokenError.expired) == .authHTTP(status: 401, body: nil))
+    @Test func expiredIsTokenStale() {
+        // An expired local token is benign/self-healing, NOT a server rejection — its own reason now.
+        #expect(FailureReason(TokenError.expired) == .tokenStale)
     }
 
     @Test func accessDeniedIsAuthHTTP401() {
+        // A Keychain ACL block IS an auth-level rejection, so — unlike .expired — it stays a 401.
         #expect(FailureReason(TokenError.accessDenied(-25293)) == .authHTTP(status: 401, body: nil))
     }
 

@@ -17,9 +17,14 @@ import Foundation
 public enum FailureReason: Sendable, Equatable {
     /// No token / not signed in (`TokenError.itemNotFound`). UX: "authenticate in Claude Code".
     case notSignedIn
-    /// An HTTP auth rejection — the API returned 401/403, or the local token was already expired/
-    /// ACL-blocked (mapped to a synthetic 401). `body` is the server's plain-text message when one
-    /// came back, shown on the popup's detail line beneath "Auth error (HTTP <status>)".
+    /// A present-but-expired local token, awaiting refresh. **Not** an auth rejection — it is benign and
+    /// self-healing: Claude Code rewrites the Keychain with a fresh pair while it runs. UX: a calm
+    /// "token expired, waiting" line, never the scary "authorization rejected" copy (issue: an expired
+    /// token used to be mapped to a synthetic 401, which read as a server rejection it never was).
+    case tokenStale
+    /// An HTTP auth rejection — the API returned 401/403, or the local token's Keychain ACL blocked the
+    /// read (`TokenError.accessDenied` → synthetic 401). `body` is the server's plain-text message when
+    /// one came back, shown on the popup's detail line beneath "Auth error (HTTP <status>)".
     case authHTTP(status: Int, body: String?)
     /// The request timed out (`URLError.timedOut`). UX: "Authentication API timeout".
     case timeout
@@ -44,8 +49,13 @@ public enum FailureReason: Sendable, Equatable {
         switch error {
         case .itemNotFound:
             self = .notSignedIn
-        case .expired, .accessDenied:
-            // The token is present but unusable — treat as an auth rejection (401), no server body.
+        case .expired:
+            // Present but stale — benign and self-healing once Claude Code refreshes. NOT a rejection,
+            // so it gets its own reason rather than a synthetic 401 (which read as a server auth error).
+            self = .tokenStale
+        case .accessDenied:
+            // The Keychain ACL blocked the read (the user declined / "Always Allow" not granted). That
+            // genuinely is an auth-level rejection, so — unlike `.expired` — it stays a synthetic 401.
             self = .authHTTP(status: 401, body: nil)
         case .malformedData, .keychainError:
             self = .unknown

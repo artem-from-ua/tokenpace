@@ -388,8 +388,9 @@ struct PollOnceTests {
         let outcome = await e.pollOnce(state: PollState(), claudeActive: true)
         #expect(outcome == .tokenError(.expired))
         #expect(await counter.count == 0)          // no request was sent
-        // The reason maps to a synthetic 401 (auth rejection), popup warns immediately.
-        #expect(FailureReason(.expired) == .authHTTP(status: 401, body: nil))
+        // An expired token maps to the benign `.tokenStale` (not a synthetic 401); popup still warns
+        // immediately, but with calm "waiting for refresh" copy rather than "authorization rejected".
+        #expect(FailureReason(.expired) == .tokenStale)
     }
 
     @Test func notSignedInSkipsFetch() async {
