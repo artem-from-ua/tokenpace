@@ -18,17 +18,28 @@ PLIST_IN="${ROOT}/scripts/Info.plist.in"
 VERSION="$(tr -d ' \t\n\r' < "${ROOT}/VERSION")"
 BUILD="$(git -C "${ROOT}" rev-list --count HEAD 2>/dev/null || echo 1)"
 
-echo "==> swift build -c release (this may take a while on first run)"
-swift build --package-path "${ROOT}" -c release 2>&1 | tee /tmp/cc-timer-build.log
+# Build a universal binary (arm64 + x86_64) so the .app runs natively on both Apple Silicon and
+# Intel Macs. SwiftPM has no single --arch flag like Xcode, so each slice is built per-triple and
+# merged with `lipo`. Each `swift build` is a no-op once cached, so re-runs are cheap.
+ARCHES=(arm64 x86_64)
+SLICES=()
+for arch in "${ARCHES[@]}"; do
+    triple="${arch}-apple-macosx"
+    echo "==> swift build -c release --triple ${triple} (this may take a while on first run)"
+    swift build --package-path "${ROOT}" -c release --triple "${triple}" 2>&1 \
+        | tee "/tmp/cc-timer-build-${arch}.log"
+    slice_dir="$(swift build --package-path "${ROOT}" -c release --triple "${triple}" --show-bin-path)"
+    slice="${slice_dir}/${APP_NAME}"
+    [ -x "${slice}" ] || { echo "error: ${arch} binary not found at ${slice}" >&2; exit 1; }
+    SLICES+=("${slice}")
+done
 
-BIN_DIR="$(swift build --package-path "${ROOT}" -c release --show-bin-path)"
-BIN="${BIN_DIR}/${APP_NAME}"
-[ -x "${BIN}" ] || { echo "error: built binary not found at ${BIN}" >&2; exit 1; }
-
-echo "==> assembling ${APP}  (version ${VERSION}, build ${BUILD})"
+echo "==> assembling ${APP}  (version ${VERSION}, build ${BUILD}, universal: ${ARCHES[*]})"
 rm -rf "${APP}"
 mkdir -p "${MACOS_DIR}" "${RES_DIR}"
-cp "${BIN}" "${MACOS_DIR}/${APP_NAME}"
+# Merge the per-arch slices into one universal Mach-O.
+lipo -create "${SLICES[@]}" -output "${MACOS_DIR}/${APP_NAME}"
+echo "==> lipo archs: $(lipo -archs "${MACOS_DIR}/${APP_NAME}")"
 
 # Info.plist with version/build substituted from template.
 sed -e "s/__VERSION__/${VERSION}/g" -e "s/__BUILD__/${BUILD}/g" \
