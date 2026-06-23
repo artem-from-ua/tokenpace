@@ -451,3 +451,40 @@ struct CeilToMinuteTests {
         #expect(sa.contains("07:00"))
     }
 }
+
+// MARK: - nextReset (last-resort reset estimate for null-window synthesis)
+
+@Suite("ResetClock.nextReset")
+struct NextResetTests {
+
+    /// 5-hour window: estimate is `now + 18000 s`, then rounded up to a 10-minute boundary.
+    @Test func fiveHourEstimateRoundedTo10Min() {
+        // now is a multiple of 600 (1_000_000 = 600 * 1666.66… → not exact), so verify via the
+        // contract rather than a hand-computed constant.
+        let result = ResetClock.nextReset(now: now, window: .fiveHour)
+        let raw = now.addingTimeInterval(18_000)
+        #expect(result == ResetClock.ceilTo10Minutes(raw))
+        #expect(result >= raw)                                   // never earlier than the real estimate
+        #expect(result.timeIntervalSince1970.truncatingRemainder(dividingBy: 600) == 0)  // on a 10-min grid
+    }
+
+    /// 7-day window uses the 604800 s duration.
+    @Test func sevenDayEstimateUsesWeekDuration() {
+        let result = ResetClock.nextReset(now: now, window: .sevenDay)
+        let raw = now.addingTimeInterval(604_800)
+        #expect(result == ResetClock.ceilTo10Minutes(raw))
+    }
+
+    /// An exact 10-minute boundary stays put (ceil leaves it alone).
+    @Test func exactBoundaryUnchanged() {
+        let onGrid = Date(timeIntervalSince1970: 1_800_000_000)   // multiple of 600
+        #expect(ResetClock.ceilTo10Minutes(onGrid) == onGrid)
+    }
+
+    /// One second past a 10-minute boundary rounds up to the next one.
+    @Test func oneSecondRoundsUpToNext10Min() {
+        let base = Date(timeIntervalSince1970: 1_800_000_000)
+        let plus1 = base.addingTimeInterval(1)
+        #expect(ResetClock.ceilTo10Minutes(plus1) == base.addingTimeInterval(600))
+    }
+}

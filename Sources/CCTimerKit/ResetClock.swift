@@ -307,4 +307,33 @@ public enum ResetClock {
         let rounded = minutes.rounded(.up)   // ceil; an exact minute stays put
         return Date(timeIntervalSince1970: rounded * 60)
     }
+
+    /// Round a `Date` **up** to the next 10-minute boundary. The coarser sibling of
+    /// ``ceilToMinute(_:)``, used only for the synthesized-reset fallback in
+    /// ``nextReset(now:window:)``: when the API omits `resets_at` on a reset boundary we have
+    /// no exact instant, so a 10-minute-rounded estimate keeps the countdown stable (and
+    /// honest about its low precision) rather than implying second-level accuracy.
+    static func ceilTo10Minutes(_ date: Date) -> Date {
+        let epoch = date.timeIntervalSince1970
+        let chunks = epoch / 600                 // 600 s == 10 min
+        let rounded = chunks.rounded(.up)        // ceil; an exact 10-min boundary stays put
+        return Date(timeIntervalSince1970: rounded * 600)
+    }
+
+    /// The next reset instant for `window`, estimated as `now + window.durationSeconds` and
+    /// rounded up to a 10-minute boundary (``ceilTo10Minutes(_:)``).
+    ///
+    /// This is a **last-resort fallback**, used by ``UsageSnapshot`` only when the API returns a
+    /// window as `null` on a reset boundary *and* the matching `limits[]` entry carries no usable
+    /// `resets_at`. The real `resets_at` (preferred) comes from the window object or the limits
+    /// array; this estimate exists so the bars/countdown keep working through the transition
+    /// instead of the whole snapshot failing to decode.
+    ///
+    /// - Parameters:
+    ///   - now: The current instant (inject for deterministic tests; do **not** call `Date()`).
+    ///   - window: The rolling window whose next reset to estimate.
+    public static func nextReset(now: Date, window: LimitWindow) -> Date {
+        let estimate = now.addingTimeInterval(TimeInterval(window.durationSeconds))
+        return ceilTo10Minutes(estimate)
+    }
 }
