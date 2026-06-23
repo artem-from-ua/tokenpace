@@ -12,6 +12,8 @@
 Те саме, що показує statusline-плагін у терміналі, але **на один погляд** у menu bar:
 дві горизонтальні смужки (5h / 7d) з кольоровим pacing і час до ресету.
 
+<img src="docs/assets/cc-timer-demo.png" alt="cc-timer у menu bar: дві pacing-смужки + статус-крапка, а в попапі — статуси сервісів, ліміти 5h/7d/Sonnet із кольоровим pacing і часом до ресету" width="240">
+
 Джерело даних — офіційний endpoint Anthropic `GET /api/oauth/usage`, авторизація — OAuth-токен
 Claude Code з macOS Keychain. **Токен ніколи не покидає Mac.**
 
