@@ -34,7 +34,7 @@ Claude Code з macOS Keychain. **Токен ніколи не покидає Mac
 3. Запусти з **Launchpad** або Finder. Іконки в Dock не буде — застосунок живе в menu bar.
 
 Застосунок нотаризований Apple, тож Gatekeeper не лаятиметься. Працює на Apple Silicon та Intel
-(universal binary). **Launch-at-login** (автозапуск) умикається в `Configure…` і працює для копії,
+(universal binary). **Launch-at-login** (автозапуск) умикається в `Settings…` і працює для копії,
 запущеної з `/Applications`.
 
 ## Документація

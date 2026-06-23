@@ -37,7 +37,7 @@ public enum LaunchAtLogin {
         status == .notRegistered
     }
 
-    /// The checkbox state to show in the Configure… window: on **only** when the item is actually
+    /// The checkbox state to show in the Settings… window: on **only** when the item is actually
     /// registered. `requiresApproval` reads as off, because launch-at-login is not in effect until
     /// the user re-enables it in System Settings.
     public static func toggleState(for status: Status) -> Bool {
