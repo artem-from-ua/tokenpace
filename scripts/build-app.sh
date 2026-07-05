@@ -1,12 +1,12 @@
 #!/bin/bash
-# build-app.sh — assemble cc-timer.app from a release SwiftPM build.
+# build-app.sh — assemble TokenPace.app from a release SwiftPM build.
 # CLT-only friendly; no full Xcode required.
 # Signs with Developer ID when available; produces an unsigned app otherwise.
-# Output: ./build/cc-timer.app  (already covered by .gitignore)
+# Output: ./build/TokenPace.app  (already covered by .gitignore)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_NAME="cc-timer"
+APP_NAME="TokenPace"
 OUT_DIR="${ROOT}/build"
 APP="${OUT_DIR}/${APP_NAME}.app"
 CONTENTS="${APP}/Contents"
@@ -27,7 +27,7 @@ for arch in "${ARCHES[@]}"; do
     triple="${arch}-apple-macosx"
     echo "==> swift build -c release --triple ${triple} (this may take a while on first run)"
     swift build --package-path "${ROOT}" -c release --triple "${triple}" 2>&1 \
-        | tee "/tmp/cc-timer-build-${arch}.log"
+        | tee "/tmp/tokenpace-build-${arch}.log"
     slice_dir="$(swift build --package-path "${ROOT}" -c release --triple "${triple}" --show-bin-path)"
     slice="${slice_dir}/${APP_NAME}"
     [ -x "${slice}" ] || { echo "error: ${arch} binary not found at ${slice}" >&2; exit 1; }
@@ -63,18 +63,18 @@ if [ -n "${IDENTITY}" ]; then
 
     # --- Optional notarization (requires a stored notarytool keychain profile) ---
     # Create the profile once with:
-    #   xcrun notarytool store-credentials cc-timer-notary --apple-id <id> --team-id <TEAMID>
-    if xcrun notarytool history --keychain-profile cc-timer-notary >/dev/null 2>&1; then
+    #   xcrun notarytool store-credentials tokenpace-notary --apple-id <id> --team-id <TEAMID>
+    if xcrun notarytool history --keychain-profile tokenpace-notary >/dev/null 2>&1; then
         echo "==> notarize (notarytool submit --wait); this can take several minutes"
         ZIP="${OUT_DIR}/${APP_NAME}.zip"
         ditto -c -k --keepParent "${APP}" "${ZIP}"
         xcrun notarytool submit "${ZIP}" \
-              --keychain-profile cc-timer-notary --wait
+              --keychain-profile tokenpace-notary --wait
         xcrun stapler staple "${APP}"
         rm -f "${ZIP}"
         echo "==> notarization complete"
     else
-        echo "==> notarization skipped (no 'cc-timer-notary' notarytool profile found)"
+        echo "==> notarization skipped (no 'tokenpace-notary' notarytool profile found)"
     fi
 else
     echo "==> signing skipped (no Developer ID identity found) — producing UNSIGNED app"

@@ -20,3 +20,4 @@
 | [0013](0013-claude-status-line.md) | Рядок статусу сервісів Claude у попапі — лише `component.status` двох компонентів, окрема ввічлива cadence | accepted |
 | [0014](0014-usage-decode-resilience-on-reset-boundary.md) | UsageSnapshot — синтез вікна на межі ресету замість падіння decode (хибне «Usage API unavailable») | accepted |
 | [0015](0015-no-idle-mode.md) | Прибрати компактний idle-режим — завжди смужки (крім стану помилки) | accepted |
+| [0016](0016-rename-to-tokenpace.md) | Перейменування проєкту cc-timer → TokenPace — ідентифікатори, межі історії | accepted |

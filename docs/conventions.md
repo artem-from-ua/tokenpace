@@ -38,7 +38,7 @@ git config core.hooksPath .githooks
 
 - **Swift build + test** — лише коли коміт торкається `*.swift` / `Package.swift`
   (docs-only коміти лишаються швидкими). Падіння збірки або тестів блокує коміт. Обійти
-  навмисний WIP-коміт: `CC_TIMER_SKIP_SWIFT_HOOK=1 git commit …`.
+  навмисний WIP-коміт: `TOKENPACE_SKIP_SWIFT_HOOK=1 git commit …`.
 - **PlantUML URL sync** — блокує коміт, якщо URL діаграм у `.md` розійшлися з джерелом
   (керується плагіном `plantuml`, між маркерами — не редагувати вручну).
 
@@ -47,7 +47,7 @@ git config core.hooksPath .githooks
 - SemVer 2.0.0.
 - **Єдине джерело істини для версії застосунку** — файл `VERSION` у корені репозиторію
   (`CFBundleShortVersionString`). Старт: `0.1.0`. Build-number = кількість git-комітів
-  (`git rev-list --count HEAD`). `CCTimerKit.version` у коді дублює значення з `VERSION`
+  (`git rev-list --count HEAD`). `TokenPaceKit.version` у коді дублює значення з `VERSION`
   і оновлюється разом із ним.
 
 ## Безпека
@@ -57,7 +57,7 @@ git config core.hooksPath .githooks
 
 ## Логування
 
-- Усі логи йдуть через фасад `AppLogger` (`os.Logger`), subsystem `com.artem-n.cc-timer`,
+- Усі логи йдуть через фасад `AppLogger` (`os.Logger`), subsystem `com.artem-n.tokenpace`,
   категорії `network`/`keychain`/`lifecycle`/`ui`. Не передформатовувати меседжі в `String` —
   лишати compile-time-інтерполяцію `os.Logger` із per-argument privacy.
 - **Секрети ніколи не логувати** (OAuth-токени, payload Keychain). Лише безпечні діагностичні

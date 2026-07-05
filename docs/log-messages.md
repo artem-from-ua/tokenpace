@@ -1,8 +1,8 @@
 # Log message catalog
 
-A complete, verbatim inventory of every log statement cc-timer emits, grouped by
+A complete, verbatim inventory of every log statement TokenPace emits, grouped by
 source file. All logging goes through the `AppLogger` facade (`os.Logger` /
-unified logging) — see [`Sources/CCTimerKit/AppLogger.swift`](../Sources/CCTimerKit/AppLogger.swift).
+unified logging) — see [`Sources/TokenPaceKit/AppLogger.swift`](../Sources/TokenPaceKit/AppLogger.swift).
 
 > **Keep this in sync.** Whenever you add, remove, or change the text of a log
 > statement, update the matching row here in the same change. See
@@ -10,7 +10,7 @@ unified logging) — see [`Sources/CCTimerKit/AppLogger.swift`](../Sources/CCTim
 
 ## Facade
 
-- **Subsystem:** `com.artem-n.cc-timer` (shared by the `.app` bundle and `swift run`).
+- **Subsystem:** `com.artem-n.tokenpace` (shared by the `.app` bundle and `swift run`).
 - **Categories:**
   - `network` — Usage/Status API requests, HTTP result codes, decode failures, snapshot synthesis.
   - `keychain` — Keychain reads (`OSStatus`), token-expiry checks.
@@ -20,7 +20,7 @@ unified logging) — see [`Sources/CCTimerKit/AppLogger.swift`](../Sources/CCTim
 Watch them live:
 
 ```sh
-log stream --predicate 'subsystem == "com.artem-n.cc-timer"' --level debug
+log stream --predicate 'subsystem == "com.artem-n.tokenpace"' --level debug
 ```
 
 ## Privacy
@@ -34,23 +34,23 @@ the request `Authorization` header, never in the response.
 
 In the tables below, `<…>` marks an interpolated value.
 
-## `Sources/cc-timer/App.swift`
+## `Sources/TokenPace/App.swift`
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 130 | `lifecycle` | `.info` | `cc-timer status item attached (<version>); live polling started` | `applicationDidFinishLaunching` — after the status item is attached and polling starts |
+| 130 | `lifecycle` | `.info` | `TokenPace status item attached (<version>); live polling started` | `applicationDidFinishLaunching` — after the status item is attached and polling starts |
 | 154 | `lifecycle` | `.notice` | `launch-at-login: status=<status>, no auto-register` | `registerLaunchAtLoginIfNeeded()` — status check shows no auto-register is needed |
 | 160 | `lifecycle` | `.notice` | `launch-at-login: auto-registered on first launch (opt-out)` | successful auto-registration on first launch |
 | 162 | `lifecycle` | `.error` | `launch-at-login: auto-register failed: <error>` | `LaunchAtLoginController.enable()` threw |
 
-## `Sources/cc-timer/SettingsWindowController.swift`
+## `Sources/TokenPace/SettingsWindowController.swift`
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
 | 148 | `lifecycle` | `.notice` | `launch-at-login: user set <true/false>` | user toggled the launch-at-login checkbox successfully |
 | 151 | `lifecycle` | `.error` | `launch-at-login: toggle failed: <error>` | toggle threw (e.g. unsigned build) |
 
-## `Sources/cc-timer/PollingShell.swift`
+## `Sources/TokenPace/PollingShell.swift`
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
@@ -60,7 +60,7 @@ In the tables below, `<…>` marks an interpolated value.
 | 87 | `lifecycle` | `.notice` | `network restored, polling immediately` | transition to `.satisfied` |
 | 90 | `lifecycle` | `.notice` | `network lost, showing stale data` | transition to `.unsatisfied` |
 
-## `Sources/CCTimerKit/UsageClient.swift`
+## `Sources/TokenPaceKit/UsageClient.swift`
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
@@ -71,7 +71,7 @@ In the tables below, `<…>` marks an interpolated value.
 | 150 | `network` | `.error` | `usage rate-limited: HTTP 429 retryAfter=<n>` | HTTP 429 |
 | 155 | `network` | `.error` | `usage request failed: HTTP <statusCode>` | other non-200/non-429 status |
 
-## `Sources/CCTimerKit/StatusClient.swift`
+## `Sources/TokenPaceKit/StatusClient.swift`
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
@@ -81,21 +81,21 @@ In the tables below, `<…>` marks an interpolated value.
 | 85 | `network` | `.notice` | `status 200 ok components=<count>` | HTTP 200; logs component count |
 | 91 | `network` | `.error` | `status request failed: HTTP <statusCode>` | non-200 status |
 
-## `Sources/CCTimerKit/TokenProvider.swift`
+## `Sources/TokenPaceKit/TokenProvider.swift`
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
 | 158 | `keychain` | `.notice` | `token expired, len=<count>` | `accessTokenIfValid(_:now:)` — `.isValid()` returned false |
 | 228 | `keychain` | `.debug` | `SecItemCopyMatching status=<status>` | `readRawData()` — after every Keychain read; logs `OSStatus` |
 
-## `Sources/CCTimerKit/UsageSnapshot.swift`
+## `Sources/TokenPaceKit/UsageSnapshot.swift`
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
 | 216 | `network` | `.notice` | `filled <key> sub-window resets_at from seven_day (was null)` | a per-model sub-window's `resets_at` was null; borrowed from the parent 7-day window |
 | 257 | `network` | `.notice` | `synthesized <key> window on reset boundary (utilization=0, resets_at source=<source>)` | synthesized a zero-usage window on an API reset boundary; `source` is `limits[]` or `local-estimate` |
 
-## `Sources/CCTimerKit/PollingEngine.swift`
+## `Sources/TokenPaceKit/PollingEngine.swift`
 
 One log line per interval change. The format is built by
 `IntervalDecision.logMessage` (line 164): `interval <from>→<to>: <phrase>`.

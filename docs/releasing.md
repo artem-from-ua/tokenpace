@@ -1,6 +1,6 @@
 # Процедура релізу
 
-Як зібрати, нотаризувати й опублікувати реліз `cc-timer` на GitHub, щоб ним могли
+Як зібрати, нотаризувати й опублікувати реліз `TokenPace` на GitHub, щоб ним могли
 користуватися інші (друзі, тестувальники) без попереджень Gatekeeper.
 
 > **Стейдж 1 — ручний реліз** (цей документ). Автоматизацію планують окремо:
@@ -10,9 +10,9 @@
 
 - **Developer ID Application** identity у Keychain
   (`security find-identity -v -p codesigning` показує 1 valid identity).
-- **notarytool keychain-профіль** `cc-timer-notary`:
+- **notarytool keychain-профіль** `tokenpace-notary`:
   ```sh
-  xcrun notarytool store-credentials cc-timer-notary \
+  xcrun notarytool store-credentials tokenpace-notary \
         --apple-id <APPLE_ID> --team-id <TEAM_ID>
   # запитає app-specific password з appleid.apple.com (НЕ основний пароль)
   ```
@@ -26,7 +26,7 @@
 ### 1. Визначити версію
 
 Версія береться з файлу `VERSION` (марк. версія) і дублюється в
-`Sources/CCTimerKit/CCTimerKit.swift` (`CCTimerKit.version`). Якщо бампаєш —
+`Sources/TokenPaceKit/TokenPaceKit.swift` (`TokenPaceKit.version`). Якщо бампаєш —
 онови **обидва** місця в окремому PR **перед** релізом і дотримуйся
 [SemVer](https://semver.org/).
 
@@ -52,9 +52,9 @@ staple`). Нотаризація може зайняти кілька хвили
 ### 3. Перевірити нотаризацію
 
 ```sh
-spctl -a -vvv -t exec ./build/cc-timer.app   # → accepted (Notarized Developer ID)
-xcrun stapler validate ./build/cc-timer.app  # → The validate action worked!
-lipo -archs ./build/cc-timer.app/Contents/MacOS/cc-timer   # → x86_64 arm64
+spctl -a -vvv -t exec ./build/TokenPace.app   # → accepted (Notarized Developer ID)
+xcrun stapler validate ./build/TokenPace.app  # → The validate action worked!
+lipo -archs ./build/TokenPace.app/Contents/MacOS/TokenPace   # → x86_64 arm64
 ```
 
 Якщо `spctl` дає `rejected` — реліз **не** публікувати, спершу розібратися.
@@ -66,10 +66,10 @@ lipo -archs ./build/cc-timer.app/Contents/MacOS/cc-timer   # → x86_64 arm64
 релізу робимо окремо — з **уже застейпленого** `.app` (щоб квиток поїхав усередині):
 
 ```sh
-ditto -c -k --keepParent ./build/cc-timer.app "./build/cc-timer-${VERSION}.zip"
+ditto -c -k --keepParent ./build/TokenPace.app "./build/TokenPace-${VERSION}.zip"
 ```
 
-`--keepParent` зберігає теку `cc-timer.app` усередині архіву (інакше
+`--keepParent` зберігає теку `TokenPace.app` усередині архіву (інакше
 розпакується «розсипом»). `ditto` (а не `zip`) коректно зберігає підпис і
 extended attributes.
 
@@ -80,8 +80,8 @@ git tag "v${VERSION}"
 git push origin "v${VERSION}"
 
 gh release create "v${VERSION}" \
-   "./build/cc-timer-${VERSION}.zip" \
-   --title "cc-timer v${VERSION}" \
+   "./build/TokenPace-${VERSION}.zip" \
+   --title "TokenPace v${VERSION}" \
    --notes "Опис релізу: що нового, як встановити (див. нижче)."
 ```
 
@@ -93,16 +93,16 @@ gh release create "v${VERSION}" \
 
 ```sh
 # симуляція завантаженого з інтернету застосунку
-cp -R ./build/cc-timer.app /tmp/cc-timer-test.app
-xattr -w com.apple.quarantine "0081;0;Safari;" /tmp/cc-timer-test.app
-spctl -a -vvv -t exec /tmp/cc-timer-test.app   # має бути accepted
-rm -rf /tmp/cc-timer-test.app
+cp -R ./build/TokenPace.app /tmp/TokenPace-test.app
+xattr -w com.apple.quarantine "0081;0;Safari;" /tmp/TokenPace-test.app
+spctl -a -vvv -t exec /tmp/TokenPace-test.app   # має бути accepted
+rm -rf /tmp/TokenPace-test.app
 ```
 
 ## Інструкція для користувачів (у тілі релізу)
 
-> 1. Завантаж `cc-timer-X.Y.Z.zip` і розпакуй (подвійний клік).
-> 2. Перетягни **cc-timer.app** у теку **Applications**.
+> 1. Завантаж `TokenPace-X.Y.Z.zip` і розпакуй (подвійний клік).
+> 2. Перетягни **TokenPace.app** у теку **Applications**.
 > 3. Запусти з **Launchpad** або Finder. Іконки в Dock не буде — застосунок
 >    живе в menu bar (`LSUIElement`).
 >

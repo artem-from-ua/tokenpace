@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>cc-timer</string>
+    <string>TokenPace</string>
     <key>CFBundleDisplayName</key>
-    <string>cc-timer</string>
+    <string>TokenPace</string>
     <key>CFBundleIdentifier</key>
-    <string>com.artem-n.cc-timer</string>
+    <string>com.artem-n.tokenpace</string>
     <key>CFBundleExecutable</key>
-    <string>cc-timer</string>
+    <string>TokenPace</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
