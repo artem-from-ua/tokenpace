@@ -2,25 +2,25 @@
 import PackageDescription
 
 let package = Package(
-    name: "cc-timer",
+    name: "TokenPace",
     platforms: [
         .macOS(.v15)
     ],
     products: [
-        .executable(name: "cc-timer", targets: ["cc-timer"]),
-        .library(name: "CCTimerKit", targets: ["CCTimerKit"]),
+        .executable(name: "TokenPace", targets: ["TokenPace"]),
+        .library(name: "TokenPaceKit", targets: ["TokenPaceKit"]),
     ],
     targets: [
         .executableTarget(
-            name: "cc-timer",
-            dependencies: ["CCTimerKit"]
+            name: "TokenPace",
+            dependencies: ["TokenPaceKit"]
         ),
         .target(
-            name: "CCTimerKit"
+            name: "TokenPaceKit"
         ),
         .testTarget(
-            name: "CCTimerKitTests",
-            dependencies: ["CCTimerKit"]
+            name: "TokenPaceKitTests",
+            dependencies: ["TokenPaceKit"]
         ),
     ]
 )

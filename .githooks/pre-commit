@@ -2,10 +2,10 @@
 
 # Swift build + test gate — runs only when the commit touches Swift code, so doc-only or
 # config-only commits stay fast. Mirrors CLAUDE.md's "swift build / swift test" commands.
-# Set CC_TIMER_SKIP_SWIFT_HOOK=1 to bypass (e.g. an intentional WIP commit).
+# Set TOKENPACE_SKIP_SWIFT_HOOK=1 to bypass (e.g. an intentional WIP commit).
 SWIFT_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- '*.swift' 'Package.swift' 'Package.resolved')
 
-if [ -n "$SWIFT_STAGED" ] && [ "$CC_TIMER_SKIP_SWIFT_HOOK" != "1" ]; then
+if [ -n "$SWIFT_STAGED" ] && [ "$TOKENPACE_SKIP_SWIFT_HOOK" != "1" ]; then
     if command -v swift >/dev/null 2>&1; then
         echo "Swift sources changed — running swift build…"
         if ! swift build; then
@@ -17,7 +17,7 @@ if [ -n "$SWIFT_STAGED" ] && [ "$CC_TIMER_SKIP_SWIFT_HOOK" != "1" ]; then
         if ! swift test; then
             echo ""
             echo "Commit blocked: swift test failed."
-            echo "  Bypass (WIP only): CC_TIMER_SKIP_SWIFT_HOOK=1 git commit …"
+            echo "  Bypass (WIP only): TOKENPACE_SKIP_SWIFT_HOOK=1 git commit …"
             exit 1
         fi
     else
