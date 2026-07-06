@@ -1,9 +1,17 @@
 ---
-status: accepted
+status: superseded
 date: 2026-06-22
+superseded_by: [0018]
 ---
 
 # ADR-0012: Вікно «Configure…» та launch-at-login (SMAppService)
+
+> **Частково superseded [ADR-0018](0018-launch-at-login-notfound-recovery.md):** Рішення §4 у частині
+> «Недоступність — видима, не мовчазна» (трактування статусу `.notFound` як термінального → сірий
+> дизейблений чекбокс) скасовано. `.notFound` повертається **і** після заміни бандла при оновленні,
+> а не лише на `swift run`; тепер чекбокс завжди клікабельний і `register()` сам вирішує (#69). Решта
+> цього ADR (окреме вікно, розкол pure-core / thin-shell, opt-out, best-effort на unsigned, меню-дії)
+> лишається чинною; тіло збережено в історичному вигляді.
 
 > **Примітка (пізніша зміна):** пункт меню та вікно пізніше перейменовано `Configure…` → `Settings…`
 > (тип `ConfigureWindowController` → `SettingsWindowController`). Рішення лишається чинним — змінилася

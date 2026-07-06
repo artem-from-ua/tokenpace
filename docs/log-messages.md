@@ -39,9 +39,10 @@ In the tables below, `<…>` marks an interpolated value.
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
 | 130 | `lifecycle` | `.info` | `TokenPace status item attached (<version>); live polling started` | `applicationDidFinishLaunching` — after the status item is attached and polling starts |
-| 154 | `lifecycle` | `.notice` | `launch-at-login: status=<status>, no auto-register` | `registerLaunchAtLoginIfNeeded()` — status check shows no auto-register is needed |
-| 160 | `lifecycle` | `.notice` | `launch-at-login: auto-registered on first launch (opt-out)` | successful auto-registration on first launch |
-| 162 | `lifecycle` | `.error` | `launch-at-login: auto-register failed: <error>` | `LaunchAtLoginController.enable()` threw |
+| 159 | `lifecycle` | `.notice` | `launch-at-login: not an .app bundle (swift run), skipping opt-out auto-register` | `registerLaunchAtLoginIfNeeded()` — running as a bare `swift run` binary, so opt-out auto-register is skipped to avoid polluting Login Items (#69) |
+| 165 | `lifecycle` | `.notice` | `launch-at-login: status=<status>, no auto-register` | status is `.registered`/`.requiresApproval`, so no auto-register is needed |
+| 171 | `lifecycle` | `.notice` | `launch-at-login: auto-registered (opt-out)` | successful auto-registration (`.notRegistered`, or recovery from `.notFound` after an update — #69) |
+| 175 | `lifecycle` | `.error` | `launch-at-login: auto-register failed: <error>` | `LaunchAtLoginController.enable()` threw on an installed `.app` bundle — an unexpected, registerable-but-refused case |
 
 ## `Sources/TokenPace/ClaudeCLIRefresher.swift`
 
@@ -61,8 +62,8 @@ token itself never is.
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 148 | `lifecycle` | `.notice` | `launch-at-login: user set <true/false>` | user toggled the launch-at-login checkbox successfully |
-| 151 | `lifecycle` | `.error` | `launch-at-login: toggle failed: <error>` | toggle threw (e.g. unsigned build) |
+| 158 | `lifecycle` | `.notice` | `launch-at-login: user set <true/false>` | user toggled the launch-at-login checkbox successfully |
+| 164 | `lifecycle` | `.error` | `launch-at-login: toggle failed: <error>` | toggle threw (e.g. unsigned build) — a deliberate user action, so it stays `.error` |
 
 ## `Sources/TokenPace/PollingShell.swift`
 
@@ -135,8 +136,8 @@ One log line per interval change. The format is built by
 | Category | Calls | Files |
 |----------|-------|-------|
 | `network` | 13 | `UsageClient` (6), `StatusClient` (5), `UsageSnapshot` (2) |
-| `lifecycle` | 12 | `App` (4), `SettingsWindowController` (2), `PollingShell` (5), `PollingEngine` (1) |
+| `lifecycle` | 13 | `App` (5), `SettingsWindowController` (2), `PollingShell` (5), `PollingEngine` (1) |
 | `keychain` | 8 | `TokenProvider` (2), `ClaudeCLIRefresher` (6) |
 | `ui` | 0 | — (category defined, unused) |
 
-**Total: 29 log statements** — `.error` ×15, `.notice` ×13, `.info` ×1, `.debug` ×1.
+**Total: 30 log statements** — `.error` ×15, `.notice` ×14, `.info` ×1, `.debug` ×1.

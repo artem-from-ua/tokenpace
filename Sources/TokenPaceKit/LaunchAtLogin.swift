@@ -25,16 +25,21 @@ public enum LaunchAtLogin {
         /// Registered but the user disabled it in System Settings → Login Items; needs manual
         /// approval there (`.requiresApproval`).
         case requiresApproval
-        /// The service could not be found — typically a bare `swift run` binary with no valid app
-        /// bundle, or a registration that is gone (`.notFound`).
+        /// The service could not be found (`.notFound`). Two distinct situations map here:
+        /// a bare `swift run` binary with no valid app bundle (registration is genuinely
+        /// impossible), **or** a legitimate signed install whose login-item registration dropped
+        /// with the old bundle on an in-place update — recoverable by re-`register()` (#69).
         case notFound
     }
 
-    /// Opt-out policy: auto-register at first launch **only** when the item is not registered yet.
-    /// `requiresApproval`/`registered`/`notFound` are left untouched — the user or the system has
-    /// already decided, and re-registering would either be a no-op or override an explicit choice.
-    public static func shouldRegisterOnFirstLaunch(_ status: Status) -> Bool {
-        status == .notRegistered
+    /// Opt-out policy: attempt registration whenever the OS has no active login item for us —
+    /// either never registered (`.notRegistered`) or a registration that dropped, e.g. after a
+    /// bundle replacement on update (`.notFound`, #69). Idempotent: `.registered`/`.requiresApproval`
+    /// are left alone — the user or the system has already decided, and re-registering would either
+    /// be a no-op or override an explicit choice. Whether `.notFound` can actually register is left
+    /// for `register()` to adjudicate (throws on `swift run`, succeeds on a real install).
+    public static func shouldAttemptRegister(_ status: Status) -> Bool {
+        status == .notRegistered || status == .notFound
     }
 
     /// The checkbox state to show in the Settings… window: on **only** when the item is actually
@@ -48,14 +53,5 @@ public enum LaunchAtLogin {
     /// `requiresApproval`, where the toggle cannot take effect without a manual approval there.
     public static func needsSystemSettings(_ status: Status) -> Bool {
         status == .requiresApproval
-    }
-
-    /// Whether launch-at-login can be controlled at all in the current run context. `.notFound`
-    /// means the OS has no registerable login item for this code identity — a bare `swift run`
-    /// binary (no app bundle) or an ad-hoc-signed bundle that `SMAppService` rejects. In that case
-    /// the toggle is meaningless: the UI disables it and explains that a properly installed build is
-    /// needed (ADR-0012 §"best-effort на unsigned").
-    public static func isAvailable(_ status: Status) -> Bool {
-        status != .notFound
     }
 }

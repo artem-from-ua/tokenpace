@@ -145,20 +145,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.terminate(nil)
     }
 
-    /// Register launch-at-login on the first launch only (opt-out): if the item is not registered
-    /// yet, register it; otherwise leave the user's/system's existing choice alone. Best-effort —
-    /// `register()` may throw on an unsigned build, which is caught and logged, never fatal.
+    /// Opt-out auto-registration: attempt to register whenever the OS has no active login item for
+    /// us — either never registered, or a registration that dropped with a replaced bundle on an
+    /// in-place update (`.notFound`, #69). This runs on every launch and is idempotent via the
+    /// status guard: `.registered`/`.requiresApproval` are left alone (the user/system decided).
+    ///
+    /// Gated to a real `.app` bundle: an ad-hoc-signed `swift run` binary is registerable too, so
+    /// without this gate every dev run would silently add a login item pointing at `.build/…` and
+    /// pollute the user's Login Items (#69). On a dev build the Settings toggle stays clickable, so
+    /// launch-at-login can still be exercised on demand — it's just not auto-registered.
     private func registerLaunchAtLoginIfNeeded() {
+        guard LaunchAtLoginController.isAppBundle else {
+            AppLogger.lifecycle.notice(
+                "launch-at-login: not an .app bundle (swift run), skipping opt-out auto-register")
+            return
+        }
         let status = LaunchAtLoginController.currentStatus()
-        guard LaunchAtLogin.shouldRegisterOnFirstLaunch(status) else {
+        guard LaunchAtLogin.shouldAttemptRegister(status) else {
             AppLogger.lifecycle.notice(
                 "launch-at-login: status=\(String(describing: status), privacy: .public), no auto-register")
             return
         }
         do {
             try LaunchAtLoginController.enable()
-            AppLogger.lifecycle.notice("launch-at-login: auto-registered on first launch (opt-out)")
+            AppLogger.lifecycle.notice("launch-at-login: auto-registered (opt-out)")
         } catch {
+            // A genuine install registers here — including recovery after a bundle replacement
+            // dropped the BTM item. A throw means an installed-but-unregisterable bundle; log it.
             AppLogger.lifecycle.error(
                 "launch-at-login: auto-register failed: \(error.localizedDescription, privacy: .public)")
         }

@@ -260,8 +260,14 @@ final class PopupViewController: NSViewController {
 
     private let stack = NSStackView()
 
-    /// The app title shown bold at the top of the popup. A constant — not localised.
-    private static let appTitle = "TokenPace"
+    /// The app title shown bold at the top of the popup — not localised. A bare `swift run` dev
+    /// binary (not an `.app` bundle) is tagged "TokenPace (dev build)" so it is visually
+    /// distinguishable from an installed `.app` running at the same time (they otherwise look
+    /// identical in the menu bar). Reuses `LaunchAtLoginController.isAppBundle`, the one reliable
+    /// bundle-vs-`swift run` discriminator (#69).
+    private static var appTitle: String {
+        LaunchAtLoginController.isAppBundle ? "TokenPace" : "TokenPace (dev build)"
+    }
 
     override func loadView() {
         let container = NSView()
