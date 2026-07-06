@@ -25,8 +25,9 @@ struct FailureReasonFromTokenErrorTests {
         #expect(FailureReason(TokenError.itemNotFound) == .notSignedIn)
     }
 
-    @Test func expiredIsAuthHTTP401() {
-        #expect(FailureReason(TokenError.expired) == .authHTTP(status: 401, body: nil))
+    @Test func expiredIsTokenExpired() {
+        // Its own reason (not a synthetic 401): the delegated refresh (ADR-0017) may still fix it.
+        #expect(FailureReason(TokenError.expired) == .tokenExpired)
     }
 
     @Test func accessDeniedIsAuthHTTP401() {

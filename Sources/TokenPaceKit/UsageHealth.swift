@@ -17,8 +17,12 @@ import Foundation
 public enum FailureReason: Sendable, Equatable {
     /// No token / not signed in (`TokenError.itemNotFound`). UX: "authenticate in Claude Code".
     case notSignedIn
-    /// An HTTP auth rejection — the API returned 401/403, or the local token was already expired/
-    /// ACL-blocked (mapped to a synthetic 401). `body` is the server's plain-text message when one
+    /// The stored token is expired and the delegated refresh (ADR-0017) has not fixed it yet —
+    /// either the attempt failed (no `claude` binary, timeout) or the gate is cooling down.
+    /// UX: honest "token expired" wording instead of a synthetic HTTP 401.
+    case tokenExpired
+    /// An HTTP auth rejection — the API returned 401/403, or the local token was ACL-blocked
+    /// (mapped to a synthetic 401). `body` is the server's plain-text message when one
     /// came back, shown on the popup's detail line beneath "Auth error (HTTP <status>)".
     case authHTTP(status: Int, body: String?)
     /// The request timed out (`URLError.timedOut`). UX: "Authentication API timeout".
@@ -44,8 +48,12 @@ public enum FailureReason: Sendable, Equatable {
         switch error {
         case .itemNotFound:
             self = .notSignedIn
-        case .expired, .accessDenied:
-            // The token is present but unusable — treat as an auth rejection (401), no server body.
+        case .expired:
+            // Expired is its own reason (not a synthetic 401): the delegated refresh may still
+            // fix it unattended, so the UI wording must not demand a re-login outright.
+            self = .tokenExpired
+        case .accessDenied:
+            // The token is present but unreadable — treat as an auth rejection (401), no server body.
             self = .authHTTP(status: 401, body: nil)
         case .malformedData, .keychainError:
             self = .unknown
