@@ -197,10 +197,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusTransport = transport
         // Under the stub the bearer token is never validated (canned responses), so skip the
         // Keychain entirely — reading it would only pop the system access prompt on a dev build.
+        // The refresher is live-only for the same reason: a stub run must never spawn the CLI.
         let tokenProvider: TokenProviding = stubMode == nil ? KeychainTokenProvider() : StubTokenProvider()
+        let refresher: DelegatedRefresher? = stubMode == nil ? ClaudeCLIRefresher() : nil
         let engine = PollingEngine(
             transport: transport,
             tokenProvider: tokenProvider,
+            refresher: refresher,
             scheduler: LivePollScheduler(signals: signals.stream),
             probe: ProcessClaudeActivityProbe(),
             now: { Date() })
