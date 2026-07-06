@@ -13,7 +13,7 @@ unified logging) — see [`Sources/TokenPaceKit/AppLogger.swift`](../Sources/Tok
 - **Subsystem:** `com.artem-n.tokenpace` (shared by the `.app` bundle and `swift run`).
 - **Categories:**
   - `network` — Usage/Status API requests, HTTP result codes, decode failures, snapshot synthesis.
-  - `keychain` — Keychain reads (`OSStatus`), token-expiry checks.
+  - `keychain` — Keychain reads (`OSStatus`), token-expiry checks, delegated token refresh (ADR-0017).
   - `lifecycle` — app launch, launch-at-login, sleep/wake, network up/down, polling-interval changes.
   - `ui` — menu-bar rendering diagnostics (defined, currently unused).
 
@@ -42,6 +42,20 @@ In the tables below, `<…>` marks an interpolated value.
 | 154 | `lifecycle` | `.notice` | `launch-at-login: status=<status>, no auto-register` | `registerLaunchAtLoginIfNeeded()` — status check shows no auto-register is needed |
 | 160 | `lifecycle` | `.notice` | `launch-at-login: auto-registered on first launch (opt-out)` | successful auto-registration on first launch |
 | 162 | `lifecycle` | `.error` | `launch-at-login: auto-register failed: <error>` | `LaunchAtLoginController.enable()` threw |
+
+## `Sources/TokenPace/ClaudeCLIRefresher.swift`
+
+Delegated token refresh (ADR-0017): the outcome of every `claude` CLI spawn is logged; the
+token itself never is.
+
+| Line | Category | Level | Message | When |
+|------|----------|-------|---------|------|
+| 44 | `keychain` | `.error` | `delegated refresh: claude binary not found` | none of the known install locations holds an executable `claude` |
+| 51 | `keychain` | `.notice` | `delegated refresh: launching cli, path=<binary>` | before spawning the CLI; logs the resolved binary path |
+| 54 | `keychain` | `.error` | `delegated refresh: cli timed out after <timeout>s` | the CLI outlived the 30 s cap and was terminated |
+| 57 | `keychain` | `.error` | `delegated refresh: cli exited status=<code>` | the CLI exited non-zero (or failed to launch → `unknown`) |
+| 71 | `keychain` | `.notice` | `delegated refresh: expiresAt advanced` | post-run Keychain re-read shows a newer `expiresAt` — refresh succeeded |
+| 74 | `keychain` | `.error` | `delegated refresh: cli exited 0 but keychain unchanged` | the CLI finished cleanly but the stored credentials did not change |
 
 ## `Sources/TokenPace/SettingsWindowController.swift`
 
@@ -85,8 +99,8 @@ In the tables below, `<…>` marks an interpolated value.
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 158 | `keychain` | `.notice` | `token expired, len=<count>` | `accessTokenIfValid(_:now:)` — `.isValid()` returned false |
-| 228 | `keychain` | `.debug` | `SecItemCopyMatching status=<status>` | `readRawData()` — after every Keychain read; logs `OSStatus` |
+| 160 | `keychain` | `.notice` | `token expired, len=<count>` | `accessTokenIfValid(_:now:)` — `.isValid()` returned false |
+| 230 | `keychain` | `.debug` | `SecItemCopyMatching status=<status>` | `readRawData()` — after every Keychain read; logs `OSStatus` |
 
 ## `Sources/TokenPaceKit/UsageSnapshot.swift`
 
@@ -98,14 +112,14 @@ In the tables below, `<…>` marks an interpolated value.
 ## `Sources/TokenPaceKit/PollingEngine.swift`
 
 One log line per interval change. The format is built by
-`IntervalDecision.logMessage` (line 164): `interval <from>→<to>: <phrase>`.
+`IntervalDecision.logMessage` (line 170): `interval <from>→<to>: <phrase>`.
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 368 | `lifecycle` | `.notice` | `interval <from>→<to>: <phrase>` | the polling interval moved; emitted once per change |
+| 390 | `lifecycle` | `.notice` | `interval <from>→<to>: <phrase>` | the polling interval moved; emitted once per change |
 
 `<from>`/`<to>` render as whole minutes (`3m`) or fall back to seconds (`90s`).
-`<phrase>` is one of six, keyed by `IntervalDecision.Cause` (lines 174–183):
+`<phrase>` is one of six, keyed by `IntervalDecision.Cause` (lines 180–189):
 
 | `Cause` | Full example message | When |
 |---------|----------------------|------|
@@ -122,7 +136,7 @@ One log line per interval change. The format is built by
 |----------|-------|-------|
 | `network` | 13 | `UsageClient` (6), `StatusClient` (5), `UsageSnapshot` (2) |
 | `lifecycle` | 12 | `App` (4), `SettingsWindowController` (2), `PollingShell` (5), `PollingEngine` (1) |
-| `keychain` | 2 | `TokenProvider` (2) |
+| `keychain` | 8 | `TokenProvider` (2), `ClaudeCLIRefresher` (6) |
 | `ui` | 0 | — (category defined, unused) |
 
-**Total: 23 log statements** — `.error` ×11, `.notice` ×11, `.info` ×1, `.debug` ×1.
+**Total: 29 log statements** — `.error` ×15, `.notice` ×13, `.info` ×1, `.debug` ×1.
