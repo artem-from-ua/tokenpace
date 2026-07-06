@@ -99,14 +99,16 @@ public enum TokenError: Error, Equatable {
 ///
 /// ## Token strategy (SPEC "Стратегія токена")
 /// 1. Read from the Keychain; if `expiresAt` is in the future → hand back `accessToken` as is.
-/// 2. **Fallback only (rare, PR 8b):** if expired — refresh via `refreshToken` and rewrite the
-///    Keychain with the same structure, as Claude Code would. Risky: `refreshToken` may be
-///    single-use (SPEC "Відкриті питання"), so it is gated behind a test account.
+/// 2. **Fallback only (rare, ADR-0017):** if expired — the polling layer performs a *delegated
+///    refresh*: it spawns the `claude` CLI (`ClaudeCLIRefresher`) so Claude Code rotates its own
+///    credentials, then re-reads this provider. TokenPace never runs the `refresh_token` grant
+///    and never writes the Keychain — refresh tokens rotate, so a self-refresh would desync
+///    Claude Code's stored pair and log the user out of the CLI.
 ///
-/// Until 8b lands, an expired token is **never** sent to the API (that would guarantee a 401 and
-/// burn rate-limit budget). ``currentAccessToken(now:)`` throws ``TokenError/expired`` instead, and
-/// the polling layer (#9 / #13) treats that as "keep re-reading the Keychain until Claude Code
-/// writes a fresh token". `TokenProvider` itself holds no timer and stays stateless.
+/// An expired token is **never** sent to the API (that would guarantee a 401 and burn rate-limit
+/// budget). ``currentAccessToken(now:)`` throws ``TokenError/expired`` instead; the polling layer
+/// reacts with the delegated refresh above. `TokenProvider` itself holds no timer and stays
+/// stateless.
 ///
 /// ## Privacy
 /// The token is **never** logged. `AppLogger.keychain` carries only `.public` diagnostics —
@@ -139,9 +141,9 @@ public enum TokenProvider {
     /// The ready-to-use `accessToken` for the `Authorization: Bearer` header, validity-checked.
     ///
     /// On an expired token this throws ``TokenError/expired`` and **never returns the stale
-    /// token** — the agent must not send it to the API. The polling layer treats `.expired` as a
-    /// signal to keep re-reading the Keychain until Claude Code writes a fresh pair. PR 8b will
-    /// attempt a fallback refresh here before throwing.
+    /// token** — the agent must not send it to the API. The polling layer treats `.expired` as
+    /// the trigger for a delegated refresh (ADR-0017): it spawns the `claude` CLI so Claude Code
+    /// rewrites the Keychain, then re-reads through this same entry point.
     ///
     /// - Parameter now: the current instant (injected for tests; do not call `Date()` inside).
     /// - Throws: ``TokenError/expired`` when stale, or any error from ``credentials()``.
@@ -239,10 +241,4 @@ public enum TokenProvider {
         }
     }
 
-    // MARK: - PR 8b (fallback refresh) — NOT in this PR
-    // Added once the refresh round-trip is verified on a test Max account (refreshToken may be
-    // single-use); client_id / endpoint / PKCE are still unconfirmed (SPEC lines 270–273).
-    //   static func refreshAndStore(_ creds: OAuthCredentials) async throws -> OAuthCredentials
-    //   static func buildRefreshRequest(refreshToken:clientId:endpoint:) -> URLRequest  // pure → tested
-    //   private static func writeBack(_ creds: OAuthCredentials) throws                 // SecItemUpdate
 }

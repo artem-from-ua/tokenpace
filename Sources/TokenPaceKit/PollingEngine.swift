@@ -81,7 +81,8 @@ public struct PollOutput: Sendable, Equatable {
 
 // MARK: - Pure core: PollState / PollOutcome / advance
 
-/// The outcome of one poll attempt — the input to the pure ``PollingEngine/advance(previous:outcome:claudeActive:now:)``.
+/// The outcome of one poll attempt — the input to the pure
+/// ``PollingEngine/advance(previous:outcome:refresh:claudeActive:now:)``.
 public enum PollOutcome: Sendable, Equatable {
     case success(UsageSnapshot)
     case tokenError(TokenError)
@@ -89,7 +90,7 @@ public enum PollOutcome: Sendable, Equatable {
 }
 
 /// The engine's accumulated state between polls — the pure value the loop threads through
-/// ``PollingEngine/advance(previous:outcome:claudeActive:now:)``. Holds both interval dimensions
+/// ``PollingEngine/advance(previous:outcome:refresh:claudeActive:now:)``. Holds both interval dimensions
 /// (``PollingBackoff`` for 429, ``AdaptiveCadence`` for content), the latest activity reading, and
 /// the inputs ``UsageHealth`` needs (`lastSuccess`/`failingSince`/`reason`) plus the stale-safe
 /// `lastSnapshot`.
@@ -101,6 +102,9 @@ public struct PollState: Sendable, Equatable {
     public var failingSince: Date?
     public var lastSnapshot: UsageSnapshot?
     public var reason: FailureReason?
+    /// Anti-flap gate for delegated-refresh attempts (ADR-0017) — blocks a respawn of the
+    /// `claude` CLI for an escalating cooldown after each failed attempt.
+    public var refreshGate: RefreshGate
 
     /// Cold start: healthy backoff, fastest adaptive cadence, no data yet. `claudeActive` defaults
     /// to `true` so the very first interval is the responsive adaptive one until the first probe.
@@ -111,7 +115,8 @@ public struct PollState: Sendable, Equatable {
         lastSuccess: Date? = nil,
         failingSince: Date? = nil,
         lastSnapshot: UsageSnapshot? = nil,
-        reason: FailureReason? = nil
+        reason: FailureReason? = nil,
+        refreshGate: RefreshGate = RefreshGate()
     ) {
         self.backoff = backoff
         self.adaptive = adaptive
@@ -120,6 +125,7 @@ public struct PollState: Sendable, Equatable {
         self.failingSince = failingSince
         self.lastSnapshot = lastSnapshot
         self.reason = reason
+        self.refreshGate = refreshGate
     }
 
     /// The `UsageHealth` view-model input derived from this state.
@@ -189,10 +195,10 @@ public struct IntervalDecision: Sendable, Equatable {
 /// sleep/wake, network changes, the data changing, and whether a Claude Code session is running.
 ///
 /// **Pure core + thin shell** (the ADR-0008/0009/0010 pattern): all decision logic
-/// (``advance(previous:outcome:claudeActive:now:)``, ``effectiveInterval(_:)``,
+/// (``advance(previous:outcome:refresh:claudeActive:now:)``, ``effectiveInterval(_:)``,
 /// ``intervalDecision(previous:next:)``) is pure and table-tested; the `async` ``run()`` loop wires
-/// it to injected seams (`UsageTransport`, `TokenProviding`, `PollScheduler`, `ClaudeActivityProbe`,
-/// a `now` clock). The shell (`AppDelegate`) supplies the live seams and consumes the output stream
+/// it to injected seams (`UsageTransport`, `TokenProviding`, `DelegatedRefresher`, `PollScheduler`,
+/// `ClaudeActivityProbe`, a `now` clock). The shell (`AppDelegate`) supplies the live seams and consumes the output stream
 /// on `@MainActor`. The engine itself is **not** `@MainActor`, so tests never need the main actor.
 ///
 /// ## Interval model — two independent dimensions plus an override
@@ -219,6 +225,7 @@ public struct PollingEngine: Sendable {
 
     let transport: UsageTransport
     let tokenProvider: TokenProviding
+    let refresher: DelegatedRefresher?
     let scheduler: PollScheduler
     let probe: ClaudeActivityProbe
     let now: @Sendable () -> Date
@@ -226,12 +233,14 @@ public struct PollingEngine: Sendable {
     public init(
         transport: UsageTransport,
         tokenProvider: TokenProviding = KeychainTokenProvider(),
+        refresher: DelegatedRefresher? = nil,
         scheduler: PollScheduler,
         probe: ClaudeActivityProbe,
         now: @escaping @Sendable () -> Date
     ) {
         self.transport = transport
         self.tokenProvider = tokenProvider
+        self.refresher = refresher
         self.scheduler = scheduler
         self.probe = probe
         self.now = now
@@ -251,14 +260,26 @@ public struct PollingEngine: Sendable {
     ///   are not a 429 — staying at the current cadence lets recovery happen promptly).
     /// - `tokenError`: the loop skipped the network entirely; record the failure, touch neither
     ///   interval dimension, keep the snapshot.
+    ///
+    /// `refresh` is the delegated-refresh attempt made during this poll (`nil` → none, ADR-0017):
+    /// an attempt that actually fixed the token (`.refreshed` and the outcome is no longer an
+    /// expired-token error) resets the ``RefreshGate``; any other attempt escalates its cooldown.
     public static func advance(
         previous: PollState,
         outcome: PollOutcome,
+        refresh: DelegatedRefreshOutcome? = nil,
         claudeActive: Bool,
         now: Date
     ) -> PollState {
         var next = previous
         next.claudeActive = claudeActive
+
+        if let refresh {
+            let stillExpired = outcome == .tokenError(.expired)
+            next.refreshGate = (refresh == .refreshed && !stillExpired)
+                ? previous.refreshGate.afterSuccess()
+                : previous.refreshGate.afterFailure(now: now)
+        }
 
         switch outcome {
         case let .success(snapshot):
@@ -359,10 +380,11 @@ public struct PollingEngine: Sendable {
                 var state = PollState()
                 while !Task.isCancelled {
                     let active = probe.isClaudeRunning()
-                    let outcome = await pollOnce(state: state, claudeActive: active)
+                    let result = await pollOnce(state: state, claudeActive: active)
                     let previous = state
                     state = Self.advance(
-                        previous: previous, outcome: outcome, claudeActive: active, now: now())
+                        previous: previous, outcome: result.outcome, refresh: result.refresh,
+                        claudeActive: active, now: now())
 
                     if let decision = Self.intervalDecision(previous: previous, next: state) {
                         AppLogger.lifecycle.notice("\(decision.logMessage, privacy: .public)")
@@ -384,29 +406,55 @@ public struct PollingEngine: Sendable {
         }
     }
 
-    /// One read-token-then-fetch attempt, collapsed to a `PollOutcome`. An expired/absent token
+    /// One read-token-then-fetch attempt, plus the delegated-refresh attempt (if any) made along
+    /// the way — the loop feeds both into ``advance(previous:outcome:refresh:claudeActive:now:)``.
+    struct PollResult: Sendable, Equatable {
+        let outcome: PollOutcome
+        /// The delegated-refresh attempt's result, or `nil` when no attempt ran this cycle.
+        let refresh: DelegatedRefreshOutcome?
+    }
+
+    /// One read-token-then-fetch attempt, collapsed to a ``PollResult``. An expired/absent token
     /// short-circuits **before** the network (ADR-0007: a stale token guarantees a 401 and burns
     /// rate-limit), so a token error means no request was sent.
-    func pollOnce(state: PollState, claudeActive: Bool) async -> PollOutcome {
-        let token: String
+    ///
+    /// On `.expired` specifically, the engine first tries a **delegated refresh** (ADR-0017): the
+    /// injected ``DelegatedRefresher`` spawns the `claude` CLI so Claude Code rotates its own
+    /// Keychain credentials, then the token is re-read once — all within this same cycle, so
+    /// recovery does not wait for the next poll. The ``RefreshGate`` in `state` throttles attempts;
+    /// a blocked or failed attempt falls through to the plain `.tokenError(.expired)` path.
+    func pollOnce(state: PollState, claudeActive: Bool) async -> PollResult {
+        var token: String
+        var refresh: DelegatedRefreshOutcome?
         do {
             token = try tokenProvider.currentAccessToken(now: now())
+        } catch TokenError.expired {
+            guard let refresher, state.refreshGate.allows(now: now()) else {
+                return PollResult(outcome: .tokenError(.expired), refresh: nil)
+            }
+            let attempt = await refresher.refresh()
+            refresh = attempt
+            guard attempt == .refreshed,
+                  let reread = try? tokenProvider.currentAccessToken(now: now()) else {
+                return PollResult(outcome: .tokenError(.expired), refresh: attempt)
+            }
+            token = reread
         } catch let error as TokenError {
-            return .tokenError(error)
+            return PollResult(outcome: .tokenError(error), refresh: nil)
         } catch {
             // currentAccessToken only throws TokenError; bucket anything else defensively
             // (no Security import needed — `.malformedData` carries no OSStatus).
-            return .tokenError(.malformedData)
+            return PollResult(outcome: .tokenError(.malformedData), refresh: nil)
         }
 
         do {
             let snapshot = try await UsageClient.fetch(
                 accessToken: token, now: now(), transport: transport)
-            return .success(snapshot)
+            return PollResult(outcome: .success(snapshot), refresh: refresh)
         } catch let error as UsageError {
-            return .usageError(error)
+            return PollResult(outcome: .usageError(error), refresh: refresh)
         } catch {
-            return .usageError(.transport(message: "\(error)", code: nil))
+            return PollResult(outcome: .usageError(.transport(message: "\(error)", code: nil)), refresh: refresh)
         }
     }
 }

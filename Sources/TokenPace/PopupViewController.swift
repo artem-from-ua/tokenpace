@@ -577,6 +577,7 @@ final class PopupViewController: NSViewController {
     static func warningTitle(_ reason: FailureReason) -> String {
         switch reason {
         case .notSignedIn:               return "Missing auth token"
+        case .tokenExpired:              return "Auth token expired"
         case let .authHTTP(status, _):   return "Auth error (HTTP \(status))"
         case .timeout, .cannotResolveHost, .network:
             return "Claude API connectivity issue"
@@ -592,6 +593,8 @@ final class PopupViewController: NSViewController {
         switch reason {
         case .notSignedIn:
             return "You need to authenticate in Claude Code console app first"
+        case .tokenExpired:
+            return "Refreshing via the claude CLI — open Claude Code if this persists"
         case let .authHTTP(_, body):
             return body ?? "Your authorization was rejected — sign in to Claude Code again"
         case .timeout:

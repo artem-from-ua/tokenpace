@@ -382,30 +382,32 @@ struct PollOnceTests {
     }
 
     @Test func expiredTokenSkipsFetch() async {
-        // A counting transport proves the network was never touched.
+        // A counting transport proves the network was never touched. (No refresher injected —
+        // the delegated-refresh path is covered by `PollOnceRefreshTests`.)
         let counter = CountingTransport(inner: .success(five: 10, seven: 20))
         let e = engine(transport: counter, token: StubTokenProvider(error: .expired))
-        let outcome = await e.pollOnce(state: PollState(), claudeActive: true)
-        #expect(outcome == .tokenError(.expired))
+        let result = await e.pollOnce(state: PollState(), claudeActive: true)
+        #expect(result.outcome == .tokenError(.expired))
+        #expect(result.refresh == nil)             // no refresher → no attempt
         #expect(await counter.count == 0)          // no request was sent
-        // The reason maps to a synthetic 401 (auth rejection), popup warns immediately.
-        #expect(FailureReason(.expired) == .authHTTP(status: 401, body: nil))
+        // Expired maps to its own honest reason (ADR-0017); the popup warns immediately.
+        #expect(FailureReason(.expired) == .tokenExpired)
     }
 
     @Test func notSignedInSkipsFetch() async {
         let counter = CountingTransport(inner: .success(five: 10, seven: 20))
         let e = engine(transport: counter, token: StubTokenProvider(error: .itemNotFound))
-        let outcome = await e.pollOnce(state: PollState(), claudeActive: true)
-        #expect(outcome == .tokenError(.itemNotFound))
+        let result = await e.pollOnce(state: PollState(), claudeActive: true)
+        #expect(result.outcome == .tokenError(.itemNotFound))
         #expect(await counter.count == 0)
     }
 
     @Test func validTokenFetchesAndSucceeds() async {
         let counter = CountingTransport(inner: .success(five: 13, seven: 40))
         let e = engine(transport: counter, token: StubTokenProvider())
-        let outcome = await e.pollOnce(state: PollState(), claudeActive: true)
-        guard case let .success(snapshot) = outcome else {
-            Issue.record("expected success, got \(outcome)"); return
+        let result = await e.pollOnce(state: PollState(), claudeActive: true)
+        guard case let .success(snapshot) = result.outcome else {
+            Issue.record("expected success, got \(result.outcome)"); return
         }
         #expect(snapshot.fiveHour.utilization == 13)
         #expect(await counter.count == 1)
@@ -413,8 +415,8 @@ struct PollOnceTests {
 
     @Test func rateLimitedSurfacesAsUsageError() async {
         let e = engine(transport: StubTransport.http(429), token: StubTokenProvider())
-        let outcome = await e.pollOnce(state: PollState(), claudeActive: true)
-        #expect(outcome == .usageError(.rateLimited(retryAfter: nil)))
+        let result = await e.pollOnce(state: PollState(), claudeActive: true)
+        #expect(result.outcome == .usageError(.rateLimited(retryAfter: nil)))
     }
 
     @Test func offlineSurfacesAsUsageErrorNotThrow() async {
@@ -422,14 +424,143 @@ struct PollOnceTests {
         let e = engine(
             transport: StubTransport.failing(URLError(.notConnectedToInternet)),
             token: StubTokenProvider())
-        let outcome = await e.pollOnce(state: PollState(), claudeActive: true)
-        guard case let .usageError(error) = outcome else {
-            Issue.record("expected usageError, got \(outcome)"); return
+        let result = await e.pollOnce(state: PollState(), claudeActive: true)
+        guard case let .usageError(error) = result.outcome else {
+            Issue.record("expected usageError, got \(result.outcome)"); return
         }
         guard case let .transport(_, code) = error else {
             Issue.record("expected .transport, got \(error)"); return
         }
         #expect(code == .notConnectedToInternet)
+    }
+}
+
+// MARK: - pollOnce: delegated refresh (ADR-0017)
+
+@Suite("PollingEngine.pollOnce — delegated refresh")
+struct PollOnceRefreshTests {
+
+    private func engine(
+        transport: UsageTransport, token: TokenProviding, refresher: DelegatedRefresher?
+    ) -> PollingEngine {
+        PollingEngine(
+            transport: transport, tokenProvider: token, refresher: refresher,
+            scheduler: ManualScheduler(), probe: StubProbe(active: true), now: { t0 })
+    }
+
+    @Test func refreshFixesExpiredTokenWithinSameCycle() async {
+        // Expired token → the refresher runs, "Claude Code" rewrites its store (rotate()),
+        // the engine re-reads and fetches — recovery does NOT wait for the next poll.
+        let provider = RotatingTokenProvider()
+        let refresher = StubRefresher(outcome: .refreshed, onRefresh: { provider.rotate() })
+        let counter = CountingTransport(inner: .success(five: 10, seven: 20))
+        let e = engine(transport: counter, token: provider, refresher: refresher)
+        let result = await e.pollOnce(state: PollState(), claudeActive: true)
+        guard case .success = result.outcome else {
+            Issue.record("expected success, got \(result.outcome)"); return
+        }
+        #expect(result.refresh == .refreshed)
+        #expect(await refresher.calls == 1)
+        #expect(await counter.count == 1)
+    }
+
+    @Test func failedRefreshFallsBackToExpiredError() async {
+        let counter = CountingTransport(inner: .success(five: 10, seven: 20))
+        let refresher = StubRefresher(outcome: .cliNotFound)
+        let e = engine(
+            transport: counter, token: StubTokenProvider(error: .expired), refresher: refresher)
+        let result = await e.pollOnce(state: PollState(), claudeActive: true)
+        #expect(result.outcome == .tokenError(.expired))
+        #expect(result.refresh == .cliNotFound)    // advance() folds this as a gate failure
+        #expect(await counter.count == 0)          // still no request with a dead token
+    }
+
+    @Test func refreshedButStillExpiredIsFailure() async {
+        // The CLI claimed success but the re-read still throws — exactly one re-read per cycle,
+        // no retry loop.
+        let refresher = StubRefresher(outcome: .refreshed)  // no side effect: stays expired
+        let e = engine(
+            transport: CountingTransport(inner: .success(five: 10, seven: 20)),
+            token: StubTokenProvider(error: .expired), refresher: refresher)
+        let result = await e.pollOnce(state: PollState(), claudeActive: true)
+        #expect(result.outcome == .tokenError(.expired))
+        #expect(result.refresh == .refreshed)      // reported so advance() escalates the gate
+    }
+
+    @Test func coolingGateSkipsRefresher() async {
+        let refresher = StubRefresher(outcome: .refreshed)
+        let e = engine(
+            transport: CountingTransport(inner: .success(five: 10, seven: 20)),
+            token: StubTokenProvider(error: .expired), refresher: refresher)
+        let blocked = PollState(refreshGate: RefreshGate().afterFailure(now: t0))
+        let result = await e.pollOnce(state: blocked, claudeActive: true)
+        #expect(result.outcome == .tokenError(.expired))
+        #expect(result.refresh == nil)
+        #expect(await refresher.calls == 0)        // gate held — no respawn this cycle
+    }
+
+    @Test func missingTokenDoesNotTriggerRefresh() async {
+        // Only `.expired` delegates; `.itemNotFound` (signed out) cannot be fixed by the CLI alone.
+        let refresher = StubRefresher(outcome: .refreshed)
+        let e = engine(
+            transport: CountingTransport(inner: .success(five: 10, seven: 20)),
+            token: StubTokenProvider(error: .itemNotFound), refresher: refresher)
+        let result = await e.pollOnce(state: PollState(), claudeActive: true)
+        #expect(result.outcome == .tokenError(.itemNotFound))
+        #expect(result.refresh == nil)
+        #expect(await refresher.calls == 0)
+    }
+}
+
+// MARK: - advance: RefreshGate folding
+
+@Suite("PollingEngine.advance — refresh gate")
+struct AdvanceRefreshGateTests {
+
+    @Test func fixedRefreshResetsGate() {
+        var prev = PollState()
+        prev.refreshGate = RefreshGate().afterFailure(now: t0.addingTimeInterval(-3600))
+        let next = PollingEngine.advance(
+            previous: prev, outcome: .success(snap(five: 10, seven: 20)), refresh: .refreshed,
+            claudeActive: true, now: t0)
+        #expect(next.refreshGate == RefreshGate())
+    }
+
+    @Test func refreshSuccessThenNetworkFailureStillResetsGate() {
+        // The refresh fixed the token; a 429 afterwards is the backoff's business, not the gate's.
+        var prev = PollState()
+        prev.refreshGate = RefreshGate().afterFailure(now: t0.addingTimeInterval(-3600))
+        let next = PollingEngine.advance(
+            previous: prev, outcome: .usageError(.rateLimited(retryAfter: nil)),
+            refresh: .refreshed, claudeActive: true, now: t0)
+        #expect(next.refreshGate == RefreshGate())
+        #expect(next.backoff.level == 0)           // the 429 still escalated the backoff
+    }
+
+    @Test func failedRefreshEscalatesGate() {
+        let next = PollingEngine.advance(
+            previous: PollState(), outcome: .tokenError(.expired), refresh: .cliNotFound,
+            claudeActive: true, now: t0)
+        #expect(next.refreshGate.consecutiveFailures == 1)
+        #expect(next.refreshGate.allows(now: t0) == false)
+        #expect(next.refreshGate.allows(now: t0.addingTimeInterval(60)))
+    }
+
+    @Test func refreshedButStillExpiredEscalatesGate() {
+        // A `.refreshed` claim that left the token expired must not reset the gate.
+        let next = PollingEngine.advance(
+            previous: PollState(), outcome: .tokenError(.expired), refresh: .refreshed,
+            claudeActive: true, now: t0)
+        #expect(next.refreshGate.consecutiveFailures == 1)
+    }
+
+    @Test func noAttemptLeavesGateUntouched() {
+        var prev = PollState()
+        prev.refreshGate = RefreshGate().afterFailure(now: t0)
+        let next = PollingEngine.advance(
+            previous: prev, outcome: .tokenError(.expired), refresh: nil,
+            claudeActive: true, now: t0)
+        #expect(next.refreshGate == prev.refreshGate)  // cooling down, not restarted
     }
 }
 
@@ -518,6 +649,44 @@ struct RunLoopTests {
 }
 
 // MARK: - Test seams
+
+/// A refresher returning a scripted outcome, counting calls, optionally running a side effect —
+/// the shape of Claude Code rewriting its Keychain item during a delegated refresh (ADR-0017).
+private actor StubRefresher: DelegatedRefresher {
+    private let outcome: DelegatedRefreshOutcome
+    private let onRefresh: (@Sendable () -> Void)?
+    private(set) var calls = 0
+
+    init(outcome: DelegatedRefreshOutcome, onRefresh: (@Sendable () -> Void)? = nil) {
+        self.outcome = outcome
+        self.onRefresh = onRefresh
+    }
+
+    func refresh() async -> DelegatedRefreshOutcome {
+        calls += 1
+        onRefresh?()
+        return outcome
+    }
+}
+
+/// A token seam that throws `.expired` until `rotate()` is called, then returns a fresh literal —
+/// the observable effect of Claude Code rotating its credentials. `TokenProviding` is sync, so this
+/// is a lock-guarded class rather than an actor.
+private final class RotatingTokenProvider: TokenProviding, @unchecked Sendable {
+    private let lock = NSLock()
+    private var expired = true
+
+    func rotate() {
+        lock.withLock { expired = false }
+    }
+
+    func currentAccessToken(now: Date) throws -> String {
+        try lock.withLock {
+            if expired { throw TokenError.expired }
+            return "acc-fresh"
+        }
+    }
+}
 
 /// A transport that wraps another and counts how many requests pass through.
 private actor CountingTransport: UsageTransport {

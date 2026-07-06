@@ -21,3 +21,4 @@
 | [0014](0014-usage-decode-resilience-on-reset-boundary.md) | UsageSnapshot — синтез вікна на межі ресету замість падіння decode (хибне «Usage API unavailable») | accepted |
 | [0015](0015-no-idle-mode.md) | Прибрати компактний idle-режим — завжди смужки (крім стану помилки) | accepted |
 | [0016](0016-rename-to-tokenpace.md) | Перейменування проєкту cc-timer → TokenPace — ідентифікатори, межі історії | accepted |
+| [0017](0017-delegated-token-refresh.md) | Делегований refresh токена через claude CLI — замість self-refresh із write-back | accepted |
