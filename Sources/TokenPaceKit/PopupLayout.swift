@@ -8,8 +8,9 @@ import Foundation
 /// they are produced by `ResetClock` (shared time arithmetic, reused in Phase 2), not localised
 /// prose, so they live here rather than in the view.
 ///
-/// Used for all four kinds of section — `5h`, `7d`, and the per-model sub-windows (`Opus`,
-/// `Sonnet`), which are paced as `.sevenDay` (they reset on the weekly cadence).
+/// Used for every kind of section — `5h`, `7d`, the per-model sub-windows (`Opus`, `Sonnet`),
+/// and the `weekly_scoped` models from `limits[]` (e.g. `Fable`, #65); all per-model rows are
+/// paced as `.sevenDay` (they reset on the weekly cadence).
 public struct LimitRow: Sendable, Equatable {
     /// Section heading, e.g. `"5-hour limit"`, `"7-day limit"`, `"Opus (7-day)"`. A raw label
     /// (the window identity), not a localised string — the view renders it as-is for now.
@@ -75,8 +76,9 @@ public struct PopupLayout: Sendable, Equatable {
     public let lastUpdateAge: TimeInterval
     /// Current polling interval in seconds (`PollingBackoff.interval`). Drives "Update interval: …".
     public let intervalSeconds: TimeInterval
-    /// The limit sections, in display order: `5h`, `7d`, then any present per-model rows
-    /// (`Opus`, `Sonnet`). Absent models are simply not in the array (null-safe). Empty on a
+    /// The limit sections, in display order: `5h`, `7d`, then any present per-model rows —
+    /// legacy sub-windows (`Opus`, `Sonnet`) first, then `weekly_scoped` models from `limits[]`
+    /// (e.g. `Fable`). Absent models are simply not in the array (null-safe). Empty on a
     /// cold-start failure (no snapshot yet — the warning stands alone).
     public let rows: [LimitRow]
     /// The current failure cause when a poll is failing, else `nil`. Drives the popup warning banner
@@ -168,9 +170,11 @@ public struct PopupLayout: Sendable, Equatable {
 
     // MARK: - Private
 
-    /// The ordered limit sections for a snapshot: `5h`, `7d`, then any present per-model rows
-    /// (`Opus`/`Sonnet`, paced as `.sevenDay`, null-safe — absent models are skipped). Shared by
-    /// both ``make`` overloads.
+    /// The ordered limit sections for a snapshot: `5h`, `7d`, then any present per-model rows —
+    /// the legacy top-level sub-windows (`Opus`/`Sonnet`, null-safe) followed by the
+    /// `weekly_scoped` models from `limits[]` (e.g. `Fable`, #65; already deduped against the
+    /// legacy rows by ``UsageSnapshot/scopedModelWindows``). All per-model rows are paced as
+    /// `.sevenDay`. Shared by both ``make`` overloads.
     private static func rows(from snapshot: UsageSnapshot, now: Date) -> [LimitRow] {
         var rows: [LimitRow] = [
             row(title: "5-hour limit", window: snapshot.fiveHour, as: .fiveHour, now: now),
@@ -181,6 +185,9 @@ public struct PopupLayout: Sendable, Equatable {
         }
         if let sonnet = snapshot.sevenDaySonnet {
             rows.append(row(title: "Sonnet (7-day)", window: sonnet, as: .sevenDay, now: now))
+        }
+        for scoped in snapshot.scopedModelWindows {
+            rows.append(row(title: "\(scoped.name) (7-day)", window: scoped.window, as: .sevenDay, now: now))
         }
         return rows
     }

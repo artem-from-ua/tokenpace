@@ -241,6 +241,126 @@ struct UsageDecodeTests {
         #expect(snapshot.limits[0].severity == "normal") // absent → default
     }
 
+    // MARK: weekly_scoped / scope
+    //
+    // Per-model weekly limits (e.g. Fable) exist ONLY as `weekly_scoped` entries of `limits[]`
+    // identified by `scope.model.display_name` — there is no top-level `seven_day_fable` (#65).
+    // `UsageSnapshot.scopedModelWindows` extracts them, deduped against the legacy sub-windows.
+
+    /// The Fable `weekly_scoped` entry as captured live on 2026-07-06.
+    private static let fableLimitJSON = """
+    {"kind":"weekly_scoped","group":"weekly","percent":5,"severity":"normal",\
+    "resets_at":"2026-07-07T07:00:00.013978+00:00",\
+    "scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":false}
+    """
+
+    @Test func weeklyScopedLimitDecodesModelDisplayName() throws {
+        let snapshot = try UsageClient.decode(from: usageJSON(limits: "[\(Self.fableLimitJSON)]"))
+        #expect(snapshot.limits.count == 1)
+        #expect(snapshot.limits[0].kind == "weekly_scoped")
+        #expect(snapshot.limits[0].percent == 5)
+        #expect(snapshot.limits[0].modelDisplayName == "Fable")
+    }
+
+    @Test func scopeNullDecodesToNilDisplayName() throws {
+        let limits = """
+        [{"kind":"weekly_all","group":"weekly","percent":36,"severity":"normal",\
+        "resets_at":"2026-06-23T06:59:59+00:00","scope":null,"is_active":true}]
+        """
+        let snapshot = try UsageClient.decode(from: usageJSON(limits: limits))
+        #expect(snapshot.limits[0].modelDisplayName == nil)
+    }
+
+    @Test func malformedScopeDoesNotFailSnapshot() throws {
+        // `scope` as a plain string and as an object with a non-object `model` — both must
+        // degrade to nil (the `try?` wrap), never fail the whole snapshot.
+        for scope in [#""garbage""#, #"{"model":"x"}"#] {
+            let limits = """
+            [{"kind":"weekly_scoped","group":"weekly","percent":5,"severity":"normal",\
+            "resets_at":"2026-07-07T07:00:00+00:00","scope":\(scope),"is_active":false}]
+            """
+            let snapshot = try UsageClient.decode(from: usageJSON(limits: limits))
+            #expect(snapshot.limits[0].modelDisplayName == nil)
+        }
+    }
+
+    @Test func scopedModelWindowExtracted() throws {
+        let snapshot = try UsageClient.decode(from: usageJSON(limits: "[\(Self.fableLimitJSON)]"))
+        #expect(snapshot.scopedModelWindows == [
+            ScopedModelWindow(
+                name: "Fable",
+                window: UsageWindow(utilization: 5, resetsAt: "2026-07-07T07:00:00.013978+00:00"))
+        ])
+    }
+
+    @Test func scopedWindowDedupedAgainstLegacyCaseInsensitive() throws {
+        // Legacy `seven_day_sonnet` present + a scoped "SONNET" entry → the legacy field wins.
+        let limits = """
+        [{"kind":"weekly_scoped","group":"weekly","percent":2,"severity":"normal",\
+        "resets_at":"2026-06-28T00:00:00+00:00",\
+        "scope":{"model":{"id":null,"display_name":"SONNET"},"surface":null},"is_active":false}]
+        """
+        let snapshot = try UsageClient.decode(from: usageJSON(
+            sevenDaySonnet: #"{"utilization":2.5,"resets_at":"2026-06-28T00:00:00+00:00"}"#,
+            limits: limits))
+        #expect(snapshot.scopedModelWindows.isEmpty)
+    }
+
+    @Test func scopedWindowRendersWhenLegacyAbsent() throws {
+        // A scoped "Opus" with no top-level `seven_day_opus` is the only data source → extracted.
+        let limits = """
+        [{"kind":"weekly_scoped","group":"weekly","percent":8,"severity":"normal",\
+        "resets_at":"2026-06-28T00:00:00+00:00",\
+        "scope":{"model":{"id":null,"display_name":"Opus"},"surface":null},"is_active":false}]
+        """
+        let snapshot = try UsageClient.decode(from: usageJSON(limits: limits))
+        #expect(snapshot.scopedModelWindows.map(\.name) == ["Opus"])
+    }
+
+    @Test func scopedWindowBorrowsSevenDayResetWhenNull() throws {
+        // `resets_at: null` in the entry (tolerant decode → "") borrows the weekly reset,
+        // mirroring the legacy sub-window borrow — scoped limits reset on the weekly cadence.
+        let limits = """
+        [{"kind":"weekly_scoped","group":"weekly","percent":5,"severity":"normal",\
+        "resets_at":null,\
+        "scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":false}]
+        """
+        let snapshot = try UsageClient.decode(from: usageJSON(limits: limits))
+        #expect(snapshot.scopedModelWindows.first?.window.resetsAt == snapshot.sevenDay.resetsAt)
+    }
+
+    @Test func nonScopedAndNamelessEntriesIgnored() throws {
+        // session / weekly_all / weekly_scoped without a usable display_name → no scoped windows.
+        let limits = """
+        [{"kind":"session","group":"session","percent":26,"severity":"normal",\
+        "resets_at":"2026-07-06T04:00:00+00:00","scope":null,"is_active":true},\
+        {"kind":"weekly_all","group":"weekly","percent":3,"severity":"normal",\
+        "resets_at":"2026-07-07T07:00:00+00:00","scope":null,"is_active":false},\
+        {"kind":"weekly_scoped","group":"weekly","percent":5,"severity":"normal",\
+        "resets_at":"2026-07-07T07:00:00+00:00","scope":{"model":{"id":null,"display_name":null},\
+        "surface":null},"is_active":false}]
+        """
+        let snapshot = try UsageClient.decode(from: usageJSON(limits: limits))
+        #expect(snapshot.scopedModelWindows.isEmpty)
+    }
+
+    @Test func duplicateScopedEntriesDedupedApiOrderKept() throws {
+        let limits = """
+        [{"kind":"weekly_scoped","group":"weekly","percent":5,"severity":"normal",\
+        "resets_at":"2026-07-07T07:00:00+00:00",\
+        "scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":false},\
+        {"kind":"weekly_scoped","group":"weekly","percent":6,"severity":"normal",\
+        "resets_at":"2026-07-07T07:00:00+00:00",\
+        "scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":false},\
+        {"kind":"weekly_scoped","group":"weekly","percent":1,"severity":"normal",\
+        "resets_at":"2026-07-07T07:00:00+00:00",\
+        "scope":{"model":{"id":null,"display_name":"Haiku"},"surface":null},"is_active":false}]
+        """
+        let snapshot = try UsageClient.decode(from: usageJSON(limits: limits))
+        #expect(snapshot.scopedModelWindows.map(\.name) == ["Fable", "Haiku"])
+        #expect(snapshot.scopedModelWindows[0].window.utilization == 5)   // first entry wins
+    }
+
     @Test func garbageBytesThrowDecode() {
         let data = "not json at all".data(using: .utf8)!
         #expect(throws: UsageError.decode) { try UsageClient.decode(from: data) }
@@ -272,6 +392,29 @@ struct UsageDecodeTests {
         #expect(snapshot.sevenDayOpus == nil)
         #expect(snapshot.limits.count == 3)
         #expect(snapshot.limits.contains { $0.kind == "weekly_scoped" })  // scope object tolerated
+        // This body carries Sonnet in BOTH forms — the legacy window and a weekly_scoped entry.
+        // The scoped one must decode its name yet be deduped, or the popup renders Sonnet twice.
+        #expect(snapshot.limits.contains { $0.modelDisplayName == "Sonnet" })
+        #expect(snapshot.scopedModelWindows.isEmpty)
+    }
+
+    /// Regression: a live API body captured 2026-07-06 — the first shape where a per-model limit
+    /// (Fable) has NO top-level window and exists only as a `weekly_scoped` entry of `limits[]`
+    /// (#65). The scoped window must be extracted with the entry's own `resets_at`.
+    @Test func liveBodyWithFableScopedLimitDecodes() throws {
+        let body = #"""
+        {"five_hour":{"utilization":26.0,"resets_at":"2026-07-06T04:00:00.013695+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day":{"utilization":3.0,"resets_at":"2026-07-07T07:00:00.013718+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day_oauth_apps":null,"seven_day_opus":null,"seven_day_sonnet":null,"seven_day_cowork":null,"seven_day_omelette":null,"tangelo":null,"iguana_necktie":null,"omelette_promotional":null,"nimbus_quill":null,"cinder_cove":null,"amber_ladder":null,"extra_usage":{"is_enabled":false,"monthly_limit":null,"used_credits":null,"utilization":null,"currency":null,"decimal_places":null,"disabled_reason":null,"daily":null,"weekly":null},"limits":[{"kind":"session","group":"session","percent":26,"severity":"normal","resets_at":"2026-07-06T04:00:00.013695+00:00","scope":null,"is_active":true},{"kind":"weekly_all","group":"weekly","percent":3,"severity":"normal","resets_at":"2026-07-07T07:00:00.013718+00:00","scope":null,"is_active":false},{"kind":"weekly_scoped","group":"weekly","percent":5,"severity":"normal","resets_at":"2026-07-07T07:00:00.013978+00:00","scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":false}],"spend":{"used":{"amount_minor":0,"currency":"USD","exponent":2},"limit":null,"percent":0,"severity":"normal","enabled":false,"disabled_reason":null,"cap":null,"balance":null,"auto_reload":null,"disclaimer":"Usage credits cover you when you hit your plan limits.","can_purchase_credits":false,"can_toggle":false},"member_dashboard_available":false}
+        """#
+        let snapshot = try UsageClient.decode(from: Data(body.utf8), now: now)
+        #expect(snapshot.limits.count == 3)
+        let fable = try #require(snapshot.limits.first { $0.kind == "weekly_scoped" })
+        #expect(fable.modelDisplayName == "Fable")
+        #expect(fable.percent == 5)
+        #expect(snapshot.scopedModelWindows == [
+            ScopedModelWindow(
+                name: "Fable",
+                window: UsageWindow(utilization: 5, resetsAt: "2026-07-07T07:00:00.013978+00:00"))
+        ])
     }
 }
 

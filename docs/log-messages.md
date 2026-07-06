@@ -92,8 +92,8 @@ In the tables below, `<…>` marks an interpolated value.
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 216 | `network` | `.notice` | `filled <key> sub-window resets_at from seven_day (was null)` | a per-model sub-window's `resets_at` was null; borrowed from the parent 7-day window |
-| 257 | `network` | `.notice` | `synthesized <key> window on reset boundary (utilization=0, resets_at source=<source>)` | synthesized a zero-usage window on an API reset boundary; `source` is `limits[]` or `local-estimate` |
+| 240 | `network` | `.notice` | `filled <key> sub-window resets_at from seven_day (was null)` | a per-model sub-window's `resets_at` was null; borrowed from the parent 7-day window |
+| 281 | `network` | `.notice` | `synthesized <key> window on reset boundary (utilization=0, resets_at source=<source>)` | synthesized a zero-usage window on an API reset boundary; `source` is `limits[]` or `local-estimate` |
 
 ## `Sources/TokenPaceKit/PollingEngine.swift`
 

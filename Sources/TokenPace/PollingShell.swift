@@ -164,6 +164,8 @@ actor StubUsageTransport: UsageTransport {
     ///  • `.authError` (`=error`)   — usage returns **401** with a long body (→ `authHTTP`), and the
     ///    status endpoint reports **both** Claude services degraded, so the warning block, the
     ///    service-status dots, and the long-message wrapping can all be seen at once.
+    /// Both data modes also carry a `weekly_scoped` Fable entry in `limits[]` (#65), so the
+    /// scoped-model popup row is exercised end-to-end.
     enum Mode {
         case climbing, screenshot, authError
     }
@@ -247,9 +249,11 @@ actor StubUsageTransport: UsageTransport {
         let five: Double
         let seven: Double
         let sonnet: Double
+        let fable: Double
         let fiveReset: String
         let sevenReset: String
         let sonnetReset: String
+        let fableReset: String
 
         if mode == .screenshot {
             // Hand-picked, frozen frame for the README screenshot. Pacing states on screen:
@@ -257,33 +261,45 @@ actor StubUsageTransport: UsageTransport {
             //    to a 10-minute mark) → GREEN gap, time indicator past the bar's two-thirds point.
             //  • 7d: 60 % used vs ≈29 % elapsed (resets ~5 d out on the hour) → ahead → RED gap (wide).
             //  • Sonnet: 2 % used, the SAME reset as 7d (so they end together) → behind pace → GREEN.
+            //  • Fable: 12 % used, same weekly reset → behind pace → GREEN (the weekly_scoped row).
             five = 40.0
             seven = 60.0
             sonnet = 2.0
+            fable = 12.0
             // 5h window = 18000 s; reset at ≈ now + 6300 s ⇒ elapsed ≈ 65 %, snapped to :x0.
             fiveReset = Self.resetsAtRounded10(inSeconds: 6300)
             let weekly = Self.isoString(Self.hourBoundary(daysFromNow: 5))
             sevenReset = weekly
-            sonnetReset = weekly                       // 7d and Sonnet end at the same hour boundary
+            sonnetReset = weekly                       // 7d, Sonnet and Fable end at the same boundary
+            fableReset = weekly
         } else {
             // Step utilisation every 3rd poll so some adjacent polls are "unchanged" (cadence
             // doubles) and some "changed" (cadence resets) — exercising the live interval logic.
             five = 20.0 + Double((n / 3) * 5)
             seven = 55.0 + Double((n / 3) * 3)
             sonnet = 2.0
+            fable = 5.0
             // Windows anchored to "now", chosen to show one of each pacing state on screen:
             //  • 5h resets in ~2 h → ≈60 % elapsed > 20 % used → behind pace → GREEN gap.
             //  • 7d resets in ~5 d → only ≈29 % elapsed < 55 % used → ahead of pace → RED gap.
             //  • Sonnet resets so that elapsed ≈ 2 % == 2 % used → NO gap (indicator on the used
             //    edge). 7d window = 604800 s, so elapsed 2 % ⇒ remaining ≈ 0.98·604800 ≈ 592704 s.
+            //  • Fable: 5 % used vs ≈29 % elapsed (same reset as 7d) → behind pace → GREEN gap —
+            //    exercises the weekly_scoped row (#65) without disturbing the engineered trio above.
             fiveReset = Self.resetsAt(inSeconds: 2 * 3600)
             sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
             sonnetReset = Self.resetsAt(inSeconds: 0.98 * 604_800)
+            fableReset = sevenReset
         }
+        // Fable has NO top-level window in the live API — it exists only as a `weekly_scoped`
+        // entry of `limits[]` (#65), so the stub mirrors that exact shape.
         let body = """
         {"five_hour":{"utilization":\(five),"resets_at":"\(fiveReset)"},\
         "seven_day":{"utilization":\(seven),"resets_at":"\(sevenReset)"},\
-        "seven_day_sonnet":{"utilization":\(sonnet),"resets_at":"\(sonnetReset)"},"limits":[]}
+        "seven_day_sonnet":{"utilization":\(sonnet),"resets_at":"\(sonnetReset)"},\
+        "limits":[{"kind":"weekly_scoped","group":"weekly","percent":\(fable),"severity":"normal",\
+        "resets_at":"\(fableReset)","scope":{"model":{"id":null,"display_name":"Fable"},\
+        "surface":null},"is_active":false}]}
         """.data(using: .utf8)!
         let response = HTTPURLResponse(
             url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
