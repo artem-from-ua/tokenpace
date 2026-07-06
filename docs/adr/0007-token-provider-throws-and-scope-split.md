@@ -5,6 +5,12 @@ date: 2026-06-22
 
 # ADR-0007: TokenProvider — `throws`+enum, чистий шар декодування і розбивка обсягу #8
 
+> **Постскриптум (2026-07-06):** частину про **fallback-refresh (PR 8b)** — самостійний
+> `refresh_token` grant + write-back у Keychain через `SecItemUpdate` — замінено на делегований
+> refresh через `claude` CLI. Див. [ADR-0017](0017-delegated-token-refresh.md). Решта рішень цього
+> ADR (розбивка 8a/8b, `throws`+`TokenError`, чистий `decode(from:)`, «протухлий токен не йде на
+> API») лишається чинною — тому запис у цілому **не** застарілий і в індексі не закреслюється.
+
 ## Контекст
 
 Issue #8 описує `TokenProvider` як «читання OAuth-токена з Keychain **+ fallback-refresh**». Це два
