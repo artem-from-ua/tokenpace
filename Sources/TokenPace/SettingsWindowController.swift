@@ -29,9 +29,16 @@ final class SettingsWindowController: NSWindowController {
     /// time the window is shown (the user may have changed it in System Settings meanwhile).
     private var launchToggle: NSButton!
 
-    /// Explanatory line under the checkbox. When launch-at-login is unavailable (`.notFound` — a
-    /// `swift run` binary or an ad-hoc bundle), it tells the user to run a properly installed build.
+    /// Explanatory line under the checkbox (`hintText(inAppBundle:)`). Three states: a `swift run`
+    /// dev build is unavailable; an `.app` where a click just failed points at recovery; otherwise
+    /// a neutral note.
     private var hintLabel: NSTextField!
+
+    /// Whether the last toggle click failed to register in an `.app` bundle (e.g. an ad-hoc bundle
+    /// SMAppService refuses). Drives the recovery hint; reset on a successful toggle or a fresh
+    /// `show()` so a state the user has since fixed in System Settings is not shadowed by a stale
+    /// failure. Only meaningful when the checkbox is enabled (i.e. in an `.app` bundle).
+    private var lastToggleFailed = false
 
     convenience init() {
         let window = NSWindow(
@@ -50,6 +57,7 @@ final class SettingsWindowController: NSWindowController {
     /// centres on first display. Calling this while the window is already on screen just focuses it —
     /// the single instance is never duplicated (see `AppDelegate.openSettings`).
     func show() {
+        lastToggleFailed = false   // a fresh open starts from the status-derived hint (#69)
         syncToggleFromSystem()
         NSApp.activate(ignoringOtherApps: true)
         if !(window?.isVisible ?? false) { window?.center() }
@@ -123,16 +131,16 @@ final class SettingsWindowController: NSWindowController {
         let status = LaunchAtLoginController.currentStatus()
         launchToggle.state = LaunchAtLogin.toggleState(for: status) ? .on : .off
 
-        // When launch-at-login is unavailable (`.notFound`) the toggle is meaningless — there is no
-        // registerable login item for this code identity (a `swift run` binary, or an ad-hoc bundle
-        // that SMAppService rejects). Grey it out and explain how to get a working build, rather
-        // than letting the user click a checkbox that silently does nothing (ADR-0012).
-        let available = LaunchAtLogin.isAvailable(status)
-        launchToggle.isEnabled = available
-        hintLabel.stringValue = available
-            ? "Best-effort on unsigned builds — full reliability needs a signed app."
-            : "Unavailable in this build. Install TokenPace.app and launch it from Launchpad/Finder "
-              + "(not a developer build) for this option to work."
+        // Availability is gated on being a real `.app` bundle, not on status. A bare `swift run`
+        // binary is a dev build we never launch at login: the checkbox stays disabled and greyed,
+        // exactly as before (ADR-0012 §4). In a real `.app`, the checkbox is always enabled — even
+        // on `.notFound`, which for an installed bundle means the login-item dropped with a replaced
+        // bundle on update; clicking re-`register()`s and recovers it (#69, ADR-0018). We deliberately
+        // do NOT try to read "signed + in /Applications" from status alone — `isAppBundle` is the one
+        // reliable discriminator, and `register()` adjudicates the rest on click.
+        let inAppBundle = LaunchAtLoginController.isAppBundle
+        launchToggle.isEnabled = inAppBundle
+        hintLabel.stringValue = hintText(inAppBundle: inAppBundle)
 
         // The hint wraps to a different height per message; refit so neither text is clipped.
         if let content = window?.contentView {
@@ -140,14 +148,34 @@ final class SettingsWindowController: NSWindowController {
         }
     }
 
+    /// The explanatory line under the checkbox. Three states: a dev build (`swift run`) is not an
+    /// `.app`, so launch-at-login is unavailable; an `.app` where a click just failed points the
+    /// user at recovery; otherwise a neutral best-effort note.
+    private func hintText(inAppBundle: Bool) -> String {
+        if !inAppBundle {
+            return "Unavailable in this build. Install TokenPace.app and launch it from "
+                 + "Launchpad/Finder (not a developer build) for this option to work."
+        }
+        if lastToggleFailed {
+            return "Couldn't enable launch at login. Reinstall TokenPace.app in /Applications and "
+                 + "open it from Finder/Launchpad, or add it manually in System Settings → General → "
+                 + "Login Items."
+        }
+        return "Launch TokenPace automatically when you log in."
+    }
+
     @objc private func toggleLaunchAtLogin(_ sender: NSButton) {
         let wantOn = sender.state == .on
         do {
             if wantOn { try LaunchAtLoginController.enable() }
             else      { try LaunchAtLoginController.disable() }
+            lastToggleFailed = false
             AppLogger.lifecycle.notice("launch-at-login: user set \(wantOn, privacy: .public)")
         } catch {
-            // Best-effort: a throw on an unsigned build must not crash — roll the checkbox back.
+            // Best-effort: a throw on an unsigned build must not crash — roll the checkbox back and
+            // remember the failure so the hint explains it (#69). A deliberate user action, so this
+            // stays `.error` (unlike the routine startup attempt, which logs `.notice`).
+            lastToggleFailed = true
             AppLogger.lifecycle.error(
                 "launch-at-login: toggle failed: \(error.localizedDescription, privacy: .public)")
             sender.state = wantOn ? .off : .on

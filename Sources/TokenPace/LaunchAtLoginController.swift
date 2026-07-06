@@ -1,3 +1,4 @@
+import Foundation
 import TokenPaceKit
 import ServiceManagement
 
@@ -27,6 +28,18 @@ enum LaunchAtLoginController {
         case .notFound:         return .notFound
         @unknown default:       return .notFound
         }
+    }
+
+    /// Whether the running process is a proper `.app` bundle (not a bare `swift run` binary). Used
+    /// to gate *opt-out* auto-registration: registering a login item without the user's consent is
+    /// only appropriate for the shipped product, not for every `swift run` during development —
+    /// which, being ad-hoc-signed, `SMAppService` will happily register at a `.build/…` path and so
+    /// pollute the user's Login Items (#69). A `swift run` binary has a `Bundle.main` whose
+    /// `bundleIdentifier` is `nil` and whose path is the executable itself, not a `.app`; a real
+    /// bundle has a non-nil identifier and a `.app` wrapper. This gates auto-registration only — the
+    /// Settings toggle stays clickable on a dev build, letting `register()` adjudicate on demand.
+    static var isAppBundle: Bool {
+        Bundle.main.bundleIdentifier != nil && Bundle.main.bundleURL.pathExtension == "app"
     }
 
     /// Register the main app as a login item. Throws on an unsigned/invalid bundle — best-effort.

@@ -9,12 +9,16 @@ import Testing
 @Suite("LaunchAtLogin decisions")
 struct LaunchAtLoginTests {
 
-    /// Opt-out auto-registration fires for `.notRegistered` only — every other status is left alone.
-    @Test func registersOnlyWhenNotRegistered() {
-        #expect(LaunchAtLogin.shouldRegisterOnFirstLaunch(.notRegistered) == true)
-        #expect(LaunchAtLogin.shouldRegisterOnFirstLaunch(.registered) == false)
-        #expect(LaunchAtLogin.shouldRegisterOnFirstLaunch(.requiresApproval) == false)
-        #expect(LaunchAtLogin.shouldRegisterOnFirstLaunch(.notFound) == false)
+    /// Opt-out auto-registration is attempted whenever there is no active login item — both
+    /// `.notRegistered` and `.notFound`. `.notFound` on a real install means the registration
+    /// dropped with a replaced bundle on update, so re-`register()` self-heals it (#69). The
+    /// `.notFound` case is the regression guard for #69 (it used to be `false`, greying the
+    /// checkbox forever after an update). `.registered`/`.requiresApproval` are left alone.
+    @Test func attemptsRegisterWhenNoActiveLoginItem() {
+        #expect(LaunchAtLogin.shouldAttemptRegister(.notRegistered) == true)
+        #expect(LaunchAtLogin.shouldAttemptRegister(.notFound) == true)
+        #expect(LaunchAtLogin.shouldAttemptRegister(.registered) == false)
+        #expect(LaunchAtLogin.shouldAttemptRegister(.requiresApproval) == false)
     }
 
     /// The checkbox is on only when the item is actually registered; `.requiresApproval` reads off.
@@ -31,14 +35,5 @@ struct LaunchAtLoginTests {
         #expect(LaunchAtLogin.needsSystemSettings(.registered) == false)
         #expect(LaunchAtLogin.needsSystemSettings(.notRegistered) == false)
         #expect(LaunchAtLogin.needsSystemSettings(.notFound) == false)
-    }
-
-    /// The toggle is controllable for every status except `.notFound` (no registerable login item
-    /// in this run context — bare `swift run` or an ad-hoc bundle SMAppService rejects).
-    @Test func unavailableOnlyWhenNotFound() {
-        #expect(LaunchAtLogin.isAvailable(.notFound) == false)
-        #expect(LaunchAtLogin.isAvailable(.registered) == true)
-        #expect(LaunchAtLogin.isAvailable(.notRegistered) == true)
-        #expect(LaunchAtLogin.isAvailable(.requiresApproval) == true)
     }
 }
