@@ -67,6 +67,11 @@ public struct UsageWindow: Sendable, Equatable, Decodable {
 /// The server already computes a `severity` tier per active limit; it is kept for the
 /// popup (#11) to cross-check against the local ``PacingModel/limitIndicator(utilization:timePercent:)``
 /// formula. Like ``UsageWindow``, `resetsAt` stays a raw string for ``ResetClock``.
+///
+/// `weekly_scoped` entries additionally carry a `scope` object naming the model they cap
+/// (`scope.model.display_name`, e.g. `"Fable"`). That name is the **only** identity the API gives
+/// for models without a top-level `seven_day_*` window (#65), so it is flattened into
+/// ``modelDisplayName``; the rest of `scope` (`model.id`, `surface`) stays ignored.
 public struct UsageLimit: Sendable, Equatable, Decodable {
     public let kind: String
     public let group: String
@@ -74,11 +79,24 @@ public struct UsageLimit: Sendable, Equatable, Decodable {
     public let severity: String
     public let resetsAt: String
     public let isActive: Bool
+    /// `scope.model.display_name` of a `weekly_scoped` entry (e.g. `"Fable"`), or `nil` when the
+    /// entry is unscoped (`scope: null` on `session`/`weekly_all`) or the name is absent. Feeds
+    /// ``UsageSnapshot/scopedModelWindows``.
+    public let modelDisplayName: String?
 
     private enum CodingKeys: String, CodingKey {
-        case kind, group, percent, severity
+        case kind, group, percent, severity, scope
         case resetsAt = "resets_at"
         case isActive = "is_active"
+    }
+
+    /// Minimal mirror of the `scope` object — only the path to the model display name is decoded.
+    private struct Scope: Decodable {
+        let model: Model?
+        struct Model: Decodable {
+            let displayName: String?
+            enum CodingKeys: String, CodingKey { case displayName = "display_name" }
+        }
     }
 
     public init(
@@ -87,7 +105,8 @@ public struct UsageLimit: Sendable, Equatable, Decodable {
         percent: Double,
         severity: String,
         resetsAt: String,
-        isActive: Bool
+        isActive: Bool,
+        modelDisplayName: String? = nil
     ) {
         self.kind = kind
         self.group = group
@@ -95,13 +114,16 @@ public struct UsageLimit: Sendable, Equatable, Decodable {
         self.severity = severity
         self.resetsAt = resetsAt
         self.isActive = isActive
+        self.modelDisplayName = modelDisplayName
     }
 
-    /// Tolerant decode: every field defaults rather than failing. `limits[]` is currently a
-    /// decoded-but-unused future-proofing carrier (no downstream consumer) **except** as a fallback
-    /// source of `resets_at` for ``UsageSnapshot``'s reset-boundary synthesis — so a `null`
-    /// `percent`/`severity`/`is_active` on one entry must never fail the whole snapshot. Newer API
-    /// fields (`scope`, …) are ignored as before.
+    /// Tolerant decode: every field defaults rather than failing. Beyond the `resets_at` fallback
+    /// role for ``UsageSnapshot``'s reset-boundary synthesis, `limits[]` now also carries the
+    /// per-model weekly limits (`weekly_scoped` + `scope.model.display_name`, #65) — so a `null`
+    /// `percent`/`severity`/`is_active` on one entry must never fail the whole snapshot. The
+    /// `scope` decode is `try?`-wrapped: a plain `decodeIfPresent` **throws** on a type mismatch
+    /// (e.g. `scope` arriving as a string), and a malformed scope must degrade to `nil`, not kill
+    /// the snapshot. Other newer API fields stay ignored.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? ""
@@ -110,6 +132,8 @@ public struct UsageLimit: Sendable, Equatable, Decodable {
         self.severity = try container.decodeIfPresent(String.self, forKey: .severity) ?? "normal"
         self.resetsAt = try container.decodeIfPresent(String.self, forKey: .resetsAt) ?? ""
         self.isActive = try container.decodeIfPresent(Bool.self, forKey: .isActive) ?? false
+        self.modelDisplayName =
+            ((try? container.decodeIfPresent(Scope.self, forKey: .scope)) ?? nil)?.model?.displayName
     }
 }
 
@@ -267,5 +291,53 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.formatOptions = [.withInternetDateTime]   // no fractional seconds — `ResetClock` strips them anyway
         return formatter.string(from: date)
+    }
+}
+
+// MARK: - ScopedModelWindow
+
+/// One per-model weekly limit extracted from a `weekly_scoped` entry of `limits[]` (#65) —
+/// the shape ``PopupLayout`` renders as a "<name> (7-day)" row. A struct (not a tuple) so test
+/// fixtures can compare whole arrays via `Equatable`.
+public struct ScopedModelWindow: Sendable, Equatable {
+    /// `scope.model.display_name`, e.g. `"Fable"` — the only model identity the API provides.
+    public let name: String
+    /// The entry reshaped as a window: `percent` → `utilization`, `resets_at` kept raw (or
+    /// borrowed from `seven_day` — see ``UsageSnapshot/scopedModelWindows``).
+    public let window: UsageWindow
+
+    public init(name: String, window: UsageWindow) {
+        self.name = name
+        self.window = window
+    }
+}
+
+extension UsageSnapshot {
+    /// Per-model weekly limits that exist **only** as `weekly_scoped` entries of `limits[]`
+    /// (e.g. Fable, which has no top-level `seven_day_fable` window — #65), in API order.
+    ///
+    /// Entries whose model name matches a **present** legacy sub-window (`seven_day_opus`/
+    /// `seven_day_sonnet`) are skipped, case-insensitively: live bodies carry Sonnet in *both*
+    /// forms at once, and the legacy field wins — its `utilization` has decimals where the
+    /// entry's `percent` is an integer. The same set also drops duplicate scoped entries.
+    ///
+    /// An entry with an empty `resets_at` borrows `seven_day`'s — the scoped limits reset on the
+    /// weekly cadence, mirroring the `subWindow` borrow above. The borrow here is silent: this
+    /// property runs on every popup render, not once per poll, so logging it would flood the
+    /// `network` category (`docs/log-messages.md` discipline).
+    public var scopedModelWindows: [ScopedModelWindow] {
+        var seen: Set<String> = []
+        if sevenDayOpus != nil { seen.insert("opus") }
+        if sevenDaySonnet != nil { seen.insert("sonnet") }
+        var result: [ScopedModelWindow] = []
+        for limit in limits where limit.kind == "weekly_scoped" {
+            guard let name = limit.modelDisplayName, !name.isEmpty,
+                  seen.insert(name.lowercased()).inserted else { continue }
+            let resetsAt = limit.resetsAt.isEmpty ? sevenDay.resetsAt : limit.resetsAt
+            result.append(ScopedModelWindow(
+                name: name,
+                window: UsageWindow(utilization: limit.percent, resetsAt: resetsAt)))
+        }
+        return result
     }
 }

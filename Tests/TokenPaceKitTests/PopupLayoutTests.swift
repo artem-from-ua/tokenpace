@@ -23,14 +23,24 @@ private func snapshot(
     fiveHourResetsIn: TimeInterval = 4 * 3600,
     sevenDayResetsIn: TimeInterval = 3 * 24 * 3600,
     opus: (util: Double, resetsIn: TimeInterval)? = nil,
-    sonnet: (util: Double, resetsIn: TimeInterval)? = nil
+    sonnet: (util: Double, resetsIn: TimeInterval)? = nil,
+    limits: [UsageLimit] = []
 ) -> UsageSnapshot {
     UsageSnapshot(
         fiveHour: UsageWindow(utilization: fiveHourUtil, resetsAt: resetsAt(inSeconds: fiveHourResetsIn)),
         sevenDay: UsageWindow(utilization: sevenDayUtil, resetsAt: resetsAt(inSeconds: sevenDayResetsIn)),
         sevenDayOpus: opus.map { UsageWindow(utilization: $0.util, resetsAt: resetsAt(inSeconds: $0.resetsIn)) },
-        sevenDaySonnet: sonnet.map { UsageWindow(utilization: $0.util, resetsAt: resetsAt(inSeconds: $0.resetsIn)) }
+        sevenDaySonnet: sonnet.map { UsageWindow(utilization: $0.util, resetsAt: resetsAt(inSeconds: $0.resetsIn)) },
+        limits: limits
     )
+}
+
+/// A `weekly_scoped` limits[] entry for a named model — the only API shape carrying models
+/// without a top-level window (e.g. Fable, #65).
+private func scopedLimit(name: String, percent: Double, resetsIn: TimeInterval) -> UsageLimit {
+    UsageLimit(
+        kind: "weekly_scoped", group: "weekly", percent: percent, severity: "normal",
+        resetsAt: resetsAt(inSeconds: resetsIn), isActive: false, modelDisplayName: name)
 }
 
 private func layout(from snap: UsageSnapshot) -> PopupLayout {
@@ -187,6 +197,64 @@ struct PopupLayoutModelTests {
         let expected = PacingModel.barLayout(utilization: 95, resetsAt: parsed, now: now, window: .sevenDay)
         #expect(p.rows[2].bar == expected)
         #expect(p.rows[2].pacing == expected.pacing)
+    }
+}
+
+// MARK: - Scoped models from limits[] (#65)
+
+@Suite("PopupLayout scoped-model rows")
+struct PopupLayoutScopedModelTests {
+
+    @Test func fableRowAppendedAfterLegacyRows() {
+        let snap = snapshot(
+            fiveHourUtil: 50, sevenDayUtil: 30,
+            opus: (util: 5, resetsIn: 3 * 24 * 3600),
+            sonnet: (util: 2, resetsIn: 3 * 24 * 3600),
+            limits: [scopedLimit(name: "Fable", percent: 12, resetsIn: 3 * 24 * 3600)]
+        )
+        let p = layout(from: snap)
+        #expect(p.rows.count == 5)
+        #expect(p.rows[4].title == "Fable (7-day)")
+        #expect(p.rows[4].utilization == 12)
+    }
+
+    @Test func fableRowWithoutLegacyModels() {
+        let snap = snapshot(
+            fiveHourUtil: 50, sevenDayUtil: 30,
+            limits: [scopedLimit(name: "Fable", percent: 5, resetsIn: 3 * 24 * 3600)]
+        )
+        let p = layout(from: snap)
+        #expect(p.rows.count == 3)
+        #expect(p.rows[2].title == "Fable (7-day)")
+    }
+
+    @Test func scopedRowPacedAsSevenDay() {
+        let snap = snapshot(
+            fiveHourUtil: 50, sevenDayUtil: 30,
+            limits: [scopedLimit(name: "Fable", percent: 95, resetsIn: 3 * 24 * 3600)]
+        )
+        let p = layout(from: snap)
+        let parsed = ResetClock.parse(snap.scopedModelWindows[0].window.resetsAt)!
+        let expected = PacingModel.barLayout(utilization: 95, resetsAt: parsed, now: now, window: .sevenDay)
+        #expect(p.rows[2].bar == expected)
+        #expect(p.rows[2].subdivisions == 7)
+    }
+
+    @Test func scopedSonnetSkippedWhenLegacySonnetPresent() {
+        // Live bodies carry Sonnet in both forms at once — exactly one row must render.
+        let snap = snapshot(
+            fiveHourUtil: 50, sevenDayUtil: 30,
+            sonnet: (util: 2.5, resetsIn: 3 * 24 * 3600),
+            limits: [
+                scopedLimit(name: "Sonnet", percent: 2, resetsIn: 3 * 24 * 3600),
+                scopedLimit(name: "Fable", percent: 5, resetsIn: 3 * 24 * 3600),
+            ]
+        )
+        let p = layout(from: snap)
+        #expect(p.rows.count == 4)   // 5h, 7d, Sonnet (legacy), Fable (scoped)
+        #expect(p.rows.filter { $0.title.contains("Sonnet") }.count == 1)
+        #expect(p.rows[2].utilization == 2.5)   // the legacy window's decimal value won
+        #expect(p.rows[3].title == "Fable (7-day)")
     }
 }
 
