@@ -314,5 +314,9 @@ actor StubUsageTransport: UsageTransport {
 /// bearer, so reading the real Keychain would be pointless — and would pop the system's Keychain
 /// access prompt for an unsigned `swift run` / dev build. Skipping it keeps the stub run silent.
 struct StubTokenProvider: TokenProviding {
-    func currentAccessToken(now: Date) throws -> String { "stub-token" }
+    func currentCredentials(now: Date) throws -> TokenCredentials {
+        // A far-future expiry so the engine treats the stub token as valid and the Troubleshoot
+        // window's token section shows a live read/expires pair end-to-end (ADR-0020).
+        TokenCredentials(accessToken: "stub-token", expiresAt: now.addingTimeInterval(8 * 3600))
+    }
 }

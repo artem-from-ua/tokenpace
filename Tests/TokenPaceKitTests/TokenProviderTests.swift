@@ -110,15 +110,28 @@ struct ValidityTests {
         #expect(creds(expiresAt: now).isExpired(now: now))
     }
 
-    @Test func expiredCredentialsThrowNotReturnOldToken() {
-        // Contract: a stale token is never handed back — the agent must not send it to the API.
-        let stale = creds(expiresAt: now.addingTimeInterval(-1))
-        #expect(throws: TokenError.expired) { try TokenProvider.accessTokenIfValid(stale, now: now) }
+}
+
+// MARK: - TokenCredentials (ADR-0020)
+
+@Suite("TokenCredentials")
+struct TokenCredentialsTests {
+
+    private func creds(expiresAt: Date) -> TokenCredentials {
+        TokenCredentials(accessToken: "acc", expiresAt: expiresAt)
     }
 
-    @Test func validCredentialsReturnAccessToken() throws {
-        let fresh = creds(expiresAt: now.addingTimeInterval(3600))
-        #expect(try TokenProvider.accessTokenIfValid(fresh, now: now) == "acc")
+    @Test func futureExpiryIsNotExpired() {
+        #expect(!creds(expiresAt: now.addingTimeInterval(3600)).isExpired(now: now))
+    }
+
+    @Test func pastExpiryIsExpired() {
+        #expect(creds(expiresAt: now.addingTimeInterval(-1)).isExpired(now: now))
+    }
+
+    @Test func exactBoundaryIsExpired() {
+        // `expiresAt == now` counts as expired (`<=`), mirroring `OAuthCredentials.isExpired`.
+        #expect(creds(expiresAt: now).isExpired(now: now))
     }
 }
 

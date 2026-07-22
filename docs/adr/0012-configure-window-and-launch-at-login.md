@@ -17,6 +17,11 @@ superseded_by: [0018]
 > (тип `ConfigureWindowController` → `SettingsWindowController`). Рішення лишається чинним — змінилася
 > лише назва-мітка; тіло цього ADR збережено в історичному вигляді.
 
+> **Примітка (2026-07-22, [ADR-0020](0020-troubleshoot-window-and-diagnostics-pipeline.md)):**
+> §5/§7 у частині «пункти без шортката (`keyEquivalent=""`)» більше не так. «Settings…» отримало
+> `⌘,`, «Quit TokenPace» — `⌘Q`: непорожній keyEquivalent — **обов'язкова** передумова нативного
+> ⌥-alternate («Troubleshoot…»), тож видимий гліф тепер свідомий. Тіло цього ADR історичне.
+
 ## Контекст
 
 Issue #14 («launch-at-login + Quit») — останній інфраструктурний пункт Фази 1. Потрібні мінімальні

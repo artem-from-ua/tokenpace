@@ -38,11 +38,11 @@ In the tables below, `<…>` marks an interpolated value.
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 130 | `lifecycle` | `.info` | `TokenPace status item attached (<version>); live polling started` | `applicationDidFinishLaunching` — after the status item is attached and polling starts |
-| 159 | `lifecycle` | `.notice` | `launch-at-login: not an .app bundle (swift run), skipping opt-out auto-register` | `registerLaunchAtLoginIfNeeded()` — running as a bare `swift run` binary, so opt-out auto-register is skipped to avoid polluting Login Items (#69) |
-| 165 | `lifecycle` | `.notice` | `launch-at-login: status=<status>, no auto-register` | status is `.registered`/`.requiresApproval`, so no auto-register is needed |
-| 171 | `lifecycle` | `.notice` | `launch-at-login: auto-registered (opt-out)` | successful auto-registration (`.notRegistered`, or recovery from `.notFound` after an update — #69) |
-| 175 | `lifecycle` | `.error` | `launch-at-login: auto-register failed: <error>` | `LaunchAtLoginController.enable()` threw on an installed `.app` bundle — an unexpected, registerable-but-refused case |
+| 146 | `lifecycle` | `.info` | `TokenPace status item attached (<version>); live polling started` | `applicationDidFinishLaunching` — after the status item is attached and polling starts |
+| 182 | `lifecycle` | `.notice` | `launch-at-login: not an .app bundle (swift run), skipping opt-out auto-register` | `registerLaunchAtLoginIfNeeded()` — running as a bare `swift run` binary, so opt-out auto-register is skipped to avoid polluting Login Items (#69) |
+| 188 | `lifecycle` | `.notice` | `launch-at-login: status=<status>, no auto-register` | status is `.registered`/`.requiresApproval`, so no auto-register is needed |
+| 194 | `lifecycle` | `.notice` | `launch-at-login: auto-registered (opt-out)` | successful auto-registration (`.notRegistered`, or recovery from `.notFound` after an update — #69) |
+| 198 | `lifecycle` | `.error` | `launch-at-login: auto-register failed: <error>` | `LaunchAtLoginController.enable()` threw on an installed `.app` bundle — an unexpected, registerable-but-refused case |
 
 ## `Sources/TokenPace/ClaudeCLIRefresher.swift`
 
@@ -80,11 +80,11 @@ token itself never is.
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
 | 98 | `network` | `.error` | `usage decode failed body=<body>` | `decode(from:now:)` — JSON `DecodingError`; body capped to 500 chars |
-| 126 | `network` | `.error` | `usage request transport error: <error>` | `transport.data(for:)` threw (network error) |
-| 132 | `network` | `.error` | `usage response not HTTP` | response was not `HTTPURLResponse` |
-| 146 | `network` | `.notice` | `usage 200 ok body=<bodyText>` | HTTP 200; logs the full JSON body |
-| 150 | `network` | `.error` | `usage rate-limited: HTTP 429 retryAfter=<n>` | HTTP 429 |
-| 155 | `network` | `.error` | `usage request failed: HTTP <statusCode>` | other non-200/non-429 status |
+| 155 | `network` | `.error` | `usage request transport error: <error>` | `diagnosedFetch` — `transport.data(for:)` threw (network error) |
+| 166 | `network` | `.error` | `usage response not HTTP` | response was not `HTTPURLResponse` |
+| 187 | `network` | `.notice` | `usage 200 ok body=<bodyText>` | HTTP 200; logs the full JSON body |
+| 199 | `network` | `.error` | `usage rate-limited: HTTP 429 retryAfter=<n>` | HTTP 429 |
+| 207 | `network` | `.error` | `usage request failed: HTTP <statusCode>` | other non-200/non-429 status |
 
 ## `Sources/TokenPaceKit/StatusClient.swift`
 
@@ -103,10 +103,12 @@ itself is never logged — only exit status and byte count.
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 164 | `keychain` | `.notice` | `token expired, len=<count>` | `accessTokenIfValid(_:now:)` — `.isValid()` returned false |
-| 267 | `keychain` | `.error` | `security cli launch failed` | `readRawData()` — `Process.run()` threw; the `security` tool could not be spawned |
-| 272 | `keychain` | `.error` | `security cli read timed out after <timeout>s` | the `security` tool outlived the 10 s cap and was terminated |
-| 279 | `keychain` | `.debug` | `security cli read exit=<status> bytes=<count>` | `readRawData()` — after every Keychain read; logs the tool's exit status and payload size |
+| 284 | `keychain` | `.error` | `security cli launch failed` | `readRawData()` — `Process.run()` threw; the `security` tool could not be spawned |
+| 289 | `keychain` | `.error` | `security cli read timed out after <timeout>s` | the `security` tool outlived the 10 s cap and was terminated |
+| 296 | `keychain` | `.debug` | `security cli read exit=<status> bytes=<count>` | `readRawData()` — after every Keychain read; logs the tool's exit status and payload size |
+
+> The `token expired, len=<count>` line moved to `PollingEngine.pollOnce` with the expiry decision
+> (ADR-0020) — see the `PollingEngine.swift` table below. Text, category, and level are unchanged.
 
 ## `Sources/TokenPaceKit/UsageSnapshot.swift`
 
@@ -122,7 +124,8 @@ One log line per interval change. The format is built by
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 390 | `lifecycle` | `.notice` | `interval <from>→<to>: <phrase>` | the polling interval moved; emitted once per change |
+| 406 | `lifecycle` | `.notice` | `interval <from>→<to>: <phrase>` | the polling interval moved; emitted once per change |
+| 470 | `keychain` | `.notice` | `token expired, len=<count>` | `pollOnce` — the read credentials are expired (`isExpired` true); moved here from `TokenProvider` with the expiry decision (ADR-0020) |
 
 `<from>`/`<to>` render as whole minutes (`3m`) or fall back to seconds (`90s`).
 `<phrase>` is one of six, keyed by `IntervalDecision.Cause` (lines 180–189):
@@ -142,7 +145,7 @@ One log line per interval change. The format is built by
 |----------|-------|-------|
 | `network` | 13 | `UsageClient` (6), `StatusClient` (5), `UsageSnapshot` (2) |
 | `lifecycle` | 13 | `App` (5), `SettingsWindowController` (2), `PollingShell` (5), `PollingEngine` (1) |
-| `keychain` | 10 | `TokenProvider` (4), `ClaudeCLIRefresher` (6) |
+| `keychain` | 10 | `TokenProvider` (3), `ClaudeCLIRefresher` (6), `PollingEngine` (1) |
 | `ui` | 0 | — (category defined, unused) |
 
 **Total: 36 log statements** — `.error` ×17, `.notice` ×17, `.info` ×1, `.debug` ×1.

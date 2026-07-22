@@ -57,6 +57,31 @@ public struct OAuthCredentials: Sendable, Equatable {
     public func isValid(now: Date) -> Bool { !isExpired(now: now) }
 }
 
+// MARK: - TokenCredentials
+
+/// The subset of ``OAuthCredentials`` the polling engine actually needs: the bearer token and its
+/// expiry — deliberately **without** the `refreshToken` (the secret never travels into the engine)
+/// or the diagnostic fields. Introduced with the Troubleshoot window (ADR-0020) so a single
+/// Keychain read hands the engine both the token *and* its `expiresAt`: the expiry drives the
+/// delegated-refresh decision (moved here from the provider) and feeds ``TokenDiagnostics`` — even
+/// for an already-expired token, the most valuable diagnostic case.
+///
+/// The provider no longer judges expiry; ``isExpired(now:)`` is the same `expiresAt <= now`
+/// predicate as ``OAuthCredentials/isExpired(now:)``, applied by the engine.
+public struct TokenCredentials: Sendable, Equatable {
+    public let accessToken: String
+    public let expiresAt: Date
+
+    public init(accessToken: String, expiresAt: Date) {
+        self.accessToken = accessToken
+        self.expiresAt = expiresAt
+    }
+
+    /// Whether the token is expired at `now` — equality counts as expired (`expiresAt <= now`),
+    /// mirroring ``OAuthCredentials/isExpired(now:)``.
+    public func isExpired(now: Date) -> Bool { expiresAt <= now }
+}
+
 // MARK: - TokenError
 
 /// Distinguishable failure causes for reading / decoding the token.
@@ -110,9 +135,10 @@ public enum TokenError: Error, Equatable {
 ///    Claude Code's stored pair and log the user out of the CLI.
 ///
 /// An expired token is **never** sent to the API (that would guarantee a 401 and burn rate-limit
-/// budget). ``currentAccessToken(now:)`` throws ``TokenError/expired`` instead; the polling layer
-/// reacts with the delegated refresh above. `TokenProvider` itself holds no timer and stays
-/// stateless.
+/// budget). Since ADR-0020 the provider no longer judges expiry: ``currentCredentials(now:)`` hands
+/// back the token **and** its `expiresAt` (readable even when stale, for diagnostics), and the
+/// polling engine decides — it short-circuits the network on an expired token and triggers the
+/// delegated refresh above. `TokenProvider` itself holds no timer and stays stateless.
 ///
 /// ## Privacy
 /// The token is **never** logged. `AppLogger.keychain` carries only `.public` diagnostics —
@@ -140,31 +166,22 @@ public enum TokenProvider {
         return try decode(from: data)
     }
 
-    // MARK: currentAccessToken
+    // MARK: currentCredentials
 
-    /// The ready-to-use `accessToken` for the `Authorization: Bearer` header, validity-checked.
+    /// The current token plus its expiry, for the polling engine. Reads ``credentials()`` and
+    /// projects it onto ``TokenCredentials`` — it does **not** judge expiry (that decision moved to
+    /// the engine with ADR-0020, so `expiresAt` is available even for a stale token, the most
+    /// valuable diagnostic case). A stale-but-readable item therefore returns successfully here; the
+    /// engine calls ``TokenCredentials/isExpired(now:)`` and short-circuits the network + triggers
+    /// the delegated refresh (ADR-0017).
     ///
-    /// On an expired token this throws ``TokenError/expired`` and **never returns the stale
-    /// token** — the agent must not send it to the API. The polling layer treats `.expired` as
-    /// the trigger for a delegated refresh (ADR-0017): it spawns the `claude` CLI so Claude Code
-    /// rewrites the Keychain, then re-reads through this same entry point.
-    ///
-    /// - Parameter now: the current instant (injected for tests; do not call `Date()` inside).
-    /// - Throws: ``TokenError/expired`` when stale, or any error from ``credentials()``.
-    public static func currentAccessToken(now: Date) throws -> String {
+    /// - Parameter now: accepted for signature symmetry with the rest of the codebase; unused here
+    ///   now that expiry is judged downstream.
+    /// - Throws: ``TokenError`` (`itemNotFound` / `accessDenied` / `keychainError` / `malformedData`)
+    ///   from ``credentials()``.
+    public static func currentCredentials(now: Date) throws -> TokenCredentials {
         let creds = try credentials()
-        return try accessTokenIfValid(creds, now: now)
-    }
-
-    /// Pure validity gate behind ``currentAccessToken(now:)``, extracted so the "never return a
-    /// stale token" contract is unit-testable without the Keychain. Returns the `accessToken` only
-    /// when still valid; otherwise logs the expiry (length only, `.public`) and throws.
-    static func accessTokenIfValid(_ creds: OAuthCredentials, now: Date) throws -> String {
-        guard creds.isValid(now: now) else {
-            AppLogger.keychain.notice("token expired, len=\(creds.accessToken.count, privacy: .public)")
-            throw TokenError.expired
-        }
-        return creds.accessToken
+        return TokenCredentials(accessToken: creds.accessToken, expiresAt: creds.expiresAt)
     }
 
     // MARK: decode

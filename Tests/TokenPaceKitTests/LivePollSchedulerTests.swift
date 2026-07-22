@@ -157,9 +157,11 @@ private struct StubTransport: UsageTransport {
     }
 }
 
-/// Token seam returning a literal. (Local copy.)
+/// Token seam returning literal credentials with a far-future expiry. (Local copy.)
 private struct StubTokenProvider: TokenProviding {
-    func currentAccessToken(now: Date) throws -> String { "acc-123" }
+    func currentCredentials(now: Date) throws -> TokenCredentials {
+        TokenCredentials(accessToken: "acc-123", expiresAt: now.addingTimeInterval(3600))
+    }
 }
 
 /// Probe returning a fixed reading. (Local copy.)

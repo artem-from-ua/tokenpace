@@ -36,11 +36,17 @@ public protocol PollScheduler: Sendable {
     func waitWhileAsleep() async
 }
 
-/// The token seam — a one-method protocol over `TokenProvider.currentAccessToken(now:)` so the
+/// The token seam — a one-method protocol over `TokenProvider.currentCredentials(now:)` so the
 /// engine is tested without touching the Keychain (`Security`). Production is
-/// ``KeychainTokenProvider``; tests inject a stub that returns a literal or throws a `TokenError`.
+/// ``KeychainTokenProvider``; tests inject a stub that returns literal credentials or throws a
+/// `TokenError`.
+///
+/// Since ADR-0020 this returns ``TokenCredentials`` (token **plus** `expiresAt`), not a bare token:
+/// the engine — not the provider — judges expiry, so a stale token still returns here (with a past
+/// `expiresAt`) and the engine decides whether to short-circuit / refresh. The single read also
+/// feeds ``TokenDiagnostics``.
 public protocol TokenProviding: Sendable {
-    func currentAccessToken(now: Date) throws -> String
+    func currentCredentials(now: Date) throws -> TokenCredentials
 }
 
 /// Production token seam — a thin `struct` wrapper over the static `TokenProvider` (a `static enum`
@@ -48,8 +54,8 @@ public protocol TokenProviding: Sendable {
 /// by Claude Code is picked up on the next cycle (ADR-0008 §2).
 public struct KeychainTokenProvider: TokenProviding {
     public init() {}
-    public func currentAccessToken(now: Date) throws -> String {
-        try TokenProvider.currentAccessToken(now: now)
+    public func currentCredentials(now: Date) throws -> TokenCredentials {
+        try TokenProvider.currentCredentials(now: now)
     }
 }
 
@@ -71,11 +77,21 @@ public struct PollOutput: Sendable, Equatable {
     public let snapshot: UsageSnapshot?
     public let health: UsageHealth
     public let interval: TimeInterval
+    /// Raw diagnostics of **this** poll attempt for the Troubleshoot window (ADR-0020) — the exact
+    /// HTTP status, full response body, and token dates. `nil` only for outputs built without a real
+    /// attempt (e.g. a hand-constructed test fixture); every live iteration fills it.
+    public let diagnostics: PollDiagnostics?
 
-    public init(snapshot: UsageSnapshot?, health: UsageHealth, interval: TimeInterval) {
+    public init(
+        snapshot: UsageSnapshot?,
+        health: UsageHealth,
+        interval: TimeInterval,
+        diagnostics: PollDiagnostics? = nil
+    ) {
         self.snapshot = snapshot
         self.health = health
         self.interval = interval
+        self.diagnostics = diagnostics
     }
 }
 
@@ -392,7 +408,8 @@ public struct PollingEngine: Sendable {
 
                     let interval = Self.effectiveInterval(state)
                     continuation.yield(PollOutput(
-                        snapshot: state.lastSnapshot, health: state.health, interval: interval))
+                        snapshot: state.lastSnapshot, health: state.health, interval: interval,
+                        diagnostics: result.diagnostics))
 
                     let reason = await scheduler.waitForNextPoll(interval: interval)
                     if case .interrupted(.sleep) = reason {
@@ -412,49 +429,92 @@ public struct PollingEngine: Sendable {
         let outcome: PollOutcome
         /// The delegated-refresh attempt's result, or `nil` when no attempt ran this cycle.
         let refresh: DelegatedRefreshOutcome?
+        /// Raw diagnostics of this attempt (ADR-0020), threaded through to `PollOutput`.
+        let diagnostics: PollDiagnostics
     }
 
     /// One read-token-then-fetch attempt, collapsed to a ``PollResult``. An expired/absent token
     /// short-circuits **before** the network (ADR-0007: a stale token guarantees a 401 and burns
     /// rate-limit), so a token error means no request was sent.
     ///
-    /// On `.expired` specifically, the engine first tries a **delegated refresh** (ADR-0017): the
-    /// injected ``DelegatedRefresher`` spawns the `claude` CLI so Claude Code rotates its own
-    /// Keychain credentials, then the token is re-read once — all within this same cycle, so
-    /// recovery does not wait for the next poll. The ``RefreshGate`` in `state` throttles attempts;
-    /// a blocked or failed attempt falls through to the plain `.tokenError(.expired)` path.
+    /// Since ADR-0020 the **engine** judges expiry (the provider hands back token + `expiresAt`), so
+    /// the "expired token never goes to the network" contract is enforced here. On expiry the engine
+    /// first tries a **delegated refresh** (ADR-0017): the injected ``DelegatedRefresher`` spawns the
+    /// `claude` CLI so Claude Code rotates its own Keychain credentials, then the token is re-read
+    /// once — all within this same cycle, so recovery does not wait for the next poll. The
+    /// ``RefreshGate`` in `state` throttles attempts; a blocked or failed attempt falls through to
+    /// the plain `.tokenError(.expired)` path.
+    ///
+    /// Every path also builds the raw ``PollDiagnostics`` for the Troubleshoot window: `token` dates
+    /// whenever the credentials read (even expired), a `.notSent` fetch record when the network was
+    /// skipped, and the full ``FetchDiagnostics`` from ``UsageClient/diagnosedFetch`` otherwise.
     func pollOnce(state: PollState, claudeActive: Bool) async -> PollResult {
-        var token: String
+        var creds: TokenCredentials
+        var token = TokenDiagnostics?.none
         var refresh: DelegatedRefreshOutcome?
         do {
-            token = try tokenProvider.currentAccessToken(now: now())
-        } catch TokenError.expired {
+            creds = try tokenProvider.currentCredentials(now: now())
+        } catch let error as TokenError {
+            // Credentials unreadable → no token dates to show; the request is never sent.
+            return tokenErrorResult(error, refresh: nil)
+        } catch {
+            // currentCredentials only throws TokenError; bucket anything else defensively
+            // (no Security import needed — `.malformedData` carries no OSStatus).
+            return tokenErrorResult(.malformedData, refresh: nil)
+        }
+        token = TokenDiagnostics(readAt: now(), expiresAt: creds.expiresAt)
+
+        // Expiry is judged here now (moved out of the provider, ADR-0020): a stale token must not
+        // reach the network. On expiry try one delegated refresh + re-read within this cycle.
+        if creds.isExpired(now: now()) {
+            AppLogger.keychain.notice("token expired, len=\(creds.accessToken.count, privacy: .public)")
             guard let refresher, state.refreshGate.allows(now: now()) else {
-                return PollResult(outcome: .tokenError(.expired), refresh: nil)
+                return tokenErrorResult(.expired, refresh: nil, token: token)
             }
             let attempt = await refresher.refresh()
             refresh = attempt
             guard attempt == .refreshed,
-                  let reread = try? tokenProvider.currentAccessToken(now: now()) else {
-                return PollResult(outcome: .tokenError(.expired), refresh: attempt)
+                  let reread = try? tokenProvider.currentCredentials(now: now()),
+                  !reread.isExpired(now: now()) else {
+                return tokenErrorResult(.expired, refresh: attempt, token: token)
             }
-            token = reread
-        } catch let error as TokenError {
-            return PollResult(outcome: .tokenError(error), refresh: nil)
-        } catch {
-            // currentAccessToken only throws TokenError; bucket anything else defensively
-            // (no Security import needed — `.malformedData` carries no OSStatus).
-            return PollResult(outcome: .tokenError(.malformedData), refresh: nil)
+            creds = reread
+            token = TokenDiagnostics(readAt: now(), expiresAt: reread.expiresAt)
         }
 
-        do {
-            let snapshot = try await UsageClient.fetch(
-                accessToken: token, now: now(), transport: transport)
-            return PollResult(outcome: .success(snapshot), refresh: refresh)
-        } catch let error as UsageError {
-            return PollResult(outcome: .usageError(error), refresh: refresh)
-        } catch {
-            return PollResult(outcome: .usageError(.transport(message: "\(error)", code: nil)), refresh: refresh)
+        let fetched = await UsageClient.diagnosedFetch(
+            accessToken: creds.accessToken, now: now(), transport: transport)
+        let diagnostics = PollDiagnostics(fetch: fetched.diagnostics, token: token)
+        switch fetched.result {
+        case let .success(snapshot):
+            return PollResult(outcome: .success(snapshot), refresh: refresh, diagnostics: diagnostics)
+        case let .failure(error):
+            return PollResult(outcome: .usageError(error), refresh: refresh, diagnostics: diagnostics)
+        }
+    }
+
+    /// Build a token-error ``PollResult`` whose fetch diagnostic is `.notSent` (the network was
+    /// skipped, ADR-0007), tagged with the reason and — when the credentials read but were expired —
+    /// the token dates, so the window can show exactly when the token expired.
+    private func tokenErrorResult(
+        _ error: TokenError, refresh: DelegatedRefreshOutcome?, token: TokenDiagnostics? = nil
+    ) -> PollResult {
+        let fetch = FetchDiagnostics(
+            attemptAt: now(), httpStatus: nil, body: nil,
+            outcome: .notSent(reason: Self.notSentReason(error)))
+        return PollResult(
+            outcome: .tokenError(error), refresh: refresh,
+            diagnostics: PollDiagnostics(fetch: fetch, token: token))
+    }
+
+    /// A short `.public`-safe reason for a `.notSent` fetch diagnostic — never the token.
+    private static func notSentReason(_ error: TokenError) -> String {
+        switch error {
+        case .itemNotFound:    return "not signed in"
+        case .expired:         return "token expired"
+        case .accessDenied:    return "keychain access denied"
+        case .keychainError:   return "keychain read failed"
+        case .malformedData:   return "malformed credentials"
         }
     }
 }
