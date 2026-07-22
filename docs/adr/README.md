@@ -23,3 +23,4 @@
 | [0016](0016-rename-to-tokenpace.md) | Перейменування проєкту cc-timer → TokenPace — ідентифікатори, межі історії | accepted |
 | [0017](0017-delegated-token-refresh.md) | Делегований refresh токена через claude CLI — замість self-refresh із write-back | accepted |
 | [0018](0018-launch-at-login-notfound-recovery.md) | Відновлення launch-at-login після оновлення — `.notFound` не термінальний, `register()` арбітр | accepted |
+| [0019](0019-token-read-via-security-cli.md) | Читання токена сабпроцесом `security` CLI — refresh Claude Code скидає ACL partition list, прямий `SecItemCopyMatching` промптить | accepted |

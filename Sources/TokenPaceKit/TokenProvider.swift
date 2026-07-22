@@ -70,9 +70,12 @@ public enum TokenError: Error, Equatable {
     /// Usually means Claude Code has never run on this Mac.
     case itemNotFound
     /// Access blocked by the item ACL or the user declined the dialog
-    /// (`errSecAuthFailed`, `errSecInteractionNotAllowed`). UX: explain "Always Allow".
+    /// (`errSecAuthFailed`, `errSecInteractionNotAllowed`). Not produced by the `security`-CLI
+    /// read path (ADR-0019) — kept for exhaustive-switch compatibility downstream.
     case accessDenied(OSStatus)
-    /// Any other unexpected `OSStatus` from `SecItemCopyMatching`.
+    /// Any other failure of the Keychain read. On the `security`-CLI path (ADR-0019) the payload
+    /// is the tool's **exit code** (not an `OSStatus`), or a local sentinel:
+    /// ``TokenProvider/launchFailedStatus`` / ``TokenProvider/timedOutStatus``.
     case keychainError(OSStatus)
     /// Payload is not `Data` / not UTF-8 / not JSON / missing the `claudeAiOauth` wrapper /
     /// missing a required field. (issue #8 acceptance: garbage → `malformedData`)
@@ -94,7 +97,8 @@ public enum TokenError: Error, Equatable {
 /// |---|---|---|
 /// | ``decode(from:)`` | pure (`Data` → struct) | yes |
 /// | ``OAuthCredentials/isExpired(now:)`` / `isValid` | pure | yes |
-/// | ``readRawData()`` / ``credentials()`` | Keychain I/O | no (manual check, issue #8) |
+/// | ``parseSecretOutput(_:)`` / ``mapExitStatus(_:)`` | pure | yes |
+/// | ``readRawData()`` / ``credentials()`` | Keychain I/O (`security` CLI) | no (manual check, issue #8) |
 /// | fallback refresh | network | PR 8b (test account) |
 ///
 /// ## Token strategy (SPEC "Стратегія токена")
@@ -216,29 +220,96 @@ public enum TokenProvider {
 
     // MARK: - Private: Keychain I/O
 
-    /// The raw `kSecValueData` of the item, matched on service alone (account is system-dependent).
-    /// Maps `OSStatus` to ``TokenError``; logs only the status (`.public`), never the payload.
+    /// Absolute path of the Apple `security` tool. A fixed path (not a `$PATH` lookup) — the app
+    /// runs under launchd with a minimal PATH, and `/usr/bin/security` is part of macOS.
+    private static let securityCLIPath = "/usr/bin/security"
+
+    /// Hard cap on the `security` subprocess. A normal read finishes in tens of milliseconds; the
+    /// cap only guards pathologies (e.g. a locked keychain making the tool wait for input it can
+    /// never receive with no TTY attached).
+    static let readTimeout: TimeInterval = 10
+
+    /// Sentinel payloads for ``TokenError/keychainError(_:)`` on the CLI read path (ADR-0019).
+    static let launchFailedStatus: OSStatus = -1
+    static let timedOutStatus: OSStatus = -2
+
+    /// The tool's "The specified item could not be found in the keychain" exit status
+    /// (verified empirically; the CLI does not surface raw `errSecItemNotFound`).
+    static let notFoundExitStatus: Int32 = 44
+
+    /// The raw secret of the item, read by spawning `security find-generic-password -w` (match on
+    /// service alone — the account is system-dependent), normalized by ``parseSecretOutput(_:)``.
+    /// Maps failures to ``TokenError``; logs only exit status and byte count (`.public`), never
+    /// the payload.
+    ///
+    /// A subprocess instead of `SecItemCopyMatching` on purpose (ADR-0019): Claude Code rewrites
+    /// this item via `security add-generic-password -U` on every token refresh, and that call
+    /// resets the item's ACL partition list to `apple-tool:` — silently revoking the
+    /// "Always Allow" grant of any GUI app, so a direct API read re-triggers keychain prompts
+    /// after every refresh (~every 8 h). The `security` tool is an Apple tool inside the
+    /// `apple-tool:` partition, so this path stays silent no matter how often Claude Code
+    /// rewrites the item — for any build flavor, ad-hoc `swift run` included.
     private static func readRawData() throws -> Data {
-        let query: [String: Any] = [
-            kSecClass as String:       kSecClassGenericPassword,   // genp
-            kSecAttrService as String: service,
-            kSecReturnData as String:  true,
-            kSecMatchLimit as String:  kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        AppLogger.keychain.debug("SecItemCopyMatching status=\(status, privacy: .public)")
-        switch status {
-        case errSecSuccess:
-            guard let data = item as? Data else { throw TokenError.malformedData }
-            return data
-        case errSecItemNotFound:
-            throw TokenError.itemNotFound
-        case errSecAuthFailed, errSecInteractionNotAllowed:
-            throw TokenError.accessDenied(status)
-        default:
-            throw TokenError.keychainError(status)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: securityCLIPath)
+        process.arguments = ["find-generic-password", "-s", service, "-w"]
+        process.standardInput = FileHandle.nullDevice
+        let stdout = Pipe()
+        let stderr = Pipe()   // captured so it cannot reach the console; may echo item attributes
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+        do {
+            try process.run()
+        } catch {
+            AppLogger.keychain.error("security cli launch failed")
+            throw TokenError.keychainError(launchFailedStatus)
         }
+        guard finished.wait(timeout: .now() + readTimeout) != .timedOut else {
+            process.terminate()
+            AppLogger.keychain.error("security cli read timed out after \(Int(readTimeout), privacy: .public)s")
+            throw TokenError.keychainError(timedOutStatus)
+        }
+        // The payload is ~3 KB — far below the 64 KB pipe buffer, so reading after exit
+        // cannot deadlock.
+        let raw = stdout.fileHandleForReading.readDataToEndOfFile()
+        let status = process.terminationStatus
+        AppLogger.keychain.debug("security cli read exit=\(status, privacy: .public) bytes=\(raw.count, privacy: .public)")
+        guard status == 0 else { throw mapExitStatus(status) }
+        return parseSecretOutput(raw)
+    }
+
+    /// Map a non-zero `security find-generic-password` exit status to a ``TokenError``.
+    /// ``notFoundExitStatus`` (44) is the tool's "item not found"; anything else is carried in
+    /// ``TokenError/keychainError(_:)`` as the raw exit code.
+    static func mapExitStatus(_ status: Int32) -> TokenError {
+        status == notFoundExitStatus ? .itemNotFound : .keychainError(OSStatus(status))
+    }
+
+    /// Normalize the raw stdout of `security find-generic-password -w` into the secret bytes.
+    ///
+    /// The tool prints the secret followed by one trailing newline. UTF-8-printable secrets (the
+    /// `claudeAiOauth` JSON wrapper) are printed verbatim; non-printable ones are hex-encoded —
+    /// decoded here defensively so a future re-encoding by Claude Code cannot break the read.
+    /// The JSON wrapper always starts with `{`, so it can never be mistaken for hex; anything
+    /// else that does not look like hex passes through untouched (``decode(from:)`` judges it).
+    static func parseSecretOutput(_ raw: Data) -> Data {
+        var bytes = raw
+        if bytes.last == 0x0A { bytes.removeLast() }
+        guard !bytes.isEmpty, bytes.count % 2 == 0,
+              let text = String(data: bytes, encoding: .utf8),
+              text.first != "{", text.allSatisfy(\.isHexDigit)
+        else { return bytes }
+        var decoded = Data(capacity: bytes.count / 2)
+        var index = text.startIndex
+        while index < text.endIndex {
+            let next = text.index(index, offsetBy: 2)
+            decoded.append(UInt8(text[index..<next], radix: 16)!)
+            index = next
+        }
+        return decoded
     }
 
 }

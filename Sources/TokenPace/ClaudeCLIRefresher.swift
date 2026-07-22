@@ -15,8 +15,10 @@ import TokenPaceKit
 /// `--model haiku` is a guard in case a future CLI ever forwards the prompt after all.
 /// `--bare` must NOT be used: it disables OAuth/Keychain entirely, so no refresh would happen.
 ///
-/// This is the codebase's only subprocess spawn — a shell-side platform seam like
-/// `ProcessClaudeActivityProbe`, injected into `PollingEngine` behind the kit protocol.
+/// This is the codebase's only `claude` spawn — a shell-side platform seam like
+/// `ProcessClaudeActivityProbe`, injected into `PollingEngine` behind the kit protocol. (The
+/// kit's `TokenProvider` also spawns a subprocess — `/usr/bin/security` for the Keychain read,
+/// ADR-0019.)
 struct ClaudeCLIRefresher: DelegatedRefresher {
 
     /// Locations probed for the `claude` binary, in order. The app runs under launchd, whose

@@ -121,3 +121,62 @@ struct ValidityTests {
         #expect(try TokenProvider.accessTokenIfValid(fresh, now: now) == "acc")
     }
 }
+
+// MARK: - security CLI read helpers (ADR-0019)
+
+@Suite("TokenProvider.parseSecretOutput")
+struct ParseSecretOutputTests {
+
+    @Test func plainJSONTrailingNewlineIsStripped() {
+        let raw = Data("{\"claudeAiOauth\":{}}\n".utf8)
+        #expect(TokenProvider.parseSecretOutput(raw) == Data("{\"claudeAiOauth\":{}}".utf8))
+    }
+
+    @Test func plainJSONWithoutNewlinePassesThrough() {
+        let raw = Data("{\"claudeAiOauth\":{}}".utf8)
+        #expect(TokenProvider.parseSecretOutput(raw) == raw)
+    }
+
+    @Test func onlyOneTrailingNewlineIsStripped() {
+        // Interior newlines are payload; only the tool's single trailing one goes.
+        let raw = Data("{\n}\n".utf8)
+        #expect(TokenProvider.parseSecretOutput(raw) == Data("{\n}".utf8))
+    }
+
+    @Test func hexOutputDecodes() {
+        // `security -w` hex-encodes non-printable secrets: "7b7d" → "{}".
+        #expect(TokenProvider.parseSecretOutput(Data("7b7d\n".utf8)) == Data("{}".utf8))
+    }
+
+    @Test func uppercaseHexDecodes() {
+        #expect(TokenProvider.parseSecretOutput(Data("7B7D".utf8)) == Data("{}".utf8))
+    }
+
+    @Test func oddLengthHexLikePassesThrough() {
+        let raw = Data("abc".utf8)
+        #expect(TokenProvider.parseSecretOutput(raw) == raw)
+    }
+
+    @Test func nonHexTextPassesThrough() {
+        let raw = Data("not-hex-at-all".utf8)
+        #expect(TokenProvider.parseSecretOutput(raw) == raw)
+    }
+
+    @Test func emptyOutputStaysEmpty() {
+        #expect(TokenProvider.parseSecretOutput(Data()) == Data())
+        #expect(TokenProvider.parseSecretOutput(Data("\n".utf8)) == Data())
+    }
+}
+
+@Suite("TokenProvider.mapExitStatus")
+struct MapExitStatusTests {
+
+    @Test func exit44MapsToItemNotFound() {
+        #expect(TokenProvider.mapExitStatus(44) == .itemNotFound)
+    }
+
+    @Test func otherExitsCarryTheRawCode() {
+        #expect(TokenProvider.mapExitStatus(1) == .keychainError(1))
+        #expect(TokenProvider.mapExitStatus(51) == .keychainError(51))
+    }
+}
