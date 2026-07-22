@@ -23,9 +23,14 @@ final class TroubleshootWindowController: NSWindowController {
     private enum Metrics {
         static let minSize = NSSize(width: 480, height: 360)
         static let startSize = NSSize(width: 640, height: 560)
-        static let padding: CGFloat = 16
+        static let padding: CGFloat = 20
         static let rowSpacing: CGFloat = 4
         static let sectionSpacing: CGFloat = 12
+        /// Gap between the "Auth token" and "Usage API" sections — wider than `sectionSpacing` so
+        /// the two read as distinct groups by whitespace alone (no rule; matches the popup's
+        /// no-interior-lines style — HIG treats negative space and separator lines as equally valid
+        /// grouping cues, so this is a stylistic choice, not a compliance one).
+        static let interSectionSpacing: CGFloat = 24
     }
 
     // Header + rows of the "Usage API — last response" section.
@@ -71,6 +76,16 @@ final class TroubleshootWindowController: NSWindowController {
     private func buildContent() {
         let content = NSView()
 
+        // Auth token is listed first — it is checked first when diagnosing a fetch failure.
+        let tokenHeader = Self.sectionHeader("Auth token")
+        tokenReadLabel = Self.infoLabel()
+        tokenExpiryLabel = Self.infoLabel()
+        let tokenStack = NSStackView(views: [tokenHeader, tokenReadLabel, tokenExpiryLabel])
+        tokenStack.orientation = .vertical
+        tokenStack.alignment = .leading
+        tokenStack.spacing = Metrics.rowSpacing
+        tokenStack.translatesAutoresizingMaskIntoConstraints = false
+
         let apiHeader = Self.sectionHeader("Usage API — last response")
         timestampLabel = Self.infoLabel()
         statusLabel = Self.infoLabel()
@@ -97,48 +112,43 @@ final class TroubleshootWindowController: NSWindowController {
         scroll.borderType = .bezelBorder
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
-        let tokenHeader = Self.sectionHeader("Auth token")
-        tokenReadLabel = Self.infoLabel()
-        tokenExpiryLabel = Self.infoLabel()
-        let tokenStack = NSStackView(views: [tokenHeader, tokenReadLabel, tokenExpiryLabel])
-        tokenStack.orientation = .vertical
-        tokenStack.alignment = .leading
-        tokenStack.spacing = Metrics.rowSpacing
-        tokenStack.translatesAutoresizingMaskIntoConstraints = false
-
+        content.addSubview(tokenStack)
         content.addSubview(apiStack)
         content.addSubview(scroll)
-        content.addSubview(tokenStack)
 
         let pad = Metrics.padding
         NSLayoutConstraint.activate([
-            apiStack.topAnchor.constraint(equalTo: content.topAnchor, constant: pad),
+            tokenStack.topAnchor.constraint(equalTo: content.topAnchor, constant: pad),
+            tokenStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: pad),
+            content.trailingAnchor.constraint(equalTo: tokenStack.trailingAnchor, constant: pad),
+
+            apiStack.topAnchor.constraint(equalTo: tokenStack.bottomAnchor, constant: Metrics.interSectionSpacing),
             apiStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: pad),
             content.trailingAnchor.constraint(equalTo: apiStack.trailingAnchor, constant: pad),
 
             scroll.topAnchor.constraint(equalTo: apiStack.bottomAnchor, constant: Metrics.sectionSpacing),
             scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: pad),
             content.trailingAnchor.constraint(equalTo: scroll.trailingAnchor, constant: pad),
-
-            tokenStack.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: Metrics.sectionSpacing),
-            tokenStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: pad),
-            content.trailingAnchor.constraint(equalTo: tokenStack.trailingAnchor, constant: pad),
-            content.bottomAnchor.constraint(equalTo: tokenStack.bottomAnchor, constant: pad),
+            content.bottomAnchor.constraint(equalTo: scroll.bottomAnchor, constant: pad),
         ])
         window?.contentView = content
     }
 
-    /// A bold section header label.
+    /// A section header label — the `.headline` dynamic text style (bold, `labelColor`) so it
+    /// scales with the user's system text-size setting like a native control, instead of a fixed
+    /// point size (HIG: prefer the system's dynamic text styles over hard-coded sizes).
     private static func sectionHeader(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
-        label.font = .boldSystemFont(ofSize: 13)
+        label.font = .preferredFont(forTextStyle: .headline, options: [:])
+        label.textColor = .labelColor
         return label
     }
 
-    /// A secondary info-row label.
+    /// A secondary info-row label — the `.body` dynamic text style in `secondaryLabelColor`, so
+    /// diagnostic rows read at the same size as the rest of the system and scale together.
     private static func infoLabel() -> NSTextField {
         let label = NSTextField(labelWithString: "")
-        label.font = .systemFont(ofSize: 12)
+        label.font = .preferredFont(forTextStyle: .body, options: [:])
         label.textColor = .secondaryLabelColor
         return label
     }

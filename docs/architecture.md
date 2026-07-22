@@ -25,7 +25,7 @@ Keychain (OAuth token)
       → MenuBarLayout.make(UsageSnapshot?, UsageHealth) → MenuBarMode (expanded/error, pure)
       → StatusItemView малює NSStatusItem (pacing-смужки + час ресету, або ⚠️ при помилці/cold-start)
       → клік по іконці → PopupLayout.make(UsageSnapshot?, UsageHealth, serviceStatus) (pure, TokenPaceKit)
-        → PopupViewController у NSMenu (заголовок + тьмяний рядок "Updated … · interval …" + рядки статусу сервісів + банер помилки + деталі 5h/7d + розбивка по моделях: top-level Opus/Sonnet + `weekly_scoped` з `limits[]`, напр. Fable)
+        → PopupViewController у NSMenu (перший рядок — болд-заголовок "Claude Code" (бренд-колір, ADR-0021), завжди; тьмяний рядок "Updated … · interval …" + рядки статусу сервісів (умовно, див. нижче) + банер помилки + деталі 5h/7d двоколонковим split-layout (ADR-0021) + розбивка по моделях: top-level Opus/Sonnet + `weekly_scoped` з `limits[]`, напр. Fable; увесь текст дропдауна — один спільний шрифт/кегль, ADR-0021)
       → (кожен PollOutput несе PollDiagnostics: сира FetchDiagnostics + TokenDiagnostics — дати, без секрету)
       → ⌥ Option на "Settings…" (нативний alternate-пункт) → "Troubleshoot…" → TroubleshootLayout.make(PollOutput?) (pure, TokenPaceKit)
         → TroubleshootWindowController (велике resizable-вікно, .normal-рівень, live-оновлення щополу): сира відповідь usage API (претіфікований JSON / payload помилки + HTTP-статус + timestamp + next-update) + метадані токена (read/expires)
@@ -36,7 +36,7 @@ Keychain (OAuth token)
     → GET https://status.claude.com/api/v2/summary.json (User-Agent: claude-code/<version>)
     → StatusClient.decode → StatusSummary (лише components[]; incidents/overall ігноруються)
     → StatusHealth.from → ServiceStatus×2 (Claude Code, Claude API) — pure, TokenPaceKit; збій → unknown
-    → PopupViewController малює два рядки (кольорова крапка + назва + слово-лінк на status.claude.com, лінк лише за non-operational)
+    → PopupViewController малює два рядки (кольорова крапка + назва + слово-лінк на status.claude.com, лінк лише за non-operational) разом з "Updated … · interval …" — **лише** коли worstProblem != nil або тримається ⌥ Option; обидва operational без ⌥ не займають місце в попапі (болд-заголовок секції "Claude Code" лишається завжди)
     → StatusHealth.worstProblem → MenuBarLayout.serviceProblem → StatusItemView малює крапку зліва (лише за проблеми)
     → при проблемі StatusCadence.problemFloor (60с) пришвидшує опитування статусу
 ```
