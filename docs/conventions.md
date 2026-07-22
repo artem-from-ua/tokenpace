@@ -50,6 +50,23 @@ git config core.hooksPath .githooks
   (`git rev-list --count HEAD`). `TokenPaceKit.version` у коді дублює значення з `VERSION`
   і оновлюється разом із ним.
 
+## UI-дизайн (AppKit)
+
+- **Перед комітом UI-зміни (menu bar popup, вікна, будь-який AppKit-екран) — звірити з актуальними
+  Apple Human Interface Guidelines** (developer.apple.com/design/human-interface-guidelines).
+  Не стверджувати деталі гайдлайну з пам'яті — HIG-сайт SPA-рендериться і часто не піддається
+  прямому `WebFetch`; коли так, шукати через WebSearch офіційні сторінки/форуми Apple Developer, а
+  не community-джерела, і чесно позначати межу впевненості, якщо точного офіційного числа не
+  знайдено (див. ADR-0021 — приклад такого пошуку для типографії Troubleshoot-вікна).
+- **Один кегль і одна гарнітура на весь дропдаун-попап**, вага (bold/regular) — єдина вісь, що
+  розрізняє заголовки від звичайного тексту. Не підбирати розмір кастомного `NSTextField` "на око"
+  проти нативного `NSMenuItem` — немає надійного способу *прочитати* реальний розмір, яким AppKit
+  малює `NSMenuItem.title` (сайд-ефект Big Sur+ redesign; `NSFont.menuFont(ofSize:)` не збігається
+  з рендером). Замість підбору — **один спільний конструктор** (`dropdownTextSize` у
+  `PopupViewController.swift`), яким явно проставляється шрифт і кастомним лейблам, і нативним
+  пунктам меню (через `NSMenuItem.attributedTitle`), щоб розбіжність була структурно неможливою.
+  Див. ADR-0021.
+
 ## Безпека
 
 - **Ніколи не комітити токени/креденшали.** `.credentials.json`, `secrets/` — у `.gitignore`.

@@ -1,6 +1,15 @@
 import AppKit
 import TokenPaceKit
 
+/// The single point size for **every** piece of text in the dropdown menu — the popup's own labels
+/// (`PopupViewController`) and the native menu items below it ("Settings…"/"Troubleshoot…", "Quit…"
+/// in `App.swift`, pinned to this via `attributedTitle`). One shared constant instead of two
+/// independently-tuned values, so the two can never visually drift apart again (see git history:
+/// `NSFont.menuFont(ofSize: 0)` and an empirically-picked 16 pt both mismatched the native items —
+/// there is no reliable way to *read* AppKit's real menu-item size, so instead both sides are forced
+/// to *write* the same one). `NSFont.systemFontSize` (13 pt) is the documented default UI text size.
+let dropdownTextSize: CGFloat = NSFont.systemFontSize
+
 // MARK: - PopupBarView
 
 /// A pacing bar drawn inside the popup, in the **same** three-zone style as the menu-bar widget:
@@ -241,33 +250,53 @@ final class PopupViewController: NSViewController {
         }
     }
 
+    /// Whether ⌥ Option is currently held (ADR-0020's modifier-poll timer feeds this live while the
+    /// dropdown is open). When both Claude services are operational, the status rows add nothing
+    /// worth the permanent space, so they only show while ⌥ is held; a real problem always shows
+    /// regardless (`rebuild()`'s `shouldShowServiceStatus`).
+    var optionHeld = false {
+        didSet {
+            guard isViewLoaded, optionHeld != oldValue else { return }
+            rebuild()
+        }
+    }
+
     private enum Metrics {
         static let width: CGFloat = 280
         static let hPadding: CGFloat = 14
         static let vPadding: CGFloat = 10
         static let rowSpacing: CGFloat = 3
-        static let sectionSpacing: CGFloat = 7
-        /// Gap between the bold title and the dim "Updated … · interval …" line beneath it — wider
-        /// than `rowSpacing` so the title reads as its own line, not crowded by the service line.
-        static let titleSpacing: CGFloat = 11
-        /// Extra breathing room on **both** sides of a horizontal rule, so each separator sits in
-        /// its own white space rather than hugging the lines above/below it.
-        static let separatorPadding: CGFloat = 10
-        /// Pacing-bar width. 240 = the original 200 widened by 20 % (user preference); still inside
-        /// the 252 pt content width (`width − 2·hPadding`), with ~12 pt to spare.
-        static let barWidth: CGFloat = 240
+        static let sectionSpacing: CGFloat = 14
+        static let textSize: CGFloat = dropdownTextSize
     }
 
     private let stack = NSStackView()
 
-    /// The app title shown bold at the top of the popup — not localised. A bare `swift run` dev
-    /// binary (not an `.app` bundle) is tagged "TokenPace (dev build)" so it is visually
-    /// distinguishable from an installed `.app` running at the same time (they otherwise look
-    /// identical in the menu bar). Reuses `LaunchAtLoginController.isAppBundle`, the one reliable
-    /// bundle-vs-`swift run` discriminator (#69).
-    private static var appTitle: String {
-        LaunchAtLoginController.isAppBundle ? "TokenPace" : "TokenPace (dev build)"
+    /// The bold header of the popup's first section — "Claude Code" covers both the update-cadence
+    /// line and the two Claude service status rows beneath it, all gated by ⌥ Option (see `rebuild`).
+    private static let claudeCodeSectionTitle = "Claude Code"
+
+    /// Anthropic's official primary accent colour (`#d97757`, a terracotta orange) — confirmed
+    /// against `anthropics/skills`' `brand-guidelines/SKILL.md` on GitHub, the same value the local
+    /// Claude Code "claude" theme slot resolves to. Used only for the "Claude Code" section header,
+    /// so the popup echoes the CLI's own brand mark rather than a generic label colour.
+    private static let claudeBrandColor = NSColor(srgbRed: 0xd9 / 255, green: 0x77 / 255, blue: 0x57 / 255, alpha: 1)
+
+    /// `Metrics.textSize`, bold — the "Claude Code" section header and the two native menu items
+    /// below it (via `App.swift`'s `attributedTitle`) all resolve to this exact font, so there is no
+    /// visual mismatch to chase.
+    private static var menuItemFont: NSFont {
+        NSFontManager.shared.convert(.systemFont(ofSize: Metrics.textSize), toHaveTrait: .boldFontMask)
     }
+
+    /// Dimmed text colour for supporting numbers/rows ("88% used", "resets in …", "Updated …",
+    /// service-status words) — neither `secondaryLabelColor` (too light) nor `tertiaryLabelColor`
+    /// (too dark) alone; AppKit has no built-in "in-between" semantic label colour, so this blends
+    /// the two at their current-appearance-resolved values. `NSColor.blended(withFraction:of:)`
+    /// resolves both dynamic system colours in the view's current appearance before mixing, so this
+    /// still adapts correctly across light/dark.
+    private static let dimmedLabelColor =
+        NSColor.tertiaryLabelColor.blended(withFraction: 0.5, of: .secondaryLabelColor) ?? .secondaryLabelColor
 
     override func loadView() {
         let container = NSView()
@@ -293,77 +322,101 @@ final class PopupViewController: NSViewController {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard let layout else { return }
 
-        // Title (first line), then — directly beneath it, before any rule — a single dim service
-        // line: "Updated 2m ago  ·  interval 3m". A wider gap separates it from the bold title.
-        let title = addLabel(Self.appTitle, font: .boldSystemFont(ofSize: 13))
-        stack.setCustomSpacing(Metrics.titleSpacing, after: title)
-        addLabel(
-            Self.serviceLineText(lastUpdateAge: layout.lastUpdateAge, intervalSeconds: layout.intervalSeconds),
-            font: .systemFont(ofSize: 11), secondary: true)
-        addSeparator()
+        // The "Claude Code" section (first line): a bold section header (always shown, brand-coloured
+        // — see `claudeBrandColor`), followed by the dim "Updated … · interval …" line and the two
+        // service status rows (issue #31) — shown only while ⌥ Option is held, or a real problem
+        // exists, since a widget most users check for numbers, not a green checkmark, shouldn't spend
+        // permanent space on "everything is fine". A real problem always shows regardless of ⌥, since
+        // that is exactly the moment the popup needs to explain itself.
+        let sectionHeader = addLabel(
+            Self.claudeCodeSectionTitle, font: Self.menuItemFont, color: Self.claudeBrandColor)
+        stack.setCustomSpacing(Metrics.sectionSpacing, after: sectionHeader)
 
-        // Claude service status (issue #31): one line per component, directly under the title block
-        // and before the limit sections. Shown only once the first status poll has landed (`nil` on
-        // cold start → no lines). Each line carries a colour dot and a status word that links to the
-        // status page (unless operational).
-        if let status = layout.serviceStatus {
-            addServiceStatusRow(label: "Claude Code", status: status.claudeCode)
-            addServiceStatusRow(label: "Claude API", status: status.claudeAPI)
-            addSeparator()
+        let status = layout.serviceStatus
+        if status?.worstProblem != nil || optionHeld {
+            addLabel(
+                Self.serviceLineText(lastUpdateAge: layout.lastUpdateAge, intervalSeconds: layout.intervalSeconds),
+                font: .systemFont(ofSize: Metrics.textSize), secondary: true)
+            if let status {
+                addServiceStatusRow(label: "Claude Code", status: status.claudeCode)
+                let apiRow = addServiceStatusRow(label: "Claude API", status: status.claudeAPI)
+                stack.setCustomSpacing(Metrics.sectionSpacing, after: apiRow)
+            }
         }
 
         // Error block (when failing): two lines — a bold title led by the ⚠️ symbol, then the
-        // detail — followed by its own rule. Shown immediately on any failure (SPEC), so the
-        // problem is read before the limit sections.
+        // detail. Shown immediately on any failure (SPEC), so the problem is read before the limit
+        // sections. No trailing rule (see above).
         if let reason = layout.warning {
             addWarningTitle(Self.warningTitle(reason))
-            addWrappingLabel(Self.warningDetail(reason), font: .systemFont(ofSize: 11), secondary: true)
-            addSeparator()
+            addWrappingLabel(Self.warningDetail(reason), font: .systemFont(ofSize: Metrics.textSize), secondary: true)
         }
 
-        // One section per limit row: separator + "title · status" line + "% used · resets" line + bar.
-        // The first section reuses the title-block rule when no status/warning block sits between.
+        // One section per limit row: "title · status" line + "% used · resets" line + bar. No rule
+        // between sections — the only interior rule in the popup is the one after the title block;
+        // sections below it are told apart by the bold per-row title and the `sectionSpacing` gap
+        // after each bar, not by a line.
         for row in layout.rows {
-            addSeparatorIfNeeded()
             addTitleStatusLine(title: row.title, status: Self.statusText(row.indicator, row.pacing))
-            addLabel(Self.detailText(row), font: .systemFont(ofSize: 11), secondary: true)
+            addDetailLine(used: Self.usedText(row), reset: Self.resetText(row))
             addBar(row)
         }
-
-        // Drop a trailing rule. When there are no limit rows (e.g. an auth failure before any
-        // snapshot ever landed) the status/warning block ends in its own separator, which would
-        // then sit flush against the native NSMenu `.separator()` placed before "Settings…" — two
-        // stacked rules. The popup's last visible element should be content, never a rule; the menu
-        // supplies the divider to the action items below.
-        if let last = stack.arrangedSubviews.last as? NSBox, last.boxType == .separator {
-            last.removeFromSuperview()
-        }
     }
 
-    /// The section's first line: the **bold** window title in `labelColor`, then the separator and
-    /// the pacing status in **normal** weight and a **dim** `secondaryLabelColor` — the status is
-    /// de-emphasised by both weight and colour, matching the dim service line under the title. Built
-    /// as one attributed string so the two parts sit on a single line.
+    /// The section's first line: title and pacing status, both `labelColor` — the same weight and
+    /// colour the dropdown's own "Settings…" text uses. `status` sits flush **right**, lined up with
+    /// the detail line and bar below it, instead of trailing right after the title on the left.
+    /// Neither half is bold — the section reads from the bar and numbers, not a heavier heading.
     @discardableResult
     private func addTitleStatusLine(title: String, status: String) -> NSView {
-        let attributed = NSMutableAttributedString(string: title, attributes: [
-            .font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.labelColor,
-        ])
-        attributed.append(NSAttributedString(string: Self.separator + status, attributes: [
-            .font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.secondaryLabelColor,
-        ]))
-        let label = NSTextField(labelWithAttributedString: attributed)
+        addSplitLine(
+            left: title, right: status,
+            leftFont: .systemFont(ofSize: Metrics.textSize), rightFont: .systemFont(ofSize: Metrics.textSize),
+            leftColor: .labelColor, rightColor: .labelColor)
+    }
+
+    @discardableResult
+    private func addLabel(_ text: String, font: NSFont, secondary: Bool = false, color: NSColor? = nil) -> NSView {
+        let label = NSTextField(labelWithString: text)
+        label.font = font
+        label.textColor = color ?? (secondary ? Self.dimmedLabelColor : .labelColor)
         stack.addArrangedSubview(label)
         return label
     }
 
+    /// The per-limit detail line: `used` flush left, `reset` flush **right** against the content
+    /// width — so "resets in …" lines up with the bar's right edge below it, instead of trailing
+    /// right after the `·` on the left like the rest of the popup's single-string lines.
     @discardableResult
-    private func addLabel(_ text: String, font: NSFont, secondary: Bool = false) -> NSView {
-        let label = NSTextField(labelWithString: text)
-        label.font = font
-        label.textColor = secondary ? .secondaryLabelColor : .labelColor
-        stack.addArrangedSubview(label)
-        return label
+    private func addDetailLine(used: String, reset: String) -> NSView {
+        let font = NSFont.systemFont(ofSize: Metrics.textSize)
+        return addSplitLine(
+            left: used, right: reset, leftFont: font, rightFont: font,
+            leftColor: Self.dimmedLabelColor, rightColor: Self.dimmedLabelColor)
+    }
+
+    /// A two-column row spanning the full content width: `left` flush against the leading edge,
+    /// `right` flush against the trailing edge — the shared layout behind `addTitleStatusLine` and
+    /// `addDetailLine`, both of which right-align their second half to line up with the bar beneath.
+    @discardableResult
+    private func addSplitLine(
+        left: String, right: String, leftFont: NSFont, rightFont: NSFont,
+        leftColor: NSColor, rightColor: NSColor
+    ) -> NSView {
+        let leftLabel = NSTextField(labelWithString: left)
+        leftLabel.font = leftFont
+        leftLabel.textColor = leftColor
+        let rightLabel = NSTextField(labelWithString: right)
+        rightLabel.font = rightFont
+        rightLabel.textColor = rightColor
+
+        let row = NSStackView(views: [leftLabel, rightLabel])
+        row.orientation = .horizontal
+        row.distribution = .equalSpacing
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.hPadding).isActive = true
+        stack.addArrangedSubview(row)
+        return row
     }
 
     /// A label that **wraps** onto multiple lines instead of clipping — for the error detail, whose
@@ -377,7 +430,7 @@ final class PopupViewController: NSViewController {
     private func addWrappingLabel(_ text: String, font: NSFont, secondary: Bool = false) -> NSView {
         let label = NSTextField(wrappingLabelWithString: text)
         label.font = font
-        label.textColor = secondary ? .secondaryLabelColor : .labelColor
+        label.textColor = secondary ? Self.dimmedLabelColor : .labelColor
         label.lineBreakMode = .byWordWrapping
         label.translatesAutoresizingMaskIntoConstraints = false
         let contentWidth = Metrics.width - 2 * Metrics.hPadding
@@ -393,7 +446,7 @@ final class PopupViewController: NSViewController {
     /// which is appearance-aware, keep contrast on light and dark panels alike.
     @discardableResult
     private func addWarningTitle(_ text: String) -> NSView {
-        let font = NSFont.boldSystemFont(ofSize: 12)
+        let font = NSFont.boldSystemFont(ofSize: Metrics.textSize)
         let color = NSColor.systemRed
         let attributed = NSMutableAttributedString()
 
@@ -419,31 +472,10 @@ final class PopupViewController: NSViewController {
         view.bar = row.bar
         view.subdivisions = row.subdivisions
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.widthAnchor.constraint(equalToConstant: Metrics.barWidth).isActive = true
+        view.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.hPadding).isActive = true
         view.heightAnchor.constraint(equalToConstant: PopupBarView.viewHeight).isActive = true
         stack.addArrangedSubview(view)
         stack.setCustomSpacing(Metrics.sectionSpacing, after: view)
-    }
-
-    private func addSeparator() {
-        // Pad the element above the rule (if any) so the gap is symmetric on both sides.
-        if let previous = stack.arrangedSubviews.last {
-            stack.setCustomSpacing(Metrics.separatorPadding, after: previous)
-        }
-        let box = NSBox()
-        box.boxType = .separator
-        box.translatesAutoresizingMaskIntoConstraints = false
-        box.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.hPadding).isActive = true
-        stack.addArrangedSubview(box)
-        stack.setCustomSpacing(Metrics.separatorPadding, after: box)
-    }
-
-    /// Add a rule **unless** the last element already is one — so consecutive optional blocks (the
-    /// title rule, then status / warning / first limit) never produce two stacked separators when an
-    /// in-between block is absent.
-    private func addSeparatorIfNeeded() {
-        if let last = stack.arrangedSubviews.last as? NSBox, last.boxType == .separator { return }
-        addSeparator()
     }
 
     // MARK: Service status row (issue #31)
@@ -457,7 +489,7 @@ final class PopupViewController: NSViewController {
     /// built-in `.link` handling is unreliable inside an `NSMenu`-hosted view.
     @discardableResult
     private func addServiceStatusRow(label: String, status: ServiceStatus) -> NSView {
-        let font = NSFont.systemFont(ofSize: 11)
+        let font = NSFont.systemFont(ofSize: Metrics.textSize)
         let attributed = NSMutableAttributedString()
 
         // Colour dot — same attachment approach as the warning triangle, tinted by status.
@@ -476,14 +508,14 @@ final class PopupViewController: NSViewController {
             .font: font, .foregroundColor: NSColor.labelColor,
         ]))
 
-        // Status word. Operational → plain secondary text (no link). Otherwise → underlined link
+        // Status word. Operational → plain dimmed text (no link). Otherwise → underlined link
         // colour, opened on click by StatusLineLabel over the word's range.
         let word = Self.word(status)
         let isLink = status != .operational
         let wordStart = attributed.length
         attributed.append(NSAttributedString(string: word, attributes: isLink
             ? [.font: font, .foregroundColor: NSColor.linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
-            : [.font: font, .foregroundColor: NSColor.secondaryLabelColor]))
+            : [.font: font, .foregroundColor: Self.dimmedLabelColor]))
 
         let field = StatusLineLabel(labelWithAttributedString: attributed)
         if isLink {
@@ -527,21 +559,18 @@ final class PopupViewController: NSViewController {
     /// spaces. A single constant so line 1 ("title · status") and line 2 ("% used · resets") match.
     static let separator = "  \u{00B7}  "
 
-    /// `"20% used  ·  resets in ~20m at 05:30"` — the per-limit **second** line (the first line is
-    /// "title · status", built in `addTitleStatusLine`). The relative countdown is always prefixed
-    /// `~` (every value is rounded, ``ResetClock/relativeRounded``); the " at hh:mm" is appended only
-    /// when the model carries an absolute time (reset < 24 h away). A reset that is now/past (no
-    /// relative string) reads as "resetting…".
-    static func detailText(_ row: LimitRow) -> String {
-        var parts = ["\(percent(row.utilization)) used"]
-        if let rel = row.resetRelative {
-            var reset = "resets in ~\(rel)"
-            if let abs = row.resetAbsolute { reset += " at \(abs)" }
-            parts.append(reset)
-        } else {
-            parts.append("resetting…")
-        }
-        return parts.joined(separator: separator)
+    /// The per-limit detail line's **left**-aligned half: `"20% used"`.
+    static func usedText(_ row: LimitRow) -> String { "\(percent(row.utilization)) used" }
+
+    /// The per-limit detail line's **right**-aligned half: `"resets in ~20m at 05:30"`, or
+    /// `"resetting…"` when the model carries no relative countdown (reset is now/past). The relative
+    /// countdown is always prefixed `~` (every value is rounded, ``ResetClock/relativeRounded``); the
+    /// " at hh:mm" is appended only when the model carries an absolute time (reset < 24 h away).
+    static func resetText(_ row: LimitRow) -> String {
+        guard let rel = row.resetRelative else { return "resetting…" }
+        var reset = "resets in ~\(rel)"
+        if let abs = row.resetAbsolute { reset += " at \(abs)" }
+        return reset
     }
 
     /// The single dim line under the title: `"Updated 2m ago  ·  interval 3m"` — combines data age

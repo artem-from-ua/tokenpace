@@ -133,16 +133,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `updateActionItemForOption(_:)`. Empty keyEquivalent keeps the menu glyph-free.
         // One fixed selector — `openActionItem` reads the live ⌥ state at click time and routes to
         // Settings or Troubleshoot. (Swapping `.action` mid-tracking is ignored by NSMenu.)
-        let actionItem = NSMenuItem(
-            title: "Settings…", action: #selector(openActionItem), keyEquivalent: "")
+        let actionItem = NSMenuItem(title: "", action: #selector(openActionItem), keyEquivalent: "")
+        actionItem.attributedTitle = Self.dropdownMenuItemText("Settings…")
         actionItem.target = self
         menu.addItem(actionItem)
         self.actionItem = actionItem
         // Separate Quit from Settings… so the terminating action sits in its own group (standard
-        // macOS menu grouping).
+        // macOS menu grouping). Tagged "(dev build)" for a bare `swift run` binary, same rule as
+        // the popup's own title (#69) — so quitting the right process is unambiguous when a dev
+        // build and the installed `.app` run side by side.
         menu.addItem(.separator())
-        let quitItem = NSMenuItem(
-            title: "Quit TokenPace", action: #selector(quit), keyEquivalent: "")
+        let quitTitle = LaunchAtLoginController.isAppBundle
+            ? "Quit TokenPace" : "Quit TokenPace (dev build)"
+        let quitItem = NSMenuItem(title: "", action: #selector(quit), keyEquivalent: "")
+        quitItem.attributedTitle = Self.dropdownMenuItemText(quitTitle)
         quitItem.target = self
         menu.addItem(quitItem)
 
@@ -186,10 +190,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Flip only the dropdown item's **title** between "Settings…" and "Troubleshoot…" for the
-    /// current ⌥ Option state (ADR-0020). Called on menu open and by `optionPollTimer` while it is
-    /// open — the status-item-menu replacement for the inert native `isAlternate` swap. Skips the
-    /// rebuild when the state is unchanged, so the poll is cheap.
+    /// Flip the dropdown item's **title** between "Settings…" and "Troubleshoot…", and the popup's
+    /// service-status visibility, for the current ⌥ Option state (ADR-0020). Called on menu open and
+    /// by `optionPollTimer` while it is open — the status-item-menu replacement for the inert native
+    /// `isAlternate` swap. Skips the rebuild when the state is unchanged, so the poll is cheap.
     ///
     /// The **action is not changed here**: NSMenu caches the target/action at open time and ignores
     /// a mid-tracking swap (it would still fire the stale selector), so the single fixed selector
@@ -197,7 +201,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateActionItemForOption(_ optionHeld: Bool) {
         guard let actionItem, optionHeld != lastOptionHeld else { return }
         lastOptionHeld = optionHeld
-        actionItem.title = optionHeld ? "Troubleshoot…" : "Settings…"
+        actionItem.attributedTitle = Self.dropdownMenuItemText(optionHeld ? "Troubleshoot…" : "Settings…")
+        popupVC.optionHeld = optionHeld
+        // The service-status rows appearing/disappearing changes the popup's fitting size; `NSMenu`
+        // does not re-measure a hosted item view on its own (see `setPopupLayout`'s note), so the
+        // frame must be re-fit here too, exactly like every other content change.
+        popupVC.view.frame = NSRect(origin: .zero, size: popupVC.view.fittingSize)
+    }
+
+    /// The native menu item's text, forced to `dropdownTextSize` (regular weight) — the counterpart
+    /// of the popup's own labels, which use the same constant, so the dropdown's custom-view section
+    /// and its native items never visually drift in size again.
+    private static func dropdownMenuItemText(_ text: String) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: dropdownTextSize)])
     }
 
     /// Quit the app via the standard terminate path, which triggers `applicationWillTerminate`.

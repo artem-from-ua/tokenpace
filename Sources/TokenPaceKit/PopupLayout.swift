@@ -12,7 +12,7 @@ import Foundation
 /// and the `weekly_scoped` models from `limits[]` (e.g. `Fable`, #65); all per-model rows are
 /// paced as `.sevenDay` (they reset on the weekly cadence).
 public struct LimitRow: Sendable, Equatable {
-    /// Section heading, e.g. `"5-hour limit"`, `"7-day limit"`, `"Opus (7-day)"`. A raw label
+    /// Section heading, e.g. `"5-hour"`, `"7-day"`, `"Opus (7-day)"`. A raw label
     /// (the window identity), not a localised string — the view renders it as-is for now.
     public let title: String
     /// API `utilization`, percent in [0, 100].
@@ -177,8 +177,8 @@ public struct PopupLayout: Sendable, Equatable {
     /// `.sevenDay`. Shared by both ``make`` overloads.
     private static func rows(from snapshot: UsageSnapshot, now: Date) -> [LimitRow] {
         var rows: [LimitRow] = [
-            row(title: "5-hour limit", window: snapshot.fiveHour, as: .fiveHour, now: now),
-            row(title: "7-day limit", window: snapshot.sevenDay, as: .sevenDay, now: now),
+            row(title: "5-hour", window: snapshot.fiveHour, as: .fiveHour, now: now),
+            row(title: "7-day", window: snapshot.sevenDay, as: .sevenDay, now: now),
         ]
         if let opus = snapshot.sevenDayOpus {
             rows.append(row(title: "Opus (7-day)", window: opus, as: .sevenDay, now: now))

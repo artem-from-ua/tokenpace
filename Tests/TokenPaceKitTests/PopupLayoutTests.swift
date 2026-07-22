@@ -55,8 +55,8 @@ struct PopupLayoutRowsTests {
     @Test func primaryRowsComeFirstInOrder() {
         let p = layout(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30))
         #expect(p.rows.count == 2)
-        #expect(p.rows[0].title == "5-hour limit")
-        #expect(p.rows[1].title == "7-day limit")
+        #expect(p.rows[0].title == "5-hour")
+        #expect(p.rows[1].title == "7-day")
     }
 
     @Test func utilizationAndPacingPassThrough() {
