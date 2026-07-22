@@ -42,19 +42,36 @@ private struct StubTransport: UsageTransport {
         return StubTransport(result: .success((Data(), response)))
     }
 
+    /// An HTTP response with the given status and a UTF-8 body — for diagnostics assertions.
+    static func httpBody(_ status: Int, body: String) -> StubTransport {
+        let response = HTTPURLResponse(
+            url: UsageClient.endpoint, statusCode: status, httpVersion: "HTTP/1.1",
+            headerFields: [:])!
+        return StubTransport(result: .success((Data(body.utf8), response)))
+    }
+
     /// A transport that throws (connection failure, cancellation, …).
     static func failing(_ error: Error) -> StubTransport {
         StubTransport(result: .failure(error))
     }
 }
 
-/// A token seam returning a literal, or throwing a fixed `TokenError`.
+/// A token seam returning literal credentials, or — since ADR-0020 — modelling expiry/read errors.
+///
+/// `.expired` no longer throws (the engine judges expiry): it is surfaced as **readable but stale**
+/// credentials (a past `expiresAt`), so the engine short-circuits and refreshes. Any other injected
+/// `TokenError` still throws (credentials genuinely unreadable). A far-future expiry otherwise.
 private struct StubTokenProvider: TokenProviding {
     var token: String? = "acc-123"
     var error: TokenError?
-    func currentAccessToken(now: Date) throws -> String {
-        if let error { throw error }
-        return token!
+    func currentCredentials(now: Date) throws -> TokenCredentials {
+        if let error {
+            if error == .expired {
+                return TokenCredentials(accessToken: token!, expiresAt: now.addingTimeInterval(-1))
+            }
+            throw error
+        }
+        return TokenCredentials(accessToken: token!, expiresAt: now.addingTimeInterval(3600))
     }
 }
 
@@ -512,6 +529,117 @@ struct PollOnceRefreshTests {
     }
 }
 
+// MARK: - pollOnce: diagnostics (ADR-0020)
+
+@Suite("PollingEngine.pollOnce — diagnostics")
+struct PollOnceDiagnosticsTests {
+
+    private func engine(
+        transport: UsageTransport, token: TokenProviding, refresher: DelegatedRefresher? = nil
+    ) -> PollingEngine {
+        PollingEngine(
+            transport: transport, tokenProvider: token, refresher: refresher,
+            scheduler: ManualScheduler(), probe: StubProbe(active: true), now: { t0 })
+    }
+
+    @Test func successCarriesFullDiagnostics() async {
+        let e = engine(transport: StubTransport.success(five: 13, seven: 40), token: StubTokenProvider())
+        let result = await e.pollOnce(state: PollState(), claudeActive: true)
+        let fetch = result.diagnostics.fetch
+        #expect(fetch.outcome == .success)
+        #expect(fetch.httpStatus == 200)
+        #expect(fetch.attemptAt == t0)
+        #expect(fetch.body?.contains("\"utilization\"") == true)   // the real 200 body is captured
+        // Token read this cycle → dates present (readAt == t0, the stub's +3600 expiry).
+        #expect(result.diagnostics.token?.readAt == t0)
+        #expect(result.diagnostics.token?.expiresAt == t0.addingTimeInterval(3600))
+    }
+
+    @Test func httpErrorCapturesStatusAndBody() async {
+        // A 401 with a body over the popup cap → the diagnostic body is the FULL length (the key
+        // divergence from `UsageError.http`, still capped at maxBodyLength for the popup).
+        let longBody = String(repeating: "x", count: UsageClient.maxBodyLength + 200)
+        let e = engine(
+            transport: StubTransport.httpBody(401, body: longBody), token: StubTokenProvider())
+        let result = await e.pollOnce(state: PollState(), claudeActive: true)
+        let fetch = result.diagnostics.fetch
+        #expect(fetch.outcome == .httpError)
+        #expect(fetch.httpStatus == 401)
+        #expect(fetch.body?.count == UsageClient.maxBodyLength + 200)   // uncapped
+        // The mapped UsageError, by contrast, is still capped.
+        guard case let .usageError(.http(_, body)) = result.outcome else {
+            Issue.record("expected .usageError(.http), got \(result.outcome)"); return
+        }
+        #expect(body?.count == UsageClient.maxBodyLength)
+    }
+
+    @Test func expiredTokenFillsTokenDiagnostics() async {
+        // Expired → no request; the token dates are STILL captured (when it expired matters).
+        let e = engine(
+            transport: StubTransport.success(five: 10, seven: 20),
+            token: StubTokenProvider(error: .expired))
+        let result = await e.pollOnce(state: PollState(), claudeActive: true)
+        #expect(result.outcome == .tokenError(.expired))
+        #expect(result.diagnostics.fetch.outcome == .notSent(reason: "token expired"))
+        #expect(result.diagnostics.token?.readAt == t0)                       // read happened
+        #expect(result.diagnostics.token?.expiresAt == t0.addingTimeInterval(-1))  // stale expiry visible
+    }
+
+    @Test func keychainErrorLeavesTokenNil() async {
+        // Credentials unreadable → no token dates; the fetch record explains why nothing was sent.
+        let e = engine(
+            transport: StubTransport.success(five: 10, seven: 20),
+            token: StubTokenProvider(error: .itemNotFound))
+        let result = await e.pollOnce(state: PollState(), claudeActive: true)
+        #expect(result.diagnostics.token == nil)
+        #expect(result.diagnostics.fetch.outcome == .notSent(reason: "not signed in"))
+        #expect(result.diagnostics.fetch.httpStatus == nil)
+    }
+
+    @Test func successfulRefreshUpdatesTokenExpiry() async {
+        // After a delegated refresh fixes the token, the token diagnostics reflect the NEW expiry.
+        let provider = RotatingTokenProvider()
+        let refresher = StubRefresher(outcome: .refreshed, onRefresh: { provider.rotate() })
+        let e = engine(
+            transport: StubTransport.success(five: 10, seven: 20), token: provider,
+            refresher: refresher)
+        let result = await e.pollOnce(state: PollState(), claudeActive: true)
+        guard case .success = result.outcome else {
+            Issue.record("expected success, got \(result.outcome)"); return
+        }
+        // Re-read after rotate → fresh +3600 expiry, not the stale -1.
+        #expect(result.diagnostics.token?.expiresAt == t0.addingTimeInterval(3600))
+    }
+
+    @Test func expiredTokenNeverReachesNetwork() async {
+        // The ADR-0007 contract, now enforced by the engine: an expired token skips the transport.
+        let counter = CountingTransport(inner: .success(five: 10, seven: 20))
+        let e = engine(transport: counter, token: StubTokenProvider(error: .expired))
+        _ = await e.pollOnce(state: PollState(), claudeActive: true)
+        #expect(await counter.count == 0)
+    }
+}
+
+// MARK: - run(): diagnostics propagation
+
+@Suite("PollingEngine.run — diagnostics")
+struct RunDiagnosticsTests {
+
+    @Test func outputCarriesAttemptDiagnostics() async {
+        let counter = CountingTransport(inner: .success(five: 13, seven: 40))
+        let scheduler = ManualScheduler(script: [.elapsed])
+        let engine = PollingEngine(
+            transport: counter, tokenProvider: StubTokenProvider(), scheduler: scheduler,
+            probe: StubProbe(active: true), now: { t0 })
+        var output: PollOutput?
+        for await o in engine.run() { output = o; break }
+        let diag = output?.diagnostics
+        #expect(diag?.fetch.outcome == .success)
+        #expect(diag?.fetch.httpStatus == 200)
+        #expect(diag?.token?.readAt == t0)
+    }
+}
+
 // MARK: - advance: RefreshGate folding
 
 @Suite("PollingEngine.advance — refresh gate")
@@ -669,9 +797,10 @@ private actor StubRefresher: DelegatedRefresher {
     }
 }
 
-/// A token seam that throws `.expired` until `rotate()` is called, then returns a fresh literal —
-/// the observable effect of Claude Code rotating its credentials. `TokenProviding` is sync, so this
-/// is a lock-guarded class rather than an actor.
+/// A token seam that returns **expired** credentials until `rotate()` is called, then a fresh pair —
+/// the observable effect of Claude Code rotating its credentials. Since ADR-0020 the provider no
+/// longer throws `.expired`; expiry is expressed by a past `expiresAt` and judged by the engine.
+/// `TokenProviding` is sync, so this is a lock-guarded class rather than an actor.
 private final class RotatingTokenProvider: TokenProviding, @unchecked Sendable {
     private let lock = NSLock()
     private var expired = true
@@ -680,10 +809,12 @@ private final class RotatingTokenProvider: TokenProviding, @unchecked Sendable {
         lock.withLock { expired = false }
     }
 
-    func currentAccessToken(now: Date) throws -> String {
-        try lock.withLock {
-            if expired { throw TokenError.expired }
-            return "acc-fresh"
+    func currentCredentials(now: Date) throws -> TokenCredentials {
+        lock.withLock {
+            let offset: TimeInterval = expired ? -1 : 3600
+            return TokenCredentials(
+                accessToken: expired ? "acc-stale" : "acc-fresh",
+                expiresAt: now.addingTimeInterval(offset))
         }
     }
 }

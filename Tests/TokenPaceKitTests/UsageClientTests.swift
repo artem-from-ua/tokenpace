@@ -575,6 +575,92 @@ struct FetchTests {
     }
 }
 
+// MARK: - diagnosedFetch (ADR-0020)
+
+@Suite("UsageClient.diagnosedFetch")
+struct DiagnosedFetchTests {
+
+    @Test func success200CapturesStatusBodyAndTime() async {
+        let body = usageJSON()
+        let transport = StubTransport.http(200, body: body)
+        let diagnosed = await UsageClient.diagnosedFetch(accessToken: "acc", now: now, transport: transport)
+        // The snapshot decoded.
+        guard case let .success(snapshot) = diagnosed.result else {
+            Issue.record("expected success, got \(diagnosed.result)"); return
+        }
+        #expect(snapshot.fiveHour.utilization == 13.0)
+        // The diagnostic: 200, the exact body, the poll instant.
+        #expect(diagnosed.diagnostics.outcome == .success)
+        #expect(diagnosed.diagnostics.httpStatus == 200)
+        #expect(diagnosed.diagnostics.attemptAt == now)
+        #expect(diagnosed.diagnostics.body == String(data: body, encoding: .utf8))
+    }
+
+    @Test func httpErrorKeepsFullBodyWhileUsageErrorCaps() async {
+        // A 401 whose body exceeds the popup cap: the diagnostic body is FULL length; the mapped
+        // UsageError.http body is still capped at maxBodyLength. This is the key divergence.
+        let long = String(repeating: "x", count: UsageClient.maxBodyLength + 100)
+        let transport = StubTransport.http(401, body: Data(long.utf8))
+        let diagnosed = await UsageClient.diagnosedFetch(accessToken: "acc", now: now, transport: transport)
+        #expect(diagnosed.diagnostics.outcome == .httpError)
+        #expect(diagnosed.diagnostics.httpStatus == 401)
+        #expect(diagnosed.diagnostics.body?.count == UsageClient.maxBodyLength + 100)  // uncapped
+        guard case let .failure(.http(status, body)) = diagnosed.result else {
+            Issue.record("expected .http failure, got \(diagnosed.result)"); return
+        }
+        #expect(status == 401)
+        #expect(body?.count == UsageClient.maxBodyLength)   // capped copy for the popup
+    }
+
+    @Test func rateLimitedCapturesStatusAndBody() async {
+        // 429 — previously the body was lost entirely; now it is captured for diagnostics.
+        let transport = StubTransport.http(
+            429, body: Data("slow down".utf8), headers: ["Retry-After": "30"])
+        let diagnosed = await UsageClient.diagnosedFetch(accessToken: "acc", now: now, transport: transport)
+        #expect(diagnosed.diagnostics.outcome == .httpError)
+        #expect(diagnosed.diagnostics.httpStatus == 429)
+        #expect(diagnosed.diagnostics.body == "slow down")
+        guard case .failure(.rateLimited(retryAfter: 30)) = diagnosed.result else {
+            Issue.record("expected .rateLimited(30), got \(diagnosed.result)"); return
+        }
+    }
+
+    @Test func decodeFailureKeepsRawBody() async {
+        // 200 with garbage → decodeFailure, and the raw body is preserved (schema-change diagnosis).
+        let transport = StubTransport.http(200, body: Data("not json".utf8))
+        let diagnosed = await UsageClient.diagnosedFetch(accessToken: "acc", now: now, transport: transport)
+        #expect(diagnosed.diagnostics.outcome == .decodeFailure)
+        #expect(diagnosed.diagnostics.httpStatus == 200)
+        #expect(diagnosed.diagnostics.body == "not json")
+        guard case .failure(.decode) = diagnosed.result else {
+            Issue.record("expected .decode failure, got \(diagnosed.result)"); return
+        }
+    }
+
+    @Test func transportErrorHasNilStatusAndBody() async {
+        let transport = StubTransport.failing(URLError(.notConnectedToInternet))
+        let diagnosed = await UsageClient.diagnosedFetch(accessToken: "acc", now: now, transport: transport)
+        guard case .transportError = diagnosed.diagnostics.outcome else {
+            Issue.record("expected .transportError, got \(diagnosed.diagnostics.outcome)"); return
+        }
+        #expect(diagnosed.diagnostics.httpStatus == nil)
+        #expect(diagnosed.diagnostics.body == nil)
+        guard case .failure(.transport) = diagnosed.result else {
+            Issue.record("expected .transport failure, got \(diagnosed.result)"); return
+        }
+    }
+
+    @Test func nonHTTPResponseCaptured() async {
+        let transport = StubTransport.nonHTTP()
+        let diagnosed = await UsageClient.diagnosedFetch(accessToken: "acc", now: now, transport: transport)
+        #expect(diagnosed.diagnostics.outcome == .nonHTTPResponse)
+        #expect(diagnosed.diagnostics.httpStatus == nil)
+        guard case .failure(.nonHTTPResponse) = diagnosed.result else {
+            Issue.record("expected .nonHTTPResponse, got \(diagnosed.result)"); return
+        }
+    }
+}
+
 // MARK: - PollingBackoff
 
 @Suite("PollingBackoff")

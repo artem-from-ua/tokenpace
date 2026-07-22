@@ -115,7 +115,36 @@ public enum UsageClient {
         now: Date,
         transport: UsageTransport = URLSession.shared
     ) async throws -> UsageSnapshot {
-        let request = try buildRequest(accessToken: accessToken, now: now)  // UA guard first
+        try (await diagnosedFetch(accessToken: accessToken, now: now, transport: transport)).result.get()
+    }
+
+    /// The core of ``fetch(accessToken:now:transport:)`` that also captures the raw
+    /// ``FetchDiagnostics`` for the Troubleshoot window (ADR-0020). Same one-request-no-retry
+    /// behaviour and same log lines as `fetch` — but instead of throwing, it returns a
+    /// ``DiagnosedFetch`` carrying both the snapshot-or-error **and** the uncapped, full-length
+    /// diagnostic record captured in every branch (200, 429, other non-2xx, decode failure,
+    /// transport error, non-HTTP, User-Agent guard). `fetch` is the thin wrapper that discards the
+    /// diagnostics; the poll loop keeps them.
+    ///
+    /// The diagnostic ``FetchDiagnostics/body`` is the **full** response body (not capped to
+    /// ``maxBodyLength`` like the popup's copy), and is captured for 429 and decode failures too —
+    /// bodies the throwing `fetch` never surfaced. It never carries the bearer token (see
+    /// ``FetchDiagnostics``).
+    public static func diagnosedFetch(
+        accessToken: String,
+        now: Date,
+        transport: UsageTransport = URLSession.shared
+    ) async -> DiagnosedFetch {
+        let request: URLRequest
+        do {
+            request = try buildRequest(accessToken: accessToken, now: now)  // UA guard first
+        } catch {
+            // The request is never sent — surface it as a not-sent diagnostic, no HTTP anything.
+            let diag = FetchDiagnostics(
+                attemptAt: now, httpStatus: nil, body: nil,
+                outcome: .notSent(reason: "missing User-Agent"))
+            return DiagnosedFetch(result: .failure(.missingUserAgent), diagnostics: diag)
+        }
 
         let data: Data
         let response: URLResponse
@@ -125,36 +154,62 @@ public enum UsageClient {
             let code = (error as? URLError)?.code
             AppLogger.network.error(
                 "usage request transport error: \(error.localizedDescription, privacy: .public)")
-            throw UsageError.transport(message: error.localizedDescription, code: code)
+            let diag = FetchDiagnostics(
+                attemptAt: now, httpStatus: nil, body: nil,
+                outcome: .transportError(message: error.localizedDescription))
+            return DiagnosedFetch(
+                result: .failure(.transport(message: error.localizedDescription, code: code)),
+                diagnostics: diag)
         }
 
         guard let http = response as? HTTPURLResponse else {
             AppLogger.network.error("usage response not HTTP")
-            throw UsageError.nonHTTPResponse
+            let diag = FetchDiagnostics(
+                attemptAt: now, httpStatus: nil, body: nil, outcome: .nonHTTPResponse)
+            return DiagnosedFetch(result: .failure(.nonHTTPResponse), diagnostics: diag)
         }
+
+        // The full, uncapped body captured once per HTTP branch — the diagnostic copy the window
+        // shows verbatim. `nil` when the body is absent / not UTF-8.
+        let fullBody = fullResponseText(from: data)
 
         switch http.statusCode {
         case 200:
-            let snapshot = try decode(from: data, now: now)
-            // One line per success: status **and** the full JSON body, so there is no duplicate
-            // "200 ok" / "200 body" pair. `.notice` so it shows at the default log level (no
-            // `--level info` needed). The usage payload carries no secrets — the token rides only in
-            // the request's Authorization header, which is never logged — so the body is `.public`.
-            // Logged in full (not capped) so the per-model breakdown is visible; once per poll
-            // (≈180 s) the volume is negligible.
-            let bodyText = String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
-            AppLogger.network.notice("usage 200 ok body=\(bodyText, privacy: .public)")
-            return snapshot
+            do {
+                let snapshot = try decode(from: data, now: now)
+                // One line per success: status **and** the full JSON body, so there is no duplicate
+                // "200 ok" / "200 body" pair. `.notice` so it shows at the default log level (no
+                // `--level info` needed). The usage payload carries no secrets — the token rides only in
+                // the request's Authorization header, which is never logged — so the body is `.public`.
+                // Logged in full (not capped) so the per-model breakdown is visible; once per poll
+                // (≈180 s) the volume is negligible.
+                let bodyText = String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
+                AppLogger.network.notice("usage 200 ok body=\(bodyText, privacy: .public)")
+                let diag = FetchDiagnostics(
+                    attemptAt: now, httpStatus: 200, body: fullBody, outcome: .success)
+                return DiagnosedFetch(result: .success(snapshot), diagnostics: diag)
+            } catch {
+                // `decode` already logged the (capped) body; here the diagnostic keeps the full one.
+                let diag = FetchDiagnostics(
+                    attemptAt: now, httpStatus: 200, body: fullBody, outcome: .decodeFailure)
+                return DiagnosedFetch(result: .failure(.decode), diagnostics: diag)
+            }
         case 429:
             let retryAfter = retryAfterSeconds(from: http)
             AppLogger.network.error(
                 "usage rate-limited: HTTP 429 retryAfter=\(retryAfter ?? -1, privacy: .public)")
-            throw UsageError.rateLimited(retryAfter: retryAfter)
+            let diag = FetchDiagnostics(
+                attemptAt: now, httpStatus: 429, body: fullBody, outcome: .httpError)
+            return DiagnosedFetch(
+                result: .failure(.rateLimited(retryAfter: retryAfter)), diagnostics: diag)
         default:
-            let body = responseText(from: data)
+            let body = responseText(from: data)   // capped copy for the popup detail line
             AppLogger.network.error(
                 "usage request failed: HTTP \(http.statusCode, privacy: .public)")
-            throw UsageError.http(status: http.statusCode, body: body)
+            let diag = FetchDiagnostics(
+                attemptAt: now, httpStatus: http.statusCode, body: fullBody, outcome: .httpError)
+            return DiagnosedFetch(
+                result: .failure(.http(status: http.statusCode, body: body)), diagnostics: diag)
         }
     }
 
@@ -170,6 +225,16 @@ public enum UsageClient {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         return trimmed.count > maxBodyLength ? String(trimmed.prefix(maxBodyLength)) : trimmed
+    }
+
+    /// The **full**, uncapped response body as UTF-8 text for ``FetchDiagnostics/body`` — the raw
+    /// bytes the Troubleshoot window shows verbatim (ADR-0020). Unlike ``responseText(from:)`` it
+    /// neither trims nor truncates (the diagnostic must be faithful), returning `nil` only when the
+    /// body is empty or not UTF-8. Like ``responseText(from:)`` it is the *response* body, so it
+    /// never carries the bearer token.
+    static func fullResponseText(from data: Data) -> String? {
+        guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return nil }
+        return text
     }
 
     /// Parse the `Retry-After` header (seconds form) if present. The HTTP-date form is not

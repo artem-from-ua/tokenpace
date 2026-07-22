@@ -24,3 +24,4 @@
 | [0017](0017-delegated-token-refresh.md) | Делегований refresh токена через claude CLI — замість self-refresh із write-back | accepted |
 | [0018](0018-launch-at-login-notfound-recovery.md) | Відновлення launch-at-login після оновлення — `.notFound` не термінальний, `register()` арбітр | accepted |
 | [0019](0019-token-read-via-security-cli.md) | Читання токена сабпроцесом `security` CLI — refresh Claude Code скидає ACL partition list, прямий `SecItemCopyMatching` промптить | accepted |
+| [0020](0020-troubleshoot-window-and-diagnostics-pipeline.md) | Вікно Troubleshoot — діагностика через чистий пайплайн, `currentCredentials` (expiry в engine), нативні alternate-пункти, вікно `.normal`-рівня | accepted |
