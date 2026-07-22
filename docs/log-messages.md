@@ -13,7 +13,7 @@ unified logging) — see [`Sources/TokenPaceKit/AppLogger.swift`](../Sources/Tok
 - **Subsystem:** `com.artem-n.tokenpace` (shared by the `.app` bundle and `swift run`).
 - **Categories:**
   - `network` — Usage/Status API requests, HTTP result codes, decode failures, snapshot synthesis.
-  - `keychain` — Keychain reads (`OSStatus`), token-expiry checks, delegated token refresh (ADR-0017).
+  - `keychain` — Keychain reads via the `security` CLI (exit status, ADR-0019), token-expiry checks, delegated token refresh (ADR-0017).
   - `lifecycle` — app launch, launch-at-login, sleep/wake, network up/down, polling-interval changes.
   - `ui` — menu-bar rendering diagnostics (defined, currently unused).
 
@@ -98,10 +98,15 @@ token itself never is.
 
 ## `Sources/TokenPaceKit/TokenProvider.swift`
 
+The Keychain read spawns `/usr/bin/security find-generic-password -w` (ADR-0019); the secret
+itself is never logged — only exit status and byte count.
+
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 160 | `keychain` | `.notice` | `token expired, len=<count>` | `accessTokenIfValid(_:now:)` — `.isValid()` returned false |
-| 230 | `keychain` | `.debug` | `SecItemCopyMatching status=<status>` | `readRawData()` — after every Keychain read; logs `OSStatus` |
+| 164 | `keychain` | `.notice` | `token expired, len=<count>` | `accessTokenIfValid(_:now:)` — `.isValid()` returned false |
+| 267 | `keychain` | `.error` | `security cli launch failed` | `readRawData()` — `Process.run()` threw; the `security` tool could not be spawned |
+| 272 | `keychain` | `.error` | `security cli read timed out after <timeout>s` | the `security` tool outlived the 10 s cap and was terminated |
+| 279 | `keychain` | `.debug` | `security cli read exit=<status> bytes=<count>` | `readRawData()` — after every Keychain read; logs the tool's exit status and payload size |
 
 ## `Sources/TokenPaceKit/UsageSnapshot.swift`
 
@@ -137,7 +142,7 @@ One log line per interval change. The format is built by
 |----------|-------|-------|
 | `network` | 13 | `UsageClient` (6), `StatusClient` (5), `UsageSnapshot` (2) |
 | `lifecycle` | 13 | `App` (5), `SettingsWindowController` (2), `PollingShell` (5), `PollingEngine` (1) |
-| `keychain` | 8 | `TokenProvider` (2), `ClaudeCLIRefresher` (6) |
+| `keychain` | 10 | `TokenProvider` (4), `ClaudeCLIRefresher` (6) |
 | `ui` | 0 | — (category defined, unused) |
 
-**Total: 30 log statements** — `.error` ×15, `.notice` ×14, `.info` ×1, `.debug` ×1.
+**Total: 36 log statements** — `.error` ×17, `.notice` ×17, `.info` ×1, `.debug` ×1.
