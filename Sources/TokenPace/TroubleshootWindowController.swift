@@ -20,6 +20,10 @@ import TokenPaceKit
 @MainActor
 final class TroubleshootWindowController: NSWindowController {
 
+    /// Called when the user clicks "Refresh now" — wired by `AppDelegate` to force an immediate poll
+    /// of both data streams and reset any 429 backoff (ADR-0020).
+    var onForceRefresh: (() -> Void)?
+
     private enum Metrics {
         static let minSize = NSSize(width: 480, height: 360)
         static let startSize = NSSize(width: 640, height: 560)
@@ -36,9 +40,11 @@ final class TroubleshootWindowController: NSWindowController {
     // Header + rows of the "Usage API — last response" section.
     private var timestampLabel: NSTextField!
     private var statusLabel: NSTextField!
-    private var nextUpdateLabel: NSTextField!
     // The scrollable raw body (pretty JSON or error payload).
     private var bodyTextView: NSTextView!
+    // Rows of the "Update interval" section (the refresh cadence + next-update estimate).
+    private var intervalLabel: NSTextField!
+    private var nextUpdateLabel: NSTextField!
     // Rows of the "Auth token" section.
     private var tokenReadLabel: NSTextField!
     private var tokenExpiryLabel: NSTextField!
@@ -76,7 +82,7 @@ final class TroubleshootWindowController: NSWindowController {
     private func buildContent() {
         let content = NSView()
 
-        // Auth token is listed first — it is checked first when diagnosing a fetch failure.
+        // Auth token — the second section (checked when diagnosing a fetch failure).
         let tokenHeader = Self.sectionHeader("Auth token")
         tokenReadLabel = Self.infoLabel()
         tokenExpiryLabel = Self.infoLabel()
@@ -86,13 +92,30 @@ final class TroubleshootWindowController: NSWindowController {
         tokenStack.spacing = Metrics.rowSpacing
         tokenStack.translatesAutoresizingMaskIntoConstraints = false
 
+        // "Update interval" — the first section: the refresh cadence (a duration) + the next-update
+        // estimate (a timestamp), plus a button that forces an immediate poll of both streams and
+        // clears any 429 backoff (ADR-0020). The interval (the rate) sits above the next-update (the
+        // when).
+        let intervalHeader = Self.sectionHeader("Update interval")
+        intervalLabel = Self.infoLabel()
+        nextUpdateLabel = Self.infoLabel()
+        let refreshButton = NSButton(
+            title: "Refresh now", target: self, action: #selector(refreshNowClicked))
+        refreshButton.bezelStyle = .rounded
+        let intervalStack = NSStackView(views: [
+            intervalHeader, intervalLabel, nextUpdateLabel, refreshButton])
+        intervalStack.orientation = .vertical
+        intervalStack.alignment = .leading
+        intervalStack.spacing = Metrics.rowSpacing
+        intervalStack.setCustomSpacing(Metrics.sectionSpacing, after: nextUpdateLabel)
+        intervalStack.translatesAutoresizingMaskIntoConstraints = false
+
         let apiHeader = Self.sectionHeader("Usage API — last response")
         timestampLabel = Self.infoLabel()
         statusLabel = Self.infoLabel()
-        nextUpdateLabel = Self.infoLabel()
 
         // Vertical stack for the API section's header + info rows (intrinsic height).
-        let apiStack = NSStackView(views: [apiHeader, timestampLabel, statusLabel, nextUpdateLabel])
+        let apiStack = NSStackView(views: [apiHeader, timestampLabel, statusLabel])
         apiStack.orientation = .vertical
         apiStack.alignment = .leading
         apiStack.spacing = Metrics.rowSpacing
@@ -113,12 +136,18 @@ final class TroubleshootWindowController: NSWindowController {
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
         content.addSubview(tokenStack)
+        content.addSubview(intervalStack)
         content.addSubview(apiStack)
         content.addSubview(scroll)
 
         let pad = Metrics.padding
         NSLayoutConstraint.activate([
-            tokenStack.topAnchor.constraint(equalTo: content.topAnchor, constant: pad),
+            // Order top-to-bottom: Update interval, Auth token, Usage API, then the scrollable body.
+            intervalStack.topAnchor.constraint(equalTo: content.topAnchor, constant: pad),
+            intervalStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: pad),
+            content.trailingAnchor.constraint(equalTo: intervalStack.trailingAnchor, constant: pad),
+
+            tokenStack.topAnchor.constraint(equalTo: intervalStack.bottomAnchor, constant: Metrics.interSectionSpacing),
             tokenStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: pad),
             content.trailingAnchor.constraint(equalTo: tokenStack.trailingAnchor, constant: pad),
 
@@ -153,6 +182,12 @@ final class TroubleshootWindowController: NSWindowController {
         return label
     }
 
+    /// The "Refresh now" button — hand off to `AppDelegate.forceRefresh()` via `onForceRefresh`.
+    /// The live `render(_:)` on the resulting poll updates the interval / next-update rows in place.
+    @objc private func refreshNowClicked() {
+        onForceRefresh?()
+    }
+
     // MARK: Live render
 
     /// Map the pure ``TroubleshootLayout`` onto the views. Called from `show(_:)` and — for live
@@ -164,6 +199,8 @@ final class TroubleshootWindowController: NSWindowController {
         timestampLabel.stringValue = layout.timestampLine
         statusLabel.stringValue = layout.statusLine ?? ""
         statusLabel.isHidden = layout.statusLine == nil
+        intervalLabel.stringValue = layout.intervalLine ?? ""
+        intervalLabel.isHidden = layout.intervalLine == nil
         nextUpdateLabel.stringValue = layout.nextUpdateLine ?? ""
         nextUpdateLabel.isHidden = layout.nextUpdateLine == nil
         tokenReadLabel.stringValue = layout.tokenReadLine

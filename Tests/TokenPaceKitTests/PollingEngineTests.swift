@@ -721,6 +721,22 @@ struct RunLoopTests {
         #expect(await counter.count >= 2)          // a second fetch happened off-schedule
     }
 
+    @Test func manualRefreshResetsBackoffToBaseInterval() async {
+        // Three consecutive 429s. Without intervention the backoff would climb 180 → 360 → 720.
+        // A `.manualRefresh` between polls 2 and 3 resets it, so poll 3 starts back at level 0 (180).
+        let transport = SequencedTransport(steps: [
+            StubTransport.http(429), StubTransport.http(429), StubTransport.http(429),
+        ])
+        let scheduler = ManualScheduler(script: [.elapsed, .interrupted(.manualRefresh), .elapsed])
+        let engine = PollingEngine(
+            transport: transport, tokenProvider: StubTokenProvider(), scheduler: scheduler,
+            probe: StubProbe(active: true), now: { t0 })
+        let outputs = await collect(engine, count: 3)
+        #expect(outputs[0].interval == 180)   // first 429 → step 0
+        #expect(outputs[1].interval == 360)   // second 429 → step 1 (climbing)
+        #expect(outputs[2].interval == 180)   // manual refresh reset the backoff → back to step 0
+    }
+
     @Test func networkRestoredTriggersImmediatePoll() async {
         // First poll offline (stale), then `.networkRestored` drives an immediate successful poll.
         let transport = SequencedTransport(steps: [

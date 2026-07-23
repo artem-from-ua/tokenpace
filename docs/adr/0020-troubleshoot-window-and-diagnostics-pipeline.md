@@ -15,13 +15,14 @@ HTTP-помилок обрізалося до 500 символів (`maxBodyLeng
 `TokenProviding.currentAccessToken` повертав лише `String`, а `expiresAt` з Keychain відкидався
 одразу після перевірки validity.
 
-Додаємо прихований діагностичний вхід: у дропдауні статус-айтема пункт **Settings…** при затиснутій
-**⌥ Option** замінюється на **Troubleshoot…**, який відкриває велике resizable-вікно з двома
-секціями — сира остання відповідь usage API (претіфікований JSON або payload помилки + HTTP-статус +
-час і час наступного оновлення) і метадані токена (час читання, час протухання). Вміст **оновлюється
-наживо** з кожним циклом опитування.
+Додаємо прихований діагностичний вхід: у дропдауні статус-айтема пункт **Settings…** видно завжди, а
+**Troubleshoot…** — окремий пункт **під ним**, прихований за замовчуванням і показаний лише поки
+затиснута **⌥ Option**. Він відкриває велике resizable-вікно з трьома секціями — **Update interval**
+(поточна каденція як тривалість + час наступного оновлення + кнопка примусового refresh), метадані
+токена (час читання, час протухання) і сира остання відповідь usage API (претіфікований JSON або
+payload помилки + HTTP-статус). Вміст **оновлюється наживо** з кожним циклом опитування.
 
-Це породжує чотири рішення того ж класу, що ADR-0009…0011 (де межа модуля, що чисте, що — shell).
+Це породжує рішення того ж класу, що ADR-0009…0011 (де межа модуля, що чисте, що — shell).
 
 ## Рішення
 
@@ -60,18 +61,24 @@ HTTP-помилок обрізалося до 500 символів (`maxBodyLeng
    формує engine, а не провайдер. Лог `token expired, len=<count>` (текст незмінний) переїхав із
    `TokenProvider.accessTokenIfValid` у `PollingEngine.pollOnce` разом із перевіркою.
 
-3. **Option-swap — нативні alternate-пункти `NSMenu`, не `NSMenuDelegate.menuNeedsUpdate`.** Делегат
-   спрацьовує раз при відкритті меню; alternate-механізм перемикає пункт наживо, поки меню відкрите
-   (патерн Finder «About This Mac»→«System Information…»). **Умови роботи (перевірено — не з
-   пам'яті):** пункти суміжні, `keyEquivalent` **однаковий і непорожній** на обох, маски
-   модифікаторів різні. Ключова пастка: з **порожнім** keyEquivalent AppKit alternate **не
-   активує** взагалі — тому `settingsItem` бере стандартний `keyEquivalent: ","` +
-   `keyEquivalentModifierMask = [.command]` (стандартний ⌘,), а `troubleshootItem` — той самий `","`
-   + `[.command, .option]` + `isAlternate = true`. Гліф ⌘, на «Settings…» — свідомий наслідок цієї
-   вимоги (не можна мати alternate-swap без видимого шортката); ⌘, — рідний macOS-шорткат Settings,
-   тож доречний. Заразом «Quit TokenPace» отримує стандартний `keyEquivalent: "q"` (⌘Q) — для
-   консистентності з видимим гліфом на «Settings…» і бо ⌘Q — рідний quit-шорткат. Це відмінює
-   зауваження ADR-0012 §7 «дефолтного ⌘Q немає» (тіло ADR-0012 незмінне — воно історичне).
+3. **Два окремі пункти; ⌥ показує/ховає Troubleshoot через `isHidden`, кероване modifier-polling
+   таймером — не нативним `isAlternate`, не `NSMenuDelegate.menuNeedsUpdate`.** «Settings…» —
+   звичайний, завжди видимий пункт із власним селектором `openSettings`; «Troubleshoot…» — окремий
+   пункт одразу під ним із власним `openTroubleshoot`, `isHidden = true` за замовчуванням. Поки меню
+   відкрите, `optionPollTimer` читає живий стан ⌥ і виставляє `troubleshootItem.isHidden`.
+
+   **Чому не нативний `isAlternate` (перевірено — не з пам'яті):** alternate-механізм `NSMenu`
+   (патерн Finder «About This Mac»→«System Information…») **інертний у меню статус-айтема** — пункт
+   не перемикається під модифікатором. **Чому не подієвий монітор:** трекінг `NSMenu` крутить модальний
+   `NSEventTrackingRunLoopMode`, який голодує `addLocalMonitorForEvents(.flagsChanged)` (перевірено:
+   монітор не спрацьовував під час трекінгу). Тому reveal веде таймер, доданий у `.common`-режими (щоб
+   спрацьовував під час модального трекінгу), який опитує `NSEvent.modifierFlags` кожні 50 мс —
+   `menuWillOpen` сідить його, `menuDidClose` вбиває й ховає пункт назад.
+
+   `keyEquivalent` на всіх пунктах **порожній** — гліфів шорткатів (⌘, / ⌘Q) у дропдауні немає (немає
+   й головного меню, яке б їх хостило). Тож зауваження ADR-0012 §7 «дефолтного ⌘Q немає» лишається
+   чинним. Попередня редакція цього ADR описувала нативний alternate-swap із ⌘,-гліфом на «Settings…»,
+   але реалізація завжди йшла modifier-polling шляхом; цей запис приведено у відповідність до коду.
 
 4. **Вікно — звичайний рівень (`.normal`), не `.floating` — свідоме відхилення від ADR-0012 §6.**
    Floating конфліктує з повноекранним Space, а велике завжди-зверху вікно вороже до користувача.
@@ -87,19 +94,40 @@ HTTP-помилок обрізалося до 500 символів (`maxBodyLeng
    — діагностика має бути однозначною. Час наступного оновлення — той самий формат із префіксом `≈`
    (wake / відновлення мережі можуть спричинити пол раніше).
 
+5. **Секція «Update interval» + кнопка примусового refresh через новий `PollSignal.manualRefresh`.**
+   Поточну каденцію винесено в окрему секцію вікна: рядок `Refresh interval: 3m` (тривалість, чистий
+   `TroubleshootLayout.durationText`) над `Next update: ≈ <timestamp>` (той самий фіксований формат).
+   Кнопка **«Refresh now»** примусово оновлює **обидва** потоки даних: `AppDelegate.forceRefresh()`
+   надсилає новий сигнал `PollSignal.manualRefresh` у `SignalHub` (usage-цикл поллить негайно — як
+   `.wake`/`.networkRestored`) **і** скидає `lastStatusSuccess = nil`, тож status-пол, який їде на
+   heartbeat usage-полу, знову `isDue` на тому ж негайному тику.
+
+   На відміну від `.wake`/`.networkRestored`, `.manualRefresh` **скидає активний 429-backoff** до
+   базового 180 с: у циклі, коли `waitForNextPoll` повернув `.interrupted(.manualRefresh)`, стан
+   `state.backoff` скидається (`.reset()`) **перед** негайним полом. Це свідоме рішення — ручна дія
+   користувача важить більше за rate-limit-обережність (ADR-0008): він приймає ризик нового 429.
+   `LivePollScheduler` проводить будь-який сигнал крім `.sleep` як `.interrupted`, тож нова гілка
+   потрібна лише для скидання backoff; `waitWhileAsleep` `.manualRefresh` ігнорує (сплячий Mac не
+   поллить). Тестами покрито і скидання backoff (`manualRefreshResetsBackoffToBaseInterval`), і
+   формат тривалості (`durationText`).
+
 ## Наслідки
 
 - `TokenPaceKit` отримує два нові чисті типи: `FetchDiagnostics`/`TokenDiagnostics`/`PollDiagnostics`/
-  `DiagnosedFetch` (діагностичний канал) і `TroubleshootLayout` (view-model). Обидва без AppKit →
-  реюз у Фазі 2, покриті юніт-тестами (`UsageClientTests` — нова suite `diagnosedFetch`;
-  `TroubleshootLayoutTests` — `prettyPrinted`/`timestampText`/`make`; `PollingEngineTests` — асерти
-  діагностики та збереження контракту «прострочений токен не йде в мережу»).
+  `DiagnosedFetch` (діагностичний канал) і `TroubleshootLayout` (view-model, тепер із полем
+  `intervalLine` + чистим `durationText`). Обидва без AppKit → реюз у Фазі 2, покриті юніт-тестами
+  (`UsageClientTests` — нова suite `diagnosedFetch`; `TroubleshootLayoutTests` —
+  `prettyPrinted`/`timestampText`/`durationText`/`make`; `PollingEngineTests` — асерти діагностики,
+  збереження контракту «прострочений токен не йде в мережу» і скидання backoff на `.manualRefresh`).
+  `PollSignal` отримує case `.manualRefresh` (негайний пол + скидання 429-backoff).
 - `TroubleshootWindowController` (`TokenPace`) — тонкий shell за зразком `SettingsWindowController`,
   але `.normal`-рівня; `render(_:)` викликається з `AppDelegate.apply(_:)` **щополу**, тож відкрите
-  вікно оновлює обидві секції на місці (body присвоюється лише коли змінився — щоб не злітали
-  виділення/скрол).
-- **Логування:** нових повідомлень немає; єдина зміна — рядок `token expired, len=<count>` тепер
-  емітиться з `PollingEngine.pollOnce`, а не з `TokenProvider` (текст, категорія, рівень незмінні).
+  вікно оновлює всі три секції на місці (body присвоюється лише коли змінився — щоб не злітали
+  виділення/скрол). Кнопка «Refresh now» кличе `onForceRefresh` → `AppDelegate.forceRefresh()`.
+- **Логування:** додано один рядок `manual refresh requested (Troubleshoot)` (`lifecycle`, `.notice`)
+  з `AppDelegate.forceRefresh()`; рядок `token expired, len=<count>` тепер емітиться з
+  `PollingEngine.pollOnce`, а не з `TokenProvider` (текст, категорія, рівень незмінні). Див.
+  `docs/log-messages.md`.
 - ADR-0007 частково зачеплений: «provider throws `.expired`» більше не так — рішення переїхало в
   engine. Це не інвалідує ADR-0007 (контракт «прострочений токен не йде на API» зберігається), тож у
   його індексі закреслення немає; додано постскриптум-вказівник сюди.

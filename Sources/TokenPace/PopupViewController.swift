@@ -322,26 +322,26 @@ final class PopupViewController: NSViewController {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard let layout else { return }
 
-        // The "Claude Code" section (first line): a bold section header (always shown, brand-coloured
-        // — see `claudeBrandColor`), followed by the dim "Updated … · interval …" line and the two
-        // service status rows (issue #31) — shown only while ⌥ Option is held, or a real problem
-        // exists, since a widget most users check for numbers, not a green checkmark, shouldn't spend
-        // permanent space on "everything is fine". A real problem always shows regardless of ⌥, since
-        // that is exactly the moment the popup needs to explain itself.
-        let sectionHeader = addLabel(
-            Self.claudeCodeSectionTitle, font: Self.menuItemFont, color: Self.claudeBrandColor)
+        // The "Claude Code" section header (first line): the brand-coloured, bold title (always
+        // shown — see `claudeBrandColor`) flush left. Its right half carries the dim data age
+        // ("2m ago") **only while ⌥ Option is held** — the age is an on-demand detail, not something
+        // to surface even when a service problem forces the status rows open. The two service status
+        // rows (issue #31) come below under a wider gate (⌥ held *or* a real problem) — a widget most
+        // users check for numbers, not a green checkmark, shouldn't spend permanent space on
+        // "everything is fine"; a real problem always shows them regardless of ⌥, since that is
+        // exactly the moment the popup needs to explain itself.
+        let status = layout.serviceStatus
+        let showStatusRows = status?.worstProblem != nil || optionHeld
+        let sectionHeader = addSplitLine(
+            left: Self.claudeCodeSectionTitle, right: optionHeld ? Self.ageText(layout.lastUpdateAge) : "",
+            leftFont: Self.menuItemFont, rightFont: .systemFont(ofSize: Metrics.textSize),
+            leftColor: Self.claudeBrandColor, rightColor: Self.dimmedLabelColor)
         stack.setCustomSpacing(Metrics.sectionSpacing, after: sectionHeader)
 
-        let status = layout.serviceStatus
-        if status?.worstProblem != nil || optionHeld {
-            addLabel(
-                Self.serviceLineText(lastUpdateAge: layout.lastUpdateAge, intervalSeconds: layout.intervalSeconds),
-                font: .systemFont(ofSize: Metrics.textSize), secondary: true)
-            if let status {
-                addServiceStatusRow(label: "Claude Code", status: status.claudeCode)
-                let apiRow = addServiceStatusRow(label: "Claude API", status: status.claudeAPI)
-                stack.setCustomSpacing(Metrics.sectionSpacing, after: apiRow)
-            }
+        if showStatusRows, let status {
+            addServiceStatusRow(label: "Claude Code", status: status.claudeCode)
+            let apiRow = addServiceStatusRow(label: "Claude API", status: status.claudeAPI)
+            stack.setCustomSpacing(Metrics.sectionSpacing, after: apiRow)
         }
 
         // Error block (when failing): two lines — a bold title led by the ⚠️ symbol, then the
@@ -555,10 +555,6 @@ final class PopupViewController: NSViewController {
 
     // MARK: - Pure text formatters (the localisation seam)
 
-    /// The separator between fields on both popup lines: two spaces, a middle dot (U+00B7), two
-    /// spaces. A single constant so line 1 ("title · status") and line 2 ("% used · resets") match.
-    static let separator = "  \u{00B7}  "
-
     /// The per-limit detail line's **left**-aligned half: `"20% used"`.
     static func usedText(_ row: LimitRow) -> String { "\(percent(row.utilization)) used" }
 
@@ -573,25 +569,19 @@ final class PopupViewController: NSViewController {
         return reset
     }
 
-    /// The single dim line under the title: `"Updated 2m ago  ·  interval 3m"` — combines data age
-    /// and the current polling cadence on one line (replacing the former two "Last update" /
-    /// "Update interval" rows). Uses the shared middle-dot ``separator``.
-    static func serviceLineText(lastUpdateAge: TimeInterval, intervalSeconds: TimeInterval) -> String {
-        "\(updatedText(lastUpdateAge))\(separator)interval \(duration(Int(intervalSeconds)))"
-    }
-
-    /// `"Updated 2m ago"`, or `"Updated just now"` for anything under a full minute — the age never
-    /// shows seconds (user preference), so a sub-minute age reads as "just now", not "40s".
+    /// The data age shown flush-right in the "Claude Code" header (under the ⌥/problem gate):
+    /// `"2m ago"`, or `"just now"` for anything under a full minute — the age never shows seconds
+    /// (user preference), so a sub-minute age reads as "just now", not "40s".
     static let justNowThreshold = 60
-    static func updatedText(_ ageSeconds: TimeInterval) -> String {
+    static func ageText(_ ageSeconds: TimeInterval) -> String {
         let age = Int(ageSeconds)
         return age < justNowThreshold
-            ? "Updated just now"
-            : "Updated \(durationMinutes(age)) ago"
+            ? "just now"
+            : "\(durationMinutes(age)) ago"
     }
 
     /// Like ``duration`` but **never** emits a seconds component — minutes are the finest unit, so
-    /// the "Last update" line stays second-free even just past the minute boundary.
+    /// the data-age text stays second-free even just past the minute boundary.
     private static func durationMinutes(_ seconds: Int) -> String {
         let minutes = seconds / 60
         if minutes < 60 { return "\(minutes)m" }
@@ -658,19 +648,4 @@ final class PopupViewController: NSViewController {
         }
     }
 
-    /// Compact duration from whole seconds: `<60s → "Ns"`, `<60m → "Nm"`, `<24h → "Nh Mm"`
-    /// (zero trailing minute dropped), else `"Nd Mh"`.
-    private static func duration(_ seconds: Int) -> String {
-        if seconds < 60 { return "\(seconds)s" }
-        let minutes = seconds / 60
-        if minutes < 60 { return "\(minutes)m" }
-        let hours = minutes / 60
-        if hours < 24 {
-            let m = minutes % 60
-            return m == 0 ? "\(hours)h" : "\(hours)h \(m)m"
-        }
-        let days = hours / 24
-        let h = hours % 24
-        return h == 0 ? "\(days)d" : "\(days)d \(h)h"
-    }
 }

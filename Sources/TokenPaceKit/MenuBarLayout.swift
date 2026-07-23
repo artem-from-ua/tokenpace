@@ -90,8 +90,8 @@ public struct MenuBarLayout: Sendable, Equatable {
 
     /// The most severe non-operational Claude service state, or `nil` when both tracked components
     /// are operational / no status is known yet (issue #31). When non-`nil`, `StatusItemView` draws
-    /// a small colour dot as the **leftmost** element of the widget, ahead of the bars/glyph; when
-    /// `nil`, no dot. Orthogonal to `mode` — a service problem and the usage state are independent.
+    /// a small colour dot as the **trailing** (rightmost) element of the widget, after the bars/glyph;
+    /// when `nil`, no dot. Orthogonal to `mode` — a service problem and the usage state are independent.
     public let serviceProblem: ServiceStatus?
 
     public init(mode: MenuBarMode, serviceProblem: ServiceStatus? = nil) {
@@ -153,7 +153,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
     ///   - serviceProblem: The worst non-operational Claude service state (issue #31), or `nil` when
     ///     all services are operational / unknown-cold. Threaded onto the result so the view can draw
-    ///     the leftmost dot; it does not affect the usage `mode`.
+    ///     the trailing dot; it does not affect the usage `mode`.
     public static func make(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date, serviceProblem: ServiceStatus? = nil
     ) -> MenuBarLayout {

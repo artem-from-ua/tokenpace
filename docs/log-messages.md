@@ -38,11 +38,12 @@ In the tables below, `<…>` marks an interpolated value.
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 146 | `lifecycle` | `.info` | `TokenPace status item attached (<version>); live polling started` | `applicationDidFinishLaunching` — after the status item is attached and polling starts |
-| 182 | `lifecycle` | `.notice` | `launch-at-login: not an .app bundle (swift run), skipping opt-out auto-register` | `registerLaunchAtLoginIfNeeded()` — running as a bare `swift run` binary, so opt-out auto-register is skipped to avoid polluting Login Items (#69) |
-| 188 | `lifecycle` | `.notice` | `launch-at-login: status=<status>, no auto-register` | status is `.registered`/`.requiresApproval`, so no auto-register is needed |
-| 194 | `lifecycle` | `.notice` | `launch-at-login: auto-registered (opt-out)` | successful auto-registration (`.notRegistered`, or recovery from `.notFound` after an update — #69) |
-| 198 | `lifecycle` | `.error` | `launch-at-login: auto-register failed: <error>` | `LaunchAtLoginController.enable()` threw on an installed `.app` bundle — an unexpected, registerable-but-refused case |
+| 179 | `lifecycle` | `.info` | `TokenPace status item attached (<version>); live polling started` | `applicationDidFinishLaunching` — after the status item is attached and polling starts |
+| 210 | `lifecycle` | `.notice` | `manual refresh requested (Troubleshoot)` | `forceRefresh()` — the user clicked "Refresh now" in the Troubleshoot window; a `.manualRefresh` signal is sent and the status poll is marked due (ADR-0020) |
+| 253 | `lifecycle` | `.notice` | `launch-at-login: not an .app bundle (swift run), skipping opt-out auto-register` | `registerLaunchAtLoginIfNeeded()` — running as a bare `swift run` binary, so opt-out auto-register is skipped to avoid polluting Login Items (#69) |
+| 259 | `lifecycle` | `.notice` | `launch-at-login: status=<status>, no auto-register` | status is `.registered`/`.requiresApproval`, so no auto-register is needed |
+| 265 | `lifecycle` | `.notice` | `launch-at-login: auto-registered (opt-out)` | successful auto-registration (`.notRegistered`, or recovery from `.notFound` after an update — #69) |
+| 269 | `lifecycle` | `.error` | `launch-at-login: auto-register failed: <error>` | `LaunchAtLoginController.enable()` threw on an installed `.app` bundle — an unexpected, registerable-but-refused case |
 
 ## `Sources/TokenPace/ClaudeCLIRefresher.swift`
 
@@ -144,8 +145,8 @@ One log line per interval change. The format is built by
 | Category | Calls | Files |
 |----------|-------|-------|
 | `network` | 13 | `UsageClient` (6), `StatusClient` (5), `UsageSnapshot` (2) |
-| `lifecycle` | 13 | `App` (5), `SettingsWindowController` (2), `PollingShell` (5), `PollingEngine` (1) |
+| `lifecycle` | 14 | `App` (6), `SettingsWindowController` (2), `PollingShell` (5), `PollingEngine` (1) |
 | `keychain` | 10 | `TokenProvider` (3), `ClaudeCLIRefresher` (6), `PollingEngine` (1) |
 | `ui` | 0 | — (category defined, unused) |
 
-**Total: 36 log statements** — `.error` ×17, `.notice` ×17, `.info` ×1, `.debug` ×1.
+**Total: 37 log statements** — `.error` ×17, `.notice` ×18, `.info` ×1, `.debug` ×1.

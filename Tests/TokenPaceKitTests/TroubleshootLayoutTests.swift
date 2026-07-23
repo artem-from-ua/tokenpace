@@ -100,6 +100,37 @@ struct TimestampTextTests {
     }
 }
 
+// MARK: - durationText
+
+@Suite("TroubleshootLayout.durationText")
+struct DurationTextTests {
+
+    @Test func secondsUnderAMinute() {
+        #expect(TroubleshootLayout.durationText(45) == "45s")
+        #expect(TroubleshootLayout.durationText(59) == "59s")
+    }
+
+    @Test func wholeMinutes() {
+        #expect(TroubleshootLayout.durationText(180) == "3m")
+        #expect(TroubleshootLayout.durationText(900) == "15m")
+    }
+
+    @Test func hoursDropZeroMinute() {
+        #expect(TroubleshootLayout.durationText(3600) == "1h")
+        #expect(TroubleshootLayout.durationText(3600 + 300) == "1h 5m")
+    }
+
+    @Test func daysDropZeroHour() {
+        #expect(TroubleshootLayout.durationText(86_400) == "1d")
+        #expect(TroubleshootLayout.durationText(86_400 + 7200) == "1d 2h")
+    }
+
+    @Test func negativeAndZeroReadZeroSeconds() {
+        #expect(TroubleshootLayout.durationText(0) == "0s")
+        #expect(TroubleshootLayout.durationText(-30) == "0s")
+    }
+}
+
 // MARK: - make
 
 @Suite("TroubleshootLayout.make")
@@ -109,9 +140,23 @@ struct MakeTests {
         let layout = TroubleshootLayout.make(from: nil, timeZone: utc)
         #expect(layout.timestampLine == TroubleshootLayout.noResponseYet)
         #expect(layout.statusLine == nil)
+        #expect(layout.intervalLine == nil)
         #expect(layout.nextUpdateLine == nil)
         #expect(layout.bodyText == TroubleshootLayout.bodyPlaceholder)
         #expect(layout.tokenExpiryLine == nil)
+    }
+
+    @Test func intervalLineShowsCadenceAsDuration() {
+        // interval 180 s → "3m"; interval 900 s → "15m".
+        let three = TroubleshootLayout.make(
+            from: output(.success, httpStatus: 200, body: "{}", interval: 180, token: freshToken),
+            timeZone: utc)
+        #expect(three.intervalLine == "Refresh interval: 3m")
+
+        let fifteen = TroubleshootLayout.make(
+            from: output(.success, httpStatus: 200, body: "{}", interval: 900, token: freshToken),
+            timeZone: utc)
+        #expect(fifteen.intervalLine == "Refresh interval: 15m")
     }
 
     @Test func successPrettyPrintsBodyAndShowsStatus() {

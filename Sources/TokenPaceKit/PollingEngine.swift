@@ -13,6 +13,11 @@ public enum PollSignal: Sendable, Equatable {
     /// Connectivity returned after a drop → poll immediately so the bars refresh within seconds
     /// instead of waiting out the cadence (AC #2 "auto-recovery").
     case networkRestored
+    /// The user asked for an immediate refresh (Troubleshoot window button) → poll now **and** reset
+    /// any active 429 backoff to the base interval. Unlike `.wake`/`.networkRestored`, this clears the
+    /// backoff: it is a deliberate user action, so honour it even mid-rate-limit (they accept the risk
+    /// of another 429).
+    case manualRefresh
 }
 
 /// Why a `waitForNextPoll` returned — the interval elapsed normally, or a signal cut it short.
@@ -415,7 +420,13 @@ public struct PollingEngine: Sendable {
                     if case .interrupted(.sleep) = reason {
                         await scheduler.waitWhileAsleep()   // park: no fetch while asleep
                     }
-                    // .elapsed → scheduled poll; .interrupted(.wake/.networkRestored) → immediate poll.
+                    if case .interrupted(.manualRefresh) = reason {
+                        // A user-requested refresh clears any active 429 backoff, so the immediate
+                        // poll below runs at the base interval rather than deep in a 15-min hold.
+                        state.backoff = state.backoff.reset()
+                    }
+                    // .elapsed → scheduled poll; .interrupted(.wake/.networkRestored/.manualRefresh) →
+                    // immediate poll (manualRefresh also cleared the backoff, just above).
                 }
                 continuation.finish()
             }

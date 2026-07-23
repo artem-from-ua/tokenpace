@@ -135,14 +135,15 @@ final class StatusItemView: NSView {
     private func render(in rect: NSRect) {
         guard let layout else { return }
 
-        // Leftmost service-status dot (issue #31): drawn first, then everything else is rendered in a
-        // content rect inset from the left by the dot + gap, so the bars/glyph shift right. When there
-        // is no problem, the inset is zero and the layout is exactly as before.
+        // Rightmost service-status dot (issue #31): drawn at the trailing edge, then everything else
+        // is rendered in a content rect inset from the right by the dot + gap, so the bars/glyph keep
+        // their leading position. When there is no problem, the inset is zero and the layout is
+        // exactly as before.
         var contentRect = rect
         if let problem = layout.serviceProblem {
             drawStatusDot(problem, in: rect)
             let inset = Metrics.statusDotDiameter + Metrics.statusDotGap
-            contentRect = NSRect(x: rect.minX + inset, y: rect.minY, width: rect.width - inset, height: rect.height)
+            contentRect = NSRect(x: rect.minX, y: rect.minY, width: rect.width - inset, height: rect.height)
         }
 
         switch layout.mode {
@@ -153,12 +154,12 @@ final class StatusItemView: NSView {
         }
     }
 
-    /// Draw the small service-status dot at the **left edge** of `rect`, vertically centred — the
-    /// leftmost element of the widget. `hPadding` keeps it off the very edge, matching the bars'
+    /// Draw the small service-status dot at the **right edge** of `rect`, vertically centred — the
+    /// trailing element of the widget. `hPadding` keeps it off the very edge, matching the bars'
     /// inset. Drawn only when a service is non-operational (issue #31).
     private func drawStatusDot(_ status: ServiceStatus, in rect: NSRect) {
         let d = Metrics.statusDotDiameter
-        let x = rect.minX + Metrics.hPadding
+        let x = rect.maxX - Metrics.hPadding - d
         let y = rect.midY - d / 2
         let dot = NSBezierPath(ovalIn: NSRect(x: x, y: y, width: d, height: d))
         statusDotColor(status).setFill()
@@ -347,7 +348,7 @@ final class StatusItemView: NSView {
     /// the bars + label, widest for the ⚠️ + stale-bars phase (the glyph adds its own width). Driven
     /// dynamically so the item hugs exactly the content currently drawn.
     private func itemWidth(for layout: MenuBarLayout?) -> CGFloat {
-        // The leftmost service dot, when present, widens every mode by the same dot + gap inset.
+        // The trailing service dot, when present, widens every mode by the same dot + gap inset.
         let dotInset = layout?.serviceProblem != nil ? Metrics.statusDotDiameter + Metrics.statusDotGap : 0
         switch layout?.mode {
         case .none:

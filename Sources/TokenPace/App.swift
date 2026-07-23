@@ -28,19 +28,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// created and kept alive; while open it re-renders on every poll (see `apply(_:)`).
     private var troubleshootWC: TroubleshootWindowController?
 
-    /// The dropdown's swapping action item: "Settings…" by default, "Troubleshoot…" while ⌥ Option
-    /// is held (ADR-0020). The native `isAlternate` swap does not work in a status-item menu, so its
-    /// title/action are flipped live by `updateActionItemForOption(_:)`, driven by `optionPollTimer`.
-    private var actionItem: NSMenuItem?
+    /// The optional "Troubleshoot…" item (ADR-0020), hidden by default and revealed **below** the
+    /// always-visible "Settings…" while ⌥ Option is held. `NSMenuItem.isHidden` is flipped live by
+    /// `updateTroubleshootVisibility(_:)`, driven by `optionPollTimer` — the native `isAlternate`
+    /// swap does not work in a status-item menu. "Settings…" is a plain, always-shown item beside it.
+    private var troubleshootItem: NSMenuItem?
 
-    /// Polls the ⌥ Option state while the dropdown is open, flipping `actionItem` when it changes
-    /// (ADR-0020). A timer — not an event monitor — because NSMenu tracking runs a modal
+    /// Polls the ⌥ Option state while the dropdown is open, showing/hiding `troubleshootItem` when it
+    /// changes (ADR-0020). A timer — not an event monitor — because NSMenu tracking runs a modal
     /// `NSEventTrackingRunLoopMode` that starves `addLocalMonitorForEvents(.flagsChanged)` (verified:
     /// the monitor never fired mid-tracking), while `isAlternate` is inert in a status-item menu. The
     /// timer is scheduled in `.common` modes so it *does* fire during tracking, reading the live
     /// `NSEvent.modifierFlags`. Live only between `menuWillOpen` and `menuDidClose`.
     private var optionPollTimer: Timer?
-    /// The last ⌥ state pushed to `actionItem`, so the poll only rebuilds the item on a real change.
+    /// The last ⌥ state pushed to the menu, so the poll only re-toggles the item on a real change.
     private var lastOptionHeld = false
 
     // MARK: live polling (#13)
@@ -77,6 +78,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// grows ("just now" → "1m ago") without waiting for the next 180 s poll. **Never** fetches — it
     /// only recomputes the view models against the current time.
     private var ageTimer: Timer?
+
+    /// The active `TOKENPACE_STUB` mode name (`"1"`/`"screenshot"`/`"error"`), or `nil` for a normal
+    /// run against the real network. One source of truth read from the environment, so the Quit
+    /// item's dev-build tag and `startPolling`'s transport wiring agree on which mode is live.
+    private static let stubName = ProcessInfo.processInfo.environment["TOKENPACE_STUB"]
 
     static func main() {
         let app = NSApplication.shared
@@ -127,24 +133,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Action items at the bottom of the same menu (#14). `keyEquivalent: ""` keeps a shortcut
         // glyph off the right edge — none is wanted, and there is no main menu to host a default ⌘Q.
         menu.addItem(.separator())
-        // A single item that swaps between "Settings…" and "Troubleshoot…" while ⌥ Option is held
-        // (ADR-0020). The native `isAlternate` mechanism does NOT work in a status-item menu, so the
-        // swap is driven by a modifier-polling timer set in `menuWillOpen` — see
-        // `updateActionItemForOption(_:)`. Empty keyEquivalent keeps the menu glyph-free.
-        // One fixed selector — `openActionItem` reads the live ⌥ state at click time and routes to
-        // Settings or Troubleshoot. (Swapping `.action` mid-tracking is ignored by NSMenu.)
-        let actionItem = NSMenuItem(title: "", action: #selector(openActionItem), keyEquivalent: "")
-        actionItem.attributedTitle = Self.dropdownMenuItemText("Settings…")
-        actionItem.target = self
-        menu.addItem(actionItem)
-        self.actionItem = actionItem
+        // "Settings…" is always visible. Directly below it sits the optional "Troubleshoot…" item
+        // (ADR-0020), hidden by default and revealed only while ⌥ Option is held. The native
+        // `isAlternate` mechanism does NOT work in a status-item menu, so the reveal is driven by a
+        // modifier-polling timer set in `menuWillOpen` — see `updateTroubleshootVisibility(_:)`. Each
+        // item carries its own fixed selector; empty keyEquivalent keeps the menu glyph-free.
+        let settingsItem = NSMenuItem(title: "", action: #selector(openSettings), keyEquivalent: "")
+        settingsItem.attributedTitle = Self.dropdownMenuItemText("Settings…")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        let troubleshootItem = NSMenuItem(title: "", action: #selector(openTroubleshoot), keyEquivalent: "")
+        troubleshootItem.attributedTitle = Self.dropdownMenuItemText("Troubleshoot…")
+        troubleshootItem.target = self
+        troubleshootItem.isHidden = true
+        menu.addItem(troubleshootItem)
+        self.troubleshootItem = troubleshootItem
         // Separate Quit from Settings… so the terminating action sits in its own group (standard
-        // macOS menu grouping). Tagged "(dev build)" for a bare `swift run` binary, same rule as
-        // the popup's own title (#69) — so quitting the right process is unambiguous when a dev
-        // build and the installed `.app` run side by side.
+        // macOS menu grouping). A bare `swift run` binary is tagged "(dev build)" (#69) so quitting
+        // the right process is unambiguous when a dev build and the installed `.app` run side by
+        // side; under a stub the mode is named too — "(dev build – error)" — so a stubbed run reads
+        // apart from a plain dev build at a glance.
         menu.addItem(.separator())
-        let quitTitle = LaunchAtLoginController.isAppBundle
-            ? "Quit TokenPace" : "Quit TokenPace (dev build)"
+        let quitTitle: String
+        if LaunchAtLoginController.isAppBundle {
+            quitTitle = "Quit TokenPace"
+        } else if let stub = Self.stubName {
+            quitTitle = "Quit TokenPace (dev build – \(stub))"
+        } else {
+            quitTitle = "Quit TokenPace (dev build)"
+        }
         let quitItem = NSMenuItem(title: "", action: #selector(quit), keyEquivalent: "")
         quitItem.attributedTitle = Self.dropdownMenuItemText(quitTitle)
         quitItem.target = self
@@ -172,36 +190,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Open (or focus) the hidden Troubleshoot window (ADR-0020), seeded with the latest poll
-    /// result. Lazily creates the single instance; while open it re-renders on every poll.
+    /// result. Reached via the optional "Troubleshoot…" item, revealed while ⌥ Option is held. Lazily
+    /// creates the single instance; while open it re-renders on every poll. Its force-refresh button
+    /// routes back to `forceRefresh()`.
     @objc private func openTroubleshoot() {
-        if troubleshootWC == nil { troubleshootWC = TroubleshootWindowController() }
+        if troubleshootWC == nil {
+            let wc = TroubleshootWindowController()
+            wc.onForceRefresh = { [weak self] in self?.forceRefresh() }
+            troubleshootWC = wc
+        }
         troubleshootWC?.show(lastOutput)
     }
 
-    /// The dropdown item's single fixed action: route to Troubleshoot when ⌥ Option is held at
-    /// **click** time, else Settings (ADR-0020). Reading the modifier here — not swapping `.action`
-    /// while the menu tracks — is what makes the ⌥-variant actually open, since NSMenu fires the
-    /// selector the item had at open time.
-    @objc private func openActionItem() {
-        if NSEvent.modifierFlags.contains(.option) {
-            openTroubleshoot()
-        } else {
-            openSettings()
-        }
+    /// Force an immediate refresh of both data streams (the Troubleshoot window's button, ADR-0020):
+    /// send `.manualRefresh` so the usage loop polls now and clears any 429 backoff to the base
+    /// interval, and clear `lastStatusSuccess` so the status poll — which rides the usage heartbeat —
+    /// is due again and re-fetches on that same immediate tick.
+    private func forceRefresh() {
+        AppLogger.lifecycle.notice("manual refresh requested (Troubleshoot)")
+        lastStatusSuccess = nil            // make the status poll due on the next (immediate) tick
+        signals.send(.manualRefresh)       // wake the usage loop now + reset backoff (engine)
     }
 
-    /// Flip the dropdown item's **title** between "Settings…" and "Troubleshoot…", and the popup's
-    /// service-status visibility, for the current ⌥ Option state (ADR-0020). Called on menu open and
-    /// by `optionPollTimer` while it is open — the status-item-menu replacement for the inert native
-    /// `isAlternate` swap. Skips the rebuild when the state is unchanged, so the poll is cheap.
-    ///
-    /// The **action is not changed here**: NSMenu caches the target/action at open time and ignores
-    /// a mid-tracking swap (it would still fire the stale selector), so the single fixed selector
-    /// `openActionItem` decides what to open by reading the live ⌥ state at *click* time.
-    private func updateActionItemForOption(_ optionHeld: Bool) {
-        guard let actionItem, optionHeld != lastOptionHeld else { return }
+    /// Show or hide the optional "Troubleshoot…" item — and flip the popup's service-status
+    /// visibility — for the current ⌥ Option state (ADR-0020). Called on menu open and by
+    /// `optionPollTimer` while it is open — the status-item-menu replacement for the inert native
+    /// `isAlternate` swap. Skips the work when the state is unchanged, so the poll is cheap.
+    private func updateTroubleshootVisibility(_ optionHeld: Bool) {
+        guard let troubleshootItem, optionHeld != lastOptionHeld else { return }
         lastOptionHeld = optionHeld
-        actionItem.attributedTitle = Self.dropdownMenuItemText(optionHeld ? "Troubleshoot…" : "Settings…")
+        troubleshootItem.isHidden = !optionHeld
         popupVC.optionHeld = optionHeld
         // The service-status rows appearing/disappearing changes the popup's fitting size; `NSMenu`
         // does not re-measure a hosted item view on its own (see `setPopupLayout`'s note), so the
@@ -275,7 +293,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //  • `=1`          → climbing utilisation (exercises adaptive cadence on screen).
         //  • `=screenshot` → frozen, hand-picked values (a stable frame for the README).
         //  • `=error`      → 401 auth failure + both Claude services degraded (the warning block).
-        let stubMode = ProcessInfo.processInfo.environment["TOKENPACE_STUB"]
+        let stubMode = Self.stubName
         let transport: UsageTransport = switch stubMode {
         case "1":          StubUsageTransport(mode: .climbing)
         case "screenshot": StubUsageTransport(mode: .screenshot)
@@ -407,33 +425,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSMenuDelegate {
 
-    /// While the dropdown is open, poll ⌥ Option and swap the action item live. The native
-    /// `isAlternate` mechanism is inert in a status-item menu, and an event monitor is starved by
-    /// menu tracking (verified), so a modifier-polling timer drives the swap instead. Seed the title
-    /// from the modifiers already held at open time (the user may click the item with ⌥ down).
+    /// While the dropdown is open, poll ⌥ Option and reveal/hide the Troubleshoot item live. The
+    /// native `isAlternate` mechanism is inert in a status-item menu, and an event monitor is starved
+    /// by menu tracking (verified), so a modifier-polling timer drives the reveal instead. Seed
+    /// visibility from the modifiers already held at open time (the user may open the menu with ⌥ down).
     func menuWillOpen(_ menu: NSMenu) {
-        // Seed the title from the modifiers held at open time. Force the first sync by desyncing
+        // Seed visibility from the modifiers held at open time. Force the first sync by desyncing
         // `lastOptionHeld`.
         lastOptionHeld = !NSEvent.modifierFlags.contains(.option)
-        updateActionItemForOption(NSEvent.modifierFlags.contains(.option))
+        updateTroubleshootVisibility(NSEvent.modifierFlags.contains(.option))
         // Poll the live modifier state while the menu tracks. Added in `.common` modes so it fires
         // during the modal `NSEventTrackingRunLoopMode` (a timer in `.default` — like an event
         // monitor — would be starved by menu tracking). The fire runs on the main run loop, so the
         // main-actor hop is a known-safe assumption (mirrors `ageTimer`).
         optionPollTimer?.invalidate()
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateActionItemForOption(NSEvent.modifierFlags.contains(.option)) }
+            MainActor.assumeIsolated { self?.updateTroubleshootVisibility(NSEvent.modifierFlags.contains(.option)) }
         }
         RunLoop.main.add(timer, forMode: .common)
         optionPollTimer = timer
     }
 
-    /// Stop the poll and reset the item to its default "Settings…" state, so the next open starts
-    /// clean (and no timer leaks between openings).
+    /// Stop the poll and hide the Troubleshoot item again, so the next open starts clean (and no
+    /// timer leaks between openings).
     func menuDidClose(_ menu: NSMenu) {
         optionPollTimer?.invalidate()
         optionPollTimer = nil
         lastOptionHeld = true            // force the reset below to apply
-        updateActionItemForOption(false)
+        updateTroubleshootVisibility(false)
     }
 }
