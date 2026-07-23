@@ -67,30 +67,35 @@ final class PopupBarView: NSView {
     // NSColor(name:dynamicProvider:) resolves per-appearance and AppKit re-draws on theme change
     // automatically (PopupBarView draws in its real appearance — no manual observation needed).
     private enum Palette {
-        /// Pacing gap "on pace": menu-bar green on dark, a deeper green on light for contrast.
-        static let gapGreen = dynamic(
-            dark: NSColor(srgbRed: 95/255, green: 175/255, blue: 95/255, alpha: 1),
-            light: NSColor(srgbRed: 80/255, green: 155/255, blue: 80/255, alpha: 1)
-        )
-        static let gapRed = NSColor(srgbRed: 215/255, green: 95/255, blue: 95/255, alpha: 1)
+        /// Pacing gap colours. Green (on pace) is the **system** colour, matching the Claude
+        /// service-status dots. The ahead-of-pace grade — amber (< 15 pts ahead) → orange (≥ 15) → red
+        /// (exhausted) — uses **custom** sRGB, pulled apart so the steps read clearly distinct: a golden
+        /// **amber** (not a pale yellow — a pure light yellow washed out against the light-grey bar, so
+        /// the mildest step is a darker golden tone instead), an orange nudged toward red, and a pure
+        /// saturated red (no blue tint unlike `systemRed`).
+        static let gapGreen = NSColor.systemGreen
+        static let gapRed = NSColor(srgbRed: 225/255, green: 45/255, blue: 35/255, alpha: 1)
+        static let gapYellow = NSColor(srgbRed: 230/255, green: 180/255, blue: 25/255, alpha: 1)
+        static let gapOrange = NSColor(srgbRed: 248/255, green: 118/255, blue: 15/255, alpha: 1)
 
-        /// Used zone: dark grey on dark, lighter grey on light (still clearly darker than the panel).
-        static let used = dynamic(dark: gray(72), light: gray(110))
-        /// Future / unused zone: dark teal on dark, lighter teal on light.
-        static let future = dynamic(
-            dark: NSColor(srgbRed: 0/255, green: 76/255, blue: 76/255, alpha: 1),
-            light: NSColor(srgbRed: 55/255, green: 110/255, blue: 110/255, alpha: 1)
+        /// Indicator-dot ring: a soft separation between the dot and the bar beneath it. On **light** a
+        /// near-white translucent ring (the earlier `windowBackgroundColor·0.4` read too dark against the
+        /// light-grey bar); on **dark** the panel background at reduced opacity, which already reads as a
+        /// soft dark ring there.
+        static let indicatorStroke = dynamic(
+            dark: NSColor.windowBackgroundColor.withAlphaComponent(0.4),
+            light: NSColor(white: 1, alpha: 0.65)
         )
-        /// Indicator-dot ring: the panel background at reduced opacity, so the ring reads as a soft
-        /// separation between the dot and the bar beneath it rather than a hard opaque outline.
-        static let indicatorStroke = NSColor.windowBackgroundColor.withAlphaComponent(0.4)
 
-        /// Tick-ruler marks below the bar: a muted neutral, translucent so it stays clearly weaker
-        /// than the indicator dot. Appearance-aware so the ruler reads on both light and dark panels.
-        static let tick = dynamic(
-            dark: NSColor(white: 1, alpha: 0.55),
-            light: NSColor(white: 0, alpha: 0.45)
-        )
+        /// Tick-ruler marks below the bar: a muted neutral **solid** grey (opaque, not translucent) so
+        /// it renders the same regardless of what's behind — a translucent tick composited against the
+        /// opaque backdrop read far too dark on dark. Weaker than the indicator dot.
+        static let tick = dynamic(dark: gray(120), light: gray(150))
+
+        /// The monochrome base-zone grey (the bar's `used` + future/unused zones): a **solid** light grey
+        /// on light, a darker solid grey on dark, so the bar's base recedes while the pacing gap and dot
+        /// stay the clear foreground — and it never depends on alpha compositing against the backdrop.
+        static let monochromeGrey = dynamic(dark: gray(78), light: gray(210))
 
         private static func gray(_ v: CGFloat) -> NSColor {
             NSColor(srgbRed: v/255, green: v/255, blue: v/255, alpha: 1)
@@ -101,6 +106,11 @@ final class PopupBarView: NSView {
             NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light }
         }
     }
+
+    /// The solid grey both bar base zones (`used` + future/unused tail) render in — a monochrome,
+    /// low-contrast bar where only the pacing gap + dot carry colour. Exposed so ``StatusItemView``
+    /// draws the menu-bar bars identically.
+    static let monochromeGrey = Palette.monochromeGrey
 
     override var isFlipped: Bool { true }
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: Metrics.height) }
@@ -116,13 +126,17 @@ final class PopupBarView: NSView {
         let w = rect.width
 
         let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner)
-        Palette.future.setFill()
+
+        // Whole-bar rounded background = the monochrome future/unused base (others paint over it).
+        Self.monochromeGrey.setFill()
         path.fill()
 
         NSGraphicsContext.saveGraphicsState()
         path.addClip()
-        fillZone(from: 0, to: l.usageFraction, in: rect, width: w, color: Palette.used)
-        let gapColor = l.pacing == .ahead ? Palette.gapRed : Palette.gapGreen
+        fillZone(from: 0, to: l.usageFraction, in: rect, width: w, color: Self.monochromeGrey)
+        let gapColor = l.pacing == .ahead
+            ? Self.aheadColor(usage: l.usageFraction, time: l.timeFraction)
+            : Palette.gapGreen
         fillZone(from: l.gapStart, to: l.gapEnd, in: rect, width: w, color: gapColor)
         NSGraphicsContext.restoreGraphicsState()
 
@@ -159,11 +173,20 @@ final class PopupBarView: NSView {
     }
 
     private func indicatorColor(usage: Double, time: Double) -> NSColor {
-        // The dot uses the exact pacing-bar colours (gapGreen/gapRed) so it reads as the same
-        // green/red as the gap zone it sits over, not a separate lighter shade. A tie (usage ==
-        // time) is still on pace, so it reads green rather than the future teal.
-        if usage > time { return Palette.gapRed }
-        return Palette.gapGreen
+        // The dot uses the exact pacing-bar colours so it reads as the same colour as the gap zone it
+        // sits over, not a separate shade. A tie (usage == time) is still on pace → green.
+        usage > time ? Self.aheadColor(usage: usage, time: time) : Palette.gapGreen
+    }
+
+    /// The gap/dot colour when **ahead of pace** (`usage > time`), graded by how far ahead — the same
+    /// system colours the Claude status dots use:
+    /// - limit exhausted (`usage >= 1`) → red (the worst; also where the bar is full)
+    /// - ahead by < 15 percentage points → yellow (mild)
+    /// - ahead by ≥ 15 points → orange (worse)
+    /// `usage`/`time` are fractions in [0, 1], so the 15% threshold is `0.15`.
+    static func aheadColor(usage: Double, time: Double) -> NSColor {
+        if usage >= 1 { return Palette.gapRed }
+        return (usage - time) < 0.15 ? Palette.gapYellow : Palette.gapOrange
     }
 
     private func fillZone(from: Double, to: Double, in rect: NSRect, width: CGFloat, color: NSColor) {
@@ -172,6 +195,25 @@ final class PopupBarView: NSView {
         guard x1 > x0 else { return }
         color.setFill()
         NSRect(x: x0, y: rect.minY, width: x1 - x0, height: rect.height).fill()
+    }
+}
+
+// MARK: - SolidBackdropView
+
+/// A plain opaque fill for the popup's solid backdrop. Layer-backed and drawn via `updateLayer`, so
+/// AppKit re-runs it on theme change and the `windowBackgroundColor` CGColor re-resolves (a raw
+/// `layer.backgroundColor` set once would not track light/dark).
+final class SolidBackdropView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override var wantsUpdateLayer: Bool { true }
+    override func updateLayer() {
+        // The system panel background, resolved in this view's own appearance so it tracks light/dark
+        // and matches the surrounding menu chrome.
+        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
     }
 }
 
@@ -265,12 +307,25 @@ final class PopupViewController: NSViewController {
         static let width: CGFloat = 280
         static let hPadding: CGFloat = 14
         static let vPadding: CGFloat = 10
+        /// Top inset — a touch tighter than `vPadding` so the content sits closer to the top edge
+        /// without the extra strip of empty background above the "Claude Code" line, but not cramped.
+        static let topPadding: CGFloat = 7
+        /// Bottom inset — tighter than `vPadding` so the last bar sits close to the menu's separator
+        /// below it (the section already ends there; a full `vPadding` reads as too much air).
+        static let bottomPadding: CGFloat = 3
         static let rowSpacing: CGFloat = 3
         static let sectionSpacing: CGFloat = 14
+        /// Gap **between limit blocks** (after each section's bar) — a touch tighter than
+        /// `sectionSpacing` so the limit list reads as a group without the header's larger breathing room.
+        static let limitSpacing: CGFloat = 10
         static let textSize: CGFloat = dropdownTextSize
     }
 
     private let stack = NSStackView()
+
+    /// The solid opaque backdrop behind the content (below `stack`), so nothing shows through the popup.
+    /// Built once by ``rebuildBackdrop()`` on load; it re-resolves its own fill on theme change.
+    private var backdropView: NSView?
 
     /// The bold header of the popup's first section — "Claude Code" covers both the update-cadence
     /// line and the two Claude service status rows beneath it, all gated by ⌥ Option (see `rebuild`).
@@ -291,12 +346,20 @@ final class PopupViewController: NSViewController {
 
     /// Dimmed text colour for supporting numbers/rows ("88% used", "resets in …", "Updated …",
     /// service-status words) — neither `secondaryLabelColor` (too light) nor `tertiaryLabelColor`
-    /// (too dark) alone; AppKit has no built-in "in-between" semantic label colour, so this blends
-    /// the two at their current-appearance-resolved values. `NSColor.blended(withFraction:of:)`
-    /// resolves both dynamic system colours in the view's current appearance before mixing, so this
-    /// still adapts correctly across light/dark.
-    private static let dimmedLabelColor =
-        NSColor.tertiaryLabelColor.blended(withFraction: 0.5, of: .secondaryLabelColor) ?? .secondaryLabelColor
+    /// (too dark) alone; AppKit has no built-in "in-between" semantic label colour, so this blends the
+    /// two. A **dynamic** `NSColor(name:)`: the blend is computed *inside* the provider, in the target
+    /// appearance, so it re-resolves per view and adapts to light/dark. A plain `static let ...
+    /// .blended(...)` bakes in whatever appearance was current at first access — which made it render
+    /// near-black under the dark system theme.
+    static let dimmedLabelColor = NSColor(name: nil) { appearance in
+        var mixed: NSColor = .secondaryLabelColor
+        appearance.performAsCurrentDrawingAppearance {
+            mixed = NSColor.tertiaryLabelColor.blended(withFraction: 0.5, of: .secondaryLabelColor)
+                ?? .secondaryLabelColor
+        }
+        return mixed
+    }
+
 
     override func loadView() {
         let container = NSView()
@@ -306,14 +369,36 @@ final class PopupViewController: NSViewController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.vPadding),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.topPadding),
             stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.hPadding),
             container.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: Metrics.hPadding),
-            container.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: Metrics.vPadding),
+            container.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: Metrics.bottomPadding),
             container.widthAnchor.constraint(equalToConstant: Metrics.width),
         ])
         self.view = container
+        rebuildBackdrop()
         rebuild()
+    }
+
+    /// (Re)build the popup's solid opaque backdrop, inserting it as the **bottom-most** subview (below
+    /// `stack`) pinned to every container edge, so nothing shows through. Called on load and on a dev
+    /// theme change (so the fresh `SolidBackdropView` re-resolves `windowBackgroundColor`).
+    func rebuildBackdrop() {
+        guard isViewLoaded else { return }
+        backdropView?.removeFromSuperview()
+        backdropView = nil
+
+        let new = SolidBackdropView()   // self-updates its fill on theme change (see updateLayer)
+        new.translatesAutoresizingMaskIntoConstraints = false
+        // Bottom-most so the stack (and its bars/labels) draw on top of it.
+        view.addSubview(new, positioned: .below, relativeTo: stack)
+        NSLayoutConstraint.activate([
+            new.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            new.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            new.topAnchor.constraint(equalTo: view.topAnchor),
+            new.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        backdropView = new
     }
 
     // MARK: Rendering
@@ -353,26 +438,30 @@ final class PopupViewController: NSViewController {
             addWrappingLabel(Self.warningDetail(reason), font: .systemFont(ofSize: Metrics.textSize), secondary: true)
         }
 
-        // One section per limit row: "title · status" line + "% used · resets" line + bar. No rule
+        // One section per limit row: "title · status" line + "reset · %" line + bar. No rule
         // between sections — the only interior rule in the popup is the one after the title block;
-        // sections below it are told apart by the bold per-row title and the `sectionSpacing` gap
+        // sections below it are told apart by the bold per-row title and the `limitSpacing` gap
         // after each bar, not by a line.
-        for row in layout.rows {
-            addTitleStatusLine(title: row.title, status: Self.statusText(row.indicator, row.pacing))
+        for (index, row) in layout.rows.enumerated() {
+            addTitleStatusLine(title: row.title, status: Self.statusText(row))
             addDetailLine(used: Self.usedText(row), reset: Self.resetText(row))
-            addBar(row)
+            // No inter-section gap after the **last** bar — it sits just above the menu's own separator,
+            // so the section gap plus the bottom padding read as too much air. Later bars need the gap.
+            addBar(row, isLast: index == layout.rows.count - 1)
         }
     }
 
     /// The section's first line: title and pacing status, both `labelColor` — the same weight and
     /// colour the dropdown's own "Settings…" text uses. `status` sits flush **right**, lined up with
     /// the detail line and bar below it, instead of trailing right after the title on the left.
-    /// Neither half is bold — the section reads from the bar and numbers, not a heavier heading.
+    /// Neither half is bold — the section reads from the bar and numbers, not a heavier heading. Both
+    /// the window titles (`"5-hour"`/`"7-day"`) and the bare per-model names (`"Opus"`/`"Fable"`) render
+    /// whole in `labelColor`.
     @discardableResult
     private func addTitleStatusLine(title: String, status: String) -> NSView {
-        addSplitLine(
-            left: title, right: status,
-            leftFont: .systemFont(ofSize: Metrics.textSize), rightFont: .systemFont(ofSize: Metrics.textSize),
+        let font = NSFont.systemFont(ofSize: Metrics.textSize)
+        return addSplitLine(
+            left: title, right: status, leftFont: font, rightFont: font,
             leftColor: .labelColor, rightColor: .labelColor)
     }
 
@@ -385,9 +474,9 @@ final class PopupViewController: NSViewController {
         return label
     }
 
-    /// The per-limit detail line: `used` flush left, `reset` flush **right** against the content
-    /// width — so "resets in …" lines up with the bar's right edge below it, instead of trailing
-    /// right after the `·` on the left like the rest of the popup's single-string lines.
+    /// The per-limit detail line: `used` percent flush left, `reset` countdown flush **right** against
+    /// the content width — the percent leads the line (under the "% used" reading) while the reset time
+    /// lines up with the bar's right edge below it.
     @discardableResult
     private func addDetailLine(used: String, reset: String) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
@@ -410,7 +499,15 @@ final class PopupViewController: NSViewController {
         let rightLabel = NSTextField(labelWithString: right)
         rightLabel.font = rightFont
         rightLabel.textColor = rightColor
+        return addSplitRow(leftLabel: leftLabel, rightLabel: rightLabel)
+    }
 
+    /// The shared layout behind every split line: a full-content-width horizontal row that pins
+    /// `leftLabel` flush leading and `rightLabel` flush trailing. Callers build the two labels —
+    /// plain (``addSplitLine``) or attributed (``addTitleStatusLine`` per-model heading) — this only
+    /// arranges them.
+    @discardableResult
+    private func addSplitRow(leftLabel: NSTextField, rightLabel: NSTextField) -> NSView {
         let row = NSStackView(views: [leftLabel, rightLabel])
         row.orientation = .horizontal
         row.distribution = .equalSpacing
@@ -468,7 +565,7 @@ final class PopupViewController: NSViewController {
         return label
     }
 
-    private func addBar(_ row: LimitRow) {
+    private func addBar(_ row: LimitRow, isLast: Bool) {
         let view = PopupBarView()
         view.bar = row.bar
         view.subdivisions = row.subdivisions
@@ -476,7 +573,8 @@ final class PopupViewController: NSViewController {
         view.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.hPadding).isActive = true
         view.heightAnchor.constraint(equalToConstant: PopupBarView.viewHeight).isActive = true
         stack.addArrangedSubview(view)
-        stack.setCustomSpacing(Metrics.sectionSpacing, after: view)
+        // Between-section gap after every bar except the last (the last sits above the menu separator).
+        if !isLast { stack.setCustomSpacing(Metrics.limitSpacing, after: view) }
     }
 
     // MARK: Service status row (issue #31)
@@ -556,17 +654,22 @@ final class PopupViewController: NSViewController {
 
     // MARK: - Pure text formatters (the localisation seam)
 
-    /// The per-limit detail line's **left**-aligned half: `"20% used"`.
-    static func usedText(_ row: LimitRow) -> String { "\(percent(row.utilization)) used" }
+    /// The per-limit detail line's **left**-aligned half: `"20%"` — the bare utilisation percentage.
+    static func usedText(_ row: LimitRow) -> String { percent(row.utilization) }
 
-    /// The per-limit detail line's **right**-aligned half: `"resets in ~20m at 05:30"`, or
-    /// `"resetting…"` when the model carries no relative countdown (reset is now/past). The relative
-    /// countdown is always prefixed `~` (every value is rounded, ``ResetClock/relativeRounded``); the
-    /// " at hh:mm" is appended only when the model carries an absolute time (reset < 24 h away).
+    /// The per-limit detail line's **right**-aligned half: `"20m at 05:30"` for a near reset,
+    /// `"3d on Monday"` for a far 7-day reset, or `"resetting…"` when the model carries no relative
+    /// countdown (reset is now/past). The relative countdown is rounded (``ResetClock/relativeRounded``);
+    /// exactly one qualifier is appended — " at hh:mm" when the reset is < 24 h away (``resetAbsolute``),
+    /// otherwise " on <weekday>" for a 7-day window a day or more out (``resetWeekday``).
     static func resetText(_ row: LimitRow) -> String {
         guard let rel = row.resetRelative else { return "resetting…" }
-        var reset = "resets in ~\(rel)"
-        if let abs = row.resetAbsolute { reset += " at \(abs)" }
+        var reset = rel
+        if let abs = row.resetAbsolute {
+            reset += " at \(abs)"
+        } else if let weekday = row.resetWeekday {
+            reset += " on \(weekday)"
+        }
         return reset
     }
 
@@ -640,13 +743,22 @@ final class PopupViewController: NSViewController {
 
     private static func percent(_ value: Double) -> String { "\(Int(value.rounded()))%" }
 
-    /// Pacing/severity in words. Severity (critical/warning) wins over the plain pacing direction.
-    private static func statusText(_ indicator: LimitIndicator, _ pacing: PacingState) -> String {
-        switch indicator {
+    /// Pacing/severity in words. Severity (critical/warning) wins over the plain pacing direction. When
+    /// ahead of pace, the wording grades with the gap colour (see ``PopupBarView/aheadColor``): a large
+    /// lead (≥ 15 points, the orange gap) reads "well ahead of pace"; a small one (yellow) stays "ahead
+    /// of pace".
+    private static func statusText(_ row: LimitRow) -> String {
+        switch row.indicator {
         case .critical: return "limit reached"
-        case .warning:  return "ahead of pace ⚠"
-        case .neutral:  return pacing == .ahead ? "ahead of pace" : "on pace"
+        case .warning:  return aheadPhrase(row) + " ⚠"
+        case .neutral:  return row.pacing == .ahead ? aheadPhrase(row) : "on pace"
         }
+    }
+
+    /// "well ahead of pace" when the token usage leads elapsed time by ≥ 15 points (the orange gap),
+    /// else "ahead of pace" (yellow). Same threshold as the gap colour, so word and colour agree.
+    private static func aheadPhrase(_ row: LimitRow) -> String {
+        (row.bar.usageFraction - row.bar.timeFraction) >= 0.15 ? "well ahead of pace" : "ahead of pace"
     }
 
 }

@@ -12,8 +12,9 @@ import Foundation
 /// and the `weekly_scoped` models from `limits[]` (e.g. `Fable`, #65); all per-model rows are
 /// paced as `.sevenDay` (they reset on the weekly cadence).
 public struct LimitRow: Sendable, Equatable {
-    /// Section heading, e.g. `"5-hour"`, `"7-day"`, `"Opus (7-day)"`. A raw label
-    /// (the window identity), not a localised string — the view renders it as-is for now.
+    /// Section heading, e.g. `"5-hour"`, `"7-day"`, or a bare model name `"Opus"` / `"Fable"` for the
+    /// per-model rows (all 7-day paced; no "(7-day)" suffix). A raw label (the window identity), not a
+    /// localised string — the view renders it as-is.
     public let title: String
     /// API `utilization`, percent in [0, 100].
     public let utilization: Double
@@ -31,8 +32,13 @@ public struct LimitRow: Sendable, Equatable {
     /// now/past or `resets_at` was unparseable (the view shows a stale signal).
     public let resetRelative: String?
     /// Absolute wall-clock `"10:30"` — present **only when the reset is < 24 h away** (the view
-    /// appends "@ 10:30"); `nil` for far-off resets where a clock time is noise.
+    /// appends "at 10:30"); `nil` for far-off resets where a clock time is noise.
     public let resetAbsolute: String?
+    /// Local weekday name `"Monday"` — the far-reset counterpart of ``resetAbsolute``: present **only
+    /// for 7-day windows whose reset is ≥ 24 h away** (the view appends "on Monday"), so a reset days
+    /// out names the day it lands on. `nil` for 5-hour windows and for any reset < 24 h away (which
+    /// carries ``resetAbsolute`` instead). At most one of the two is ever non-`nil`.
+    public let resetWeekday: String?
 
     public init(
         title: String,
@@ -42,7 +48,8 @@ public struct LimitRow: Sendable, Equatable {
         bar: BarLayout,
         subdivisions: Int,
         resetRelative: String?,
-        resetAbsolute: String?
+        resetAbsolute: String?,
+        resetWeekday: String? = nil
     ) {
         self.title = title
         self.utilization = utilization
@@ -52,6 +59,7 @@ public struct LimitRow: Sendable, Equatable {
         self.subdivisions = subdivisions
         self.resetRelative = resetRelative
         self.resetAbsolute = resetAbsolute
+        self.resetWeekday = resetWeekday
     }
 }
 
@@ -181,13 +189,13 @@ public struct PopupLayout: Sendable, Equatable {
             row(title: "7-day", window: snapshot.sevenDay, as: .sevenDay, now: now),
         ]
         if let opus = snapshot.sevenDayOpus {
-            rows.append(row(title: "Opus (7-day)", window: opus, as: .sevenDay, now: now))
+            rows.append(row(title: "Opus", window: opus, as: .sevenDay, now: now))
         }
         if let sonnet = snapshot.sevenDaySonnet {
-            rows.append(row(title: "Sonnet (7-day)", window: sonnet, as: .sevenDay, now: now))
+            rows.append(row(title: "Sonnet", window: sonnet, as: .sevenDay, now: now))
         }
         for scoped in snapshot.scopedModelWindows {
-            rows.append(row(title: "\(scoped.name) (7-day)", window: scoped.window, as: .sevenDay, now: now))
+            rows.append(row(title: scoped.name, window: scoped.window, as: .sevenDay, now: now))
         }
         return rows
     }
@@ -209,6 +217,12 @@ public struct PopupLayout: Sendable, Equatable {
         )
         let relative = parsed.flatMap { ResetClock.relativeRounded(resetsAt: $0, now: now) }
         let absolute = parsed.flatMap { ResetClock.absoluteWithin(resetsAt: $0, now: now) }
+        // 7-day windows whose reset is a day or more out name the weekday they land on ("on Monday")
+        // in place of the omitted clock time; 5-hour windows always reset within 24 h, so they only
+        // ever carry the clock time (weekdayBeyond returns nil for them anyway, but scope it explicitly).
+        let weekday = (kind == .sevenDay)
+            ? parsed.flatMap { ResetClock.weekdayBeyond(resetsAt: $0, now: now) }
+            : nil
         return LimitRow(
             title: title,
             utilization: window.utilization,
@@ -217,7 +231,8 @@ public struct PopupLayout: Sendable, Equatable {
             bar: bar,
             subdivisions: kind.subdivisions,
             resetRelative: relative,
-            resetAbsolute: absolute
+            resetAbsolute: absolute,
+            resetWeekday: weekday
         )
     }
 }

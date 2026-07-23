@@ -318,7 +318,7 @@ struct ResetDisplayTests {
     }
 }
 
-// MARK: - relativeRounded (popup "resets in ~…", single-unit, nearest-rounded)
+// MARK: - relativeRounded (popup "resets in …", single-unit, nearest-rounded)
 
 @Suite("ResetClock.relativeRounded")
 struct RelativeRoundedTests {
@@ -400,6 +400,51 @@ struct AbsoluteWithinTests {
         // withinHours: 1 → 90 min away is outside.
         #expect(ResetClock.absoluteWithin(resetsAt: at(90 * 60), now: now, withinHours: 1, locale: gb, timeZone: utc) == nil)
         #expect(ResetClock.absoluteWithin(resetsAt: at(30 * 60), now: now, withinHours: 1, locale: gb, timeZone: utc) != nil)
+    }
+}
+
+// MARK: - weekdayBeyond (weekday name only beyond the threshold — the far-reset counterpart)
+
+@Suite("ResetClock.weekdayBeyond")
+struct WeekdayBeyondTests {
+    // now = 1970-01-12 13:46:40 UTC — a Monday; +3 days lands on a Thursday.
+    private let now = Date(timeIntervalSince1970: 1_000_000)
+    private func at(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(seconds) }
+    private let utc = TimeZone(identifier: "UTC")!
+
+    @Test func beyondThresholdReturnsWeekday() {
+        // 3 days out → the weekday it lands on. Deterministic under UTC.
+        #expect(ResetClock.weekdayBeyond(resetsAt: at(3 * 86_400), now: now, timeZone: utc) == "Thursday")
+    }
+
+    @Test func weekdayIsEnglishRegardlessOfDeviceLocale() {
+        // The name is pinned to en_US_POSIX inside — there is no `locale` parameter to override it, so
+        // whatever the device locale, a Thursday reads "Thursday", never a localised form. This test
+        // documents that contract: the call takes no locale and the English name is the only output.
+        let s = ResetClock.weekdayBeyond(resetsAt: at(3 * 86_400), now: now, timeZone: utc)
+        #expect(s == "Thursday")
+    }
+
+    @Test func withinThresholdReturnsNil() {
+        // 5 h out → a clock time is shown instead, so no weekday here.
+        #expect(ResetClock.weekdayBeyond(resetsAt: at(5 * 3600), now: now, timeZone: utc) == nil)
+    }
+
+    @Test func exactlyAtThresholdIncluded() {
+        // Mirror of absoluteWithin's strict `<`: `>=` here, so exactly 24 h away is a weekday (and
+        // absoluteWithin returns nil at the same instant — the two never both fire).
+        #expect(ResetClock.weekdayBeyond(resetsAt: at(24 * 3600), now: now, timeZone: utc) != nil)
+        #expect(ResetClock.absoluteWithin(
+            resetsAt: at(24 * 3600), now: now,
+            locale: Locale(identifier: "en_GB"), timeZone: utc) == nil)
+    }
+
+    @Test func justInsideThresholdExcluded() {
+        #expect(ResetClock.weekdayBeyond(resetsAt: at(24 * 3600 - 60), now: now, timeZone: utc) == nil)
+    }
+
+    @Test func nilWhenPast() {
+        #expect(ResetClock.weekdayBeyond(resetsAt: at(-60), now: now) == nil)
     }
 }
 
