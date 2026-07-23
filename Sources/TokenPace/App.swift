@@ -101,6 +101,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Run config migrations first — before any UI or polling reads persisted settings — so a
+        // future migration can rename keys or clean up stale system state (e.g. old login items)
+        // before the rest of launch depends on it (#71, ADR-0023). Phase 1 is a no-op scaffold that
+        // only records the running version.
+        runConfigMigrationsIfNeeded()
+
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         // Cold start: no data yet — render the structure (idle/empty), not fake bars. The first
@@ -245,6 +251,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Quit the app via the standard terminate path, which triggers `applicationWillTerminate`.
     @objc private func quit() {
         NSApplication.shared.terminate(nil)
+    }
+
+    /// Compare the stored config version against the running one and run any migrations before the
+    /// config is used (#71, ADR-0023). Phase 1 is a scaffold: it classifies the launch, logs the
+    /// outcome, and records the current version — there are no real migration steps yet, only the
+    /// `.upgraded` extension point. Called first thing in `applicationDidFinishLaunching`.
+    private func runConfigMigrationsIfNeeded() {
+        let current = TokenPaceKit.version
+        switch MigrationPlan.transition(stored: PersistedConfig.lastRunVersion, current: current) {
+        case .firstRun:
+            AppLogger.lifecycle.notice(
+                "config: first run, no prior version (\(current, privacy: .public))")
+        case .unchanged:
+            AppLogger.lifecycle.notice("config: version unchanged (\(current, privacy: .public))")
+        case .upgraded(let from, let to):
+            AppLogger.lifecycle.notice(
+                "config: version \(from, privacy: .public) → \(to, privacy: .public), running migrations")
+            // Future from→to migrations run here. Empty scaffold for now (#71).
+        }
+        // Record the running version so the next launch compares against it.
+        PersistedConfig.lastRunVersion = current
     }
 
     /// Opt-out auto-registration: attempt to register whenever the OS has no active login item for

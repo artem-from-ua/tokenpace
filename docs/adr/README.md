@@ -27,3 +27,4 @@
 | [0020](0020-troubleshoot-window-and-diagnostics-pipeline.md) | Вікно Troubleshoot — діагностика через чистий пайплайн, `currentCredentials` (expiry в engine), нативні alternate-пункти, вікно `.normal`-рівня | accepted |
 | [0021](0021-popup-two-column-layout-and-uniform-dropdown-typography.md) | Popup — двоколонковий layout, ⌥-gated статуси сервісів, єдиний шрифт усього дропдауна | accepted |
 | [0022](0022-popup-bar-transparency-and-contrast-experiment.md) | Вигляд пейсинг-барів попапа — монохромні непрозорі бари на суцільному фоні; A/B-експеримент прибрано, поведінку зашито | accepted |
+| [0023](0023-persisted-config-version-marker.md) | Версійний маркер конфігу (`lastRunVersion`) + каркас міграції — перший persistence; чистий `MigrationPlan` у kit, `UserDefaults`-обгортка у shell | accepted |
