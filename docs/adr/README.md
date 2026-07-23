@@ -26,3 +26,4 @@
 | [0019](0019-token-read-via-security-cli.md) | Читання токена сабпроцесом `security` CLI — refresh Claude Code скидає ACL partition list, прямий `SecItemCopyMatching` промптить | accepted |
 | [0020](0020-troubleshoot-window-and-diagnostics-pipeline.md) | Вікно Troubleshoot — діагностика через чистий пайплайн, `currentCredentials` (expiry в engine), нативні alternate-пункти, вікно `.normal`-рівня | accepted |
 | [0021](0021-popup-two-column-layout-and-uniform-dropdown-typography.md) | Popup — двоколонковий layout, ⌥-gated статуси сервісів, єдиний шрифт усього дропдауна | accepted |
+| [0022](0022-popup-bar-transparency-and-contrast-experiment.md) | Вигляд пейсинг-барів попапа — монохромні непрозорі бари на суцільному фоні; A/B-експеримент прибрано, поведінку зашито | accepted |

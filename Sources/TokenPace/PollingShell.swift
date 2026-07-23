@@ -160,12 +160,13 @@ actor StubUsageTransport: UsageTransport {
     ///  • `.climbing` (`=1`)        — utilisation nudges upward every few polls, so the popup text,
     ///    the bars, and the adaptive cadence (changed → reset, unchanged → double) can all be seen.
     ///  • `.screenshot` (`=screenshot`) — frozen, hand-picked values; a stable frame for the README.
-    ///    The pacing states are still one-of-each (green / red / no-gap); only the climbing is frozen.
+    ///    The pacing states still span green (5h, Fable) and red (7d); only the climbing is frozen.
     ///  • `.authError` (`=error`)   — usage returns **401** with a long body (→ `authHTTP`), and the
     ///    status endpoint reports **both** Claude services degraded, so the warning block, the
     ///    service-status dots, and the long-message wrapping can all be seen at once.
-    /// Both data modes also carry a `weekly_scoped` Fable entry in `limits[]` (#65), so the
-    /// scoped-model popup row is exercised end-to-end.
+    /// Both data modes also carry two `weekly_scoped` per-model entries in `limits[]` (#65) —
+    /// Fable / Mythos — so the scoped-model popup rows are exercised end-to-end, and their utilisations
+    /// (plus the 7-day window) show a couple of the ahead-of-pace gap colours (yellow / orange / red).
     enum Mode {
         case climbing, screenshot, authError
     }
@@ -248,58 +249,60 @@ actor StubUsageTransport: UsageTransport {
 
         let five: Double
         let seven: Double
-        let sonnet: Double
+        // Two weekly_scoped per-model rows, chosen to show a couple of the ahead-of-pace gap colours
+        // against the 7-day windows' shared ≈29 % elapsed (their **time** use is unchanged; only the
+        // **token** utilisation moves): Fable ahead ~31 pts → ORANGE, Mythos exhausted → RED.
+        // `PopupBarView.aheadColor` grades by `usage − time` (15-pt threshold).
         let fable: Double
+        let mythos: Double
         let fiveReset: String
         let sevenReset: String
-        let sonnetReset: String
-        let fableReset: String
+        let weeklyReset: String
 
         if mode == .screenshot {
             // Hand-picked, frozen frame for the README screenshot. Pacing states on screen:
-            //  • 5h: 40 % used vs ≈65 % elapsed (resets ~35 % of the window out, now + 1.75 h, snapped
-            //    to a 10-minute mark) → GREEN gap, time indicator past the bar's two-thirds point.
-            //  • 7d: 60 % used vs ≈29 % elapsed (resets ~5 d out on the hour) → ahead → RED gap (wide).
-            //  • Sonnet: 2 % used, the SAME reset as 7d (so they end together) → behind pace → GREEN.
-            //  • Fable: 12 % used, same weekly reset → behind pace → GREEN (the weekly_scoped row).
-            five = 40.0
-            seven = 60.0
-            sonnet = 2.0
-            fable = 12.0
+            //  • 5h: 10 % used vs ≈65 % elapsed (resets ~35 % of the window out, now + 1.75 h, snapped
+            //    to a 10-minute mark) → wide GREEN gap, well behind pace.
+            //  • 7d: 40 % used vs ≈29 % elapsed (resets ~5 d out on the hour) → ahead ~11 pts → AMBER.
+            //  • Fable 70 % / Mythos 100 % (same ≈29 % elapsed) → ORANGE / RED.
+            five = 10.0
+            seven = 40.0
+            fable = 70.0
+            mythos = 100.0
             // 5h window = 18000 s; reset at ≈ now + 6300 s ⇒ elapsed ≈ 65 %, snapped to :x0.
             fiveReset = Self.resetsAtRounded10(inSeconds: 6300)
-            let weekly = Self.isoString(Self.hourBoundary(daysFromNow: 5))
-            sevenReset = weekly
-            sonnetReset = weekly                       // 7d, Sonnet and Fable end at the same boundary
-            fableReset = weekly
+            weeklyReset = Self.isoString(Self.hourBoundary(daysFromNow: 5))
+            sevenReset = weeklyReset                    // 7d and every per-model row end at the same boundary
         } else {
             // Step utilisation every 3rd poll so some adjacent polls are "unchanged" (cadence
             // doubles) and some "changed" (cadence resets) — exercising the live interval logic.
             five = 20.0 + Double((n / 3) * 5)
             seven = 55.0 + Double((n / 3) * 3)
-            sonnet = 2.0
-            fable = 5.0
+            fable = 60.0
+            mythos = 100.0
             // Windows anchored to "now", chosen to show one of each pacing state on screen:
             //  • 5h resets in ~2 h → ≈60 % elapsed > 20 % used → behind pace → GREEN gap.
-            //  • 7d resets in ~5 d → only ≈29 % elapsed < 55 % used → ahead of pace → RED gap.
-            //  • Sonnet resets so that elapsed ≈ 2 % == 2 % used → NO gap (indicator on the used
-            //    edge). 7d window = 604800 s, so elapsed 2 % ⇒ remaining ≈ 0.98·604800 ≈ 592704 s.
-            //  • Fable: 5 % used vs ≈29 % elapsed (same reset as 7d) → behind pace → GREEN gap —
-            //    exercises the weekly_scoped row (#65) without disturbing the engineered trio above.
+            //  • 7d resets in ~5 d → only ≈29 % elapsed < 55 % used → ahead of pace → ORANGE gap.
+            //  • Per-model rows share the 7d reset (≈29 % elapsed) → ORANGE / RED (#65).
             fiveReset = Self.resetsAt(inSeconds: 2 * 3600)
             sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
-            sonnetReset = Self.resetsAt(inSeconds: 0.98 * 604_800)
-            fableReset = sevenReset
+            weeklyReset = sevenReset
         }
-        // Fable has NO top-level window in the live API — it exists only as a `weekly_scoped`
-        // entry of `limits[]` (#65), so the stub mirrors that exact shape.
+        // These models have NO top-level window in the live API — each exists only as a `weekly_scoped`
+        // entry of `limits[]` (#65), so the stub mirrors that exact shape. Order = Fable, Mythos.
+        func scopedLimit(_ name: String, _ percent: Double) -> String {
+            """
+            {"kind":"weekly_scoped","group":"weekly","percent":\(percent),"severity":"normal",\
+            "resets_at":"\(weeklyReset)","scope":{"model":{"id":null,"display_name":"\(name)"},\
+            "surface":null},"is_active":false}
+            """
+        }
+        let scoped = [scopedLimit("Fable", fable), scopedLimit("Mythos", mythos)]
+            .joined(separator: ",")
         let body = """
         {"five_hour":{"utilization":\(five),"resets_at":"\(fiveReset)"},\
         "seven_day":{"utilization":\(seven),"resets_at":"\(sevenReset)"},\
-        "seven_day_sonnet":{"utilization":\(sonnet),"resets_at":"\(sonnetReset)"},\
-        "limits":[{"kind":"weekly_scoped","group":"weekly","percent":\(fable),"severity":"normal",\
-        "resets_at":"\(fableReset)","scope":{"model":{"id":null,"display_name":"Fable"},\
-        "surface":null},"is_active":false}]}
+        "limits":[\(scoped)]}
         """.data(using: .utf8)!
         let response = HTTPURLResponse(
             url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!

@@ -297,8 +297,8 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
 // MARK: - ScopedModelWindow
 
 /// One per-model weekly limit extracted from a `weekly_scoped` entry of `limits[]` (#65) —
-/// the shape ``PopupLayout`` renders as a "<name> (7-day)" row. A struct (not a tuple) so test
-/// fixtures can compare whole arrays via `Equatable`.
+/// the shape ``PopupLayout`` renders as a bare `"<name>"` row (7-day paced, no suffix). A struct (not a
+/// tuple) so test fixtures can compare whole arrays via `Equatable`.
 public struct ScopedModelWindow: Sendable, Equatable {
     /// `scope.model.display_name`, e.g. `"Fable"` — the only model identity the API provides.
     public let name: String

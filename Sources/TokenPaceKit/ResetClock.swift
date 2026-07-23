@@ -272,6 +272,31 @@ public enum ResetClock {
         return absoluteString(for: resetsAt, locale: locale, timeZone: timeZone)
     }
 
+    /// The reset's weekday name — always the **English** `"Monday"` — but **only when it is
+    /// `beyondHours` or more** away; otherwise `nil`. The counterpart of
+    /// ``absoluteWithin(resetsAt:now:withinHours:locale:timeZone:)``: a near reset gets a clock time
+    /// (`at 17:00`), a far one gets the day it lands on (`on Monday`), which is the useful granularity
+    /// for a reset days out. The two thresholds match (both 24 h by default), so exactly one of the
+    /// pair is non-`nil` for any future reset. Only the caller decides which windows use it — the popup
+    /// applies it to 7-day windows, whose resets are typically days away.
+    ///
+    /// Deliberately **not** localised: unlike the clock time (which respects the device's 12/24h
+    /// convention), the weekday is always the fixed English name, so there is no `locale` parameter.
+    /// `timeZone` still matters — it decides which calendar day the reset instant falls on.
+    ///
+    /// - Parameter beyondHours: The threshold; default 24 h (the mirror of `absoluteWithin`).
+    /// - Returns: The English `"Monday"` when the reset is ≥ `beyondHours` away, else `nil`.
+    public static func weekdayBeyond(
+        resetsAt: Date,
+        now: Date,
+        beyondHours: Double = 24,
+        timeZone: TimeZone = .current
+    ) -> String? {
+        let remaining = resetsAt.timeIntervalSince(now)
+        guard remaining >= beyondHours * 3_600 else { return nil }
+        return weekdayString(for: resetsAt, timeZone: timeZone)
+    }
+
     // MARK: - Private formatting
 
     /// Compact relative duration for a strictly-positive `seconds` remaining (≤ 90 min).
@@ -293,6 +318,20 @@ public enum ResetClock {
         f.locale = locale
         f.timeZone = timeZone
         f.setLocalizedDateFormatFromTemplate("jmm")
+        return f.string(from: ceilToMinute(date))
+    }
+
+    /// Full **English** weekday name for `date` (`"Monday"`), DST-correct via `timeZone`. Pinned to
+    /// `en_US_POSIX` with a literal `"EEEE"` format (not a localised template), so the name is always
+    /// English regardless of the device locale — unlike ``absoluteString(for:locale:timeZone:)``, whose
+    /// 12/24h convention is locale-driven. A fresh `DateFormatter` per call (at most one per render).
+    /// The reset instant is ceiled to the minute first so a `…:59:59.9` reset lands on the same day its
+    /// `hh:mm` sibling would show.
+    private static func weekdayString(for date: Date, timeZone: TimeZone) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")   // fixed English weekday names, never localised
+        f.timeZone = timeZone
+        f.dateFormat = "EEEE"                           // full weekday, literal (no locale re-templating)
         return f.string(from: ceilToMinute(date))
     }
 

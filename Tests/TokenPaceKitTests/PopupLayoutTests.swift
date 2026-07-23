@@ -103,8 +103,8 @@ struct PopupLayoutSubdivisionsTests {
             opus: (util: 5, resetsIn: 3 * 24 * 3600),
             sonnet: (util: 2, resetsIn: 3 * 24 * 3600)
         ))
-        #expect(p.rows[2].subdivisions == 7)   // Opus (7-day)
-        #expect(p.rows[3].subdivisions == 7)   // Sonnet (7-day)
+        #expect(p.rows[2].subdivisions == 7)   // Opus (per-model, 7-day paced)
+        #expect(p.rows[3].subdivisions == 7)   // Sonnet (per-model, 7-day paced)
     }
 }
 
@@ -114,23 +114,26 @@ struct PopupLayoutSubdivisionsTests {
 struct PopupLayoutResetTests {
 
     @Test func fiveHourAlwaysHasAbsolute() {
-        // 5h resets within 24 h by definition → "@ hh:mm" shown.
+        // 5h resets within 24 h by definition → "at hh:mm" shown, never a weekday.
         let p = layout(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30, fiveHourResetsIn: 4 * 3600))
         #expect(p.rows[0].resetRelative != nil)
         #expect(p.rows[0].resetAbsolute != nil)
+        #expect(p.rows[0].resetWeekday == nil)
     }
 
-    @Test func sevenDayFarOffOmitsAbsolute() {
-        // 7d resets 3 days out → relative only, no clock time.
+    @Test func sevenDayFarOffOmitsAbsoluteAndShowsWeekday() {
+        // 7d resets 3 days out → relative only, no clock time, but the landing weekday instead.
         let p = layout(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30, sevenDayResetsIn: 3 * 24 * 3600))
         #expect(p.rows[1].resetRelative != nil)
         #expect(p.rows[1].resetAbsolute == nil)
+        #expect(p.rows[1].resetWeekday != nil)
     }
 
-    @Test func sevenDayWithinDayShowsAbsolute() {
-        // 7d in its final hours (< 24 h) → clock time appears.
+    @Test func sevenDayWithinDayShowsAbsoluteNotWeekday() {
+        // 7d in its final hours (< 24 h) → clock time appears, weekday suppressed (exactly one of the two).
         let p = layout(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30, sevenDayResetsIn: 5 * 3600))
         #expect(p.rows[1].resetAbsolute != nil)
+        #expect(p.rows[1].resetWeekday == nil)
     }
 
     @Test func relativeMatchesResetClock() {
@@ -146,8 +149,8 @@ struct PopupLayoutResetTests {
             sevenDay: UsageWindow(utilization: 30, resetsAt: "null")
         )
         let p = layout(from: snap)
-        #expect(p.rows[0].resetRelative == nil && p.rows[0].resetAbsolute == nil)
-        #expect(p.rows[1].resetRelative == nil && p.rows[1].resetAbsolute == nil)
+        #expect(p.rows[0].resetRelative == nil && p.rows[0].resetAbsolute == nil && p.rows[0].resetWeekday == nil)
+        #expect(p.rows[1].resetRelative == nil && p.rows[1].resetAbsolute == nil && p.rows[1].resetWeekday == nil)
     }
 }
 
@@ -171,9 +174,9 @@ struct PopupLayoutModelTests {
         )
         let p = layout(from: snap)
         #expect(p.rows.count == 4)
-        #expect(p.rows[2].title == "Opus (7-day)")
+        #expect(p.rows[2].title == "Opus")
         #expect(p.rows[2].utilization == 5)
-        #expect(p.rows[3].title == "Sonnet (7-day)")
+        #expect(p.rows[3].title == "Sonnet")
         #expect(p.rows[3].utilization == 2)
     }
 
@@ -184,7 +187,7 @@ struct PopupLayoutModelTests {
         )
         let p = layout(from: snap)
         #expect(p.rows.count == 3)
-        #expect(p.rows[2].title == "Sonnet (7-day)")
+        #expect(p.rows[2].title == "Sonnet")
     }
 
     @Test func modelPacedAsSevenDay() {
@@ -214,7 +217,7 @@ struct PopupLayoutScopedModelTests {
         )
         let p = layout(from: snap)
         #expect(p.rows.count == 5)
-        #expect(p.rows[4].title == "Fable (7-day)")
+        #expect(p.rows[4].title == "Fable")
         #expect(p.rows[4].utilization == 12)
     }
 
@@ -225,7 +228,7 @@ struct PopupLayoutScopedModelTests {
         )
         let p = layout(from: snap)
         #expect(p.rows.count == 3)
-        #expect(p.rows[2].title == "Fable (7-day)")
+        #expect(p.rows[2].title == "Fable")
     }
 
     @Test func scopedRowPacedAsSevenDay() {
@@ -254,7 +257,7 @@ struct PopupLayoutScopedModelTests {
         #expect(p.rows.count == 4)   // 5h, 7d, Sonnet (legacy), Fable (scoped)
         #expect(p.rows.filter { $0.title.contains("Sonnet") }.count == 1)
         #expect(p.rows[2].utilization == 2.5)   // the legacy window's decimal value won
-        #expect(p.rows[3].title == "Fable (7-day)")
+        #expect(p.rows[3].title == "Fable")
     }
 }
 

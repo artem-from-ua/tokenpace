@@ -73,20 +73,13 @@ final class StatusItemView: NSView {
     // non-template so macOS does not retint it.
 
     private enum Palette {
-        /// Used zone — statusline `dark_gray` 236 = #303030, nudged a touch lighter for legibility.
-        static let used = NSColor(srgbRed: 56/255, green: 56/255, blue: 56/255, alpha: 1)
-        /// Pacing gap when on pace or behind — statusline `bright_green` 71 = #5faf5f (good).
+        /// Pacing gap / dot when on pace or behind — statusline `bright_green` 71 = #5faf5f (good). The
+        /// ahead-of-pace colours are NOT here: they come from `PopupBarView.aheadColor` (graded amber →
+        /// orange → red), shared with the popup so both bars agree.
         static let gapGreen = NSColor(srgbRed: 95/255, green: 175/255, blue: 95/255, alpha: 1)
-        /// Pacing gap when ahead of pace — statusline `bright_red` 167 = #d75f5f (bad).
-        static let gapRed = NSColor(srgbRed: 215/255, green: 95/255, blue: 95/255, alpha: 1)
-        /// Time-indicator dot colours — the gap colours lightened ~30 % (white-mixed) so the dot
-        /// reads brighter than the pacing gap it sits over. Only the dot uses these; the gap zones
-        /// keep `gapGreen`/`gapRed`.
+        /// Time-indicator dot when on pace — the gap green lightened ~30 % (white-mixed) so the dot
+        /// reads brighter than the pacing gap it sits over.
         static let dotGreen = NSColor(srgbRed: 143/255, green: 199/255, blue: 143/255, alpha: 1)
-        static let dotRed = NSColor(srgbRed: 227/255, green: 143/255, blue: 143/255, alpha: 1)
-        /// Future / unused zone — statusline `dark_blue` 23 = #005f5f (a dark teal), darkened ~20%
-        /// (#004c4c) so it recedes more as background behind the used/pacing zones.
-        static let future = NSColor(srgbRed: 0/255, green: 76/255, blue: 76/255, alpha: 1)
         /// Dark ring around the time-indicator dot so it stays distinct over any coloured zone.
         static let indicatorStroke = NSColor(srgbRed: 24/255, green: 24/255, blue: 24/255, alpha: 1)
         /// Idle glyph + reset label — follow the menu-bar foreground.
@@ -261,15 +254,17 @@ final class StatusItemView: NSView {
         return originX + ceil(size.width)
     }
 
-    /// Draw one pacing bar: used (grey) → gap (green/red) → future (teal), plus the time-indicator
-    /// dot. Geometry comes straight from `BarView.layout` — fractions are just multiplied by width.
+    /// Draw one pacing bar: monochrome grey base → gap (green/red), plus the time-indicator dot.
+    /// Geometry comes straight from `BarView.layout` — fractions are just multiplied by width. The two
+    /// base zones (used + future/unused) share the solid ``PopupBarView/monochromeGrey`` with the popup,
+    /// so the menu-bar bars read identically; only the pacing gap and dot carry colour.
     private func drawBar(_ bar: BarView, in rect: NSRect) {
         let l = bar.layout
         let w = rect.width
 
-        // Whole-bar rounded background = future zone (drawn first, others paint over it).
+        // Whole-bar rounded background = the monochrome base (drawn first, others paint over it).
         let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
-        Palette.future.setFill()
+        PopupBarView.monochromeGrey.setFill()
         path.fill()
 
         // Clip subsequent zone fills to the rounded shape so corners stay clean.
@@ -277,10 +272,15 @@ final class StatusItemView: NSView {
         path.addClip()
 
         // Used zone: [0, usageFraction).
-        fillZone(from: 0, to: l.usageFraction, in: rect, width: w, color: Palette.used)
+        fillZone(from: 0, to: l.usageFraction, in: rect, width: w, color: PopupBarView.monochromeGrey)
 
-        // Pacing gap: [gapStart, gapEnd), coloured by pacing direction.
-        let gapColor = l.pacing == .ahead ? Palette.gapRed : Palette.gapGreen
+        // Pacing gap: [gapStart, gapEnd). Ahead-of-pace uses the SAME graded colour as the popup
+        // (`PopupBarView.aheadColor`: amber → orange → red by how far ahead), so the menu-bar bar and
+        // the popup row agree — e.g. a yellow 7-day here reads yellow in the dropdown too. On pace →
+        // the statusline green (ADR-0005), kept fixed to match the terminal pacing bar.
+        let gapColor = l.pacing == .ahead
+            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction)
+            : Palette.gapGreen
         fillZone(from: l.gapStart, to: l.gapEnd, in: rect, width: w, color: gapColor)
 
         NSGraphicsContext.restoreGraphicsState()
@@ -301,14 +301,14 @@ final class StatusItemView: NSView {
 
     /// Colour of the time-indicator dot from the usage-vs-time relationship:
     /// - `usage < time` → behind pace (good) → green
-    /// - `usage > time` → ahead of pace (bad) → red
+    /// - `usage > time` → ahead of pace (bad) → the graded ahead colour (amber → orange → red)
     /// - `usage == time` → exactly on the line → green (a tie is still on pace, not behind)
     ///
-    /// This is a finer split than `PacingState` (whose `.onPaceOrBehind` folds the tie into green),
-    /// so the dot is computed from the raw fractions here rather than reusing `bar.layout.pacing`.
+    /// This is a finer split than `PacingState` (whose `.onPaceOrBehind` folds the tie into green), so
+    /// the dot is computed from the raw fractions here. The ahead colour matches the popup exactly
+    /// (`PopupBarView.aheadColor`), so the dot and its gap read as the same colour across both bars.
     private func indicatorColor(usage: Double, time: Double) -> NSColor {
-        if usage > time { return Palette.dotRed }
-        return Palette.dotGreen
+        usage > time ? PopupBarView.aheadColor(usage: usage, time: time) : Palette.dotGreen
     }
 
     /// Fill the sub-rect spanning the fraction range `[from, to)` of a bar.
