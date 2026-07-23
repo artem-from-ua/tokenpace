@@ -251,9 +251,9 @@ final class PopupViewController: NSViewController {
     }
 
     /// Whether ⌥ Option is currently held (ADR-0020's modifier-poll timer feeds this live while the
-    /// dropdown is open). When both Claude services are operational, the status rows add nothing
-    /// worth the permanent space, so they only show while ⌥ is held; a real problem always shows
-    /// regardless (`rebuild()`'s `shouldShowServiceStatus`).
+    /// dropdown is open). It reveals the on-demand data age ("2m ago") in the "Claude Code" header;
+    /// it does **not** gate the service-status rows, which show only when a component is
+    /// non-operational (`rebuild()`'s `showStatusRows`) — two green lines are never worth the space.
     var optionHeld = false {
         didSet {
             guard isViewLoaded, optionHeld != oldValue else { return }
@@ -324,14 +324,15 @@ final class PopupViewController: NSViewController {
 
         // The "Claude Code" section header (first line): the brand-coloured, bold title (always
         // shown — see `claudeBrandColor`) flush left. Its right half carries the dim data age
-        // ("2m ago") **only while ⌥ Option is held** — the age is an on-demand detail, not something
-        // to surface even when a service problem forces the status rows open. The two service status
-        // rows (issue #31) come below under a wider gate (⌥ held *or* a real problem) — a widget most
-        // users check for numbers, not a green checkmark, shouldn't spend permanent space on
-        // "everything is fine"; a real problem always shows them regardless of ⌥, since that is
-        // exactly the moment the popup needs to explain itself.
+        // ("2m ago") **only while ⌥ Option is held** — the age is an on-demand detail.
+        //
+        // The two service status rows (issue #31) show **only when there is a real problem** —
+        // `worstProblem != nil`, i.e. at least one component is non-operational. Two green
+        // "operational" lines add nothing worth the space, so a healthy status is never shown — not
+        // even while ⌥ is held (⌥ still reveals the data age, but not the status). When a problem is
+        // present we show **both** components (the healthy one for context), regardless of ⌥.
         let status = layout.serviceStatus
-        let showStatusRows = status?.worstProblem != nil || optionHeld
+        let showStatusRows = status?.worstProblem != nil
         let sectionHeader = addSplitLine(
             left: Self.claudeCodeSectionTitle, right: optionHeld ? Self.ageText(layout.lastUpdateAge) : "",
             leftFont: Self.menuItemFont, rightFont: .systemFont(ofSize: Metrics.textSize),
