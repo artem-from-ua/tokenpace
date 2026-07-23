@@ -1,9 +1,15 @@
 ---
-status: accepted
+status: superseded
 date: 2026-06-23
+superseded_by: [0024]
 ---
 
 # ADR-0013: Рядок статусу сервісів Claude у попапі (status.claude.com)
+
+> **Superseded у частині обсягу** [ADR-0024](0024-configurable-logical-services.md): «рівно два
+> фіксовані компоненти `Claude Code` + `Claude API`» замінено конфігурованими логічними сервісами
+> (issue #89). Решта рішень нижче (джерело стану = лише `component.status`, інциденти не декодуються,
+> cadence-підлоги, чисте ядро / тонкий shell) **лишається чинною** і реюзується ADR-0024.
 
 ## Контекст
 

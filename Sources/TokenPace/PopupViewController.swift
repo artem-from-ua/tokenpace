@@ -327,9 +327,9 @@ final class PopupViewController: NSViewController {
     /// Built once by ``rebuildBackdrop()`` on load; it re-resolves its own fill on theme change.
     private var backdropView: NSView?
 
-    /// The bold header of the popup's first section — "Claude Code" covers both the update-cadence
-    /// line and the two Claude service status rows beneath it, all gated by ⌥ Option (see `rebuild`).
-    private static let claudeCodeSectionTitle = "Claude Code"
+    /// The bold header of the popup's first section — "Claude" covers the update-cadence line and the
+    /// per-component service status rows beneath it (see `rebuild`).
+    private static let claudeCodeSectionTitle = "Claude"
 
     /// Anthropic's official primary accent colour (`#d97757`, a terracotta orange) — confirmed
     /// against `anthropics/skills`' `brand-guidelines/SKILL.md` on GitHub, the same value the local
@@ -411,11 +411,13 @@ final class PopupViewController: NSViewController {
         // shown — see `claudeBrandColor`) flush left. Its right half carries the dim data age
         // ("2m ago") **only while ⌥ Option is held** — the age is an on-demand detail.
         //
-        // The two service status rows (issue #31) show **only when there is a real problem** —
-        // `worstProblem != nil`, i.e. at least one component is non-operational. Two green
-        // "operational" lines add nothing worth the space, so a healthy status is never shown — not
-        // even while ⌥ is held (⌥ still reveals the data age, but not the status). When a problem is
-        // present we show **both** components (the healthy one for context), regardless of ⌥.
+        // The service status rows (issue #31, #89) show **only when there is a real problem** —
+        // `worstProblem != nil`, i.e. at least one monitored component is non-operational. All-
+        // operational lines add nothing worth the space, so a healthy status is never shown (⌥ still
+        // reveals the data age, but not the status). When a problem is present we show **one row per
+        // monitored component**, each with its own status — `API` always, then `Code`, `WEB/Desktop`,
+        // and `Cowork` when their services are enabled (the healthy ones for context). Each row is a
+        // single component, so there is nothing to expand under ⌥.
         let status = layout.serviceStatus
         let showStatusRows = status?.worstProblem != nil
         let sectionHeader = addSplitLine(
@@ -425,9 +427,11 @@ final class PopupViewController: NSViewController {
         stack.setCustomSpacing(Metrics.sectionSpacing, after: sectionHeader)
 
         if showStatusRows, let status {
-            addServiceStatusRow(label: "Claude Code", status: status.claudeCode)
-            let apiRow = addServiceStatusRow(label: "Claude API", status: status.claudeAPI)
-            stack.setCustomSpacing(Metrics.sectionSpacing, after: apiRow)
+            var lastRow: NSView?
+            for component in status.checks.flatMap(\.components) {
+                lastRow = addServiceStatusRow(label: Self.displayName(component), status: component.status)
+            }
+            if let lastRow { stack.setCustomSpacing(Metrics.sectionSpacing, after: lastRow) }
         }
 
         // Error block (when failing): two lines — a bold title led by the ⚠️ symbol, then the
@@ -602,7 +606,7 @@ final class PopupViewController: NSViewController {
             attributed.append(NSAttributedString(string: "  "))
         }
 
-        // Prefix "Claude Code: " in the normal label colour.
+        // Prefix the component's display label (e.g. "API: ") in the normal label colour.
         attributed.append(NSAttributedString(string: "\(label): ", attributes: [
             .font: font, .foregroundColor: NSColor.labelColor,
         ]))
@@ -649,6 +653,22 @@ final class PopupViewController: NSViewController {
         case .majorOutage:      return "major outage"
         case .underMaintenance: return "maintenance"
         case .unknown:          return "unknown"
+        }
+    }
+
+    /// The popup label for one monitored component (#89) — the localisation seam: the kit carries the
+    /// component's matching name (`ResolvedComponent.name`), and the short label the user reads is
+    /// assembled here (ADR-0009/0013). Each monitored component gets its own row (`Cowork` is its own
+    /// line, not a suffix), so the mapping is per-component. Names are shown bare (no "Claude" prefix)
+    /// under the "Claude" section header. An unrecognised name falls back to itself, so a future
+    /// component still renders rather than vanishing.
+    static func displayName(_ component: ResolvedComponent) -> String {
+        switch component.name {
+        case StatusHealth.claudeAPIComponentName:    return "API"
+        case StatusHealth.claudeCodeComponentName:   return "Code"
+        case StatusHealth.claudeWebComponentName:    return "WEB/Desktop"
+        case StatusHealth.claudeCoworkComponentName: return "Cowork"
+        default:                                     return component.name
         }
     }
 

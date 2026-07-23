@@ -80,6 +80,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// overlap (the status loop hangs off the usage poll's heartbeat, it owns no timer).
     private var statusTask: Task<Void, Never>?
 
+    /// Which logical services to monitor on the status page (#89) — loaded from `PersistedConfig`
+    /// on launch, updated live when the user changes it in Settings (`monitoredServicesChanged`).
+    /// `Claude API` is always monitored regardless of this; the two toggleable services and the
+    /// WEB/Desktop mode come from here. Seeded to `.default` until `applicationDidFinishLaunching`
+    /// reads the stored value.
+    private var monitoredServices: MonitoredServices = .default
+
     /// Re-renders the popup/menu bar from `lastOutput` on a fixed cadence so the "Last update" age
     /// grows ("just now" → "1m ago") without waiting for the next 180 s poll. **Never** fetches — it
     /// only recomputes the view models against the current time.
@@ -106,6 +113,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // before the rest of launch depends on it (#71, ADR-0023). Phase 1 is a no-op scaffold that
         // only records the running version.
         runConfigMigrationsIfNeeded()
+
+        // Load the persisted monitored-services choice (#89) before the first status poll, so it
+        // resolves the right logical services from the start. Falls back to `.default` when absent.
+        monitoredServices = PersistedConfig.monitoredServices
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -196,9 +207,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Menu actions (#14)
 
-    /// Open (or focus) the Settings… window. Lazily creates the single instance.
+    /// Open (or focus) the Settings… window. Lazily creates the single instance and wires the
+    /// monitored-services change callback (#89) so a toggle there re-polls the status immediately.
     @objc private func openSettings() {
-        if settingsWC == nil { settingsWC = SettingsWindowController() }
+        if settingsWC == nil {
+            let wc = SettingsWindowController()
+            wc.onMonitoredServicesChange = { [weak self] config in self?.monitoredServicesChanged(config) }
+            settingsWC = wc
+        }
         settingsWC?.show()
     }
 
@@ -223,6 +239,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppLogger.lifecycle.notice("manual refresh requested (Troubleshoot)")
         lastStatusSuccess = nil            // make the status poll due on the next (immediate) tick
         signals.send(.manualRefresh)       // wake the usage loop now + reset backoff (engine)
+    }
+
+    /// Apply a new monitored-services config chosen in Settings (#89): adopt it, drop the stale
+    /// status (it was resolved under the old config — the enabled set may have changed), and force an
+    /// immediate re-poll so the popup/menu-bar reflect the new services within a moment. Clearing
+    /// `lastStatusHealth` briefly hides the status rows/dot until that fetch lands — honest, since
+    /// the retained value describes services that are no longer the ones being monitored.
+    func monitoredServicesChanged(_ config: MonitoredServices) {
+        monitoredServices = config
+        lastStatusHealth = nil
+        lastStatusSuccess = nil            // status poll is due again on the immediate tick
+        signals.send(.manualRefresh)       // wake the usage loop now, which rides the status poll
+        reRenderForCurrentTime()           // clear the stale rows/dot right away
     }
 
     /// Show or hide the optional "Troubleshoot…" item — and flip the popup's service-status
@@ -394,17 +423,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Cancel any slow in-flight fetch rather than overlap.
         statusTask?.cancel()
         let transport = statusTransport
+        // Snapshot the config for this fetch — which logical services to resolve, and which grey
+        // `unknown` lines to show if it fails (#89). `Claude API` is always in there.
+        let config = monitoredServices
         statusTask = Task { [weak self] in
             let health: StatusHealth
             let succeeded: Bool
             do {
                 let summary = try await StatusClient.fetch(transport: transport)
-                health = .from(summary)
+                health = .from(summary, config: config)
                 succeeded = true
             } catch {
                 // Any failure → honest "unknown" (grey), and don't advance lastStatusSuccess so the
                 // next usage tick retries.
-                health = .unknown
+                health = .unknown(for: config)
                 succeeded = false
             }
             guard let self, !Task.isCancelled else { return }

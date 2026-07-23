@@ -23,6 +23,8 @@ enum PersistedConfig {
         /// The marketing version the settings were last written under — the input to
         /// `MigrationPlan.transition`. Absent (`nil`) on a fresh install or a pre-persistence build.
         static let lastRunVersion = "lastRunVersion"
+        /// The monitored-services config (#89), stored as a JSON blob under this key.
+        static let monitoredServices = "monitoredServices"
     }
 
     /// The marketing version the config was last written under, or `nil` if none has been recorded
@@ -30,5 +32,23 @@ enum PersistedConfig {
     static var lastRunVersion: String? {
         get { defaults.string(forKey: Key.lastRunVersion) }
         set { defaults.set(newValue, forKey: Key.lastRunVersion) }
+    }
+
+    /// The monitored-services config (#89) — which logical services to watch on the status page.
+    /// Persisted as JSON so the `Codable` shape can grow. Reads fall back to
+    /// ``MonitoredServices/default`` when the key is absent (first run) or the blob fails to decode
+    /// (corrupt / an incompatible older shape) — an honest default rather than a crash, matching the
+    /// forward-compatible decoding in `MonitoredServices` itself.
+    static var monitoredServices: MonitoredServices {
+        get {
+            guard let data = defaults.data(forKey: Key.monitoredServices),
+                  let decoded = try? JSONDecoder().decode(MonitoredServices.self, from: data)
+            else { return .default }
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            defaults.set(data, forKey: Key.monitoredServices)
+        }
     }
 }
