@@ -60,47 +60,116 @@ public enum ServiceStatus: Sendable, Equatable {
     }
 }
 
+// MARK: - ServiceID
+
+/// A stable, rename-agnostic identifier for one logical service (#89). Its components carry the
+/// matching names; the popup maps each component to a short display label in the view
+/// (ADR-0009/0013: display text lives in the view, semantics in the kit), so the labels can change
+/// without touching the persisted config or this enum.
+public enum ServiceID: Sendable, Equatable {
+    /// "Claude API" — the `Claude API (api.anthropic.com)` component. Always monitored (TokenPace's
+    /// own usage-API calls depend on it), not user-configurable.
+    case claudeAPI
+    /// "Claude Code" — the `Claude Code` component (CLI product infrastructure: login, updater,
+    /// model routing).
+    case claudeCode
+    /// "Claude WEB/Desktop" — `claude.ai`, plus `Claude Cowork` in the cowork mode.
+    case webDesktop
+}
+
+// MARK: - ResolvedComponent
+
+/// One status-page component within a logical service: its matching name (kit-side semantics,
+/// compared verbatim against `components[].name`) and its current ``ServiceStatus``. The popup
+/// renders one row per component, mapping this name to a short display label.
+public struct ResolvedComponent: Sendable, Equatable {
+    /// The component's matching name (verbatim against the API). This is **not** the popup's display
+    /// label — it is the technical constituent name (e.g. `"Claude Cowork"`) the view maps to a short
+    /// label via `displayName`.
+    public let name: String
+    /// The semantic status of this component.
+    public let status: ServiceStatus
+
+    public init(name: String, status: ServiceStatus) {
+        self.name = name
+        self.status = status
+    }
+}
+
+// MARK: - ServiceCheck
+
+/// One logical service resolved against a concrete ``StatusSummary``: its identifier, named
+/// constituents, and an aggregated worst-of-N status.
+///
+/// This is a semantic descriptor (ADR-0013 §3, generalised): the kit reports **what** the service
+/// covers (id + components + aggregate), the view decides how to render it. The popup iterates the
+/// `components` (one row each); the aggregate ``status`` feeds nothing in the popup today but is the
+/// worst-of-N a service-level summary would use, and mirrors how ``StatusHealth/worstProblem`` ranks
+/// across all components for the menu-bar dot.
+public struct ServiceCheck: Sendable, Equatable {
+    /// Which logical service.
+    public let id: ServiceID
+    /// The constituents in display order, each with its own status — the popup renders one row each.
+    public let components: [ResolvedComponent]
+
+    public init(id: ServiceID, components: [ResolvedComponent]) {
+        self.id = id
+        self.components = components
+    }
+
+    /// Worst-of-N across the constituents via ``ServiceStatus/severity`` (ADR-0013 §8). An empty
+    /// `components` (should not happen for a well-formed `from`) reads as `.unknown`.
+    public var status: ServiceStatus {
+        components.map(\.status).max(by: { $0.severity < $1.severity }) ?? .unknown
+    }
+}
+
 // MARK: - StatusHealth
 
-/// The two service states the popup renders, one line each — the pure result of mapping a
-/// ``StatusSummary`` (or a failed fetch) into semantics.
+/// The state of every **enabled** Claude logical service — the pure result of mapping a
+/// ``StatusSummary`` (or a failed fetch) against a ``MonitoredServices`` config (#89).
 ///
-/// The two components are **independent**: each gets its own line with its own colour dot, with
-/// no aggregation into a single "overall" state (ADR-0013). Incidents, the overall indicator, and
-/// scheduled maintenances are deliberately not part of this type — they are not decoded at all.
+/// Was: two fixed component dots. Now: a collection of resolved services. Each carries its named
+/// constituents (plus an aggregated worst-of-N), so the popup draws one row per component, while the
+/// menu bar shows one dot that is the worst across all enabled services (ADR-0024).
+///
+/// `Claude API` is always present as the first check regardless of config — it cannot be disabled
+/// (TokenPace's own usage-API calls depend on it). The two toggleable services follow when enabled.
 ///
 /// A failed status poll does not produce a distinct value: the shell maps any ``StatusFetchError``
-/// to ``unknown`` (both components grey), because the UI for "service is unknown" and "we couldn't
-/// reach the status page" is identical — an honest grey `unknown` line — so the type need not carry
-/// a separate failure flag.
+/// to ``unknown(for:)`` (every enabled component grey), because the UI for "service is unknown" and
+/// "we couldn't reach the status page" is identical — an honest grey `unknown` line — so the type
+/// need not carry a separate failure flag.
 public struct StatusHealth: Sendable, Equatable {
-    /// State of the `Claude Code` component (the CLI product infrastructure: login, updater,
-    /// model routing).
-    public let claudeCode: ServiceStatus
-    /// State of the `Claude API (api.anthropic.com)` component (the inference backend the CLI
-    /// calls — 5xx/429/529 in the CLI mean this is degraded).
-    public let claudeAPI: ServiceStatus
+    /// The resolved logical services in display order (`Claude API`, then `Claude Code`, then
+    /// `Claude WEB/Desktop` — the enabled ones). Always contains at least the `Claude API` check.
+    public let checks: [ServiceCheck]
 
-    public init(claudeCode: ServiceStatus, claudeAPI: ServiceStatus) {
-        self.claudeCode = claudeCode
-        self.claudeAPI = claudeAPI
+    public init(checks: [ServiceCheck]) {
+        self.checks = checks
     }
 
-    /// Both components unknown — the value the shell substitutes when a status poll fails
-    /// (network or decode), so the popup shows two honest grey `unknown` lines.
-    public static let unknown = StatusHealth(claudeCode: .unknown, claudeAPI: .unknown)
-
-    /// The most severe non-operational state across the two components, or `nil` when **both** are
-    /// operational. Drives the menu-bar status dot (ADR-0013): `nil` → no dot; otherwise the dot
-    /// takes this state's colour. `unknown` counts (we surface "don't know" rather than hide it).
+    /// The most severe non-operational state across **all** components of **all** enabled services
+    /// (worst-of-all, including the cowork constituent only when the mode adds it), or `nil` when
+    /// everything is operational. Drives the menu-bar status dot (ADR-0024): `nil` → no dot;
+    /// otherwise the dot takes this state's colour. `unknown` counts (we surface "don't know").
+    ///
+    /// The signature is unchanged from the two-component era (`ServiceStatus?`), so the menu-bar
+    /// and cadence consumers (`MenuBarLayout`, `StatusCadence`, `App`) need no change.
     public var worstProblem: ServiceStatus? {
-        let worst = claudeCode.severity >= claudeAPI.severity ? claudeCode : claudeAPI
-        return worst.isProblem ? worst : nil
+        let worst = checks.flatMap(\.components).map(\.status).max(by: { $0.severity < $1.severity })
+        return worst.flatMap { $0.isProblem ? $0 : nil }
     }
 
-    /// The two component names we track, matched verbatim against the API's `components[].name`.
-    static let claudeCodeName = "Claude Code"
-    static let claudeAPIName = "Claude API (api.anthropic.com)"
+    // MARK: matching names
+
+    /// The component names we match verbatim against the API's `components[].name` (kit-side
+    /// semantics). `public` so the view can map a resolved component back to its short display label
+    /// (`displayName`), keeping the human strings in the view — ADR-0009/0013.
+    public static let claudeAPIComponentName = "Claude API (api.anthropic.com)"
+    public static let claudeCodeComponentName = "Claude Code"
+    public static let claudeWebComponentName = "claude.ai"
+    public static let claudeCoworkComponentName = "Claude Cowork"
 
     /// The status page the popup's status word links to (ADR-0013). Force-unwrapped: a literal
     /// constant whose failure would be a programmer error, not a runtime condition.
@@ -108,23 +177,56 @@ public struct StatusHealth: Sendable, Equatable {
 
     // MARK: from
 
-    /// Map one decoded summary to the two component states. A component absent from `components[]`
+    /// Map a decoded summary to the enabled logical services. A component absent from `components[]`
     /// (Anthropic renamed or removed it) maps to ``ServiceStatus/unknown`` rather than silently
-    /// defaulting to operational. Every other component in the array is ignored.
-    public static func from(_ summary: StatusSummary) -> StatusHealth {
-        StatusHealth(
-            claudeCode: status(of: claudeCodeName, in: summary),
-            claudeAPI: status(of: claudeAPIName, in: summary)
-        )
+    /// defaulting to operational (ADR-0013 §1). Every other component in the array is ignored.
+    public static func from(_ summary: StatusSummary, config: MonitoredServices) -> StatusHealth {
+        StatusHealth(checks: checks(for: config) { name in
+            summary.components.first(where: { $0.name == name })
+                .map { ServiceStatus(rawAPIValue: $0.status) } ?? .unknown
+        })
     }
 
-    /// The semantic status of the named component, or ``ServiceStatus/unknown`` if it is not
-    /// present in the array.
-    private static func status(of name: String, in summary: StatusSummary) -> ServiceStatus {
-        guard let component = summary.components.first(where: { $0.name == name }) else {
-            return .unknown
+    /// The value the shell substitutes when a status poll fails (network or decode): every enabled
+    /// component grey, so the popup shows honest `unknown` lines for exactly the services being
+    /// monitored. Depends on the config (which services/components exist), so it is a function, not
+    /// a `static let`.
+    public static func unknown(for config: MonitoredServices) -> StatusHealth {
+        StatusHealth(checks: checks(for: config) { _ in .unknown })
+    }
+
+    /// The single source of truth for **which** services and constituents exist under a config —
+    /// shared by ``from(_:config:)`` and ``unknown(for:)``, which differ only in how each
+    /// component's status is obtained (`statusOf`: from a summary, vs the constant `.unknown`).
+    ///
+    /// `Claude API` is emitted unconditionally as the first check; `Claude Code` and `Claude
+    /// WEB/Desktop` follow when their flags are set, WEB/Desktop adding `Claude Cowork` in the
+    /// cowork mode.
+    private static func checks(
+        for config: MonitoredServices,
+        statusOf: (String) -> ServiceStatus
+    ) -> [ServiceCheck] {
+        var checks: [ServiceCheck] = [
+            ServiceCheck(id: .claudeAPI, components: [
+                ResolvedComponent(name: claudeAPIComponentName, status: statusOf(claudeAPIComponentName)),
+            ]),
+        ]
+        if config.claudeCodeEnabled {
+            checks.append(ServiceCheck(id: .claudeCode, components: [
+                ResolvedComponent(name: claudeCodeComponentName, status: statusOf(claudeCodeComponentName)),
+            ]))
         }
-        return ServiceStatus(rawAPIValue: component.status)
+        if config.webDesktopEnabled {
+            var components = [
+                ResolvedComponent(name: claudeWebComponentName, status: statusOf(claudeWebComponentName)),
+            ]
+            if config.webDesktopMode == .chatAndCowork {
+                components.append(
+                    ResolvedComponent(name: claudeCoworkComponentName, status: statusOf(claudeCoworkComponentName)))
+            }
+            checks.append(ServiceCheck(id: .webDesktop, components: components))
+        }
+        return checks
     }
 }
 

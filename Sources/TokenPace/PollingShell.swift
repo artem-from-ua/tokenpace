@@ -209,19 +209,25 @@ actor StubUsageTransport: UsageTransport {
     }
 
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
-        // Status endpoint (#31): a canned summary. In `.authError` mode **both** Claude services are
-        // degraded (the failure frame); otherwise Claude Code is operational and only the API is
-        // degraded — so the popup shows a green Code dot + a yellow API dot, while the incident is
-        // *ignored* (both lines still come from component.status). Lets the status line be seen
-        // end-to-end without the live status page.
+        // Status endpoint (#31, #89): a canned summary covering every component the configurable
+        // logical services can monitor (`Claude Code`, `Claude API`, `claude.ai`, `Claude Cowork` —
+        // ADR-0024). In `.authError` mode the API, Code, and Cowork are degraded and `claude.ai` has a
+        // partial outage (the failure frame) — so with Cowork monitoring on, the popup shows a row per
+        // component (`API`, `Code`, `WEB/Desktop`, `Cowork`), each with its own status. Otherwise only
+        // the API is degraded, everything else operational. The incident is *ignored* (all lines still
+        // come from component.status). Lets the status lines be seen end-to-end without the live page.
         if request.url == StatusClient.endpoint {
-            let codeStatus = mode == .authError ? "degraded_performance" : "operational"
+            let failing = mode == .authError
+            let codeStatus = failing ? "degraded_performance" : "operational"
+            let webStatus = failing ? "partial_outage" : "operational"
+            let coworkStatus = failing ? "degraded_performance" : "operational"
             let body = """
             {"status":{"indicator":"major","description":"Degraded"},\
             "components":[\
             {"name":"Claude Code","status":"\(codeStatus)"},\
             {"name":"Claude API (api.anthropic.com)","status":"degraded_performance"},\
-            {"name":"claude.ai","status":"operational"}],\
+            {"name":"claude.ai","status":"\(webStatus)"},\
+            {"name":"Claude Cowork","status":"\(coworkStatus)"}],\
             "incidents":[{"name":"Stubbed incident","status":"monitoring","impact":"major",\
             "components":[{"name":"Claude Code"},{"name":"Claude API (api.anthropic.com)"}]}]}
             """.data(using: .utf8)!

@@ -23,11 +23,27 @@ final class SettingsWindowController: NSWindowController {
         static let width: CGFloat = 320
         static let padding: CGFloat = 20
         static let rowSpacing: CGFloat = 12
+        /// Leading inset of the radio group nested under the "Claude WEB/Desktop" checkbox (#89).
+        static let nestIndent: CGFloat = 18
     }
+
+    /// Called when the user changes the monitored-services selection (#89), with the new config —
+    /// wired by `AppDelegate.openSettings` to re-poll the status page immediately. The config is
+    /// already persisted (via `PersistedConfig`) by the time this fires.
+    var onMonitoredServicesChange: ((MonitoredServices) -> Void)?
 
     /// The launch-at-login checkbox — its state is synced from the live `SMAppService` status every
     /// time the window is shown (the user may have changed it in System Settings meanwhile).
     private var launchToggle: NSButton!
+
+    /// The "Claude Code" monitoring checkbox (#89).
+    private var claudeCodeToggle: NSButton!
+    /// The "Claude WEB/Desktop" monitoring checkbox (#89); gates the mode radios below it.
+    private var webDesktopToggle: NSButton!
+    /// The WEB/Desktop mode radios (#89): "Chat only" / "Chat and Cowork". Enabled only while
+    /// `webDesktopToggle` is on.
+    private var chatOnlyRadio: NSButton!
+    private var chatAndCoworkRadio: NSButton!
 
     /// Explanatory line under the checkbox (`hintText(inAppBundle:)`). Three states: a `swift run`
     /// dev build is unavailable; an `.app` where a click just failed points at recovery; otherwise
@@ -59,6 +75,7 @@ final class SettingsWindowController: NSWindowController {
     func show() {
         lastToggleFailed = false   // a fresh open starts from the status-derived hint (#69)
         syncToggleFromSystem()
+        syncMonitoredServicesFromConfig()
         NSApp.activate(ignoringOtherApps: true)
         if !(window?.isVisible ?? false) { window?.center() }
         showWindow(nil)
@@ -73,6 +90,9 @@ final class SettingsWindowController: NSWindowController {
         stack.alignment = .leading
         stack.spacing = Metrics.rowSpacing
         stack.translatesAutoresizingMaskIntoConstraints = false
+
+        // ── General ───────────────────────────────────────────────────────────────────────────
+        stack.addArrangedSubview(sectionHeader("General"))
 
         launchToggle = NSButton(
             checkboxWithTitle: "Launch TokenPace at login",
@@ -90,12 +110,43 @@ final class SettingsWindowController: NSWindowController {
         hintLabel.widthAnchor.constraint(
             equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
 
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(separator)
-        separator.widthAnchor.constraint(
-            equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
+        stack.addArrangedSubview(sectionSeparator())
+
+        // ── Monitored services (#89) ──────────────────────────────────────────────────────────
+        stack.addArrangedSubview(sectionHeader("Monitored services"))
+
+        // Claude API — always monitored, not configurable (TokenPace's own usage API depends on it),
+        // so the checkbox is shown on and disabled (greyed); the "(always monitored)" suffix says why.
+        let apiToggle = NSButton(checkboxWithTitle: "Claude API (always monitored)", target: nil, action: nil)
+        apiToggle.state = .on
+        apiToggle.isEnabled = false
+        stack.addArrangedSubview(apiToggle)
+
+        claudeCodeToggle = NSButton(
+            checkboxWithTitle: "Claude Code", target: self, action: #selector(monitoredServicesToggled))
+        stack.addArrangedSubview(claudeCodeToggle)
+
+        webDesktopToggle = NSButton(
+            checkboxWithTitle: "Claude WEB/Desktop", target: self, action: #selector(monitoredServicesToggled))
+        stack.addArrangedSubview(webDesktopToggle)
+
+        // Nested mode radios under the WEB/Desktop checkbox. AppKit groups radios with the same
+        // action within one superview into an exclusive set; wrapping them in an indented vertical
+        // stack gives the visual nesting and keeps them a single group.
+        chatOnlyRadio = NSButton(
+            radioButtonWithTitle: "Chat only", target: self, action: #selector(monitoredServicesToggled))
+        chatAndCoworkRadio = NSButton(
+            radioButtonWithTitle: "Chat and Cowork", target: self, action: #selector(monitoredServicesToggled))
+        let radioGroup = NSStackView(views: [chatOnlyRadio, chatAndCoworkRadio])
+        radioGroup.orientation = .vertical
+        radioGroup.alignment = .leading
+        radioGroup.spacing = 4
+        stack.addArrangedSubview(indented(radioGroup))
+
+        stack.addArrangedSubview(sectionSeparator())
+
+        // ── About ─────────────────────────────────────────────────────────────────────────────
+        stack.addArrangedSubview(sectionHeader("About"))
 
         let versionLabel = NSTextField(labelWithString: Self.versionText())
         versionLabel.font = .systemFont(ofSize: 11)
@@ -125,6 +176,37 @@ final class SettingsWindowController: NSWindowController {
         window?.setContentSize(content.fittingSize)
     }
 
+    /// A bold section heading (`General` / `Monitored services`), the visual anchor of each group.
+    private func sectionHeader(_ title: String) -> NSView {
+        let label = NSTextField(labelWithString: title)
+        label.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
+        label.textColor = .labelColor
+        return label
+    }
+
+    /// A full-content-width horizontal rule between sections (same technique as the original one).
+    private func sectionSeparator() -> NSView {
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
+        return separator
+    }
+
+    /// Wrap a view in a leading-indented row, for controls nested under a parent checkbox (the
+    /// WEB/Desktop mode radios). A fixed-width leading spacer gives the indent within the
+    /// leading-aligned vertical stack.
+    private func indented(_ view: NSView) -> NSView {
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        spacer.widthAnchor.constraint(equalToConstant: Metrics.nestIndent).isActive = true
+        let row = NSStackView(views: [spacer, view])
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.spacing = 0
+        return row
+    }
+
     // MARK: Actions
 
     private func syncToggleFromSystem() {
@@ -148,9 +230,41 @@ final class SettingsWindowController: NSWindowController {
         }
     }
 
-    /// The explanatory line under the checkbox. Three states: a dev build (`swift run`) is not an
-    /// `.app`, so launch-at-login is unavailable; an `.app` where a click just failed points the
-    /// user at recovery; otherwise a neutral best-effort note.
+    /// Load the persisted monitored-services config (#89) into the checkboxes and radios. Called on
+    /// every `show()`, so the window always reflects the stored choice (which a prior session or the
+    /// popup may have changed).
+    private func syncMonitoredServicesFromConfig() {
+        let config = PersistedConfig.monitoredServices
+        claudeCodeToggle.state = config.claudeCodeEnabled ? .on : .off
+        webDesktopToggle.state = config.webDesktopEnabled ? .on : .off
+        chatOnlyRadio.state = config.webDesktopMode == .chatOnly ? .on : .off
+        chatAndCoworkRadio.state = config.webDesktopMode == .chatAndCowork ? .on : .off
+        updateRadioAvailability()
+    }
+
+    /// The radios are only meaningful while WEB/Desktop is monitored, so they enable/disable with
+    /// the parent checkbox (the mode is still remembered in the config when disabled).
+    private func updateRadioAvailability() {
+        let enabled = webDesktopToggle.state == .on
+        chatOnlyRadio.isEnabled = enabled
+        chatAndCoworkRadio.isEnabled = enabled
+    }
+
+    /// A monitored-services control changed (#89): read the current UI into a config, persist it,
+    /// refresh the radio enablement, and notify the app so it re-polls the status page immediately.
+    @objc private func monitoredServicesToggled() {
+        updateRadioAvailability()
+        let config = MonitoredServices(
+            claudeCodeEnabled: claudeCodeToggle.state == .on,
+            webDesktopEnabled: webDesktopToggle.state == .on,
+            webDesktopMode: chatAndCoworkRadio.state == .on ? .chatAndCowork : .chatOnly)
+        PersistedConfig.monitoredServices = config
+        onMonitoredServicesChange?(config)
+    }
+
+    /// The explanatory line under the checkbox. A dev build (`swift run`) is not an `.app`, so
+    /// launch-at-login is unavailable; an `.app` where a click just failed points the user at
+    /// recovery; otherwise the hint is empty (the checkbox label speaks for itself).
     private func hintText(inAppBundle: Bool) -> String {
         if !inAppBundle {
             return "Unavailable in this build. Install TokenPace.app and launch it from "
@@ -161,7 +275,8 @@ final class SettingsWindowController: NSWindowController {
                  + "open it from Finder/Launchpad, or add it manually in System Settings → General → "
                  + "Login Items."
         }
-        return "Launch TokenPace automatically when you log in."
+        // Neutral state: no hint — the checkbox label already says what it does.
+        return ""
     }
 
     /// The version line under the separator: just the version for an installed `.app`; a

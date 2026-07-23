@@ -375,7 +375,10 @@ struct PopupLayoutServiceStatusTests {
     }
 
     @Test func passesThroughUnchanged() {
-        let status = StatusHealth(claudeCode: .operational, claudeAPI: .degraded)
+        let status = StatusHealth.from(StatusSummary(components: [
+            StatusComponent(name: "Claude API (api.anthropic.com)", status: "operational"),
+            StatusComponent(name: "Claude Code", status: "degraded_performance"),
+        ]), config: .default)
         let p = PopupLayout.make(from: snap, health: healthy, now: now,
                                  interval: PollingBackoff.defaultInterval, serviceStatus: status)
         #expect(p.serviceStatus == status)
@@ -384,10 +387,10 @@ struct PopupLayoutServiceStatusTests {
     @Test func independentOfUsageWarning() {
         // A failing usage poll still carries the (separately-polled) service status.
         let failing = UsageHealth(lastSuccess: now, failingSince: now.addingTimeInterval(-60), reason: .timeout)
-        let status = StatusHealth.unknown
+        let status = StatusHealth.unknown(for: .default)
         let p = PopupLayout.make(from: snap, health: failing, now: now,
                                  interval: PollingBackoff.defaultInterval, serviceStatus: status)
         #expect(p.warning == .timeout)
-        #expect(p.serviceStatus == .unknown)
+        #expect(p.serviceStatus == status)
     }
 }

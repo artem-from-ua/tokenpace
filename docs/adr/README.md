@@ -17,7 +17,7 @@
 | [0010](0010-usage-health-and-error-states.md) | UsageHealth — стани помилок (⚠️ menu bar + банер popup + stale); пороги 30/60 хв | accepted |
 | [0011](0011-polling-engine-adaptive-cadence-and-signal-seams.md) | PollingEngine — async-цикл, адаптивний інтервал і seam'и sleep/wake/мережі | accepted |
 | ~~[0012](0012-configure-window-and-launch-at-login.md)~~ | ~~Вікно «Configure…» та launch-at-login (SMAppService); opt-out, best-effort на unsigned~~ | superseded |
-| [0013](0013-claude-status-line.md) | Рядок статусу сервісів Claude у попапі — лише `component.status` двох компонентів, окрема ввічлива cadence | accepted |
+| ~~[0013](0013-claude-status-line.md)~~ | ~~Рядок статусу сервісів Claude у попапі — лише `component.status` двох компонентів, окрема ввічлива cadence~~ | superseded |
 | [0014](0014-usage-decode-resilience-on-reset-boundary.md) | UsageSnapshot — синтез вікна на межі ресету замість падіння decode (хибне «Usage API unavailable») | accepted |
 | [0015](0015-no-idle-mode.md) | Прибрати компактний idle-режим — завжди смужки (крім стану помилки) | accepted |
 | [0016](0016-rename-to-tokenpace.md) | Перейменування проєкту cc-timer → TokenPace — ідентифікатори, межі історії | accepted |
@@ -28,3 +28,4 @@
 | [0021](0021-popup-two-column-layout-and-uniform-dropdown-typography.md) | Popup — двоколонковий layout, ⌥-gated статуси сервісів, єдиний шрифт усього дропдауна | accepted |
 | [0022](0022-popup-bar-transparency-and-contrast-experiment.md) | Вигляд пейсинг-барів попапа — монохромні непрозорі бари на суцільному фоні; A/B-експеримент прибрано, поведінку зашито | accepted |
 | [0023](0023-persisted-config-version-marker.md) | Версійний маркер конфігу (`lastRunVersion`) + каркас міграції — перший persistence; чистий `MigrationPlan` у kit, `UserDefaults`-обгортка у shell | accepted |
+| [0024](0024-configurable-logical-services.md) | Конфігуровані логічні сервіси статусу (група компонентів → worst-of-N) замість двох фіксованих; `Claude API` завжди-on; display-назви з конфігу у view | accepted |
