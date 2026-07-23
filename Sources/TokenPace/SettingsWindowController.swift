@@ -44,6 +44,9 @@ final class SettingsWindowController: NSWindowController {
     private var updateLineLabel: NSTextField!
     /// The "Download" link button next to `updateLineLabel` (#37); hidden alongside it.
     private var updateDownloadLink: NSButton!
+    /// The row holding the update-available label + Download link; hidden as a whole when up to date so
+    /// the stack drops it from layout (no empty gap under "Check now").
+    private var updateRow: NSStackView!
     /// The release currently offered by the update line, or `nil` when up to date. Drives the
     /// Download link's target.
     private var latestRelease: GitHubRelease?
@@ -183,6 +186,9 @@ final class SettingsWindowController: NSWindowController {
         checkNowButton = NSButton(title: "Check now", target: self, action: #selector(checkNow))
         checkNowButton.bezelStyle = .rounded
         stack.addArrangedSubview(checkNowButton)
+        // Tighten the gap below the button — the update-available row that follows is usually hidden,
+        // so the default row spacing leaves too much air under "Check now".
+        stack.setCustomSpacing(4, after: checkNowButton)
 
         // The "Update available: vX.Y.Z" line + a "Download" link, both hidden until a newer release
         // is found. Kept as two controls on one row: a plain label and a link button (same inline
@@ -195,12 +201,11 @@ final class SettingsWindowController: NSWindowController {
         updateDownloadLink.bezelStyle = .inline
         updateDownloadLink.contentTintColor = .linkColor
         updateDownloadLink.font = .systemFont(ofSize: 11)
-        let updateRow = NSStackView(views: [updateLineLabel, updateDownloadLink])
+        updateRow = NSStackView(views: [updateLineLabel, updateDownloadLink])
         updateRow.orientation = .horizontal
         updateRow.alignment = .firstBaseline
         updateRow.spacing = 6
-        updateLineLabel.isHidden = true
-        updateDownloadLink.isHidden = true
+        updateRow.isHidden = true   // whole row hidden until an update is known (drops it from layout)
         stack.addArrangedSubview(updateRow)
 
         stack.addArrangedSubview(sectionSeparator())
@@ -413,12 +418,10 @@ final class SettingsWindowController: NSWindowController {
         latestRelease = release
         if let release {
             updateLineLabel.stringValue = "Update available: \(release.tagName)"
-            updateLineLabel.isHidden = false
-            updateDownloadLink.isHidden = false
+            updateRow.isHidden = false
         } else {
             updateLineLabel.stringValue = ""
-            updateLineLabel.isHidden = true
-            updateDownloadLink.isHidden = true
+            updateRow.isHidden = true
         }
         if let content = window?.contentView {
             window?.setContentSize(content.fittingSize)

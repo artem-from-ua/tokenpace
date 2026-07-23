@@ -36,6 +36,12 @@ menu-bar-пункт): користувач попросив **системний
      локально автентифікований `gh` читає приватний репо власними креденшалами з keyring. Обирається
      рантаймом, коли встановлено env-змінну **`TOKENPACE_GH_AUTH`** (прапорець присутності).
 
+   **Резолвинг `TOKENPACE_GH_AUTH`:** застосунок стартує при логіні через `SMAppService`, тобто
+   launchd запускає `.app` **без шелла**, тож `export TOKENPACE_GH_AUTH=1` у `~/.zshrc` невидимий
+   через `ProcessInfo`. Тому прапорець резолвиться раз (memoised): спершу `ProcessInfo` (запуск із
+   термінала / `launchctl setenv`), потім — fallback — із rc-файлів login-шелла через `ShellEnvironment`
+   (`zsh -l -i`). Так користувачу достатньо `export` у `.zshrc`, без `launchctl`/LaunchAgent.
+
    Обидва шляхи годують байти в **той самий** чистий `GitHubReleaseDecoder` і те саме порівняння
    `SemanticVersion`/`UpdateComparison`, тож decode/порівняння лишаються тестованими без живої мережі
    чи процесу. Subprocess — платформний side-effect, тож живе у shell за kit-протоколом (як
