@@ -97,7 +97,7 @@ final class SettingsWindowController: NSWindowController {
         separator.widthAnchor.constraint(
             equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
 
-        let versionLabel = NSTextField(labelWithString: "Version \(TokenPaceKit.version)")
+        let versionLabel = NSTextField(labelWithString: Self.versionText())
         versionLabel.font = .systemFont(ofSize: 11)
         versionLabel.textColor = .secondaryLabelColor
         stack.addArrangedSubview(versionLabel)
@@ -162,6 +162,18 @@ final class SettingsWindowController: NSWindowController {
                  + "Login Items."
         }
         return "Launch TokenPace automatically when you log in."
+    }
+
+    /// The version line under the separator: just the version for an installed `.app`; a
+    /// "— Dev Build" tag for a bare `swift run` binary; and, under a stub, the stub mode too —
+    /// "Version 0.17.0 — Dev Build (stub: error)" — so a stubbed dev window is unmistakable.
+    private static func versionText() -> String {
+        let base = "Version \(TokenPaceKit.version)"
+        guard !LaunchAtLoginController.isAppBundle else { return base }
+        if let stub = ProcessInfo.processInfo.environment["TOKENPACE_STUB"] {
+            return "\(base) — Dev Build (stub: \(stub))"
+        }
+        return "\(base) — Dev Build"
     }
 
     @objc private func toggleLaunchAtLogin(_ sender: NSButton) {

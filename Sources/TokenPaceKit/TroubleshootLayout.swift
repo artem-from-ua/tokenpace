@@ -10,13 +10,15 @@ import Foundation
 /// Two sections:
 /// 1. **Usage API — last response**: `timestampLine` (when the last response arrived, with its
 ///    time zone), an optional `statusLine` (HTTP status or a transport/not-sent explanation), an
-///    optional `nextUpdateLine` (`≈ attemptAt + interval`), and `bodyText` — the pretty-printed
-///    JSON on success, or the raw error payload otherwise.
+///    optional `intervalLine` (the current refresh cadence as a duration, e.g. `3m`), an optional
+///    `nextUpdateLine` (`≈ attemptAt + interval`), and `bodyText` — the pretty-printed JSON on
+///    success, or the raw error payload otherwise.
 /// 2. **Auth token**: `tokenReadLine` (when the token was read, or why it is unavailable) and an
 ///    optional `tokenExpiryLine` (when it expires).
 public struct TroubleshootLayout: Sendable, Equatable {
     public let timestampLine: String
     public let statusLine: String?
+    public let intervalLine: String?
     public let nextUpdateLine: String?
     public let bodyText: String
     public let tokenReadLine: String
@@ -25,6 +27,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
     public init(
         timestampLine: String,
         statusLine: String?,
+        intervalLine: String?,
         nextUpdateLine: String?,
         bodyText: String,
         tokenReadLine: String,
@@ -32,6 +35,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
     ) {
         self.timestampLine = timestampLine
         self.statusLine = statusLine
+        self.intervalLine = intervalLine
         self.nextUpdateLine = nextUpdateLine
         self.bodyText = bodyText
         self.tokenReadLine = tokenReadLine
@@ -55,6 +59,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
             return TroubleshootLayout(
                 timestampLine: noResponseYet,
                 statusLine: nil,
+                intervalLine: nil,
                 nextUpdateLine: nil,
                 bodyText: bodyPlaceholder,
                 tokenReadLine: "Token: unavailable (no poll yet)",
@@ -89,6 +94,10 @@ public struct TroubleshootLayout: Sendable, Equatable {
             bodyText = noResponseBody
         }
 
+        // The current refresh cadence as a duration (e.g. "3m"), separate from the absolute next-update
+        // timestamp below it — the interval is the *rate*, the next update is the *when*.
+        let intervalLine = "Refresh interval: \(durationText(output.interval))"
+
         // The next scheduled poll — approximate (wake / network restoration can trigger it earlier).
         let nextUpdate = fetch.attemptAt.addingTimeInterval(output.interval)
         let nextUpdateLine = "Next update: ≈ \(timestampText(nextUpdate, timeZone: timeZone))"
@@ -108,6 +117,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
         return TroubleshootLayout(
             timestampLine: "Last response: \(ts)",
             statusLine: statusLine,
+            intervalLine: intervalLine,
             nextUpdateLine: nextUpdateLine,
             bodyText: bodyText,
             tokenReadLine: tokenReadLine,
@@ -121,6 +131,24 @@ public struct TroubleshootLayout: Sendable, Equatable {
     }
 
     // MARK: Formatting helpers
+
+    /// A compact duration from a `TimeInterval`, for the refresh-interval line: `<60s → "Ns"`,
+    /// `<60m → "Nm"`, `<24h → "Nh Mm"` (a zero trailing minute dropped), else `"Nd Mh"`. Seconds are
+    /// truncated to whole units; a negative or zero interval reads `"0s"`.
+    public static func durationText(_ interval: TimeInterval) -> String {
+        let seconds = max(0, Int(interval))
+        if seconds < 60 { return "\(seconds)s" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        if hours < 24 {
+            let m = minutes % 60
+            return m == 0 ? "\(hours)h" : "\(hours)h \(m)m"
+        }
+        let days = hours / 24
+        let h = hours % 24
+        return h == 0 ? "\(days)d" : "\(days)d \(h)h"
+    }
 
     /// Pretty-print a JSON string with sorted keys and indentation, for stable, diff-friendly output.
     /// Any failure (the payload is HTML / plain text / already not JSON) returns the input unchanged —
