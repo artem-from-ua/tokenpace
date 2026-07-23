@@ -25,6 +25,13 @@ enum PersistedConfig {
         static let lastRunVersion = "lastRunVersion"
         /// The monitored-services config (#89), stored as a JSON blob under this key.
         static let monitoredServices = "monitoredServices"
+        /// Whether the daily update check runs (#37). Default-on (opt-out) — see the property.
+        static let automaticUpdateChecks = "automaticUpdateChecks"
+        /// Instant of the last update-check **attempt** (#37), gating the 24 h cadence.
+        static let lastUpdateCheck = "lastUpdateCheck"
+        /// The latest release tag last surfaced to the user (#37), so the same version is not
+        /// notified twice.
+        static let lastSeenLatestVersion = "lastSeenLatestVersion"
     }
 
     /// The marketing version the config was last written under, or `nil` if none has been recorded
@@ -50,5 +57,30 @@ enum PersistedConfig {
             guard let data = try? JSONEncoder().encode(newValue) else { return }
             defaults.set(data, forKey: Key.monitoredServices)
         }
+    }
+
+    /// Whether TokenPace checks GitHub Releases for a newer version once a day (#37). **Default-on**
+    /// (opt-out): an absent key reads as `true`. `object(forKey:) as? Bool ?? true` distinguishes
+    /// "unset" (→ true) from an explicit `false` the user chose — `bool(forKey:)` would collapse both
+    /// to `false` and silently defeat the opt-out default.
+    static var automaticUpdateChecks: Bool {
+        get { defaults.object(forKey: Key.automaticUpdateChecks) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.automaticUpdateChecks) }
+    }
+
+    /// Instant of the last update-check **attempt** (success or graceful failure), or `nil` if none
+    /// has run yet. Advanced on every attempt so a private-repo 404 does not retry each heartbeat —
+    /// the 24 h gate is on the *attempt*, not the *success* (`UpdateCheckCadence`, ADR-0025).
+    static var lastUpdateCheck: Date? {
+        get { defaults.object(forKey: Key.lastUpdateCheck) as? Date }
+        set { defaults.set(newValue, forKey: Key.lastUpdateCheck) }
+    }
+
+    /// The latest release tag last surfaced to the user (e.g. `"v0.20.0"`), or `nil` if none yet.
+    /// Guards the notification against re-firing daily for the same un-upgraded version — the banner
+    /// posts only when the freshly-found tag differs from this.
+    static var lastSeenLatestVersion: String? {
+        get { defaults.string(forKey: Key.lastSeenLatestVersion) }
+        set { defaults.set(newValue, forKey: Key.lastSeenLatestVersion) }
     }
 }

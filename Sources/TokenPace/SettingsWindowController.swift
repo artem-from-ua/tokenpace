@@ -32,6 +32,22 @@ final class SettingsWindowController: NSWindowController {
     /// already persisted (via `PersistedConfig`) by the time this fires.
     var onMonitoredServicesChange: ((MonitoredServices) -> Void)?
 
+    /// Called when the user clicks "Check now" (#37) — wired by `AppDelegate.openSettings` to run an
+    /// immediate update check that bypasses the 24 h cadence.
+    var onCheckForUpdatesNow: (() -> Void)?
+
+    /// The "Check for updates daily" checkbox (#37), synced from `PersistedConfig` on every `show()`.
+    private var updatesToggle: NSButton!
+    /// The "Check now" button (#37).
+    private var checkNowButton: NSButton!
+    /// The "Update available: vX.Y.Z — Download" line (#37), hidden until a newer release is known.
+    private var updateLineLabel: NSTextField!
+    /// The "Download" link button next to `updateLineLabel` (#37); hidden alongside it.
+    private var updateDownloadLink: NSButton!
+    /// The release currently offered by the update line, or `nil` when up to date. Drives the
+    /// Download link's target.
+    private var latestRelease: GitHubRelease?
+
     /// The launch-at-login checkbox — its state is synced from the live `SMAppService` status every
     /// time the window is shown (the user may have changed it in System Settings meanwhile).
     private var launchToggle: NSButton!
@@ -76,6 +92,7 @@ final class SettingsWindowController: NSWindowController {
         lastToggleFailed = false   // a fresh open starts from the status-derived hint (#69)
         syncToggleFromSystem()
         syncMonitoredServicesFromConfig()
+        updatesToggle.state = PersistedConfig.automaticUpdateChecks ? .on : .off
         NSApp.activate(ignoringOtherApps: true)
         if !(window?.isVisible ?? false) { window?.center() }
         showWindow(nil)
@@ -151,6 +168,40 @@ final class SettingsWindowController: NSWindowController {
         radioGroup.alignment = .leading
         radioGroup.spacing = 4
         stack.addArrangedSubview(indented(radioGroup))
+
+        stack.addArrangedSubview(sectionSeparator())
+
+        // ── Updates (#37) ─────────────────────────────────────────────────────────────────────
+        stack.addArrangedSubview(sectionHeader("Updates"))
+
+        updatesToggle = NSButton(
+            checkboxWithTitle: "Check for updates daily",
+            target: self,
+            action: #selector(toggleAutomaticUpdates(_:)))
+        stack.addArrangedSubview(updatesToggle)
+
+        checkNowButton = NSButton(title: "Check now", target: self, action: #selector(checkNow))
+        checkNowButton.bezelStyle = .rounded
+        stack.addArrangedSubview(checkNowButton)
+
+        // The "Update available: vX.Y.Z" line + a "Download" link, both hidden until a newer release
+        // is found. Kept as two controls on one row: a plain label and a link button (same inline
+        // link style as the repo link in the About section).
+        updateLineLabel = NSTextField(labelWithString: "")
+        updateLineLabel.font = .systemFont(ofSize: 11)
+        updateLineLabel.textColor = .secondaryLabelColor
+        updateDownloadLink = NSButton(title: "Download", target: self, action: #selector(openDownload))
+        updateDownloadLink.isBordered = false
+        updateDownloadLink.bezelStyle = .inline
+        updateDownloadLink.contentTintColor = .linkColor
+        updateDownloadLink.font = .systemFont(ofSize: 11)
+        let updateRow = NSStackView(views: [updateLineLabel, updateDownloadLink])
+        updateRow.orientation = .horizontal
+        updateRow.alignment = .firstBaseline
+        updateRow.spacing = 6
+        updateLineLabel.isHidden = true
+        updateDownloadLink.isHidden = true
+        stack.addArrangedSubview(updateRow)
 
         stack.addArrangedSubview(sectionSeparator())
 
@@ -231,7 +282,11 @@ final class SettingsWindowController: NSWindowController {
         // reliable discriminator, and `register()` adjudicates the rest on click.
         let inAppBundle = LaunchAtLoginController.isAppBundle
         launchToggle.isEnabled = inAppBundle
-        hintLabel.stringValue = hintText(inAppBundle: inAppBundle)
+        let hint = hintText(inAppBundle: inAppBundle)
+        hintLabel.stringValue = hint
+        // Hide the hint when empty (the neutral state) so the stack drops it from layout — otherwise an
+        // empty wrapping label still claims a row's height plus spacing, leaving a gap under General.
+        hintLabel.isHidden = hint.isEmpty
 
         // The hint wraps to a different height per message; refit so neither text is clipped.
         if let content = window?.contentView {
@@ -326,5 +381,47 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func openRepo() {
         NSWorkspace.shared.open(Self.repoURL)
+    }
+
+    // MARK: Updates (#37)
+
+    /// Persist the "Check for updates daily" choice. Turning it on also (re)requests notification
+    /// authorization so a later banner can appear — a no-op outside a real `.app`.
+    @objc private func toggleAutomaticUpdates(_ sender: NSButton) {
+        let on = sender.state == .on
+        PersistedConfig.automaticUpdateChecks = on
+        AppLogger.lifecycle.notice("update: automatic checks set \(on, privacy: .public)")
+        if on { UpdateNotifier.requestAuthorizationIfNeeded() }
+    }
+
+    /// Run an immediate update check (bypasses the 24 h cadence) via the app's shared path.
+    @objc private func checkNow() {
+        onCheckForUpdatesNow?()
+    }
+
+    /// Open the release page for the currently-offered update.
+    @objc private func openDownload() {
+        guard let release = latestRelease, let url = URL(string: release.htmlURL) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Reflect the current update state in the window (#37): show "Update available: vX.Y.Z" + the
+    /// Download link when `release` is non-nil, hide the line when up to date. Called by `AppDelegate`
+    /// after each check and on window open. Re-fits the window so the appearing/disappearing line is
+    /// not clipped.
+    func updateAvailability(_ release: GitHubRelease?) {
+        latestRelease = release
+        if let release {
+            updateLineLabel.stringValue = "Update available: \(release.tagName)"
+            updateLineLabel.isHidden = false
+            updateDownloadLink.isHidden = false
+        } else {
+            updateLineLabel.stringValue = ""
+            updateLineLabel.isHidden = true
+            updateDownloadLink.isHidden = true
+        }
+        if let content = window?.contentView {
+            window?.setContentSize(content.fittingSize)
+        }
     }
 }
