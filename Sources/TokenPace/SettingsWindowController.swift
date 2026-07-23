@@ -116,8 +116,17 @@ final class SettingsWindowController: NSWindowController {
         stack.addArrangedSubview(sectionHeader("Monitored services"))
 
         // Claude API — always monitored, not configurable (TokenPace's own usage API depends on it),
-        // so the checkbox is shown on and disabled (greyed); the "(always monitored)" suffix says why.
+        // so the checkbox is shown on and disabled; the "(always monitored)" suffix says why. The
+        // title is drawn in `secondaryLabelColor` (an `attributedTitle`, since a disabled NSButton
+        // otherwise applies its own greying) — the same muted tone the explanatory hints use, rather
+        // than the default disabled grey.
         let apiToggle = NSButton(checkboxWithTitle: "Claude API (always monitored)", target: nil, action: nil)
+        apiToggle.attributedTitle = NSAttributedString(
+            string: "Claude API (always monitored)",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ])
         apiToggle.state = .on
         apiToggle.isEnabled = false
         stack.addArrangedSubview(apiToggle)
