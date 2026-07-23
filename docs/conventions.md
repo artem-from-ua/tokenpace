@@ -83,6 +83,30 @@ git config core.hooksPath .githooks
   виклик, видалення, зміна тексту меседжа чи рівня/категорії) **в тому самому коміті** оновлює
   відповідний рядок у `docs/log-messages.md` — включно з номерами рядків і підсумковими лічильниками.
 
+## Верифікаційні env-змінні
+
+Сімейство `TOKENPACE_*` перемикає застосунок у режими ручної верифікації. **Ніколи не встановлювати
+в нормальному запуску** — усі вони лише для діагностики / скріншотів / прогонки UI-флоу.
+
+- **`TOKENPACE_STUB`** = `1` / `screenshot` / `error` — підміняє живий `URLSession` канованим
+  транспортом (`StubUsageTransport`), тож застосунок ганяється end-to-end без usage/status API й без
+  Keychain (`1` — зростаюча утилізація; `screenshot` — застиглий кадр для README; `error` — 401 +
+  деградовані сервіси).
+- **`TOKENPACE_GH_AUTH`** (прапорець присутності, будь-яке непорожнє значення) — вмикає `gh`-шлях
+  update-чеку (`GHReleaseFetcher`): `gh api …/releases/latest` як subprocess, `gh` бере токен із
+  keyring. Для мейнтейнерів, поки репо приватне; без змінної — анонімний HTTPS (ADR-0025).
+- **`TOKENPACE_FAKE_LATEST`** = `vX.Y.Z` — форсує канований «останній реліз» (`StubUpdateFetcher`)
+  без мережі, щоб перевірити гілки «доступне оновлення» / «up to date». Пріоритетніший за
+  `TOKENPACE_GH_AUTH` (ADR-0025).
+- **`TOKENPACE_SKIP_SWIFT_HOOK`** = `1` — обходить Swift build/test у pre-commit-хуку (для навмисного
+  WIP-коміту).
+
+> **UserNotifications і запуск бандла.** Системний банер update-чеку працює лише в підписаному,
+> встановленому `.app`, запущеному через LaunchServices (`open`), **не** прямим викликом бінарника
+> `…/Contents/MacOS/TokenPace` — completion-хендлери `UNUserNotificationCenter` виконуються на
+> не-main черзі, тож будь-який `@MainActor`-ізольований код у них падає `SIGTRAP`
+> (`dispatch_assert_queue`). Логувати з таких хендлерів лише через `nonisolated`-хелпери (ADR-0025).
+
 ## Документація як частина коду
 
 - Зміна модуля → оновити `docs/architecture.md`.

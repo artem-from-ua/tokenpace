@@ -80,6 +80,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// overlap (the status loop hangs off the usage poll's heartbeat, it owns no timer).
     private var statusTask: Task<Void, Never>?
 
+    // MARK: update check (#37)
+
+    /// The "New version available" menu item (blue-dot indicator), sitting just above Quit behind its
+    /// own separator. Hidden until a check finds a newer release; `isHidden` is flipped in
+    /// `handleUpdateFound` / `performUpdateCheck` via `setUpdateItemVisible`.
+    private var updateAvailableItem: NSMenuItem?
+    /// The separator above ``updateAvailableItem``, hidden/shown in lockstep with it so an absent
+    /// update leaves no dangling rule above Quit.
+    private var updateSeparatorItem: NSMenuItem?
+    /// The newest release found so far, or `nil` if none/up-to-date. Drives the menu click target and
+    /// the Configure… "Update available" line.
+    private var lastKnownRelease: GitHubRelease?
+    /// The in-flight update fetch, if any — cancelled before a new check and on terminate.
+    private var updateTask: Task<Void, Never>?
+
     /// Which logical services to monitor on the status page (#89) — loaded from `PersistedConfig`
     /// on launch, updated live when the user changes it in Settings (`monitoredServicesChanged`).
     /// `Claude API` is always monitored regardless of this; the two toggleable services and the
@@ -173,7 +188,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(troubleshootItem)
         self.troubleshootItem = troubleshootItem
 
-        // Separate Quit from Settings… so the terminating action sits in its own group (standard
+        // "New version available" (#37): sits just above Quit, behind its own separator, with a blue
+        // dot to draw the eye (same tinted `circle.fill` attachment the popup uses for service dots).
+        // Both the separator and the item are hidden until a check finds a newer release, so an absent
+        // update leaves no dangling rule; click opens the releases page. Visibility is flipped by
+        // `setUpdateItemVisible` from `handleUpdateFound` / `performUpdateCheck`.
+        let updateSeparator = NSMenuItem.separator()
+        updateSeparator.isHidden = true
+        menu.addItem(updateSeparator)
+        self.updateSeparatorItem = updateSeparator
+
+        let updateItem = NSMenuItem(title: "", action: #selector(openReleasesPage), keyEquivalent: "")
+        updateItem.attributedTitle = Self.updateItemTitle()
+        updateItem.target = self
+        updateItem.isHidden = true
+        menu.addItem(updateItem)
+        self.updateAvailableItem = updateItem
+
+        // Separate Quit from the items above so the terminating action sits in its own group (standard
         // macOS menu grouping). A bare `swift run` binary is tagged "(dev build)" (#69) so quitting
         // the right process is unambiguous when a dev build and the installed `.app` run side by
         // side; under a stub the mode is named too — "(dev build – error)" — so a stubbed run reads
@@ -200,6 +232,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // log the outcome, never crash on an unsigned build.
         registerLaunchAtLoginIfNeeded()
 
+        // Update check (#37): install the notification delegate before any banner can arrive, and —
+        // when automatic checks are on — request notification authorization once. Both no-op outside
+        // a real `.app` bundle.
+        UpdateNotifier.installDelegate()
+        if PersistedConfig.automaticUpdateChecks {
+            UpdateNotifier.requestAuthorizationIfNeeded()
+            // Always check once on launch, bypassing the 24 h cadence: a build the user just
+            // installed/relaunched should surface a pending update immediately, not up to a day later.
+            // The cadence still governs re-checks during a long-running session (`pollUpdateIfDue`).
+            performUpdateCheck(userInitiated: false)
+        }
+
         AppLogger.lifecycle.info(
             "TokenPace status item attached (\(TokenPaceKit.version, privacy: .public)); live polling started"
         )
@@ -213,8 +257,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if settingsWC == nil {
             let wc = SettingsWindowController()
             wc.onMonitoredServicesChange = { [weak self] config in self?.monitoredServicesChanged(config) }
+            wc.onCheckForUpdatesNow = { [weak self] in self?.performUpdateCheck(userInitiated: true) }
             settingsWC = wc
         }
+        // Reflect the latest known update state whenever the window opens (#37).
+        settingsWC?.updateAvailability(lastKnownRelease)
         settingsWC?.show()
     }
 
@@ -338,6 +385,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         pollTask?.cancel()
         statusTask?.cancel()
+        updateTask?.cancel()
         ageTimer?.invalidate()
         sleepWake?.stop()
         network.stop()
@@ -408,6 +456,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // token dates) refresh in place each poll (ADR-0020). No-op while the controller is nil.
         troubleshootWC?.render(output)
         pollStatusIfDue(usageInterval: output.interval)
+        pollUpdateIfDue()
     }
 
     /// Fetch the Claude status page when `StatusCadence` says it is due — riding the usage poll's
@@ -445,6 +494,116 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Re-render with the new status against the retained usage output.
             self.reRenderForCurrentTime()
         }
+    }
+
+    // MARK: - Update check (#37)
+
+    /// Run the daily GitHub-release check when it is due, riding the usage heartbeat like the status
+    /// poll. No-op when the user turned the feature off, or when the 24 h cadence has not elapsed.
+    private func pollUpdateIfDue() {
+        guard PersistedConfig.automaticUpdateChecks else { return }
+        guard UpdateCheckCadence.isDue(lastCheck: PersistedConfig.lastUpdateCheck, now: Date()) else { return }
+        performUpdateCheck(userInitiated: false)
+    }
+
+    /// Perform one update check — shared by three callers: the launch-time check (always, bypassing
+    /// the cadence), the daily heartbeat (`pollUpdateIfDue`, gated by `UpdateCheckCadence`), and the
+    /// Settings… "Check now" button (`userInitiated: true`). `userInitiated` only affects logging; all
+    /// three record the attempt and surface a result identically.
+    ///
+    /// The attempt marker is advanced on **every** run, success or graceful failure, so a private-repo
+    /// 404 on the anonymous path does not re-fetch each heartbeat (ADR-0025). The fetch itself is
+    /// dispatched on a `Task`; because `AppDelegate` is `@MainActor`, the continuation after `await`
+    /// resumes on the main actor, so flipping the menu item and touching `PersistedConfig` is safe.
+    func performUpdateCheck(userInitiated: Bool) {
+        updateTask?.cancel()
+        let fetcher = makeUpdateFetcher()
+        AppLogger.network.notice(
+            "update: checking (userInitiated=\(userInitiated, privacy: .public))")
+        updateTask = Task { [weak self] in
+            let release = await GitHubReleaseClient.checkForUpdate(using: fetcher)
+            guard let self, !Task.isCancelled else { return }
+            PersistedConfig.lastUpdateCheck = Date()
+            if let release {
+                self.handleUpdateFound(release)
+            } else {
+                // Up to date (or a graceful failure). Clear any stale surfaced state so a manual
+                // check reflects "you're current"; the menu item + its separator hide again.
+                self.lastKnownRelease = nil
+                self.setUpdateItemVisible(false)
+                self.settingsWC?.updateAvailability(nil)
+            }
+        }
+    }
+
+    /// Choose the fetch path: the `gh` subprocess when `TOKENPACE_GH_AUTH` is set (maintainers, so a
+    /// private repo's releases are readable via local `gh` credentials), otherwise the anonymous
+    /// HTTPS client (which works once the repo is public; while private it 404s → no update).
+    ///
+    /// `TOKENPACE_FAKE_LATEST=vX.Y.Z` overrides both paths with a canned tag — a verification aid
+    /// (mirrors `TOKENPACE_STUB`) so the "update available" and "up to date" UI branches can be driven
+    /// on demand regardless of what the real latest release is. Never set in normal use.
+    private func makeUpdateFetcher() -> UpdateFetcher {
+        if let fake = ProcessInfo.processInfo.environment["TOKENPACE_FAKE_LATEST"], !fake.isEmpty {
+            return StubUpdateFetcher(tag: fake)
+        }
+        if let flag = ProcessInfo.processInfo.environment["TOKENPACE_GH_AUTH"], !flag.isEmpty {
+            return GHReleaseFetcher()
+        }
+        return HTTPUpdateFetcher()
+    }
+
+    /// Surface a newly-found newer release: retain it (drives the menu click + Configure line), reveal
+    /// the blue-dot menu item, update the Configure… window if open, and post the macOS banner —
+    /// **once per version** (guarded on `lastSeenLatestVersion`) so the same un-upgraded release does
+    /// not re-notify every day. The menu item / Configure line stay shown regardless.
+    private func handleUpdateFound(_ release: GitHubRelease) {
+        lastKnownRelease = release
+        setUpdateItemVisible(true)
+        settingsWC?.updateAvailability(release)
+
+        let firstTimeSeen = PersistedConfig.lastSeenLatestVersion != release.tagName
+        PersistedConfig.lastSeenLatestVersion = release.tagName
+        AppLogger.lifecycle.notice(
+            "update: new version available tag=\(release.tagName, privacy: .public) firstSeen=\(firstTimeSeen, privacy: .public)")
+        if firstTimeSeen {
+            UpdateNotifier.post(release: release)
+        }
+    }
+
+    /// Show or hide the "New version available" item together with its separator, so the two never
+    /// drift out of sync (an absent update must leave no dangling rule).
+    private func setUpdateItemVisible(_ visible: Bool) {
+        updateSeparatorItem?.isHidden = !visible
+        updateAvailableItem?.isHidden = !visible
+    }
+
+    /// Open the releases page from the "New version available" menu item — the specific release if one
+    /// is known, else the releases index (#37).
+    @objc private func openReleasesPage() {
+        let url = lastKnownRelease.flatMap { URL(string: $0.htmlURL) } ?? GitHubReleaseClient.releasesPageURL
+        AppLogger.lifecycle.notice("update: user opened releases page")
+        NSWorkspace.shared.open(url)
+    }
+
+    /// The "New version available" menu item's title: a blue `circle.fill` dot (same tinted-symbol
+    /// attachment technique as the popup's service-status rows) followed by the label at
+    /// `dropdownTextSize`, so it matches the other native items' typography.
+    private static func updateItemTitle() -> NSAttributedString {
+        let attributed = NSMutableAttributedString()
+        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
+            .applying(.init(paletteColors: [.systemBlue]))
+        if let dot = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "update available")?
+            .withSymbolConfiguration(config) {
+            let attachment = NSTextAttachment()
+            attachment.image = dot
+            attributed.append(NSAttributedString(attachment: attachment))
+            attributed.append(NSAttributedString(string: "  "))
+        }
+        attributed.append(NSAttributedString(
+            string: "New version available",
+            attributes: [.font: NSFont.systemFont(ofSize: dropdownTextSize)]))
+        return attributed
     }
 
     /// Re-render the retained last poll against the current time — grows the "Last update" age and

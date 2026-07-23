@@ -47,6 +47,9 @@ In the tables below, `<…>` marks an interpolated value.
 | 294 | `lifecycle` | `.notice` | `launch-at-login: status=<status>, no auto-register` | status is `.registered`/`.requiresApproval`, so no auto-register is needed |
 | 300 | `lifecycle` | `.notice` | `launch-at-login: auto-registered (opt-out)` | successful auto-registration (`.notRegistered`, or recovery from `.notFound` after an update — #69) |
 | 304 | `lifecycle` | `.error` | `launch-at-login: auto-register failed: <error>` | `LaunchAtLoginController.enable()` threw on an installed `.app` bundle — an unexpected, registerable-but-refused case |
+| 521 | `network` | `.notice` | `update: checking (userInitiated=<bool>)` | `performUpdateCheck` — an update check begins (launch, daily heartbeat, or "Check now"); #37 |
+| 567 | `lifecycle` | `.notice` | `update: new version available tag=<tag> firstSeen=<bool>` | `handleUpdateFound` — a newer release was found; `firstSeen` gates the one-per-version banner (#37) |
+| 585 | `lifecycle` | `.notice` | `update: user opened releases page` | `openReleasesPage` — the user clicked the "New version available" menu item (#37) |
 
 ## `Sources/TokenPace/ClaudeCLIRefresher.swift`
 
@@ -68,6 +71,29 @@ token itself never is.
 |------|----------|-------|---------|------|
 | 158 | `lifecycle` | `.notice` | `launch-at-login: user set <true/false>` | user toggled the launch-at-login checkbox successfully |
 | 164 | `lifecycle` | `.error` | `launch-at-login: toggle failed: <error>` | toggle threw (e.g. unsigned build) — a deliberate user action, so it stays `.error` |
+| 389 | `lifecycle` | `.notice` | `update: automatic checks set <bool>` | user toggled the "Check for updates daily" checkbox (#37) |
+
+## `Sources/TokenPace/GHReleaseFetcher.swift`
+
+The `gh api` subprocess for the maintainer update-check path (#37, ADR-0025); the token never appears
+(gh resolves it from keyring internally).
+
+| Line | Category | Level | Message | When |
+|------|----------|-------|---------|------|
+| 46 | `network` | `.notice` | `update: gh path, launching <binary>` | before spawning `gh api …/releases/latest` under `TOKENPACE_GH_AUTH` |
+
+## `Sources/TokenPace/UpdateNotifier.swift`
+
+The first `UserNotifications` use (#37, ADR-0025). Completion handlers run off the main actor, so
+their bodies live in `nonisolated` helpers.
+
+| Line | Category | Level | Message | When |
+|------|----------|-------|---------|------|
+| 54 | `lifecycle` | `.error` | `update: notification auth failed: <error>` | `requestAuthorization` returned an error |
+| 57 | `lifecycle` | `.notice` | `update: notification auth granted=<bool>` | authorization resolved (granted or denied) |
+| 68 | `lifecycle` | `.notice` | `update: skip notification (not an .app bundle)` | `post` called outside a real `.app` — banner unavailable, menu/Settings still carry the signal |
+| 87 | `lifecycle` | `.error` | `update: notification post failed: <error>` | `UNUserNotificationCenter.add` returned an error |
+| 128 | `lifecycle` | `.notice` | `update: notification action opened releases page` | the user clicked the banner body or its "Update" button (`didReceive`); "Close" does nothing |
 
 ## `Sources/TokenPace/PollingShell.swift`
 
@@ -99,6 +125,28 @@ token itself never is.
 | 78 | `network` | `.error` | `status response not HTTP` | response was not `HTTPURLResponse` |
 | 85 | `network` | `.notice` | `status 200 ok components=<count>` | HTTP 200; logs component count |
 | 91 | `network` | `.error` | `status request failed: HTTP <statusCode>` | non-200 status |
+
+## `Sources/TokenPaceKit/GitHubRelease.swift`
+
+Update-check release decode (#37, ADR-0025).
+
+| Line | Category | Level | Message | When |
+|------|----------|-------|---------|------|
+| 55 | `network` | `.error` | `update: release decode failed` | `GitHubReleaseDecoder.decode(from:)` — JSON `DecodingError` |
+
+## `Sources/TokenPaceKit/GitHubReleaseClient.swift`
+
+Update-check orchestration (#37, ADR-0025); every branch of a fetch outcome logs once. `.notFound`
+(private repo / no release) and "not newer" are expected no-ops → `.notice`; genuine faults → `.error`.
+
+| Line | Category | Level | Message | When |
+|------|----------|-------|---------|------|
+| 106 | `network` | `.notice` | `update: releases/latest 404 (repo private or no release)` | anonymous fetch 404'd — expected while the repo is private |
+| 108 | `network` | `.error` | `update: fetch transport error: <message>` | a network/connectivity failure |
+| 110 | `network` | `.notice` | `update: fetch unavailable: <message>` | the `gh` path was unavailable (binary missing / non-zero exit) |
+| 112 | `network` | `.error` | `update: fetch decode error` | a non-404 HTTP error or an undecodable body |
+| 116 | `network` | `.error` | `update: fetch unexpected error: <error>` | a non-`UpdateFetchError` thrown by the fetcher |
+| 123 | `network` | `.notice` | `update: latest=<tag> not newer than <current>` | a release was found but it is not newer than the running version |
 
 ## `Sources/TokenPaceKit/TokenProvider.swift`
 
@@ -147,9 +195,9 @@ One log line per interval change. The format is built by
 
 | Category | Calls | Files |
 |----------|-------|-------|
-| `network` | 13 | `UsageClient` (6), `StatusClient` (5), `UsageSnapshot` (2) |
-| `lifecycle` | 17 | `App` (9), `SettingsWindowController` (2), `PollingShell` (5), `PollingEngine` (1) |
+| `network` | 22 | `UsageClient` (6), `StatusClient` (5), `UsageSnapshot` (2), `GitHubReleaseClient` (6), `App` (1), `GHReleaseFetcher` (1), `GitHubRelease` (1) |
+| `lifecycle` | 25 | `App` (11), `SettingsWindowController` (3), `PollingShell` (5), `PollingEngine` (1), `UpdateNotifier` (5) |
 | `keychain` | 10 | `TokenProvider` (3), `ClaudeCLIRefresher` (6), `PollingEngine` (1) |
 | `ui` | 0 | — (category defined, unused) |
 
-**Total: 40 log statements** — `.error` ×17, `.notice` ×21, `.info` ×1, `.debug` ×1.
+**Total: 57 log statements** — `.error` ×23, `.notice` ×32, `.info` ×1, `.debug` ×1.
