@@ -39,6 +39,12 @@ public struct LimitRow: Sendable, Equatable {
     /// out names the day it lands on. `nil` for 5-hour windows and for any reset < 24 h away (which
     /// carries ``resetAbsolute`` instead). At most one of the two is ever non-`nil`.
     public let resetWeekday: String?
+    /// Whether this is the **idle** 5-hour row — the 5h window does not exist server-side (no active
+    /// session, ``UsageSnapshot/sessionIdle``, #100). When `true` the view renders a solid-blue knobless
+    /// bar, the status word "ready to start", and **no second (utilization + reset) line at all**; the
+    /// numeric fields (`utilization`, `pacing`, `indicator`, the three `reset*`) are inert placeholders
+    /// the idle render path ignores. `false` on every normal row.
+    public let sessionIdle: Bool
 
     public init(
         title: String,
@@ -49,7 +55,8 @@ public struct LimitRow: Sendable, Equatable {
         subdivisions: Int,
         resetRelative: String?,
         resetAbsolute: String?,
-        resetWeekday: String? = nil
+        resetWeekday: String? = nil,
+        sessionIdle: Bool = false
     ) {
         self.title = title
         self.utilization = utilization
@@ -60,6 +67,7 @@ public struct LimitRow: Sendable, Equatable {
         self.resetRelative = resetRelative
         self.resetAbsolute = resetAbsolute
         self.resetWeekday = resetWeekday
+        self.sessionIdle = sessionIdle
     }
 }
 
@@ -184,8 +192,10 @@ public struct PopupLayout: Sendable, Equatable {
     /// legacy rows by ``UsageSnapshot/scopedModelWindows``). All per-model rows are paced as
     /// `.sevenDay`. Shared by both ``make`` overloads.
     private static func rows(from snapshot: UsageSnapshot, now: Date) -> [LimitRow] {
+        // The 5-hour row is the idle placeholder when the window has no active session (#100); every
+        // other row is built normally, including the 7-day one (which always exists).
         var rows: [LimitRow] = [
-            row(title: "5-hour", window: snapshot.fiveHour, as: .fiveHour, now: now),
+            snapshot.sessionIdle ? idleFiveHourRow() : row(title: "5-hour", window: snapshot.fiveHour, as: .fiveHour, now: now),
             row(title: "7-day", window: snapshot.sevenDay, as: .sevenDay, now: now),
         ]
         if let opus = snapshot.sevenDayOpus {
@@ -198,6 +208,24 @@ public struct PopupLayout: Sendable, Equatable {
             rows.append(row(title: scoped.name, window: scoped.window, as: .sevenDay, now: now))
         }
         return rows
+    }
+
+    /// The idle 5-hour placeholder row (#100, ADR-0027): title `"5-hour"`, `sessionIdle: true`, all
+    /// reset strings `nil`, and an inert zeroed bar (the view fills it solid blue and skips the second
+    /// line). `subdivisions` stays the 5-hour value so the under-bar tick ruler keeps the row's anatomy
+    /// in family with the active rows; the numeric fields are placeholders the idle render path ignores.
+    private static func idleFiveHourRow() -> LimitRow {
+        LimitRow(
+            title: "5-hour",
+            utilization: 0,
+            pacing: .onPaceOrBehind,
+            indicator: .neutral,
+            bar: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind),
+            subdivisions: LimitWindow.fiveHour.subdivisions,
+            resetRelative: nil,
+            resetAbsolute: nil,
+            resetWeekday: nil,
+            sessionIdle: true)
     }
 
     /// Build one `LimitRow`, delegating all arithmetic to tested pure logic. An unparseable

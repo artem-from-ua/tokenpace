@@ -20,6 +20,10 @@ public enum TimeToReset: Sendable, Equatable {
 
     /// Reset is **within (0, 90] minutes** (down to one second): a compact relative
     /// duration — `"1h10m"`, `"45m"`, `"1h"`, or `"40s"`. No spaces, no zero-padding.
+    ///
+    /// Also reused by ``ResetClock/timeToResetCompactDays(resetsAt:now:locale:timeZone:)`` to carry a
+    /// **compact day count** (`"4d"`, `"1d"`) for the menu-bar idle countdown to a far 7-day reset —
+    /// the view renders the string verbatim, so no new case is needed for that band.
     case relative(String)
 
     /// Reset is **now or in the past** (remaining ≤ 0): the cached usage snapshot is
@@ -188,6 +192,43 @@ public enum ResetClock {
             return .absolute(absoluteString(for: resetsAt, locale: locale, timeZone: timeZone))
         }
         return .relative(relativeString(seconds: Int(remaining))) // truncate toward zero
+    }
+
+    // MARK: timeToResetCompactDays (menu-bar idle variant, #100)
+
+    /// The menu-bar countdown when the 5-hour window is idle and the label falls back to the
+    /// **7-day** reset (``UsageSnapshot/sessionIdle``): like ``timeToReset(resetsAt:now:locale:timeZone:)``,
+    /// but a reset **24 h or more** away renders as a compact `"Nd"` day count (`"4d"`) instead of an
+    /// absolute wall-clock time, which for a reset days out is more legible than a bare `"20:40"`.
+    ///
+    /// Bands:
+    /// - `≥ 24 h`  → ``TimeToReset/relative(_:)`` carrying ``relativeRounded(resetsAt:now:)``'s value,
+    ///   which at ≥ 24 h is always its nearest-**day** branch (`"4d"`, `"1d"`) — the *same* arithmetic
+    ///   the popup uses for a far reset, so the menu bar and popup never disagree by a day.
+    /// - `< 24 h`  → delegates verbatim to ``timeToReset(resetsAt:now:locale:timeZone:)`` (absolute
+    ///   `"20:40"` above 90 min, the relative `"45m"` bands below, ``TimeToReset/resetNow`` at ≤ 0).
+    ///
+    /// No new ``TimeToReset`` cases: the day count rides in ``TimeToReset/relative(_:)`` and the view
+    /// renders it verbatim. `relativeRounded` returns `nil` only for a non-positive remaining, which the
+    /// `≥ 24 h` guard already excludes — but if it ever did, we fall through to `timeToReset` (→
+    /// ``TimeToReset/resetNow``) rather than force-unwrap.
+    ///
+    /// - Parameters:
+    ///   - resetsAt: The 7-day reset instant (from ``parse(_:)``).
+    ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
+    ///   - locale: Drives 12h vs 24h in the `< 24 h` absolute sub-branch. Default `.current`.
+    ///   - timeZone: Wall-clock zone + DST source for that sub-branch. Default `.current`.
+    public static func timeToResetCompactDays(
+        resetsAt: Date,
+        now: Date,
+        locale: Locale = .current,
+        timeZone: TimeZone = .current
+    ) -> TimeToReset {
+        let remaining = resetsAt.timeIntervalSince(now)
+        if remaining >= 24 * 3_600, let days = relativeRounded(resetsAt: resetsAt, now: now) {
+            return .relative(days)   // ≥ 24 h ⇒ relativeRounded is always its "Nd" nearest-day branch
+        }
+        return timeToReset(resetsAt: resetsAt, now: now, locale: locale, timeZone: timeZone)
     }
 
     // MARK: resetDisplay (convenience)

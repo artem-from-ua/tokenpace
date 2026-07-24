@@ -410,11 +410,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //  • `=1`          → climbing utilisation (exercises adaptive cadence on screen).
         //  • `=screenshot` → frozen, hand-picked values (a stable frame for the README).
         //  • `=error`      → 401 auth failure + both Claude services degraded (the warning block).
+        //  • `=idle`       → the honest "no active 5h session" state (#100): solid-blue 5h bar, no
+        //                    phantom reset, menu-bar time falls back to the 7-day reset ("4d").
         let stubMode = Self.stubName
         let transport: UsageTransport = switch stubMode {
         case "1":          StubUsageTransport(mode: .climbing)
         case "screenshot": StubUsageTransport(mode: .screenshot)
         case "error":      StubUsageTransport(mode: .authError)
+        case "idle":       StubUsageTransport(mode: .idle)
         default:           URLSession.shared
         }
         // The status poll uses the same transport seam (the stub answers the status endpoint too).

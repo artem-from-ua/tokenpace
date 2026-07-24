@@ -8,6 +8,10 @@ extension CodingUserInfoKey {
     /// `resets_at` via ``ResetClock/nextReset(now:window:)`` **without** calling `Date()` inside the
     /// decode layer. ``UsageClient/decode(from:now:)`` sets it; if absent, the synthesis falls back
     /// to `Date()` (the value only feeds a last-resort estimate, never a parsed instant).
+    ///
+    /// Only `seven_day` reaches the local estimate now (#100): the `five_hour` window opts out of it
+    /// (`localEstimateAllowed: false`), reporting the honest ``UsageSnapshot/sessionIdle`` state
+    /// instead of synthesizing a drifting `now + 5h` reset.
     static let usageNow = CodingUserInfoKey(rawValue: "cc.usageNow")!
 }
 
@@ -154,7 +158,7 @@ public struct UsageLimit: Sendable, Equatable, Decodable {
 /// unknown keys, so their presence is tolerated without any work (issue #9 scope).
 ///
 /// The custom ``init(from:)`` hardens `limits`: an omitted array decodes to `[]` rather
-/// than failing the whole snapshot. The memberwise ``init(fiveHour:sevenDay:sevenDayOpus:sevenDaySonnet:limits:)``
+/// than failing the whole snapshot. The memberwise ``init(fiveHour:sevenDay:sevenDayOpus:sevenDaySonnet:limits:sessionIdle:)``
 /// is kept so tests can build fixtures directly.
 public struct UsageSnapshot: Sendable, Equatable, Decodable {
     public let fiveHour: UsageWindow
@@ -162,6 +166,16 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
     public let sevenDayOpus: UsageWindow?
     public let sevenDaySonnet: UsageWindow?
     public let limits: [UsageLimit]
+    /// Whether the 5-hour window does **not** exist server-side right now — the honest "no active
+    /// session" state (#100). Set when the `five_hour` window arrives without a usable `resets_at`
+    /// **and** no `limits[]` entry supplies one either: the 5h window is *created* by the first token
+    /// spend and *does not exist* until then (verified server mechanics — see ADR-0027), so a missing
+    /// reset means "ready to start", not a reset boundary. When `true`, `fiveHour` is
+    /// `UsageWindow(utilization: 0, resetsAt: "")` and the UI renders a solid-blue "ready to start"
+    /// bar with **no synthesized phantom reset** — the bug this flag fixes. `false` on every normal
+    /// snapshot (an active 5h window, or a genuine reset-boundary `null` that `limits[]` still
+    /// backfills). Applies only to `five_hour`; the 7-day window keeps its local-estimate fallback.
+    public let sessionIdle: Bool
 
     private enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
@@ -176,13 +190,15 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         sevenDay: UsageWindow,
         sevenDayOpus: UsageWindow? = nil,
         sevenDaySonnet: UsageWindow? = nil,
-        limits: [UsageLimit] = []
+        limits: [UsageLimit] = [],
+        sessionIdle: Bool = false
     ) {
         self.fiveHour = fiveHour
         self.sevenDay = sevenDay
         self.sevenDayOpus = sevenDayOpus
         self.sevenDaySonnet = sevenDaySonnet
         self.limits = limits
+        self.sessionIdle = sessionIdle
     }
 
     public init(from decoder: any Decoder) throws {
@@ -202,12 +218,23 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         // them as `null` (or with `utilization: null`). Synthesize a fresh zero-usage window in that
         // case instead of failing the whole snapshot (which surfaced as a false "Usage API
         // unavailable"). See `Self.window(...)`.
-        self.fiveHour = try Self.window(
+        //
+        // `five_hour` is special (#100): when its reset is unavailable **and** `limits[]` backfills
+        // nothing, the window does not exist server-side (no active session), so `window(...)` reports
+        // `sessionIdle: true` and returns a `resetsAt: ""` window rather than a synthesized `now + 5h`
+        // phantom. `localEstimateAllowed: false` disables the local-estimate rung for it — that rung
+        // is exactly what produced the drifting phantom reset. `seven_day` keeps the local estimate
+        // (`localEstimateAllowed: true`) and is never idle: the weekly window always exists.
+        let (five, fiveIdle) = try Self.window(
             in: container, key: .fiveHour, window: .fiveHour,
-            limitKinds: ["session", "five_hour"], limits: limits, now: now)
+            limitKinds: ["session", "five_hour"], limits: limits, now: now,
+            localEstimateAllowed: false)
+        self.fiveHour = five
+        self.sessionIdle = fiveIdle
         self.sevenDay = try Self.window(
             in: container, key: .sevenDay, window: .sevenDay,
-            limitKinds: ["weekly_all", "seven_day"], limits: limits, now: now)
+            limitKinds: ["weekly_all", "seven_day"], limits: limits, now: now,
+            localEstimateAllowed: true).window
 
         // Per-model sub-windows stay optional: an absent key or an all-`null` object → `nil` (the
         // model was not used this window). But a **present** sub-window with `resets_at: null` is the
@@ -242,45 +269,64 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         return UsageWindow(utilization: decoded.utilization, resetsAt: parentResetsAt)
     }
 
-    /// Decode a core window, synthesizing a fresh zero-usage window when the API omits its
-    /// `resets_at` on a reset boundary (the object is `null`, missing, or present-but-without a
-    /// `resets_at`). The `utilization` is `0` — a just-reset window has zero usage — and the
-    /// `resets_at` is resolved by a fallback chain:
+    /// Decode a core window, resolving its `resets_at` via a fallback chain when the API omits it on
+    /// a reset boundary (the object is `null`, missing, or present-but-without a `resets_at`). The
+    /// `utilization` is `0` — a just-reset window has zero usage — and the `resets_at` chain is:
     ///
     /// 1. the window object's own `resets_at`, if present (the `utilization: null` case);
     /// 2. the first `limits[]` entry whose `kind` matches `limitKinds` and carries a `resets_at`
     ///    (live API uses `"session"`/`"weekly_all"`; the test fixtures use `"five_hour"`/`"seven_day"`);
-    /// 3. a local estimate, ``ResetClock/nextReset(now:window:)`` (`now + duration`, rounded to 10 min).
+    /// 3. a local estimate, ``ResetClock/nextReset(now:window:)`` (`now + duration`, rounded to 10 min)
+    ///    — **only when `localEstimateAllowed`**.
     ///
-    /// Every synthesis is logged once so a genuine future schema change is diagnosable from the logs.
+    /// `localEstimateAllowed` splits the two core windows (#100):
+    /// - `seven_day` (`true`): the weekly window always exists, so an exhausted chain still synthesizes
+    ///   a `now + 7d` estimate (logged once) — a missing weekly reset is a genuine boundary blip.
+    /// - `five_hour` (`false`): the 5h window is *created by the first token spend* and does not exist
+    ///   before then. An exhausted chain therefore means "no active session", not a reset boundary:
+    ///   the method returns `(UsageWindow(utilization: <decoded ?? 0>, resetsAt: ""), sessionIdle: true)`
+    ///   with **no** local estimate and **no** synthesis log — the honest idle state the UI renders as
+    ///   a solid-blue "ready to start" bar. This is what removes the drifting phantom `now + 5h` reset.
+    ///
+    /// - Returns: the resolved window plus `sessionIdle` — `true` only in the `five_hour` exhausted-chain
+    ///   case above, `false` on every other path (present reset, or a `limits[]`/local-estimate fill).
     private static func window(
         in container: KeyedDecodingContainer<CodingKeys>,
         key: CodingKeys,
         window: LimitWindow,
         limitKinds: [String],
         limits: [UsageLimit],
-        now: Date
-    ) throws -> UsageWindow {
+        now: Date,
+        localEstimateAllowed: Bool
+    ) throws -> (window: UsageWindow, sessionIdle: Bool) {
+        // The window object as sent (may be absent → `nil`). Kept so an idle window can preserve a
+        // present `utilization` (e.g. a `{"utilization":0.0,"resets_at":null}` idle body).
+        let decoded = try container.decodeIfPresent(UsageWindow.self, forKey: key)
+
         // A present, well-formed window with its own `resets_at` is the common path — return as-is.
-        if let decoded = try container.decodeIfPresent(UsageWindow.self, forKey: key),
-           decoded.hasResetsAt {
-            return decoded
+        if let decoded, decoded.hasResetsAt {
+            return (decoded, false)
         }
 
-        // Otherwise synthesize. Resolve the reset string via the fallback chain.
-        let source: String
-        let resetsAt: String
+        // No usable own `resets_at`. Try the `limits[]` fallback next.
         if let fromLimit = limits.first(where: { limitKinds.contains($0.kind) && !$0.resetsAt.isEmpty })?.resetsAt {
-            source = "limits[]"
-            resetsAt = fromLimit
-        } else {
-            source = "local-estimate"
-            resetsAt = Self.isoString(from: ResetClock.nextReset(now: now, window: window))
+            AppLogger.network.notice(
+                "synthesized \(key.stringValue, privacy: .public) window on reset boundary (utilization=0, resets_at source=limits[])")
+            return (UsageWindow(utilization: 0, resetsAt: fromLimit), false)
         }
 
+        // The `limits[]` chain is exhausted. For `five_hour` this is the honest "no active session"
+        // state: no synthesis, no phantom reset — `sessionIdle: true`. Preserve any present utilization
+        // (usually 0). No log: idle is a normal steady state, not a boundary event to diagnose.
+        guard localEstimateAllowed else {
+            return (UsageWindow(utilization: decoded?.utilization ?? 0, resetsAt: ""), true)
+        }
+
+        // `seven_day`: the weekly window always exists, so fall back to a local estimate (logged once).
         AppLogger.network.notice(
-            "synthesized \(key.stringValue, privacy: .public) window on reset boundary (utilization=0, resets_at source=\(source, privacy: .public))")
-        return UsageWindow(utilization: 0, resetsAt: resetsAt)
+            "synthesized \(key.stringValue, privacy: .public) window on reset boundary (utilization=0, resets_at source=local-estimate)")
+        let resetsAt = Self.isoString(from: ResetClock.nextReset(now: now, window: window))
+        return (UsageWindow(utilization: 0, resetsAt: resetsAt), false)
     }
 
     /// Render a `Date` back into the API's `resets_at` string shape (`…+00:00`, no fractional

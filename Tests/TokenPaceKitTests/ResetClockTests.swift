@@ -533,3 +533,44 @@ struct NextResetTests {
         #expect(ResetClock.ceilTo10Minutes(plus1) == base.addingTimeInterval(600))
     }
 }
+
+// MARK: - timeToResetCompactDays (menu-bar idle countdown, #100)
+
+@Suite("ResetClock.timeToResetCompactDays")
+struct TimeToResetCompactDaysTests {
+    private let now = Date(timeIntervalSince1970: 1_000_000)
+    private func at(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(seconds) }
+    private let utc = TimeZone(identifier: "UTC")!
+    private let gb = Locale(identifier: "en_GB")   // 24-hour
+
+    @Test func atLeastTwentyFourHoursIsDayCount() {
+        // ≥ 24 h → the compact "Nd" day count (reusing relativeRounded's nearest-day branch).
+        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(4 * 86_400), now: now) == .relative("4d"))
+    }
+
+    @Test func exactlyTwentyFourHoursIsOneDay() {
+        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(24 * 3_600), now: now) == .relative("1d"))
+    }
+
+    @Test func daysRoundToNearest() {
+        // 3d18h → 4d, same arithmetic as the popup (never disagrees by a day).
+        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(3 * 86_400 + 18 * 3_600), now: now) == .relative("4d"))
+    }
+
+    @Test func justUnderTwentyFourHoursIsAbsolute() {
+        // 23h59m < 24 h → delegates to timeToReset → the absolute wall-clock branch (> 90 min).
+        let reset = ResetClock.timeToResetCompactDays(
+            resetsAt: at(23 * 3_600 + 59 * 60), now: now, locale: gb, timeZone: utc)
+        if case .absolute = reset {} else { Issue.record("expected .absolute, got \(reset)") }
+    }
+
+    @Test func within90MinutesIsRelative() {
+        // 45 min < 24 h → the existing relative band, verbatim.
+        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(45 * 60), now: now) == .relative("45m"))
+    }
+
+    @Test func pastIsResetNow() {
+        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(-60), now: now) == .resetNow)
+        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(0), now: now) == .resetNow)
+    }
+}

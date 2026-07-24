@@ -1,7 +1,14 @@
 ---
-status: accepted
+status: superseded
 date: 2026-06-23
+superseded_by: [0027]
 ---
+
+> **Частково витіснено [ADR-0027](0027-session-idle-no-phantom-reset.md).** Гілка **local-estimate для
+> `five_hour`** (синтез `now + 5h` на межі ресету) замінена на чесний стан «немає активної сесії»
+> (`sessionIdle`), бо для 5h-вікна відсутність `resets_at` означає «вікна не існує», а не блип ресету.
+> Решта рішення чинна: толерантний decode, limits[]-фолбек, local-estimate для `seven_day` та borrow
+> для sub-вікон лишаються в силі.
 
 # ADR-0014: UsageSnapshot — синтез вікна на межі ресету замість падіння decode
 
