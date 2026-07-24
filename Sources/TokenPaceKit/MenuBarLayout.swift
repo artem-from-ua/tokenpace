@@ -30,6 +30,13 @@ public struct BarView: Sendable, Equatable {
         self.window = window
         self.idle = idle
     }
+
+    /// Whether this bar is "calm" (green/yellow) for the purpose of hiding the reset label
+    /// (`MenuBarMode/expanded` `showReset`, ADR-0028). Delegates to `BarLayout.isCalm`, except an
+    /// **idle** 5-hour bar is always calm: it carries an inert placeholder `layout` (`usage 0 /
+    /// time 0`) and represents "ready to start, full quota available", never a pacing concern — so
+    /// it must not force the label on. Only the 7-day bar decides the label in the idle state.
+    public var isCalm: Bool { idle ? true : layout.isCalm }
 }
 
 // MARK: - MenuBarMode
@@ -53,9 +60,13 @@ public enum MenuBarMode: Sendable, Equatable {
     /// - Parameters:
     ///   - fiveHour: The 5-hour bar (drawn on top).
     ///   - sevenDay: The 7-day bar (drawn below).
-    ///   - reset: Formatted countdown to whichever window resets first (`ResetClock`).
+    ///   - reset: Formatted countdown to whichever window resets first (`ResetClock`). Always
+    ///     computed; drawn only when `showReset` is `true`.
     ///   - which: Which window drives `reset` (so the view can label/associate it).
-    case expanded(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset, which: LimitWindow)
+    ///   - showReset: Whether the view should actually draw the `reset` label. `false` when **both**
+    ///     bars are calm (green/yellow) — the label is dropped as noise (ADR-0028); `true` as soon as
+    ///     either bar is orange/red. In the idle state only the 7-day bar decides this.
+    case expanded(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset, which: LimitWindow, showReset: Bool)
     /// Error state: a ⚠️ glyph, optionally with the last known bars beside it.
     ///
     /// All associated values are `nil` together (⚠️ only) or all non-`nil` together (⚠️ + bars) —
@@ -146,8 +157,10 @@ public struct MenuBarLayout: Sendable, Equatable {
                 indicator: .neutral, window: .fiveHour, idle: true)
             let reset = ResetClock.parse(snapshot.sevenDay.resetsAt)
                 .map { ResetClock.timeToResetCompactDays(resetsAt: $0, now: now) } ?? .resetNow
+            // Idle 5h is always calm, so only the 7-day bar decides whether the label shows.
             return MenuBarLayout(
-                mode: .expanded(fiveHour: five, sevenDay: seven, reset: reset, which: .sevenDay))
+                mode: .expanded(fiveHour: five, sevenDay: seven, reset: reset, which: .sevenDay,
+                                showReset: !seven.isCalm))
         }
 
         let five = bar(for: snapshot.fiveHour, window: .fiveHour, now: now)
@@ -158,8 +171,11 @@ public struct MenuBarLayout: Sendable, Equatable {
             now: now
         ) ?? (.fiveHour, .resetNow)
 
+        // Drop the reset countdown as noise while both bars are calm (green/yellow); show it as soon
+        // as either turns orange/red (ADR-0028).
         return MenuBarLayout(
-            mode: .expanded(fiveHour: five, sevenDay: seven, reset: reset, which: which)
+            mode: .expanded(fiveHour: five, sevenDay: seven, reset: reset, which: which,
+                            showReset: !(five.isCalm && seven.isCalm))
         )
     }
 
@@ -210,7 +226,7 @@ public struct MenuBarLayout: Sendable, Equatable {
         // only if we have a snapshot; otherwise the glyph stands alone.
         let keepBars = snapshot != nil && age <= UsageHealth.hideBarsAfter
         guard keepBars, let snapshot,
-              case let .expanded(five, seven, reset, which) = make(from: snapshot, now: now).mode else {
+              case let .expanded(five, seven, reset, which, _) = make(from: snapshot, now: now).mode else {
             return MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
         }
         return MenuBarLayout(mode: .error(fiveHour: five, sevenDay: seven, reset: reset, which: which))

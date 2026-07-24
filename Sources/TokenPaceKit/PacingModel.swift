@@ -99,6 +99,23 @@ public struct BarLayout: Sendable, Equatable {
     public var gapStart: Double { min(usageFraction, timeFraction) }
     /// Right edge of the gap zone = `max(usageFraction, timeFraction)`.
     public var gapEnd: Double   { max(usageFraction, timeFraction) }
+
+    /// Whether this bar is "calm" — its rendered gap colour is **green or yellow**, i.e. pacing is
+    /// not yet worth flagging. The menu bar uses this to drop the reset-countdown label when *both*
+    /// bars are calm (removing visual noise while everything is fine); the label returns as soon as
+    /// either bar turns orange or red (`MenuBarLayout.make`, ADR-0028).
+    ///
+    /// Mirrors the colour grading in `PopupBarView.aheadColor` (which lives in the AppKit layer and
+    /// cannot be imported here), so the thresholds are duplicated deliberately:
+    /// - `.onPaceOrBehind` (`usage <= time`) → **green** → calm.
+    /// - ahead (`usage > time`): **red** when `usageFraction >= 1` (limit exhausted) → not calm;
+    ///   **yellow** when `(usageFraction - timeFraction) < 0.15` → calm; else **orange** → not calm.
+    ///
+    /// The `< 0.15` boundary is strict (no epsilon), matching the integer-percent contract of
+    /// `limitIndicator`: exactly 15 points ahead is orange, not yellow.
+    public var isCalm: Bool {
+        pacing == .onPaceOrBehind || (usageFraction < 1 && (usageFraction - timeFraction) < 0.15)
+    }
 }
 
 // MARK: - PacingModel

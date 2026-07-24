@@ -255,3 +255,40 @@ struct BlockIndexTests {
         #expect(PacingModel.blockIndex(fraction: -0.5, cells: 10) == 0)
     }
 }
+
+// MARK: - BarLayout.isCalm (ADR-0028)
+
+@Suite("BarLayout.isCalm")
+struct BarLayoutIsCalmTests {
+
+    /// A layout with explicit fractions; `pacing` derived exactly as `barLayout` would
+    /// (`time >= usage → onPaceOrBehind`), so `isCalm` is exercised on realistic inputs.
+    private static func layout(usage: Double, time: Double) -> BarLayout {
+        BarLayout(usageFraction: usage, timeFraction: time,
+                  pacing: time >= usage ? .onPaceOrBehind : .ahead)
+    }
+
+    @Test func onPaceIsCalm() {   // green — usage below time
+        #expect(BarLayoutIsCalmTests.layout(usage: 0.3, time: 0.5).isCalm)
+    }
+
+    @Test func exactTieIsCalm() { // green — the equality tie folds into on-pace
+        #expect(BarLayoutIsCalmTests.layout(usage: 0.5, time: 0.5).isCalm)
+    }
+
+    @Test func slightlyAheadIsCalm() {   // yellow — 10 points ahead (< 0.15)
+        #expect(BarLayoutIsCalmTests.layout(usage: 0.5, time: 0.4).isCalm)
+    }
+
+    @Test func exactlyFifteenPointsAheadIsNoisy() {  // boundary is strict (< 0.15): 0.15 → orange
+        #expect(!BarLayoutIsCalmTests.layout(usage: 0.55, time: 0.4).isCalm)
+    }
+
+    @Test func farAheadIsNoisy() {   // orange — 20 points ahead
+        #expect(!BarLayoutIsCalmTests.layout(usage: 0.7, time: 0.5).isCalm)
+    }
+
+    @Test func exhaustedIsNoisyEvenWhenNearlyOnPace() {  // red — usage == 1 overrides the yellow window
+        #expect(!BarLayoutIsCalmTests.layout(usage: 1.0, time: 0.95).isCalm)
+    }
+}

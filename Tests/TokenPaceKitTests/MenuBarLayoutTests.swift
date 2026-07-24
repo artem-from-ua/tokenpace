@@ -61,7 +61,7 @@ struct MenuBarLayoutMakeTests {
         // 0 % with a VALID resets_at is an active-but-empty window, NOT session-idle — both bars are
         // normal (the idle state is API-driven by a missing reset, not by a low utilisation; ADR-0027).
         let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 0, sevenDayUtil: 0), now: now)
-        guard case let .expanded(five, _, _, _) = layout.mode else {
+        guard case let .expanded(five, _, _, _, _) = layout.mode else {
             Issue.record("expected .expanded at 0%, got \(layout.mode)")
             return
         }
@@ -85,12 +85,12 @@ struct MenuBarLayoutExpandedTests {
     /// Pull the associated values out of an expanded mode, or fail the test.
     private func expanded(
         _ layout: MenuBarLayout
-    ) -> (five: BarView, seven: BarView, reset: TimeToReset, which: LimitWindow)? {
-        guard case let .expanded(five, seven, reset, which) = layout.mode else {
+    ) -> (five: BarView, seven: BarView, reset: TimeToReset, which: LimitWindow, showReset: Bool)? {
+        guard case let .expanded(five, seven, reset, which, showReset) = layout.mode else {
             Issue.record("expected .expanded, got \(layout.mode)")
             return nil
         }
-        return (five, seven, reset, which)
+        return (five, seven, reset, which, showReset)
     }
 
     @Test func barsCarryTheirWindows() {
@@ -171,12 +171,12 @@ struct MenuBarLayoutIdleTests {
 
     private func expanded(
         _ layout: MenuBarLayout
-    ) -> (five: BarView, seven: BarView, reset: TimeToReset, which: LimitWindow)? {
-        guard case let .expanded(five, seven, reset, which) = layout.mode else {
+    ) -> (five: BarView, seven: BarView, reset: TimeToReset, which: LimitWindow, showReset: Bool)? {
+        guard case let .expanded(five, seven, reset, which, showReset) = layout.mode else {
             Issue.record("expected .expanded, got \(layout.mode)")
             return nil
         }
-        return (five, seven, reset, which)
+        return (five, seven, reset, which, showReset)
     }
 
     @Test func idleKeepsBothBarsExpanded() {
@@ -375,5 +375,71 @@ struct MenuBarLayoutServiceProblemTests {
             from: nil, health: failing, now: now, serviceProblem: .majorOutage)
         #expect(layout.serviceProblem == .majorOutage)
         if case .error = layout.mode {} else { Issue.record("expected error mode") }
+    }
+}
+
+// MARK: - showReset: hide the reset label when both bars are calm (ADR-0028)
+
+@Suite("MenuBarLayout showReset")
+struct MenuBarLayoutShowResetTests {
+
+    /// `showReset` from an expanded mode, or `nil` (recording a failure) if not expanded.
+    private func showReset(_ layout: MenuBarLayout) -> Bool? {
+        guard case let .expanded(_, _, _, _, showReset) = layout.mode else {
+            Issue.record("expected .expanded, got \(layout.mode)")
+            return nil
+        }
+        return showReset
+    }
+
+    // In the 5h window (18000 s) a `fiveHourResetsIn: 4*3600` reset → timeFraction 0.2; in the 7d
+    // window a `3*24*3600` reset → timeFraction ≈ 0.571. Utilisations below those are green (calm).
+
+    @Test func bothGreenHidesReset() {
+        // 5h usage 0.10 < time 0.20 (green); 7d usage 0.30 < time 0.571 (green) → both calm → hidden.
+        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), now: now)
+        #expect(showReset(layout) == false)
+    }
+
+    @Test func greenPlusYellowHidesReset() {
+        // 5h green (usage 0.10); 7d yellow — usage 0.65 vs time 0.571, ahead by ~0.08 (< 0.15) → calm.
+        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 65), now: now)
+        #expect(showReset(layout) == false)
+    }
+
+    @Test func bothYellowHidesReset() {
+        // 5h yellow — usage 0.30 vs time 0.20, ahead 0.10 (< 0.15); 7d yellow — usage 0.65 vs 0.571.
+        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 30, sevenDayUtil: 65), now: now)
+        #expect(showReset(layout) == false)
+    }
+
+    @Test func oneOrangeShowsReset() {
+        // 5h orange — usage 0.50 vs time 0.20, ahead 0.30 (>= 0.15) → noisy; 7d green → label returns.
+        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), now: now)
+        #expect(showReset(layout) == true)
+    }
+
+    @Test func oneExhaustedShowsReset() {
+        // 7d usage == 100 → red → noisy, even though 5h is green.
+        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 100), now: now)
+        #expect(showReset(layout) == true)
+    }
+
+    @Test func idleWithCalmSevenDayHidesReset() {
+        // Idle 5h is always calm; a calm 7-day (usage 0.31 vs time ≈ 0.571 green) → label hidden.
+        let layout = MenuBarLayout.make(from: idleSnapshot(sevenDayUtil: 31), now: now)
+        guard case let .expanded(five, _, _, which, showReset) = layout.mode else {
+            Issue.record("expected .expanded, got \(layout.mode)")
+            return
+        }
+        #expect(five.idle)
+        #expect(which == .sevenDay)
+        #expect(!showReset)
+    }
+
+    @Test func idleWithNoisySevenDayShowsReset() {
+        // Idle 5h calm, but a noisy 7-day decides: usage 0.95 vs time ≈ 0.571, ahead ~0.38 → orange.
+        let layout = MenuBarLayout.make(from: idleSnapshot(sevenDayUtil: 95), now: now)
+        #expect(showReset(layout) == true)
     }
 }

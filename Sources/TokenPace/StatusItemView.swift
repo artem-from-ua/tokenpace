@@ -168,8 +168,8 @@ final class StatusItemView: NSView {
         }
 
         switch layout.mode {
-        case let .expanded(fiveHour, sevenDay, reset, _):
-            drawExpanded(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: contentRect)
+        case let .expanded(fiveHour, sevenDay, reset, _, showReset):
+            drawExpanded(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, showReset: showReset, in: contentRect)
         case let .error(fiveHour, sevenDay, reset, _):
             drawError(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: contentRect)
         }
@@ -219,14 +219,20 @@ final class StatusItemView: NSView {
 
     // MARK: Expanded
 
-    private func drawExpanded(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset, in rect: NSRect) {
-        drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, originX: rect.minX + Metrics.hPadding, in: rect)
+    private func drawExpanded(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset, showReset: Bool, in rect: NSRect) {
+        drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, showReset: showReset,
+                 originX: rect.minX + Metrics.hPadding, in: rect)
     }
 
-    /// Draw the stacked 5h/7d bars + reset label, with the bars block starting at `originX`.
-    /// Shared by ``drawExpanded(fiveHour:sevenDay:reset:in:)`` and the bars-beside-⚠️ error phase so
-    /// the geometry is identical; only the left origin differs (the error glyph shifts it right).
-    private func drawBars(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset, originX: CGFloat, in rect: NSRect) {
+    /// Draw the stacked 5h/7d bars, with the bars block starting at `originX`; the reset label is
+    /// drawn to their right only when `showReset` is `true`.
+    ///
+    /// Shared by ``drawExpanded(fiveHour:sevenDay:reset:showReset:in:)`` and the bars-beside-⚠️ error
+    /// phase so the geometry is identical; only the left origin differs (the error glyph shifts it
+    /// right). The error phase always passes `showReset: true` (the countdown is diagnostic there,
+    /// ADR-0028); the calm-hiding applies to the normal expanded mode only.
+    private func drawBars(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset, showReset: Bool = true,
+                          originX: CGFloat, in rect: NSRect) {
         // Two bars stacked, vertically centred as a block.
         let blockHeight = Metrics.barHeight * 2 + Metrics.barGap
         let topY = rect.minY + (rect.height - blockHeight) / 2
@@ -241,7 +247,9 @@ final class StatusItemView: NSView {
             width: Metrics.barWidth, height: Metrics.barHeight
         ))
 
-        drawResetLabel(reset, leftOf: barsRect.maxX + Metrics.labelGap, in: rect)
+        if showReset {
+            drawResetLabel(reset, leftOf: barsRect.maxX + Metrics.labelGap, in: rect)
+        }
     }
 
     // MARK: Error (issue #12)
@@ -416,8 +424,8 @@ final class StatusItemView: NSView {
         switch layout?.mode {
         case .none:
             return Metrics.height + dotInset            // square-ish compact item (no layout yet)
-        case let .expanded(_, _, reset, _):
-            return dotInset + Metrics.hPadding + barsBlockWidth(reset: reset) + Metrics.hPadding
+        case let .expanded(_, _, reset, _, showReset):
+            return dotInset + Metrics.hPadding + barsBlockWidth(reset: reset, showReset: showReset) + Metrics.hPadding
         case let .error(five, _, reset, _):
             // ⚠️ alone (cold start / >60 min) → compact; ⚠️ + stale bars (30–60 min) → glyph + bars.
             guard five != nil, let reset else { return Metrics.height + dotInset }
@@ -426,9 +434,13 @@ final class StatusItemView: NSView {
         }
     }
 
-    /// Width of the bars block + its reset label (no outer padding) — shared by the expanded and
-    /// error-with-bars widths so they stay in sync with ``drawBars(fiveHour:sevenDay:reset:originX:in:)``.
-    private func barsBlockWidth(reset: TimeToReset) -> CGFloat {
+    /// Width of the bars block + (optionally) its reset label (no outer padding) — shared by the
+    /// expanded and error-with-bars widths so they stay in sync with
+    /// ``drawBars(fiveHour:sevenDay:reset:showReset:originX:in:)``. When `showReset` is `false` the
+    /// label (and its leading gap) is omitted, so the item hugs just the bars (ADR-0028); the error
+    /// path always passes `showReset: true`.
+    private func barsBlockWidth(reset: TimeToReset, showReset: Bool = true) -> CGFloat {
+        guard showReset else { return Metrics.barWidth }
         let labelWidth = (resetText(reset) as NSString).size(withAttributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         ]).width
