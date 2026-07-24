@@ -20,7 +20,7 @@ final class SettingsWindowController: NSWindowController {
     private static let repoURL = URL(string: "https://github.com/artem-from-ua/tokenpace")!
 
     private enum Metrics {
-        static let width: CGFloat = 320
+        static let width: CGFloat = 400
         static let padding: CGFloat = 20
         static let rowSpacing: CGFloat = 12
         /// Leading inset of the radio group nested under the "Claude WEB/Desktop" checkbox (#89).
@@ -177,10 +177,10 @@ final class SettingsWindowController: NSWindowController {
         // shows (or hides). AppKit groups radios with the same `action` in one superview into an
         // exclusive set; the vertical stack keeps them a single group. Each radio's `tag` is its
         // `ResetCountdownMode.allCases` index, so the handler maps the selection back to a mode.
-        let resetLabel = NSTextField(labelWithString: "Reset countdown:")
+        let resetLabel = NSTextField(labelWithString: "Display reset countdown:")
         resetLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
         stack.addArrangedSubview(resetLabel)
-        stack.setCustomSpacing(4, after: calmHint)
+        stack.setCustomSpacing(12, after: calmHint)   // separate the countdown sub-section from the calm hint
 
         var resetRadioViews: [NSButton] = []
         for (index, mode) in ResetCountdownMode.allCases.enumerated() {
