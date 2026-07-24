@@ -422,8 +422,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //  • `=error`      → 401 auth failure + both Claude services degraded (the warning block).
         //  • `=idle`       → the honest "no active 5h session" state (#100): solid-blue 5h bar, no
         //                    phantom reset, menu-bar time falls back to the 7-day reset ("4d").
-        //  • `=5h-orange` / `both-orange` / `both-red` / `red-orange`
+        //  • `=5h-orange` / `both-orange` / `both-red` / `red-orange` / `calm5-orange7`
         //                  → fixed 5h×7d severity frames for the reset-countdown table (#103).
+        //                    `calm5-orange7` is the lone-distant-7d-orange cell where the Settings
+        //                    "Include distant 7d limit reset" checkbox toggles a visible difference.
         let stubMode = Self.stubName
         let transport: UsageTransport = switch stubMode {
         case "1":          StubUsageTransport(mode: .climbing)
@@ -435,6 +437,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "both-orange": StubUsageTransport(mode: .pacing(.bothOrange))
         case "both-red":    StubUsageTransport(mode: .pacing(.bothRed))
         case "red-orange":  StubUsageTransport(mode: .pacing(.redOrange))
+        case "calm5-orange7": StubUsageTransport(mode: .pacing(.calmFiveOrangeSeven))
         default:           URLSession.shared
         }
         // The status poll uses the same transport seam (the stub answers the status endpoint too).
