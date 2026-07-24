@@ -126,7 +126,8 @@ token itself never is.
 |------|----------|-------|---------|------|
 | 158 | `lifecycle` | `.notice` | `launch-at-login: user set <true/false>` | user toggled the launch-at-login checkbox successfully |
 | 164 | `lifecycle` | `.error` | `launch-at-login: toggle failed: <error>` | toggle threw (e.g. unsigned build) — a deliberate user action, so it stays `.error` |
-| 389 | `lifecycle` | `.notice` | `update: automatic checks set <bool>` | user toggled the "Check for updates daily" checkbox (#37) |
+| 424 | `lifecycle` | `.notice` | `calm-colors: menu-bar set <bool>` | user toggled the "Calm MenuBar Widget colors" checkbox (#105) |
+| 439 | `lifecycle` | `.notice` | `update: automatic checks set <bool>` | user toggled the "Check for updates daily" checkbox (#37) |
 
 ## `Sources/TokenPace/GHReleaseFetcher.swift`
 
@@ -254,7 +255,7 @@ One log line per interval change. The format is built by
 | Category | Calls | Files |
 |----------|-------|-------|
 | `network` | 24 | `UsageClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `PollingEngine` (1), `GitHubReleaseClient` (6), `App` (1), `GHReleaseFetcher` (1), `GitHubRelease` (1) |
-| `lifecycle` | 27 | `App` (12), `SettingsWindowController` (3), `PollingShell` (5), `PollingEngine` (1), `UpdateNotifier` (5), `ShellEnvironment` (1) |
+| `lifecycle` | 28 | `App` (12), `SettingsWindowController` (4), `PollingShell` (5), `PollingEngine` (1), `UpdateNotifier` (5), `ShellEnvironment` (1) |
 | `keychain` | 10 | `TokenProvider` (3), `ClaudeCLIRefresher` (6), `PollingEngine` (1) |
 | `ui` | 0 | — (category defined, unused) |
 

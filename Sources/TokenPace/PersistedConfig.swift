@@ -32,6 +32,9 @@ enum PersistedConfig {
         /// The latest release tag last surfaced to the user (#37), so the same version is not
         /// notified twice.
         static let lastSeenLatestVersion = "lastSeenLatestVersion"
+        /// Whether the menu-bar widget mutes its soft pacing colours to white (#105). Default-off
+        /// (opt-in) — see the property.
+        static let calmMenuBarColors = "calmMenuBarColors"
     }
 
     /// The marketing version the config was last written under, or `nil` if none has been recorded
@@ -82,5 +85,16 @@ enum PersistedConfig {
     static var lastSeenLatestVersion: String? {
         get { defaults.string(forKey: Key.lastSeenLatestVersion) }
         set { defaults.set(newValue, forKey: Key.lastSeenLatestVersion) }
+    }
+
+    /// Whether the menu-bar widget renders its **soft** pacing colours as white (#105) — the idle
+    /// blue track, the on-pace green, and the mild ahead-of-pace yellow. **Default-off** (opt-in):
+    /// an absent key reads as `false`, so the vivid statusline colours are the out-of-the-box look.
+    /// `object(forKey:) as? Bool ?? false` distinguishes "unset" (→ false) from an explicit choice.
+    /// The strong warnings (orange/red), the time-indicator dot, the service-status dot, and the
+    /// error triangle are unaffected; the popup keeps its full colour too.
+    static var calmMenuBarColors: Bool {
+        get { defaults.object(forKey: Key.calmMenuBarColors) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.calmMenuBarColors) }
     }
 }

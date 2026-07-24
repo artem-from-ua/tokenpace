@@ -36,6 +36,11 @@ final class SettingsWindowController: NSWindowController {
     /// immediate update check that bypasses the 24 h cadence.
     var onCheckForUpdatesNow: (() -> Void)?
 
+    /// Called when the user toggles "Calm MenuBar Widget colors" (#105), with the new on/off state —
+    /// wired by `AppDelegate.openSettings` to re-render the menu-bar image immediately. The choice is
+    /// already persisted (via `PersistedConfig`) by the time this fires.
+    var onCalmColorsChange: ((Bool) -> Void)?
+
     /// The "Check for updates daily" checkbox (#37), synced from `PersistedConfig` on every `show()`.
     private var updatesToggle: NSButton!
     /// The "Check now" button (#37).
@@ -54,6 +59,10 @@ final class SettingsWindowController: NSWindowController {
     /// The launch-at-login checkbox — its state is synced from the live `SMAppService` status every
     /// time the window is shown (the user may have changed it in System Settings meanwhile).
     private var launchToggle: NSButton!
+
+    /// The "Calm MenuBar Widget colors" checkbox (#105), synced from `PersistedConfig` on every
+    /// `show()`.
+    private var calmColorsToggle: NSButton!
 
     /// The "Claude Code" monitoring checkbox (#89).
     private var claudeCodeToggle: NSButton!
@@ -95,6 +104,7 @@ final class SettingsWindowController: NSWindowController {
         lastToggleFailed = false   // a fresh open starts from the status-derived hint (#69)
         syncToggleFromSystem()
         syncMonitoredServicesFromConfig()
+        calmColorsToggle.state = PersistedConfig.calmMenuBarColors ? .on : .off
         updatesToggle.state = PersistedConfig.automaticUpdateChecks ? .on : .off
         NSApp.activate(ignoringOtherApps: true)
         if !(window?.isVisible ?? false) { window?.center() }
@@ -128,6 +138,28 @@ final class SettingsWindowController: NSWindowController {
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
         stack.addArrangedSubview(hintLabel)
         hintLabel.widthAnchor.constraint(
+            equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
+
+        stack.addArrangedSubview(sectionSeparator())
+
+        // ── Menu bar widget (#105) ────────────────────────────────────────────────────────────
+        stack.addArrangedSubview(sectionHeader("Menu bar widget"))
+
+        calmColorsToggle = NSButton(
+            checkboxWithTitle: "Calm MenuBar Widget colors",
+            target: self,
+            action: #selector(toggleCalmColors(_:)))
+        stack.addArrangedSubview(calmColorsToggle)
+
+        // Explains what the toggle does — warning colours and the service dot are deliberately spared.
+        let calmHint = NSTextField(wrappingLabelWithString:
+            "Shows blue/green/yellow pacing bars as white in the menu bar. "
+            + "Warning colours and the service dot stay coloured.")
+        calmHint.font = .systemFont(ofSize: 11)
+        calmHint.textColor = .secondaryLabelColor
+        calmHint.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(calmHint)
+        calmHint.widthAnchor.constraint(
             equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
 
         stack.addArrangedSubview(sectionSeparator())
@@ -382,6 +414,15 @@ final class SettingsWindowController: NSWindowController {
             LaunchAtLoginController.openLoginItemsSettings()
         }
         syncToggleFromSystem()
+    }
+
+    /// Persist the "Calm MenuBar Widget colors" choice (#105) and notify the app so the menu-bar
+    /// image repaints immediately.
+    @objc private func toggleCalmColors(_ sender: NSButton) {
+        let on = sender.state == .on
+        PersistedConfig.calmMenuBarColors = on
+        AppLogger.lifecycle.notice("calm-colors: menu-bar set \(on, privacy: .public)")
+        onCalmColorsChange?(on)
     }
 
     @objc private func openRepo() {
