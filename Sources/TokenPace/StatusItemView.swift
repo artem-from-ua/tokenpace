@@ -398,16 +398,16 @@ final class StatusItemView: NSView {
 
     // MARK: Helpers
 
-    /// Map the reset countdown to its display string. `.resetNow` renders as a neutral `"~1m"`
-    /// ("refresh imminent"), not the old colored ⏰ (#36) — it stays consistent with the monochrome
-    /// text of the rest of the menu bar. In the normal reset-boundary flow the coordinator's
-    /// optimistic-reset timer rolls the window forward before the countdown reaches zero, so `.resetNow`
-    /// now only surfaces genuinely degenerate data (a missing/unparseable `resets_at`).
+    /// Map the reset countdown to its display string. `.resetNow` renders as a neutral `"<1m"`
+    /// ("about to reset"), not the old colored ⏰ (#36) — it stays consistent with the monochrome text
+    /// and the sub-minute `"<1m"` of the live countdown. In the normal reset-boundary flow the
+    /// coordinator's optimistic-reset timer rolls the window forward before the countdown reaches zero,
+    /// so `.resetNow` now only surfaces genuinely degenerate data (a missing/unparseable `resets_at`).
     private func resetText(_ reset: TimeToReset) -> String {
         switch reset {
         case let .absolute(s): return s
         case let .relative(s): return s
-        case .resetNow:        return "~1m"
+        case .resetNow:        return "<1m"
         }
     }
 

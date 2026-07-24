@@ -118,11 +118,11 @@ struct RelCase: Sendable {
 struct RelativeTests {
 
     private static let cases: [RelCase] = [
-        // seconds band (0, 60)
-        RelCase(offset: 1,                 want: .relative("1s")),
-        RelCase(offset: 40,                want: .relative("40s")),
-        RelCase(offset: 59,                want: .relative("59s")),
-        // seconds → minutes boundary at exactly 60 s
+        // sub-minute (0, 60) → "<1m", no seconds band (menu bar re-renders on ~30 s, #36 follow-up)
+        RelCase(offset: 1,                 want: .relative("<1m")),
+        RelCase(offset: 40,                want: .relative("<1m")),
+        RelCase(offset: 59,                want: .relative("<1m")),
+        // minute boundary at exactly 60 s
         RelCase(offset: 60,                want: .relative("1m")),
         // minutes only (h == 0)
         RelCase(offset: 45 * 60,           want: .relative("45m")),
@@ -132,8 +132,10 @@ struct RelativeTests {
         // hours + minutes
         RelCase(offset: 60 * 60 + 60,      want: .relative("1h1m")),
         RelCase(offset: 70 * 60,           want: .relative("1h10m")),
-        // truncation toward zero: 1h10m59s of remaining drops the 59 s
-        RelCase(offset: 70 * 60 + 59,      want: .relative("1h10m")),
+        // rounds to the nearest minute: 1h10m59s → 1h11m (not truncated to 1h10m)
+        RelCase(offset: 70 * 60 + 59,      want: .relative("1h11m")),
+        // rounds down: 1h10m20s → 1h10m
+        RelCase(offset: 70 * 60 + 20,      want: .relative("1h10m")),
     ]
 
     @Test(arguments: RelativeTests.cases)
@@ -325,9 +327,11 @@ struct RelativeRoundedTests {
     private let now = Date(timeIntervalSince1970: 1_000_000)
     private func at(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(seconds) }
 
-    @Test func subThirtySecondsFloorsToOneMinute() {
-        #expect(ResetClock.relativeRounded(resetsAt: at(10), now: now) == "1m")
-        #expect(ResetClock.relativeRounded(resetsAt: at(29), now: now) == "1m")
+    @Test func subMinuteRendersLessThanOneMinute() {
+        // Sub-minute → "<1m" (no seconds value), matching the menu bar (#36 follow-up).
+        #expect(ResetClock.relativeRounded(resetsAt: at(10), now: now) == "<1m")
+        #expect(ResetClock.relativeRounded(resetsAt: at(29), now: now) == "<1m")
+        #expect(ResetClock.relativeRounded(resetsAt: at(59), now: now) == "<1m")
     }
 
     @Test func minutesRoundToNearest() {
