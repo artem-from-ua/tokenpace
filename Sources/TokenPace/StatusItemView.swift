@@ -324,7 +324,7 @@ final class StatusItemView: NSView {
         // (`PopupBarView.aheadColor`: amber → orange → red by how far ahead), so the menu-bar bar and
         // the popup row agree — e.g. a yellow 7-day here reads yellow in the dropdown too. On pace →
         // the statusline green (ADR-0005), kept fixed to match the terminal pacing bar.
-        let gapColor = calmedGapColor(usage: l.usageFraction, time: l.timeFraction, pacing: l.pacing)
+        let gapColor = calmedGapColor(l)
         fillZone(from: l.gapStart, to: l.gapEnd, in: rect, width: w, color: gapColor)
 
         NSGraphicsContext.restoreGraphicsState()
@@ -336,7 +336,7 @@ final class StatusItemView: NSView {
         let cy = rect.midY
         let d = Metrics.tickDiameter
         let dot = NSBezierPath(ovalIn: NSRect(x: cx - d / 2, y: cy - d / 2, width: d, height: d))
-        indicatorColor(usage: l.usageFraction, time: l.timeFraction).setFill()
+        indicatorColor(l).setFill()
         dot.fill()
         Palette.indicatorStroke.setStroke()
         dot.lineWidth = Metrics.tickStroke
@@ -353,33 +353,26 @@ final class StatusItemView: NSView {
     /// (`PopupBarView.aheadColor`), so the dot and its gap read as the same colour across both bars.
     ///
     /// Calm mode (#105): the dot follows its gap — it is white in exactly the states where the pacing
-    /// gap under it mutes to white (on pace / behind, and the mild ahead-of-pace yellow), and keeps
-    /// its colour where the gap stays coloured (orange/red). So the dot never floats as a colour over a
-    /// white strip.
-    private func indicatorColor(usage: Double, time: Double) -> NSColor {
-        if calmColors && mutesToWhiteInCalm(usage: usage, time: time) { return Palette.calmWhite }
-        return usage > time ? PopupBarView.aheadColor(usage: usage, time: time) : Palette.dotGreen
+    /// gap under it mutes to white (the **calm** states — on pace / behind, and the mild ahead-of-pace
+    /// yellow), and keeps its colour where the gap stays coloured (orange/red). So the dot never floats
+    /// as a colour over a white strip. "Calm" is the SAME predicate the menu bar uses to drop the reset
+    /// label (`BarLayout.isCalm`, ADR-0028) — one source of truth, so colour and countdown always agree.
+    private func indicatorColor(_ l: BarLayout) -> NSColor {
+        if calmColors && l.isCalm { return Palette.calmWhite }
+        return l.timeFraction < l.usageFraction
+            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction)
+            : Palette.dotGreen
     }
 
     /// The pacing-gap fill colour, with calm mode (#105) applied. Normally this is the on-pace green
-    /// or the graded ahead colour (`PopupBarView.aheadColor`). When `calmColors` is on, the **soft**
-    /// states mute to white — on-pace green, and the *mild* ahead-of-pace step (yellow); the strong
-    /// warnings stay coloured.
-    private func calmedGapColor(usage: Double, time: Double, pacing: PacingState) -> NSColor {
-        if calmColors && mutesToWhiteInCalm(usage: usage, time: time) { return Palette.calmWhite }
-        return pacing == .ahead
-            ? PopupBarView.aheadColor(usage: usage, time: time)
+    /// or the graded ahead colour (`PopupBarView.aheadColor`). When `calmColors` is on, the **calm**
+    /// states (`BarLayout.isCalm`: on-pace green + mild-ahead yellow) mute to white; the strong warnings
+    /// (orange/red) stay coloured.
+    private func calmedGapColor(_ l: BarLayout) -> NSColor {
+        if calmColors && l.isCalm { return Palette.calmWhite }
+        return l.pacing == .ahead
+            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction)
             : Palette.gapGreen
-    }
-
-    /// Whether a bar's pacing colour is a **soft** one that calm mode (#105) mutes to white — the
-    /// on-pace/behind green (`usage <= time`) or the *mild* ahead-of-pace yellow (ahead by < 15 pts and
-    /// not yet exhausted). Orange/red (strong ahead / exhausted) return `false` and keep their colour.
-    /// The thresholds mirror `PopupBarView.aheadColor` and are recomputed from the raw fractions, so
-    /// the gap fill and the time-indicator dot agree without comparing resolved `NSColor` instances.
-    private func mutesToWhiteInCalm(usage: Double, time: Double) -> Bool {
-        if usage <= time { return true }                 // on pace / behind / tie → green
-        return usage < 1 && (usage - time) < 0.15        // mild ahead → yellow
     }
 
     /// Fill the sub-rect spanning the fraction range `[from, to)` of a bar.
