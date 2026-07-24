@@ -146,6 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let coldHealth = UsageHealth(lastSuccess: nil, failingSince: nil, reason: nil)
         let view = StatusItemView(frame: NSRect(origin: .zero, size: NSSize(width: 0, height: 22)))
         view.layout = MenuBarLayout.make(from: nil, health: coldHealth, now: now)
+        view.calmColors = PersistedConfig.calmMenuBarColors   // apply the saved choice from launch (#105)
         self.statusView = view
         self.statusItem = item
 
@@ -263,6 +264,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let wc = SettingsWindowController()
             wc.onMonitoredServicesChange = { [weak self] config in self?.monitoredServicesChanged(config) }
             wc.onCheckForUpdatesNow = { [weak self] in self?.performUpdateCheck(userInitiated: true) }
+            wc.onCalmColorsChange = { [weak self] on in
+                self?.statusView?.calmColors = on
+                self?.refreshStatusImage()   // menu-bar image is snapshotted, not auto-rendered
+            }
             settingsWC = wc
         }
         // Reflect the latest known update state whenever the window opens (#37).
