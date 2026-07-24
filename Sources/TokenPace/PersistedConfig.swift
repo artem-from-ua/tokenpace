@@ -35,6 +35,9 @@ enum PersistedConfig {
         /// Whether the menu-bar widget mutes its soft pacing colours to white (#105). Default-off
         /// (opt-in) — see the property.
         static let calmMenuBarColors = "calmMenuBarColors"
+        /// How the menu-bar widget picks/hides the reset countdown (#103), stored as the raw
+        /// `ResetCountdownMode` string. Default `.showDistant7d` — see the property.
+        static let resetCountdownModeMenuBar = "resetCountdownModeMenuBar"
     }
 
     /// The marketing version the config was last written under, or `nil` if none has been recorded
@@ -96,5 +99,15 @@ enum PersistedConfig {
     static var calmMenuBarColors: Bool {
         get { defaults.object(forKey: Key.calmMenuBarColors) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.calmMenuBarColors) }
+    }
+
+    /// How the **menu-bar** widget picks or hides the reset countdown (#103, ADR-0029). Named for the
+    /// menu bar specifically because the popup has its own countdown logic. Stored as the raw
+    /// `ResetCountdownMode` string; an absent key or an unrecognised value (e.g. one a newer build
+    /// wrote) reads as the default ``ResetCountdownMode/showDistant7d`` — same forward-compatible
+    /// fallback the type's own decoder uses, so an older build never trips on a future value.
+    static var resetCountdownModeMenuBar: ResetCountdownMode {
+        get { ResetCountdownMode(rawValue: defaults.string(forKey: Key.resetCountdownModeMenuBar) ?? "") ?? .showDistant7d }
+        set { defaults.set(newValue.rawValue, forKey: Key.resetCountdownModeMenuBar) }
     }
 }

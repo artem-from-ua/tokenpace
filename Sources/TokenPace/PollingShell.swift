@@ -172,8 +172,34 @@ actor StubUsageTransport: UsageTransport {
     /// The climbing/screenshot data modes also carry two `weekly_scoped` per-model entries in `limits[]`
     /// (#65) — Fable / Mythos — so the scoped-model popup rows are exercised end-to-end, and their
     /// utilisations (plus the 7-day window) show a couple of the ahead-of-pace gap colours.
-    enum Mode {
+    enum Mode: Equatable {
         case climbing, screenshot, authError, idle
+        /// A fixed 5h×7d severity frame for verifying the reset-countdown selection table (#103).
+        case pacing(PacingFrame)
+    }
+
+    /// Hand-picked top-level 5h/7d frames covering the reset-countdown cells the other stubs miss
+    /// (no red bar, no both-noisy, no lone-noisy-5h). Numbers are chosen against the 5h (18000 s) and
+    /// 7d (604800 s) windows so each bar lands in the intended severity.
+    enum PacingFrame: Equatable {
+        /// 5h orange (usage 50 vs elapsed ~20), 7d green (usage 20 vs elapsed ~29).
+        case fiveOrange
+        /// Both orange: 5h as `fiveOrange`, 7d usage 55 vs elapsed ~29 → ahead ~26 pts.
+        case bothOrange
+        /// Both red (usage 100): 5h resets in 2 h, 7d in 4 d — the later reset is the 7d one.
+        case bothRed
+        /// 5h red (usage 100) + 7d orange (usage 55) — the red bar (5h) drives the countdown.
+        case redOrange
+
+        /// (fiveUtil, sevenUtil, fiveResetSeconds, sevenResetSeconds).
+        var values: (five: Double, seven: Double, fiveIn: TimeInterval, sevenIn: TimeInterval) {
+            switch self {
+            case .fiveOrange: return (50, 20, 4 * 3600, 5 * 24 * 3600)
+            case .bothOrange: return (50, 55, 4 * 3600, 5 * 24 * 3600)
+            case .bothRed:    return (100, 100, 2 * 3600, 4 * 24 * 3600)
+            case .redOrange:  return (100, 55, 2 * 3600, 5 * 24 * 3600)
+            }
+        }
     }
 
     private let mode: Mode
@@ -290,7 +316,18 @@ actor StubUsageTransport: UsageTransport {
         let sevenReset: String
         let weeklyReset: String
 
-        if mode == .screenshot {
+        if case let .pacing(frame) = mode {
+            // Fixed severity frame for reset-countdown verification (#103). Per-model rows kept as in
+            // the climbing default so the popup still has content; only the top-level bars are pinned.
+            let v = frame.values
+            five = v.five
+            seven = v.seven
+            fable = 60.0
+            mythos = 100.0
+            fiveReset = Self.resetsAt(inSeconds: v.fiveIn)
+            sevenReset = Self.resetsAt(inSeconds: v.sevenIn)
+            weeklyReset = sevenReset
+        } else if mode == .screenshot {
             // Hand-picked, frozen frame for the README screenshot. Pacing states on screen:
             //  • 5h: 10 % used vs ≈65 % elapsed (resets ~35 % of the window out, now + 1.75 h, snapped
             //    to a 10-minute mark) → wide GREEN gap, well behind pace.

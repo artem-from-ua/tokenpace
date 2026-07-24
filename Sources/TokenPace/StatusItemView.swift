@@ -168,8 +168,8 @@ final class StatusItemView: NSView {
         }
 
         switch layout.mode {
-        case let .expanded(fiveHour, sevenDay, reset, _):
-            drawExpanded(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: contentRect)
+        case let .expanded(fiveHour, sevenDay, resetToShow):
+            drawExpanded(fiveHour: fiveHour, sevenDay: sevenDay, reset: resetToShow?.display, in: contentRect)
         case let .error(fiveHour, sevenDay, reset, _):
             drawError(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: contentRect)
         }
@@ -219,14 +219,20 @@ final class StatusItemView: NSView {
 
     // MARK: Expanded
 
-    private func drawExpanded(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset, in rect: NSRect) {
-        drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, originX: rect.minX + Metrics.hPadding, in: rect)
+    private func drawExpanded(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset?, in rect: NSRect) {
+        drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset,
+                 originX: rect.minX + Metrics.hPadding, in: rect)
     }
 
-    /// Draw the stacked 5h/7d bars + reset label, with the bars block starting at `originX`.
+    /// Draw the stacked 5h/7d bars, with the bars block starting at `originX`; the reset label is
+    /// drawn to their right only when `reset != nil`.
+    ///
     /// Shared by ``drawExpanded(fiveHour:sevenDay:reset:in:)`` and the bars-beside-⚠️ error phase so
-    /// the geometry is identical; only the left origin differs (the error glyph shifts it right).
-    private func drawBars(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset, originX: CGFloat, in rect: NSRect) {
+    /// the geometry is identical; only the left origin differs (the error glyph shifts it right). The
+    /// error phase always passes a non-nil `reset` (the countdown is diagnostic there); in the normal
+    /// expanded mode `nil` means the countdown was dropped per the selection table (ADR-0029).
+    private func drawBars(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset?,
+                          originX: CGFloat, in rect: NSRect) {
         // Two bars stacked, vertically centred as a block.
         let blockHeight = Metrics.barHeight * 2 + Metrics.barGap
         let topY = rect.minY + (rect.height - blockHeight) / 2
@@ -241,7 +247,9 @@ final class StatusItemView: NSView {
             width: Metrics.barWidth, height: Metrics.barHeight
         ))
 
-        drawResetLabel(reset, leftOf: barsRect.maxX + Metrics.labelGap, in: rect)
+        if let reset {
+            drawResetLabel(reset, leftOf: barsRect.maxX + Metrics.labelGap, in: rect)
+        }
     }
 
     // MARK: Error (issue #12)
@@ -316,7 +324,7 @@ final class StatusItemView: NSView {
         // (`PopupBarView.aheadColor`: amber → orange → red by how far ahead), so the menu-bar bar and
         // the popup row agree — e.g. a yellow 7-day here reads yellow in the dropdown too. On pace →
         // the statusline green (ADR-0005), kept fixed to match the terminal pacing bar.
-        let gapColor = calmedGapColor(usage: l.usageFraction, time: l.timeFraction, pacing: l.pacing)
+        let gapColor = calmedGapColor(l)
         fillZone(from: l.gapStart, to: l.gapEnd, in: rect, width: w, color: gapColor)
 
         NSGraphicsContext.restoreGraphicsState()
@@ -328,7 +336,7 @@ final class StatusItemView: NSView {
         let cy = rect.midY
         let d = Metrics.tickDiameter
         let dot = NSBezierPath(ovalIn: NSRect(x: cx - d / 2, y: cy - d / 2, width: d, height: d))
-        indicatorColor(usage: l.usageFraction, time: l.timeFraction).setFill()
+        indicatorColor(l).setFill()
         dot.fill()
         Palette.indicatorStroke.setStroke()
         dot.lineWidth = Metrics.tickStroke
@@ -345,33 +353,26 @@ final class StatusItemView: NSView {
     /// (`PopupBarView.aheadColor`), so the dot and its gap read as the same colour across both bars.
     ///
     /// Calm mode (#105): the dot follows its gap — it is white in exactly the states where the pacing
-    /// gap under it mutes to white (on pace / behind, and the mild ahead-of-pace yellow), and keeps
-    /// its colour where the gap stays coloured (orange/red). So the dot never floats as a colour over a
-    /// white strip.
-    private func indicatorColor(usage: Double, time: Double) -> NSColor {
-        if calmColors && mutesToWhiteInCalm(usage: usage, time: time) { return Palette.calmWhite }
-        return usage > time ? PopupBarView.aheadColor(usage: usage, time: time) : Palette.dotGreen
+    /// gap under it mutes to white (the **calm** states — on pace / behind, and the mild ahead-of-pace
+    /// yellow), and keeps its colour where the gap stays coloured (orange/red). So the dot never floats
+    /// as a colour over a white strip. "Calm" is the SAME predicate the menu bar uses to drop the reset
+    /// label (`BarLayout.isCalm`, ADR-0028) — one source of truth, so colour and countdown always agree.
+    private func indicatorColor(_ l: BarLayout) -> NSColor {
+        if calmColors && l.isCalm { return Palette.calmWhite }
+        return l.timeFraction < l.usageFraction
+            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction)
+            : Palette.dotGreen
     }
 
     /// The pacing-gap fill colour, with calm mode (#105) applied. Normally this is the on-pace green
-    /// or the graded ahead colour (`PopupBarView.aheadColor`). When `calmColors` is on, the **soft**
-    /// states mute to white — on-pace green, and the *mild* ahead-of-pace step (yellow); the strong
-    /// warnings stay coloured.
-    private func calmedGapColor(usage: Double, time: Double, pacing: PacingState) -> NSColor {
-        if calmColors && mutesToWhiteInCalm(usage: usage, time: time) { return Palette.calmWhite }
-        return pacing == .ahead
-            ? PopupBarView.aheadColor(usage: usage, time: time)
+    /// or the graded ahead colour (`PopupBarView.aheadColor`). When `calmColors` is on, the **calm**
+    /// states (`BarLayout.isCalm`: on-pace green + mild-ahead yellow) mute to white; the strong warnings
+    /// (orange/red) stay coloured.
+    private func calmedGapColor(_ l: BarLayout) -> NSColor {
+        if calmColors && l.isCalm { return Palette.calmWhite }
+        return l.pacing == .ahead
+            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction)
             : Palette.gapGreen
-    }
-
-    /// Whether a bar's pacing colour is a **soft** one that calm mode (#105) mutes to white — the
-    /// on-pace/behind green (`usage <= time`) or the *mild* ahead-of-pace yellow (ahead by < 15 pts and
-    /// not yet exhausted). Orange/red (strong ahead / exhausted) return `false` and keep their colour.
-    /// The thresholds mirror `PopupBarView.aheadColor` and are recomputed from the raw fractions, so
-    /// the gap fill and the time-indicator dot agree without comparing resolved `NSColor` instances.
-    private func mutesToWhiteInCalm(usage: Double, time: Double) -> Bool {
-        if usage <= time { return true }                 // on pace / behind / tie → green
-        return usage < 1 && (usage - time) < 0.15        // mild ahead → yellow
     }
 
     /// Fill the sub-rect spanning the fraction range `[from, to)` of a bar.
@@ -416,8 +417,8 @@ final class StatusItemView: NSView {
         switch layout?.mode {
         case .none:
             return Metrics.height + dotInset            // square-ish compact item (no layout yet)
-        case let .expanded(_, _, reset, _):
-            return dotInset + Metrics.hPadding + barsBlockWidth(reset: reset) + Metrics.hPadding
+        case let .expanded(_, _, resetToShow):
+            return dotInset + Metrics.hPadding + barsBlockWidth(reset: resetToShow?.display) + Metrics.hPadding
         case let .error(five, _, reset, _):
             // ⚠️ alone (cold start / >60 min) → compact; ⚠️ + stale bars (30–60 min) → glyph + bars.
             guard five != nil, let reset else { return Metrics.height + dotInset }
@@ -426,9 +427,12 @@ final class StatusItemView: NSView {
         }
     }
 
-    /// Width of the bars block + its reset label (no outer padding) — shared by the expanded and
-    /// error-with-bars widths so they stay in sync with ``drawBars(fiveHour:sevenDay:reset:originX:in:)``.
-    private func barsBlockWidth(reset: TimeToReset) -> CGFloat {
+    /// Width of the bars block + (optionally) its reset label (no outer padding) — shared by the
+    /// expanded and error-with-bars widths so they stay in sync with
+    /// ``drawBars(fiveHour:sevenDay:reset:originX:in:)``. A `nil` `reset` omits the label (and its
+    /// leading gap), so the item hugs just the bars (ADR-0029); the error path always passes non-nil.
+    private func barsBlockWidth(reset: TimeToReset?) -> CGFloat {
+        guard let reset else { return Metrics.barWidth }
         let labelWidth = (resetText(reset) as NSString).size(withAttributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         ]).width

@@ -61,7 +61,7 @@ struct MenuBarLayoutMakeTests {
         // 0 % with a VALID resets_at is an active-but-empty window, NOT session-idle — both bars are
         // normal (the idle state is API-driven by a missing reset, not by a low utilisation; ADR-0027).
         let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 0, sevenDayUtil: 0), now: now)
-        guard case let .expanded(five, _, _, _) = layout.mode else {
+        guard case let .expanded(five, _, _) = layout.mode else {
             Issue.record("expected .expanded at 0%, got \(layout.mode)")
             return
         }
@@ -85,12 +85,12 @@ struct MenuBarLayoutExpandedTests {
     /// Pull the associated values out of an expanded mode, or fail the test.
     private func expanded(
         _ layout: MenuBarLayout
-    ) -> (five: BarView, seven: BarView, reset: TimeToReset, which: LimitWindow)? {
-        guard case let .expanded(five, seven, reset, which) = layout.mode else {
+    ) -> (five: BarView, seven: BarView, resetToShow: ResetToShow?)? {
+        guard case let .expanded(five, seven, resetToShow) = layout.mode else {
             Issue.record("expected .expanded, got \(layout.mode)")
             return nil
         }
-        return (five, seven, reset, which)
+        return (five, seven, resetToShow)
     }
 
     @Test func barsCarryTheirWindows() {
@@ -116,24 +116,35 @@ struct MenuBarLayoutExpandedTests {
         #expect(e.five.layout == expectedFive)
     }
 
-    @Test func resetMatchesResetClock() {
-        // `which`/`reset` must equal a direct ResetClock.resetDisplay call on the same inputs.
+    @Test func alwaysModeShowsNearestReset() {
+        // In `.always` both bars are calm here (50%/30% behind pace), so the countdown is the nearest
+        // reset — it must equal a direct ResetClock.resetDisplay call on the same inputs.
         let snap = snapshot(
             fiveHourUtil: 50, sevenDayUtil: 30,
             fiveHourResetsIn: 30 * 60,        // 30 min → nearest, relative branch
             sevenDayResetsIn: 3 * 24 * 3600
         )
-        let layout = MenuBarLayout.make(from: snap, now: now)
-        guard let e = expanded(layout) else { return }
-
+        let layout = MenuBarLayout.make(from: snap, now: now, resetMode: .always)
+        guard let e = expanded(layout), let r = e.resetToShow else {
+            Issue.record("expected a countdown in .always mode"); return
+        }
         let expected = ResetClock.resetDisplay(
             fiveHourResetsAt: snap.fiveHour.resetsAt,
             sevenDayResetsAt: snap.sevenDay.resetsAt,
             now: now
         )!
-        #expect(e.which == expected.which)
-        #expect(e.reset == expected.display)
-        #expect(e.which == .fiveHour)                 // 5h resets first here
+        #expect(r.which == expected.which)
+        #expect(r.display == expected.display)
+        #expect(r.which == .fiveHour)                 // 5h resets first here
+    }
+
+    @Test func bothCalmHidesResetByDefault() {
+        // Default mode (.showDistant7d): 50%/30% both behind pace → both calm → no countdown.
+        let snap = snapshot(fiveHourUtil: 50, sevenDayUtil: 30,
+                            fiveHourResetsIn: 30 * 60, sevenDayResetsIn: 3 * 24 * 3600)
+        let layout = MenuBarLayout.make(from: snap, now: now)
+        guard let e = expanded(layout) else { return }
+        #expect(e.resetToShow == nil)
     }
 
     @Test func criticalUtilizationSurfacesIndicator() {
@@ -143,16 +154,17 @@ struct MenuBarLayoutExpandedTests {
         #expect(e.five.indicator == .critical)
     }
 
-    @Test func unparseableResetsFallBackToResetNow() {
-        // Both resets_at malformed → resetDisplay returns nil → fallback (.fiveHour, .resetNow).
+    @Test func bothResetsUnparseableAndCalmShowNoCountdown() {
+        // Both resets_at malformed → elapsed pins to 1.0 (`resetsAt ?? now`), so usage 50/30 < time
+        // 100 → both bars calm. Even in `.always` there is no valid instant to show (nearest of two
+        // nil dates is nil), so the countdown is dropped rather than a phantom ⏰.
         let snap = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 50, resetsAt: "garbage"),
             sevenDay: UsageWindow(utilization: 30, resetsAt: "null")
         )
-        let layout = MenuBarLayout.make(from: snap, now: now)
+        let layout = MenuBarLayout.make(from: snap, now: now, resetMode: .always)
         guard let e = expanded(layout) else { return }
-        #expect(e.reset == .resetNow)
-        #expect(e.which == .fiveHour)
+        #expect(e.resetToShow == nil)
     }
 
     @Test func missingPerModelWindowsDoNotBreakLayout() {
@@ -171,12 +183,12 @@ struct MenuBarLayoutIdleTests {
 
     private func expanded(
         _ layout: MenuBarLayout
-    ) -> (five: BarView, seven: BarView, reset: TimeToReset, which: LimitWindow)? {
-        guard case let .expanded(five, seven, reset, which) = layout.mode else {
+    ) -> (five: BarView, seven: BarView, resetToShow: ResetToShow?)? {
+        guard case let .expanded(five, seven, resetToShow) = layout.mode else {
             Issue.record("expected .expanded, got \(layout.mode)")
             return nil
         }
-        return (five, seven, reset, which)
+        return (five, seven, resetToShow)
     }
 
     @Test func idleKeepsBothBarsExpanded() {
@@ -199,36 +211,44 @@ struct MenuBarLayoutIdleTests {
         #expect(e.five.indicator == .neutral)
     }
 
-    @Test func idleResetIsSevenDayInCompactDays() {
-        // 7-day reset 4 days out → the reset label is the 7-day one, rendered as "4d".
-        let layout = MenuBarLayout.make(from: idleSnapshot(sevenDayResetsIn: 4 * 24 * 3600), now: now)
-        guard let e = expanded(layout) else { return }
-        #expect(e.which == .sevenDay)
-        #expect(e.reset == .relative("4d"))
+    @Test func idleResetIsSevenDayInCompactDaysInAlwaysMode() {
+        // Idle 5h calm + a calm 7-day → default mode hides the countdown; `.always` shows the 7-day
+        // one (5h has no reset), rendered compact as "4d".
+        let layout = MenuBarLayout.make(
+            from: idleSnapshot(sevenDayResetsIn: 4 * 24 * 3600), now: now, resetMode: .always)
+        guard let e = expanded(layout), let r = e.resetToShow else {
+            Issue.record("expected a countdown in .always mode"); return
+        }
+        #expect(r.which == .sevenDay)
+        #expect(r.display == .relative("4d"))
     }
 
     @Test func idleResetWithin24hIsAbsolute() {
-        // 7-day reset < 24 h out → falls through to the absolute wall-clock time (not a day count).
-        let layout = MenuBarLayout.make(from: idleSnapshot(sevenDayResetsIn: 5 * 3600), now: now)
-        guard let e = expanded(layout) else { return }
-        #expect(e.which == .sevenDay)
+        // 7-day reset < 24 h out → absolute wall-clock time (not a day count). Both bars calm, so
+        // `.always` is needed to surface the countdown.
+        let layout = MenuBarLayout.make(
+            from: idleSnapshot(sevenDayResetsIn: 5 * 3600), now: now, resetMode: .always)
+        guard let e = expanded(layout), let r = e.resetToShow else {
+            Issue.record("expected a countdown in .always mode"); return
+        }
+        #expect(r.which == .sevenDay)
         let expected = ResetClock.timeToResetCompactDays(
             resetsAt: now.addingTimeInterval(5 * 3600), now: now)
-        #expect(e.reset == expected)
-        if case .absolute = e.reset {} else { Issue.record("expected .absolute, got \(e.reset)") }
+        #expect(r.display == expected)
+        if case .absolute = r.display {} else { Issue.record("expected .absolute, got \(r.display)") }
     }
 
-    @Test func idleWithUnparseableSevenDayResetIsResetNow() {
-        // A blank/unparseable 7-day resets_at with an idle 5h window → the countdown is .resetNow
-        // (the view shows ⏰), never a phantom.
+    @Test func idleWithUnparseableSevenDayResetShowsNoCountdown() {
+        // A blank 7-day resets_at with an idle 5h window: the calm 7-day has no valid instant, so even
+        // `.always` shows no countdown (no phantom ⏰). A noisy 7-day with a blank reset would show ⏰
+        // (see selectReset's brokenResetOfChosenBarIsResetNow); a calm one is simply dropped.
         let snap = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
             sevenDay: UsageWindow(utilization: 31, resetsAt: ""),
             sessionIdle: true)
-        let layout = MenuBarLayout.make(from: snap, now: now)
+        let layout = MenuBarLayout.make(from: snap, now: now, resetMode: .always)
         guard let e = expanded(layout) else { return }
-        #expect(e.reset == .resetNow)
-        #expect(e.which == .sevenDay)
+        #expect(e.resetToShow == nil)
     }
 
     @Test func idleSnapshotStalePhaseCarriesIdleBar() {
@@ -375,5 +395,165 @@ struct MenuBarLayoutServiceProblemTests {
             from: nil, health: failing, now: now, serviceProblem: .majorOutage)
         #expect(layout.serviceProblem == .majorOutage)
         if case .error = layout.mode {} else { Issue.record("expected error mode") }
+    }
+}
+
+// MARK: - default-mode hide/show: drop the countdown when both bars are calm (ADR-0028/0029)
+
+@Suite("MenuBarLayout showReset")
+struct MenuBarLayoutShowResetTests {
+
+    /// Whether the default-mode layout draws a countdown (`resetToShow != nil`), or `nil` (recording a
+    /// failure) if not expanded. All tests here use the default `.showDistant7d` mode.
+    private func showReset(_ layout: MenuBarLayout) -> Bool? {
+        guard case let .expanded(_, _, resetToShow) = layout.mode else {
+            Issue.record("expected .expanded, got \(layout.mode)")
+            return nil
+        }
+        return resetToShow != nil
+    }
+
+    // In the 5h window (18000 s) a `fiveHourResetsIn: 4*3600` reset → timeFraction 0.2; in the 7d
+    // window a `3*24*3600` reset → timeFraction ≈ 0.571. Utilisations below those are green (calm).
+
+    @Test func bothGreenHidesReset() {
+        // 5h usage 0.10 < time 0.20 (green); 7d usage 0.30 < time 0.571 (green) → both calm → hidden.
+        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), now: now)
+        #expect(showReset(layout) == false)
+    }
+
+    @Test func greenPlusYellowHidesReset() {
+        // 5h green (usage 0.10); 7d yellow — usage 0.65 vs time 0.571, ahead by ~0.08 (< 0.15) → calm.
+        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 65), now: now)
+        #expect(showReset(layout) == false)
+    }
+
+    @Test func bothYellowHidesReset() {
+        // 5h yellow — usage 0.30 vs time 0.20, ahead 0.10 (< 0.15); 7d yellow — usage 0.65 vs 0.571.
+        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 30, sevenDayUtil: 65), now: now)
+        #expect(showReset(layout) == false)
+    }
+
+    @Test func oneOrangeShowsReset() {
+        // 5h orange — usage 0.50 vs time 0.20, ahead 0.30 (>= 0.15) → noisy; 7d green → label returns.
+        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), now: now)
+        #expect(showReset(layout) == true)
+    }
+
+    @Test func oneExhaustedShowsReset() {
+        // 7d usage == 100 → red → noisy, even though 5h is green.
+        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 100), now: now)
+        #expect(showReset(layout) == true)
+    }
+
+    @Test func idleWithCalmSevenDayHidesReset() {
+        // Idle 5h is always calm; a calm 7-day (usage 0.31 vs time ≈ 0.571 green) → both calm → hidden.
+        let layout = MenuBarLayout.make(from: idleSnapshot(sevenDayUtil: 31), now: now)
+        guard case let .expanded(five, _, resetToShow) = layout.mode else {
+            Issue.record("expected .expanded, got \(layout.mode)")
+            return
+        }
+        #expect(five.idle)
+        #expect(resetToShow == nil)
+    }
+
+    @Test func idleWithNoisySevenDayShowsReset() {
+        // Idle 5h calm, but a noisy 7-day decides: usage 0.95 vs time ≈ 0.571, ahead ~0.38 → orange.
+        let layout = MenuBarLayout.make(from: idleSnapshot(sevenDayUtil: 95), now: now)
+        #expect(showReset(layout) == true)
+    }
+}
+
+// MARK: - MenuBarLayout.selectReset (ADR-0029)
+
+@Suite("MenuBarLayout.selectReset")
+struct MenuBarLayoutSelectResetTests {
+
+    private static let now = Date(timeIntervalSince1970: 1_700_000_000)
+    /// 5h reset 2 h out; 7d reset either near (< 24 h) or far (days) per each test.
+    private static func at(hours: Double) -> Date { now.addingTimeInterval(hours * 3_600) }
+    private static let fiveAt = at(hours: 2)          // 5h always near
+    private static let sevenFar = at(hours: 5 * 24)   // 7d days away (≥ 24 h)
+    private static let sevenNear = at(hours: 10)      // 7d < 24 h
+
+    private static func select(
+        five: PacingSeverity, seven: PacingSeverity,
+        fiveAt: Date? = fiveAt, sevenAt: Date? = sevenFar,
+        mode: ResetCountdownMode
+    ) -> ResetToShow? {
+        MenuBarLayout.selectReset(
+            fiveSeverity: five, fiveResetsAt: fiveAt,
+            sevenSeverity: seven, sevenResetsAt: sevenAt,
+            now: now, mode: mode, timeZone: TimeZone(identifier: "UTC")!)
+    }
+
+    // ── Never ────────────────────────────────────────────────────────────────────────────────
+    @Test func neverHidesEverything() {
+        for (f, s): (PacingSeverity, PacingSeverity) in
+            [(.calm, .calm), (.ahead, .calm), (.exhausted, .exhausted)] {
+            #expect(Self.select(five: f, seven: s, mode: .never) == nil)
+        }
+    }
+
+    // ── Both calm ────────────────────────────────────────────────────────────────────────────
+    @Test func bothCalmHiddenExceptAlways() {
+        #expect(Self.select(five: .calm, seven: .calm, mode: .showDistant7d) == nil)
+        #expect(Self.select(five: .calm, seven: .calm, mode: .hideDistant7d) == nil)
+        // Always → nearest (5h at 2 h is nearer than 7d).
+        #expect(Self.select(five: .calm, seven: .calm, mode: .always)?.which == .fiveHour)
+    }
+
+    // ── One noisy: 5h ────────────────────────────────────────────────────────────────────────
+    @Test func onlyFiveNoisyShowsFive() {
+        for m: ResetCountdownMode in [.always, .showDistant7d, .hideDistant7d] {
+            #expect(Self.select(five: .ahead, seven: .calm, mode: m)?.which == .fiveHour)
+            #expect(Self.select(five: .exhausted, seven: .calm, mode: m)?.which == .fiveHour)
+        }
+    }
+
+    // ── One noisy: 7d orange (gated) ─────────────────────────────────────────────────────────
+    @Test func onlySevenOrangeFarGatedByMode() {
+        // Far (≥24 h): Always/Show → shown; Hide → hidden.
+        #expect(Self.select(five: .calm, seven: .ahead, sevenAt: Self.sevenFar, mode: .always)?.which == .sevenDay)
+        #expect(Self.select(five: .calm, seven: .ahead, sevenAt: Self.sevenFar, mode: .showDistant7d)?.which == .sevenDay)
+        #expect(Self.select(five: .calm, seven: .ahead, sevenAt: Self.sevenFar, mode: .hideDistant7d) == nil)
+    }
+
+    @Test func onlySevenOrangeNearAlwaysShown() {
+        // Near (< 24 h): shown regardless of mode (Hide only hides the *distant* one).
+        #expect(Self.select(five: .calm, seven: .ahead, sevenAt: Self.sevenNear, mode: .hideDistant7d)?.which == .sevenDay)
+    }
+
+    // ── One noisy: 7d red (always) ───────────────────────────────────────────────────────────
+    @Test func onlySevenRedAlwaysShownEvenFarAndHideMode() {
+        #expect(Self.select(five: .calm, seven: .exhausted, sevenAt: Self.sevenFar, mode: .hideDistant7d)?.which == .sevenDay)
+    }
+
+    // ── Both noisy: next unblock ─────────────────────────────────────────────────────────────
+    @Test func bothExhaustedShowsLater() {
+        // 5h at 2 h, 7d at 5 d → later is 7d.
+        let r = Self.select(five: .exhausted, seven: .exhausted, mode: .showDistant7d)
+        #expect(r?.which == .sevenDay)
+    }
+
+    @Test func bothOrangeShowsEarlier() {
+        // 5h at 2 h, 7d at 5 d → earlier is 5h.
+        let r = Self.select(five: .ahead, seven: .ahead, mode: .showDistant7d)
+        #expect(r?.which == .fiveHour)
+    }
+
+    @Test func redPlusOrangeShowsRed() {
+        // 5h red + 7d orange → red bar (5h).
+        #expect(Self.select(five: .exhausted, seven: .ahead, mode: .showDistant7d)?.which == .fiveHour)
+        // 5h orange + 7d red → red bar (7d).
+        #expect(Self.select(five: .ahead, seven: .exhausted, mode: .showDistant7d)?.which == .sevenDay)
+    }
+
+    // ── Broken resets_at ─────────────────────────────────────────────────────────────────────
+    @Test func brokenResetOfChosenBarIsResetNow() {
+        // 5h noisy but its resets_at is nil → chosen 5h, display .resetNow.
+        let r = Self.select(five: .exhausted, seven: .calm, fiveAt: nil, mode: .showDistant7d)
+        #expect(r?.which == .fiveHour)
+        #expect(r?.display == .resetNow)
     }
 }
