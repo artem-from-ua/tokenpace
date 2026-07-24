@@ -29,6 +29,10 @@ final class TroubleshootWindowController: NSWindowController {
         static let startSize = NSSize(width: 640, height: 560)
         static let padding: CGFloat = 20
         static let rowSpacing: CGFloat = 4
+        /// Gap between a section header and its first info row — wider than `rowSpacing` so the
+        /// bold header reads as a title above its rows rather than as just another line, without
+        /// opening up as much air as `sectionSpacing` (which separates whole groups).
+        static let headerSpacing: CGFloat = 8
         static let sectionSpacing: CGFloat = 12
         /// Gap between the "Auth token" and "Usage API" sections — wider than `sectionSpacing` so
         /// the two read as distinct groups by whitespace alone (no rule; matches the popup's
@@ -46,7 +50,7 @@ final class TroubleshootWindowController: NSWindowController {
     private var intervalLabel: NSTextField!
     private var nextUpdateLabel: NSTextField!
     // Rows of the "Auth token" section.
-    private var tokenReadLabel: NSTextField!
+    private var tokenStatusLabel: NSTextField!
     private var tokenExpiryLabel: NSTextField!
 
     convenience init() {
@@ -84,12 +88,13 @@ final class TroubleshootWindowController: NSWindowController {
 
         // Auth token — the second section (checked when diagnosing a fetch failure).
         let tokenHeader = Self.sectionHeader("Auth token")
-        tokenReadLabel = Self.infoLabel()
+        tokenStatusLabel = Self.infoLabel()
         tokenExpiryLabel = Self.infoLabel()
-        let tokenStack = NSStackView(views: [tokenHeader, tokenReadLabel, tokenExpiryLabel])
+        let tokenStack = NSStackView(views: [tokenHeader, tokenStatusLabel, tokenExpiryLabel])
         tokenStack.orientation = .vertical
         tokenStack.alignment = .leading
         tokenStack.spacing = Metrics.rowSpacing
+        tokenStack.setCustomSpacing(Metrics.headerSpacing, after: tokenHeader)
         tokenStack.translatesAutoresizingMaskIntoConstraints = false
 
         // "Update interval" — the first section: the refresh cadence (a duration) + the next-update
@@ -107,6 +112,7 @@ final class TroubleshootWindowController: NSWindowController {
         intervalStack.orientation = .vertical
         intervalStack.alignment = .leading
         intervalStack.spacing = Metrics.rowSpacing
+        intervalStack.setCustomSpacing(Metrics.headerSpacing, after: intervalHeader)
         intervalStack.setCustomSpacing(Metrics.sectionSpacing, after: nextUpdateLabel)
         intervalStack.translatesAutoresizingMaskIntoConstraints = false
 
@@ -119,6 +125,7 @@ final class TroubleshootWindowController: NSWindowController {
         apiStack.orientation = .vertical
         apiStack.alignment = .leading
         apiStack.spacing = Metrics.rowSpacing
+        apiStack.setCustomSpacing(Metrics.headerSpacing, after: apiHeader)
         apiStack.translatesAutoresizingMaskIntoConstraints = false
 
         // The scrollable raw body — takes the remaining vertical space, so it must stretch.
@@ -203,7 +210,8 @@ final class TroubleshootWindowController: NSWindowController {
         intervalLabel.isHidden = layout.intervalLine == nil
         nextUpdateLabel.stringValue = layout.nextUpdateLine ?? ""
         nextUpdateLabel.isHidden = layout.nextUpdateLine == nil
-        tokenReadLabel.stringValue = layout.tokenReadLine
+        tokenStatusLabel.stringValue = layout.tokenStatusLine ?? ""
+        tokenStatusLabel.isHidden = layout.tokenStatusLine == nil
         tokenExpiryLabel.stringValue = layout.tokenExpiryLine ?? ""
         tokenExpiryLabel.isHidden = layout.tokenExpiryLine == nil
 

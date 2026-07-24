@@ -143,6 +143,7 @@ struct MakeTests {
         #expect(layout.intervalLine == nil)
         #expect(layout.nextUpdateLine == nil)
         #expect(layout.bodyText == TroubleshootLayout.bodyPlaceholder)
+        #expect(layout.tokenStatusLine == "Token: unavailable (no poll yet)")
         #expect(layout.tokenExpiryLine == nil)
     }
 
@@ -214,26 +215,28 @@ struct MakeTests {
         #expect(layout.bodyText == TroubleshootLayout.noResponseBody)
     }
 
-    @Test func tokenPresentShowsReadAndExpiry() {
+    @Test func tokenPresentShowsExpiryOnly() {
+        // A readable token shows its expiry and no status line — the Keychain read instant
+        // (`readAt`) is deliberately not surfaced (it is not an issued-at).
         let layout = TroubleshootLayout.make(
             from: output(.success, httpStatus: 200, body: "{}", token: freshToken), timeZone: utc)
-        #expect(layout.tokenReadLine == "Token read: 2026-07-22 12:00:00 (\(utcID))")
+        #expect(layout.tokenStatusLine == nil)
         #expect(layout.tokenExpiryLine == "Token expires: 2026-07-22 20:00:00 (\(utcID))")
     }
 
-    @Test func expiredTokenStillShowsDates() {
-        // The key diagnostic case: an expired token's dates are still rendered.
+    @Test func expiredTokenStillShowsExpiry() {
+        // The key diagnostic case: an expired token's expiry is still rendered (and no read line).
         let expired = TokenDiagnostics(readAt: t0, expiresAt: t0.addingTimeInterval(-3600))
         let layout = TroubleshootLayout.make(
             from: output(.notSent(reason: "token expired"), token: expired), timeZone: utc)
-        #expect(layout.tokenReadLine == "Token read: 2026-07-22 12:00:00 (\(utcID))")
+        #expect(layout.tokenStatusLine == nil)
         #expect(layout.tokenExpiryLine == "Token expires: 2026-07-22 11:00:00 (\(utcID))")
     }
 
     @Test func tokenNilExplainsUnavailability() {
         let layout = TroubleshootLayout.make(
             from: output(.notSent(reason: "not signed in"), token: nil), timeZone: utc)
-        #expect(layout.tokenReadLine == "Token unavailable: not signed in")
+        #expect(layout.tokenStatusLine == "Token unavailable: not signed in")
         #expect(layout.tokenExpiryLine == nil)
     }
 }
