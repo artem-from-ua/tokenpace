@@ -17,11 +17,57 @@ unified logging) — see [`Sources/TokenPaceKit/AppLogger.swift`](../Sources/Tok
   - `lifecycle` — app launch, launch-at-login, sleep/wake, network up/down, polling-interval changes.
   - `ui` — menu-bar rendering diagnostics (defined, currently unused).
 
-Watch them live:
+## Collecting logs — methods & gotchas
+
+TokenPace logs through `os.Logger`, which is easy to *not* see if you use the wrong command.
+The single biggest gotcha: **most of our lines are `.notice`/`.info`, and those are not written to
+the persistent store** — only `.error`/`.fault` are. So the method matters.
+
+### 1. Live stream — the reliable default (use `--level debug`)
 
 ```sh
 log stream --predicate 'subsystem == "com.artem-n.tokenpace"' --level debug
 ```
+
+`--level debug` is **mandatory**: without it the stream shows only `.error`, so `.notice`/`.info`
+lines (the bulk of the catalog below — `update: checking`, `usage 200 ok`, …) silently never appear.
+This is the trap that makes the app look "silent" when it is logging fine.
+
+To catch **launch-time** lines (the update check, migration, launch-at-login — all fire once at
+startup), start the stream **first**, then relaunch the app while it runs:
+
+```sh
+( timeout 20 log stream --predicate 'subsystem == "com.artem-n.tokenpace"' --level debug \
+    --style compact > /tmp/tp.log ) &
+sleep 3   # let the stream attach
+open -n /Applications/TokenPace.app   # relaunch; launch logs land in /tmp/tp.log
+```
+
+### 2. `log show` — only for `.error`/`.fault` (persisted history)
+
+```sh
+log show --predicate 'subsystem == "com.artem-n.tokenpace" AND messageType == error' --last 1h
+```
+
+`log show` reads the **store**, so it can retrieve past `.error`/`.fault` but **will not** show
+`.notice`/`.info`/`.debug` no matter what flags you pass (they were never persisted). Do not conclude
+"the app didn't log" from an empty `log show` of notice-level events — use the live stream instead.
+
+### 3. Console.app
+
+Filter by subsystem `com.artem-n.tokenpace`, and turn on **Action ▸ Include Info/Debug Messages**
+(the GUI equivalent of `--level debug`) — otherwise, same trap as above.
+
+### 4. `swift run` dev build — logs still go to unified logging, not stdout
+
+A `swift run` build logs through the same `os.Logger`, so read it with the **same stream command**
+(same subsystem). It does **not** print to the terminal. When a value must be seen directly (e.g. a
+signed release whose store is inconvenient), a temporary `FileHandle.standardError.write(…)` in the
+code, run from a `.app` bundle, is the escape hatch — but that is a debugging aid, never committed.
+
+> **Signed/notarized release builds.** They log identically — the "invisible logs" people hit on a
+> release build is almost always method (1) run without `--level debug`, or method (2) used for
+> notice-level events, not a real difference in the build.
 
 ## Privacy
 

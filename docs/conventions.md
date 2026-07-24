@@ -82,6 +82,11 @@ git config core.hooksPath .githooks
 - **`docs/log-messages.md` — каталог усіх лог-меседжів.** Будь-яка зміна логування (новий
   виклик, видалення, зміна тексту меседжа чи рівня/категорії) **в тому самому коміті** оновлює
   відповідний рядок у `docs/log-messages.md` — включно з номерами рядків і підсумковими лічильниками.
+- **Як дивитися логи (методи й пастки)** — див.
+  [log-messages.md → Collecting logs](log-messages.md#collecting-logs--methods--gotchas). Головна
+  пастка: `.notice`/`.info` **не** пишуться в store, тож `log show` їх не покаже — потрібен
+  `log stream … --level debug` (без `--level debug` видно лише `.error`). Це стосується і підписаних
+  release-білдів (вони логують так само).
 
 ## Верифікаційні env-змінні
 
