@@ -69,9 +69,19 @@ final class SettingsWindowController: NSWindowController {
     /// `show()`.
     private var calmColorsToggle: NSButton!
 
-    /// The "Reset countdown" mode radios (#103), one per ``ResetCountdownMode``, an exclusive group.
-    /// Synced from `PersistedConfig` on every `show()`; the map ties each radio to its mode.
-    private var resetModeRadios: [ResetCountdownMode: NSButton] = [:]
+    /// The "Display reset countdown" controls (#103): a three-radio exclusive group plus one nested
+    /// checkbox. The radios pick the coarse intent — always show / smart / never — and the checkbox
+    /// under the middle ("smart") radio decides the one bit that separates ``ResetCountdownMode``'s
+    /// two smart cases: whether a *distant* (≥24 h) well-ahead-of-pace 7d reset is included
+    /// (``ResetCountdownMode/showDistant7d``) or dropped (``ResetCountdownMode/hideDistant7d``).
+    /// Collapsing the four flat radios this way makes the sole difference between the two smart modes
+    /// a single toggle instead of two near-identical long labels. Synced from `PersistedConfig` on
+    /// every `show()`.
+    private var resetAlwaysRadio: NSButton!
+    private var resetSmartRadio: NSButton!
+    /// Enabled only while `resetSmartRadio` is on; gates ``showDistant7d`` ↔ ``hideDistant7d``.
+    private var resetIncludeDistantCheckbox: NSButton!
+    private var resetNeverRadio: NSButton!
 
     /// The "Claude Code" monitoring checkbox (#89).
     private var claudeCodeToggle: NSButton!
@@ -114,8 +124,7 @@ final class SettingsWindowController: NSWindowController {
         syncToggleFromSystem()
         syncMonitoredServicesFromConfig()
         calmColorsToggle.state = PersistedConfig.calmMenuBarColors ? .on : .off
-        let resetMode = PersistedConfig.resetCountdownModeMenuBar
-        for (mode, radio) in resetModeRadios { radio.state = (mode == resetMode) ? .on : .off }
+        syncResetCountdownFromConfig()
         updatesToggle.state = PersistedConfig.automaticUpdateChecks ? .on : .off
         NSApp.activate(ignoringOtherApps: true)
         if !(window?.isVisible ?? false) { window?.center() }
@@ -173,25 +182,36 @@ final class SettingsWindowController: NSWindowController {
         calmHint.widthAnchor.constraint(
             equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
 
-        // "Reset countdown" mode (#103): an exclusive radio group deciding which reset time the widget
-        // shows (or hides). AppKit groups radios with the same `action` in one superview into an
-        // exclusive set; the vertical stack keeps them a single group. Each radio's `tag` is its
-        // `ResetCountdownMode.allCases` index, so the handler maps the selection back to a mode.
+        // "Display reset countdown" (#103): three radios pick the coarse intent, and a checkbox nested
+        // under the middle ("smart") radio flips the one bit between the two smart modes. AppKit groups
+        // radios sharing an `action` in one superview into an exclusive set; the vertical stack keeps
+        // them a single group. The checkbox shares that action too, so any change routes through
+        // `resetCountdownModeChanged`, which reads the whole group back into a `ResetCountdownMode`.
         let resetLabel = NSTextField(labelWithString: "Display reset countdown:")
         resetLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
         stack.addArrangedSubview(resetLabel)
         stack.setCustomSpacing(12, after: calmHint)   // separate the countdown sub-section from the calm hint
 
-        var resetRadioViews: [NSButton] = []
-        for (index, mode) in ResetCountdownMode.allCases.enumerated() {
-            let radio = NSButton(
-                radioButtonWithTitle: Self.resetModeTitle(mode),
-                target: self, action: #selector(resetCountdownModeChanged(_:)))
-            radio.tag = index
-            resetModeRadios[mode] = radio
-            resetRadioViews.append(radio)
-        }
-        let resetGroup = NSStackView(views: resetRadioViews)
+        resetAlwaysRadio = NSButton(
+            radioButtonWithTitle: "Always",
+            target: self, action: #selector(resetCountdownModeChanged(_:)))
+        resetSmartRadio = NSButton(
+            radioButtonWithTitle: "When well ahead or limit reached",
+            target: self, action: #selector(resetCountdownModeChanged(_:)))
+        resetNeverRadio = NSButton(
+            radioButtonWithTitle: "Never",
+            target: self, action: #selector(resetCountdownModeChanged(_:)))
+        // The "smart" radio's sub-option: whether a distant (≥24 h) well-ahead 7d reset is included.
+        // Nesting is the same `indented(_:)` treatment the WEB/Desktop mode radios use.
+        resetIncludeDistantCheckbox = NSButton(
+            checkboxWithTitle: "Include distant 7d limit reset (≥ 24 h away)",
+            target: self, action: #selector(resetCountdownModeChanged(_:)))
+        let resetGroup = NSStackView(views: [
+            resetAlwaysRadio,
+            resetSmartRadio,
+            indented(resetIncludeDistantCheckbox),
+            resetNeverRadio,
+        ])
         resetGroup.orientation = .vertical
         resetGroup.alignment = .leading
         resetGroup.spacing = 4
@@ -386,6 +406,34 @@ final class SettingsWindowController: NSWindowController {
         chatAndCoworkRadio.isEnabled = enabled
     }
 
+    /// Load the persisted reset-countdown mode (#103) into the radio group + nested checkbox. The two
+    /// smart modes share the middle radio and differ only in the checkbox; `.always`/`.never` leave
+    /// the checkbox at `.on` (the `showDistant7d` default) so returning to the smart radio lands on a
+    /// predictable state. Called on every `show()`.
+    private func syncResetCountdownFromConfig() {
+        switch PersistedConfig.resetCountdownModeMenuBar {
+        case .always:
+            resetAlwaysRadio.state = .on
+            resetIncludeDistantCheckbox.state = .on
+        case .showDistant7d:
+            resetSmartRadio.state = .on
+            resetIncludeDistantCheckbox.state = .on
+        case .hideDistant7d:
+            resetSmartRadio.state = .on
+            resetIncludeDistantCheckbox.state = .off
+        case .never:
+            resetNeverRadio.state = .on
+            resetIncludeDistantCheckbox.state = .on
+        }
+        updateResetCheckboxAvailability()
+    }
+
+    /// The "include distant 7d reset" checkbox only distinguishes the two smart modes, so it is
+    /// enabled only while the middle radio is on (the choice is still remembered when disabled).
+    private func updateResetCheckboxAvailability() {
+        resetIncludeDistantCheckbox.isEnabled = (resetSmartRadio.state == .on)
+    }
+
     /// A monitored-services control changed (#89): read the current UI into a config, persist it,
     /// refresh the radio enablement, and notify the app so it re-polls the status page immediately.
     @objc private func monitoredServicesToggled() {
@@ -460,24 +508,23 @@ final class SettingsWindowController: NSWindowController {
         onCalmColorsChange?(on)
     }
 
-    /// User picked a "Reset countdown" radio (#103): map the sender's `tag` back to the mode, persist
-    /// it, and notify the app so the menu-bar image repaints immediately.
+    /// A "Display reset countdown" control changed (#103): refresh the checkbox enablement, read the
+    /// radio group + checkbox back into a `ResetCountdownMode`, persist it, and notify the app so the
+    /// menu-bar image repaints immediately. The middle radio maps to one of the two smart modes per
+    /// the checkbox; `Always`/`Never` map straight through.
     @objc private func resetCountdownModeChanged(_ sender: NSButton) {
-        let cases = ResetCountdownMode.allCases
-        let mode = cases.indices.contains(sender.tag) ? cases[sender.tag] : .showDistant7d
+        updateResetCheckboxAvailability()
+        let mode: ResetCountdownMode
+        if resetAlwaysRadio.state == .on {
+            mode = .always
+        } else if resetNeverRadio.state == .on {
+            mode = .never
+        } else {
+            mode = resetIncludeDistantCheckbox.state == .on ? .showDistant7d : .hideDistant7d
+        }
         PersistedConfig.resetCountdownModeMenuBar = mode
         AppLogger.lifecycle.notice("reset-countdown: menu-bar mode set \(mode.rawValue, privacy: .public)")
         onResetCountdownModeMenuBarChange?(mode)
-    }
-
-    /// The Settings label for a reset-countdown mode (#103).
-    private static func resetModeTitle(_ mode: ResetCountdownMode) -> String {
-        switch mode {
-        case .always:        return "Always show reset time"
-        case .showDistant7d: return "Show 7d ahead-of-pace reset when days away"
-        case .hideDistant7d: return "Hide 7d ahead-of-pace reset when days away"
-        case .never:         return "Never show reset time"
-        }
     }
 
     @objc private func openRepo() {

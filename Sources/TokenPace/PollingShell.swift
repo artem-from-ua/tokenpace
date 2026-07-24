@@ -190,14 +190,20 @@ actor StubUsageTransport: UsageTransport {
         case bothRed
         /// 5h red (usage 100) + 7d orange (usage 55) — the red bar (5h) drives the countdown.
         case redOrange
+        /// 5h **calm** (usage 10 vs elapsed ~20 → green) + 7d **orange** ahead-of-pace (usage 55 vs
+        /// elapsed ~29 → ahead ~26 pts) with a **distant** reset (5 d ≥ 24 h). The only frame where the
+        /// "Display reset countdown" checkbox toggles a visible difference: `showDistant7d` shows the
+        /// 7d countdown, `hideDistant7d` hides it (the "lone distant 7d orange" cell, #103/ADR-0029).
+        case calmFiveOrangeSeven
 
         /// (fiveUtil, sevenUtil, fiveResetSeconds, sevenResetSeconds).
         var values: (five: Double, seven: Double, fiveIn: TimeInterval, sevenIn: TimeInterval) {
             switch self {
-            case .fiveOrange: return (50, 20, 4 * 3600, 5 * 24 * 3600)
-            case .bothOrange: return (50, 55, 4 * 3600, 5 * 24 * 3600)
-            case .bothRed:    return (100, 100, 2 * 3600, 4 * 24 * 3600)
-            case .redOrange:  return (100, 55, 2 * 3600, 5 * 24 * 3600)
+            case .fiveOrange:         return (50, 20, 4 * 3600, 5 * 24 * 3600)
+            case .bothOrange:         return (50, 55, 4 * 3600, 5 * 24 * 3600)
+            case .bothRed:            return (100, 100, 2 * 3600, 4 * 24 * 3600)
+            case .redOrange:          return (100, 55, 2 * 3600, 5 * 24 * 3600)
+            case .calmFiveOrangeSeven: return (10, 55, 4 * 3600, 5 * 24 * 3600)
             }
         }
     }
