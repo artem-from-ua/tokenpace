@@ -100,7 +100,7 @@ In the tables below, `<…>` marks an interpolated value.
 | 702 | `lifecycle` | `.notice` | `update: new version available tag=<tag> firstSeen=<bool>` | `handleUpdateFound` — a newer release was found; `firstSeen` gates the one-per-version banner (#37) |
 | 719 | `lifecycle` | `.notice` | `update: user opened releases page` | `openReleasesPage` — the user clicked the "New version available" menu item (#37) |
 | — | `archive` | `.notice` | `archive: sync starting (userInitiated=<bool>)` | `performArchiveSync` — an archive sync begins (daily heartbeat or "Archive now"); #110, ADR-0031 |
-| — | `archive` | `.notice` | `archive: sync ok — <n> files, <bytes> bytes` | `performArchiveSync` — the sync finished; the `lastArchiveSync` marker is advanced (#110) |
+| — | `archive` | `.notice` | `archive: sync ok — <n> updated, <bytes> bytes, <total> files / <totalBytes> bytes in archive` | `performArchiveSync` — the sync finished; the `lastArchiveSync` marker is advanced (#110). `<total>`/`<totalBytes>` count the whole archive incl. source-pruned files |
 | — | `archive` | `.error` | `archive: sync failed — <error>` | `performArchiveSync` — the sync threw (e.g. destination unwritable); marker not advanced, retried next heartbeat (#110) |
 
 ## `Sources/TokenPace/LogArchiver.swift`

@@ -698,7 +698,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 PersistedConfig.lastArchiveSync = Date()
                 self.lastArchiveSummary = summary
                 AppLogger.archive.notice(
-                    "archive: sync ok — \(summary.copied, privacy: .public) files, \(summary.bytes, privacy: .public) bytes")
+                    "archive: sync ok — \(summary.copied, privacy: .public) updated, \(summary.bytes, privacy: .public) bytes, \(summary.totalInArchive, privacy: .public) files / \(summary.totalBytesInArchive, privacy: .public) bytes in archive")
                 self.settingsWC?.updateArchiveStatus()
             case .failure(let error):
                 // Don't advance the marker → next heartbeat retries.

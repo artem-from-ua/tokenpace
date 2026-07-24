@@ -26,8 +26,15 @@ struct LogArchiver {
 
     /// Outcome of one sync run, surfaced to the Settings status line.
     struct Summary {
+        /// Files copied this run (new or changed).
         let copied: Int
+        /// Bytes copied this run.
         let bytes: Int64
+        /// Total files in the archive after this run — the union of what was already mirrored
+        /// (including files Claude Code has since pruned from the source) and everything just copied.
+        let totalInArchive: Int
+        /// Total bytes of every file in the archive after this run (same union as `totalInArchive`).
+        let totalBytesInArchive: Int64
     }
 
     enum ArchiveError: Error {
@@ -54,14 +61,23 @@ struct LogArchiver {
 
         var copied = 0
         var bytes: Int64 = 0
+        var totalInArchive = 0
+        var totalBytesInArchive: Int64 = 0
 
         for root in Self.sourceRoots {
             let sourceRoot = claudeHome.appendingPathComponent(root)
-            guard fileManager.fileExists(atPath: sourceRoot.path) else { continue }
             let destRoot = destination.appendingPathComponent(root)
 
-            let sourceEntries = scan(sourceRoot)
+            // The destination mirror is scanned even when the source root is gone, so a root Claude
+            // Code has fully pruned still contributes its archived files to the total.
             let destEntries = scan(destRoot)
+            guard fileManager.fileExists(atPath: sourceRoot.path) else {
+                totalInArchive += destEntries.count
+                totalBytesInArchive += destEntries.reduce(0) { $0 + $1.size }
+                continue
+            }
+
+            let sourceEntries = scan(sourceRoot)
             let toCopy = ArchiveSyncPlan.filesToCopy(source: sourceEntries, dest: destEntries)
 
             AppLogger.archive.debug(
@@ -80,9 +96,37 @@ struct LogArchiver {
                         "archive copy failed for \(entry.relativePath, privacy: .private): \(error.localizedDescription, privacy: .public)")
                 }
             }
+
+            // Files now in the archive for this root = the union of what was already mirrored (incl.
+            // pruned-in-source files) and every source file (all present after the copies above). Size
+            // per file prefers the source (freshly copied, current) and falls back to the archived
+            // copy for pruned-in-source files.
+            let sourceByPath = Dictionary(sourceEntries.map { ($0.relativePath, $0.size) }, uniquingKeysWith: { a, _ in a })
+            var sizeByPath = Dictionary(destEntries.map { ($0.relativePath, $0.size) }, uniquingKeysWith: { a, _ in a })
+            sizeByPath.merge(sourceByPath) { _, source in source }
+            totalInArchive += sizeByPath.count
+            totalBytesInArchive += sizeByPath.values.reduce(0, +)
         }
 
-        return Summary(copied: copied, bytes: bytes)
+        return Summary(
+            copied: copied, bytes: bytes,
+            totalInArchive: totalInArchive, totalBytesInArchive: totalBytesInArchive)
+    }
+
+    /// Count the files and total bytes already sitting in `destination` — a read-only scan of the
+    /// allow-listed roots, no copying. Lets the Settings status line show the archive's size on every
+    /// window open, independent of whether a sync has run in this process session (the in-memory
+    /// `Summary` is lost across relaunches, but the archive on disk is not). Returns `(0, 0)` for an
+    /// empty or missing destination.
+    func archiveStats(at destination: URL) -> (files: Int, bytes: Int64) {
+        var files = 0
+        var bytes: Int64 = 0
+        for root in Self.sourceRoots {
+            let entries = scan(destination.appendingPathComponent(root))
+            files += entries.count
+            bytes += entries.reduce(0) { $0 + $1.size }
+        }
+        return (files, bytes)
     }
 
     // MARK: - Tree scan

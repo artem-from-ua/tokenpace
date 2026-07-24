@@ -19,6 +19,10 @@ final class SettingsWindowController: NSWindowController {
 
     private static let repoURL = URL(string: "https://github.com/artem-from-ua/tokenpace")!
 
+    /// The scroll view wrapping all settings content (#110) — the window scrolls when the content is
+    /// taller than the capped window height. Retained so `resizeToFit()` can read its document view.
+    private var scrollView: NSScrollView!
+
     private enum Metrics {
         static let width: CGFloat = 400
         static let padding: CGFloat = 20
@@ -69,7 +73,9 @@ final class SettingsWindowController: NSWindowController {
     private var archiveNowButton: NSButton!
     /// Shows the chosen destination path, or "No folder selected" (#110).
     private var archivePathLabel: NSTextField!
-    /// Shows "Last archived: … · N files", or a hint when nothing has synced yet (#110).
+    /// Shows "Last archived: … · N updated · M files · <size>", or a pending hint (#110). Files and
+    /// size come from a live scan of the archive folder; "N updated" only when a fresh sync summary
+    /// is available.
     private var archiveStatusLabel: NSTextField!
 
     /// The "Check for updates daily" checkbox (#37), synced from `PersistedConfig` on every `show()`.
@@ -411,17 +417,44 @@ final class SettingsWindowController: NSWindowController {
         link.font = .systemFont(ofSize: 11)
         stack.addArrangedSubview(link)
 
-        let content = NSView()
-        content.addSubview(stack)
+        // The settings have outgrown a short panel (#110 added a Session-logs section), so the
+        // content lives in a document view inside a vertical scroll view: on a tall screen the window
+        // sizes to fit (no scroller shows), on a short one it caps its height and the extra content
+        // scrolls rather than running off-screen.
+        let documentView = NSView()
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        documentView.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: Metrics.padding),
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: Metrics.padding),
-            content.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: Metrics.padding),
-            content.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: Metrics.padding),
-            content.widthAnchor.constraint(equalToConstant: Metrics.width),
+            stack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: Metrics.padding),
+            stack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: Metrics.padding),
+            documentView.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: Metrics.padding),
+            documentView.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: Metrics.padding),
+            documentView.widthAnchor.constraint(equalToConstant: Metrics.width),
         ])
-        window?.contentView = content
-        window?.setContentSize(content.fittingSize)
+
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.documentView = documentView
+        self.scrollView = scrollView
+
+        window?.contentView = scrollView
+        resizeToFit()
+    }
+
+    /// Size the window to the content, but never taller than most of the visible screen — beyond that
+    /// the scroll view takes over. Called after `buildContent` and whenever a status line grows/shrinks
+    /// (the archive line, the launch hint, the update row) so the window keeps hugging its content.
+    private func resizeToFit() {
+        guard let scrollView, let documentView = scrollView.documentView else { return }
+        let contentHeight = documentView.fittingSize.height
+        let maxHeight = (window?.screen ?? NSScreen.main)
+            .map { $0.visibleFrame.height * 0.85 } ?? 900
+        let height = min(contentHeight, maxHeight)
+        window?.setContentSize(NSSize(width: Metrics.width, height: height))
     }
 
     /// A bold section heading (`General` / `Monitored services`), the visual anchor of each group.
@@ -477,9 +510,7 @@ final class SettingsWindowController: NSWindowController {
         hintLabel.isHidden = hint.isEmpty
 
         // The hint wraps to a different height per message; refit so neither text is clipped.
-        if let content = window?.contentView {
-            window?.setContentSize(content.fittingSize)
-        }
+        resizeToFit()
     }
 
     /// Load the persisted monitored-services config (#89) into the checkboxes and radios. Called on
@@ -671,9 +702,7 @@ final class SettingsWindowController: NSWindowController {
             updateLineLabel.stringValue = ""
             updateRow.isHidden = true
         }
-        if let content = window?.contentView {
-            window?.setContentSize(content.fittingSize)
-        }
+        resizeToFit()
     }
 
     // MARK: Session logs (#110)
@@ -724,34 +753,38 @@ final class SettingsWindowController: NSWindowController {
         archiveChooseButton.isEnabled = enabled
         archiveNowButton.isEnabled = enabled && destination != nil
 
-        if let destination {
-            archivePathLabel.stringValue = (destination as NSString).abbreviatingWithTildeInPath
-        } else {
+        guard let destination else {
             archivePathLabel.stringValue = "No folder selected"
+            archiveStatusLabel.stringValue = ""
+            resizeToFit()
+            return
         }
+        archivePathLabel.stringValue = (destination as NSString).abbreviatingWithTildeInPath
+
+        // Files + size come from a live scan of the archive folder, so they show on every window open
+        // regardless of whether a sync has run this session (the in-memory Summary is lost across
+        // relaunches; the folder on disk is not). "N updated" is only meaningful right after a sync,
+        // so it's appended only when a fresh Summary is available.
+        let destURL = URL(fileURLWithPath: (destination as NSString).expandingTildeInPath)
+        let stats = LogArchiver().archiveStats(at: destURL)
+        let totals = "\(stats.files) files · \(ByteSize.humanReadable(stats.bytes))"
 
         if let last = PersistedConfig.lastArchiveSync {
-            let when = Self.relativeFormatter.localizedString(for: last, relativeTo: Date())
+            // Reuse the popup's data-age formatter — plain English ("just now" / "2h ago"), never a
+            // locale-formatted string (the whole UI is English) and never a future "in 0 seconds"
+            // when a sync just finished and `last ≈ now`.
+            let when = PopupViewController.ageText(max(0, Date().timeIntervalSince(last)))
             if let summary = archiveSummaryProvider?() {
-                archiveStatusLabel.stringValue = "Last archived: \(when) · \(summary.copied) file\(summary.copied == 1 ? "" : "s")"
+                archiveStatusLabel.stringValue = "Last archived: \(when) · \(summary.copied) updated · \(totals)"
             } else {
-                archiveStatusLabel.stringValue = "Last archived: \(when)"
+                archiveStatusLabel.stringValue = "Last archived: \(when) · \(totals)"
             }
-        } else if enabled, destination != nil {
-            archiveStatusLabel.stringValue = "Not archived yet — runs daily, or use Archive now."
         } else {
-            archiveStatusLabel.stringValue = ""
+            // Folder set but nothing synced yet this install: still show what's already there (0 files
+            // on a fresh folder), plus the hint that a sync is pending.
+            archiveStatusLabel.stringValue = "Not archived yet — runs daily, or use Archive now. (\(totals))"
         }
 
-        if let content = window?.contentView {
-            window?.setContentSize(content.fittingSize)
-        }
+        resizeToFit()
     }
-
-    /// Shared relative-time formatter for the "Last archived …" line ("2 hours ago").
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .full
-        return f
-    }()
 }
