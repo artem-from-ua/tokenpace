@@ -100,22 +100,43 @@ public struct BarLayout: Sendable, Equatable {
     /// Right edge of the gap zone = `max(usageFraction, timeFraction)`.
     public var gapEnd: Double   { max(usageFraction, timeFraction) }
 
-    /// Whether this bar is "calm" — its rendered gap colour is **green or yellow**, i.e. pacing is
-    /// not yet worth flagging. The menu bar uses this to drop the reset-countdown label when *both*
-    /// bars are calm (removing visual noise while everything is fine); the label returns as soon as
-    /// either bar turns orange or red (`MenuBarLayout.make`, ADR-0028).
+    /// The bar's pacing **severity** — a three-way grading of the rendered gap colour, computed
+    /// AppKit-free from the raw fractions. This is the single Kit-side source that both the
+    /// "calm" muting (#105) and the reset-countdown selection (#103, ADR-0028/0029) read.
     ///
     /// Mirrors the colour grading in `PopupBarView.aheadColor` (which lives in the AppKit layer and
     /// cannot be imported here), so the thresholds are duplicated deliberately:
-    /// - `.onPaceOrBehind` (`usage <= time`) → **green** → calm.
-    /// - ahead (`usage > time`): **red** when `usageFraction >= 1` (limit exhausted) → not calm;
-    ///   **yellow** when `(usageFraction - timeFraction) < 0.15` → calm; else **orange** → not calm.
+    /// - `.calm` — **green** (`usage <= time`, i.e. `.onPaceOrBehind`) or **yellow** (ahead by
+    ///   `< 15` points): not yet worth flagging.
+    /// - `.ahead` — **orange**: ahead by `>= 15` points but not yet exhausted (`usage < 1`).
+    /// - `.exhausted` — **red**: `usageFraction >= 1` (limit hit, service blocked).
     ///
     /// The `< 0.15` boundary is strict (no epsilon), matching the integer-percent contract of
     /// `limitIndicator`: exactly 15 points ahead is orange, not yellow.
-    public var isCalm: Bool {
-        pacing == .onPaceOrBehind || (usageFraction < 1 && (usageFraction - timeFraction) < 0.15)
+    public var severity: PacingSeverity {
+        if pacing == .onPaceOrBehind { return .calm }              // green
+        if usageFraction >= 1 { return .exhausted }                // red (limit hit)
+        return (usageFraction - timeFraction) < 0.15 ? .calm : .ahead   // yellow : orange
     }
+
+    /// Whether this bar is "calm" — its rendered gap colour is **green or yellow**, i.e. pacing is
+    /// not yet worth flagging. Derived from ``severity`` so the thresholds live in one place. The
+    /// menu bar uses this to mute colours (#105) and to drop the reset-countdown label when both
+    /// bars are calm (#103, ADR-0028/0029).
+    public var isCalm: Bool { severity == .calm }
+}
+
+// MARK: - PacingSeverity
+
+/// Three-way pacing grade of a bar, mirroring the menu-bar/popup colour tiers. AppKit-free so the
+/// pure model layer can decide reset-countdown behaviour (#103) without importing the view palette.
+public enum PacingSeverity: Sendable, Equatable {
+    /// Green (on pace / behind) or yellow (mildly ahead, `< 15` pts) — not worth flagging.
+    case calm
+    /// Orange — ahead by `>= 15` pts, not yet exhausted (`usage < 1`).
+    case ahead
+    /// Red — the limit is exhausted (`usage >= 1`); the service is blocked until this window resets.
+    case exhausted
 }
 
 // MARK: - PacingModel

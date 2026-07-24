@@ -41,6 +41,11 @@ final class SettingsWindowController: NSWindowController {
     /// already persisted (via `PersistedConfig`) by the time this fires.
     var onCalmColorsChange: ((Bool) -> Void)?
 
+    /// Called when the user changes the menu-bar "Reset countdown" mode (#103), with the new mode —
+    /// wired by `AppDelegate.openSettings` to re-render the menu-bar image immediately. Already
+    /// persisted (via `PersistedConfig`) by the time this fires.
+    var onResetCountdownModeMenuBarChange: ((ResetCountdownMode) -> Void)?
+
     /// The "Check for updates daily" checkbox (#37), synced from `PersistedConfig` on every `show()`.
     private var updatesToggle: NSButton!
     /// The "Check now" button (#37).
@@ -63,6 +68,10 @@ final class SettingsWindowController: NSWindowController {
     /// The "Calm MenuBar Widget colors" checkbox (#105), synced from `PersistedConfig` on every
     /// `show()`.
     private var calmColorsToggle: NSButton!
+
+    /// The "Reset countdown" mode radios (#103), one per ``ResetCountdownMode``, an exclusive group.
+    /// Synced from `PersistedConfig` on every `show()`; the map ties each radio to its mode.
+    private var resetModeRadios: [ResetCountdownMode: NSButton] = [:]
 
     /// The "Claude Code" monitoring checkbox (#89).
     private var claudeCodeToggle: NSButton!
@@ -105,6 +114,8 @@ final class SettingsWindowController: NSWindowController {
         syncToggleFromSystem()
         syncMonitoredServicesFromConfig()
         calmColorsToggle.state = PersistedConfig.calmMenuBarColors ? .on : .off
+        let resetMode = PersistedConfig.resetCountdownModeMenuBar
+        for (mode, radio) in resetModeRadios { radio.state = (mode == resetMode) ? .on : .off }
         updatesToggle.state = PersistedConfig.automaticUpdateChecks ? .on : .off
         NSApp.activate(ignoringOtherApps: true)
         if !(window?.isVisible ?? false) { window?.center() }
@@ -161,6 +172,30 @@ final class SettingsWindowController: NSWindowController {
         stack.addArrangedSubview(calmHint)
         calmHint.widthAnchor.constraint(
             equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
+
+        // "Reset countdown" mode (#103): an exclusive radio group deciding which reset time the widget
+        // shows (or hides). AppKit groups radios with the same `action` in one superview into an
+        // exclusive set; the vertical stack keeps them a single group. Each radio's `tag` is its
+        // `ResetCountdownMode.allCases` index, so the handler maps the selection back to a mode.
+        let resetLabel = NSTextField(labelWithString: "Reset countdown:")
+        resetLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
+        stack.addArrangedSubview(resetLabel)
+        stack.setCustomSpacing(4, after: calmHint)
+
+        var resetRadioViews: [NSButton] = []
+        for (index, mode) in ResetCountdownMode.allCases.enumerated() {
+            let radio = NSButton(
+                radioButtonWithTitle: Self.resetModeTitle(mode),
+                target: self, action: #selector(resetCountdownModeChanged(_:)))
+            radio.tag = index
+            resetModeRadios[mode] = radio
+            resetRadioViews.append(radio)
+        }
+        let resetGroup = NSStackView(views: resetRadioViews)
+        resetGroup.orientation = .vertical
+        resetGroup.alignment = .leading
+        resetGroup.spacing = 4
+        stack.addArrangedSubview(indented(resetGroup))
 
         stack.addArrangedSubview(sectionSeparator())
 
@@ -423,6 +458,26 @@ final class SettingsWindowController: NSWindowController {
         PersistedConfig.calmMenuBarColors = on
         AppLogger.lifecycle.notice("calm-colors: menu-bar set \(on, privacy: .public)")
         onCalmColorsChange?(on)
+    }
+
+    /// User picked a "Reset countdown" radio (#103): map the sender's `tag` back to the mode, persist
+    /// it, and notify the app so the menu-bar image repaints immediately.
+    @objc private func resetCountdownModeChanged(_ sender: NSButton) {
+        let cases = ResetCountdownMode.allCases
+        let mode = cases.indices.contains(sender.tag) ? cases[sender.tag] : .showDistant7d
+        PersistedConfig.resetCountdownModeMenuBar = mode
+        AppLogger.lifecycle.notice("reset-countdown: menu-bar mode set \(mode.rawValue, privacy: .public)")
+        onResetCountdownModeMenuBarChange?(mode)
+    }
+
+    /// The Settings label for a reset-countdown mode (#103).
+    private static func resetModeTitle(_ mode: ResetCountdownMode) -> String {
+        switch mode {
+        case .always:        return "Always show reset time"
+        case .showDistant7d: return "Show 7d ahead-of-pace reset when days away"
+        case .hideDistant7d: return "Hide 7d ahead-of-pace reset when days away"
+        case .never:         return "Never show reset time"
+        }
     }
 
     @objc private func openRepo() {

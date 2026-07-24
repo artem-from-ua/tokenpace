@@ -31,12 +31,15 @@ public struct BarView: Sendable, Equatable {
         self.idle = idle
     }
 
-    /// Whether this bar is "calm" (green/yellow) for the purpose of hiding the reset label
-    /// (`MenuBarMode/expanded` `showReset`, ADR-0028). Delegates to `BarLayout.isCalm`, except an
-    /// **idle** 5-hour bar is always calm: it carries an inert placeholder `layout` (`usage 0 /
-    /// time 0`) and represents "ready to start, full quota available", never a pacing concern — so
-    /// it must not force the label on. Only the 7-day bar decides the label in the idle state.
-    public var isCalm: Bool { idle ? true : layout.isCalm }
+    /// The bar's pacing **severity** for reset-countdown selection (#103, ADR-0028/0029). Delegates to
+    /// `BarLayout.severity`, except an **idle** 5-hour bar is always ``PacingSeverity/calm``: it carries
+    /// an inert placeholder `layout` (`usage 0 / time 0`) and means "ready to start, full quota
+    /// available", never a pacing concern — so it must not drive the countdown. Only the 7-day bar
+    /// decides in the idle state.
+    public var severity: PacingSeverity { idle ? .calm : layout.severity }
+
+    /// Whether this bar is "calm" (green/yellow). Derived from ``severity`` (idle → always calm).
+    public var isCalm: Bool { severity == .calm }
 }
 
 // MARK: - MenuBarMode
@@ -45,28 +48,25 @@ public struct BarView: Sendable, Equatable {
 /// switches on when drawing.
 ///
 /// Cases:
-/// - ``expanded(fiveHour:sevenDay:reset:which:)``: the normal widget — two stacked bars (5h top,
-///   7d bottom) plus the countdown to the nearest reset. Shown whenever there is a usable snapshot,
+/// - ``expanded(fiveHour:sevenDay:resetToShow:)``: the normal widget — two stacked bars (5h top,
+///   7d bottom) plus an **optional** reset countdown. Shown whenever there is a usable snapshot,
 ///   at any `utilization` — the widget never collapses to a compact glyph (ADR-0015 supersedes the
-///   earlier idle mode).
+///   earlier idle mode). `resetToShow` is `nil` when no countdown should be drawn (ADR-0029).
 /// - ``error(fiveHour:sevenDay:reset:which:)``: there is no usable data to show — polling has been
 ///   failing long enough to surface a ⚠️ glyph (issue #12), **or** it is a cold start before the
 ///   first poll resolves (e.g. token expired, API unreachable). The bars are **optional**: present
 ///   during the 30–60 min "stale" phase (⚠️ drawn alongside the last known bars), `nil` past 60 min
 ///   or on a cold start (⚠️ alone).
 public enum MenuBarMode: Sendable, Equatable {
-    /// Full widget: 5h bar, 7d bar, and the nearest-reset countdown.
+    /// Full widget: 5h bar, 7d bar, and an optional reset countdown.
     ///
     /// - Parameters:
     ///   - fiveHour: The 5-hour bar (drawn on top).
     ///   - sevenDay: The 7-day bar (drawn below).
-    ///   - reset: Formatted countdown to whichever window resets first (`ResetClock`). Always
-    ///     computed; drawn only when `showReset` is `true`.
-    ///   - which: Which window drives `reset` (so the view can label/associate it).
-    ///   - showReset: Whether the view should actually draw the `reset` label. `false` when **both**
-    ///     bars are calm (green/yellow) — the label is dropped as noise (ADR-0028); `true` as soon as
-    ///     either bar is orange/red. In the idle state only the 7-day bar decides this.
-    case expanded(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset, which: LimitWindow, showReset: Bool)
+    ///   - resetToShow: The countdown to draw and which window drives it, or `nil` to draw no
+    ///     countdown. Computed by `MenuBarLayout.selectReset` from the 5h×7d severity table and the
+    ///     user's `ResetCountdownMode` (#103, ADR-0029) — the view just draws what it is given.
+    case expanded(fiveHour: BarView, sevenDay: BarView, resetToShow: ResetToShow?)
     /// Error state: a ⚠️ glyph, optionally with the last known bars beside it.
     ///
     /// All associated values are `nil` together (⚠️ only) or all non-`nil` together (⚠️ + bars) —
@@ -79,6 +79,21 @@ public enum MenuBarMode: Sendable, Equatable {
     ///   - reset: The last known nearest-reset countdown, or `nil`.
     ///   - which: Which window drove `reset`, or `nil`.
     case error(fiveHour: BarView?, sevenDay: BarView?, reset: TimeToReset?, which: LimitWindow?)
+}
+
+// MARK: - ResetToShow
+
+/// A reset countdown the menu bar should draw: the formatted `display` text and `which` window it
+/// belongs to. Produced by `MenuBarLayout.selectReset` (#103, ADR-0029); a `nil` `ResetToShow?`
+/// means "draw no countdown".
+public struct ResetToShow: Sendable, Equatable {
+    public let which: LimitWindow
+    public let display: TimeToReset
+
+    public init(which: LimitWindow, display: TimeToReset) {
+        self.which = which
+        self.display = display
+    }
 }
 
 // MARK: - MenuBarLayout
@@ -145,38 +160,36 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// - Parameters:
     ///   - snapshot: A decoded usage poll (`UsageClient`/#9).
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
-    public static func make(from snapshot: UsageSnapshot, now: Date) -> MenuBarLayout {
+    ///   - resetMode: How to pick/hide the reset countdown (#103, ADR-0029). Default `.showDistant7d`.
+    public static func make(
+        from snapshot: UsageSnapshot, now: Date, resetMode: ResetCountdownMode = .showDistant7d
+    ) -> MenuBarLayout {
         let seven = bar(for: snapshot.sevenDay, window: .sevenDay, now: now)
+        let sevenResetsAt = ResetClock.parse(snapshot.sevenDay.resetsAt)
 
         if snapshot.sessionIdle {
             // No active 5h window: an inert, knobless placeholder bar (the idle draw path ignores its
-            // geometry) + the 7-day reset label. The layout is an explicit zero — never derived from
-            // `fiveHour.resetsAt` (it is "" and would pin the pacing bar to elapsed 1.0).
+            // geometry). The 5h bar is always calm here, so only the 7-day bar drives the countdown —
+            // pass a nil 5h reset (never derived from the empty `fiveHour.resetsAt`).
             let five = BarView(
                 layout: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind),
                 indicator: .neutral, window: .fiveHour, idle: true)
-            let reset = ResetClock.parse(snapshot.sevenDay.resetsAt)
-                .map { ResetClock.timeToResetCompactDays(resetsAt: $0, now: now) } ?? .resetNow
-            // Idle 5h is always calm, so only the 7-day bar decides whether the label shows.
-            return MenuBarLayout(
-                mode: .expanded(fiveHour: five, sevenDay: seven, reset: reset, which: .sevenDay,
-                                showReset: !seven.isCalm))
+            let resetToShow = selectReset(
+                fiveSeverity: .calm, fiveResetsAt: nil,
+                sevenSeverity: seven.severity, sevenResetsAt: sevenResetsAt,
+                now: now, mode: resetMode)
+            return MenuBarLayout(mode: .expanded(fiveHour: five, sevenDay: seven, resetToShow: resetToShow))
         }
 
         let five = bar(for: snapshot.fiveHour, window: .fiveHour, now: now)
+        let fiveResetsAt = ResetClock.parse(snapshot.fiveHour.resetsAt)
 
-        let (which, reset) = ResetClock.resetDisplay(
-            fiveHourResetsAt: snapshot.fiveHour.resetsAt,
-            sevenDayResetsAt: snapshot.sevenDay.resetsAt,
-            now: now
-        ) ?? (.fiveHour, .resetNow)
-
-        // Drop the reset countdown as noise while both bars are calm (green/yellow); show it as soon
-        // as either turns orange/red (ADR-0028).
-        return MenuBarLayout(
-            mode: .expanded(fiveHour: five, sevenDay: seven, reset: reset, which: which,
-                            showReset: !(five.isCalm && seven.isCalm))
-        )
+        // Pick which reset countdown to show (or hide) from the 5h×7d severity table + mode (ADR-0029).
+        let resetToShow = selectReset(
+            fiveSeverity: five.severity, fiveResetsAt: fiveResetsAt,
+            sevenSeverity: seven.severity, sevenResetsAt: sevenResetsAt,
+            now: now, mode: resetMode)
+        return MenuBarLayout(mode: .expanded(fiveHour: five, sevenDay: seven, resetToShow: resetToShow))
     }
 
     // MARK: make (health-aware, issue #12)
@@ -203,32 +216,43 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///     all services are operational / unknown-cold. Threaded onto the result so the view can draw
     ///     the trailing dot; it does not affect the usage `mode`.
     public static func make(
-        from snapshot: UsageSnapshot?, health: UsageHealth, now: Date, serviceProblem: ServiceStatus? = nil
+        from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
+        serviceProblem: ServiceStatus? = nil, resetMode: ResetCountdownMode = .showDistant7d
     ) -> MenuBarLayout {
-        usageMode(from: snapshot, health: health, now: now).withServiceProblem(serviceProblem)
+        usageMode(from: snapshot, health: health, now: now, resetMode: resetMode)
+            .withServiceProblem(serviceProblem)
     }
 
     /// The usage-driven `mode` only (no service dot) — the existing #12 decision tree, factored out
-    /// so ``make(from:health:now:serviceProblem:)`` can graft the service dot onto its result.
-    private static func usageMode(from snapshot: UsageSnapshot?, health: UsageHealth, now: Date) -> MenuBarLayout {
+    /// so ``make(from:health:now:serviceProblem:resetMode:)`` can graft the service dot onto its result.
+    private static func usageMode(
+        from snapshot: UsageSnapshot?, health: UsageHealth, now: Date, resetMode: ResetCountdownMode
+    ) -> MenuBarLayout {
         // Healthy, or stale within the grace window: show the (possibly stale) bars unchanged.
         // A healthy state with no snapshot only happens at the very first tick before the first
         // poll resolves; with no data to draw, fall back to the bare ⚠️ error glyph.
         guard let age = health.failureAge(now: now) else {
-            return snapshot.map { make(from: $0, now: now) }
+            return snapshot.map { make(from: $0, now: now, resetMode: resetMode) }
                 ?? MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
         }
         if let snapshot, age <= UsageHealth.glyphAfter {
-            return make(from: snapshot, now: now)
+            return make(from: snapshot, now: now, resetMode: resetMode)
         }
 
         // Failing past the glyph threshold. Keep the bars only in the 30–60 min stale window and
-        // only if we have a snapshot; otherwise the glyph stands alone.
+        // only if we have a snapshot; otherwise the glyph stands alone. The countdown here is
+        // **diagnostic** ("data is stale, last reset was …"), so it always shows the nearest reset,
+        // independent of `resetMode`'s selection table (ADR-0029).
         let keepBars = snapshot != nil && age <= UsageHealth.hideBarsAfter
         guard keepBars, let snapshot,
-              case let .expanded(five, seven, reset, which, _) = make(from: snapshot, now: now).mode else {
+              case let .expanded(five, seven, _) = make(from: snapshot, now: now, resetMode: resetMode).mode else {
             return MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
         }
+        let (which, reset) = ResetClock.resetDisplay(
+            fiveHourResetsAt: snapshot.fiveHour.resetsAt,
+            sevenDayResetsAt: snapshot.sevenDay.resetsAt,
+            now: now
+        ) ?? (.fiveHour, .resetNow)
         return MenuBarLayout(mode: .error(fiveHour: five, sevenDay: seven, reset: reset, which: which))
     }
 
@@ -256,5 +280,80 @@ public struct MenuBarLayout: Sendable, Equatable {
             timePercent: layout.timeFraction * 100
         )
         return BarView(layout: layout, indicator: indicator, window: kind)
+    }
+
+    // MARK: - Reset-countdown selection (#103, ADR-0029)
+
+    /// Choose which reset countdown (5h or 7d) the menu bar should show, per the 5h×7d severity table
+    /// and the user's ``ResetCountdownMode``. Returns `nil` to hide the countdown. Pure/testable — the
+    /// single source of the selection table.
+    ///
+    /// The semantics ("show the next real unblock"):
+    /// - both bars **calm** → hidden, unless the mode shows a countdown even then (`always` → nearest).
+    /// - exactly one bar **noisy** → that bar's reset. A lone **7d ahead-of-pace (orange)** is gated:
+    ///   shown when `< 24 h` out, or when the mode allows a distant one; a 7d **exhausted (red)** is
+    ///   always shown. A noisy **5h** is always shown (its reset is near by definition).
+    /// - both bars **noisy** → the next unblock: both **exhausted** → the **later** reset (blocked
+    ///   until both clear); both **ahead** → the **earlier** reset (neither blocks yet); **red+orange**
+    ///   → the **red** bar's reset (only it blocks).
+    ///
+    /// `nil` `resetsAt` (missing/unparseable) is tolerated: a chosen bar with a `nil` instant yields
+    /// `.resetNow` (⏰), matching the rest of the layer.
+    static func selectReset(
+        fiveSeverity: PacingSeverity, fiveResetsAt: Date?,
+        sevenSeverity: PacingSeverity, sevenResetsAt: Date?,
+        now: Date, mode: ResetCountdownMode,
+        locale: Locale = .current, timeZone: TimeZone = .current
+    ) -> ResetToShow? {
+        if mode == .never { return nil }
+
+        let fiveNoisy = fiveSeverity != .calm
+        let sevenNoisy = sevenSeverity != .calm
+
+        // Format a chosen window's reset (5h → live countdown; 7d → compact-days variant).
+        func display(_ window: LimitWindow, _ resetsAt: Date?) -> ResetToShow {
+            guard let at = resetsAt else { return ResetToShow(which: window, display: .resetNow) }
+            let text = window == .sevenDay
+                ? ResetClock.timeToResetCompactDays(resetsAt: at, now: now, locale: locale, timeZone: timeZone)
+                : ResetClock.timeToReset(resetsAt: at, now: now, locale: locale, timeZone: timeZone)
+            return ResetToShow(which: window, display: text)
+        }
+        func pick(_ nr: NearestReset?) -> ResetToShow? {
+            guard let nr else { return nil }
+            return display(nr.window, nr.resetsAt)
+        }
+
+        let chosen: ResetToShow?
+        switch (fiveNoisy, sevenNoisy) {
+        case (true, true):
+            // Both noisy → next unblock.
+            if fiveSeverity == .exhausted && sevenSeverity == .exhausted {
+                chosen = pick(ResetClock.latestReset(fiveHour: fiveResetsAt, sevenDay: sevenResetsAt))
+            } else if fiveSeverity == .ahead && sevenSeverity == .ahead {
+                chosen = pick(ResetClock.nearestReset(fiveHour: fiveResetsAt, sevenDay: sevenResetsAt))
+            } else {
+                // red + orange → the red (exhausted) bar.
+                chosen = fiveSeverity == .exhausted
+                    ? display(.fiveHour, fiveResetsAt)
+                    : display(.sevenDay, sevenResetsAt)
+            }
+        case (true, false):
+            // Only 5h noisy → its reset (always near enough to matter).
+            chosen = display(.fiveHour, fiveResetsAt)
+        case (false, true):
+            // Only 7d noisy. Red → always; orange → gated by distance + mode.
+            if sevenSeverity == .exhausted {
+                chosen = display(.sevenDay, sevenResetsAt)
+            } else {
+                let far = (sevenResetsAt?.timeIntervalSince(now) ?? 0) >= 24 * 3_600
+                chosen = (far && !mode.showsDistantAhead7d) ? nil : display(.sevenDay, sevenResetsAt)
+            }
+        case (false, false):
+            // Both calm → hidden, unless the mode shows a countdown anyway (nearest).
+            chosen = mode.showsWhenBothCalm
+                ? pick(ResetClock.nearestReset(fiveHour: fiveResetsAt, sevenDay: sevenResetsAt))
+                : nil
+        }
+        return chosen
     }
 }

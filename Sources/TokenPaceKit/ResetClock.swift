@@ -146,6 +146,26 @@ public enum ResetClock {
         }
     }
 
+    /// Pick the limit that resets **last** (largest `resets_at`) between the 5h and 7d windows —
+    /// used by the "both exhausted" reset-countdown rule (#103, ADR-0029): when both bars are red the
+    /// service is blocked until the *later* window clears, so that is the actionable instant. Mirror
+    /// of ``nearestReset(fiveHour:sevenDay:)`` with the comparison reversed; on an exact tie the 5h
+    /// window still wins (`>=` keeps 5h on equality), matching `nearestReset`'s tie rule.
+    public static func latestReset(fiveHour: Date?, sevenDay: Date?) -> NearestReset? {
+        switch (fiveHour, sevenDay) {
+        case let (.some(five), .some(seven)):
+            return five >= seven
+                ? NearestReset(window: .fiveHour, resetsAt: five)
+                : NearestReset(window: .sevenDay, resetsAt: seven)
+        case let (.some(five), nil):
+            return NearestReset(window: .fiveHour, resetsAt: five)
+        case let (nil, .some(seven)):
+            return NearestReset(window: .sevenDay, resetsAt: seven)
+        case (nil, nil):
+            return nil
+        }
+    }
+
     // MARK: timeToReset
 
     /// Render the countdown to a single reset instant.

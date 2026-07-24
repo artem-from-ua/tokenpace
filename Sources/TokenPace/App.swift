@@ -268,6 +268,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.statusView?.calmColors = on
                 self?.refreshStatusImage()   // menu-bar image is snapshotted, not auto-rendered
             }
+            wc.onResetCountdownModeMenuBarChange = { [weak self] _ in
+                // The mode changes the layout (which countdown to draw), not just a colour — rebuild
+                // the menu-bar layout from the last poll (render reads PersistedConfig for the mode).
+                self?.reRenderForCurrentTime()
+            }
             settingsWC = wc
         }
         // Reflect the latest known update state whenever the window opens (#37).
@@ -646,7 +651,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func render(_ output: PollOutput, at now: Date) {
         statusView?.layout = MenuBarLayout.make(
             from: output.snapshot, health: output.health, now: now,
-            serviceProblem: lastStatusHealth?.worstProblem)
+            serviceProblem: lastStatusHealth?.worstProblem,
+            resetMode: PersistedConfig.resetCountdownModeMenuBar)   // #103: which reset countdown to show
         refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
         setPopupLayout(PopupLayout.make(
             from: output.snapshot, health: output.health, now: now, interval: output.interval,
