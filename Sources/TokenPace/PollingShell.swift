@@ -169,11 +169,21 @@ actor StubUsageTransport: UsageTransport {
     ///    the snapshot decodes `sessionIdle == true`. The 5h bar renders solid blue with no knob and the
     ///    menu-bar time falls back to the 7-day reset (set ~4.2 days out → "4d" live). The status
     ///    endpoint stays all-operational so the frame is clean.
+    ///  • `.optimisticReset` (`=optimistic-reset`) — the reset-boundary frame (#36): the first poll's 5h
+    ///    window resets in ~20 s at 60 % util, so the coordinator's one-shot timer fires shortly after
+    ///    launch — the 5h bar flips 60 % → 0 % with a fresh ~5 h countdown (no ⏰) and a forced refresh
+    ///    follows. Every later poll returns a freshly-reset window (0 %, now + 5h).
     /// The climbing/screenshot data modes also carry two `weekly_scoped` per-model entries in `limits[]`
     /// (#65) — Fable / Mythos — so the scoped-model popup rows are exercised end-to-end, and their
     /// utilisations (plus the 7-day window) show a couple of the ahead-of-pace gap colours.
     enum Mode: Equatable {
         case climbing, screenshot, authError, idle
+        /// The optimistic-reset frame (#36): the first poll returns an **active** 5h window whose reset
+        /// is only ~20 s out (utilisation 60 %), so the coordinator's one-shot timer fires shortly after
+        /// launch. On fire the 5h bar flips 60 % → 0 % with a fresh ~5 h countdown (the optimistic
+        /// overlay, no ⏰), then the forced refresh lands: from the second poll on the stub returns a
+        /// freshly-reset window (0 %, `now + 5h`), mirroring what the real API would report post-reset.
+        case optimisticReset
         /// A fixed 5h×7d severity frame for verifying the reset-countdown selection table (#103).
         case pacing(PacingFrame)
     }
@@ -304,6 +314,25 @@ actor StubUsageTransport: UsageTransport {
             """.data(using: .utf8)!
             let response = HTTPURLResponse(
                 url: UsageClient.endpoint, statusCode: 401, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
+        // Optimistic-reset frame (#36): first poll = active 5h resetting in ~20 s (60 %); every later
+        // poll = a freshly-reset window (0 %, now + 5h), as the real API would report post-reset. Lets
+        // the whole flow be watched: live countdown → optimistic 0 % flip (no ⏰) → forced refresh.
+        if mode == .optimisticReset {
+            let first = calls == 0
+            calls += 1
+            let fiveUtil = first ? 60.0 : 0.0
+            let fiveReset = Self.resetsAt(inSeconds: first ? 20 : 5 * 3600)
+            let sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
+            let body = """
+            {"five_hour":{"utilization":\(fiveUtil),"resets_at":"\(fiveReset)"},\
+            "seven_day":{"utilization":40.0,"resets_at":"\(sevenReset)"},\
+            "limits":[]}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
             return (body, response)
         }
 

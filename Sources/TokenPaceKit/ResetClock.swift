@@ -26,10 +26,13 @@ public enum TimeToReset: Sendable, Equatable {
     /// the view renders the string verbatim, so no new case is needed for that band.
     case relative(String)
 
-    /// Reset is **now or in the past** (remaining ≤ 0): the cached usage snapshot is
-    /// stale. The view renders a glyph (statusline uses ⏰); the polling layer should
-    /// treat this as a signal to re-query the usage API out of turn. The reactive
-    /// re-poll itself is **not** this module's job — `ResetClock` stays pure.
+    /// Reset is **now or in the past** (remaining ≤ 0), or the window's `resets_at` is
+    /// missing/unparseable: a boundary/unknown state. The view renders a neutral `"~1m"`
+    /// ("refresh imminent"), not the old ⏰ glyph (#36). In the normal reset-boundary flow
+    /// this case is not reached — the coordinator's one-shot timer applies an optimistic
+    /// reset (``optimisticReset(_:now:)``) and forces a refresh before the countdown hits
+    /// zero — so `.resetNow` now marks only genuinely degenerate data. `ResetClock` stays
+    /// pure: scheduling the re-poll is the coordinator's job, not this module's.
     case resetNow
 }
 
@@ -72,7 +75,7 @@ public struct NearestReset: Sendable, Equatable {
 ///   2h / 48h `threshold_hours`);
 /// - drops trailing zero minutes (`2h`, not `2h0m`) and adds a sub-minute **seconds**
 ///   band (`40s`);
-/// - returns ``TimeToReset/resetNow`` instead of hard-coding the ⏰ glyph.
+/// - returns ``TimeToReset/resetNow`` instead of hard-coding a glyph (the view renders `"~1m"`, #36).
 public enum ResetClock {
 
     // MARK: parse
@@ -435,5 +438,106 @@ public enum ResetClock {
     public static func nextReset(now: Date, window: LimitWindow) -> Date {
         let estimate = now.addingTimeInterval(TimeInterval(window.durationSeconds))
         return ceilTo10Minutes(estimate)
+    }
+
+    // MARK: nextResetInstant (scheduler helper)
+
+    /// The nearest **future** reset instant across the 5h and 7d windows, or `nil` if neither is in
+    /// the future — the input to the coordinator's one-shot optimistic-reset timer (#36).
+    ///
+    /// A window whose `resets_at` is missing/unparseable (``parse(_:)`` → `nil`) or already at/past
+    /// `now` is excluded, so this returns only an instant worth scheduling a timer for. When both are
+    /// already past (or both absent), the caller should apply the optimistic reset immediately rather
+    /// than schedule. The idle 5h case (`resets_at == ""`) drops out naturally and the 7d reset wins.
+    ///
+    /// - Parameters:
+    ///   - fiveHourResetsAt: Raw `five_hour.resets_at` (may be `""`).
+    ///   - sevenDayResetsAt: Raw `seven_day.resets_at`.
+    ///   - now: The current instant (inject for deterministic tests; do **not** call `Date()`).
+    public static func nextResetInstant(
+        fiveHourResetsAt: String,
+        sevenDayResetsAt: String,
+        now: Date
+    ) -> Date? {
+        let five = parse(fiveHourResetsAt).flatMap { $0 > now ? $0 : nil }
+        let seven = parse(sevenDayResetsAt).flatMap { $0 > now ? $0 : nil }
+        return nearestReset(fiveHour: five, sevenDay: seven)?.resetsAt
+    }
+
+    // MARK: optimisticReset (#36)
+
+    /// Apply a **local, optimistic reset** to a snapshot the instant a window's reset boundary passes,
+    /// so the menu bar never shows the stale `.resetNow` state (the colored ⏰) while it waits for the
+    /// forced API refresh to land. Each window whose parsed `resets_at` is at or past `now` is reset
+    /// to zero usage and rolled forward to its next window; a window still in the future is left
+    /// untouched. The result is a temporary local overlay — the next **successful** API response
+    /// overwrites it wholesale (the API is the source of truth, even if usage is still non-zero there).
+    ///
+    /// Per-window rules (issue #36):
+    /// - **5h:** if the snapshot is ``UsageSnapshot/sessionIdle`` the window is left idle
+    ///   (`utilization: 0`, `resets_at: ""`) — an idle 5h session has no reset to cross, and stays
+    ///   "ready to start". Otherwise, when its reset has passed, `utilization → 0` and a fresh
+    ///   `resets_at = now + 5h` is **synthesized**. This synthesis is a deliberate divergence from the
+    ///   decoder's `localEstimateAllowed: false` opt-out (#100 / ADR-0027): here the 5h window was
+    ///   *active* (not idle), so its reset genuinely rolls into a new active window — see ADR-0030.
+    /// - **7d:** when its reset has passed, `utilization → 0` and `resets_at = now + 7d`. The weekly
+    ///   window always exists, so there is no idle case.
+    /// - **Sub-windows** (`sevenDayOpus` / `sevenDaySonnet`): reset **only** when the 7d window itself
+    ///   reset, sharing its new `resets_at` — they ride the weekly cadence.
+    /// - **`limits`** are kept as-is: the overlay is transient and the next successful poll replaces
+    ///   the whole snapshot, so synthesizing limit resets would be wasted (and self-correcting) work.
+    ///
+    /// Driven purely off `now` vs each window's `resets_at` (not a "which timer fired" parameter), so a
+    /// near-simultaneous 5h+7d reset, or slight timer skew, resets exactly the windows that have
+    /// actually crossed their boundary.
+    ///
+    /// - Parameters:
+    ///   - snapshot: The last-known snapshot to roll forward.
+    ///   - now: The current instant (inject for deterministic tests; do **not** call `Date()`).
+    public static func optimisticReset(_ snapshot: UsageSnapshot, now: Date) -> UsageSnapshot {
+        // 5h: idle stays idle; an active window past its reset rolls to a fresh now+5h window.
+        let fiveHour: UsageWindow
+        if snapshot.sessionIdle {
+            fiveHour = snapshot.fiveHour
+        } else if let at = parse(snapshot.fiveHour.resetsAt), at <= now {
+            fiveHour = UsageWindow(utilization: 0, resetsAt: isoString(from: nextReset(now: now, window: .fiveHour)))
+        } else {
+            fiveHour = snapshot.fiveHour
+        }
+
+        // 7d: roll forward when its reset has passed; sub-windows ride the same boundary.
+        let sevenReset = parse(snapshot.sevenDay.resetsAt).map { $0 <= now } ?? false
+        let sevenDay: UsageWindow
+        let sevenDayOpus: UsageWindow?
+        let sevenDaySonnet: UsageWindow?
+        if sevenReset {
+            let newSeven = isoString(from: nextReset(now: now, window: .sevenDay))
+            sevenDay = UsageWindow(utilization: 0, resetsAt: newSeven)
+            sevenDayOpus = snapshot.sevenDayOpus.map { _ in UsageWindow(utilization: 0, resetsAt: newSeven) }
+            sevenDaySonnet = snapshot.sevenDaySonnet.map { _ in UsageWindow(utilization: 0, resetsAt: newSeven) }
+        } else {
+            sevenDay = snapshot.sevenDay
+            sevenDayOpus = snapshot.sevenDayOpus
+            sevenDaySonnet = snapshot.sevenDaySonnet
+        }
+
+        return UsageSnapshot(
+            fiveHour: fiveHour,
+            sevenDay: sevenDay,
+            sevenDayOpus: sevenDayOpus,
+            sevenDaySonnet: sevenDaySonnet,
+            limits: snapshot.limits,
+            sessionIdle: snapshot.sessionIdle)
+    }
+
+    /// Render a `Date` as an ISO-8601 string (`.withInternetDateTime`, UTC, no fractional seconds) so a
+    /// synthesized `resets_at` round-trips through ``parse(_:)`` identically to a real API one. Mirrors
+    /// the decode layer's private helper of the same name — kept local to `ResetClock` so the optimistic
+    /// path does not widen ``UsageSnapshot``'s private decode surface (ADR-0030).
+    private static func isoString(from date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.string(from: date)
     }
 }
