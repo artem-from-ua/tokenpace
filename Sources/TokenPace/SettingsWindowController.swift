@@ -188,7 +188,7 @@ final class SettingsWindowController: NSWindowController {
         stack.addArrangedSubview(checkNowButton)
         // Tighten the gap below the button — the update-available row that follows is usually hidden,
         // so the default row spacing leaves too much air under "Check now".
-        stack.setCustomSpacing(4, after: checkNowButton)
+        stack.setCustomSpacing(8, after: checkNowButton)
 
         // The "Update available: vX.Y.Z" line + a "Download" link, both hidden until a newer release
         // is found. Kept as two controls on one row: a plain label and a link button (same inline
