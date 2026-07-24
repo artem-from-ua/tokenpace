@@ -13,15 +13,18 @@ import Foundation
 ///    optional `intervalLine` (the current refresh cadence as a duration, e.g. `3m`), an optional
 ///    `nextUpdateLine` (`≈ attemptAt + interval`), and `bodyText` — the pretty-printed JSON on
 ///    success, or the raw error payload otherwise.
-/// 2. **Auth token**: `tokenReadLine` (when the token was read, or why it is unavailable) and an
-///    optional `tokenExpiryLine` (when it expires).
+/// 2. **Auth token**: an optional `tokenStatusLine` (why the token is unavailable — `nil` when it
+///    read cleanly, so nothing is shown) and an optional `tokenExpiryLine` (when it expires). There
+///    is deliberately no "token read at" line: the Keychain payload has no issued-at field and the
+///    access token is opaque (not a JWT), so the only honest instant we could show is the Keychain
+///    *read* time — misleading as an "obtained at", so it is not surfaced (`TokenDiagnostics.readAt`).
 public struct TroubleshootLayout: Sendable, Equatable {
     public let timestampLine: String
     public let statusLine: String?
     public let intervalLine: String?
     public let nextUpdateLine: String?
     public let bodyText: String
-    public let tokenReadLine: String
+    public let tokenStatusLine: String?
     public let tokenExpiryLine: String?
 
     public init(
@@ -30,7 +33,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
         intervalLine: String?,
         nextUpdateLine: String?,
         bodyText: String,
-        tokenReadLine: String,
+        tokenStatusLine: String?,
         tokenExpiryLine: String?
     ) {
         self.timestampLine = timestampLine
@@ -38,7 +41,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
         self.intervalLine = intervalLine
         self.nextUpdateLine = nextUpdateLine
         self.bodyText = bodyText
-        self.tokenReadLine = tokenReadLine
+        self.tokenStatusLine = tokenStatusLine
         self.tokenExpiryLine = tokenExpiryLine
     }
 
@@ -62,7 +65,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
                 intervalLine: nil,
                 nextUpdateLine: nil,
                 bodyText: bodyPlaceholder,
-                tokenReadLine: "Token: unavailable (no poll yet)",
+                tokenStatusLine: "Token: unavailable (no poll yet)",
                 tokenExpiryLine: nil)
         }
 
@@ -102,15 +105,19 @@ public struct TroubleshootLayout: Sendable, Equatable {
         let nextUpdate = fetch.attemptAt.addingTimeInterval(output.interval)
         let nextUpdateLine = "Next update: ≈ \(timestampText(nextUpdate, timeZone: timeZone))"
 
-        let tokenReadLine: String
+        // A readable token shows only its expiry — never a "read at" line: `token.readAt` is the
+        // Keychain read instant, not an issued-at, so it would misrepresent when the token was
+        // obtained (see the type doc). When the token could not be read, `tokenStatusLine` carries
+        // the reason instead; otherwise it is `nil` and the shell hides the row.
+        let tokenStatusLine: String?
         let tokenExpiryLine: String?
         if let token = diagnostics.token {
-            tokenReadLine = "Token read: \(timestampText(token.readAt, timeZone: timeZone))"
+            tokenStatusLine = nil
             tokenExpiryLine = "Token expires: \(timestampText(token.expiresAt, timeZone: timeZone))"
         } else {
             // No token → explain with the same reason the fetch carried (it was `.notSent`).
             let reason = Self.tokenUnavailableReason(fetch.outcome)
-            tokenReadLine = "Token unavailable: \(reason)"
+            tokenStatusLine = "Token unavailable: \(reason)"
             tokenExpiryLine = nil
         }
 
@@ -120,7 +127,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
             intervalLine: intervalLine,
             nextUpdateLine: nextUpdateLine,
             bodyText: bodyText,
-            tokenReadLine: tokenReadLine,
+            tokenStatusLine: tokenStatusLine,
             tokenExpiryLine: tokenExpiryLine)
     }
 
