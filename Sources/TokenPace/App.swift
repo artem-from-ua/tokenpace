@@ -94,6 +94,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastKnownRelease: GitHubRelease?
     /// The in-flight update fetch, if any — cancelled before a new check and on terminate.
     private var updateTask: Task<Void, Never>?
+    /// The in-flight archive sync, if any (#110) — cancelled before a new sync and on terminate.
+    private var archiveTask: Task<Void, Never>?
+    /// The result of the last archive sync, retained so the Settings status line can show
+    /// "Last archived: … · N files" between runs (#110). `nil` until the first sync completes.
+    private(set) var lastArchiveSummary: LogArchiver.Summary?
     /// Whether the `gh` path is enabled, resolved once (lazily) from `TOKENPACE_GH_AUTH`. Checked in
     /// `ProcessInfo` first (terminal / `launchctl setenv` launches), then — since a login-launched app
     /// sees no shell env — from the login shell's `~/.zshrc`/`~/.zprofile` via `ShellEnvironment`. The
@@ -285,6 +290,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // menu-bar layout from the last poll (render reads PersistedConfig for the toggle).
                 self?.reRenderForCurrentTime()
             }
+            wc.onArchiveNow = { [weak self] in self?.performArchiveSync(userInitiated: true) }
+            wc.archiveSummaryProvider = { [weak self] in self?.lastArchiveSummary }
             settingsWC = wc
         }
         // Reflect the latest known update state whenever the window opens (#37).
@@ -466,6 +473,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pollTask?.cancel()
         statusTask?.cancel()
         updateTask?.cancel()
+        archiveTask?.cancel()
         ageTimer?.invalidate()
         resetTimer?.invalidate()
         sleepWake?.stop()
@@ -575,6 +583,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         troubleshootWC?.render(output)
         pollStatusIfDue(usageInterval: output.interval)
         pollUpdateIfDue()
+        pollArchiveIfDue()
     }
 
     /// Fetch the Claude status page when `StatusCadence` says it is due — riding the usage poll's
@@ -650,6 +659,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.lastKnownRelease = nil
                 self.setUpdateItemVisible(false)
                 self.settingsWC?.updateAvailability(nil)
+            }
+        }
+    }
+
+    // MARK: - Session-log archive (#110)
+
+    /// Mirror Claude Code's session logs when the daily `ArchiveCadence` says it is due, riding the
+    /// usage heartbeat like the update and status polls. No-op when the feature is off, no destination
+    /// is set, or the 24 h window has not elapsed.
+    private func pollArchiveIfDue() {
+        guard PersistedConfig.archiveEnabled, PersistedConfig.archiveDestination != nil else { return }
+        guard ArchiveCadence.isDue(lastSync: PersistedConfig.lastArchiveSync, now: Date()) else { return }
+        performArchiveSync(userInitiated: false)
+    }
+
+    /// Run one archive sync — shared by the daily heartbeat (`pollArchiveIfDue`) and the Settings…
+    /// "Archive now" button (`userInitiated: true`). Requires a destination (the caller guards, but
+    /// this re-checks). The `lastArchiveSync` marker advances only on **success**, so a failed sync
+    /// (unwritable folder) stays due and retries next heartbeat (`ArchiveCadence`).
+    ///
+    /// Dispatched on a `Task` off the main actor for the file I/O; because `AppDelegate` is
+    /// `@MainActor`, the continuation after `await` resumes on the main actor, so touching
+    /// `PersistedConfig`, `lastArchiveSummary`, and the Settings window is safe.
+    func performArchiveSync(userInitiated: Bool) {
+        guard let path = PersistedConfig.archiveDestination else { return }
+        let destination = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        archiveTask?.cancel()
+        AppLogger.archive.notice("archive: sync starting (userInitiated=\(userInitiated, privacy: .public))")
+        archiveTask = Task { [weak self] in
+            let result = await Task.detached { () -> Result<LogArchiver.Summary, Error> in
+                do { return .success(try LogArchiver().sync(to: destination)) }
+                catch { return .failure(error) }
+            }.value
+            guard let self, !Task.isCancelled else { return }
+            switch result {
+            case .success(let summary):
+                PersistedConfig.lastArchiveSync = Date()
+                self.lastArchiveSummary = summary
+                AppLogger.archive.notice(
+                    "archive: sync ok — \(summary.copied, privacy: .public) files, \(summary.bytes, privacy: .public) bytes")
+                self.settingsWC?.updateArchiveStatus()
+            case .failure(let error):
+                // Don't advance the marker → next heartbeat retries.
+                AppLogger.archive.error(
+                    "archive: sync failed — \(error.localizedDescription, privacy: .public)")
+                self.settingsWC?.updateArchiveStatus()
             }
         }
     }

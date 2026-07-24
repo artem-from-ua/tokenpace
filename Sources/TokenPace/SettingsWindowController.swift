@@ -52,6 +52,26 @@ final class SettingsWindowController: NSWindowController {
     /// by the time this fires.
     var onServiceDotChange: ((Bool) -> Void)?
 
+    /// Called when the user clicks "Archive now" (#110) — wired by `AppDelegate.openSettings` to run
+    /// an immediate archive sync that bypasses the daily cadence.
+    var onArchiveNow: (() -> Void)?
+
+    /// Provides the last archive summary for the status line (#110), read from the app on each
+    /// `show()` / `updateArchiveStatus()`. `nil` until the first sync of the session completes.
+    var archiveSummaryProvider: (() -> LogArchiver.Summary?)?
+
+    /// The "Archive session logs to a folder" checkbox (#110), synced from `PersistedConfig` on every
+    /// `show()`.
+    private var archiveToggle: NSButton!
+    /// The "Choose…" button that opens an `NSOpenPanel` to pick the archive folder (#110).
+    private var archiveChooseButton: NSButton!
+    /// The "Archive now" button (#110), enabled only when the feature is on and a folder is set.
+    private var archiveNowButton: NSButton!
+    /// Shows the chosen destination path, or "No folder selected" (#110).
+    private var archivePathLabel: NSTextField!
+    /// Shows "Last archived: … · N files", or a hint when nothing has synced yet (#110).
+    private var archiveStatusLabel: NSTextField!
+
     /// The "Check for updates daily" checkbox (#37), synced from `PersistedConfig` on every `show()`.
     private var updatesToggle: NSButton!
     /// The "Check now" button (#37).
@@ -137,6 +157,8 @@ final class SettingsWindowController: NSWindowController {
         syncResetCountdownFromConfig()
         serviceDotToggle.state = PersistedConfig.showServiceStatusDot ? .on : .off
         updatesToggle.state = PersistedConfig.automaticUpdateChecks ? .on : .off
+        archiveToggle.state = PersistedConfig.archiveEnabled ? .on : .off
+        updateArchiveStatus()
         NSApp.activate(ignoringOtherApps: true)
         if !(window?.isVisible ?? false) { window?.center() }
         showWindow(nil)
@@ -287,6 +309,51 @@ final class SettingsWindowController: NSWindowController {
         radioGroup.alignment = .leading
         radioGroup.spacing = 4
         stack.addArrangedSubview(indented(radioGroup))
+
+        stack.addArrangedSubview(sectionSeparator())
+
+        // ── Session logs (#110) ───────────────────────────────────────────────────────────────
+        stack.addArrangedSubview(sectionHeader("Session logs"))
+
+        archiveToggle = NSButton(
+            checkboxWithTitle: "Archive session logs to a folder",
+            target: self,
+            action: #selector(toggleArchive(_:)))
+        stack.addArrangedSubview(archiveToggle)
+
+        // Explains what the archiver does and why — accumulate-only, survives Claude Code's cleanup.
+        let archiveHint = NSTextField(wrappingLabelWithString:
+            "Copies Claude Code's raw session logs to a folder you choose, daily. Files Claude Code "
+            + "deletes after 30 days are kept in the archive.")
+        archiveHint.font = .systemFont(ofSize: 11)
+        archiveHint.textColor = .secondaryLabelColor
+        archiveHint.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(archiveHint)
+        archiveHint.widthAnchor.constraint(
+            equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
+
+        // The chosen-folder line + "Choose…" button on one row.
+        archivePathLabel = NSTextField(labelWithString: "")
+        archivePathLabel.font = .systemFont(ofSize: 11)
+        archivePathLabel.textColor = .secondaryLabelColor
+        archivePathLabel.lineBreakMode = .byTruncatingMiddle
+        archiveChooseButton = NSButton(title: "Choose…", target: self, action: #selector(chooseArchiveFolder))
+        archiveChooseButton.bezelStyle = .rounded
+        let archiveFolderRow = NSStackView(views: [archiveChooseButton, archivePathLabel])
+        archiveFolderRow.orientation = .horizontal
+        archiveFolderRow.alignment = .firstBaseline
+        archiveFolderRow.spacing = 8
+        stack.addArrangedSubview(archiveFolderRow)
+
+        archiveNowButton = NSButton(title: "Archive now", target: self, action: #selector(archiveNow))
+        archiveNowButton.bezelStyle = .rounded
+        stack.addArrangedSubview(archiveNowButton)
+        stack.setCustomSpacing(8, after: archiveNowButton)
+
+        archiveStatusLabel = NSTextField(labelWithString: "")
+        archiveStatusLabel.font = .systemFont(ofSize: 11)
+        archiveStatusLabel.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(archiveStatusLabel)
 
         stack.addArrangedSubview(sectionSeparator())
 
@@ -608,4 +675,83 @@ final class SettingsWindowController: NSWindowController {
             window?.setContentSize(content.fittingSize)
         }
     }
+
+    // MARK: Session logs (#110)
+
+    /// Persist the "Archive session logs" choice. A first-time enable with no folder yet chosen nudges
+    /// the user straight into the folder picker, since the archiver stays inert without a destination.
+    @objc private func toggleArchive(_ sender: NSButton) {
+        let on = sender.state == .on
+        PersistedConfig.archiveEnabled = on
+        AppLogger.lifecycle.notice("archive: enabled set \(on, privacy: .public)")
+        if on, PersistedConfig.archiveDestination == nil {
+            chooseArchiveFolder()   // no folder yet → prompt now, or the toggle does nothing
+        }
+        updateArchiveStatus()
+    }
+
+    /// Open an `NSOpenPanel` to pick (or create) the archive folder, and persist the chosen path.
+    /// No security-scoped bookmark: the app isn't sandboxed, so a plain path suffices (ADR-0030).
+    @objc private func chooseArchiveFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Choose a folder to archive Claude Code session logs into."
+        if let current = PersistedConfig.archiveDestination {
+            panel.directoryURL = URL(fileURLWithPath: (current as NSString).expandingTildeInPath)
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        PersistedConfig.archiveDestination = url.path
+        AppLogger.lifecycle.notice("archive: destination chosen")
+        updateArchiveStatus()
+    }
+
+    /// Run an immediate archive sync (bypasses the daily cadence) via the app's shared path.
+    @objc private func archiveNow() {
+        onArchiveNow?()
+    }
+
+    /// Reflect the current archive state in the window (#110): the chosen path (or "No folder
+    /// selected"), the "Last archived …" line, and the enablement of the Choose…/Archive-now buttons.
+    /// Called on `show()`, after each toggle/choose, and by `AppDelegate` when a sync finishes.
+    func updateArchiveStatus() {
+        let enabled = PersistedConfig.archiveEnabled
+        let destination = PersistedConfig.archiveDestination
+
+        archiveChooseButton.isEnabled = enabled
+        archiveNowButton.isEnabled = enabled && destination != nil
+
+        if let destination {
+            archivePathLabel.stringValue = (destination as NSString).abbreviatingWithTildeInPath
+        } else {
+            archivePathLabel.stringValue = "No folder selected"
+        }
+
+        if let last = PersistedConfig.lastArchiveSync {
+            let when = Self.relativeFormatter.localizedString(for: last, relativeTo: Date())
+            if let summary = archiveSummaryProvider?() {
+                archiveStatusLabel.stringValue = "Last archived: \(when) · \(summary.copied) file\(summary.copied == 1 ? "" : "s")"
+            } else {
+                archiveStatusLabel.stringValue = "Last archived: \(when)"
+            }
+        } else if enabled, destination != nil {
+            archiveStatusLabel.stringValue = "Not archived yet — runs daily, or use Archive now."
+        } else {
+            archiveStatusLabel.stringValue = ""
+        }
+
+        if let content = window?.contentView {
+            window?.setContentSize(content.fittingSize)
+        }
+    }
+
+    /// Shared relative-time formatter for the "Last archived …" line ("2 hours ago").
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .full
+        return f
+    }()
 }
