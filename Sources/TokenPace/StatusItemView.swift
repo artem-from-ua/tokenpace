@@ -84,11 +84,13 @@ final class StatusItemView: NSView {
         static let indicatorStroke = NSColor(srgbRed: 24/255, green: 24/255, blue: 24/255, alpha: 1)
         /// The **idle** 5-hour bar's solid fill (#100, ADR-0027) — the 5h window has no active session,
         /// so the bar is a knobless solid track meaning "ready to start, full quota available", not a
-        /// pacing state. Same 70/140/230 sRGB as the ``statusBlue`` service dot: mid-brightness, in tone
-        /// with the palette (`gapGreen` #5faf5f), distinct from the pacing greens/ambers, and already
-        /// tuned to read at small size on both light and dark menu bars. Fixed sRGB (not `systemBlue`)
-        /// because the menu-bar image is non-template and drawn in a resolved appearance.
-        static let idleBlue = NSColor(srgbRed: 70/255, green: 140/255, blue: 230/255, alpha: 1)
+        /// pacing state. A **muted, slightly darker** blue (85/130/180): the R/G channels are pulled up
+        /// toward B to drop the saturation (~53 %, softer than the vivid ~70 % `statusBlue` service dot),
+        /// and the overall brightness is lowered a notch so the track reads a touch deeper — still
+        /// clearly blue, in tone with the palette (`gapGreen` #5faf5f), distinct from the pacing
+        /// greens/ambers, on both light and dark menu bars. Fixed sRGB (not `systemBlue`) because the
+        /// menu-bar image is non-template, drawn in a resolved appearance.
+        static let idleBlue = NSColor(srgbRed: 85/255, green: 130/255, blue: 180/255, alpha: 1)
         /// Idle glyph + reset label — follow the menu-bar foreground.
         static let foreground = NSColor.labelColor
 
