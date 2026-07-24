@@ -36,4 +36,7 @@ public enum AppLogger {
     /// Menu-bar rendering: layout mode transitions (idle↔expanded), redraw triggers. Diagnostic
     /// only — never logs full layout data (high-volume, not secret). (Ticket: StatusItemView, #10)
     public static let ui        = Logger(subsystem: subsystem, category: "ui")
+    /// Session-log archiver: sync start/finish, file/byte counts, failures. Never logs file paths at
+    /// `.notice`/`.info` (they contain project names); paths are `.debug`-only. (Ticket: #110)
+    public static let archive   = Logger(subsystem: subsystem, category: "archive")
 }

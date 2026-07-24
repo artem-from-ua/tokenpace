@@ -19,6 +19,10 @@ final class SettingsWindowController: NSWindowController {
 
     private static let repoURL = URL(string: "https://github.com/artem-from-ua/tokenpace")!
 
+    /// The scroll view wrapping all settings content (#110) — the window scrolls when the content is
+    /// taller than the capped window height. Retained so `resizeToFit()` can read its document view.
+    private var scrollView: NSScrollView!
+
     private enum Metrics {
         static let width: CGFloat = 400
         static let padding: CGFloat = 20
@@ -51,6 +55,28 @@ final class SettingsWindowController: NSWindowController {
     /// dot changes both what is drawn and the item width). Already persisted (via `PersistedConfig`)
     /// by the time this fires.
     var onServiceDotChange: ((Bool) -> Void)?
+
+    /// Called when the user clicks "Archive now" (#110) — wired by `AppDelegate.openSettings` to run
+    /// an immediate archive sync that bypasses the daily cadence.
+    var onArchiveNow: (() -> Void)?
+
+    /// Provides the last archive summary for the status line (#110), read from the app on each
+    /// `show()` / `updateArchiveStatus()`. `nil` until the first sync of the session completes.
+    var archiveSummaryProvider: (() -> LogArchiver.Summary?)?
+
+    /// The "Archive session logs to a folder" checkbox (#110), synced from `PersistedConfig` on every
+    /// `show()`.
+    private var archiveToggle: NSButton!
+    /// The "Choose…" button that opens an `NSOpenPanel` to pick the archive folder (#110).
+    private var archiveChooseButton: NSButton!
+    /// The "Archive now" button (#110), enabled only when the feature is on and a folder is set.
+    private var archiveNowButton: NSButton!
+    /// Shows the chosen destination path, or "No folder selected" (#110).
+    private var archivePathLabel: NSTextField!
+    /// Shows "Last archived: … · N updated · M files · <size>", or a pending hint (#110). Files and
+    /// size come from a live scan of the archive folder; "N updated" only when a fresh sync summary
+    /// is available.
+    private var archiveStatusLabel: NSTextField!
 
     /// The "Check for updates daily" checkbox (#37), synced from `PersistedConfig` on every `show()`.
     private var updatesToggle: NSButton!
@@ -137,6 +163,8 @@ final class SettingsWindowController: NSWindowController {
         syncResetCountdownFromConfig()
         serviceDotToggle.state = PersistedConfig.showServiceStatusDot ? .on : .off
         updatesToggle.state = PersistedConfig.automaticUpdateChecks ? .on : .off
+        archiveToggle.state = PersistedConfig.archiveEnabled ? .on : .off
+        updateArchiveStatus()
         NSApp.activate(ignoringOtherApps: true)
         if !(window?.isVisible ?? false) { window?.center() }
         showWindow(nil)
@@ -290,6 +318,51 @@ final class SettingsWindowController: NSWindowController {
 
         stack.addArrangedSubview(sectionSeparator())
 
+        // ── Session logs (#110) ───────────────────────────────────────────────────────────────
+        stack.addArrangedSubview(sectionHeader("Session logs"))
+
+        archiveToggle = NSButton(
+            checkboxWithTitle: "Archive session logs to a folder",
+            target: self,
+            action: #selector(toggleArchive(_:)))
+        stack.addArrangedSubview(archiveToggle)
+
+        // Explains what the archiver does and why — accumulate-only, survives Claude Code's cleanup.
+        let archiveHint = NSTextField(wrappingLabelWithString:
+            "Copies Claude Code's raw session logs to a folder you choose, daily. Files Claude Code "
+            + "deletes after 30 days are kept in the archive.")
+        archiveHint.font = .systemFont(ofSize: 11)
+        archiveHint.textColor = .secondaryLabelColor
+        archiveHint.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(archiveHint)
+        archiveHint.widthAnchor.constraint(
+            equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
+
+        // The chosen-folder line + "Choose…" button on one row.
+        archivePathLabel = NSTextField(labelWithString: "")
+        archivePathLabel.font = .systemFont(ofSize: 11)
+        archivePathLabel.textColor = .secondaryLabelColor
+        archivePathLabel.lineBreakMode = .byTruncatingMiddle
+        archiveChooseButton = NSButton(title: "Choose…", target: self, action: #selector(chooseArchiveFolder))
+        archiveChooseButton.bezelStyle = .rounded
+        let archiveFolderRow = NSStackView(views: [archiveChooseButton, archivePathLabel])
+        archiveFolderRow.orientation = .horizontal
+        archiveFolderRow.alignment = .firstBaseline
+        archiveFolderRow.spacing = 8
+        stack.addArrangedSubview(archiveFolderRow)
+
+        archiveNowButton = NSButton(title: "Archive now", target: self, action: #selector(archiveNow))
+        archiveNowButton.bezelStyle = .rounded
+        stack.addArrangedSubview(archiveNowButton)
+        stack.setCustomSpacing(8, after: archiveNowButton)
+
+        archiveStatusLabel = NSTextField(labelWithString: "")
+        archiveStatusLabel.font = .systemFont(ofSize: 11)
+        archiveStatusLabel.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(archiveStatusLabel)
+
+        stack.addArrangedSubview(sectionSeparator())
+
         // ── Updates (#37) ─────────────────────────────────────────────────────────────────────
         stack.addArrangedSubview(sectionHeader("Updates"))
 
@@ -344,17 +417,44 @@ final class SettingsWindowController: NSWindowController {
         link.font = .systemFont(ofSize: 11)
         stack.addArrangedSubview(link)
 
-        let content = NSView()
-        content.addSubview(stack)
+        // The settings have outgrown a short panel (#110 added a Session-logs section), so the
+        // content lives in a document view inside a vertical scroll view: on a tall screen the window
+        // sizes to fit (no scroller shows), on a short one it caps its height and the extra content
+        // scrolls rather than running off-screen.
+        let documentView = NSView()
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        documentView.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: Metrics.padding),
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: Metrics.padding),
-            content.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: Metrics.padding),
-            content.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: Metrics.padding),
-            content.widthAnchor.constraint(equalToConstant: Metrics.width),
+            stack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: Metrics.padding),
+            stack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: Metrics.padding),
+            documentView.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: Metrics.padding),
+            documentView.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: Metrics.padding),
+            documentView.widthAnchor.constraint(equalToConstant: Metrics.width),
         ])
-        window?.contentView = content
-        window?.setContentSize(content.fittingSize)
+
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.documentView = documentView
+        self.scrollView = scrollView
+
+        window?.contentView = scrollView
+        resizeToFit()
+    }
+
+    /// Size the window to the content, but never taller than most of the visible screen — beyond that
+    /// the scroll view takes over. Called after `buildContent` and whenever a status line grows/shrinks
+    /// (the archive line, the launch hint, the update row) so the window keeps hugging its content.
+    private func resizeToFit() {
+        guard let scrollView, let documentView = scrollView.documentView else { return }
+        let contentHeight = documentView.fittingSize.height
+        let maxHeight = (window?.screen ?? NSScreen.main)
+            .map { $0.visibleFrame.height * 0.85 } ?? 900
+        let height = min(contentHeight, maxHeight)
+        window?.setContentSize(NSSize(width: Metrics.width, height: height))
     }
 
     /// A bold section heading (`General` / `Monitored services`), the visual anchor of each group.
@@ -410,9 +510,7 @@ final class SettingsWindowController: NSWindowController {
         hintLabel.isHidden = hint.isEmpty
 
         // The hint wraps to a different height per message; refit so neither text is clipped.
-        if let content = window?.contentView {
-            window?.setContentSize(content.fittingSize)
-        }
+        resizeToFit()
     }
 
     /// Load the persisted monitored-services config (#89) into the checkboxes and radios. Called on
@@ -604,8 +702,89 @@ final class SettingsWindowController: NSWindowController {
             updateLineLabel.stringValue = ""
             updateRow.isHidden = true
         }
-        if let content = window?.contentView {
-            window?.setContentSize(content.fittingSize)
+        resizeToFit()
+    }
+
+    // MARK: Session logs (#110)
+
+    /// Persist the "Archive session logs" choice. A first-time enable with no folder yet chosen nudges
+    /// the user straight into the folder picker, since the archiver stays inert without a destination.
+    @objc private func toggleArchive(_ sender: NSButton) {
+        let on = sender.state == .on
+        PersistedConfig.archiveEnabled = on
+        AppLogger.lifecycle.notice("archive: enabled set \(on, privacy: .public)")
+        if on, PersistedConfig.archiveDestination == nil {
+            chooseArchiveFolder()   // no folder yet → prompt now, or the toggle does nothing
         }
+        updateArchiveStatus()
+    }
+
+    /// Open an `NSOpenPanel` to pick (or create) the archive folder, and persist the chosen path.
+    /// No security-scoped bookmark: the app isn't sandboxed, so a plain path suffices (ADR-0030).
+    @objc private func chooseArchiveFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Choose a folder to archive Claude Code session logs into."
+        if let current = PersistedConfig.archiveDestination {
+            panel.directoryURL = URL(fileURLWithPath: (current as NSString).expandingTildeInPath)
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        PersistedConfig.archiveDestination = url.path
+        AppLogger.lifecycle.notice("archive: destination chosen")
+        updateArchiveStatus()
+    }
+
+    /// Run an immediate archive sync (bypasses the daily cadence) via the app's shared path.
+    @objc private func archiveNow() {
+        onArchiveNow?()
+    }
+
+    /// Reflect the current archive state in the window (#110): the chosen path (or "No folder
+    /// selected"), the "Last archived …" line, and the enablement of the Choose…/Archive-now buttons.
+    /// Called on `show()`, after each toggle/choose, and by `AppDelegate` when a sync finishes.
+    func updateArchiveStatus() {
+        let enabled = PersistedConfig.archiveEnabled
+        let destination = PersistedConfig.archiveDestination
+
+        archiveChooseButton.isEnabled = enabled
+        archiveNowButton.isEnabled = enabled && destination != nil
+
+        guard let destination else {
+            archivePathLabel.stringValue = "No folder selected"
+            archiveStatusLabel.stringValue = ""
+            resizeToFit()
+            return
+        }
+        archivePathLabel.stringValue = (destination as NSString).abbreviatingWithTildeInPath
+
+        // Files + size come from a live scan of the archive folder, so they show on every window open
+        // regardless of whether a sync has run this session (the in-memory Summary is lost across
+        // relaunches; the folder on disk is not). "N updated" is only meaningful right after a sync,
+        // so it's appended only when a fresh Summary is available.
+        let destURL = URL(fileURLWithPath: (destination as NSString).expandingTildeInPath)
+        let stats = LogArchiver().archiveStats(at: destURL)
+        let totals = "\(stats.files) files · \(ByteSize.humanReadable(stats.bytes))"
+
+        if let last = PersistedConfig.lastArchiveSync {
+            // Reuse the popup's data-age formatter — plain English ("just now" / "2h ago"), never a
+            // locale-formatted string (the whole UI is English) and never a future "in 0 seconds"
+            // when a sync just finished and `last ≈ now`.
+            let when = PopupViewController.ageText(max(0, Date().timeIntervalSince(last)))
+            if let summary = archiveSummaryProvider?() {
+                archiveStatusLabel.stringValue = "Last archived: \(when) · \(summary.copied) updated · \(totals)"
+            } else {
+                archiveStatusLabel.stringValue = "Last archived: \(when) · \(totals)"
+            }
+        } else {
+            // Folder set but nothing synced yet this install: still show what's already there (0 files
+            // on a fresh folder), plus the hint that a sync is pending.
+            archiveStatusLabel.stringValue = "Not archived yet — runs daily, or use Archive now. (\(totals))"
+        }
+
+        resizeToFit()
     }
 }

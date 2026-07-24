@@ -41,6 +41,12 @@ enum PersistedConfig {
         /// Whether the menu-bar widget draws the service-status dot on a service issue (#31).
         /// Default-on (opt-out) — see the property.
         static let showServiceStatusDot = "showServiceStatusDot"
+        /// Whether the session-log archiver runs (#110). Default-off (opt-in) — see the property.
+        static let archiveEnabled = "archiveEnabled"
+        /// Filesystem path of the user-chosen archive folder (#110), or absent if not yet set.
+        static let archiveDestination = "archiveDestination"
+        /// Instant of the last **successful** archive sync (#110), gating the 24 h cadence.
+        static let lastArchiveSync = "lastArchiveSync"
     }
 
     /// The marketing version the config was last written under, or `nil` if none has been recorded
@@ -123,5 +129,30 @@ enum PersistedConfig {
     static var showServiceStatusDot: Bool {
         get { defaults.object(forKey: Key.showServiceStatusDot) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.showServiceStatusDot) }
+    }
+
+    /// Whether the session-log archiver mirrors Claude Code's raw logs to a folder (#110).
+    /// **Default-off** (opt-in): an absent key reads as `false`, so nothing is copied until the user
+    /// turns it on *and* picks a destination. `object(forKey:) as? Bool ?? false` distinguishes
+    /// "unset" from an explicit choice, consistent with the other opt-in toggles.
+    static var archiveEnabled: Bool {
+        get { defaults.object(forKey: Key.archiveEnabled) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.archiveEnabled) }
+    }
+
+    /// Filesystem path of the archive folder the user chose (#110), or `nil` if none picked yet.
+    /// Stored as a plain path (no security-scoped bookmark: the app is not sandboxed — ADR-0030).
+    /// The archiver stays inert while this is `nil` even when ``archiveEnabled`` is `true`.
+    static var archiveDestination: String? {
+        get { defaults.string(forKey: Key.archiveDestination) }
+        set { defaults.set(newValue, forKey: Key.archiveDestination) }
+    }
+
+    /// Instant of the last **successful** archive sync (#110), or `nil` if none yet. Advanced only on
+    /// success, so a failed sync (unwritable destination) stays due and retries next heartbeat
+    /// (`ArchiveCadence`). Drives the "Last archived …" status line in Settings.
+    static var lastArchiveSync: Date? {
+        get { defaults.object(forKey: Key.lastArchiveSync) as? Date }
+        set { defaults.set(newValue, forKey: Key.lastArchiveSync) }
     }
 }
