@@ -46,6 +46,12 @@ final class SettingsWindowController: NSWindowController {
     /// persisted (via `PersistedConfig`) by the time this fires.
     var onResetCountdownModeMenuBarChange: ((ResetCountdownMode) -> Void)?
 
+    /// Called when the user toggles "Show service status dot on issues" (#31), with the new on/off
+    /// state — wired by `AppDelegate.openSettings` to re-render the menu-bar image immediately (the
+    /// dot changes both what is drawn and the item width). Already persisted (via `PersistedConfig`)
+    /// by the time this fires.
+    var onServiceDotChange: ((Bool) -> Void)?
+
     /// The "Check for updates daily" checkbox (#37), synced from `PersistedConfig` on every `show()`.
     private var updatesToggle: NSButton!
     /// The "Check now" button (#37).
@@ -82,6 +88,10 @@ final class SettingsWindowController: NSWindowController {
     /// Enabled only while `resetSmartRadio` is on; gates ``showDistant7d`` ↔ ``hideDistant7d``.
     private var resetIncludeDistantCheckbox: NSButton!
     private var resetNeverRadio: NSButton!
+
+    /// The "Show service status dot on issues" checkbox (#31), synced from `PersistedConfig` on every
+    /// `show()`.
+    private var serviceDotToggle: NSButton!
 
     /// The "Claude Code" monitoring checkbox (#89).
     private var claudeCodeToggle: NSButton!
@@ -125,6 +135,7 @@ final class SettingsWindowController: NSWindowController {
         syncMonitoredServicesFromConfig()
         calmColorsToggle.state = PersistedConfig.calmMenuBarColors ? .on : .off
         syncResetCountdownFromConfig()
+        serviceDotToggle.state = PersistedConfig.showServiceStatusDot ? .on : .off
         updatesToggle.state = PersistedConfig.automaticUpdateChecks ? .on : .off
         NSApp.activate(ignoringOtherApps: true)
         if !(window?.isVisible ?? false) { window?.center() }
@@ -215,7 +226,25 @@ final class SettingsWindowController: NSWindowController {
         resetGroup.orientation = .vertical
         resetGroup.alignment = .leading
         resetGroup.spacing = 4
-        stack.addArrangedSubview(indented(resetGroup))
+        let resetGroupWrapper = indented(resetGroup)
+        stack.addArrangedSubview(resetGroupWrapper)
+
+        serviceDotToggle = NSButton(
+            checkboxWithTitle: "Show service status dot on issues",
+            target: self,
+            action: #selector(toggleServiceDot(_:)))
+        stack.setCustomSpacing(12, after: resetGroupWrapper)   // separate the service-dot toggle from the countdown group
+        stack.addArrangedSubview(serviceDotToggle)
+
+        // Explains the toggle: the dot is a coloured marker that appears only on a service issue.
+        let serviceDotHint = NSTextField(wrappingLabelWithString:
+            "Draws a small coloured dot in the menu bar when a monitored Claude service has issues.")
+        serviceDotHint.font = .systemFont(ofSize: 11)
+        serviceDotHint.textColor = .secondaryLabelColor
+        serviceDotHint.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(serviceDotHint)
+        serviceDotHint.widthAnchor.constraint(
+            equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
 
         stack.addArrangedSubview(sectionSeparator())
 
@@ -506,6 +535,15 @@ final class SettingsWindowController: NSWindowController {
         PersistedConfig.calmMenuBarColors = on
         AppLogger.lifecycle.notice("calm-colors: menu-bar set \(on, privacy: .public)")
         onCalmColorsChange?(on)
+    }
+
+    /// Persist the "Show service status dot on issues" choice (#31) and notify the app so the
+    /// menu-bar image repaints immediately (the dot changes both the drawing and the item width).
+    @objc private func toggleServiceDot(_ sender: NSButton) {
+        let on = sender.state == .on
+        PersistedConfig.showServiceStatusDot = on
+        AppLogger.lifecycle.notice("service-status-dot: menu-bar set \(on, privacy: .public)")
+        onServiceDotChange?(on)
     }
 
     /// A "Display reset countdown" control changed (#103): refresh the checkbox enablement, read the

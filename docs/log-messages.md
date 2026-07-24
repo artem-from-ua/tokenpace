@@ -128,6 +128,7 @@ token itself never is.
 | 164 | `lifecycle` | `.error` | `launch-at-login: toggle failed: <error>` | toggle threw (e.g. unsigned build) — a deliberate user action, so it stays `.error` |
 | 424 | `lifecycle` | `.notice` | `calm-colors: menu-bar set <bool>` | user toggled the "Calm MenuBar Widget colors" checkbox (#105) |
 | 434 | `lifecycle` | `.notice` | `reset-countdown: menu-bar mode set <mode>` | user picked a "Reset countdown" radio (#103); `<mode>` is the raw `ResetCountdownMode` |
+| 442 | `lifecycle` | `.notice` | `service-status-dot: menu-bar set <bool>` | user toggled the "Show service status dot on issues" checkbox (#31) |
 | 439 | `lifecycle` | `.notice` | `update: automatic checks set <bool>` | user toggled the "Check for updates daily" checkbox (#37) |
 
 ## `Sources/TokenPace/GHReleaseFetcher.swift`

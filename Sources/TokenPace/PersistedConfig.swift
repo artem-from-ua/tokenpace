@@ -38,6 +38,9 @@ enum PersistedConfig {
         /// How the menu-bar widget picks/hides the reset countdown (#103), stored as the raw
         /// `ResetCountdownMode` string. Default `.showDistant7d` — see the property.
         static let resetCountdownModeMenuBar = "resetCountdownModeMenuBar"
+        /// Whether the menu-bar widget draws the service-status dot on a service issue (#31).
+        /// Default-on (opt-out) — see the property.
+        static let showServiceStatusDot = "showServiceStatusDot"
     }
 
     /// The marketing version the config was last written under, or `nil` if none has been recorded
@@ -109,5 +112,16 @@ enum PersistedConfig {
     static var resetCountdownModeMenuBar: ResetCountdownMode {
         get { ResetCountdownMode(rawValue: defaults.string(forKey: Key.resetCountdownModeMenuBar) ?? "") ?? .showDistant7d }
         set { defaults.set(newValue.rawValue, forKey: Key.resetCountdownModeMenuBar) }
+    }
+
+    /// Whether the **menu-bar** widget draws the service-status dot when a monitored service has a
+    /// non-operational issue (#31). **Default-on** (opt-out): an absent key reads as `true`, so the
+    /// dot shows out of the box. `object(forKey:) as? Bool ?? true` distinguishes "unset" (→ true)
+    /// from an explicit `false` the user chose — `bool(forKey:)` would collapse both to `false` and
+    /// silently defeat the opt-out default. Menu-bar only: the popup's service-status rows are
+    /// unaffected.
+    static var showServiceStatusDot: Bool {
+        get { defaults.object(forKey: Key.showServiceStatusDot) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.showServiceStatusDot) }
     }
 }

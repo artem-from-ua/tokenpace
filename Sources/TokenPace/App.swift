@@ -273,6 +273,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // the menu-bar layout from the last poll (render reads PersistedConfig for the mode).
                 self?.reRenderForCurrentTime()
             }
+            wc.onServiceDotChange = { [weak self] _ in
+                // The dot changes the layout (drawn + item width), not just a colour — rebuild the
+                // menu-bar layout from the last poll (render reads PersistedConfig for the toggle).
+                self?.reRenderForCurrentTime()
+            }
             settingsWC = wc
         }
         // Reflect the latest known update state whenever the window opens (#37).
@@ -661,7 +666,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func render(_ output: PollOutput, at now: Date) {
         statusView?.layout = MenuBarLayout.make(
             from: output.snapshot, health: output.health, now: now,
-            serviceProblem: lastStatusHealth?.worstProblem,
+            // #31: honour the "Show service status dot" toggle — nil hides the dot and reclaims its width.
+            serviceProblem: PersistedConfig.showServiceStatusDot ? lastStatusHealth?.worstProblem : nil,
             resetMode: PersistedConfig.resetCountdownModeMenuBar)   // #103: which reset countdown to show
         refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
         setPopupLayout(PopupLayout.make(
