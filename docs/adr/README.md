@@ -30,3 +30,4 @@
 | [0023](0023-persisted-config-version-marker.md) | Версійний маркер конфігу (`lastRunVersion`) + каркас міграції — перший persistence; чистий `MigrationPlan` у kit, `UserDefaults`-обгортка у shell | accepted |
 | [0024](0024-configurable-logical-services.md) | Конфігуровані логічні сервіси статусу (група компонентів → worst-of-N) замість двох фіксованих; `Claude API` завжди-on; display-назви з конфігу у view | accepted |
 | [0025](0025-check-for-updates.md) | Перевірка оновлень — подвійний fetch-шлях (`gh` subprocess для приватного репо / анонімний HTTPS), системний банер (лише підписаний `.app`), launch-time + добовий чек; чистий `SemanticVersion`/`GitHubReleaseClient` у kit | accepted |
+| [0026](0026-gemini-not-implemented.md) | Gemini не імплементуємо — правильну (споживацьку) метрику дає лише cookie-replay внутрішнього RPC, що порушує Google ToS і ризикує баном акаунтів; OAuth-шлях читає інший лічильник. Multi-vendor живий (наступний — Codex) | accepted |
