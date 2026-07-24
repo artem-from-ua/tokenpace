@@ -87,19 +87,23 @@ final class PopupBarView: NSView {
         /// The **idle** 5-hour bar's solid fill (#100, ADR-0027): the 5h window has no active session, so
         /// the bar is a knobless solid track meaning "ready to start, full quota available" — a neutral
         /// blue, not a pacing colour (green is reserved for an active window's pacing status). Built on
-        /// `NSColor.systemBlue` (the appearance-aware pair to `gapGreen`'s `systemGreen`), but **lightened
-        /// on the light theme** (mixed ~22 % toward white) so it does not read as heavy against the pale
-        /// panel; on dark it stays the full `systemBlue`, which already reads bright there. The blend is
-        /// computed **inside** the provider, in the target appearance, so `systemBlue` resolves to its
-        /// real per-theme RGB before mixing (a `static let … .blended(...)` would bake in whatever
-        /// appearance was current at first access — the same trap `dimmedLabelColor` documents).
+        /// `NSColor.systemBlue` (the appearance-aware pair to `gapGreen`'s `systemGreen`), then
+        /// **slightly desaturated** (mixed ~15 % toward a mid `.gray`) so it reads a touch softer than a
+        /// pure `systemBlue` without changing its brightness; on the **light theme** it is additionally
+        /// **lightened** (mixed ~22 % toward white) so it does not read as heavy against the pale panel.
+        /// Both blends are computed **inside** the provider, in the target appearance, so `systemBlue`
+        /// resolves to its real per-theme RGB before mixing (a `static let … .blended(...)` would bake in
+        /// whatever appearance was current at first access — the same trap `dimmedLabelColor` documents).
         static let idleBlue = NSColor(name: nil) { appearance in
-            if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua { return .systemBlue }
-            var lightened: NSColor = .systemBlue
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            var result: NSColor = .systemBlue
             appearance.performAsCurrentDrawingAppearance {
-                lightened = NSColor.systemBlue.blended(withFraction: 0.22, of: .white) ?? .systemBlue
+                // Desaturate slightly (toward a mid grey — lowers saturation, keeps brightness).
+                let muted = NSColor.systemBlue.blended(withFraction: 0.15, of: .gray) ?? .systemBlue
+                // On light, also lighten toward white so it isn't heavy on the pale panel.
+                result = isDark ? muted : (muted.blended(withFraction: 0.22, of: .white) ?? muted)
             }
-            return lightened
+            return result
         }
         static let gapRed = NSColor(srgbRed: 225/255, green: 45/255, blue: 35/255, alpha: 1)
         static let gapYellow = NSColor(srgbRed: 230/255, green: 180/255, blue: 25/255, alpha: 1)
