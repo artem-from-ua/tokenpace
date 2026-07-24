@@ -7,5 +7,5 @@ public enum TokenPaceKit {
     /// AdaptiveCadence + PollingEngine (#13, live loop: sleep/wake, network, adaptive interval),
     /// LaunchAtLogin (#14, pure decision core for the launch-at-login toggle),
     /// DelegatedRefresh (#8b, delegated token refresh via the claude CLI — ADR-0017).
-    public static let version = "0.26.0"
+    public static let version = "0.27.0"
 }
