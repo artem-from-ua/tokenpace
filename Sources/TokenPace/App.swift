@@ -94,6 +94,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastKnownRelease: GitHubRelease?
     /// The in-flight update fetch, if any — cancelled before a new check and on terminate.
     private var updateTask: Task<Void, Never>?
+    /// Whether the `gh` path is enabled, resolved once (lazily) from `TOKENPACE_GH_AUTH`. Checked in
+    /// `ProcessInfo` first (terminal / `launchctl setenv` launches), then — since a login-launched app
+    /// sees no shell env — from the login shell's `~/.zshrc`/`~/.zprofile` via `ShellEnvironment`. The
+    /// shell probe is memoised so it runs at most once, not on every heartbeat.
+    private lazy var ghAuthEnabled: Bool = Self.resolveGHAuth()
 
     /// Which logical services to monitor on the status page (#89) — loaded from `PersistedConfig`
     /// on launch, updated live when the user changes it in Settings (`monitoredServicesChanged`).
@@ -547,10 +552,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let fake = ProcessInfo.processInfo.environment["TOKENPACE_FAKE_LATEST"], !fake.isEmpty {
             return StubUpdateFetcher(tag: fake)
         }
-        if let flag = ProcessInfo.processInfo.environment["TOKENPACE_GH_AUTH"], !flag.isEmpty {
+        if ghAuthEnabled {
             return GHReleaseFetcher()
         }
         return HTTPUpdateFetcher()
+    }
+
+    /// Resolve whether `TOKENPACE_GH_AUTH` is set. The app is usually launched at login by launchd,
+    /// which passes no shell environment, so a plain `export TOKENPACE_GH_AUTH=1` in `~/.zshrc` would
+    /// be invisible via `ProcessInfo`. So check `ProcessInfo` first (terminal / `launchctl setenv`
+    /// launches), then fall back to the login shell's rc files via `ShellEnvironment`. Run once and
+    /// memoised in `ghAuthEnabled` — the shell probe is a subprocess, not something to repeat per poll.
+    private static func resolveGHAuth() -> Bool {
+        if let flag = ProcessInfo.processInfo.environment["TOKENPACE_GH_AUTH"], !flag.isEmpty {
+            return true
+        }
+        if let flag = ShellEnvironment.value(for: "TOKENPACE_GH_AUTH"), !flag.isEmpty {
+            AppLogger.lifecycle.notice("update: TOKENPACE_GH_AUTH found in login shell env")
+            return true
+        }
+        return false
     }
 
     /// Surface a newly-found newer release: retain it (drives the menu click + Configure line), reveal

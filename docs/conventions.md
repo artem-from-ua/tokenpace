@@ -95,6 +95,9 @@ git config core.hooksPath .githooks
 - **`TOKENPACE_GH_AUTH`** (прапорець присутності, будь-яке непорожнє значення) — вмикає `gh`-шлях
   update-чеку (`GHReleaseFetcher`): `gh api …/releases/latest` як subprocess, `gh` бере токен із
   keyring. Для мейнтейнерів, поки репо приватне; без змінної — анонімний HTTPS (ADR-0025).
+  Резолвиться з `ProcessInfo`, а якщо там немає (застосунок стартував через launchd при логіні) —
+  з `~/.zshrc`/`~/.zprofile` через `ShellEnvironment`. Тож достатньо `export TOKENPACE_GH_AUTH=1` у
+  `~/.zshrc` — жодних `launchctl setenv`/LaunchAgent не потрібно.
 - **`TOKENPACE_FAKE_LATEST`** = `vX.Y.Z` — форсує канований «останній реліз» (`StubUpdateFetcher`)
   без мережі, щоб перевірити гілки «доступне оновлення» / «up to date». Пріоритетніший за
   `TOKENPACE_GH_AUTH` (ADR-0025).
