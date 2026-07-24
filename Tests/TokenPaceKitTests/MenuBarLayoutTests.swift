@@ -29,6 +29,19 @@ private func snapshot(
     )
 }
 
+/// A **session-idle** snapshot (#100): the 5h window does not exist (`utilization: 0`, `resetsAt: ""`,
+/// `sessionIdle: true`); the 7-day window is normal, `sevenDayResetsIn` seconds out.
+private func idleSnapshot(
+    sevenDayUtil: Double = 31,
+    sevenDayResetsIn: TimeInterval = 4 * 24 * 3600
+) -> UsageSnapshot {
+    UsageSnapshot(
+        fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
+        sevenDay: UsageWindow(utilization: sevenDayUtil, resetsAt: resetsAt(inSeconds: sevenDayResetsIn)),
+        sessionIdle: true
+    )
+}
+
 // MARK: - always expanded (no idle/compact mode — ADR-0014)
 
 @Suite("MenuBarLayout.make")
@@ -45,11 +58,14 @@ struct MenuBarLayoutMakeTests {
     }
 
     @Test func zeroUtilizationStillExpands() {
+        // 0 % with a VALID resets_at is an active-but-empty window, NOT session-idle — both bars are
+        // normal (the idle state is API-driven by a missing reset, not by a low utilisation; ADR-0027).
         let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 0, sevenDayUtil: 0), now: now)
-        guard case .expanded = layout.mode else {
+        guard case let .expanded(five, _, _, _) = layout.mode else {
             Issue.record("expected .expanded at 0%, got \(layout.mode)")
             return
         }
+        #expect(!five.idle)
     }
 
     @Test func highUtilizationExpands() {
@@ -82,6 +98,7 @@ struct MenuBarLayoutExpandedTests {
         guard let e = expanded(layout) else { return }
         #expect(e.five.window == .fiveHour)
         #expect(e.seven.window == .sevenDay)
+        #expect(!e.five.idle && !e.seven.idle)   // normal path — neither bar is idle
     }
 
     @Test func barLayoutMatchesPacingModel() {
@@ -144,6 +161,89 @@ struct MenuBarLayoutExpandedTests {
         #expect(snap.sevenDayOpus == nil && snap.sevenDaySonnet == nil)
         let layout = MenuBarLayout.make(from: snap, now: now)
         #expect(expanded(layout) != nil)
+    }
+}
+
+// MARK: - session-idle (#100, ADR-0027)
+
+@Suite("MenuBarLayout session-idle")
+struct MenuBarLayoutIdleTests {
+
+    private func expanded(
+        _ layout: MenuBarLayout
+    ) -> (five: BarView, seven: BarView, reset: TimeToReset, which: LimitWindow)? {
+        guard case let .expanded(five, seven, reset, which) = layout.mode else {
+            Issue.record("expected .expanded, got \(layout.mode)")
+            return nil
+        }
+        return (five, seven, reset, which)
+    }
+
+    @Test func idleKeepsBothBarsExpanded() {
+        // The bars never collapse (ADR-0015 stands): idle is still `.expanded`, only the 5h bar is idle.
+        let layout = MenuBarLayout.make(from: idleSnapshot(), now: now)
+        guard let e = expanded(layout) else { return }
+        #expect(e.five.idle)
+        #expect(!e.seven.idle)
+        #expect(e.five.window == .fiveHour)
+        #expect(e.seven.window == .sevenDay)
+    }
+
+    @Test func idleFiveHourLayoutIsInertZeroed() {
+        // The idle bar's geometry is an explicit zero — never derived from the empty resets_at (which
+        // would pin elapsed to 1.0). Usage 0, time 0, on-pace, neutral.
+        let layout = MenuBarLayout.make(from: idleSnapshot(), now: now)
+        guard let e = expanded(layout) else { return }
+        #expect(e.five.layout.usageFraction == 0)
+        #expect(e.five.layout.timeFraction == 0)
+        #expect(e.five.indicator == .neutral)
+    }
+
+    @Test func idleResetIsSevenDayInCompactDays() {
+        // 7-day reset 4 days out → the reset label is the 7-day one, rendered as "4d".
+        let layout = MenuBarLayout.make(from: idleSnapshot(sevenDayResetsIn: 4 * 24 * 3600), now: now)
+        guard let e = expanded(layout) else { return }
+        #expect(e.which == .sevenDay)
+        #expect(e.reset == .relative("4d"))
+    }
+
+    @Test func idleResetWithin24hIsAbsolute() {
+        // 7-day reset < 24 h out → falls through to the absolute wall-clock time (not a day count).
+        let layout = MenuBarLayout.make(from: idleSnapshot(sevenDayResetsIn: 5 * 3600), now: now)
+        guard let e = expanded(layout) else { return }
+        #expect(e.which == .sevenDay)
+        let expected = ResetClock.timeToResetCompactDays(
+            resetsAt: now.addingTimeInterval(5 * 3600), now: now)
+        #expect(e.reset == expected)
+        if case .absolute = e.reset {} else { Issue.record("expected .absolute, got \(e.reset)") }
+    }
+
+    @Test func idleWithUnparseableSevenDayResetIsResetNow() {
+        // A blank/unparseable 7-day resets_at with an idle 5h window → the countdown is .resetNow
+        // (the view shows ⏰), never a phantom.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
+            sevenDay: UsageWindow(utilization: 31, resetsAt: ""),
+            sessionIdle: true)
+        let layout = MenuBarLayout.make(from: snap, now: now)
+        guard let e = expanded(layout) else { return }
+        #expect(e.reset == .resetNow)
+        #expect(e.which == .sevenDay)
+    }
+
+    @Test func idleSnapshotStalePhaseCarriesIdleBar() {
+        // The idle 5h bar rides through the 30–60 min stale error phase unchanged (issue #12 reuse).
+        let health = UsageHealth(
+            lastSuccess: now.addingTimeInterval(-31 * 60),
+            failingSince: now.addingTimeInterval(-31 * 60),
+            reason: .notSignedIn)
+        let layout = MenuBarLayout.make(from: idleSnapshot(), health: health, now: now)
+        guard case let .error(five, seven, reset, which) = layout.mode else {
+            Issue.record("expected .error with bars, got \(layout.mode)")
+            return
+        }
+        #expect(five?.idle == true)
+        #expect(seven != nil && reset != nil && which == .sevenDay)
     }
 }
 

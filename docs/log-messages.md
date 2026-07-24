@@ -221,8 +221,9 @@ itself is never logged — only exit status and byte count.
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 240 | `network` | `.notice` | `filled <key> sub-window resets_at from seven_day (was null)` | a per-model sub-window's `resets_at` was null; borrowed from the parent 7-day window |
-| 281 | `network` | `.notice` | `synthesized <key> window on reset boundary (utilization=0, resets_at source=<source>)` | synthesized a zero-usage window on an API reset boundary; `source` is `limits[]` or `local-estimate` |
+| 268 | `network` | `.notice` | `filled <key> sub-window resets_at from seven_day (was null)` | a per-model sub-window's `resets_at` was null; borrowed from the parent 7-day window |
+| 314 | `network` | `.notice` | `synthesized <key> window on reset boundary (utilization=0, resets_at source=limits[])` | a core window's `resets_at` was null but a matching `limits[]` entry supplied one — a reset-boundary blip |
+| 327 | `network` | `.notice` | `synthesized <key> window on reset boundary (utilization=0, resets_at source=local-estimate)` | **`seven_day` only** — the weekly window's `resets_at` was null and no `limits[]` entry supplied one; a local `now+7d` estimate is used (`five_hour` in this case is idle, see the `PollingEngine` table — no synthesis, no log) |
 
 ## `Sources/TokenPaceKit/PollingEngine.swift`
 
@@ -231,8 +232,10 @@ One log line per interval change. The format is built by
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 406 | `lifecycle` | `.notice` | `interval <from>→<to>: <phrase>` | the polling interval moved; emitted once per change |
-| 470 | `keychain` | `.notice` | `token expired, len=<count>` | `pollOnce` — the read credentials are expired (`isExpired` true); moved here from `TokenProvider` with the expiry decision (ADR-0020) |
+| 435 | `lifecycle` | `.notice` | `interval <from>→<to>: <phrase>` | the polling interval moved; emitted once per change |
+| 441 | `network` | `.notice` | `five_hour idle — no active session (resets_at absent)` | the 5h window flipped to session-idle (`sessionIdleTransition`); emitted **once per transition**, not every poll (#100, ADR-0027) |
+| 441 | `network` | `.notice` | `five_hour window active again` | the 5h window came back (idle → active); same call site, once per transition (#100, ADR-0027) |
+| 511 | `keychain` | `.notice` | `token expired, len=<count>` | `pollOnce` — the read credentials are expired (`isExpired` true); moved here from `TokenProvider` with the expiry decision (ADR-0020) |
 
 `<from>`/`<to>` render as whole minutes (`3m`) or fall back to seconds (`90s`).
 `<phrase>` is one of six, keyed by `IntervalDecision.Cause` (lines 180–189):
@@ -250,9 +253,12 @@ One log line per interval change. The format is built by
 
 | Category | Calls | Files |
 |----------|-------|-------|
-| `network` | 22 | `UsageClient` (6), `StatusClient` (5), `UsageSnapshot` (2), `GitHubReleaseClient` (6), `App` (1), `GHReleaseFetcher` (1), `GitHubRelease` (1) |
+| `network` | 24 | `UsageClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `PollingEngine` (1), `GitHubReleaseClient` (6), `App` (1), `GHReleaseFetcher` (1), `GitHubRelease` (1) |
 | `lifecycle` | 27 | `App` (12), `SettingsWindowController` (3), `PollingShell` (5), `PollingEngine` (1), `UpdateNotifier` (5), `ShellEnvironment` (1) |
 | `keychain` | 10 | `TokenProvider` (3), `ClaudeCLIRefresher` (6), `PollingEngine` (1) |
 | `ui` | 0 | — (category defined, unused) |
 
-**Total: 59 log statements** — `.error` ×24, `.notice` ×33, `.info` ×1, `.debug` ×1.
+**Total: 61 log statements** — `.error` ×24, `.notice` ×35, `.info` ×1, `.debug` ×1.
+
+The `five_hour idle …` / `window active again` pair is one call site (`sessionIdleTransition`) that
+emits one of two strings; it is counted once under `PollingEngine` network.

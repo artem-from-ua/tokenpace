@@ -18,7 +18,7 @@
 | [0011](0011-polling-engine-adaptive-cadence-and-signal-seams.md) | PollingEngine — async-цикл, адаптивний інтервал і seam'и sleep/wake/мережі | accepted |
 | ~~[0012](0012-configure-window-and-launch-at-login.md)~~ | ~~Вікно «Configure…» та launch-at-login (SMAppService); opt-out, best-effort на unsigned~~ | superseded |
 | ~~[0013](0013-claude-status-line.md)~~ | ~~Рядок статусу сервісів Claude у попапі — лише `component.status` двох компонентів, окрема ввічлива cadence~~ | superseded |
-| [0014](0014-usage-decode-resilience-on-reset-boundary.md) | UsageSnapshot — синтез вікна на межі ресету замість падіння decode (хибне «Usage API unavailable») | accepted |
+| ~~[0014](0014-usage-decode-resilience-on-reset-boundary.md)~~ | ~~UsageSnapshot — синтез вікна на межі ресету замість падіння decode (хибне «Usage API unavailable»)~~ | superseded |
 | [0015](0015-no-idle-mode.md) | Прибрати компактний idle-режим — завжди смужки (крім стану помилки) | accepted |
 | [0016](0016-rename-to-tokenpace.md) | Перейменування проєкту cc-timer → TokenPace — ідентифікатори, межі історії | accepted |
 | [0017](0017-delegated-token-refresh.md) | Делегований refresh токена через claude CLI — замість self-refresh із write-back | accepted |
@@ -31,3 +31,4 @@
 | [0024](0024-configurable-logical-services.md) | Конфігуровані логічні сервіси статусу (група компонентів → worst-of-N) замість двох фіксованих; `Claude API` завжди-on; display-назви з конфігу у view | accepted |
 | [0025](0025-check-for-updates.md) | Перевірка оновлень — подвійний fetch-шлях (`gh` subprocess для приватного репо / анонімний HTTPS), системний банер (лише підписаний `.app`), launch-time + добовий чек; чистий `SemanticVersion`/`GitHubReleaseClient` у kit | accepted |
 | [0026](0026-gemini-not-implemented.md) | Gemini не імплементуємо — правильну (споживацьку) метрику дає лише cookie-replay внутрішнього RPC, що порушує Google ToS і ризикує баном акаунтів; OAuth-шлях читає інший лічильник. Multi-vendor живий (наступний — Codex) | accepted |
+| [0027](0027-session-idle-no-phantom-reset.md) | Чесний стан «немає активної 5h-сесії» — суцільний синій 5h-бар без індикатора, час до 7-денного ресету, «ready to start»; прибрано фантомний `now+5h` ресет; `is_active` не використовується | accepted |

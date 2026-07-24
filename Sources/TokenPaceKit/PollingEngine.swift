@@ -391,6 +391,30 @@ public struct PollingEngine: Sendable {
         return next.adaptive.level <= previous.adaptive.level ? .contentChanged : .contentUnchanged
     }
 
+    // MARK: Session-idle transition (for logging)
+
+    /// The one-time log line when the 5-hour session-idle state flips (#100, ADR-0027), or `nil` when it
+    /// did not change — so the loop logs a transition **once**, not the idle state on every poll (the
+    /// same "only on change" discipline as `intervalDecision`).
+    ///
+    /// - `nil`/active → idle (`current` snapshot is idle, `previous` was absent or active): the 5h
+    ///   window stopped existing server-side ⇒ `"five_hour idle — no active session (resets_at absent)"`.
+    /// - idle → active (`previous` was idle, `current` is not): a new session opened the window ⇒
+    ///   `"five_hour window active again"`.
+    /// - no change (both idle, both active, or `current == nil`): `nil`.
+    ///
+    /// Compares the snapshots' ``UsageSnapshot/sessionIdle`` only; a `nil` `current` (cold-start
+    /// failure, no snapshot yet) is treated as "no transition" so a failing first poll logs nothing.
+    public static func sessionIdleTransition(previous: UsageSnapshot?, current: UsageSnapshot?) -> String? {
+        guard let current else { return nil }
+        let wasIdle = previous?.sessionIdle ?? false
+        switch (wasIdle, current.sessionIdle) {
+        case (false, true): return "five_hour idle — no active session (resets_at absent)"
+        case (true, false): return "five_hour window active again"
+        default:            return nil
+        }
+    }
+
     // MARK: Live loop
 
     /// Run the polling loop, emitting one ``PollOutput`` per iteration. The stream ends only when the
@@ -409,6 +433,12 @@ public struct PollingEngine: Sendable {
 
                     if let decision = Self.intervalDecision(previous: previous, next: state) {
                         AppLogger.lifecycle.notice("\(decision.logMessage, privacy: .public)")
+                    }
+
+                    // Log the session-idle flip once per transition (#100), not the idle state every poll.
+                    if let transition = Self.sessionIdleTransition(
+                        previous: previous.lastSnapshot, current: state.lastSnapshot) {
+                        AppLogger.network.notice("\(transition, privacy: .public)")
                     }
 
                     let interval = Self.effectiveInterval(state)

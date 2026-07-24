@@ -164,11 +164,16 @@ actor StubUsageTransport: UsageTransport {
     ///  • `.authError` (`=error`)   — usage returns **401** with a long body (→ `authHTTP`), and the
     ///    status endpoint reports **both** Claude services degraded, so the warning block, the
     ///    service-status dots, and the long-message wrapping can all be seen at once.
-    /// Both data modes also carry two `weekly_scoped` per-model entries in `limits[]` (#65) —
-    /// Fable / Mythos — so the scoped-model popup rows are exercised end-to-end, and their utilisations
-    /// (plus the 7-day window) show a couple of the ahead-of-pace gap colours (yellow / orange / red).
+    ///  • `.idle` (`=idle`)         — the honest "no active 5h session" frame (#100, ADR-0027): the
+    ///    `five_hour` window arrives with `resets_at: null` **and** no `session` entry in `limits[]`, so
+    ///    the snapshot decodes `sessionIdle == true`. The 5h bar renders solid blue with no knob and the
+    ///    menu-bar time falls back to the 7-day reset (set ~4.2 days out → "4d" live). The status
+    ///    endpoint stays all-operational so the frame is clean.
+    /// The climbing/screenshot data modes also carry two `weekly_scoped` per-model entries in `limits[]`
+    /// (#65) — Fable / Mythos — so the scoped-model popup rows are exercised end-to-end, and their
+    /// utilisations (plus the 7-day window) show a couple of the ahead-of-pace gap colours.
     enum Mode {
-        case climbing, screenshot, authError
+        case climbing, screenshot, authError, idle
     }
 
     private let mode: Mode
@@ -233,6 +238,26 @@ actor StubUsageTransport: UsageTransport {
             """.data(using: .utf8)!
             let response = HTTPURLResponse(
                 url: StatusClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
+        // Idle frame (#100, ADR-0027): `five_hour` with `resets_at: null` and **no** `session` entry in
+        // `limits[]` → the decoder reports `sessionIdle == true` (no synthesized phantom reset). The
+        // `seven_day` window is set ~4.2 days out so the menu-bar fallback shows "4d" live; a Fable
+        // `weekly_scoped` row keeps a normal per-model section on screen. Mirrors the live "no active
+        // session" body shape (Body A) verbatim.
+        if mode == .idle {
+            let sevenReset = Self.resetsAt(inSeconds: 4.2 * 24 * 3600)   // ≥ 24 h → "4d" via timeToResetCompactDays
+            let body = """
+            {"five_hour":{"utilization":0.0,"resets_at":null},\
+            "seven_day":{"utilization":31.0,"resets_at":"\(sevenReset)"},\
+            "limits":[\
+            {"kind":"weekly_scoped","group":"weekly","percent":15,"severity":"normal",\
+            "resets_at":"\(sevenReset)","scope":{"model":{"id":null,"display_name":"Fable"},\
+            "surface":null},"is_active":false}]}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
             return (body, response)
         }
 

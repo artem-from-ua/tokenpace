@@ -177,6 +177,7 @@ struct UsageDecodeTests {
             now: now)
         #expect(snapshot.fiveHour.utilization == 0)
         #expect(snapshot.fiveHour.resetsAt == "2026-06-23T05:40:00+00:00")
+        #expect(!snapshot.sessionIdle)   // present resets_at → active window, not idle
     }
 
     @Test func nullFiveHourPullsResetsAtFromSessionLimit() throws {
@@ -189,6 +190,7 @@ struct UsageDecodeTests {
             from: usageJSON(fiveHour: "null", limits: limits), now: now)
         #expect(snapshot.fiveHour.utilization == 0)
         #expect(snapshot.fiveHour.resetsAt == "2026-06-23T05:40:00+00:00")
+        #expect(!snapshot.sessionIdle)   // a limits[] backfill is a boundary blip, NOT idle
     }
 
     @Test func nullFiveHourPullsResetsAtFromFiveHourLimit() throws {
@@ -200,6 +202,7 @@ struct UsageDecodeTests {
         let snapshot = try UsageClient.decode(
             from: usageJSON(fiveHour: "null", limits: limits), now: now)
         #expect(snapshot.fiveHour.resetsAt == "2026-06-23T05:40:00+00:00")
+        #expect(!snapshot.sessionIdle)
     }
 
     @Test func nullSevenDayPullsResetsAtFromWeeklyAllLimit() throws {
@@ -213,20 +216,68 @@ struct UsageDecodeTests {
         #expect(snapshot.sevenDay.resetsAt == "2026-06-23T06:59:59+00:00")
     }
 
-    @Test func nullWindowWithoutMatchingLimitUsesLocalEstimate() throws {
-        // No usable limits[] entry → fall back to ResetClock.nextReset (now + 5h, ceil to 10 min).
+    @Test func nullFiveHourWithoutMatchingLimitIsSessionIdle() throws {
+        // No usable limits[] entry for five_hour → the honest idle state (#100): NO local estimate, NO
+        // phantom reset. `sessionIdle == true`, `resetsAt` is empty, utilisation 0.
         let snapshot = try UsageClient.decode(
             from: usageJSON(fiveHour: "null", limits: "[]"), now: now)
+        #expect(snapshot.sessionIdle)
         #expect(snapshot.fiveHour.utilization == 0)
-        let expected = ResetClock.nextReset(now: now, window: .fiveHour)
-        #expect(ResetClock.parse(snapshot.fiveHour.resetsAt) == expected)
+        #expect(snapshot.fiveHour.resetsAt.isEmpty)
     }
 
-    @Test func missingFiveHourSynthesizes() throws {
-        // Key omitted entirely (not just null) → still synthesized, snapshot does not fail.
+    @Test func missingFiveHourWithoutLimitIsSessionIdle() throws {
+        // Key omitted entirely (not just null) and no session limit → idle, not synthesized.
         let snapshot = try UsageClient.decode(from: usageJSON(fiveHour: nil), now: now)
+        #expect(snapshot.sessionIdle)
+        #expect(snapshot.fiveHour.resetsAt.isEmpty)
+    }
+
+    @Test func sevenDayNullWithoutLimitStillUsesLocalEstimate() throws {
+        // The weekly window always exists, so its degenerate case keeps the local estimate — and is
+        // never `sessionIdle` (that flag is five_hour-only).
+        let snapshot = try UsageClient.decode(
+            from: usageJSON(sevenDay: "null", limits: "[]"), now: now)
+        #expect(!snapshot.sessionIdle)
+        #expect(snapshot.sevenDay.utilization == 0)
+        let expected = ResetClock.nextReset(now: now, window: .sevenDay)
+        #expect(ResetClock.parse(snapshot.sevenDay.resetsAt) == expected)
+    }
+
+    @Test func idleLiveBodyDetectsSessionIdle() throws {
+        // Body A (verbatim live shape): five_hour resets_at null, NO session entry in limits[] — the
+        // real "no active session" body. Decodes idle; seven_day + Fable preserved.
+        let body = #"""
+        {"five_hour":{"utilization":0.0,"resets_at":null,"limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day":{"utilization":31.0,"resets_at":"2026-07-28T07:00:00.405400+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day_oauth_apps":null,"seven_day_opus":null,"seven_day_sonnet":null,"tangelo":null,"extra_usage":{"is_enabled":false},"limits":[{"kind":"weekly_all","group":"weekly","percent":31,"severity":"normal","resets_at":"2026-07-28T07:00:00.405400+00:00","scope":null,"is_active":true},{"kind":"weekly_scoped","group":"weekly","percent":15,"severity":"normal","resets_at":"2026-07-28T07:00:00.405400+00:00","scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":false}]}
+        """#
+        let snapshot = try UsageClient.decode(from: Data(body.utf8), now: now)
+        #expect(snapshot.sessionIdle)
         #expect(snapshot.fiveHour.utilization == 0)
-        #expect(!snapshot.fiveHour.resetsAt.isEmpty)
+        #expect(snapshot.fiveHour.resetsAt.isEmpty)
+        #expect(snapshot.sevenDay.utilization == 31.0)
+        #expect(snapshot.sevenDay.resetsAt == "2026-07-28T07:00:00.405400+00:00")
+        #expect(snapshot.scopedModelWindows.map(\.name) == ["Fable"])
+        #expect(snapshot.scopedModelWindows.first?.window.utilization == 15)
+    }
+
+    @Test func activeBodyWithInactiveSessionFlagIsNotIdle() throws {
+        // Body B: an active 2 % 5h window whose `session` limit carries `is_active:false`. The window
+        // has a real resets_at, so it is NOT idle — `is_active` must be ignored (proven unreliable).
+        let body = #"""
+        {"five_hour":{"utilization":2.0,"resets_at":"2026-07-24T18:39:00.000000+00:00","limit_dollars":null},"seven_day":{"utilization":31.0,"resets_at":"2026-07-28T07:00:00.000000+00:00"},"seven_day_opus":null,"seven_day_sonnet":null,"limits":[{"kind":"session","group":"session","percent":2,"severity":"normal","resets_at":"2026-07-24T18:39:00.000000+00:00","scope":null,"is_active":false},{"kind":"weekly_all","group":"weekly","percent":31,"severity":"normal","resets_at":"2026-07-28T07:00:00.000000+00:00","scope":null,"is_active":true}]}
+        """#
+        let snapshot = try UsageClient.decode(from: Data(body.utf8), now: now)
+        #expect(!snapshot.sessionIdle)
+        #expect(snapshot.fiveHour.utilization == 2.0)
+        #expect(snapshot.fiveHour.resetsAt == "2026-07-24T18:39:00.000000+00:00")
+    }
+
+    @Test func memberwiseDefaultIsNotIdle() {
+        // The memberwise init defaults sessionIdle to false so every fixture stays non-idle by default.
+        let snapshot = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 10, resetsAt: "2026-06-21T05:30:00+00:00"),
+            sevenDay: UsageWindow(utilization: 20, resetsAt: "2026-06-28T00:00:00+00:00"))
+        #expect(!snapshot.sessionIdle)
     }
 
     @Test func limitEntryWithNullFieldsDoesNotFailSnapshot() throws {
@@ -396,6 +447,7 @@ struct UsageDecodeTests {
         // The scoped one must decode its name yet be deduped, or the popup renders Sonnet twice.
         #expect(snapshot.limits.contains { $0.modelDisplayName == "Sonnet" })
         #expect(snapshot.scopedModelWindows.isEmpty)
+        #expect(!snapshot.sessionIdle)   // an active 5h window with a real reset is never idle
     }
 
     /// Regression: a live API body captured 2026-07-06 — the first shape where a per-model limit
@@ -415,6 +467,7 @@ struct UsageDecodeTests {
                 name: "Fable",
                 window: UsageWindow(utilization: 5, resetsAt: "2026-07-07T07:00:00.013978+00:00"))
         ])
+        #expect(!snapshot.sessionIdle)   // five_hour has a real reset (26 %) → active, not idle
     }
 }
 

@@ -82,6 +82,13 @@ final class StatusItemView: NSView {
         static let dotGreen = NSColor(srgbRed: 143/255, green: 199/255, blue: 143/255, alpha: 1)
         /// Dark ring around the time-indicator dot so it stays distinct over any coloured zone.
         static let indicatorStroke = NSColor(srgbRed: 24/255, green: 24/255, blue: 24/255, alpha: 1)
+        /// The **idle** 5-hour bar's solid fill (#100, ADR-0027) — the 5h window has no active session,
+        /// so the bar is a knobless solid track meaning "ready to start, full quota available", not a
+        /// pacing state. Same 70/140/230 sRGB as the ``statusBlue`` service dot: mid-brightness, in tone
+        /// with the palette (`gapGreen` #5faf5f), distinct from the pacing greens/ambers, and already
+        /// tuned to read at small size on both light and dark menu bars. Fixed sRGB (not `systemBlue`)
+        /// because the menu-bar image is non-template and drawn in a resolved appearance.
+        static let idleBlue = NSColor(srgbRed: 70/255, green: 140/255, blue: 230/255, alpha: 1)
         /// Idle glyph + reset label — follow the menu-bar foreground.
         static let foreground = NSColor.labelColor
 
@@ -259,6 +266,15 @@ final class StatusItemView: NSView {
     /// base zones (used + future/unused) share the solid ``PopupBarView/monochromeGrey`` with the popup,
     /// so the menu-bar bars read identically; only the pacing gap and dot carry colour.
     private func drawBar(_ bar: BarView, in rect: NSRect) {
+        // Idle 5h bar (#100, ADR-0027): a solid blue track, no pacing zones, no time-indicator dot —
+        // "no active session, full quota available". The bar's `layout`/`indicator` are inert here.
+        if bar.idle {
+            let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
+            Palette.idleBlue.setFill()
+            path.fill()
+            return
+        }
+
         let l = bar.layout
         let w = rect.width
 

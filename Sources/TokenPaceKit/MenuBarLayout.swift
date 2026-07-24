@@ -17,11 +17,18 @@ public struct BarView: Sendable, Equatable {
     public let indicator: LimitIndicator
     /// Which rolling window this bar represents (5h on top, 7d below — see ``MenuBarMode``).
     public let window: LimitWindow
+    /// Whether this bar is the **idle** 5-hour bar — the 5h window does not exist server-side (no
+    /// active session, ``UsageSnapshot/sessionIdle``, #100). When `true` the view draws a **solid,
+    /// knobless** track (`StatusItemView` fills it with `Palette.idleBlue`, no zones, no time dot); the
+    /// `layout`/`indicator` are inert placeholders (`usage 0 / time 0`, `.neutral`) that the idle draw
+    /// path ignores. `false` on every normal bar, including a genuine 0 %-with-valid-reset 5h window.
+    public let idle: Bool
 
-    public init(layout: BarLayout, indicator: LimitIndicator, window: LimitWindow) {
+    public init(layout: BarLayout, indicator: LimitIndicator, window: LimitWindow, idle: Bool = false) {
         self.layout = layout
         self.indicator = indicator
         self.window = window
+        self.idle = idle
     }
 }
 
@@ -83,7 +90,9 @@ public enum MenuBarMode: Sendable, Equatable {
 /// - `ResetClock.resetDisplay(...)` → the `reset`/`which` of ``MenuBarMode/expanded``
 ///
 /// On the healthy path the result is always ``MenuBarMode/expanded`` — there is no compact/idle
-/// collapse (ADR-0015 removed it). The only mode variation is the error state (issue #12).
+/// collapse (ADR-0015 removed it). The only mode variation is the error state (issue #12). The
+/// session-idle state (#100, ADR-0027) stays ``MenuBarMode/expanded`` too: it only recolours the 5h
+/// bar (``BarView/idle``) and swaps the reset label to the 7-day one — the bars never disappear.
 public struct MenuBarLayout: Sendable, Equatable {
     /// The mode `StatusItemView` switches on to draw.
     public let mode: MenuBarMode
@@ -113,12 +122,35 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// ``TimeToReset/resetNow`` — the snapshot is unusable for a countdown, which the view renders
     /// as the stale ⏰ glyph and the polling layer (#13) treats as a re-poll signal.
     ///
+    /// **Session-idle (#100, ADR-0027).** When `snapshot.sessionIdle` (the 5h window does not exist
+    /// server-side — no active session), the mode is still ``MenuBarMode/expanded`` with **both** bars
+    /// (ADR-0015's "bars never collapse" still holds), but:
+    /// - the 5h bar is built ``BarView/idle`` `= true` (inert `usage 0 / time 0` layout; the view draws
+    ///   a solid-blue knobless track — **no** synthesized `now + 5h` phantom reset, the bug this fixes);
+    /// - the reset label switches to the **7-day** reset via
+    ///   ``ResetClock/timeToResetCompactDays(resetsAt:now:locale:timeZone:)`` (`"4d"` when ≥ 24 h,
+    ///   `"20:40"` when nearer), with `which == .sevenDay`.
+    ///
     /// - Parameters:
     ///   - snapshot: A decoded usage poll (`UsageClient`/#9).
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
     public static func make(from snapshot: UsageSnapshot, now: Date) -> MenuBarLayout {
-        let five = bar(for: snapshot.fiveHour, window: .fiveHour, now: now)
         let seven = bar(for: snapshot.sevenDay, window: .sevenDay, now: now)
+
+        if snapshot.sessionIdle {
+            // No active 5h window: an inert, knobless placeholder bar (the idle draw path ignores its
+            // geometry) + the 7-day reset label. The layout is an explicit zero — never derived from
+            // `fiveHour.resetsAt` (it is "" and would pin the pacing bar to elapsed 1.0).
+            let five = BarView(
+                layout: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind),
+                indicator: .neutral, window: .fiveHour, idle: true)
+            let reset = ResetClock.parse(snapshot.sevenDay.resetsAt)
+                .map { ResetClock.timeToResetCompactDays(resetsAt: $0, now: now) } ?? .resetNow
+            return MenuBarLayout(
+                mode: .expanded(fiveHour: five, sevenDay: seven, reset: reset, which: .sevenDay))
+        }
+
+        let five = bar(for: snapshot.fiveHour, window: .fiveHour, now: now)
 
         let (which, reset) = ResetClock.resetDisplay(
             fiveHourResetsAt: snapshot.fiveHour.resetsAt,

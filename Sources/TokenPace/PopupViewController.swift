@@ -35,6 +35,16 @@ final class PopupBarView: NSView {
         }
     }
 
+    /// Whether this is the **idle** 5-hour bar (#100, ADR-0027): a solid-blue knobless track (no pacing
+    /// zones, no time-indicator dot) for a 5h window with no active session. The under-bar tick ruler
+    /// still draws (`subdivisions`), keeping the row's anatomy in family with the active bars.
+    var idle: Bool = false {
+        didSet {
+            guard idle != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
     private enum Metrics {
         /// Height of the pacing bar itself (the coloured zones + indicator dot).
         static let barHeight: CGFloat = 6
@@ -74,6 +84,23 @@ final class PopupBarView: NSView {
         /// the mildest step is a darker golden tone instead), an orange nudged toward red, and a pure
         /// saturated red (no blue tint unlike `systemRed`).
         static let gapGreen = NSColor.systemGreen
+        /// The **idle** 5-hour bar's solid fill (#100, ADR-0027): the 5h window has no active session, so
+        /// the bar is a knobless solid track meaning "ready to start, full quota available" — a neutral
+        /// blue, not a pacing colour (green is reserved for an active window's pacing status). Built on
+        /// `NSColor.systemBlue` (the appearance-aware pair to `gapGreen`'s `systemGreen`), but **lightened
+        /// on the light theme** (mixed ~22 % toward white) so it does not read as heavy against the pale
+        /// panel; on dark it stays the full `systemBlue`, which already reads bright there. The blend is
+        /// computed **inside** the provider, in the target appearance, so `systemBlue` resolves to its
+        /// real per-theme RGB before mixing (a `static let … .blended(...)` would bake in whatever
+        /// appearance was current at first access — the same trap `dimmedLabelColor` documents).
+        static let idleBlue = NSColor(name: nil) { appearance in
+            if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua { return .systemBlue }
+            var lightened: NSColor = .systemBlue
+            appearance.performAsCurrentDrawingAppearance {
+                lightened = NSColor.systemBlue.blended(withFraction: 0.22, of: .white) ?? .systemBlue
+            }
+            return lightened
+        }
         static let gapRed = NSColor(srgbRed: 225/255, green: 45/255, blue: 35/255, alpha: 1)
         static let gapYellow = NSColor(srgbRed: 230/255, green: 180/255, blue: 25/255, alpha: 1)
         static let gapOrange = NSColor(srgbRed: 248/255, green: 118/255, blue: 15/255, alpha: 1)
@@ -116,7 +143,6 @@ final class PopupBarView: NSView {
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: Metrics.height) }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard let l = bar else { return }
         // The bar sits below a top margin equal to the dot's overhang — the dot is centred on the
         // bar, so a dot taller than the bar sticks out by `(diameter − barHeight)/2` on each side;
         // the margin keeps that top overhang inside the view (the tick ruler fills the strip below).
@@ -124,6 +150,19 @@ final class PopupBarView: NSView {
         let rect = NSRect(
             x: bounds.minX, y: bounds.minY + overhang, width: bounds.width, height: Metrics.barHeight)
         let w = rect.width
+
+        // Idle 5h bar (#100, ADR-0027): a solid blue track + the under-bar tick ruler, but no pacing
+        // zones and no time-indicator dot ("no active session, full quota available"). Rendered before
+        // the pacing path so the (inert, zeroed) `bar` layout is never consulted.
+        if idle {
+            let idlePath = NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner)
+            Palette.idleBlue.setFill()
+            idlePath.fill()
+            drawTicks(in: rect, width: w)
+            return
+        }
+
+        guard let l = bar else { return }
 
         let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner)
 
@@ -331,6 +370,12 @@ final class PopupViewController: NSViewController {
     /// per-component service status rows beneath it (see `rebuild`).
     private static let claudeCodeSectionTitle = "Claude"
 
+    /// The status word shown flush-right on the **idle** 5-hour row (#100, ADR-0027): the 5h window has
+    /// no active session, so the row reads "5-hour  ready to start" with a solid-blue bar and no second
+    /// line. The localisation seam (ADR-0009) — like the other status phrases, the English word lives
+    /// here, not in the kit.
+    static let idleStatusText = "ready to start"
+
     /// Anthropic's official primary accent colour (`#d97757`, a terracotta orange) — confirmed
     /// against `anthropics/skills`' `brand-guidelines/SKILL.md` on GitHub, the same value the local
     /// Claude Code "claude" theme slot resolves to. Used only for the "Claude Code" section header,
@@ -448,7 +493,11 @@ final class PopupViewController: NSViewController {
         // after each bar, not by a line.
         for (index, row) in layout.rows.enumerated() {
             addTitleStatusLine(title: row.title, status: Self.statusText(row))
-            addDetailLine(used: Self.usedText(row), reset: Self.resetText(row))
+            // The idle 5-hour row (#100) has **no** second line at all — no "0%", no reset — so it reads
+            // as a compact "5-hour  ready to start" + solid-blue bar. Every other row shows the detail.
+            if !row.sessionIdle {
+                addDetailLine(used: Self.usedText(row), reset: Self.resetText(row))
+            }
             // No inter-section gap after the **last** bar — it sits just above the menu's own separator,
             // so the section gap plus the bottom padding read as too much air. Later bars need the gap.
             addBar(row, isLast: index == layout.rows.count - 1)
@@ -573,6 +622,7 @@ final class PopupViewController: NSViewController {
         let view = PopupBarView()
         view.bar = row.bar
         view.subdivisions = row.subdivisions
+        view.idle = row.sessionIdle   // solid-blue knobless track when the 5h window is idle (#100)
         view.translatesAutoresizingMaskIntoConstraints = false
         view.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.hPadding).isActive = true
         view.heightAnchor.constraint(equalToConstant: PopupBarView.viewHeight).isActive = true
@@ -768,6 +818,9 @@ final class PopupViewController: NSViewController {
     /// lead (≥ 15 points, the orange gap) reads "well ahead of pace"; a small one (yellow) stays "ahead
     /// of pace".
     private static func statusText(_ row: LimitRow) -> String {
+        // Idle 5-hour row (#100): "ready to start" instead of a pacing phrase — there is no active
+        // window to pace. Guarded first so the inert placeholder indicator/pacing are never consulted.
+        if row.sessionIdle { return idleStatusText }
         switch row.indicator {
         case .critical: return "limit reached"
         case .warning:  return aheadPhrase(row) + " ⚠"

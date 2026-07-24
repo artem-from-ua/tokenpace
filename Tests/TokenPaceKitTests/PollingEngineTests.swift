@@ -878,3 +878,51 @@ private actor ManualScheduler: PollScheduler {
         // Returns immediately so the test loop makes progress (production blocks until .wake).
     }
 }
+
+// MARK: - sessionIdleTransition (#100, ADR-0027)
+
+@Suite("PollingEngine.sessionIdleTransition")
+struct SessionIdleTransitionTests {
+
+    /// An active snapshot (has a real five_hour reset → not idle).
+    private func active() -> UsageSnapshot { snap(five: 2, seven: 31) }
+    /// A session-idle snapshot (five_hour has no reset).
+    private func idle() -> UsageSnapshot {
+        UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
+            sevenDay: UsageWindow(utilization: 31, resetsAt: "2026-06-28T00:00:00+00:00"),
+            sessionIdle: true)
+    }
+
+    @Test func nilToIdleLogsIdle() {
+        #expect(PollingEngine.sessionIdleTransition(previous: nil, current: idle())
+            == "five_hour idle — no active session (resets_at absent)")
+    }
+
+    @Test func activeToIdleLogsIdle() {
+        #expect(PollingEngine.sessionIdleTransition(previous: active(), current: idle())
+            == "five_hour idle — no active session (resets_at absent)")
+    }
+
+    @Test func idleToActiveLogsActiveAgain() {
+        #expect(PollingEngine.sessionIdleTransition(previous: idle(), current: active())
+            == "five_hour window active again")
+    }
+
+    @Test func nilToActiveIsSilent() {
+        #expect(PollingEngine.sessionIdleTransition(previous: nil, current: active()) == nil)
+    }
+
+    @Test func idleToIdleIsSilent() {
+        #expect(PollingEngine.sessionIdleTransition(previous: idle(), current: idle()) == nil)
+    }
+
+    @Test func activeToActiveIsSilent() {
+        #expect(PollingEngine.sessionIdleTransition(previous: active(), current: active()) == nil)
+    }
+
+    @Test func nilCurrentIsSilent() {
+        // A failing poll (no new snapshot) never logs a transition.
+        #expect(PollingEngine.sessionIdleTransition(previous: idle(), current: nil) == nil)
+    }
+}

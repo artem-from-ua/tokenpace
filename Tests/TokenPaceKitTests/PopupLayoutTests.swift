@@ -43,6 +43,20 @@ private func scopedLimit(name: String, percent: Double, resetsIn: TimeInterval) 
         resetsAt: resetsAt(inSeconds: resetsIn), isActive: false, modelDisplayName: name)
 }
 
+/// A **session-idle** snapshot (#100): the 5h window does not exist (`sessionIdle: true`); the 7-day
+/// window is normal, and an optional Fable `weekly_scoped` row can be attached.
+private func idleSnapshot(
+    sevenDayUtil: Double = 31,
+    sevenDayResetsIn: TimeInterval = 4 * 24 * 3600,
+    limits: [UsageLimit] = []
+) -> UsageSnapshot {
+    UsageSnapshot(
+        fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
+        sevenDay: UsageWindow(utilization: sevenDayUtil, resetsAt: resetsAt(inSeconds: sevenDayResetsIn)),
+        limits: limits,
+        sessionIdle: true)
+}
+
 private func layout(from snap: UsageSnapshot) -> PopupLayout {
     PopupLayout.make(from: snap, now: now, lastUpdate: now, interval: PollingBackoff.defaultInterval)
 }
@@ -392,5 +406,44 @@ struct PopupLayoutServiceStatusTests {
                                  interval: PollingBackoff.defaultInterval, serviceStatus: status)
         #expect(p.warning == .timeout)
         #expect(p.serviceStatus == status)
+    }
+}
+
+// MARK: - session-idle 5-hour row (#100, ADR-0027)
+
+@Suite("PopupLayout session-idle row")
+struct PopupLayoutIdleTests {
+
+    @Test func idleFiveHourRowHasNoResetFields() {
+        let p = layout(from: idleSnapshot())
+        let five = p.rows[0]
+        #expect(five.title == "5-hour")
+        #expect(five.sessionIdle)
+        #expect(five.resetRelative == nil)
+        #expect(five.resetAbsolute == nil)
+        #expect(five.resetWeekday == nil)
+        #expect(five.subdivisions == LimitWindow.fiveHour.subdivisions)   // ruler stays in family
+    }
+
+    @Test func idleLeavesOtherRowsNormal() {
+        // The 7-day row and a Fable scoped row are unaffected — only the 5h row goes idle.
+        let p = layout(from: idleSnapshot(limits: [
+            scopedLimit(name: "Fable", percent: 15, resetsIn: 4 * 24 * 3600)]))
+        let seven = p.rows[1]
+        #expect(seven.title == "7-day")
+        #expect(!seven.sessionIdle)
+        #expect(seven.utilization == 31)
+        #expect(seven.resetRelative != nil)
+
+        let fable = p.rows.first { $0.title == "Fable" }
+        #expect(fable != nil)
+        #expect(fable?.sessionIdle == false)
+        #expect(fable?.utilization == 15)
+    }
+
+    @Test func normalRowDefaultsToNotIdle() {
+        let p = layout(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30))
+        #expect(!p.rows[0].sessionIdle)
+        #expect(!p.rows[1].sessionIdle)
     }
 }
