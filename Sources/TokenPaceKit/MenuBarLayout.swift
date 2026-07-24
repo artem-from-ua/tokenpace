@@ -146,7 +146,8 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///
     /// When neither `resets_at` parses (both `nil`/malformed), the reset display falls back to
     /// ``TimeToReset/resetNow`` — the snapshot is unusable for a countdown, which the view renders
-    /// as the stale ⏰ glyph and the polling layer (#13) treats as a re-poll signal.
+    /// as the neutral `"<1m"` boundary text (#36). The normal reset-boundary flow does not reach this:
+    /// the coordinator's optimistic-reset timer rolls the window forward before zero (see ADR-0030).
     ///
     /// **Session-idle (#100, ADR-0027).** When `snapshot.sessionIdle` (the 5h window does not exist
     /// server-side — no active session), the mode is still ``MenuBarMode/expanded`` with **both** bars
@@ -298,7 +299,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///   → the **red** bar's reset (only it blocks).
     ///
     /// `nil` `resetsAt` (missing/unparseable) is tolerated: a chosen bar with a `nil` instant yields
-    /// `.resetNow` (⏰), matching the rest of the layer.
+    /// `.resetNow` (rendered as the neutral `"<1m"`, #36), matching the rest of the layer.
     static func selectReset(
         fiveSeverity: PacingSeverity, fiveResetsAt: Date?,
         sevenSeverity: PacingSeverity, sevenResetsAt: Date?,

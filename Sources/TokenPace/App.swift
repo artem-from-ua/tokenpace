@@ -112,6 +112,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// only recomputes the view models against the current time.
     private var ageTimer: Timer?
 
+    /// One-shot timer firing exactly at the nearest window `resets_at` to apply a local optimistic
+    /// reset + force a refresh (#36), so the menu bar rolls straight from a live countdown to a fresh
+    /// window without ever showing the stale ⏰. Rescheduled on every `apply(_:)` against the latest
+    /// `resets_at`, invalidated on sleep, and recomputed on wake so a long sleep never fires a stale
+    /// in-the-past reset. Unlike `ageTimer` this is non-repeating and fires at a variable instant.
+    private var resetTimer: Timer?
+
     /// The active `TOKENPACE_STUB` mode name (`"1"`/`"screenshot"`/`"error"`), or `nil` for a normal
     /// run against the real network. One source of truth read from the environment, so the Quit
     /// item's dev-build tag and `startPolling`'s transport wiring agree on which mode is live.
@@ -308,6 +315,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         signals.send(.manualRefresh)       // wake the usage loop now + reset backoff (engine)
     }
 
+    // MARK: - Optimistic reset (#36)
+
+    /// (Re)arm the one-shot `resetTimer` for the nearest **future** window reset in `snapshot`. Any
+    /// pending timer is invalidated first, so this is safe to call on every poll and on wake. When the
+    /// nearest reset is already at/past `now` (e.g. we woke after it passed), the optimistic reset is
+    /// applied immediately instead of scheduling a timer in the past; when neither window has a future
+    /// reset (both past, or 5h idle + no 7d — impossible in practice), nothing is scheduled.
+    private func rescheduleResetTimer(from snapshot: UsageSnapshot?, now: Date) {
+        resetTimer?.invalidate()
+        resetTimer = nil
+        guard let snapshot else { return }
+        guard let instant = ResetClock.nextResetInstant(
+            fiveHourResetsAt: snapshot.fiveHour.resetsAt,
+            sevenDayResetsAt: snapshot.sevenDay.resetsAt,
+            now: now) else {
+            // No future reset to wait for. If a boundary already passed, roll forward now.
+            fireOptimisticReset()
+            return
+        }
+        let delay = instant.timeIntervalSince(now)
+        guard delay > 0 else { fireOptimisticReset(); return }
+        // `.common` run-loop mode so it still fires while an NSMenu is tracking (mirrors `ageTimer`).
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.fireOptimisticReset() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        resetTimer = timer
+    }
+
+    /// A window reset boundary just passed: overlay a local optimistic reset on the retained snapshot
+    /// (zero usage + rolled-forward `resets_at`), render it immediately so the menu bar never shows the
+    /// stale ⏰, re-arm the timer for the next boundary, then force an authoritative refresh. The forced
+    /// poll goes through the engine (`.manualRefresh`), so backoff/health update normally and the next
+    /// successful response overwrites the optimistic overlay wholesale (the API is the source of truth).
+    private func fireOptimisticReset() {
+        guard let output = lastOutput, let snapshot = output.snapshot else { return }
+        let now = Date()
+        let reset = ResetClock.optimisticReset(snapshot, now: now)
+        // Nothing actually crossed a boundary (early/spurious fire) — leave state untouched.
+        guard reset != snapshot else { return }
+        AppLogger.lifecycle.notice("optimistic reset applied, forcing refresh")
+        // 1. Replace the retained output with the optimistic overlay and render it now (no ⏰).
+        let overlay = PollOutput(
+            snapshot: reset, health: output.health, interval: output.interval,
+            diagnostics: output.diagnostics)
+        lastOutput = overlay
+        render(overlay, at: now)
+        // 2. Arm the timer for the *next* boundary (the window that did not just reset).
+        rescheduleResetTimer(from: reset, now: now)
+        // 3. Force the authoritative refresh (engine → backoff/health → overwrites the overlay).
+        forceRefresh()
+    }
+
     /// Apply a new monitored-services config chosen in Settings (#89): adopt it, drop the stale
     /// status (it was resolved under the old config — the enabled set may have changed), and force an
     /// immediate re-poll so the popup/menu-bar reflect the new services within a moment. Clearing
@@ -407,6 +467,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusTask?.cancel()
         updateTask?.cancel()
         ageTimer?.invalidate()
+        resetTimer?.invalidate()
         sleepWake?.stop()
         network.stop()
     }
@@ -415,8 +476,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Wire the platform signal sources to the engine and consume its output on the main actor.
     private func startPolling() {
-        // Sleep/wake and network observers push signals into the shared hub.
-        sleepWake = WorkspaceSleepWake { [signals] signal in signals.send(signal) }
+        // Sleep/wake and network observers push signals into the shared hub. The optimistic-reset
+        // timer (#36) also keys off sleep/wake: `Timer` scheduling is unreliable across sleep, so we
+        // invalidate on sleep and recompute the delay from the current `Date()` on wake — if a reset
+        // passed while asleep, `rescheduleResetTimer`'s `delay <= 0` guard fires it immediately.
+        sleepWake = WorkspaceSleepWake { [signals, weak self] signal in
+            signals.send(signal)
+            // Observers fire on the main queue (see WorkspaceSleepWake), so we are on the main actor.
+            MainActor.assumeIsolated {
+                switch signal {
+                case .sleep:
+                    self?.resetTimer?.invalidate()
+                    self?.resetTimer = nil
+                case .wake:
+                    self?.rescheduleResetTimer(from: self?.lastOutput?.snapshot, now: Date())
+                default:
+                    break
+                }
+            }
+        }
         network.start { [signals] in signals.send(.networkRestored) }
 
         // TOKENPACE_STUB swaps the live URLSession for a canned-response transport so the app can be
@@ -427,6 +505,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //  • `=error`      → 401 auth failure + both Claude services degraded (the warning block).
         //  • `=idle`       → the honest "no active 5h session" state (#100): solid-blue 5h bar, no
         //                    phantom reset, menu-bar time falls back to the 7-day reset ("4d").
+        //  • `=optimistic-reset` → the reset-boundary flow (#36): the 5h window resets ~20 s after
+        //                    launch, so the bar flips 60 % → 0 % (no ⏰) and a forced refresh follows.
         //  • `=5h-orange` / `both-orange` / `both-red` / `red-orange` / `calm5-orange7`
         //                  → fixed 5h×7d severity frames for the reset-countdown table (#103).
         //                    `calm5-orange7` is the lone-distant-7d-orange cell where the Settings
@@ -437,6 +517,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "screenshot": StubUsageTransport(mode: .screenshot)
         case "error":      StubUsageTransport(mode: .authError)
         case "idle":       StubUsageTransport(mode: .idle)
+        case "optimistic-reset": StubUsageTransport(mode: .optimisticReset)
         // Reset-countdown (#103) verification frames: fixed 5h×7d severities to exercise the table.
         case "5h-orange":   StubUsageTransport(mode: .pacing(.fiveOrange))
         case "both-orange": StubUsageTransport(mode: .pacing(.bothOrange))
@@ -485,6 +566,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func apply(_ output: PollOutput) {
         lastOutput = output
         render(output, at: Date())
+        // Re-arm the optimistic-reset timer against this poll's `resets_at` (#36). A successful poll
+        // fully overwrites any prior optimistic overlay; a 429/error poll carries the stale last-known
+        // snapshot, so rescheduling is a harmless no-op (same instant).
+        rescheduleResetTimer(from: output.snapshot, now: Date())
         // Live-update an open Troubleshoot window: both sections (JSON, timestamps, next update,
         // token dates) refresh in place each poll (ADR-0020). No-op while the controller is nil.
         troubleshootWC?.render(output)

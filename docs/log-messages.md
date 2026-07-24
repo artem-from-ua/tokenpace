@@ -84,19 +84,20 @@ In the tables below, `<…>` marks an interpolated value.
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 252 | `lifecycle` | `.info` | `TokenPace status item attached (<version>); live polling started` | `applicationDidFinishLaunching` — after the status item is attached and polling starts |
-| 291 | `lifecycle` | `.notice` | `manual refresh requested (Troubleshoot)` | `forceRefresh()` — the user clicked "Refresh now" in the Troubleshoot window; a `.manualRefresh` signal is sent and the status poll is marked due (ADR-0020) |
-| 345 | `lifecycle` | `.notice` | `config: first run, no prior version (<version>)` | `runConfigMigrationsIfNeeded()` — no `lastRunVersion` stored (fresh install or a pre-persistence build); records the version, no migrations (#71, ADR-0023) |
-| 348 | `lifecycle` | `.notice` | `config: version unchanged (<version>)` | stored `lastRunVersion` equals the running version — nothing to migrate |
-| 350 | `lifecycle` | `.notice` | `config: version <old> → <new>, running migrations` | stored version differs from the running one — the `.upgraded` extension point (empty scaffold for now) |
-| 369 | `lifecycle` | `.notice` | `launch-at-login: not an .app bundle (swift run), skipping opt-out auto-register` | `registerLaunchAtLoginIfNeeded()` — running as a bare `swift run` binary, so opt-out auto-register is skipped to avoid polluting Login Items (#69) |
-| 375 | `lifecycle` | `.notice` | `launch-at-login: status=<status>, no auto-register` | status is `.registered`/`.requiresApproval`, so no auto-register is needed |
-| 381 | `lifecycle` | `.notice` | `launch-at-login: auto-registered (opt-out)` | successful auto-registration (`.notRegistered`, or recovery from `.notFound` after an update — #69) |
-| 385 | `lifecycle` | `.error` | `launch-at-login: auto-register failed: <error>` | `LaunchAtLoginController.enable()` threw on an installed `.app` bundle — an unexpected, registerable-but-refused case |
-| 526 | `network` | `.notice` | `update: checking (userInitiated=<bool>)` | `performUpdateCheck` — an update check begins (launch, daily heartbeat, or "Check now"); #37 |
-| 571 | `lifecycle` | `.notice` | `update: TOKENPACE_GH_AUTH found in login shell env` | `resolveGHAuth` — the gh-auth flag was absent from `ProcessInfo` but found in the login shell's rc files via `ShellEnvironment` (#37) |
-| 588 | `lifecycle` | `.notice` | `update: new version available tag=<tag> firstSeen=<bool>` | `handleUpdateFound` — a newer release was found; `firstSeen` gates the one-per-version banner (#37) |
-| 606 | `lifecycle` | `.notice` | `update: user opened releases page` | `openReleasesPage` — the user clicked the "New version available" menu item (#37) |
+| 261 | `lifecycle` | `.info` | `TokenPace status item attached (<version>); live polling started` | `applicationDidFinishLaunching` — after the status item is attached and polling starts |
+| 313 | `lifecycle` | `.notice` | `manual refresh requested (Troubleshoot)` | `forceRefresh()` — the user clicked "Refresh now" in the Troubleshoot window; a `.manualRefresh` signal is sent and the status poll is marked due (ADR-0020) |
+| 358 | `lifecycle` | `.notice` | `optimistic reset applied, forcing refresh` | `fireOptimisticReset()` — a window's reset boundary passed; the retained snapshot is rolled forward locally (zero usage + next `resets_at`) and rendered immediately (no ⏰), then `.manualRefresh` forces the authoritative poll (#36, ADR-0030) |
+| 421 | `lifecycle` | `.notice` | `config: first run, no prior version (<version>)` | `runConfigMigrationsIfNeeded()` — no `lastRunVersion` stored (fresh install or a pre-persistence build); records the version, no migrations (#71, ADR-0023) |
+| 423 | `lifecycle` | `.notice` | `config: version unchanged (<version>)` | stored `lastRunVersion` equals the running version — nothing to migrate |
+| 426 | `lifecycle` | `.notice` | `config: version <old> → <new>, running migrations` | stored version differs from the running one — the `.upgraded` extension point (empty scaffold for now) |
+| 445 | `lifecycle` | `.notice` | `launch-at-login: not an .app bundle (swift run), skipping opt-out auto-register` | `registerLaunchAtLoginIfNeeded()` — running as a bare `swift run` binary, so opt-out auto-register is skipped to avoid polluting Login Items (#69) |
+| 451 | `lifecycle` | `.notice` | `launch-at-login: status=<status>, no auto-register` | status is `.registered`/`.requiresApproval`, so no auto-register is needed |
+| 456 | `lifecycle` | `.notice` | `launch-at-login: auto-registered (opt-out)` | successful auto-registration (`.notRegistered`, or recovery from `.notFound` after an update — #69) |
+| 461 | `lifecycle` | `.error` | `launch-at-login: auto-register failed: <error>` | `LaunchAtLoginController.enable()` threw on an installed `.app` bundle — an unexpected, registerable-but-refused case |
+| 640 | `network` | `.notice` | `update: checking (userInitiated=<bool>)` | `performUpdateCheck` — an update check begins (launch, daily heartbeat, or "Check now"); #37 |
+| 684 | `lifecycle` | `.notice` | `update: TOKENPACE_GH_AUTH found in login shell env` | `resolveGHAuth` — the gh-auth flag was absent from `ProcessInfo` but found in the login shell's rc files via `ShellEnvironment` (#37) |
+| 702 | `lifecycle` | `.notice` | `update: new version available tag=<tag> firstSeen=<bool>` | `handleUpdateFound` — a newer release was found; `firstSeen` gates the one-per-version banner (#37) |
+| 719 | `lifecycle` | `.notice` | `update: user opened releases page` | `openReleasesPage` — the user clicked the "New version available" menu item (#37) |
 
 ## `Sources/TokenPace/ShellEnvironment.swift`
 
@@ -257,11 +258,11 @@ One log line per interval change. The format is built by
 | Category | Calls | Files |
 |----------|-------|-------|
 | `network` | 24 | `UsageClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `PollingEngine` (1), `GitHubReleaseClient` (6), `App` (1), `GHReleaseFetcher` (1), `GitHubRelease` (1) |
-| `lifecycle` | 29 | `App` (12), `SettingsWindowController` (5), `PollingShell` (5), `PollingEngine` (1), `UpdateNotifier` (5), `ShellEnvironment` (1) |
+| `lifecycle` | 30 | `App` (13), `SettingsWindowController` (5), `PollingShell` (5), `PollingEngine` (1), `UpdateNotifier` (5), `ShellEnvironment` (1) |
 | `keychain` | 10 | `TokenProvider` (3), `ClaudeCLIRefresher` (6), `PollingEngine` (1) |
 | `ui` | 0 | — (category defined, unused) |
 
-**Total: 61 log statements** — `.error` ×24, `.notice` ×35, `.info` ×1, `.debug` ×1.
+**Total: 62 log statements** — `.error` ×24, `.notice` ×36, `.info` ×1, `.debug` ×1.
 
 The `five_hour idle …` / `window active again` pair is one call site (`sessionIdleTransition`) that
 emits one of two strings; it is counted once under `PollingEngine` network.
