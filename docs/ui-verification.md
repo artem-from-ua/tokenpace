@@ -52,10 +52,30 @@ log show --last 3m --predicate 'process == "TokenPace" AND eventMessage CONTAINS
 `interval`/usage-логу між ними. Чекбокс — Settings → General → «Pause polling while the screen is
 locked».
 
-### Авто-встановлення оновлень (#122–#125, ADR-0033)
+### Сигнали авто-апдейту — єдиний пункт дропдауна (#130, ADR-0036)
+
+Мета — **менше шуму**: жодних системних нотифікацій (`UpdateNotifier` видалено), усе — в одному
+пункті меню, що змінює лише колір крапки й текст. Стуб **`TOKENPACE_UPDATE_STATE=<state>`** форсує
+стан пункту без реального релізу/фейлу (пише лише в пам'ять, **не** в `UserDefaults`):
+
+| `TOKENPACE_UPDATE_STATE` | Крапка | Текст |
+|---|---|---|
+| `failed` | 🔴 | `New version available (update failed)…` |
+| `available` | 🔵 | `New version available…` |
+| `pending` | 🔵 | `Update pending…` |
+| `whatsnew` | 🔵 | `What's new in the version…` |
+
+Перевірка: `TOKENPACE_UPDATE_STATE=whatsnew TOKENPACE_STUB=1 swift run` → відкрий меню, глянь
+колір/текст пункта (над Quit) й **вирівнювання крапки** з текстом (має збігатися з крапками статусів
+сервісів у popup). Клік завжди → сторінка релізів; `whatsnew` після кліку зникає (крім форсованого
+стуба — той тримає стан). У логах: `update: menu item = <state>`.
+
+### Авто-встановлення оновлень (#122–#125, ADR-0033; сигнали ADR-0036)
 
 Повний флоу (download→verify→unzip→replace) працює **лише в нотаризованому `.app` із
-`/Applications`** — у `swift run` інсталятор одразу `.notApplicable`.
+`/Applications`** — у `swift run` інсталятор одразу `.notApplicable`. Опція
+`installUpdatesAutomatically` — **default-ON** (opt-out, з #130). Після успіху пункт меню показує 🔵
+«What's new…» (переживає рестарт); після фейлу — 🔴 «…(update failed)…», і цей tag не ретраїться.
 
 - Стуб **`TOKENPACE_UPDATE_DRYRUN=1`** ганяє download→verify→unzip **без** заміни й перезапуску (і
   оминає гейти AC-power/metered — це forced-шлях). Приватний репо: asset качається через `gh` за

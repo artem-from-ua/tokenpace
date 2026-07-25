@@ -55,8 +55,8 @@ protocol AppUpdateInstalling: Sendable {
 /// ``UpdateInstallPlan``; this type only executes an already-made decision. All work is gated on
 /// ``LaunchAtLoginController/isAppBundle`` — a dev build returns ``notApplicable`` immediately.
 ///
-/// Off-actor discipline mirrors ``UpdateNotifier``: the download uses `URLSession`, and the
-/// subprocess/file steps run on a detached task; the `@MainActor` entry point only orchestrates.
+/// Off-actor discipline: the download uses `URLSession`, and the subprocess/file steps run on a
+/// detached task; the `@MainActor` entry point only orchestrates.
 @MainActor
 struct UpdateInstaller: AppUpdateInstalling {
 

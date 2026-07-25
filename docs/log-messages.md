@@ -97,14 +97,17 @@ In the tables below, `<…>` marks an interpolated value.
 | 461 | `lifecycle` | `.error` | `launch-at-login: auto-register failed: <error>` | `LaunchAtLoginController.enable()` threw on an installed `.app` bundle — an unexpected, registerable-but-refused case |
 | 640 | `network` | `.notice` | `update: checking (userInitiated=<bool>)` | `performUpdateCheck` — an update check begins (launch, 12 h heartbeat, or "Check now"); #37 |
 | 684 | `lifecycle` | `.notice` | `update: TOKENPACE_GH_AUTH found in login shell env` | `resolveGHAuth` — the gh-auth flag was absent from `ProcessInfo` but found in the login shell's rc files via `ShellEnvironment` (#37) |
-| 702 | `lifecycle` | `.notice` | `update: new version available tag=<tag> firstSeen=<bool>` | `handleUpdateFound` — a newer release was found; `firstSeen` gates the one-per-version banner (#37) |
-| 719 | `lifecycle` | `.notice` | `update: user opened releases page` | `openReleasesPage` — the user clicked the "New version available" menu item (#37) |
+| — | `lifecycle` | `.notice` | `update: new version available tag=<tag> firstSeen=<bool>` | `handleUpdateFound` — a newer release was found; `firstSeen` = first time this tag is surfaced (`lastSeenLatestVersion`), #37 |
+| — | `lifecycle` | `.notice` | `update: cleared pending what's new (superseded by newer release)` | `handleUpdateFound` — a release newer than the installed build pre-empts an unseen "what's new" (#130, ADR-0036) |
+| — | `lifecycle` | `.notice` | `update: menu item = <hidden\|updateFailed\|updateAvailable\|updatePending\|whatsNew>` | `refreshUpdateMenuItem` — the single update dropdown item's resolved state (#130, ADR-0036) |
+| — | `lifecycle` | `.notice` | `update: user opened releases page (item=<state>)` | `openReleasesPage` — the user clicked the update item; opens the releases page (#37/#130) |
+| — | `lifecycle` | `.notice` | `update: cleared pending what's new (user opened it)` | `openReleasesPage` — opening the `whatsNew` item acknowledges it, clearing `pendingWhatsNewVersion` (#130) |
 | — | `lifecycle` | `.notice` | `update-install: decision=install target=<tag> asset=<name>` | `evaluateAutoInstall` — all gates passed; this release would be auto-installed (#122, ADR-0033). Phase 2 runs the installer only under `TOKENPACE_UPDATE_DRYRUN` (download/verify/unzip, no replace) |
-| — | `lifecycle` | `.notice` | `update-install: decision=skip reason=<auto-install-off\|not-newer\|not-app-bundle\|no-asset>` | `evaluateAutoInstall` — why auto-install stood down (opt-in off / not newer / dev build / no version-named `.zip` asset); the signal path (banner/Download) still runs (#122) |
+| — | `lifecycle` | `.notice` | `update-install: decision=skip reason=<auto-install-off\|not-newer\|not-app-bundle\|no-asset>` | `evaluateAutoInstall` — why auto-install stood down (opt-out off / not newer / dev build / no version-named `.zip` asset); the single dropdown item still carries the signal (#122/#130) |
 | — | `lifecycle` | `.notice` | `update-install: decision=defer reason=insufficient-space target=<tag>` | `evaluateAutoInstall` — installable, but downloading would leave < 5 GB free; deferred until space frees up. Not bypassed by a forced install. Re-evaluated next heartbeat (#124) |
 | — | `lifecycle` | `.notice` | `update-install: decision=defer reason=on-battery target=<tag>` | `evaluateAutoInstall` — installable, but on battery; deferred until AC power. Re-evaluated next heartbeat. Bypassed by a forced (dry-run) install (#123) |
 | — | `lifecycle` | `.notice` | `update-install: decision=defer reason=metered-network target=<tag>` | `evaluateAutoInstall` — installable, but on a metered (expensive/constrained) network; deferred until unmetered. The update *check* is unaffected. Re-evaluated next heartbeat (#123) |
-| — | `lifecycle` | `.notice` | `update-install: auto set <bool>` | user toggled the "Install updates automatically" checkbox (#122) |
+| — | `lifecycle` | `.notice` | `update-install: auto set <bool>` | user toggled the "Install updates automatically" checkbox (#122; default-on since #130) |
 | — | `lifecycle` | `.notice` | `update-install: skip (not an .app bundle)` | `UpdateInstaller.install` — gated out on a dev build before any I/O (#123) |
 | — | `network` | `.notice` | `update-install: download started tag=<tag> asset=<name> via=<gh\|https>` | `UpdateInstaller` — the asset download began; `gh` path for the private repo (asset needs credentials), else anonymous HTTPS (#123) |
 | — | `network` | `.notice` | `update-install: download ok bytes=<n>` | `UpdateInstaller` — the asset downloaded successfully (#123) |
@@ -120,8 +123,10 @@ In the tables below, `<…>` marks an interpolated value.
 | — | `lifecycle` | `.notice` | `update-install: installed <tag>, relaunching` | `UpdateInstaller` — replace done; about to relaunch the new build (#124) |
 | — | `lifecycle` | `.notice` | `update-install: relaunching from <path>` | `UpdateInstaller.relaunch` — launching the new bundle; this process then terminates (#124) |
 | — | `lifecycle` | `.error` | `update-install: relaunch failed <error>` | `UpdateInstaller.relaunch` — couldn't launch the new bundle; this process stays alive, the new version is picked up on next manual launch (#124) |
+| — | `lifecycle` | `.notice` | `update-install: what's new pending set tag=<tag>` | `startInstall` — the pending "what's new" is persisted **before** the install runs, so it survives the imminent relaunch (#130, ADR-0036) |
 | — | `lifecycle` | `.notice` | `update-install: installed <tag>, app will relaunch` | `AppDelegate` — the real install succeeded; the installer is relaunching (#124) |
-| — | `lifecycle` | `.error` | `update-install: did not complete (<outcome>) — manual Download remains` | `AppDelegate` — the install ended in a failure outcome; the signal-path Download link is the fallback (#123/#124) |
+| — | `lifecycle` | `.notice` | `update-install: last failed install version set tag=<tag>` | `startInstall` — an install failed; this tag is recorded so it is not retried (a newer tag still is), driving the red `updateFailed` item (#130, ADR-0036) |
+| — | `lifecycle` | `.error` | `update-install: did not complete (<outcome>) — signal item remains` | `AppDelegate` — the install ended in a failure outcome; the speculative "what's new" is cleared and the single dropdown item carries the signal (#123/#124/#130) |
 | — | `archive` | `.notice` | `archive: sync starting (userInitiated=<bool>)` | `performArchiveSync` — an archive sync begins (daily heartbeat or "Archive now"); #110, ADR-0031 |
 | — | `archive` | `.notice` | `archive: sync ok — <n> updated, <bytes> bytes, <total> files / <totalBytes> bytes in archive` | `performArchiveSync` — the sync finished; the `lastArchiveSync` marker is advanced (#110). `<total>`/`<totalBytes>` count the whole archive incl. source-pruned files |
 | — | `archive` | `.error` | `archive: sync failed — <error>` | `performArchiveSync` — the sync threw (e.g. destination unwritable); marker not advanced, retried next heartbeat (#110) |
@@ -182,18 +187,8 @@ The `gh api` subprocess for the maintainer update-check path (#37, ADR-0025); th
 |------|----------|-------|---------|------|
 | 46 | `network` | `.notice` | `update: gh path, launching <binary>` | before spawning `gh api …/releases/latest` under `TOKENPACE_GH_AUTH` |
 
-## `Sources/TokenPace/UpdateNotifier.swift`
-
-The first `UserNotifications` use (#37, ADR-0025). Completion handlers run off the main actor, so
-their bodies live in `nonisolated` helpers.
-
-| Line | Category | Level | Message | When |
-|------|----------|-------|---------|------|
-| 54 | `lifecycle` | `.error` | `update: notification auth failed: <error>` | `requestAuthorization` returned an error |
-| 57 | `lifecycle` | `.notice` | `update: notification auth granted=<bool>` | authorization resolved (granted or denied) |
-| 68 | `lifecycle` | `.notice` | `update: skip notification (not an .app bundle)` | `post` called outside a real `.app` — banner unavailable, menu/Settings still carry the signal |
-| 87 | `lifecycle` | `.error` | `update: notification post failed: <error>` | `UNUserNotificationCenter.add` returned an error |
-| 128 | `lifecycle` | `.notice` | `update: notification action opened releases page` | the user clicked the banner body or its "Update" button (`didReceive`); "Close" does nothing |
+<!-- `Sources/TokenPace/UpdateNotifier.swift` removed in #130 (ADR-0036): no more system notifications;
+the sole update signal is the single dropdown item logged as `update: menu item = …` above. -->
 
 ## `Sources/TokenPace/PollingShell.swift`
 
@@ -298,13 +293,13 @@ One log line per interval change. The format is built by
 
 | Category | Calls | Files |
 |----------|-------|-------|
-| `network` | 24 | `UsageClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `PollingEngine` (1), `GitHubReleaseClient` (6), `App` (1), `GHReleaseFetcher` (1), `GitHubRelease` (1) |
-| `lifecycle` | 32 | `App` (13), `SettingsWindowController` (7), `PollingShell` (5), `PollingEngine` (1), `UpdateNotifier` (5), `ShellEnvironment` (1) |
-| `keychain` | 10 | `TokenProvider` (3), `ClaudeCLIRefresher` (6), `PollingEngine` (1) |
+| `network` | 27 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `UpdateInstaller` (3), `PollingEngine` (1), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
+| `lifecycle` | 62 | `App` (29), `UpdateInstaller` (13), `SettingsWindowController` (10), `PollingShell` (7), `PollingEngine` (2), `ShellEnvironment` (1) |
+| `keychain` | 11 | `ClaudeCLIRefresher` (6), `TokenProvider` (4), `PollingEngine` (1) |
 | `ui` | 0 | — (category defined, unused) |
 | `archive` | 5 | `App` (3), `LogArchiver` (2) |
 
-**Total: 69 log statements** — `.error` ×26, `.notice` ×40, `.info` ×1, `.debug` ×2.
+**Total: 105 log statements** — `.error` ×33, `.notice` ×68, `.info` ×1, `.debug` ×3.
 
 The `five_hour idle …` / `window active again` pair is one call site (`sessionIdleTransition`) that
 emits one of two strings; it is counted once under `PollingEngine` network.

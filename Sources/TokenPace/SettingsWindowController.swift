@@ -101,6 +101,12 @@ final class SettingsWindowController: NSWindowController {
 
     // About / Updates
     private var updatesToggle: NSSwitch!
+    /// The nested "Install updates automatically" toggle (#122), enabled only when the parent check is
+    /// on and this is a real `.app` bundle; synced from `PersistedConfig` on every `show()`.
+    private var installAutomaticallyToggle: NSSwitch!
+    /// Explanatory line under `installAutomaticallyToggle` (#122): what it does + its `/Applications`
+    /// precondition, or why it is unavailable on a dev build. Text set in `updateInstallAvailability`.
+    private var installAutomaticallyHint: NSTextField!
     private var checkNowButton: NSButton!
     private var updateLineLabel: NSTextField!
     private var updateDownloadLink: NSButton!
@@ -148,7 +154,7 @@ final class SettingsWindowController: NSWindowController {
         hideCalmSevenDayToggle.state = PersistedConfig.hideCalmSevenDayBar ? .on : .off
         syncResetCountdownFromConfig()
         serviceDotToggle.state = PersistedConfig.showServiceStatusDot ? .on : .off
-        updatesToggle.state = PersistedConfig.automaticUpdateChecks ? .on : .off
+        syncUpdatesFromConfig()
         archiveToggle.state = PersistedConfig.archiveEnabled ? .on : .off
         updateArchiveStatus()
         NSApp.activate(ignoringOtherApps: true)
@@ -385,6 +391,17 @@ final class SettingsWindowController: NSWindowController {
         updatesTrailing.alignment = .centerY
         updatesTrailing.spacing = 10
         updates.addRow(SettingsRow.container(leading: leadingLabel("Check for updates daily"), trailing: updatesTrailing))
+
+        // Nested "Install updates automatically" (#122, restored in the sidebar design): label + its
+        // dynamic hint stacked in one leading column (so no divider splits them), switch on the right,
+        // the whole row indented under the parent check. `updateInstallAvailability` sets the hint text
+        // (enabled description / parent-off / dev-build precondition).
+        installAutomaticallyToggle = SettingsRow.makeSwitch(
+            target: self, action: #selector(toggleInstallAutomatically(_:)))
+        let installCol = SettingsRow.labelColumn("Install updates automatically", hint: " ")
+        installAutomaticallyHint = installCol.hintLabel
+        updates.addRow(SettingsRow.container(
+            leading: indented(installCol.view), trailing: installAutomaticallyToggle))
 
         updateLineLabel = NSTextField(labelWithString: "")
         updateLineLabel.font = .systemFont(ofSize: 12)
@@ -637,11 +654,63 @@ final class SettingsWindowController: NSWindowController {
 
     // MARK: Updates (#37)
 
+    /// Load both update toggles from `PersistedConfig` and refresh the nested toggle's enablement +
+    /// hint. Called from `show()` (via the switch sync), so the window always reflects the stored
+    /// choice.
+    private func syncUpdatesFromConfig() {
+        updatesToggle.state = PersistedConfig.automaticUpdateChecks ? .on : .off
+        installAutomaticallyToggle.state = PersistedConfig.installUpdatesAutomatically ? .on : .off
+        updateInstallAvailability()
+    }
+
+    /// The "Install updates automatically" toggle is only meaningful when update checks are on and
+    /// this is a real `.app` bundle (a `swift run` dev build cannot self-replace). Enable it only
+    /// then; otherwise disable it and explain why in the hint. The stored choice is preserved either
+    /// way — turning the parent back on re-enables it at its remembered state.
+    ///
+    /// Hint precedence puts the **`.app`-bundle** requirement first: in a dev build auto-install is
+    /// permanently impossible, so "Available only for TokenPace.app in /Applications" is the honest
+    /// message even with the parent toggle off — telling a dev user to "Turn on Check for updates"
+    /// would imply the option would then work, which it never will. In a real `.app`
+    /// (`inAppBundle == true`) that branch never fires, so a user only ever sees the parent-dependency
+    /// hint or the enabled description — the two cases that actually differ for them.
+    private func updateInstallAvailability() {
+        let inAppBundle = LaunchAtLoginController.isAppBundle
+        let checksOn = updatesToggle.state == .on
+        installAutomaticallyToggle.isEnabled = checksOn && inAppBundle
+
+        let hint: String
+        if !inAppBundle {
+            // U+2060 word-joiner keeps "/Applications" from wrapping mid-path; the surrounding spaces
+            // stay ordinary so the line can still break cleanly before or after the path.
+            hint = "Available only for the TokenPace app in /\u{2060}Applications — a developer build "
+                 + "can't replace itself."
+        } else if !checksOn {
+            hint = "Turn on \u{201C}Check for updates automatically\u{201D} to enable this."
+        } else {
+            hint = "On by default: downloads and installs a newer release in the background, then "
+                 + "restarts. If anything fails, the menu shows a \u{201C}New version available\u{201D} "
+                 + "item linking to the release instead."
+        }
+        installAutomaticallyHint.stringValue = hint
+    }
+
+    /// Persist the "Check for updates automatically" choice. Refreshes the nested "Install updates
+    /// automatically" enablement, which depends on this. (There is no notification-authorization
+    /// request here — #130 removed the banner; the only signal is the dropdown item.)
     @objc private func toggleAutomaticUpdates(_ sender: NSSwitch) {
         let on = sender.state == .on
         PersistedConfig.automaticUpdateChecks = on
         AppLogger.lifecycle.notice("update: automatic checks set \(on, privacy: .public)")
-        if on { UpdateNotifier.requestAuthorizationIfNeeded() }
+        updateInstallAvailability()
+    }
+
+    /// Persist the "Install updates automatically" choice (#122). No immediate action — the decision
+    /// to install rides the next found-update path (`AppDelegate.handleUpdateFound`).
+    @objc private func toggleInstallAutomatically(_ sender: NSSwitch) {
+        let on = sender.state == .on
+        PersistedConfig.installUpdatesAutomatically = on
+        AppLogger.lifecycle.notice("update-install: auto set \(on, privacy: .public)")
     }
 
     @objc private func checkNow() {

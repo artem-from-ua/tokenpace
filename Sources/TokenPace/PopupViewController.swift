@@ -649,13 +649,11 @@ final class PopupViewController: NSViewController {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
         let attributed = NSMutableAttributedString()
 
-        // Colour dot — same attachment approach as the warning triangle, tinted by status.
-        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
-            .applying(.init(paletteColors: [Self.dotColor(status)]))
-        if let symbol = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: status == .operational ? "operational" : "issue")?
-            .withSymbolConfiguration(symbolConfig) {
-            let attachment = NSTextAttachment()
-            attachment.image = symbol
+        // Colour dot — the shared baseline-nudged attachment (#130), tinted by status, so the popup
+        // rows align with the update menu item and the menu-bar dot.
+        if let attachment = Self.dotAttachment(
+            color: Self.dotColor(status),
+            accessibility: status == .operational ? "operational" : "issue") {
             attributed.append(NSAttributedString(attachment: attachment))
             attributed.append(NSAttributedString(string: "  "))
         }
@@ -695,6 +693,36 @@ final class PopupViewController: NSViewController {
         case .underMaintenance: return .systemBlue
         case .unknown:          return .systemGray
         }
+    }
+
+    /// A `circle.fill` colour-dot text attachment, **baseline-nudged** so the dot sits on the text's
+    /// optical centre rather than dropping to the baseline (#130). Shared by the popup's service-status
+    /// rows and the update menu item, so both align identically — like the menu-bar widget's dot.
+    ///
+    /// A raw symbol attachment aligns its *bottom* to the text baseline, which leaves a round dot
+    /// sitting visibly low next to lowercase text. Raising `bounds.origin.y` by roughly the gap between
+    /// the font's cap height and the dot's height centres it. `fontSize` defaults to the dropdown text
+    /// size (the popup rows and menu items share it); `pointSize` is the symbol's own size. Returns
+    /// `nil` only if the system symbol can't be created (never, in practice).
+    static func dotAttachment(
+        color: NSColor,
+        accessibility: String,
+        pointSize: CGFloat = 9,
+        fontSize: CGFloat = dropdownTextSize
+    ) -> NSTextAttachment? {
+        let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold)
+            .applying(.init(paletteColors: [color]))
+        guard let symbol = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: accessibility)?
+            .withSymbolConfiguration(config) else { return nil }
+        let attachment = NSTextAttachment()
+        attachment.image = symbol
+        // Lift the dot to the cap-height optical centre: (capHeight − dotHeight) / 2, rounded. Keeps the
+        // dot vertically centred against uppercase text instead of resting on the baseline.
+        let font = NSFont.systemFont(ofSize: fontSize)
+        let dotHeight = symbol.size.height
+        let rise = ((font.capHeight - dotHeight) / 2).rounded()
+        attachment.bounds = CGRect(x: 0, y: rise, width: symbol.size.width, height: dotHeight)
+        return attachment
     }
 
     /// The human status word shown after the component name. Exhaustive, no `default`, so a new
