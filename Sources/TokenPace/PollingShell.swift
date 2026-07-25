@@ -164,10 +164,28 @@ final class NetworkMonitor: @unchecked Sendable {
     /// first callback, which is just the initial reading, not a restoration).
     private var wasSatisfied: Bool?
 
+    /// The last path's "metered" reading (`isExpensive || isConstrained`), cached under `meteredLock`
+    /// so ``isMetered`` can be read synchronously from the main actor at auto-install decision time
+    /// (#123). Updated on every `pathUpdateHandler` callback (which runs on `queue`).
+    private let meteredLock = NSLock()
+    private var _isMetered = false
+
+    /// Whether the current network is metered — expensive (cellular / personal hotspot) or constrained
+    /// (Low Data Mode). Used only to *defer* an auto-install download onto an unmetered link, never to
+    /// gate the lightweight update *check*. Defaults to `false` until the first path callback arrives.
+    var isMetered: Bool {
+        meteredLock.lock(); defer { meteredLock.unlock() }
+        return _isMetered
+    }
+
     /// Begin monitoring; `onRestored` fires on each connectivity restoration.
     func start(onRestored: @escaping @Sendable () -> Void) {
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self else { return }
+            self.meteredLock.lock()
+            self._isMetered = path.isExpensive || path.isConstrained
+            self.meteredLock.unlock()
+
             let satisfied = path.status == .satisfied
             defer { self.wasSatisfied = satisfied }
             switch self.wasSatisfied {

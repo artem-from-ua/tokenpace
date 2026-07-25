@@ -71,6 +71,17 @@ swift run          # запуск
   `log show --last 3m --predicate 'process == "TokenPace" AND eventMessage CONTAINS "screen-lock-pause"'`
   → мають бути `screen locked, pausing polling` і `screen unlocked, polling immediately`, і **жодного**
   `interval`/usage-логу між ними. Чекбокс — Settings → General → «Pause polling while the screen is locked».
+- **Авто-встановлення оновлень (#122–#125, ADR-0033)** повний флоу (download→verify→unzip→replace)
+  працює **лише в нотаризованому `.app` із `/Applications`** — у `swift run` інсталятор одразу
+  `.notApplicable`. Стуб **`TOKENPACE_UPDATE_DRYRUN=1`** ганяє download→verify→unzip **без** заміни й
+  перезапуску (і оминає гейти AC-power/metered — це forced-шлях). Приватний репо: asset качається
+  через `gh` за `TOKENPACE_GH_AUTH=1`. Верифікація: збери нотаризований білд із **заниженою** версією
+  (щоб реальний GitHub-реліз був новішим), постав у `/Applications` (зроби backup чинного релізу!),
+  запусти `TOKENPACE_GH_AUTH=1 TOKENPACE_UPDATE_DRYRUN=1 /Applications/TokenPace.app/Contents/MacOS/TokenPace`
+  з увімкненими обома чекбоксами Updates. Докази проходження (логи невидимі при прямому запуску, не
+  через launchd): `defaults read com.artem-n.tokenpace lastSeenLatestVersion` = знайдений тег, і
+  збережений верифікований bundle `$TMPDIR/TokenPace-update-<tag>.app` (перевір `codesign -dv` +
+  `spctl --assess`). Після тесту **віднови чинний реліз** у `/Applications`.
 - **Скриншоти з тимчасового dev-only коду НЕ рахуються за верифікацію.** Синтетичний рендер
   `StatusItemView`/PNG-матриці доводить лише логіку малювання, а не те, що фіча працює в живому
   віджеті, вікні Settings і потоці даних. Не заявляй «працює»/`готово` на їх основі.

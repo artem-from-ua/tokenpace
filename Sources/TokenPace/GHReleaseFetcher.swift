@@ -58,8 +58,9 @@ struct GHReleaseFetcher: UpdateFetcher {
 
     // MARK: binary discovery
 
-    /// The first existing executable among ``binaryCandidates``, tilde-expanded.
-    private static func locateBinary() -> String? {
+    /// The first existing executable among ``binaryCandidates``, tilde-expanded. Also used by
+    /// ``UpdateInstaller`` to locate `gh` for private-repo asset downloads (#123).
+    static func locateBinary() -> String? {
         binaryCandidates
             .map { NSString(string: $0).expandingTildeInPath }
             .first { FileManager.default.isExecutableFile(atPath: $0) }
