@@ -576,6 +576,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //                    when calm" (#94) on, the 7-day bar is dropped and a lone green 5h bar
         //                    sits centred (no reset text — both calm). Turn the toggle off to see
         //                    both bars again.
+        //  • `=calm-degraded` → calm bars + a **degraded (yellow)** service dot: with "Calm colours"
+        //                    (#105) off the dot is yellow; turn Calm on (Settings → General) and it
+        //                    mutes to white alongside the bars. The frame that verifies #… .
         let stubMode = Self.stubName
         let transport: UsageTransport = switch stubMode {
         case "1":          StubUsageTransport(mode: .climbing)
@@ -591,6 +594,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "calm5-orange7": StubUsageTransport(mode: .pacing(.calmFiveOrangeSeven))
         // Both-calm frame (#94): exercises the "Hide 7-day bar when calm" opt-out (lone centred 5h).
         case "calm-both":  StubUsageTransport(mode: .pacing(.calmBoth))
+        // Calm bars + degraded (yellow) service dot: verifies calm colours muting the dot (#…).
+        case "calm-degraded": StubUsageTransport(mode: .calmDegraded)
         default:           URLSession.shared
         }
         // The status poll uses the same transport seam (the stub answers the status endpoint too).

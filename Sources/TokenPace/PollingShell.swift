@@ -294,6 +294,11 @@ actor StubUsageTransport: UsageTransport {
         case optimisticReset
         /// A fixed 5h×7d severity frame for verifying the reset-countdown selection table (#103).
         case pacing(PacingFrame)
+        /// Calm bars + a **degraded** (yellow) service dot (#…): the usage side mirrors
+        /// `.pacing(.calmBoth)` (both bars calm) while the status side reports `Claude Code`
+        /// `degraded_performance`, so the menu bar shows the lone calm 5h bar *and* a yellow service
+        /// dot. The one frame that verifies calm colours muting the yellow service dot to white.
+        case calmDegraded
     }
 
     /// Hand-picked top-level 5h/7d frames covering the reset-countdown cells the other stubs miss
@@ -378,14 +383,19 @@ actor StubUsageTransport: UsageTransport {
         // come from component.status). Lets the status lines be seen end-to-end without the live page.
         if request.url == StatusClient.endpoint {
             let failing = mode == .authError
-            let codeStatus = failing ? "degraded_performance" : "operational"
+            // Calm-degraded frame (#…): exactly one component degraded (the soft yellow state), the
+            // rest operational — so `worstProblem` is `.degraded` and the menu bar draws a **yellow**
+            // service dot, which calm colours then mute to white.
+            let calmDegraded = mode == .calmDegraded
+            let codeStatus = (failing || calmDegraded) ? "degraded_performance" : "operational"
+            let apiStatus = calmDegraded ? "operational" : "degraded_performance"
             let webStatus = failing ? "partial_outage" : "operational"
             let coworkStatus = failing ? "degraded_performance" : "operational"
             let body = """
             {"status":{"indicator":"major","description":"Degraded"},\
             "components":[\
             {"name":"Claude Code","status":"\(codeStatus)"},\
-            {"name":"Claude API (api.anthropic.com)","status":"degraded_performance"},\
+            {"name":"Claude API (api.anthropic.com)","status":"\(apiStatus)"},\
             {"name":"claude.ai","status":"\(webStatus)"},\
             {"name":"Claude Cowork","status":"\(coworkStatus)"}],\
             "incidents":[{"name":"Stubbed incident","status":"monitoring","impact":"major",\
@@ -464,7 +474,14 @@ actor StubUsageTransport: UsageTransport {
         let sevenReset: String
         let weeklyReset: String
 
-        if case let .pacing(frame) = mode {
+        // `.calmDegraded` reuses the calm-both bar frame for its usage side — only its service dot
+        // differs (handled in the status branch above) — so resolve both to a `PacingFrame`.
+        let pacingFrame: PacingFrame? = switch mode {
+        case let .pacing(frame): frame
+        case .calmDegraded:      .calmBoth
+        default:                 nil
+        }
+        if let frame = pacingFrame {
             // Fixed severity frame for reset-countdown verification (#103). Per-model rows kept as in
             // the climbing default so the popup still has content; only the top-level bars are pinned.
             let v = frame.values
