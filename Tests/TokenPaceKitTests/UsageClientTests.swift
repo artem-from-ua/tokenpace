@@ -469,6 +469,30 @@ struct UsageDecodeTests {
         ])
         #expect(!snapshot.sessionIdle)   // five_hour has a real reset (26 %) → active, not idle
     }
+
+    /// Spike baseline (#142, captured 2026-07-26 from a live account that has **run out of paid
+    /// credits**). This is the richest `spend` / `extra_usage` shape we can observe today — but only
+    /// in the *disabled* state (`enabled: false`, `disabled_reason: "out_of_credits"`). It carries
+    /// fields absent from earlier fixtures: a **non-USD** currency (`EUR`), `used_credits`, and the
+    /// `extra_usage` flags `user_disabled` / `spend_limit_reached` / `credits_ever_enabled`. The
+    /// decoder must still tolerate all of it — `spend` / `extra_usage` remain **unmodeled** until the
+    /// decode-model ticket (#143), and the enabled-state shape of `balance` / `auto_reload` / `cap` /
+    /// `limit` is **still unverified** (this account never supplies them non-null). See #142.
+    @Test func liveBodyOutOfCreditsEURDecodes() throws {
+        let body = #"""
+        {"five_hour":{"utilization":6.0,"resets_at":"2026-07-26T04:10:00.157569+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day":{"utilization":65.0,"resets_at":"2026-07-28T07:00:00.157592+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day_oauth_apps":null,"seven_day_opus":null,"seven_day_sonnet":null,"seven_day_cowork":null,"seven_day_omelette":null,"tangelo":null,"iguana_necktie":null,"omelette_promotional":null,"nimbus_quill":null,"cinder_cove":null,"amber_ladder":null,"extra_usage":{"is_enabled":false,"monthly_limit":null,"used_credits":1077.0,"utilization":null,"currency":"EUR","decimal_places":2,"disabled_reason":"out_of_credits","user_disabled":false,"spend_limit_reached":false,"credits_ever_enabled":true,"daily":null,"weekly":null},"limits":[{"kind":"session","group":"session","percent":6,"severity":"normal","resets_at":"2026-07-26T04:10:00.157569+00:00","scope":null,"is_active":false},{"kind":"weekly_all","group":"weekly","percent":65,"severity":"normal","resets_at":"2026-07-28T07:00:00.157592+00:00","scope":null,"is_active":true},{"kind":"weekly_scoped","group":"weekly","percent":36,"severity":"normal","resets_at":"2026-07-28T07:00:00.157890+00:00","scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":false}],"spend":{"used":{"amount_minor":1077,"currency":"EUR","exponent":2},"limit":null,"percent":0,"severity":"normal","enabled":false,"disabled_reason":"out_of_credits","cap":null,"balance":null,"auto_reload":null,"disclaimer":"Usage credits cover you when you hit your plan limits. [Learn more](https://support.claude.com/articles/12429409)","can_purchase_credits":false,"can_toggle":false},"member_dashboard_available":false}
+        """#
+        let snapshot = try UsageClient.decode(from: Data(body.utf8), now: now)
+        #expect(snapshot.fiveHour.utilization == 6.0)
+        #expect(snapshot.sevenDay.utilization == 65.0)
+        #expect(snapshot.limits.count == 3)
+        // Fable is present only as a weekly_scoped entry (no top-level window), at 36 %.
+        let fable = try #require(snapshot.limits.first { $0.kind == "weekly_scoped" })
+        #expect(fable.modelDisplayName == "Fable")
+        #expect(fable.percent == 36)
+        #expect(!snapshot.sessionIdle)   // an active 5h window (6 %) → not idle
+        // `spend` / `extra_usage` are still ignored — their presence must not fail the decode.
+    }
 }
 
 // MARK: - buildRequest
