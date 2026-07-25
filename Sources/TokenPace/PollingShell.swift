@@ -61,6 +61,96 @@ final class WorkspaceSleepWake {
     }
 }
 
+// MARK: - ScreenLockObserver
+
+/// Pauses polling while the screen is **locked, asleep, or running a screensaver**, resuming with an
+/// immediate poll when it comes back — reusing the same `.sleep`/`.wake` park path as
+/// ``WorkspaceSleepWake`` (#114, ADR-0030). Screen-off is a strong "the user isn't looking" signal, so
+/// there is no point spending usage-API quota on refreshes nobody sees.
+///
+/// **Config-gated, default-on.** Each handler reads ``PersistedConfig/pausePollingWhenScreenLocked``
+/// *at fire time*, so toggling the Settings checkbox takes effect on the very next lock/unlock with no
+/// restart. When the option is off, the handlers emit nothing and polling continues unaffected.
+///
+/// Distinct from ``WorkspaceSleepWake`` (whole-system sleep/wake), which stays **unconditional** — a
+/// laptop that actually sleeps must always park regardless of this preference. The two observers feed
+/// the same `.sleep`/`.wake` signals into the same hub; `SignalHub`'s newest-wins buffer collapses any
+/// overlap (e.g. lock then system-sleep) harmlessly.
+///
+/// Events observed:
+/// - **Lock/unlock** — `com.apple.screenIsLocked` / `com.apple.screenIsUnlocked` on
+///   `DistributedNotificationCenter` (the system-wide bus these are posted on).
+/// - **Screensaver** — `com.apple.screensaver.didstart` / `...willstop`, same bus.
+/// - **Display sleep/wake** — `NSWorkspace.screensDidSleepNotification` / `screensDidWakeNotification`
+///   on `NSWorkspace.shared.notificationCenter` (energy-saver display-off without a full system sleep).
+@MainActor
+final class ScreenLockObserver {
+    private let onSignal: @Sendable (PollSignal) -> Void
+    private var distributedTokens: [NSObjectProtocol] = []
+    private var workspaceTokens: [NSObjectProtocol] = []
+
+    /// Whether the pause-on-screen-lock preference is currently on. Read live on each event so the
+    /// Settings toggle needs no restart to take effect.
+    private var isEnabled: Bool { PersistedConfig.pausePollingWhenScreenLocked }
+
+    init(onSignal: @escaping @Sendable (PollSignal) -> Void) {
+        self.onSignal = onSignal
+
+        // Lock / unlock / screensaver ride the *distributed* notification center (cross-process bus).
+        let distributed = DistributedNotificationCenter.default()
+        let pausing: [(String, String)] = [
+            ("com.apple.screenIsLocked", "screen locked"),
+            ("com.apple.screensaver.didstart", "screensaver started"),
+        ]
+        let resuming: [(String, String)] = [
+            ("com.apple.screenIsUnlocked", "screen unlocked"),
+            ("com.apple.screensaver.willstop", "screensaver stopped"),
+        ]
+        for (name, label) in pausing {
+            distributedTokens.append(distributed.addObserver(
+                forName: Notification.Name(name), object: nil, queue: .main
+            ) { [weak self] _ in MainActor.assumeIsolated { self?.pause(label) } })
+        }
+        for (name, label) in resuming {
+            distributedTokens.append(distributed.addObserver(
+                forName: Notification.Name(name), object: nil, queue: .main
+            ) { [weak self] _ in MainActor.assumeIsolated { self?.resume(label) } })
+        }
+
+        // Display sleep/wake (energy saver turning the panel off) ride the workspace center.
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspaceTokens.append(workspace.addObserver(
+            forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main
+        ) { [weak self] _ in MainActor.assumeIsolated { self?.pause("display asleep") } })
+        workspaceTokens.append(workspace.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in MainActor.assumeIsolated { self?.resume("display awake") } })
+    }
+
+    /// Park the poll loop (via `.sleep`) if the preference is on; otherwise ignore the event.
+    private func pause(_ reason: String) {
+        guard isEnabled else { return }
+        AppLogger.lifecycle.notice("screen-lock-pause: \(reason, privacy: .public), pausing polling")
+        onSignal(.sleep)
+    }
+
+    /// Resume the poll loop with one immediate poll (via `.wake`) if the preference is on.
+    private func resume(_ reason: String) {
+        guard isEnabled else { return }
+        AppLogger.lifecycle.notice("screen-lock-pause: \(reason, privacy: .public), polling immediately")
+        onSignal(.wake)
+    }
+
+    func stop() {
+        let distributed = DistributedNotificationCenter.default()
+        distributedTokens.forEach(distributed.removeObserver)
+        distributedTokens.removeAll()
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspaceTokens.forEach(workspace.removeObserver)
+        workspaceTokens.removeAll()
+    }
+}
+
 // MARK: - NetworkMonitor
 
 /// Wraps `NWPathMonitor`, emitting `.networkRestored` on each `.unsatisfied → .satisfied`
@@ -118,7 +208,7 @@ struct ProcessClaudeActivityProbe: ClaudeActivityProbe {
 
     /// All running process names via `sysctl(KERN_PROC_ALL)` — no subprocess spawn, no `pgrep` path
     /// dependency. Returns an empty set on any sysctl failure (fail-safe: treated as "inactive" →
-    /// the 30-min override, which is the conservative cadence).
+    /// the 15-min override, which is the conservative cadence).
     private static func runningProcessNames() -> Set<String> {
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
         var size = 0

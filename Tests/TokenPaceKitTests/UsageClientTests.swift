@@ -714,100 +714,58 @@ struct DiagnosedFetchTests {
     }
 }
 
-// MARK: - PollingBackoff
+// MARK: - PollingBackoff (honored-hold, ADR-0032)
 
 @Suite("PollingBackoff")
 struct PollingBackoffTests {
 
     @Test func initialIsHealthy180() {
         let b = PollingBackoff()
-        #expect(b.level == nil)
+        #expect(b.isHolding == false)
         #expect(b.interval == 180)
     }
 
-    @Test func firstEscalationIsThreeMin() {
-        let b = PollingBackoff().escalated()
-        #expect(b.level == 0)
-        #expect(b.interval == 180)  // step 0 == 3 min == 180 s
+    @Test func honorsRetryAfterVerbatim() {
+        let b = PollingBackoff().honoring(retryAfter: 450)
+        #expect(b.isHolding == true)
+        #expect(b.interval == 450)   // exactly the server hint, no step schedule
     }
 
-    @Test func escalationClimbs() {
-        var b = PollingBackoff()
-        let expected: [TimeInterval] = [180, 360, 720, 900]
-        for want in expected {
-            b = b.escalated()
-            #expect(b.interval == want)
-        }
-        #expect(b.level == 3)
+    @Test func absentRetryAfterFallsBackToBase() {
+        let b = PollingBackoff().honoring(retryAfter: nil)
+        #expect(b.isHolding == true)
+        #expect(b.interval == 180)   // base hold when the server gave no hint
     }
 
-    @Test func holdsAtFifteenMin() {
-        var b = PollingBackoff()
-        for _ in 0..<6 { b = b.escalated() }
-        #expect(b.interval == 900)
-        #expect(b.level == PollingBackoff.steps.count - 1)
+    @Test func nonPositiveRetryAfterFallsBackToBase() {
+        // A zero/negative hint is meaningless as a wait — fall back to the base rather than hold at 0.
+        #expect(PollingBackoff().honoring(retryAfter: 0).interval == 180)
+        #expect(PollingBackoff().honoring(retryAfter: -5).interval == 180)
+    }
+
+    @Test func repeatHonoringDoesNotEscalate() {
+        // The core of the new rule: a second 429 with the same hint re-sets the same hold, it never
+        // climbs. A second 429 with a *longer* hint simply adopts the latest hint.
+        var b = PollingBackoff().honoring(retryAfter: 200)
+        b = b.honoring(retryAfter: 200)
+        #expect(b.interval == 200)   // not 400, not a doubled step
+        b = b.honoring(retryAfter: 500)
+        #expect(b.interval == 500)   // adopts the newest hint
     }
 
     @Test func resetReturnsToDefault() {
-        var b = PollingBackoff()
-        for _ in 0..<4 { b = b.escalated() }
+        var b = PollingBackoff().honoring(retryAfter: 900)
         b = b.reset()
-        #expect(b.level == nil)
+        #expect(b.isHolding == false)
         #expect(b.interval == 180)
     }
 
-    @Test func escalateThenResetThenEscalate() {
-        var b = PollingBackoff()
-        for _ in 0..<3 { b = b.escalated() }   // climb
-        b = b.reset()                          // 200 → healthy
+    @Test func honorThenResetThenHonor() {
+        var b = PollingBackoff().honoring(retryAfter: 600)
+        b = b.reset()                       // 200 → healthy
         #expect(b.interval == 180)
-        b = b.escalated()                      // single 429 → back to step 0
-        #expect(b.level == 0)
-        #expect(b.interval == 180)
-    }
-
-    @Test func stepsAreInSeconds() {
-        // Guards the minutes-vs-seconds trap: 3,6,12,15 min must be stored as seconds.
-        #expect(PollingBackoff.steps == [180, 360, 720, 900])
-    }
-
-    struct ProgressionCase {
-        let escalations: Int
-        let expected: TimeInterval
-    }
-
-    @Test(arguments: [
-        ProgressionCase(escalations: 0, expected: 180),  // healthy default
-        ProgressionCase(escalations: 1, expected: 180),  // step 0 (3 min)
-        ProgressionCase(escalations: 2, expected: 360),
-        ProgressionCase(escalations: 3, expected: 720),
-        ProgressionCase(escalations: 4, expected: 900),
-        ProgressionCase(escalations: 5, expected: 900),  // ceiling hold
-        ProgressionCase(escalations: 6, expected: 900),
-    ])
-    func progression(_ c: ProgressionCase) {
-        var b = PollingBackoff()
-        for _ in 0..<c.escalations { b = b.escalated() }
-        #expect(b.interval == c.expected,
-            "after \(c.escalations) escalations expected \(c.expected), got \(b.interval)")
-    }
-
-    @Test func retryAfterLongerThanStepIsHonored() {
-        // At level 0 the scheduled interval is 180 s; a 1200 s hint should win.
-        let b = PollingBackoff().escalated(retryAfter: 1200)
-        #expect(b.interval == 900)  // clamps to the ceiling (no step >= 1200)
-    }
-
-    @Test func retryAfterMatchingStepJumpsToit() {
-        // A 700 s hint at level 0 should jump to the 720 s step.
-        let b = PollingBackoff().escalated(retryAfter: 700)
-        #expect(b.interval == 720)
-    }
-
-    @Test func retryAfterShorterIsIgnored() {
-        // A hint shorter than the scheduled step falls back to the step.
-        let b = PollingBackoff().escalated(retryAfter: 10)
-        #expect(b.interval == 180)
-        #expect(b.level == 0)
+        b = b.honoring(retryAfter: 300)     // a fresh 429 → back to a hold
+        #expect(b.isHolding == true)
+        #expect(b.interval == 300)
     }
 }

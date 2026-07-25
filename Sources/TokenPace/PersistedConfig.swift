@@ -41,6 +41,9 @@ enum PersistedConfig {
         /// Whether the menu-bar widget draws the service-status dot on a service issue (#31).
         /// Default-on (opt-out) — see the property.
         static let showServiceStatusDot = "showServiceStatusDot"
+        /// Whether polling pauses while the screen is locked / off / running a screensaver (#114).
+        /// Default-on (opt-out) — see the property.
+        static let pausePollingWhenScreenLocked = "pausePollingWhenScreenLocked"
         /// Whether the session-log archiver runs (#110). Default-off (opt-in) — see the property.
         static let archiveEnabled = "archiveEnabled"
         /// Filesystem path of the user-chosen archive folder (#110), or absent if not yet set.
@@ -129,6 +132,18 @@ enum PersistedConfig {
     static var showServiceStatusDot: Bool {
         get { defaults.object(forKey: Key.showServiceStatusDot) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.showServiceStatusDot) }
+    }
+
+    /// Whether polling pauses while the screen is **locked, off, or running a screensaver** (#114,
+    /// ADR-0032). **Default-on** (opt-out): an absent key reads as `true`, so a screen-off Mac stops
+    /// spending usage-API quota on refreshes nobody sees, resuming with an immediate poll on wake.
+    /// `object(forKey:) as? Bool ?? true` distinguishes "unset" (→ true) from an explicit `false` the
+    /// user chose — `bool(forKey:)` would collapse both to `false` and silently defeat the opt-out.
+    /// Read live by ``ScreenLockObserver`` on each lock/unlock, so a Settings change needs no restart.
+    /// Whole-system sleep/wake (``WorkspaceSleepWake``) is unaffected — it always parks.
+    static var pausePollingWhenScreenLocked: Bool {
+        get { defaults.object(forKey: Key.pausePollingWhenScreenLocked) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.pausePollingWhenScreenLocked) }
     }
 
     /// Whether the session-log archiver mirrors Claude Code's raw logs to a folder (#110).

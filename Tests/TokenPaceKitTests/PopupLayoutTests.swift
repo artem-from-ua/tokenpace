@@ -301,8 +301,8 @@ struct PopupLayoutServiceTests {
         #expect(p.intervalSeconds == 180)
     }
 
-    @Test func intervalReflectsBackoffStep() {
-        let backoff = PollingBackoff().escalated().escalated()   // 3 → 6 min
+    @Test func intervalReflectsBackoffHold() {
+        let backoff = PollingBackoff().honoring(retryAfter: 6 * 60)   // Retry-After hold
         let p = PopupLayout.make(
             from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), now: now,
             lastUpdate: now, interval: backoff.interval

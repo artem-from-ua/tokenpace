@@ -95,11 +95,11 @@ struct AdvanceSuccessTests {
 
     @Test func successResetsBackoffAndHealth() {
         var prev = PollState(failingSince: t0.addingTimeInterval(-100), reason: .timeout)
-        prev.backoff = PollingBackoff().escalated().escalated()  // climbed to 360 s
+        prev.backoff = PollingBackoff().honoring(retryAfter: 300)  // an active hold
         let next = PollingEngine.advance(
             previous: prev, outcome: .success(snap(five: 10, seven: 20)),
             claudeActive: true, now: t0)
-        #expect(next.backoff.level == nil)         // 200 cleared the backoff
+        #expect(next.backoff.isHolding == false)   // 200 cleared the hold
         #expect(next.lastSuccess == t0)
         #expect(next.failingSince == nil)
         #expect(next.reason == nil)
@@ -107,38 +107,21 @@ struct AdvanceSuccessTests {
         #expect(next.health.isFailing == false)
     }
 
-    @Test func firstSuccessKeepsAdaptiveAtFloor() {
-        // No previous snapshot → counts as a change → adaptive stays at the responsive floor.
+    @Test func successKeepsBaseInterval() {
+        // With no 429 hold and an active session, a success leaves the flat 3-min base.
         let next = PollingEngine.advance(
             previous: PollState(), outcome: .success(snap(five: 10, seven: 20)),
             claudeActive: true, now: t0)
-        #expect(next.adaptive.interval == 180)
+        #expect(PollingEngine.effectiveInterval(next) == 180)
     }
 
-    @Test func unchangedUtilisationDoublesAdaptive() {
+    @Test func repeatSuccessStaysAtBase() {
+        // The interval no longer reacts to whether utilisation moved — it is a flat base now.
         let prev = PollState(lastSnapshot: snap(five: 40, seven: 75))
         let next = PollingEngine.advance(
-            previous: prev, outcome: .success(snap(five: 40, seven: 75)),
+            previous: prev, outcome: .success(snap(five: 40, seven: 75)),  // identical
             claudeActive: true, now: t0)
-        #expect(next.adaptive.interval == 360)     // identical snapshot → one step slower
-    }
-
-    @Test func changedUtilisationSnapsAdaptiveToFloor() {
-        var prev = PollState(lastSnapshot: snap(five: 40, seven: 75))
-        prev.adaptive = AdaptiveCadence().unchanged().unchanged()  // climbed to 720 s
-        let next = PollingEngine.advance(
-            previous: prev, outcome: .success(snap(five: 41, seven: 75)),  // 5h moved
-            claudeActive: true, now: t0)
-        #expect(next.adaptive.interval == 180)     // change → instant reset to floor
-    }
-
-    @Test func sevenDayChangeAloneCountsAsChange() {
-        var prev = PollState(lastSnapshot: snap(five: 40, seven: 75))
-        prev.adaptive = AdaptiveCadence().unchanged()
-        let next = PollingEngine.advance(
-            previous: prev, outcome: .success(snap(five: 40, seven: 76)),  // 7d moved
-            claudeActive: true, now: t0)
-        #expect(next.adaptive.interval == 180)
+        #expect(PollingEngine.effectiveInterval(next) == 180)
     }
 }
 
@@ -147,31 +130,46 @@ struct AdvanceSuccessTests {
 @Suite("PollingEngine.advance — failure")
 struct AdvanceFailureTests {
 
-    @Test func rateLimitedEscalatesBackoffAndKeepsSnapshot() {
+    @Test func rateLimitedHoldsAndKeepsSnapshot() {
+        // No Retry-After → the hold falls back to the 180 s base, and the snapshot is preserved.
         let prev = PollState(lastSnapshot: snap(five: 40, seven: 75))
         let next = PollingEngine.advance(
             previous: prev, outcome: .usageError(.rateLimited(retryAfter: nil)),
             claudeActive: true, now: t0)
-        #expect(next.backoff.level == 0)           // first 429 → step 0
+        #expect(next.backoff.isHolding == true)
+        #expect(next.backoff.interval == 180)      // no hint → base hold
         #expect(next.failingSince == t0)
         #expect(next.reason == .serverProblem)
         #expect(next.lastSnapshot == snap(five: 40, seven: 75))  // stale data preserved
     }
 
-    @Test func rateLimitedHonoursRetryAfter() {
+    @Test func rateLimitedHonoursRetryAfterExactly() {
+        // The hold is the honored Retry-After verbatim — no step schedule, no rounding up.
         let next = PollingEngine.advance(
             previous: PollState(), outcome: .usageError(.rateLimited(retryAfter: 700)),
             claudeActive: true, now: t0)
-        #expect(next.backoff.interval == 720)      // jumped to the step >= the hint
+        #expect(next.backoff.interval == 700)
     }
 
-    @Test func offlineDoesNotEscalateBackoff() {
+    @Test func repeatRateLimitDoesNotEscalate() {
+        // Two consecutive 429s with the same hint hold at the same interval — no climbing.
+        let first = PollingEngine.advance(
+            previous: PollState(), outcome: .usageError(.rateLimited(retryAfter: 200)),
+            claudeActive: true, now: t0)
+        let second = PollingEngine.advance(
+            previous: first, outcome: .usageError(.rateLimited(retryAfter: 200)),
+            claudeActive: true, now: t0.addingTimeInterval(200))
+        #expect(first.backoff.interval == 200)
+        #expect(second.backoff.interval == 200)    // still 200, not doubled
+    }
+
+    @Test func offlineDoesNotHold() {
         let prev = PollState(lastSnapshot: snap(five: 40, seven: 75))
         let next = PollingEngine.advance(
             previous: prev,
             outcome: .usageError(.transport(message: "offline", code: .notConnectedToInternet)),
             claudeActive: true, now: t0)
-        #expect(next.backoff.level == nil)         // not a 429 → cadence unchanged
+        #expect(next.backoff.isHolding == false)   // not a 429 → cadence unchanged
         #expect(PollingEngine.effectiveInterval(next) == 180)
         #expect(next.failingSince == t0)
         #expect(next.reason == .network("offline"))
@@ -194,14 +192,13 @@ struct AdvanceFailureTests {
 
     @Test func tokenErrorRecordsFailureWithoutTouchingIntervals() {
         var prev = PollState(lastSnapshot: snap(five: 40, seven: 75))
-        prev.adaptive = AdaptiveCadence().unchanged()  // 360 s
+        prev.backoff = PollingBackoff().honoring(retryAfter: 240)  // a pre-existing hold
         let next = PollingEngine.advance(
             previous: prev, outcome: .tokenError(.itemNotFound),
             claudeActive: true, now: t0)
         #expect(next.reason == .notSignedIn)
         #expect(next.failingSince == t0)
-        #expect(next.backoff.level == nil)             // untouched
-        #expect(next.adaptive.interval == 360)         // untouched
+        #expect(next.backoff.interval == 240)          // hold untouched (network was skipped)
         #expect(next.lastSnapshot == snap(five: 40, seven: 75))
     }
 
@@ -221,27 +218,71 @@ struct AdvanceFailureTests {
 @Suite("PollingEngine.effectiveInterval")
 struct EffectiveIntervalTests {
 
-    @Test func inactiveClaudeForces30m() {
-        var state = PollState(claudeActive: false)
-        state.adaptive = AdaptiveCadence()             // would be 180 s if active
-        #expect(PollingEngine.effectiveInterval(state) == 30 * 60)
+    @Test func inactiveClaudeForces15m() {
+        let state = PollState(claudeActive: false)
+        #expect(PollingEngine.effectiveInterval(state) == 15 * 60)
     }
 
-    @Test func activeUsesAdaptive() {
-        var state = PollState(claudeActive: true)
-        state.adaptive = AdaptiveCadence().unchanged()  // 360 s
-        #expect(PollingEngine.effectiveInterval(state) == 360)
-    }
-
-    @Test func rateLimitOverridesInactiveAndAdaptive() {
-        var state = PollState(claudeActive: false)     // would force 30 min
-        state.backoff = PollingBackoff().escalated().escalated()  // 360 s
-        #expect(PollingEngine.effectiveInterval(state) == 360)    // 429 wins outright
-    }
-
-    @Test func activeChangedIsFloor() {
-        let state = PollState(claudeActive: true)      // fresh adaptive = floor
+    @Test func activeUsesBase() {
+        let state = PollState(claudeActive: true)
         #expect(PollingEngine.effectiveInterval(state) == 180)
+    }
+
+    @Test func rateLimitOverridesInactiveAndBase() {
+        var state = PollState(claudeActive: false)     // would force 15 min
+        state.backoff = PollingBackoff().honoring(retryAfter: 600)
+        #expect(PollingEngine.effectiveInterval(state) == 600)   // 429 hold wins outright
+    }
+
+    @Test func baseIsThreeMinutes() {
+        #expect(PollingEngine.baseInterval == 180)
+        let state = PollState(claudeActive: true)
+        #expect(PollingEngine.effectiveInterval(state) == 180)
+    }
+
+    @Test func shortRetryAfterFlooredToMinInterval() {
+        // A tiny Retry-After (30 s) is still floored at the 60 s safety rail.
+        var state = PollState(claudeActive: true)
+        state.backoff = PollingBackoff().honoring(retryAfter: 30)
+        #expect(PollingEngine.effectiveInterval(state) == PollingEngine.minInterval)
+    }
+}
+
+// MARK: - wakeRearmInterval: redundant-wake suppression (ADR-0032 D6)
+
+@Suite("PollingEngine.wakeRearmInterval")
+struct WakeRearmIntervalTests {
+
+    @Test func staleCachePollsNow() {
+        // interval elapsed since the last success → nil (poll immediately).
+        let last = t0
+        let now = t0.addingTimeInterval(200)   // 200 > 180
+        #expect(PollingEngine.wakeRearmInterval(lastSuccess: last, interval: 180, now: now) == nil)
+    }
+
+    @Test func exactlyIntervalPollsNow() {
+        // remaining == 0 is not > 0 → poll now (boundary).
+        let now = t0.addingTimeInterval(180)
+        #expect(PollingEngine.wakeRearmInterval(lastSuccess: t0, interval: 180, now: now) == nil)
+    }
+
+    @Test func noPriorSuccessPollsNow() {
+        // Cold start / still-failing → a wake must be free to fetch.
+        #expect(PollingEngine.wakeRearmInterval(lastSuccess: nil, interval: 180, now: t0) == nil)
+    }
+
+    @Test func freshCacheReArmsForRemainder() {
+        // 60 s into a 180 s interval → re-arm for the remaining 120 s (no fetch).
+        let now = t0.addingTimeInterval(60)
+        #expect(PollingEngine.wakeRearmInterval(lastSuccess: t0, interval: 180, now: now) == 120)
+    }
+
+    @Test func remainderFlooredToMinInterval() {
+        // 175 s into 180 s → remaining 5 s, but floored at the 60 s safety rail so a burst of wakes
+        // can never tighten the cadence below the floor.
+        let now = t0.addingTimeInterval(175)
+        #expect(PollingEngine.wakeRearmInterval(lastSuccess: t0, interval: 180, now: now)
+            == PollingEngine.minInterval)
     }
 }
 
@@ -251,27 +292,21 @@ struct EffectiveIntervalTests {
 struct MinIntervalFloorTests {
 
     @Test func effectiveIntervalNeverBelowFloor() {
-        // The adaptive floor is 180 s (above the 60 s safety floor), but assert the rail directly:
-        // even a hypothetical sub-floor raw interval is clamped.
-        var state = PollState(claudeActive: true)
-        // Force the adaptive level to the floor (180) — still well above minInterval.
-        state.adaptive = AdaptiveCadence()
+        // The base is 180 s (above the 60 s safety floor); assert the rail directly.
+        let state = PollState(claudeActive: true)
         #expect(PollingEngine.effectiveInterval(state) >= PollingEngine.minInterval)
     }
 
     @Test func everyIntervalCombinationRespectsFloor() {
-        // Exhaustively: across activity × adaptive level × backoff level, the effective interval is
-        // never below the safety floor — the rail that makes ~50 req/s impossible regardless of state.
+        // Exhaustively: across activity × hold interval (including sub-floor Retry-After values), the
+        // effective interval is never below the safety floor — the rail that makes ~50 req/s impossible.
+        let holds: [TimeInterval?] = [nil, 1, 30, 59, 60, 180, 900, 3600]
         for active in [true, false] {
-            for adaptiveSteps in 0...5 {
-                for backoffSteps in 0...5 {
-                    var adaptive = AdaptiveCadence()
-                    for _ in 0..<adaptiveSteps { adaptive = adaptive.unchanged() }
-                    var backoff = PollingBackoff()
-                    for _ in 0..<backoffSteps { backoff = backoff.escalated() }
-                    let state = PollState(backoff: backoff, adaptive: adaptive, claudeActive: active)
-                    #expect(PollingEngine.effectiveInterval(state) >= PollingEngine.minInterval)
-                }
+            for hold in holds {
+                var backoff = PollingBackoff()
+                if let hold { backoff = backoff.honoring(retryAfter: hold) }
+                let state = PollState(backoff: backoff, claudeActive: active)
+                #expect(PollingEngine.effectiveInterval(state) >= PollingEngine.minInterval)
             }
         }
     }
@@ -325,62 +360,44 @@ struct IntervalDecisionTests {
         #expect(PollingEngine.intervalDecision(previous: s, next: s) == nil)
     }
 
-    @Test func contentUnchangedDoubling() {
-        let prev = PollState(claudeActive: true)                 // 180
-        var next = prev
-        next.adaptive = AdaptiveCadence().unchanged()            // 360
-        let d = PollingEngine.intervalDecision(previous: prev, next: next)
-        #expect(d?.from == 180)
-        #expect(d?.to == 360)
-        #expect(d?.cause == .contentUnchanged)
-    }
-
-    @Test func contentChangedReset() {
-        var prev = PollState(claudeActive: true)
-        prev.adaptive = AdaptiveCadence().unchanged().unchanged()  // 720
-        var next = prev
-        next.adaptive = prev.adaptive.changed()                   // 180
-        let d = PollingEngine.intervalDecision(previous: prev, next: next)
-        #expect(d?.cause == .contentChanged)
-        #expect(d?.to == 180)
-    }
-
     @Test func claudeInactiveCause() {
         let prev = PollState(claudeActive: true)                 // 180
-        let next = PollState(claudeActive: false)                // 1800
+        let next = PollState(claudeActive: false)                // 900 (15 min)
         let d = PollingEngine.intervalDecision(previous: prev, next: next)
         #expect(d?.cause == .claudeInactive)
-        #expect(d?.to == 1800)
+        #expect(d?.to == 900)
     }
 
     @Test func claudeResumedCause() {
-        let prev = PollState(claudeActive: false)                // 1800
+        let prev = PollState(claudeActive: false)                // 900
         let next = PollState(claudeActive: true)                 // 180
         let d = PollingEngine.intervalDecision(previous: prev, next: next)
         #expect(d?.cause == .claudeActiveResumed)
+        #expect(d?.to == 180)
     }
 
     @Test func rateLimitedCause() {
         let prev = PollState(claudeActive: true)
         var next = prev
-        next.backoff = PollingBackoff().escalated().escalated()  // 360
+        next.backoff = PollingBackoff().honoring(retryAfter: 600)
         let d = PollingEngine.intervalDecision(previous: prev, next: next)
         #expect(d?.cause == .rateLimited)
+        #expect(d?.to == 600)
     }
 
     @Test func rateLimitClearedCause() {
         var prev = PollState(claudeActive: true)
-        prev.backoff = PollingBackoff().escalated().escalated()  // 360
+        prev.backoff = PollingBackoff().honoring(retryAfter: 600)
         var next = prev
-        next.backoff = prev.backoff.reset()                      // back to adaptive 180
+        next.backoff = prev.backoff.reset()                      // back to base 180
         let d = PollingEngine.intervalDecision(previous: prev, next: next)
         #expect(d?.cause == .rateLimitCleared)
         #expect(d?.to == 180)
     }
 
     @Test func logMessageFormatsWholeMinutes() {
-        let d = IntervalDecision(from: 180, to: 360, cause: .contentUnchanged)
-        #expect(d.logMessage.hasPrefix("interval 3m→6m:"))
+        let d = IntervalDecision(from: 180, to: 900, cause: .claudeInactive)
+        #expect(d.logMessage.hasPrefix("interval 3m→15m:"))
     }
 }
 
@@ -662,7 +679,7 @@ struct AdvanceRefreshGateTests {
             previous: prev, outcome: .usageError(.rateLimited(retryAfter: nil)),
             refresh: .refreshed, claudeActive: true, now: t0)
         #expect(next.refreshGate == RefreshGate())
-        #expect(next.backoff.level == 0)           // the 429 still escalated the backoff
+        #expect(next.backoff.isHolding == true)    // the 429 still entered the hold
     }
 
     @Test func failedRefreshEscalatesGate() {
@@ -709,32 +726,37 @@ struct RunLoopTests {
         return outputs
     }
 
-    @Test func wakeTriggersImmediatePoll() async {
-        // The scheduler interrupts the first wait with `.wake`; the loop must poll again at once.
-        let counter = CountingTransport(inner: .success(five: 10, seven: 20))
+    @Test func staleWakeTriggersImmediatePoll() async {
+        // A `.wake` on a cold start (no prior success) fetches at once — `wakeRearmInterval` returns
+        // nil when `lastSuccess == nil`, so the loop polls immediately rather than re-arming.
+        let counter = CountingTransport(inner: .failing(URLError(.timedOut)))  // never a success
         let scheduler = ManualScheduler(script: [.interrupted(.wake), .elapsed])
         let engine = PollingEngine(
             transport: counter, tokenProvider: StubTokenProvider(), scheduler: scheduler,
             probe: StubProbe(active: true), now: { t0 })
         let outputs = await collect(engine, count: 2)
         #expect(outputs.count == 2)
-        #expect(await counter.count >= 2)          // a second fetch happened off-schedule
+        #expect(await counter.count >= 2)          // no prior success → the wake fetched off-schedule
     }
 
-    @Test func manualRefreshResetsBackoffToBaseInterval() async {
-        // Three consecutive 429s. Without intervention the backoff would climb 180 → 360 → 720.
-        // A `.manualRefresh` between polls 2 and 3 resets it, so poll 3 starts back at level 0 (180).
+    @Test func manualRefreshClearsHoldForImmediatePoll() async {
+        // Two 429s that each carry a long Retry-After (600 s) → the loop holds at 600. A
+        // `.manualRefresh` between polls 2 and 3 clears the hold *before* the immediate poll 3 runs;
+        // poll 3 succeeds (a 200), so its interval is the 180 s base — the manual refresh escaped the
+        // 10-minute hold. (Had poll 3 hit another 429, it would re-enter the hold — that is correct.)
         let transport = SequencedTransport(steps: [
-            StubTransport.http(429), StubTransport.http(429), StubTransport.http(429),
+            StubTransport.http(429, headers: ["Retry-After": "600"]),
+            StubTransport.http(429, headers: ["Retry-After": "600"]),
+            StubTransport.success(five: 10, seven: 20),
         ])
         let scheduler = ManualScheduler(script: [.elapsed, .interrupted(.manualRefresh), .elapsed])
         let engine = PollingEngine(
             transport: transport, tokenProvider: StubTokenProvider(), scheduler: scheduler,
             probe: StubProbe(active: true), now: { t0 })
         let outputs = await collect(engine, count: 3)
-        #expect(outputs[0].interval == 180)   // first 429 → step 0
-        #expect(outputs[1].interval == 360)   // second 429 → step 1 (climbing)
-        #expect(outputs[2].interval == 180)   // manual refresh reset the backoff → back to step 0
+        #expect(outputs[0].interval == 600)   // first 429 → hold at Retry-After
+        #expect(outputs[1].interval == 600)   // second 429 → still 600 (no escalation)
+        #expect(outputs[2].interval == 180)   // manual refresh cleared the hold; the 200 stays at base
     }
 
     @Test func networkRestoredTriggersImmediatePoll() async {
@@ -781,14 +803,14 @@ struct RunLoopTests {
         #expect(await scheduler.parkCount == 1)    // the loop parked exactly once on .sleep
     }
 
-    @Test func inactiveClaudeYieldsThirtyMinInterval() async {
+    @Test func inactiveClaudeYieldsFifteenMinInterval() async {
         let counter = CountingTransport(inner: .success(five: 10, seven: 20))
         let scheduler = ManualScheduler(script: [.elapsed])
         let engine = PollingEngine(
             transport: counter, tokenProvider: StubTokenProvider(), scheduler: scheduler,
             probe: StubProbe(active: false), now: { t0 })
         let outputs = await collect(engine, count: 1)
-        #expect(outputs[0].interval == 30 * 60)    // hard idle override
+        #expect(outputs[0].interval == 15 * 60)    // hard idle override
     }
 }
 

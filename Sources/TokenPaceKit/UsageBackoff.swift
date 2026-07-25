@@ -42,78 +42,60 @@ public enum UsageError: Error, Equatable {
 
 // MARK: - PollingBackoff
 
-/// Pure, value-type state machine for the 429 backoff schedule.
+/// Pure, value-type hold for the 429 rate-limit response.
 ///
-/// SPEC "Частота оновлення": poll every **180 s** by default; on a 429 step the interval
-/// `3 → 6 → 12 → 15 min`, then hold at 15 min until a success; on a 200 reset to 180 s.
+/// SPEC "Частота оновлення" (revised, ADR-0032): poll every **180 s** by default; on a 429 wait
+/// exactly the server's `Retry-After` (or 180 s when it is absent), then **hold** at that one
+/// interval — a repeat 429 just re-sets the same hold, it does **not** escalate. The first 200
+/// clears the hold and returns to the 180 s base.
 ///
-/// This type owns **no timer** and never sleeps — like ``PacingModel``, every transition
-/// is deterministic and side-effect-free. The polling loop (#13) owns the clock: it reads
-/// ``interval`` to schedule the next wake, calls ``escalated()``/``escalated(retryAfter:)``
-/// on a 429, and ``reset()`` on a 200. Splitting the pure schedule out of the timer is the
-/// boundary decision recorded in ADR-0008; it keeps the schedule fully unit-testable
-/// (issue #9 acceptance: "Backoff працює (unit-тест на логіку інтервалів)").
+/// This replaces the earlier escalating `3 → 6 → 12 → 15 min` schedule: the app now trusts the
+/// server's own hint instead of inventing its own back-pressure curve. The type owns **no timer**
+/// and never sleeps — like ``PacingModel``, every transition is deterministic and side-effect-free.
+/// The polling loop (#13) owns the clock: it reads ``interval`` to schedule the next wake, calls
+/// ``honoring(retryAfter:)`` on a 429, and ``reset()`` on a 200. Splitting the pure hold out of the
+/// timer is the boundary decision recorded in ADR-0008; it keeps the logic fully unit-testable.
 public struct PollingBackoff: Sendable, Equatable {
 
-    /// The escalating 429 steps, **in seconds**: 3, 6, 12, 15 min → `[180, 360, 720, 900]`.
-    /// The minutes-to-seconds factor (`* 60`) is load-bearing — storing `[3, 6, 12, 15]`
-    /// would back off by seconds, not minutes. The last value is the ceiling held until a
-    /// success. `stepsAreInSeconds` guards this in the tests.
-    public static let steps: [TimeInterval] = [3 * 60, 6 * 60, 12 * 60, 15 * 60]
-
-    /// The healthy cadence — 180 s (SPEC). Used whenever not backing off.
+    /// The healthy cadence — 180 s (SPEC). Used whenever not holding, and as the fallback hold when a
+    /// 429 arrives without a usable `Retry-After`.
     public static let defaultInterval: TimeInterval = 180
 
-    /// Current escalation level: `nil` means healthy (use ``defaultInterval``); otherwise an
-    /// index into ``steps``, held at `steps.count - 1` once the ceiling is reached.
-    public private(set) var level: Int?
+    /// The interval to hold at while rate-limited: the honored `Retry-After` (or ``defaultInterval``).
+    /// `nil` means healthy — no active hold, use ``defaultInterval``.
+    public private(set) var heldInterval: TimeInterval?
 
-    /// A fresh, healthy backoff (180 s cadence).
+    /// A fresh, healthy backoff (180 s cadence, no hold).
     public init() {
-        self.level = nil
+        self.heldInterval = nil
     }
 
-    /// The interval the caller should wait before the next poll: ``defaultInterval`` when
-    /// healthy, otherwise `steps[level]` (clamped to the ceiling).
+    /// Whether a 429 hold is currently active (the engine's top interval priority).
+    public var isHolding: Bool { heldInterval != nil }
+
+    /// The interval the caller should wait before the next poll: the active hold when rate-limited,
+    /// otherwise ``defaultInterval``.
     public var interval: TimeInterval {
-        guard let level else { return Self.defaultInterval }
-        return Self.steps[min(level, Self.steps.count - 1)]
+        heldInterval ?? Self.defaultInterval
     }
 
-    /// Advance one escalation step after a 429. First 429 → step 0 (3 min); subsequent 429s
-    /// climb 6 → 12 → 15 min, then stay at 15 min (idempotent at the ceiling). Returns a copy.
-    public func escalated() -> PollingBackoff {
+    /// Enter (or refresh) the 429 hold, honoring the server's `Retry-After` seconds. A `nil` or
+    /// non-positive hint falls back to ``defaultInterval`` (180 s). A repeat 429 simply re-sets the
+    /// hold to the latest hint — there is **no** escalation across consecutive 429s. Returns a copy.
+    public func honoring(retryAfter: TimeInterval?) -> PollingBackoff {
         var copy = self
-        switch level {
-        case nil:
-            copy.level = 0
-        case let current?:
-            copy.level = min(current + 1, Self.steps.count - 1)
+        if let retryAfter, retryAfter > 0 {
+            copy.heldInterval = retryAfter
+        } else {
+            copy.heldInterval = Self.defaultInterval
         }
         return copy
     }
 
-    /// Advance one step after a 429, honoring a server `Retry-After` hint. The resulting
-    /// ``interval`` is the larger of the scheduled step and `retryAfter` — a hint longer
-    /// than our schedule wins, a shorter (or absent) one is ignored in favor of the step.
-    ///
-    /// The hint is applied by skipping ahead to the first scheduled step that meets or
-    /// exceeds it (so the state stays a plain `level` and ``reset()`` still works); if no
-    /// step is long enough, the ceiling is used.
-    public func escalated(retryAfter: TimeInterval?) -> PollingBackoff {
-        let stepped = escalated()
-        guard let retryAfter, retryAfter > stepped.interval else { return stepped }
-        var copy = self
-        // Jump to the first step whose interval is >= the server hint, else the ceiling.
-        let target = Self.steps.firstIndex(where: { $0 >= retryAfter }) ?? (Self.steps.count - 1)
-        copy.level = max(stepped.level ?? 0, target)
-        return copy
-    }
-
-    /// Reset to the healthy 180 s cadence after a successful 200. Returns a copy.
+    /// Reset to the healthy 180 s cadence after a successful 200 (clears any hold). Returns a copy.
     public func reset() -> PollingBackoff {
         var copy = self
-        copy.level = nil
+        copy.heldInterval = nil
         return copy
     }
 }

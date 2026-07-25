@@ -6,17 +6,19 @@ import Foundation
 /// transition (`NWPathMonitor`). The shell owns the platform observers and feeds these to the
 /// scheduler; the engine stays free of AppKit/Network so it is unit-tested with a stub scheduler.
 public enum PollSignal: Sendable, Equatable {
-    /// The system is about to sleep → pause polling (no fetch while asleep).
+    /// The system is about to sleep, or (opt-in) the screen locked / turned off / a screensaver
+    /// started → pause polling (no fetch while parked). See `ScreenLockObserver` for the screen path.
     case sleep
-    /// The system just woke → poll immediately (data may be stale; AC #1).
+    /// The system woke, or the screen came back → resume. Polls immediately **only if the cache has
+    /// gone stale** (≥ interval since the last success); a wake while the data is still fresh just
+    /// re-arms the wait, so a blinking screen can't hammer the API (ADR-0032 D6, `wakeRearmInterval`).
     case wake
-    /// Connectivity returned after a drop → poll immediately so the bars refresh within seconds
-    /// instead of waiting out the cadence (AC #2 "auto-recovery").
+    /// Connectivity returned after a drop → same conditional re-poll as `.wake` (fetch now only if the
+    /// cache is stale). On a cold start / still-failing state there is no fresh cache, so it fetches.
     case networkRestored
-    /// The user asked for an immediate refresh (Troubleshoot window button) → poll now **and** reset
-    /// any active 429 backoff to the base interval. Unlike `.wake`/`.networkRestored`, this clears the
-    /// backoff: it is a deliberate user action, so honour it even mid-rate-limit (they accept the risk
-    /// of another 429).
+    /// The user asked for an immediate refresh (Troubleshoot window button) → poll now **and** clear
+    /// any active 429 hold. Unlike `.wake`/`.networkRestored`, this always fetches (no staleness
+    /// check) and clears the hold: a deliberate user action, honoured even mid-rate-limit.
     case manualRefresh
 }
 
@@ -64,8 +66,8 @@ public struct KeychainTokenProvider: TokenProviding {
     }
 }
 
-/// Whether a Claude **Code** session is running on this Mac — the gate for the 30-min idle override
-/// (no active session → poll rarely; a session → adaptive 3–15 min). A seam because process
+/// Whether a Claude **Code** session is running on this Mac — the gate for the 15-min idle override
+/// (no active session → poll every 15 min; a session → the 3-min base). A seam because process
 /// enumeration is a platform side-effect; production is `ProcessClaudeActivityProbe` in the shell,
 /// tests inject a `StubProbe` returning a fixed `Bool`.
 public protocol ClaudeActivityProbe: Sendable {
@@ -111,13 +113,11 @@ public enum PollOutcome: Sendable, Equatable {
 }
 
 /// The engine's accumulated state between polls — the pure value the loop threads through
-/// ``PollingEngine/advance(previous:outcome:refresh:claudeActive:now:)``. Holds both interval dimensions
-/// (``PollingBackoff`` for 429, ``AdaptiveCadence`` for content), the latest activity reading, and
-/// the inputs ``UsageHealth`` needs (`lastSuccess`/`failingSince`/`reason`) plus the stale-safe
-/// `lastSnapshot`.
+/// ``PollingEngine/advance(previous:outcome:refresh:claudeActive:now:)``. Holds the 429 hold
+/// (``PollingBackoff``), the latest activity reading, and the inputs ``UsageHealth`` needs
+/// (`lastSuccess`/`failingSince`/`reason`) plus the stale-safe `lastSnapshot`.
 public struct PollState: Sendable, Equatable {
     public var backoff: PollingBackoff
-    public var adaptive: AdaptiveCadence
     public var claudeActive: Bool
     public var lastSuccess: Date?
     public var failingSince: Date?
@@ -127,11 +127,10 @@ public struct PollState: Sendable, Equatable {
     /// `claude` CLI for an escalating cooldown after each failed attempt.
     public var refreshGate: RefreshGate
 
-    /// Cold start: healthy backoff, fastest adaptive cadence, no data yet. `claudeActive` defaults
-    /// to `true` so the very first interval is the responsive adaptive one until the first probe.
+    /// Cold start: healthy backoff (no hold), no data yet. `claudeActive` defaults to `true` so the
+    /// very first interval is the responsive 3-min base until the first probe.
     public init(
         backoff: PollingBackoff = PollingBackoff(),
-        adaptive: AdaptiveCadence = AdaptiveCadence(),
         claudeActive: Bool = true,
         lastSuccess: Date? = nil,
         failingSince: Date? = nil,
@@ -140,7 +139,6 @@ public struct PollState: Sendable, Equatable {
         refreshGate: RefreshGate = RefreshGate()
     ) {
         self.backoff = backoff
-        self.adaptive = adaptive
         self.claudeActive = claudeActive
         self.lastSuccess = lastSuccess
         self.failingSince = failingSince
@@ -163,17 +161,13 @@ public struct PollState: Sendable, Equatable {
 /// the same "only on change" discipline as `StatusItemView.layout`, ADR-0009).
 public struct IntervalDecision: Sendable, Equatable {
     public enum Cause: Sendable, Equatable {
-        /// No Claude Code session running → the 30-min idle override took effect.
+        /// No Claude Code session running → the 15-min idle override took effect.
         case claudeInactive
-        /// A Claude Code session reappeared → back to the adaptive cadence.
+        /// A Claude Code session reappeared → back to the 3-min base.
         case claudeActiveResumed
-        /// The snapshot moved → adaptive snapped to the 3-min floor.
-        case contentChanged
-        /// Two adjacent snapshots matched → adaptive doubled the interval.
-        case contentUnchanged
-        /// HTTP 429 → the server backoff took over (overrides adaptive/idle).
+        /// HTTP 429 → the server hold took over (overrides the idle/base).
         case rateLimited
-        /// A 200 cleared an active 429 backoff → back to adaptive/idle.
+        /// A 200 cleared an active 429 hold → back to the idle/base.
         case rateLimitCleared
     }
 
@@ -201,11 +195,9 @@ public struct IntervalDecision: Sendable, Equatable {
     private static func phrase(_ cause: Cause) -> String {
         switch cause {
         case .claudeInactive:      return "no Claude Code session — idle override"
-        case .claudeActiveResumed: return "Claude Code session active — resuming adaptive cadence"
-        case .contentChanged:      return "usage changed — tracking closely"
-        case .contentUnchanged:    return "usage unchanged — backing off"
-        case .rateLimited:         return "rate-limited (HTTP 429) — server backoff"
-        case .rateLimitCleared:    return "rate-limit cleared — resuming adaptive cadence"
+        case .claudeActiveResumed: return "Claude Code session active — resuming base cadence"
+        case .rateLimited:         return "rate-limited (HTTP 429) — honoring Retry-After"
+        case .rateLimitCleared:    return "rate-limit cleared — resuming base cadence"
         }
     }
 }
@@ -222,17 +214,28 @@ public struct IntervalDecision: Sendable, Equatable {
 /// `ClaudeActivityProbe`, a `now` clock). The shell (`AppDelegate`) supplies the live seams and consumes the output stream
 /// on `@MainActor`. The engine itself is **not** `@MainActor`, so tests never need the main actor.
 ///
-/// ## Interval model — two independent dimensions plus an override
-/// ``effectiveInterval(_:)`` combines them with a fixed priority:
-/// 1. **429 backoff** (``PollingBackoff``) — if escalating, it wins outright (server told us to slow
-///    down; honour it above any optimisation).
-/// 2. **Claude-inactive 30-min override** — no session → poll rarely, regardless of adaptive state.
-/// 3. **Adaptive cadence** (``AdaptiveCadence``) — otherwise, 3–15 min by whether the data is moving.
+/// ## Interval model — a fixed 3-min base with two overrides (ADR-0032)
+/// ``effectiveInterval(_:)`` picks the wait with this priority (higher wins), floored at
+/// ``minInterval``:
+/// 1. **429 Retry-After hold** (``PollingBackoff``) — if holding, wait exactly the honored interval
+///    (server told us to slow down; honour it above everything). No escalation across 429s.
+/// 2. **Claude-inactive 15-min override** — no session → poll rarely.
+/// 3. **Base** — otherwise a flat ``baseInterval`` (180 s).
+///
+/// The **reset-triggered immediate poll** is *not* an interval rule here — it is owned by the shell's
+/// optimistic-reset timer (#36), which fires exactly on `resets_at`, overlays a zero-usage bar, and
+/// forces a `.manualRefresh`. Keeping it there (rather than duplicating a reset-cap in this interval
+/// math) is the single-source-of-truth choice recorded in ADR-0032.
 public struct PollingEngine: Sendable {
 
-    /// The interval used when no Claude Code session is running — a hard override above the adaptive
-    /// cadence. 30 min (user decision).
-    public static let inactiveInterval: TimeInterval = 30 * 60
+    /// The healthy base cadence — 180 s (SPEC "Частота оновлення"). The floor every override narrows
+    /// from, and the value the loop returns to after a 429 clears.
+    public static let baseInterval: TimeInterval = 180
+
+    /// The interval used when no Claude Code session is running — a hard override. 15 min (user
+    /// decision, ADR-0032; halved from the earlier 30 min so an idle-but-present user still sees data
+    /// refresh within a quarter hour).
+    public static let inactiveInterval: TimeInterval = 15 * 60
 
     /// The **hard floor** on the gap between any two polls — a safety rail independent of the
     /// scheduler. Even if a scheduler returned instantly (a bug we shipped once: a broken signal
@@ -272,15 +275,14 @@ public struct PollingEngine: Sendable {
     /// Fold one poll outcome into the next state. No clock, no I/O — `now` is injected. The single
     /// source of the engine's behaviour, exhaustively table-tested.
     ///
-    /// - `success`: reset the 429 backoff, mark `lastSuccess = now`, clear the failure; compare the
-    ///   new snapshot's 5h/7d utilisation against the previous one to step the adaptive cadence
-    ///   (changed → floor, unchanged → double); keep the snapshot as the new `lastSnapshot`.
-    /// - `usageError(.rateLimited)`: escalate the 429 backoff (honouring `Retry-After`); leave the
-    ///   adaptive cadence untouched; begin/continue the failure run; **keep** `lastSnapshot` (stale).
-    /// - other `usageError`: same as above but **do not** escalate the backoff (offline/timeout/5xx
-    ///   are not a 429 — staying at the current cadence lets recovery happen promptly).
+    /// - `success`: clear the 429 hold, mark `lastSuccess = now`, clear the failure; keep the snapshot
+    ///   as the new `lastSnapshot` (also the reset-cap's source of the nearest `resets_at`).
+    /// - `usageError(.rateLimited)`: enter/refresh the 429 hold honouring `Retry-After` (no
+    ///   escalation across 429s); begin/continue the failure run; **keep** `lastSnapshot` (stale).
+    /// - other `usageError`: same as above but **do not** hold (offline/timeout/5xx are not a 429 —
+    ///   staying at the base cadence lets recovery happen promptly).
     /// - `tokenError`: the loop skipped the network entirely; record the failure, touch neither
-    ///   interval dimension, keep the snapshot.
+    ///   the hold nor the snapshot.
     ///
     /// `refresh` is the delegated-refresh attempt made during this poll (`nil` → none, ADR-0017):
     /// an attempt that actually fixed the token (`.refreshed` and the outcome is no longer an
@@ -305,9 +307,6 @@ public struct PollingEngine: Sendable {
         switch outcome {
         case let .success(snapshot):
             next.backoff = previous.backoff.reset()
-            next.adaptive = changed(previous.lastSnapshot, snapshot)
-                ? previous.adaptive.changed()
-                : previous.adaptive.unchanged()
             next.lastSuccess = now
             next.failingSince = nil
             next.reason = nil
@@ -315,9 +314,8 @@ public struct PollingEngine: Sendable {
 
         case let .usageError(error):
             if case let .rateLimited(retryAfter) = error {
-                next.backoff = previous.backoff.escalated(retryAfter: retryAfter)
+                next.backoff = previous.backoff.honoring(retryAfter: retryAfter)
             }
-            // adaptive cadence is content-driven; a failed poll observes no new content → unchanged.
             recordFailure(into: &next, previous: previous, reason: FailureReason(error), now: now)
 
         case let .tokenError(error):
@@ -340,31 +338,37 @@ public struct PollingEngine: Sendable {
         next.reason = reason
     }
 
-    /// Whether the 5h/7d utilisation moved between two successful snapshots (the user's definition of
-    /// "change"). The first success (no previous snapshot) counts as a change, so the cadence starts
-    /// at the responsive floor rather than immediately doubling.
-    static func changed(_ previous: UsageSnapshot?, _ current: UsageSnapshot) -> Bool {
-        guard let previous else { return true }
-        return previous.fiveHour.utilization != current.fiveHour.utilization
-            || previous.sevenDay.utilization != current.sevenDay.utilization
-    }
-
-    /// The interval to wait before the next poll, combining the two dimensions with the priority:
-    /// 429 backoff > Claude-inactive 30-min override > adaptive cadence. Never returns below
-    /// ``minInterval`` — the first of two rails that make a tight request loop impossible.
+    /// The interval to wait before the next poll, with the priority 429 hold > idle > base (see the
+    /// type doc). Never returns below ``minInterval`` — the first of two rails that make a tight
+    /// request loop impossible.
     public static func effectiveInterval(_ state: PollState) -> TimeInterval {
         max(minInterval, rawInterval(state))
     }
 
-    /// The interval before the ``minInterval`` floor is applied — the pure dimension combination.
+    /// The interval before the ``minInterval`` floor is applied — the pure priority combination.
     private static func rawInterval(_ state: PollState) -> TimeInterval {
-        if state.backoff.level != nil {           // an active 429 backoff overrides everything
+        if state.backoff.isHolding {              // an active 429 hold overrides everything
             return state.backoff.interval
         }
-        if !state.claudeActive {                  // no Claude Code session → hard 30-min override
+        if !state.claudeActive {                  // no Claude Code session → hard 15-min override
             return inactiveInterval
         }
-        return state.adaptive.interval            // otherwise: content-driven 3–15 min
+        return baseInterval                       // otherwise the flat 3-min base
+    }
+
+    /// The wait to re-arm after a redundant `.wake` / `.networkRestored`, or `nil` when the loop
+    /// should poll immediately (ADR-0032 D6). Returns `nil` — poll now — when the cache is already
+    /// stale (`interval` or more since the last success) **or** there is no prior success yet (cold
+    /// start / still-failing: a wake must be free to fetch). Otherwise returns the remaining time
+    /// until the cache would be stale, floored at ``minInterval`` so a burst of wakes can never
+    /// tighten the cadence below the safety rail. Pure — `now` is injected.
+    static func wakeRearmInterval(
+        lastSuccess: Date?, interval: TimeInterval, now: Date
+    ) -> TimeInterval? {
+        guard let lastSuccess else { return nil }        // no success yet → let the wake fetch
+        let remaining = interval - now.timeIntervalSince(lastSuccess)
+        guard remaining > 0 else { return nil }          // cache already stale → poll now
+        return max(minInterval, remaining)
     }
 
     /// Why the effective interval changed from `previous` to `next`, or `nil` if it did not move.
@@ -376,19 +380,14 @@ public struct PollingEngine: Sendable {
         return IntervalDecision(from: from, to: to, cause: cause(previous: previous, next: next))
     }
 
-    /// Attribute an interval change to the dimension that drove it, checked in priority order so the
-    /// reported cause matches which dimension actually owns the new interval.
+    /// Attribute an interval change to the rule that drove it, checked in priority order so the
+    /// reported cause matches which rule actually owns the new interval.
     private static func cause(previous: PollState, next: PollState) -> IntervalDecision.Cause {
-        let wasRateLimited = previous.backoff.level != nil
-        let isRateLimited = next.backoff.level != nil
-        if isRateLimited { return .rateLimited }
-        if wasRateLimited { return .rateLimitCleared }       // 429 just cleared on a 200
+        if next.backoff.isHolding { return .rateLimited }
+        if previous.backoff.isHolding { return .rateLimitCleared }   // 429 just cleared on a 200
 
-        if previous.claudeActive != next.claudeActive {
-            return next.claudeActive ? .claudeActiveResumed : .claudeInactive
-        }
-        // Same activity, no 429 churn → the adaptive cadence moved.
-        return next.adaptive.level <= previous.adaptive.level ? .contentChanged : .contentUnchanged
+        // The only remaining interval mover is the Claude-active/idle flip.
+        return next.claudeActive ? .claudeActiveResumed : .claudeInactive
     }
 
     // MARK: Session-idle transition (for logging)
@@ -446,17 +445,35 @@ public struct PollingEngine: Sendable {
                         snapshot: state.lastSnapshot, health: state.health, interval: interval,
                         diagnostics: result.diagnostics))
 
-                    let reason = await scheduler.waitForNextPoll(interval: interval)
-                    if case .interrupted(.sleep) = reason {
-                        await scheduler.waitWhileAsleep()   // park: no fetch while asleep
+                    // Wait for the next poll, but suppress a **redundant** wake: a `.wake` /
+                    // `.networkRestored` that arrives while the cached data is still fresh (last
+                    // success < interval ago) does not fetch — it re-arms the wait for the remaining
+                    // interval (ADR-0032 D6). This stops a screen that blinks on/off, or a flaky
+                    // network, from hammering the API when the data on screen is already current.
+                    // `.manualRefresh` (deliberate user action) and `.sleep`/`.elapsed` fetch as before.
+                    var wait = interval
+                    waitLoop: while true {
+                        switch await scheduler.waitForNextPoll(interval: wait) {
+                        case .interrupted(.sleep):
+                            await scheduler.waitWhileAsleep()   // park: no fetch while asleep
+                            break waitLoop                      // resume with an immediate poll
+                        case .interrupted(.manualRefresh):
+                            // A user-requested refresh clears any active 429 hold, so the immediate
+                            // poll below runs at the base interval rather than deep in a Retry-After hold.
+                            state.backoff = state.backoff.reset()
+                            break waitLoop
+                        case .interrupted(.wake), .interrupted(.networkRestored):
+                            // Fetch now only if the cache is already stale; otherwise re-arm for the
+                            // time left until it would be. Pure decision in `wakeRearmInterval`.
+                            guard let remaining = Self.wakeRearmInterval(
+                                lastSuccess: state.lastSuccess, interval: interval, now: now())
+                            else { break waitLoop }              // stale (or no prior success) → poll now
+                            wait = remaining
+                            // loop: wait out the remainder; the next signal re-enters this switch.
+                        case .elapsed:
+                            break waitLoop                      // the (possibly re-armed) wait passed
+                        }
                     }
-                    if case .interrupted(.manualRefresh) = reason {
-                        // A user-requested refresh clears any active 429 backoff, so the immediate
-                        // poll below runs at the base interval rather than deep in a 15-min hold.
-                        state.backoff = state.backoff.reset()
-                    }
-                    // .elapsed → scheduled poll; .interrupted(.wake/.networkRestored/.manualRefresh) →
-                    // immediate poll (manualRefresh also cleared the backoff, just above).
                 }
                 continuation.finish()
             }

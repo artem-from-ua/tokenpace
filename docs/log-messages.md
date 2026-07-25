@@ -144,6 +144,7 @@ token itself never is.
 | 424 | `lifecycle` | `.notice` | `calm-colors: menu-bar set <bool>` | user toggled the "Calm MenuBar Widget colors" checkbox (#105) |
 | 434 | `lifecycle` | `.notice` | `reset-countdown: menu-bar mode set <mode>` | user picked a "Reset countdown" radio (#103); `<mode>` is the raw `ResetCountdownMode` |
 | 442 | `lifecycle` | `.notice` | `service-status-dot: menu-bar set <bool>` | user toggled the "Show service status dot on issues" checkbox (#31) |
+| — | `lifecycle` | `.notice` | `screen-lock-pause: setting set <bool>` | user toggled the "Pause polling while the screen is locked" checkbox (#114, ADR-0032) |
 | 439 | `lifecycle` | `.notice` | `update: automatic checks set <bool>` | user toggled the "Check for updates daily" checkbox (#37) |
 | — | `lifecycle` | `.notice` | `archive: enabled set <bool>` | user toggled the "Archive session logs to a folder" checkbox (#110) |
 | — | `lifecycle` | `.notice` | `archive: destination chosen` | user picked an archive folder via `NSOpenPanel` (#110); the path itself is not logged |
@@ -175,7 +176,9 @@ their bodies live in `nonisolated` helpers.
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
 | 46 | `lifecycle` | `.notice` | `system will sleep, pausing polling` | `NSWorkspace.willSleepNotification` fired |
-| 52 | `lifecycle` | `.notice` | `system did wake, polling immediately` | `NSWorkspace.didWakeNotification` fired |
+| 52 | `lifecycle` | `.notice` | `system did wake, polling immediately` | `NSWorkspace.didWakeNotification` fired (the loop still re-polls only if the cache is stale — ADR-0032 D6) |
+| 133 | `lifecycle` | `.notice` | `screen-lock-pause: <reason>, pausing polling` | `ScreenLockObserver` — screen locked / screensaver started / display asleep, with `pausePollingWhenScreenLocked` on (#114). `<reason>` ∈ {`screen locked`, `screensaver started`, `display asleep`} |
+| 140 | `lifecycle` | `.notice` | `screen-lock-pause: <reason>, polling immediately` | `ScreenLockObserver` — screen unlocked / screensaver stopped / display awake (resume; the loop re-polls only if the cache is stale). `<reason>` ∈ {`screen unlocked`, `screensaver stopped`, `display awake`} |
 | 85 | `lifecycle` | `.notice` | `network monitor started (satisfied=<bool>)` | first `NWPathMonitor` callback (initial reading) |
 | 87 | `lifecycle` | `.notice` | `network restored, polling immediately` | transition to `.satisfied` |
 | 90 | `lifecycle` | `.notice` | `network lost, showing stale data` | transition to `.unsatisfied` |
@@ -258,16 +261,14 @@ One log line per interval change. The format is built by
 | 511 | `keychain` | `.notice` | `token expired, len=<count>` | `pollOnce` — the read credentials are expired (`isExpired` true); moved here from `TokenProvider` with the expiry decision (ADR-0020) |
 
 `<from>`/`<to>` render as whole minutes (`3m`) or fall back to seconds (`90s`).
-`<phrase>` is one of six, keyed by `IntervalDecision.Cause` (lines 180–189):
+`<phrase>` is one of four, keyed by `IntervalDecision.Cause` (ADR-0032):
 
 | `Cause` | Full example message | When |
 |---------|----------------------|------|
-| `.claudeInactive` | `interval 3m→6m: no Claude Code session — idle override` | no running Claude Code session → idle override |
-| `.claudeActiveResumed` | `interval 6m→3m: Claude Code session active — resuming adaptive cadence` | a Claude Code session reappeared → adaptive cadence |
-| `.contentChanged` | `interval 6m→3m: usage changed — tracking closely` | snapshot moved → adaptive snapped to the 3-min floor |
-| `.contentUnchanged` | `interval 3m→6m: usage unchanged — backing off` | two adjacent snapshots matched → adaptive doubled the interval |
-| `.rateLimited` | `interval 3m→8m: rate-limited (HTTP 429) — server backoff` | HTTP 429 → server backoff overrides adaptive/idle |
-| `.rateLimitCleared` | `interval 8m→3m: rate-limit cleared — resuming adaptive cadence` | a 200 cleared an active 429 backoff |
+| `.claudeInactive` | `interval 3m→15m: no Claude Code session — idle override` | no running Claude Code session → 15-min idle override |
+| `.claudeActiveResumed` | `interval 15m→3m: Claude Code session active — resuming base cadence` | a Claude Code session reappeared → 3-min base |
+| `.rateLimited` | `interval 3m→10m: rate-limited (HTTP 429) — honoring Retry-After` | HTTP 429 → hold at the server's Retry-After (overrides idle/base) |
+| `.rateLimitCleared` | `interval 10m→3m: rate-limit cleared — resuming base cadence` | a 200 cleared an active 429 hold |
 
 ## Counts
 

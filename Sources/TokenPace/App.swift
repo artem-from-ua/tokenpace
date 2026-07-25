@@ -56,6 +56,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let signals = SignalHub()
     /// System sleep/wake observers, feeding `.sleep`/`.wake` into `signals`.
     private var sleepWake: WorkspaceSleepWake?
+    /// Screen lock / screensaver / display-sleep observers, feeding `.sleep`/`.wake` into `signals`
+    /// when `PersistedConfig.pausePollingWhenScreenLocked` is on (#114).
+    private var screenLock: ScreenLockObserver?
     /// Connectivity monitor, feeding `.networkRestored` into `signals`.
     private let network = NetworkMonitor()
     /// The running poll loop's consumer task — cancelled on terminate.
@@ -290,6 +293,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // menu-bar layout from the last poll (render reads PersistedConfig for the toggle).
                 self?.reRenderForCurrentTime()
             }
+            wc.onPausePollingChange = { [weak self] on in
+                // Turning the pause OFF must un-stick a loop already parked by a screen lock: send a
+                // `.wake` so it resumes immediately. Turning it ON changes nothing now — the next lock
+                // will park it (the observer reads the pref live). No render impact either way.
+                if !on { self?.signals.send(.wake) }
+            }
             wc.onArchiveNow = { [weak self] in self?.performArchiveSync(userInitiated: true) }
             wc.archiveSummaryProvider = { [weak self] in self?.lastArchiveSummary }
             settingsWC = wc
@@ -323,6 +332,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Optimistic reset (#36)
+
+    /// React to a park/resume signal (`.sleep`/`.wake`) from either the system sleep/wake observer or
+    /// the screen-lock observer (#114): `Timer` scheduling is unreliable across sleep, so we invalidate
+    /// the optimistic-reset timer on park and recompute its delay from the current `Date()` on resume —
+    /// if a reset passed while parked, `rescheduleResetTimer`'s `delay <= 0` guard fires it immediately.
+    /// Other signals (`.networkRestored`, `.manualRefresh`) do not touch the reset timer.
+    private func handleParkSignal(_ signal: PollSignal) {
+        switch signal {
+        case .sleep:
+            resetTimer?.invalidate()
+            resetTimer = nil
+        case .wake:
+            rescheduleResetTimer(from: lastOutput?.snapshot, now: Date())
+        default:
+            break
+        }
+    }
 
     /// (Re)arm the one-shot `resetTimer` for the nearest **future** window reset in `snapshot`. Any
     /// pending timer is invalidated first, so this is safe to call on every poll and on wake. When the
@@ -477,6 +503,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ageTimer?.invalidate()
         resetTimer?.invalidate()
         sleepWake?.stop()
+        screenLock?.stop()
         network.stop()
     }
 
@@ -491,17 +518,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sleepWake = WorkspaceSleepWake { [signals, weak self] signal in
             signals.send(signal)
             // Observers fire on the main queue (see WorkspaceSleepWake), so we are on the main actor.
-            MainActor.assumeIsolated {
-                switch signal {
-                case .sleep:
-                    self?.resetTimer?.invalidate()
-                    self?.resetTimer = nil
-                case .wake:
-                    self?.rescheduleResetTimer(from: self?.lastOutput?.snapshot, now: Date())
-                default:
-                    break
-                }
-            }
+            MainActor.assumeIsolated { self?.handleParkSignal(signal) }
+        }
+        // Screen lock / screensaver / display-sleep park the loop the same way, gated by the
+        // pause-on-screen-lock preference (#114). It emits the same `.sleep`/`.wake`, so it also drives
+        // the optimistic-reset timer through the shared handler.
+        screenLock = ScreenLockObserver { [signals, weak self] signal in
+            signals.send(signal)
+            MainActor.assumeIsolated { self?.handleParkSignal(signal) }
         }
         network.start { [signals] in signals.send(.networkRestored) }
 
