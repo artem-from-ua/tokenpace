@@ -27,9 +27,16 @@ enum PersistedConfig {
         static let monitoredServices = "monitoredServices"
         /// Whether the periodic update check runs (#37). Default-on (opt-out) — see the property.
         static let automaticUpdateChecks = "automaticUpdateChecks"
-        /// Whether a found update is downloaded and installed automatically (#122). Default-off
-        /// (opt-in), and only meaningful while `automaticUpdateChecks` is on — see the property.
+        /// Whether a found update is downloaded and installed automatically (#122). Default-**on**
+        /// (opt-out) since #130 — the silent background update is the least-noisy channel; only
+        /// meaningful while `automaticUpdateChecks` is on — see the property.
         static let installUpdatesAutomatically = "installUpdatesAutomatically"
+        /// The tag of a successful auto-update whose "what's new" the user has not opened yet (#130),
+        /// set just before the post-install relaunch — see the property.
+        static let pendingWhatsNewVersion = "pendingWhatsNewVersion"
+        /// The tag whose automatic install failed (#130) — gates a retry of exactly that tag; a newer
+        /// tag is still attempted. See the property.
+        static let lastFailedInstallVersion = "lastFailedInstallVersion"
         /// Instant of the last update-check **attempt** (#37), gating the 12 h cadence.
         static let lastUpdateCheck = "lastUpdateCheck"
         /// The latest release tag last surfaced to the user (#37), so the same version is not
@@ -92,16 +99,38 @@ enum PersistedConfig {
         set { defaults.set(newValue, forKey: Key.automaticUpdateChecks) }
     }
 
-    /// Whether a found update is **downloaded and installed automatically** (#122, ADR-0033).
-    /// **Default-off** (opt-in): an absent key reads as `false`, so out of the box a new release is
-    /// only *signalled* (banner / menu item / "Download"), never installed without the user asking.
-    /// `object(forKey:) as? Bool ?? false` distinguishes "unset" from an explicit choice, consistent
-    /// with the other opt-in toggles. Only meaningful while ``automaticUpdateChecks`` is on (the
-    /// installer rides the same found-update path); the Settings checkbox is nested under it. The full
-    /// flow additionally requires a real `.app` in `/Applications` — see `UpdateInstallPlan`.
+    /// Whether a found update is **downloaded and installed automatically** (#122, ADR-0033/0034).
+    /// **Default-on** (opt-out) since #130: an absent key reads as `true`, because a silent background
+    /// update that just relaunches is the *least*-noisy channel now that the banner is gone — the goal
+    /// is to interrupt as little as possible until the App Store build. `object(forKey:) as? Bool ??
+    /// true` distinguishes "unset" (→ true) from an explicit `false` the user chose — `bool(forKey:)`
+    /// would collapse both to `false` and defeat the opt-out. Only meaningful while
+    /// ``automaticUpdateChecks`` is on (the installer rides the same found-update path); the Settings
+    /// checkbox is nested under it. The full flow additionally requires a real `.app` in
+    /// `/Applications` — see `UpdateInstallPlan` — so a dev build's checkbox is disabled regardless.
     static var installUpdatesAutomatically: Bool {
-        get { defaults.object(forKey: Key.installUpdatesAutomatically) as? Bool ?? false }
+        get { defaults.object(forKey: Key.installUpdatesAutomatically) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.installUpdatesAutomatically) }
+    }
+
+    /// The tag of a **successful** auto-update whose "what's new" the user has not yet opened (#130),
+    /// or `nil`. Set just before the post-install relaunch (`AppDelegate.startInstall`), so it survives
+    /// the restart and drives the blue `whatsNew` menu item (`UpdateMenuState`). Cleared when the user
+    /// opens the item (which links to the releases page) or when a release newer than the installed
+    /// build appears (that supersedes it — see `handleUpdateFound`).
+    static var pendingWhatsNewVersion: String? {
+        get { defaults.string(forKey: Key.pendingWhatsNewVersion) }
+        set { defaults.set(newValue, forKey: Key.pendingWhatsNewVersion) }
+    }
+
+    /// The tag whose automatic install **failed** and must not be retried (#130), or `nil`. Set when
+    /// an install attempt returns a failure outcome (`AppDelegate.startInstall`); it gates a retry of
+    /// exactly that tag (the red `updateFailed` menu item), while a *newer* tag is still attempted —
+    /// `UpdateMenuState` only matches this against the current latest. A one-off retry is available by
+    /// clearing it manually; a normal newer release clears the gate implicitly by not matching.
+    static var lastFailedInstallVersion: String? {
+        get { defaults.string(forKey: Key.lastFailedInstallVersion) }
+        set { defaults.set(newValue, forKey: Key.lastFailedInstallVersion) }
     }
 
     /// Instant of the last update-check **attempt** (success or graceful failure), or `nil` if none

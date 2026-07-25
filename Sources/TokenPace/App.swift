@@ -85,15 +85,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: update check (#37)
 
-    /// The "New version available" menu item (blue-dot indicator), sitting just above Quit behind its
-    /// own separator. Hidden until a check finds a newer release; `isHidden` is flipped in
-    /// `handleUpdateFound` / `performUpdateCheck` via `setUpdateItemVisible`.
+    /// The single update menu item (#130), sitting just above Quit behind its own separator. Hidden
+    /// unless `UpdateMenuState` says otherwise; its colour/label/visibility are set by
+    /// `refreshUpdateMenuItem`.
     private var updateAvailableItem: NSMenuItem?
     /// The separator above ``updateAvailableItem``, hidden/shown in lockstep with it so an absent
     /// update leaves no dangling rule above Quit.
     private var updateSeparatorItem: NSMenuItem?
-    /// The newest release found so far, or `nil` if none/up-to-date. Drives the menu click target and
-    /// the Configure… "Update available" line.
+    /// The update item state last applied by `refreshUpdateMenuItem` (#130), read by `openReleasesPage`
+    /// to know whether opening it should clear the pending "what's new".
+    private var currentUpdateItem: UpdateMenuState.Item = .hidden
+    /// Whether the last auto-install verdict was a `defer…` (battery / metered / low disk) — drives the
+    /// blue "Update pending" item (#130). Set in `evaluateAutoInstall`, read by `refreshUpdateMenuItem`.
+    private var installDeferred = false
+    /// The newest release found so far, or `nil` if none/up-to-date. Drives the update menu item state
+    /// and the Settings "Update available" line.
     private var lastKnownRelease: GitHubRelease?
     /// The in-flight update fetch, if any — cancelled before a new check and on terminate.
     private var updateTask: Task<Void, Never>?
@@ -134,6 +140,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// run against the real network. One source of truth read from the environment, so the Quit
     /// item's dev-build tag and `startPolling`'s transport wiring agree on which mode is live.
     private static let stubName = ProcessInfo.processInfo.environment["TOKENPACE_STUB"]
+
+    /// A forced update menu-item state from `TOKENPACE_UPDATE_STATE` (#130), or `nil` for the real,
+    /// version-derived state. Lets a maintainer verify each of the four dropdown states on a dev build
+    /// without a real newer release or a failed install — `failed` (red), `available` (blue, auto off),
+    /// `pending` (blue, deferred), `whatsnew` (blue, post-update). Never set in normal use.
+    private static let forcedUpdateItem: UpdateMenuState.Item? = {
+        switch ProcessInfo.processInfo.environment["TOKENPACE_UPDATE_STATE"] {
+        case "failed":    return .updateFailed
+        case "available": return .updateAvailable
+        case "pending":   return .updatePending
+        case "whatsnew":  return .whatsNew
+        default:          return nil
+        }
+    }()
 
     static func main() {
         let app = NSApplication.shared
@@ -213,17 +233,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.troubleshootItem = troubleshootItem
 
         // "New version available" (#37): sits just above Quit, behind its own separator, with a blue
-        // dot to draw the eye (same tinted `circle.fill` attachment the popup uses for service dots).
-        // Both the separator and the item are hidden until a check finds a newer release, so an absent
-        // update leaves no dangling rule; click opens the releases page. Visibility is flipped by
-        // `setUpdateItemVisible` from `handleUpdateFound` / `performUpdateCheck`.
+        // The single update item (#130): one dropdown line carrying every non-critical update signal,
+        // sitting just above Quit behind its own separator, with a status-coloured dot (same tinted
+        // `circle.fill` attachment the popup uses for service dots). Both the separator and the item
+        // start hidden and are driven entirely by `refreshUpdateMenuItem` (colour, label, visibility);
+        // click always opens the releases page.
         let updateSeparator = NSMenuItem.separator()
         updateSeparator.isHidden = true
         menu.addItem(updateSeparator)
         self.updateSeparatorItem = updateSeparator
 
         let updateItem = NSMenuItem(title: "", action: #selector(openReleasesPage), keyEquivalent: "")
-        updateItem.attributedTitle = Self.updateItemTitle()
         updateItem.target = self
         updateItem.isHidden = true
         menu.addItem(updateItem)
@@ -256,12 +276,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // log the outcome, never crash on an unsigned build.
         registerLaunchAtLoginIfNeeded()
 
-        // Update check (#37): install the notification delegate before any banner can arrive, and —
-        // when automatic checks are on — request notification authorization once. Both no-op outside
-        // a real `.app` bundle.
-        UpdateNotifier.installDelegate()
+        // Update check (#37): there are no system notifications (#130 removed the banner) — the sole
+        // signal is the single dropdown item (`refreshUpdateMenuItem`). Surface a "what's new" left
+        // pending by a prior auto-update relaunch right away, then check for a newer release.
+        refreshUpdateMenuItem()
         if PersistedConfig.automaticUpdateChecks {
-            UpdateNotifier.requestAuthorizationIfNeeded()
             // Always check once on launch, bypassing the 12 h cadence: a build the user just
             // installed/relaunched should surface a pending update immediately, not up to half a day
             // later. The cadence still governs re-checks during a long-running session
@@ -695,11 +714,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let release {
                 self.handleUpdateFound(release)
             } else {
-                // Up to date (or a graceful failure). Clear any stale surfaced state so a manual
-                // check reflects "you're current"; the menu item + its separator hide again.
+                // Up to date (or a graceful failure). Clear the stale "newer release" state and the
+                // defer flag, then recompute the item: it does **not** simply hide — a successful
+                // auto-update leaves a pending "what's new" that surfaces precisely when the installed
+                // build is the newest (`UpdateMenuState`).
                 self.lastKnownRelease = nil
-                self.setUpdateItemVisible(false)
+                self.installDeferred = false
                 self.settingsWC?.updateAvailability(nil)
+                self.refreshUpdateMenuItem()
             }
         }
     }
@@ -783,28 +805,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
-    /// Surface a newly-found newer release: retain it (drives the menu click + Configure line), reveal
-    /// the blue-dot menu item, update the Configure… window if open, and post the macOS banner —
-    /// **once per version** (guarded on `lastSeenLatestVersion`) so the same un-upgraded release does
-    /// not re-notify every day. The menu item / Configure line stay shown regardless.
+    /// Surface a newly-found newer release: retain it (drives the menu click + Settings line), update
+    /// the Settings window if open, then let the update menu item (`refreshUpdateMenuItem`) and the
+    /// auto-installer (`evaluateAutoInstall`) react. There are **no** macOS notifications (#130 removed
+    /// the banner) — the single dropdown item is the sole signal.
     ///
-    /// When auto-install is enabled and applicable, this is also where the installer would kick in
-    /// (#122, ADR-0033). Phase 1 only *logs* the `UpdateInstallPlan` verdict — no download or
-    /// replacement happens yet; the signal path (banner / menu item / Download) is unchanged.
+    /// A newer release also clears any stale `pendingWhatsNewVersion`: once a version past the
+    /// installed build exists, "what's new" is superseded (the menu shows "New version available"
+    /// instead — the pre-emption `UpdateMenuState` encodes).
     private func handleUpdateFound(_ release: GitHubRelease) {
         lastKnownRelease = release
-        setUpdateItemVisible(true)
         settingsWC?.updateAvailability(release)
+
+        // A newer release supersedes an unseen "what's new" from an earlier auto-update.
+        if PersistedConfig.pendingWhatsNewVersion != nil,
+           UpdateComparison.isNewer(tag: release.tagName, than: TokenPaceKit.version) {
+            PersistedConfig.pendingWhatsNewVersion = nil
+            AppLogger.lifecycle.notice("update: cleared pending what's new (superseded by newer release)")
+        }
 
         let firstTimeSeen = PersistedConfig.lastSeenLatestVersion != release.tagName
         PersistedConfig.lastSeenLatestVersion = release.tagName
         AppLogger.lifecycle.notice(
             "update: new version available tag=\(release.tagName, privacy: .public) firstSeen=\(firstTimeSeen, privacy: .public)")
-        if firstTimeSeen {
-            UpdateNotifier.post(release: release)
-        }
 
         evaluateAutoInstall(for: release)
+        refreshUpdateMenuItem()
     }
 
     /// Decide whether to auto-install this release and, on a `.install` verdict, run the installer
@@ -837,6 +863,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             freeDiskBytes: freeBytes,
             onACPower: forced ? true : PowerSource.isOnACPower,
             networkIsMetered: forced ? false : network.isMetered)
+        // A `defer…` verdict drives the blue "Update pending" menu item (#130); every other verdict
+        // clears that flag. Set it before `refreshUpdateMenuItem` (called by the caller) reads it.
+        switch decision {
+        case .deferInsufficientSpace, .deferOnBattery, .deferMeteredNetwork:
+            installDeferred = true
+        default:
+            installDeferred = false
+        }
+
         switch decision {
         case let .install(asset, targetVersion):
             AppLogger.lifecycle.notice(
@@ -864,62 +899,139 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Run the installer for an `.install` verdict — a dry run under `TOKENPACE_UPDATE_DRYRUN`
     /// (download/verify/unzip, no replace), otherwise the real install (atomic replace + relaunch).
-    /// Any failure logs and falls back to the manual Download link (already shown by `updateAvailability`
-    /// from `handleUpdateFound`). Dispatched on `installTask` (cancelled before a new one / on
-    /// terminate); because `AppDelegate` is `@MainActor`, the continuation after `await` is safe.
+    /// Any failure logs and falls back to the single dropdown item (`refreshUpdateMenuItem`).
+    /// Dispatched on `installTask` (cancelled before a new one / on terminate); because `AppDelegate`
+    /// is `@MainActor`, the continuation after `await` is safe.
+    ///
+    /// **"What's new" is marked pending *before* the install runs** (#130): a real install ends by
+    /// relaunching + terminating *inside* `install()`, so there is no code path after
+    /// `.installedRelaunching` in which to persist it — it must already be on disk when the new build
+    /// starts and shows the blue `whatsNew` item. On a failure the marker is cleared again (nothing was
+    /// installed) and `lastFailedInstallVersion` is set so this exact tag is not retried — a newer tag
+    /// still is. A dry run touches neither marker (nothing was really installed).
     private func startInstall(asset: GitHubReleaseAsset, tag: String) {
         installTask?.cancel()
+        let dryRun = ProcessInfo.processInfo.environment["TOKENPACE_UPDATE_DRYRUN"] == "1"
+        // Persist the pending "what's new" up front so it survives the imminent relaunch. Skip for a
+        // dry run (no real install / relaunch happens).
+        if !dryRun {
+            PersistedConfig.pendingWhatsNewVersion = tag
+            AppLogger.lifecycle.notice("update-install: what's new pending set tag=\(tag, privacy: .public)")
+        }
         let installer = UpdateInstaller(ghAuthEnabled: ghAuthEnabled)
         installTask = Task { [weak self] in
             let outcome = await installer.install(asset, expectedTag: tag)
-            guard self != nil, !Task.isCancelled else { return }
+            guard let self, !Task.isCancelled else { return }
             switch outcome {
             case let .installedRelaunching(tag):
-                // The installer requests the relaunch + terminate itself; just note it.
+                // The installer requests the relaunch + terminate itself; just note it. The pending
+                // "what's new" was already persisted above and will drive the post-restart menu item.
                 AppLogger.lifecycle.notice("update-install: installed \(tag, privacy: .public), app will relaunch")
             case let .dryRunVerified(bundlePath):
                 AppLogger.lifecycle.notice(
                     "update-install: dry-run complete, verified bundle at \(bundlePath, privacy: .public)")
             case .notApplicable, .downloadFailed, .verifyFailed, .unzipFailed, .replaceFailed:
+                // Nothing was installed — undo the speculative "what's new", and (except for the inert
+                // `notApplicable` dev-build case) mark this tag failed so it is not retried.
+                PersistedConfig.pendingWhatsNewVersion = nil
+                if outcome != .notApplicable {
+                    PersistedConfig.lastFailedInstallVersion = tag
+                    AppLogger.lifecycle.notice(
+                        "update-install: last failed install version set tag=\(tag, privacy: .public)")
+                }
                 AppLogger.lifecycle.error(
-                    "update-install: did not complete (\(String(describing: outcome), privacy: .public)) — manual Download remains")
+                    "update-install: did not complete (\(String(describing: outcome), privacy: .public)) — signal item remains")
+                self.refreshUpdateMenuItem()
             }
         }
     }
 
-    /// Show or hide the "New version available" item together with its separator, so the two never
-    /// drift out of sync (an absent update must leave no dangling rule).
-    private func setUpdateItemVisible(_ visible: Bool) {
-        updateSeparatorItem?.isHidden = !visible
-        updateAvailableItem?.isHidden = !visible
+    /// Recompute the single update menu item (#130) from the current version/flags and apply it: a
+    /// `.hidden` state hides the item **and** its separator (no dangling rule); any `shown` state
+    /// reveals them with the matching dot colour + label. This is the one place the item's visibility
+    /// is decided — called after every update check (both branches), after an install verdict/failure,
+    /// after the auto-install toggle changes, and at launch (so a "what's new" left pending by a prior
+    /// relaunch surfaces immediately).
+    ///
+    /// The pure `UpdateMenuState.evaluate` picks the winner; the colour + wording live here (the view
+    /// side, per ADR-0009/0013), reusing the popup's `dotColor` so the update dot matches the
+    /// service-status dots exactly.
+    private func refreshUpdateMenuItem() {
+        // `TOKENPACE_UPDATE_STATE=failed|available|pending|whatsnew` forces the item to a given state
+        // for live verification (#130), without writing anything to the real UserDefaults — a
+        // maintainer aid like `TOKENPACE_STUB`/`TOKENPACE_FAKE_LATEST`, never set in normal use.
+        let item = Self.forcedUpdateItem
+            ?? UpdateMenuState.evaluate(
+                installedVersion: TokenPaceKit.version,
+                latestKnownVersion: lastKnownRelease?.tagName,
+                autoInstallEnabled: PersistedConfig.installUpdatesAutomatically,
+                installDeferred: installDeferred,
+                lastFailedInstallVersion: PersistedConfig.lastFailedInstallVersion,
+                pendingWhatsNewVersion: PersistedConfig.pendingWhatsNewVersion)
+        currentUpdateItem = item
+
+        if item == .hidden {
+            updateSeparatorItem?.isHidden = true
+            updateAvailableItem?.isHidden = true
+            return
+        }
+        updateSeparatorItem?.isHidden = false
+        updateAvailableItem?.isHidden = false
+        updateAvailableItem?.attributedTitle = Self.updateItemTitle(for: item)
+        AppLogger.lifecycle.notice("update: menu item = \(String(describing: item), privacy: .public)")
     }
 
-    /// Open the releases page from the "New version available" menu item — the specific release if one
-    /// is known, else the releases index (#37).
+    /// Open the releases page from the update menu item (#130) — the click target is **always** the
+    /// releases index (there is no in-app release-notes render). If the item was the `whatsNew` state,
+    /// opening it acknowledges the update: clear `pendingWhatsNewVersion` and recompute the item so it
+    /// disappears.
     @objc private func openReleasesPage() {
-        let url = lastKnownRelease.flatMap { URL(string: $0.htmlURL) } ?? GitHubReleaseClient.releasesPageURL
-        AppLogger.lifecycle.notice("update: user opened releases page")
-        NSWorkspace.shared.open(url)
+        AppLogger.lifecycle.notice("update: user opened releases page (item=\(String(describing: self.currentUpdateItem), privacy: .public))")
+        NSWorkspace.shared.open(GitHubReleaseClient.releasesPageURL)
+        if currentUpdateItem == .whatsNew {
+            PersistedConfig.pendingWhatsNewVersion = nil
+            AppLogger.lifecycle.notice("update: cleared pending what's new (user opened it)")
+            refreshUpdateMenuItem()
+        }
     }
 
-    /// The "New version available" menu item's title: a blue `circle.fill` dot (same tinted-symbol
-    /// attachment technique as the popup's service-status rows) followed by the label at
-    /// `dropdownTextSize`, so it matches the other native items' typography.
-    private static func updateItemTitle() -> NSAttributedString {
+    /// The update menu item's title for `item` (#130): a `circle.fill` dot tinted to the item's
+    /// severity (reusing `PopupViewController.dotColor` so it matches the popup's service dots) followed
+    /// by the label at `dropdownTextSize`, so it reads like the other native items. The dot is nudged
+    /// up to sit on the text's optical centre (`Self.dotAttachment`), same as the popup rows.
+    private static func updateItemTitle(for item: UpdateMenuState.Item) -> NSAttributedString {
         let attributed = NSMutableAttributedString()
-        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
-            .applying(.init(paletteColors: [.systemBlue]))
-        if let dot = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "update available")?
-            .withSymbolConfiguration(config) {
-            let attachment = NSTextAttachment()
-            attachment.image = dot
+        if let attachment = PopupViewController.dotAttachment(
+            color: dotColor(for: item), accessibility: "update") {
             attributed.append(NSAttributedString(attachment: attachment))
             attributed.append(NSAttributedString(string: "  "))
         }
         attributed.append(NSAttributedString(
-            string: "New version available",
+            string: label(for: item),
             attributes: [.font: NSFont.systemFont(ofSize: dropdownTextSize)]))
         return attributed
+    }
+
+    /// The dropdown label for each visible update state (#130). `hidden` never renders a title, so it
+    /// falls back to an empty string.
+    private static func label(for item: UpdateMenuState.Item) -> String {
+        switch item {
+        case .hidden:          return ""
+        case .updateFailed:    return "New version available (update failed)…"
+        case .updateAvailable: return "New version available…"
+        case .updatePending:   return "Update pending…"
+        case .whatsNew:        return "What's new in the version…"
+        }
+    }
+
+    /// The dot colour for each update state (#130), taken from the popup's service-status palette so
+    /// the update dot uses the **same** colours as the status dots (issue #130): red for a failed
+    /// install, blue for every other signal. `hidden` is never drawn; it maps to blue harmlessly.
+    private static func dotColor(for item: UpdateMenuState.Item) -> NSColor {
+        switch item {
+        case .updateFailed: return PopupViewController.dotColor(.majorOutage)     // red
+        default:            return PopupViewController.dotColor(.underMaintenance) // blue
+        }
     }
 
     /// Re-render the retained last poll against the current time — grows the "Last update" age and

@@ -1,9 +1,16 @@
 ---
 status: accepted
 date: 2026-07-24
+superseded_by: [0036]
 ---
 
 # ADR-0025: Перевірка оновлень — подвійний fetch-шлях, системний банер, launch-time чек
+
+> **Частково superseded [ADR-0036](0036-update-signals-single-dropdown-item.md).** Банерна частина
+> (Рішення §3, `UpdateNotifier`, `UNUserNotificationCenter`) **видалена** — жодних системних
+> нотифікацій; сигнал зведено в один пункт дропдауна (0036). Fetch-шлях (§1), `SemanticVersion` (§2),
+> cadence-маркер (§4) і launch-time чек (§5) лишаються чинними. Запис нижче — незмінний історичний
+> контекст; читати про сигнальний UX слід у 0036.
 
 ## Контекст
 
