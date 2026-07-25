@@ -66,6 +66,11 @@ swift run          # запуск
   `calm5-orange7` (5h calm + 7d orange distant — єдиний кейс, де чекбокс «Include distant 7d limit
   reset» дає видиму різницю). Додаючи нову фічу зі своїм станом — **додай стуб і онови цей перелік**
   (як зробили для #103).
+- **Пауза опитування на екрані (#114)** не має окремого стубу — перевіряється будь-яким стубом +
+  реальним блокуванням екрана. Запусти dev-білд, заблокуй екран (⌃⌘Q), розблокуй, і перевір логи:
+  `log show --last 3m --predicate 'process == "TokenPace" AND eventMessage CONTAINS "screen-lock-pause"'`
+  → мають бути `screen locked, pausing polling` і `screen unlocked, polling immediately`, і **жодного**
+  `interval`/usage-логу між ними. Чекбокс — Settings → General → «Pause polling while the screen is locked».
 - **Скриншоти з тимчасового dev-only коду НЕ рахуються за верифікацію.** Синтетичний рендер
   `StatusItemView`/PNG-матриці доводить лише логіку малювання, а не те, що фіча працює в живому
   віджеті, вікні Settings і потоці даних. Не заявляй «працює»/`готово` на їх основі.
