@@ -1,0 +1,34 @@
+{
+  "model": "sonnet",
+  "scope": {
+    "include": ["README.md", "CLAUDE.md", "docs/", "*.md"],
+    "exclude": [
+      "node_modules/",
+      ".git/",
+      "vendor/",
+      "dist/",
+      "build/",
+      ".claude/worktrees/",
+      ".claude/"
+    ]
+  },
+  "checks": {
+    "brokenLinks": true,
+    "orphanDocs": true,
+    "duplicateContent": true,
+    "claudemdOverflow": true,
+    "mandatoryDocs": true,
+    "readmeCompliance": true,
+    "terminologyConsistency": true,
+    "adrCompleteness": true,
+    "contentActuality": true
+  },
+  "output": {
+    "githubIssues": true,
+    "reportFile": true
+  },
+  "github": {
+    "labels": ["documentation", "kb-grooming"],
+    "assignee": ""
+  }
+}

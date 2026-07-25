@@ -113,7 +113,7 @@ menu-bar-пункт): користувач попросив **системний
 
 ## Пов'язані
 
-- [ADR-0008](0008-usage-client-testable-http.md) — `UsageTransport` seam, перевикористаний HTTP-шляхом.
+- [ADR-0008](0008-usageclient-pure-backoff-and-transport-seam.md) — `UsageTransport` seam, перевикористаний HTTP-шляхом.
 - [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — чисте ядро / тонкий shell.
 - [ADR-0013](0013-claude-status-line.md) — «їзда на heartbeat» і cadence-seam (`StatusCadence`), за
   зразком якого зроблено `UpdateCheckCadence`.
