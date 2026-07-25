@@ -93,10 +93,11 @@ git config core.hooksPath .githooks
 Сімейство `TOKENPACE_*` перемикає застосунок у режими ручної верифікації. **Ніколи не встановлювати
 в нормальному запуску** — усі вони лише для діагностики / скріншотів / прогонки UI-флоу.
 
-- **`TOKENPACE_STUB`** = `1` / `screenshot` / `error` — підміняє живий `URLSession` канованим
+- **`TOKENPACE_STUB`** = `1` / `screenshot` / `error` / … — підміняє живий `URLSession` канованим
   транспортом (`StubUsageTransport`), тож застосунок ганяється end-to-end без usage/status API й без
   Keychain (`1` — зростаюча утилізація; `screenshot` — застиглий кадр для README; `error` — 401 +
-  деградовані сервіси).
+  деградовані сервіси). Повний перелік усіх стубів (idle, pacing-фрейми, calm-both тощо) — у
+  [ui-verification.md](ui-verification.md).
 - **`TOKENPACE_GH_AUTH`** (прапорець присутності, будь-яке непорожнє значення) — вмикає `gh`-шлях
   update-чеку (`GHReleaseFetcher`): `gh api …/releases/latest` як subprocess, `gh` бере токен із
   keyring. Для мейнтейнерів, поки репо приватне; без змінної — анонімний HTTPS (ADR-0025).

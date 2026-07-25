@@ -61,12 +61,17 @@ public enum MenuBarMode: Sendable, Equatable {
     /// Full widget: 5h bar, 7d bar, and an optional reset countdown.
     ///
     /// - Parameters:
-    ///   - fiveHour: The 5-hour bar (drawn on top).
-    ///   - sevenDay: The 7-day bar (drawn below).
+    ///   - fiveHour: The 5-hour bar (drawn on top, or alone and vertically centred when `sevenDay`
+    ///     is `nil`).
+    ///   - sevenDay: The 7-day bar (drawn below), or `nil` when it is **hidden** because it is calm
+    ///     and the user opted into the quieter single-bar look (`hideCalmSevenDay`, #94). The view
+    ///     then draws only the 5h bar, vertically centred. `nil` never means "no data" — an absent
+    ///     7-day window is impossible here (both windows always resolve); it means "deliberately not
+    ///     drawn". Independent of `resetToShow`: hiding the bar does not change which reset is shown.
     ///   - resetToShow: The countdown to draw and which window drives it, or `nil` to draw no
     ///     countdown. Computed by `MenuBarLayout.selectReset` from the 5h×7d severity table and the
     ///     user's `ResetCountdownMode` (#103, ADR-0029) — the view just draws what it is given.
-    case expanded(fiveHour: BarView, sevenDay: BarView, resetToShow: ResetToShow?)
+    case expanded(fiveHour: BarView, sevenDay: BarView?, resetToShow: ResetToShow?)
     /// Error state: a ⚠️ glyph, optionally with the last known bars beside it.
     ///
     /// All associated values are `nil` together (⚠️ only) or all non-`nil` together (⚠️ + bars) —
@@ -162,11 +167,22 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///   - snapshot: A decoded usage poll (`UsageClient`/#9).
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
     ///   - resetMode: How to pick/hide the reset countdown (#103, ADR-0029). Default `.showDistant7d`.
+    ///   - hideCalmSevenDay: When `true`, the 7-day bar is dropped (`sevenDay == nil`) whenever it is
+    ///     **calm** (`BarView.isCalm` — green on-pace/behind or mild-ahead yellow), leaving the 5h bar
+    ///     as the single, vertically-centred bar (#94, opt-out `PersistedConfig.hideCalmSevenDayBar`).
+    ///     An orange/red 7-day bar is always kept. Default `false` (both bars) so existing callers and
+    ///     tests are unaffected. This only elides the *bar*; `selectReset` still runs on the true
+    ///     severities, so the reset countdown is unchanged (a hidden calm 7-day never drove it anyway).
+    ///     In the session-idle state a calm 7-day is likewise dropped, leaving only the idle 5h bar.
     public static func make(
-        from snapshot: UsageSnapshot, now: Date, resetMode: ResetCountdownMode = .showDistant7d
+        from snapshot: UsageSnapshot, now: Date, resetMode: ResetCountdownMode = .showDistant7d,
+        hideCalmSevenDay: Bool = false
     ) -> MenuBarLayout {
         let seven = bar(for: snapshot.sevenDay, window: .sevenDay, now: now)
         let sevenResetsAt = ResetClock.parse(snapshot.sevenDay.resetsAt)
+        // Elide the 7-day bar when it is calm and the user opted in (#94). `selectReset` below still
+        // sees the real `seven.severity`, so the reset-countdown logic is untouched.
+        let sevenToShow: BarView? = (hideCalmSevenDay && seven.isCalm) ? nil : seven
 
         if snapshot.sessionIdle {
             // No active 5h window: an inert, knobless placeholder bar (the idle draw path ignores its
@@ -179,7 +195,8 @@ public struct MenuBarLayout: Sendable, Equatable {
                 fiveSeverity: .calm, fiveResetsAt: nil,
                 sevenSeverity: seven.severity, sevenResetsAt: sevenResetsAt,
                 now: now, mode: resetMode)
-            return MenuBarLayout(mode: .expanded(fiveHour: five, sevenDay: seven, resetToShow: resetToShow))
+            return MenuBarLayout(mode: .expanded(
+                fiveHour: five, sevenDay: sevenToShow, resetToShow: resetToShow))
         }
 
         let five = bar(for: snapshot.fiveHour, window: .fiveHour, now: now)
@@ -190,7 +207,8 @@ public struct MenuBarLayout: Sendable, Equatable {
             fiveSeverity: five.severity, fiveResetsAt: fiveResetsAt,
             sevenSeverity: seven.severity, sevenResetsAt: sevenResetsAt,
             now: now, mode: resetMode)
-        return MenuBarLayout(mode: .expanded(fiveHour: five, sevenDay: seven, resetToShow: resetToShow))
+        return MenuBarLayout(mode: .expanded(
+            fiveHour: five, sevenDay: sevenToShow, resetToShow: resetToShow))
     }
 
     // MARK: make (health-aware, issue #12)
@@ -216,34 +234,41 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///   - serviceProblem: The worst non-operational Claude service state (issue #31), or `nil` when
     ///     all services are operational / unknown-cold. Threaded onto the result so the view can draw
     ///     the trailing dot; it does not affect the usage `mode`.
+    ///   - hideCalmSevenDay: Elide the calm 7-day bar on the **healthy/stale** path (#94) — see the
+    ///     plain ``make(from:now:resetMode:hideCalmSevenDay:)``. The error state (⚠️ + stale bars)
+    ///     ignores it: the 7-day bar is diagnostic there and always kept.
     public static func make(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
-        serviceProblem: ServiceStatus? = nil, resetMode: ResetCountdownMode = .showDistant7d
+        serviceProblem: ServiceStatus? = nil, resetMode: ResetCountdownMode = .showDistant7d,
+        hideCalmSevenDay: Bool = false
     ) -> MenuBarLayout {
-        usageMode(from: snapshot, health: health, now: now, resetMode: resetMode)
+        usageMode(from: snapshot, health: health, now: now,
+                  resetMode: resetMode, hideCalmSevenDay: hideCalmSevenDay)
             .withServiceProblem(serviceProblem)
     }
 
     /// The usage-driven `mode` only (no service dot) — the existing #12 decision tree, factored out
     /// so ``make(from:health:now:serviceProblem:resetMode:)`` can graft the service dot onto its result.
     private static func usageMode(
-        from snapshot: UsageSnapshot?, health: UsageHealth, now: Date, resetMode: ResetCountdownMode
+        from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
+        resetMode: ResetCountdownMode, hideCalmSevenDay: Bool
     ) -> MenuBarLayout {
         // Healthy, or stale within the grace window: show the (possibly stale) bars unchanged.
         // A healthy state with no snapshot only happens at the very first tick before the first
         // poll resolves; with no data to draw, fall back to the bare ⚠️ error glyph.
         guard let age = health.failureAge(now: now) else {
-            return snapshot.map { make(from: $0, now: now, resetMode: resetMode) }
+            return snapshot.map { make(from: $0, now: now, resetMode: resetMode, hideCalmSevenDay: hideCalmSevenDay) }
                 ?? MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
         }
         if let snapshot, age <= UsageHealth.glyphAfter {
-            return make(from: snapshot, now: now, resetMode: resetMode)
+            return make(from: snapshot, now: now, resetMode: resetMode, hideCalmSevenDay: hideCalmSevenDay)
         }
 
         // Failing past the glyph threshold. Keep the bars only in the 30–60 min stale window and
         // only if we have a snapshot; otherwise the glyph stands alone. The countdown here is
         // **diagnostic** ("data is stale, last reset was …"), so it always shows the nearest reset,
-        // independent of `resetMode`'s selection table (ADR-0029).
+        // independent of `resetMode`'s selection table (ADR-0029). The 7-day bar is diagnostic too —
+        // rebuild with `hideCalmSevenDay: false` so a calm 7-day is never elided in the error state.
         let keepBars = snapshot != nil && age <= UsageHealth.hideBarsAfter
         guard keepBars, let snapshot,
               case let .expanded(five, seven, _) = make(from: snapshot, now: now, resetMode: resetMode).mode else {
