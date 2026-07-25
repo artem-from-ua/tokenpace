@@ -39,9 +39,10 @@ Claude Code з macOS Keychain. **Токен ніколи не покидає Mac
 
 ## Документація
 
-- [docs/building.md](docs/building.md) — збірка з джерел (для контриб'юторів).
+- [docs/README.md](docs/README.md) — **карта всієї документації** (почни звідси).
 - [SPEC.md](SPEC.md) — продуктовий спек (проблема, архітектура, UI, фази, монетизація).
 - [docs/architecture.md](docs/architecture.md) — архітектура та потік даних.
+- [docs/building.md](docs/building.md) — збірка з джерел (для контриб'юторів).
 - [docs/conventions.md](docs/conventions.md) — конвенції розробки.
 - [docs/adr/](docs/adr/) — записи архітектурних рішень.
 

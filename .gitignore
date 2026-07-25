@@ -20,4 +20,18 @@ Package.resolved
 
 # Secrets — never commit OAuth tokens or credentials
 *.credentials.json
+.credentials.json
 secrets/
+.env
+*.env
+.env.*
+
+# Signing material — never commit certs or private keys
+*.p12
+*.cer
+*.pem
+*.p8
+*.certSigningRequest
+*.mobileprovision
+*.keychain
+*.keychain-db
