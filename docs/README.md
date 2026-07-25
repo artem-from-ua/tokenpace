@@ -20,6 +20,8 @@
 - [releasing.md](releasing.md) — зібрати, нотаризувати й опублікувати реліз; стиль release notes.
 - [ui-verification.md](ui-verification.md) — жива перевірка menu-bar / Settings змін перед PR:
   перелік стубів (`TOKENPACE_STUB=…`), сценарії без стубу, фічі, що потребують підпису.
+- [guides/agent-workflow.md](guides/agent-workflow.md) — операційні правила для AI-агента:
+  worktrees, гілки/PR, запуск для перевірки UI, зупинка застосунку та логи, GitHub Project.
 
 ## Довідник (що це)
 
