@@ -57,9 +57,15 @@ final class StatusItemView: NSView {
         static let hPadding: CGFloat = 2
         /// Gap between the bars block and the reset-time label.
         static let labelGap: CGFloat = 5
-        /// Diameter of the time-indicator dot (slightly taller than the bar so it stands proud).
-        static let tickDiameter: CGFloat = 7
-        /// Width of the dark ring around the time-indicator dot.
+        /// Width of the time-indicator marker — a slim vertical bar (#…), narrower than the diameter
+        /// of the old dot so it reads as a crisp position tick rather than a blob.
+        static let tickWidth: CGFloat = 3
+        /// Height of the time-indicator marker — taller than the bar so it stands proud above and
+        /// below the pacing zone.
+        static let tickHeight: CGFloat = 9
+        /// Corner radius of the time-indicator marker (lightly rounded, matching the bar corners).
+        static let tickCorner: CGFloat = 1.5
+        /// Width of the dark ring around the time-indicator marker.
         static let tickStroke: CGFloat = 1
         /// Corner radius of each bar.
         static let barCorner: CGFloat = 1.5
@@ -344,18 +350,22 @@ final class StatusItemView: NSView {
 
         NSGraphicsContext.restoreGraphicsState()
 
-        // Time-indicator dot at timeFraction (drawn on top, unclipped so it stands proud).
+        // Time-indicator marker at timeFraction (drawn on top, unclipped so it stands proud).
+        // A slim, lightly-rounded vertical bar rather than a dot — reads as a crisp position tick.
         // Colour tracks the pacing relationship: green when behind, red when ahead, teal on a tie.
-        // A dark stroke rings the dot so it separates cleanly when it sits over a coloured zone.
+        // A dark stroke rings the marker so it separates cleanly when it sits over a coloured zone.
         let cx = rect.minX + CGFloat(l.timeFraction) * w
         let cy = rect.midY
-        let d = Metrics.tickDiameter
-        let dot = NSBezierPath(ovalIn: NSRect(x: cx - d / 2, y: cy - d / 2, width: d, height: d))
+        let mw = Metrics.tickWidth
+        let mh = Metrics.tickHeight
+        let markerRect = NSRect(x: cx - mw / 2, y: cy - mh / 2, width: mw, height: mh)
+        let marker = NSBezierPath(
+            roundedRect: markerRect, xRadius: Metrics.tickCorner, yRadius: Metrics.tickCorner)
         indicatorColor(l).setFill()
-        dot.fill()
+        marker.fill()
         Palette.indicatorStroke.setStroke()
-        dot.lineWidth = Metrics.tickStroke
-        dot.stroke()
+        marker.lineWidth = Metrics.tickStroke
+        marker.stroke()
     }
 
     /// Colour of the time-indicator dot from the usage-vs-time relationship:

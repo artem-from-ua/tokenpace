@@ -49,20 +49,25 @@ final class PopupBarView: NSView {
         /// Height of the pacing bar itself (the coloured zones + indicator dot).
         static let barHeight: CGFloat = 6
         static let corner: CGFloat = 2
-        /// Diameter of the time-indicator dot — 2× the bar height so it reads clearly as the primary
-        /// time marker over the pacing zones.
-        static let indicatorDiameter: CGFloat = 12
+        /// Width of the time-indicator marker — a slim vertical bar, narrower than the old dot so it
+        /// reads as a crisp position tick rather than a blob.
+        static let indicatorWidth: CGFloat = 5
+        /// Height of the time-indicator marker — taller than the bar (≈2×) so it reads clearly as the
+        /// primary time marker, standing proud above and below the pacing zones.
+        static let indicatorHeight: CGFloat = 14
+        /// Corner radius of the time-indicator marker (lightly rounded, matching the bar corners).
+        static let indicatorCorner: CGFloat = 2
         static let indicatorStroke: CGFloat = 1
         // Tick ruler, drawn *below* the bar like an axis (issue #38, "under-bar ruler" style).
         static let tickLength: CGFloat = 3
         static let tickGap: CGFloat = 2
         static let tickWidth: CGFloat = 1
-        /// Total view height: tall enough for the bar + under-bar tick ruler **and** for the dot,
-        /// which is centred on the bar and so overhangs it by `indicatorDiameter/2 − barHeight/2`
-        /// on top; without that headroom a larger dot would be clipped by the view's frame.
+        /// Total view height: tall enough for the bar + under-bar tick ruler **and** for the marker,
+        /// which is centred on the bar and so overhangs it by `indicatorHeight/2 − barHeight/2`
+        /// on top; without that headroom a taller marker would be clipped by the view's frame.
         static let height: CGFloat = max(
             barHeight + tickGap + tickLength,
-            indicatorDiameter + tickGap + tickLength)
+            indicatorHeight + tickGap + tickLength)
     }
 
     /// The fixed view height (bar + under-bar tick ruler), exposed so `PopupViewController` can pin
@@ -147,10 +152,10 @@ final class PopupBarView: NSView {
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: Metrics.height) }
 
     override func draw(_ dirtyRect: NSRect) {
-        // The bar sits below a top margin equal to the dot's overhang — the dot is centred on the
-        // bar, so a dot taller than the bar sticks out by `(diameter − barHeight)/2` on each side;
+        // The bar sits below a top margin equal to the marker's overhang — the marker is centred on
+        // the bar, so a marker taller than the bar sticks out by `(height − barHeight)/2` on each side;
         // the margin keeps that top overhang inside the view (the tick ruler fills the strip below).
-        let overhang = max(0, (Metrics.indicatorDiameter - Metrics.barHeight) / 2)
+        let overhang = max(0, (Metrics.indicatorHeight - Metrics.barHeight) / 2)
         let rect = NSRect(
             x: bounds.minX, y: bounds.minY + overhang, width: bounds.width, height: Metrics.barHeight)
         let w = rect.width
@@ -184,19 +189,23 @@ final class PopupBarView: NSView {
         NSGraphicsContext.restoreGraphicsState()
 
         // Tick ruler: `subdivisions - 1` interior marks at k/subdivisions, drawn below the bar and
-        // *under* the indicator dot in z-order (so the dot always reads as the primary marker).
+        // *under* the indicator marker in z-order (so the marker always reads as the primary mark).
         drawTicks(in: rect, width: w)
 
-        // Time-indicator dot at timeFraction, coloured by the raw usage-vs-time relationship.
+        // Time-indicator marker at timeFraction, coloured by the raw usage-vs-time relationship.
+        // A slim, lightly-rounded vertical bar rather than a dot — a crisp position tick.
         let cx = rect.minX + CGFloat(l.timeFraction) * w
         let cy = rect.midY
-        let d = Metrics.indicatorDiameter
-        let dot = NSBezierPath(ovalIn: NSRect(x: cx - d / 2, y: cy - d / 2, width: d, height: d))
+        let mw = Metrics.indicatorWidth
+        let mh = Metrics.indicatorHeight
+        let markerRect = NSRect(x: cx - mw / 2, y: cy - mh / 2, width: mw, height: mh)
+        let marker = NSBezierPath(
+            roundedRect: markerRect, xRadius: Metrics.indicatorCorner, yRadius: Metrics.indicatorCorner)
         indicatorColor(usage: l.usageFraction, time: l.timeFraction).setFill()
-        dot.fill()
+        marker.fill()
         Palette.indicatorStroke.setStroke()
-        dot.lineWidth = Metrics.indicatorStroke
-        dot.stroke()
+        marker.lineWidth = Metrics.indicatorStroke
+        marker.stroke()
     }
 
     /// Draw the under-bar tick ruler: vertical teeth at each interior window boundary
