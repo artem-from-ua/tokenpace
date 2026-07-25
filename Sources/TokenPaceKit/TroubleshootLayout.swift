@@ -24,6 +24,12 @@ public struct TroubleshootLayout: Sendable, Equatable {
     public let intervalLine: String?
     public let nextUpdateLine: String?
     public let bodyText: String
+    /// Whether `bodyText` is pretty-printed JSON (so the shell should syntax-highlight it) rather
+    /// than an error/plain payload or a placeholder. Decided here in the tested core — on success,
+    /// and on any other outcome whose body round-tripped through `prettyPrinted` (an error payload
+    /// can itself be JSON). `false` for HTML/plain error bodies and the "no response" placeholders,
+    /// which the shell then renders as monolithic monospace (see `JSONHighlighter`).
+    public let bodyIsJSON: Bool
     public let tokenStatusLine: String?
     public let tokenExpiryLine: String?
 
@@ -33,6 +39,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
         intervalLine: String?,
         nextUpdateLine: String?,
         bodyText: String,
+        bodyIsJSON: Bool,
         tokenStatusLine: String?,
         tokenExpiryLine: String?
     ) {
@@ -41,6 +48,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
         self.intervalLine = intervalLine
         self.nextUpdateLine = nextUpdateLine
         self.bodyText = bodyText
+        self.bodyIsJSON = bodyIsJSON
         self.tokenStatusLine = tokenStatusLine
         self.tokenExpiryLine = tokenExpiryLine
     }
@@ -65,6 +73,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
                 intervalLine: nil,
                 nextUpdateLine: nil,
                 bodyText: bodyPlaceholder,
+                bodyIsJSON: false,
                 tokenStatusLine: "Token: unavailable (no poll yet)",
                 tokenExpiryLine: nil)
         }
@@ -72,29 +81,42 @@ public struct TroubleshootLayout: Sendable, Equatable {
         let fetch = diagnostics.fetch
         let ts = timestampText(fetch.attemptAt, timeZone: timeZone)
 
+        // `bodyIsJSON` gates syntax highlighting in the shell — set to `true` only where `bodyText`
+        // is genuine JSON. `prettyPrinted` passes non-JSON through unchanged, so "was it reformatted"
+        // is not a reliable signal; `isJSON` re-checks parseability directly.
         let statusLine: String?
         let bodyText: String
+        let bodyIsJSON: Bool
         switch fetch.outcome {
         case .success:
             statusLine = "HTTP 200"
-            bodyText = prettyPrinted(fetch.body ?? "")
+            let body = fetch.body ?? ""
+            bodyText = prettyPrinted(body)
+            bodyIsJSON = isJSON(body)
         case .httpError:
             let status = fetch.httpStatus.map(String.init) ?? "?"
             statusLine = "HTTP \(status)"
             // The error payload may be JSON (pretty-print it) or HTML/plain text (passed through).
             bodyText = fetch.body.map(prettyPrinted) ?? noResponseBody
+            bodyIsJSON = fetch.body.map(isJSON) ?? false
         case .decodeFailure:
             statusLine = "HTTP 200 — body failed to decode"
             bodyText = fetch.body ?? noResponseBody
+            // Not pretty-printed and, by definition of this outcome, did not decode — but it may
+            // still be well-formed JSON that failed our schema, so highlight when it parses.
+            bodyIsJSON = fetch.body.map(isJSON) ?? false
         case let .transportError(message):
             statusLine = "Transport error: \(message)"
             bodyText = noResponseBody
+            bodyIsJSON = false
         case .nonHTTPResponse:
             statusLine = "Non-HTTP response"
             bodyText = noResponseBody
+            bodyIsJSON = false
         case let .notSent(reason):
             statusLine = "Request not sent: \(reason)"
             bodyText = noResponseBody
+            bodyIsJSON = false
         }
 
         // The current refresh cadence as a duration (e.g. "3m"), separate from the absolute next-update
@@ -127,8 +149,20 @@ public struct TroubleshootLayout: Sendable, Equatable {
             intervalLine: intervalLine,
             nextUpdateLine: nextUpdateLine,
             bodyText: bodyText,
+            bodyIsJSON: bodyIsJSON,
             tokenStatusLine: tokenStatusLine,
             tokenExpiryLine: tokenExpiryLine)
+    }
+
+    /// Whether `text` parses as JSON — the gate for syntax-highlighting `bodyText` in the shell.
+    /// Uses the same `.fragmentsAllowed` option as `prettyPrinted`, so a bare string/number/bool
+    /// body (which `prettyPrinted` also accepts) is still classed as JSON and highlighted. Empty or
+    /// non-JSON (HTML, plain text) → `false`.
+    static func isJSON(_ text: String) -> Bool {
+        guard let data = text.data(using: .utf8),
+              (try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])) != nil
+        else { return false }
+        return true
     }
 
     /// The explanation for a missing token — the `.notSent` reason when present, else a generic note.

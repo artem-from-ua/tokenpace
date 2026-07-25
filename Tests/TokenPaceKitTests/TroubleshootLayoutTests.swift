@@ -143,6 +143,7 @@ struct MakeTests {
         #expect(layout.intervalLine == nil)
         #expect(layout.nextUpdateLine == nil)
         #expect(layout.bodyText == TroubleshootLayout.bodyPlaceholder)
+        #expect(layout.bodyIsJSON == false)   // placeholder is not JSON — no highlighting
         #expect(layout.tokenStatusLine == "Token: unavailable (no poll yet)")
         #expect(layout.tokenExpiryLine == nil)
     }
@@ -166,6 +167,7 @@ struct MakeTests {
             from: output(.success, httpStatus: 200, body: body, token: freshToken), timeZone: utc)
         #expect(layout.statusLine == "HTTP 200")
         #expect(layout.bodyText == "{\n  \"a\" : 1,\n  \"b\" : 2\n}")
+        #expect(layout.bodyIsJSON == true)   // success JSON → highlighted
         #expect(layout.timestampLine == "Last response: 2026-07-22 12:00:00 (\(utcID))")
     }
 
@@ -183,6 +185,16 @@ struct MakeTests {
             from: output(.httpError, httpStatus: 401, body: payload, token: freshToken), timeZone: utc)
         #expect(layout.statusLine == "HTTP 401")
         #expect(layout.bodyText == payload)   // plain text, passed through
+        #expect(layout.bodyIsJSON == false)   // plain-text error → no highlighting
+    }
+
+    @Test func httpErrorWithJSONPayloadIsHighlighted() {
+        // An error body that is itself JSON (e.g. an API error object) is highlighted too.
+        let layout = TroubleshootLayout.make(
+            from: output(.httpError, httpStatus: 400, body: #"{"error":"bad"}"#, token: freshToken),
+            timeZone: utc)
+        #expect(layout.statusLine == "HTTP 400")
+        #expect(layout.bodyIsJSON == true)
     }
 
     @Test func rateLimitedShowsStatus() {
@@ -206,6 +218,7 @@ struct MakeTests {
             from: output(.transportError(message: "offline"), token: freshToken), timeZone: utc)
         #expect(layout.statusLine == "Transport error: offline")
         #expect(layout.bodyText == TroubleshootLayout.noResponseBody)
+        #expect(layout.bodyIsJSON == false)   // "(no response body)" is not JSON
     }
 
     @Test func notSentExplainsAndHasNoBody() {
