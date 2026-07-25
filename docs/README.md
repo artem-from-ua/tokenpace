@@ -27,7 +27,11 @@
 
 - [conventions.md](conventions.md) — конвенції розробки: мова, стиль, логування, версіонування.
 - [log-messages.md](log-messages.md) — повний перелік кожного лог-повідомлення, згрупований за файлом.
-- [architecture.md](architecture.md) — компоненти, їхні відповідальності, потік даних, діаграми.
+- [architecture.md](architecture.md) — архітектура (індекс), розбита на під-сторінки:
+  - [reference/architecture/overview.md](reference/architecture/overview.md) — принципи, розгортання, каденції, SPM.
+  - [reference/architecture/data-flow.md](reference/architecture/data-flow.md) — полінг, токен, pacing, рендер, діаграми потоку.
+  - [reference/architecture/update-system.md](reference/architecture/update-system.md) — перевірка й авто-встановлення оновлень.
+  - [reference/architecture/services-and-config.md](reference/architecture/services-and-config.md) — статус сервісів, конфіг, Settings, архіватор.
 
 ## Рішення (чому саме так)
 
@@ -36,6 +40,7 @@
 
 ---
 
-> **Групування вище — за наміром читача** (як зробити / що це / чому), а не за темою. Наразі файли
-> лежать пласко в `docs/`; тематичні підпапки (`guides/`, `reference/`) додаються поетапно окремими
-> PR — цей індекс оновлюватиметься разом із ними.
+> **Групування вище — за наміром читача** (як зробити / що це / чому), а не за темою. Тематичні
+> підпапки додаються поетапно: `guides/` та `reference/architecture/` уже є; решта reference-доків
+> (`conventions.md`, `log-messages.md`) переїде в `reference/` окремим PR — цей індекс
+> оновлюватиметься разом із ними.
