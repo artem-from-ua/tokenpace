@@ -215,8 +215,70 @@ final class TroubleshootWindowController: NSWindowController {
         tokenExpiryLabel.stringValue = layout.tokenExpiryLine ?? ""
         tokenExpiryLabel.isHidden = layout.tokenExpiryLine == nil
 
+        // Only rebuild the body when the text actually changed — reassigning it would drop the
+        // user's selection and scroll position on every live poll (ADR-0020). When the body is JSON
+        // (`bodyIsJSON`) it is syntax-highlighted; otherwise it is monolithic monospace.
         if bodyTextView.string != layout.bodyText {
-            bodyTextView.string = layout.bodyText
+            bodyTextView.textStorage?.setAttributedString(
+                Self.bodyAttributedString(layout.bodyText, isJSON: layout.bodyIsJSON))
+        }
+    }
+
+    // MARK: JSON syntax highlighting
+
+    /// Build the attributed body: the base monospace font in `labelColor`, then — for a JSON body —
+    /// a foreground colour per token from the pure ``JSONHighlighter``. Non-JSON bodies (error
+    /// payloads, placeholders) get the base attributes only, reading as plain monospace as before.
+    private static func bodyAttributedString(_ text: String, isJSON: Bool) -> NSAttributedString {
+        let base: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+            .foregroundColor: NSColor.labelColor,
+        ]
+        let attributed = NSMutableAttributedString(string: text, attributes: base)
+        guard isJSON else { return attributed }
+
+        let full = attributed.length
+        for token in JSONHighlighter.tokens(in: text) {
+            // Guard against any range drift (the tokenizer works on the same string, so this is
+            // belt-and-suspenders) before touching the storage.
+            guard token.range.location >= 0,
+                  token.range.location + token.range.length <= full else { continue }
+            attributed.addAttribute(
+                .foregroundColor, value: Self.color(for: token.kind), range: token.range)
+        }
+        return attributed
+    }
+
+    /// Map a JSON token kind to its highlight colour. The base is a system semantic colour; in the
+    /// **light** appearance it is darkened a touch so the tokens read with more contrast against the
+    /// white background (the bright system tints are tuned for dark mode). The **dark** appearance
+    /// keeps the system colours as-is. `punctuation` stays `tertiaryLabelColor` (already adaptive and
+    /// intentionally muted) in both.
+    private static func color(for kind: JSONHighlighter.JSONTokenKind) -> NSColor {
+        switch kind {
+        case .key: return Self.dynamic(light: Self.darkened(.systemBlue), dark: .systemBlue)
+        case .string: return Self.dynamic(light: Self.darkened(.systemGreen), dark: .systemGreen)
+        case .number: return Self.dynamic(light: Self.darkened(.systemOrange), dark: .systemOrange)
+        case .bool: return Self.dynamic(light: Self.darkened(.systemPurple), dark: .systemPurple)
+        case .null: return Self.dynamic(light: Self.darkened(.systemPurple), dark: .systemPurple)
+        case .punctuation: return .tertiaryLabelColor
+        }
+    }
+
+    /// Darken a system colour for the light appearance — blend a fraction of black into it, in the
+    /// sRGB space (system colours resolve cleanly there). ~28 % reads noticeably deeper without going
+    /// muddy.
+    private static func darkened(_ color: NSColor) -> NSColor {
+        (color.usingColorSpace(.sRGB) ?? color).blended(withFraction: 0.28, of: .black) ?? color
+    }
+
+    /// An appearance-aware colour: resolves to `light` under Aqua and `dark` under Dark Aqua. Uses
+    /// `NSColor(name:dynamicProvider:)` so the `NSTextView` re-resolves it if the system theme flips
+    /// while the window is open.
+    private static func dynamic(light: NSColor, dark: NSColor) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return isDark ? dark : light
         }
     }
 }

@@ -133,6 +133,17 @@ payload помилки + HTTP-статус). Вміст **оновлюється
   його індексі закреслення немає; додано постскриптум-вказівник сюди.
 - `JSONSerialization` вперше з'являється в кодовій базі — лише для претіфікації діагностичного JSON
   (`prettyPrinted`); основний decode-шлях застосунку й далі на `Codable`.
+- **Синтаксична підсвітка JSON-body (пізніше доповнення).** Body вікна, коли це валідний JSON
+  (`TroubleshootLayout.bodyIsJSON`, вирішене в тестованому ядрі через `isJSON`), розфарбовується за
+  токенами. Розбір — новий чистий тип `JSONHighlighter.tokens(in:) -> [Token]` (`NSRange` +
+  `JSONTokenKind`, той самий pure-core/shell розділ, що й `TroubleshootLayout` — ADR-0009): **власний
+  однопрохідний сканер, не `NSRegularExpression`** (regex не відрізняє ключ від string-value і рве
+  рядок на escaped-лапках `\"`) і **не стороння бібліотека** (проєкт без зовнішніх залежностей).
+  Мапу `JSONTokenKind → NSColor` тримає shell (`TroubleshootWindowController`) на **системних
+  semantic-кольорах** (`.systemBlue`/`.systemGreen`/`.systemOrange`/`.systemPurple`/
+  `.tertiaryLabelColor`) — адаптуються під light/dark без ручної палітри. Не-JSON body (HTML/plain
+  payload помилки, плейсхолдери) лишається монолітним monospace. Це не нове архітектурне рішення, а
+  продовження вже задокументованого розділу — окремого ADR не потребує.
 
 ## Пов'язані
 
