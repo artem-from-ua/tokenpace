@@ -25,9 +25,12 @@ enum PersistedConfig {
         static let lastRunVersion = "lastRunVersion"
         /// The monitored-services config (#89), stored as a JSON blob under this key.
         static let monitoredServices = "monitoredServices"
-        /// Whether the daily update check runs (#37). Default-on (opt-out) — see the property.
+        /// Whether the periodic update check runs (#37). Default-on (opt-out) — see the property.
         static let automaticUpdateChecks = "automaticUpdateChecks"
-        /// Instant of the last update-check **attempt** (#37), gating the 24 h cadence.
+        /// Whether a found update is downloaded and installed automatically (#122). Default-off
+        /// (opt-in), and only meaningful while `automaticUpdateChecks` is on — see the property.
+        static let installUpdatesAutomatically = "installUpdatesAutomatically"
+        /// Instant of the last update-check **attempt** (#37), gating the 12 h cadence.
         static let lastUpdateCheck = "lastUpdateCheck"
         /// The latest release tag last surfaced to the user (#37), so the same version is not
         /// notified twice.
@@ -77,7 +80,7 @@ enum PersistedConfig {
         }
     }
 
-    /// Whether TokenPace checks GitHub Releases for a newer version once a day (#37). **Default-on**
+    /// Whether TokenPace checks GitHub Releases for a newer version twice a day (#37). **Default-on**
     /// (opt-out): an absent key reads as `true`. `object(forKey:) as? Bool ?? true` distinguishes
     /// "unset" (→ true) from an explicit `false` the user chose — `bool(forKey:)` would collapse both
     /// to `false` and silently defeat the opt-out default.
@@ -86,9 +89,21 @@ enum PersistedConfig {
         set { defaults.set(newValue, forKey: Key.automaticUpdateChecks) }
     }
 
+    /// Whether a found update is **downloaded and installed automatically** (#122, ADR-0033).
+    /// **Default-off** (opt-in): an absent key reads as `false`, so out of the box a new release is
+    /// only *signalled* (banner / menu item / "Download"), never installed without the user asking.
+    /// `object(forKey:) as? Bool ?? false` distinguishes "unset" from an explicit choice, consistent
+    /// with the other opt-in toggles. Only meaningful while ``automaticUpdateChecks`` is on (the
+    /// installer rides the same found-update path); the Settings checkbox is nested under it. The full
+    /// flow additionally requires a real `.app` in `/Applications` — see `UpdateInstallPlan`.
+    static var installUpdatesAutomatically: Bool {
+        get { defaults.object(forKey: Key.installUpdatesAutomatically) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.installUpdatesAutomatically) }
+    }
+
     /// Instant of the last update-check **attempt** (success or graceful failure), or `nil` if none
     /// has run yet. Advanced on every attempt so a private-repo 404 does not retry each heartbeat —
-    /// the 24 h gate is on the *attempt*, not the *success* (`UpdateCheckCadence`, ADR-0025).
+    /// the 12 h gate is on the *attempt*, not the *success* (`UpdateCheckCadence`, ADR-0025).
     static var lastUpdateCheck: Date? {
         get { defaults.object(forKey: Key.lastUpdateCheck) as? Date }
         set { defaults.set(newValue, forKey: Key.lastUpdateCheck) }

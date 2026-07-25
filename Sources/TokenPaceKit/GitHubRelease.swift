@@ -2,13 +2,14 @@ import Foundation
 
 // MARK: - GitHubRelease
 
-/// The two fields TokenPace needs from GitHub's `GET /repos/{owner}/{repo}/releases/latest`
-/// response (#37): the release tag (compared against the running version) and the release page URL
-/// (opened from the menu / notification / Configure line).
+/// The fields TokenPace needs from GitHub's `GET /repos/{owner}/{repo}/releases/latest` response
+/// (#37): the release tag (compared against the running version), the release page URL (opened from
+/// the menu / notification / Configure line), and the downloadable assets (the notarized `.zip` the
+/// auto-installer fetches, #122).
 ///
-/// The REST payload carries dozens of other keys (`id`, `name`, `body`, `assets[]`, `prerelease`,
-/// `draft`, …) — all deliberately unmodeled. `Decodable` drops unknown keys for free, mirroring
-/// ``StatusSummary``'s forward-compatible decode.
+/// The REST payload carries dozens of other keys (`id`, `name`, `body`, `prerelease`, `draft`, …) —
+/// all deliberately unmodeled. `Decodable` drops unknown keys for free, mirroring ``StatusSummary``'s
+/// forward-compatible decode.
 ///
 /// This model is the **shared** decode target of both fetch paths: the anonymous HTTPS body and the
 /// `gh api` subprocess stdout are the same REST JSON, so ``GitHubReleaseDecoder/decode(from:)`` maps
@@ -21,15 +22,56 @@ public struct GitHubRelease: Sendable, Equatable, Decodable {
     /// The human-facing release page URL (`html_url`), e.g.
     /// `https://github.com/artem-from-ua/tokenpace/releases/tag/v0.20.0`. Opened on click.
     public let htmlURL: String
+    /// The release's downloadable assets (#122), used by ``UpdateAssetSelector`` to find the
+    /// notarized `.zip`. Absent/empty for the signal-only path (a stub release, or a payload that
+    /// predates this field) — see the decode note below.
+    public let assets: [GitHubReleaseAsset]
 
     private enum CodingKeys: String, CodingKey {
         case tagName = "tag_name"
         case htmlURL = "html_url"
+        case assets
     }
 
-    public init(tagName: String, htmlURL: String) {
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tagName = try c.decode(String.self, forKey: .tagName)
+        htmlURL = try c.decode(String.self, forKey: .htmlURL)
+        // Forward-compatible: a `/releases/latest` body always carries `assets` (possibly `[]`), but
+        // a hand-built stub (`StubUpdateFetcher`) or an older cached blob may omit it — decode as `[]`
+        // rather than failing, matching the "unknown keys dropped" contract for the required fields.
+        assets = try c.decodeIfPresent([GitHubReleaseAsset].self, forKey: .assets) ?? []
+    }
+
+    public init(tagName: String, htmlURL: String, assets: [GitHubReleaseAsset] = []) {
         self.tagName = tagName
         self.htmlURL = htmlURL
+        self.assets = assets
+    }
+}
+
+// MARK: - GitHubReleaseAsset
+
+/// One downloadable file attached to a GitHub release (#122) — the subset TokenPace's auto-installer
+/// needs: the asset's file `name` (matched against the version-named `.zip` pattern) and its
+/// `browser_download_url` (the direct HTTPS download). Other keys (`id`, `size`, `content_type`, …)
+/// are unmodeled; `Decodable` drops them.
+public struct GitHubReleaseAsset: Sendable, Equatable, Decodable {
+    /// The asset's file name, e.g. `"TokenPace-0.31.0.zip"`. Matched by ``UpdateAssetSelector``.
+    public let name: String
+    /// The direct download URL (`browser_download_url`), e.g.
+    /// `https://github.com/.../releases/download/v0.31.0/TokenPace-0.31.0.zip`. Always HTTPS from
+    /// GitHub; the selector rejects any non-`https` URL defensively.
+    public let browserDownloadURL: String
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case browserDownloadURL = "browser_download_url"
+    }
+
+    public init(name: String, browserDownloadURL: String) {
+        self.name = name
+        self.browserDownloadURL = browserDownloadURL
     }
 }
 

@@ -772,6 +772,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the blue-dot menu item, update the Configure… window if open, and post the macOS banner —
     /// **once per version** (guarded on `lastSeenLatestVersion`) so the same un-upgraded release does
     /// not re-notify every day. The menu item / Configure line stay shown regardless.
+    ///
+    /// When auto-install is enabled and applicable, this is also where the installer would kick in
+    /// (#122, ADR-0033). Phase 1 only *logs* the `UpdateInstallPlan` verdict — no download or
+    /// replacement happens yet; the signal path (banner / menu item / Download) is unchanged.
     private func handleUpdateFound(_ release: GitHubRelease) {
         lastKnownRelease = release
         setUpdateItemVisible(true)
@@ -783,6 +787,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "update: new version available tag=\(release.tagName, privacy: .public) firstSeen=\(firstTimeSeen, privacy: .public)")
         if firstTimeSeen {
             UpdateNotifier.post(release: release)
+        }
+
+        logAutoInstallDecision(for: release)
+    }
+
+    /// Evaluate — and, for now, only **log** — whether this release would be auto-installed (#122).
+    /// The pure `UpdateInstallPlan.decide` folds every gate (opt-in, newer, real `.app`, has asset)
+    /// into one verdict; later phases (#123/#124) turn a `.install` verdict into an actual download +
+    /// replace. Keeping the decision wired but inert here lets the whole gate matrix be exercised on a
+    /// live build (via `TOKENPACE_FAKE_LATEST`) before any destructive I/O exists.
+    private func logAutoInstallDecision(for release: GitHubRelease) {
+        let decision = UpdateInstallPlan.decide(
+            release: release,
+            currentVersion: TokenPaceKit.version,
+            isAppBundle: LaunchAtLoginController.isAppBundle,
+            autoInstallEnabled: PersistedConfig.installUpdatesAutomatically)
+        switch decision {
+        case let .install(asset, targetVersion):
+            AppLogger.lifecycle.notice(
+                "update-install: decision=install target=\(targetVersion, privacy: .public) asset=\(asset.name, privacy: .public)")
+        case .skipAutoInstallOff:
+            AppLogger.lifecycle.notice("update-install: decision=skip reason=auto-install-off")
+        case .skipNotNewer:
+            AppLogger.lifecycle.notice("update-install: decision=skip reason=not-newer")
+        case .skipNotAppBundle:
+            AppLogger.lifecycle.notice("update-install: decision=skip reason=not-app-bundle")
+        case .skipNoAsset:
+            AppLogger.lifecycle.notice("update-install: decision=skip reason=no-asset")
         }
     }
 

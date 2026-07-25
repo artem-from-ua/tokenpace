@@ -47,6 +47,41 @@ struct GitHubReleaseDecodeTests {
             try GitHubReleaseDecoder.decode(from: garbage)
         }
     }
+
+    @Test func decodesAssets() throws {
+        let payload = Data("""
+        {
+          "tag_name": "v0.31.0",
+          "html_url": "https://github.com/artem-from-ua/tokenpace/releases/tag/v0.31.0",
+          "assets": [
+            {
+              "name": "TokenPace-0.31.0.zip",
+              "id": 42,
+              "content_type": "application/zip",
+              "browser_download_url": "https://github.com/artem-from-ua/tokenpace/releases/download/v0.31.0/TokenPace-0.31.0.zip"
+            }
+          ]
+        }
+        """.utf8)
+        let release = try GitHubReleaseDecoder.decode(from: payload)
+        #expect(release.assets == [GitHubReleaseAsset(
+            name: "TokenPace-0.31.0.zip",
+            browserDownloadURL: "https://github.com/artem-from-ua/tokenpace/releases/download/v0.31.0/TokenPace-0.31.0.zip")])
+    }
+
+    @Test func absentAssetsDecodesToEmpty() throws {
+        // A hand-built stub body (StubUpdateFetcher) omits `assets` entirely — must be `[]`, not a
+        // decode failure (forward-compatible contract).
+        let noAssets = Data(#"{"tag_name": "v0.31.0", "html_url": "https://example.com/x"}"#.utf8)
+        let release = try GitHubReleaseDecoder.decode(from: noAssets)
+        #expect(release.assets.isEmpty)
+    }
+
+    @Test func emptyAssetsDecodesToEmpty() throws {
+        // The realistic fixture carries `"assets": []`.
+        let release = try GitHubReleaseDecoder.decode(from: Self.realistic)
+        #expect(release.assets.isEmpty)
+    }
 }
 
 // MARK: - Stub fetcher
