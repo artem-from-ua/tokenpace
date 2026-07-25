@@ -120,19 +120,50 @@ final class TroubleshootWindowController: NSWindowController {
         timestampLabel = Self.infoLabel()
         statusLabel = Self.infoLabel()
 
-        // Vertical stack for the API section's header + info rows (intrinsic height).
-        let apiStack = NSStackView(views: [apiHeader, timestampLabel, statusLabel])
+        // Header row: the section title on the left, a borderless "copy JSON" icon button on the
+        // right (pinned there by a low-hugging spacer). The button copies the body verbatim — the
+        // same text ⌘C copies from a selection — so a payload can be lifted into a bug report with
+        // one click. The row spans the section's full width so the button sits at the right edge.
+        let copyButton = NSButton(
+            image: NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy JSON")!,
+            target: self, action: #selector(copyBodyClicked))
+        copyButton.isBordered = false
+        copyButton.bezelStyle = .inline
+        copyButton.setButtonType(.momentaryChange)
+        copyButton.toolTip = "Copy the response body to the clipboard"
+        copyButton.setContentHuggingPriority(.required, for: .horizontal)
+        let headerSpacer = NSView()
+        headerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let headerRow = NSStackView(views: [apiHeader, headerSpacer, copyButton])
+        headerRow.orientation = .horizontal
+        headerRow.alignment = .centerY
+        headerRow.spacing = Metrics.rowSpacing
+        headerRow.translatesAutoresizingMaskIntoConstraints = false
+
+        // Vertical stack for the API section's info rows (intrinsic height). The header row sits
+        // above it as a separate, full-width subview so the copy button can reach the right edge.
+        let apiStack = NSStackView(views: [timestampLabel, statusLabel])
         apiStack.orientation = .vertical
         apiStack.alignment = .leading
         apiStack.spacing = Metrics.rowSpacing
-        apiStack.setCustomSpacing(Metrics.headerSpacing, after: apiHeader)
         apiStack.translatesAutoresizingMaskIntoConstraints = false
 
         // The scrollable raw body — takes the remaining vertical space, so it must stretch.
-        let scroll = NSTextView.scrollableTextView()
-        bodyTextView = (scroll.documentView as! NSTextView)
-        bodyTextView.isEditable = false
+        //
+        // It is **editable, but every mutation is vetoed** by the delegate (see
+        // `textView(_:shouldChangeTextIn:)`), rather than `isEditable = false`. Editable is what gives
+        // a blinking insertion-point caret and full arrow-key caret navigation (word/line jumps,
+        // shift-selection); a read-only view has neither. The veto keeps the content immutable.
+        // Clipboard shortcuts do NOT ride the native path here: an accessory app has no Edit menu, so
+        // the ⌘C/⌘A key-equivalent pass finds no handler, falls through to `noResponderFor:` → `NSBeep`
+        // (and never copies). `ReadOnlyTextView.performKeyEquivalent(_:)` claims ⌘C/⌘A/⌘X itself,
+        // which both copies and suppresses the beep — see that type.
+        let scroll = ReadOnlyTextView.scrollableTextView()
+        bodyTextView = (scroll.documentView as! ReadOnlyTextView)
+        bodyTextView.isEditable = true
         bodyTextView.isSelectable = true
+        bodyTextView.allowsUndo = false
+        bodyTextView.delegate = self
         bodyTextView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         // Smart quotes / dashes would corrupt copied JSON — disable them.
         bodyTextView.isAutomaticQuoteSubstitutionEnabled = false
@@ -144,6 +175,7 @@ final class TroubleshootWindowController: NSWindowController {
 
         content.addSubview(tokenStack)
         content.addSubview(intervalStack)
+        content.addSubview(headerRow)
         content.addSubview(apiStack)
         content.addSubview(scroll)
 
@@ -158,7 +190,12 @@ final class TroubleshootWindowController: NSWindowController {
             tokenStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: pad),
             content.trailingAnchor.constraint(equalTo: tokenStack.trailingAnchor, constant: pad),
 
-            apiStack.topAnchor.constraint(equalTo: tokenStack.bottomAnchor, constant: Metrics.interSectionSpacing),
+            // Full-width header row (title + right-aligned copy button), then the info rows below it.
+            headerRow.topAnchor.constraint(equalTo: tokenStack.bottomAnchor, constant: Metrics.interSectionSpacing),
+            headerRow.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: pad),
+            content.trailingAnchor.constraint(equalTo: headerRow.trailingAnchor, constant: pad),
+
+            apiStack.topAnchor.constraint(equalTo: headerRow.bottomAnchor, constant: Metrics.headerSpacing),
             apiStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: pad),
             content.trailingAnchor.constraint(equalTo: apiStack.trailingAnchor, constant: pad),
 
@@ -193,6 +230,15 @@ final class TroubleshootWindowController: NSWindowController {
     /// The live `render(_:)` on the resulting poll updates the interval / next-update rows in place.
     @objc private func refreshNowClicked() {
         onForceRefresh?()
+    }
+
+    /// Copy the response body verbatim to the clipboard for a bug report. Reads `bodyTextView.string`
+    /// — exactly what is displayed (`TroubleshootLayout.bodyText`), the pretty-printed JSON or error
+    /// payload. First `NSPasteboard` use in the codebase.
+    @objc private func copyBodyClicked() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(bodyTextView.string, forType: .string)
     }
 
     // MARK: Live render
@@ -281,4 +327,59 @@ final class TroubleshootWindowController: NSWindowController {
             return isDark ? dark : light
         }
     }
+}
+
+// MARK: - NSTextViewDelegate
+
+extension TroubleshootWindowController: NSTextViewDelegate {
+    /// Veto every user-driven text change so the body stays read-only while the view is technically
+    /// editable (which is what supplies the caret, arrow navigation, and beep-free ⌘C/⌘A — see the
+    /// body-setup comment). This is the single choke point for typing, paste (⌘V), delete, and
+    /// drag-drop insertion — all funnel through here before mutating storage. Programmatic
+    /// `bodyTextView.string = …` in `render(_:)` bypasses this path, so live updates still apply.
+    func textView(
+        _ textView: NSTextView,
+        shouldChangeTextIn affectedCharRange: NSRange,
+        replacementString: String?
+    ) -> Bool {
+        false
+    }
+}
+
+// MARK: - ReadOnlyTextView
+
+/// An `NSTextView` for a read-only body in an accessory app that has **no Edit menu**.
+///
+/// Two custom behaviours, both needed because there is no menu to carry the standard clipboard key
+/// equivalents:
+/// - `performKeyEquivalent(_:)` handles ⌘C / ⌘A / ⌘X itself. In Cocoa a Command chord is first
+///   offered as a key equivalent down the responder chain; with no Edit menu nothing claims ⌘C/⌘A,
+///   the pass returns `false`, and the event falls through to `noResponderFor:` → `NSBeep` (and copy
+///   never happens). Claiming them here calls the action and returns `true`, so copy/select-all work
+///   **and** the beep is suppressed. Matched by `keyCode` (layout-independent — on a non-Latin layout
+///   the C key reports a non-"c" character, so a character match would miss).
+/// - `cut(_:)` is a plain copy: the view is editable-but-edit-vetoed (that supplies the caret + arrow
+///   navigation), so a real cut would copy then have its delete rejected — this makes ⌘X explicit.
+final class ReadOnlyTextView: NSTextView {
+    /// ANSI virtual key codes (Carbon `kVK_ANSI_*`) — layout-independent physical keys.
+    private enum KeyCode {
+        static let a: UInt16 = 0
+        static let c: UInt16 = 8
+        static let x: UInt16 = 7
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags == .command {
+            switch event.keyCode {
+            case KeyCode.c: copy(nil);      return true
+            case KeyCode.a: selectAll(nil); return true
+            case KeyCode.x: cut(nil);       return true   // cut == copy (see type doc)
+            default: break
+            }
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func cut(_ sender: Any?) { copy(sender) }
 }

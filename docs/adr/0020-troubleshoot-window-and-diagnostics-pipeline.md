@@ -124,6 +124,21 @@ payload помилки + HTTP-статус). Вміст **оновлюється
   але `.normal`-рівня; `render(_:)` викликається з `AppDelegate.apply(_:)` **щополу**, тож відкрите
   вікно оновлює всі три секції на місці (body присвоюється лише коли змінився — щоб не злітали
   виділення/скрол). Кнопка «Refresh now» кличе `onForceRefresh` → `AppDelegate.forceRefresh()`.
+- **Копіювання body + курсор/навігація (пізніше доповнення).** Заголовок секції usage-API несе
+  праворуч borderless icon-кнопку (`doc.on.doc`) — `copyBodyClicked` кладе `bodyTextView.string` у
+  `NSPasteboard.general` (перше використання `NSPasteboard` у кодовій базі). Крім кнопки, body тепер
+  дає **миготливий курсор і навігацію стрілками** та підтримує `⌘C`/`⌘A`/`⌘X` над виділеним. Досягнуто
+  двома рішеннями, обидва через те, що accessory-застосунок навмисно без `mainMenu` (див. §3):
+  - Body-`NSTextView` — **editable, але всі зміни ветуються** delegate-ом
+    (`shouldChangeTextIn → false`). `isEditable = false` не дає ані курсора, ані навігації стрілками —
+    лише editable-режим їх вмикає; veto тримає вміст незмінним (typing/paste/drag-insert усе йде через
+    цей єдиний чок-пойнт; програмний `setAttributedString` у `render` його обходить).
+  - `⌘C`/`⌘A`/`⌘X` обробляє **`ReadOnlyTextView.performKeyEquivalent(_:)`** за `keyCode`
+    (layout-independent — на укр. розкладці клавіші C/A дають «с»/«ф», тож матч за символом промахнувся
+    б). Без Edit-меню ці key equivalents інакше не резолвляться: пас падає в `noResponderFor:` →
+    `NSBeep`, і копіювання не відбувається. Перехоплення тієї ж фази й повернення `true` **і** копіює,
+    **і** глушить beep. `⌘X` зведено до copy (view read-only). Свідомо **не** додаємо `NSApp.mainMenu`
+    заради `⌘C` — рядок меню зверху екрана не має з'являтись для фонового accessory-віджета.
 - **Логування:** додано один рядок `manual refresh requested (Troubleshoot)` (`lifecycle`, `.notice`)
   з `AppDelegate.forceRefresh()`; рядок `token expired, len=<count>` тепер емітиться з
   `PollingEngine.pollOnce`, а не з `TokenProvider` (текст, категорія, рівень незмінні). Див.
