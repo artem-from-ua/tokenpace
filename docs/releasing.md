@@ -79,13 +79,19 @@ extended attributes.
 git tag "v${VERSION}"
 git push origin "v${VERSION}"
 
-gh release create "v${VERSION}" \
+RELEASE_NOTES_APPROVED=1 gh release create "v${VERSION}" \
    "./build/TokenPace-${VERSION}.zip" \
    --title "TokenPace v${VERSION}" \
    --notes "Опис релізу: що нового, як встановити (див. нижче)."
 ```
 
 Тег ставимо на актуальний `main` (усі PR уже змерджені).
+
+> **Гейт release notes.** `gh release create` стереже hook
+> (`.claude/hooks/release-notes-guard.sh`): він блокує публікацію, доки команду не запущено з
+> префіксом `RELEASE_NOTES_APPROVED=1`. Префікс додають **лише після** того, як нотатки складено за
+> цим документом (автооновлення — канонічний шлях) і затверджено мейнтейнером. Це запобіжник проти
+> публікації нотаток, написаних із пам'яті без звірки з цим файлом.
 
 ### 6. Перевірити з боку користувача
 
