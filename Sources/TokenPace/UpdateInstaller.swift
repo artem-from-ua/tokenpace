@@ -4,10 +4,8 @@ import TokenPaceKit
 
 // MARK: - UpdateInstallOutcome
 
-/// The result of an auto-install attempt (#123, ADR-0033) — a fail-safe enum, never a thrown error,
-/// so the caller can always fall back to the manual "Download" link on any failure. Phase 2 stops at
-/// ``dryRunVerified`` (download + verify + unzip proven, no replacement); Phase 3 (#124) adds the
-/// terminal ``installedRelaunching`` / ``replaceFailed`` cases.
+/// The result of an auto-install attempt (#123/#124, ADR-0033) — a fail-safe enum, never a thrown
+/// error, so the caller can always fall back to the manual "Download" link on any failure.
 enum UpdateInstallOutcome: Sendable, Equatable {
     /// Not applicable: not a real `.app` bundle (a `swift run` dev build) — installation is impossible.
     case notApplicable
@@ -18,11 +16,16 @@ enum UpdateInstallOutcome: Sendable, Equatable {
     case verifyFailed(String)
     /// Unzipping the downloaded archive failed.
     case unzipFailed(String)
-    /// **Phase 2 terminal success**: downloaded, verified, and unzipped into a temp directory, but
-    /// deliberately **not** installed (no `/Applications` replacement, no relaunch). Carries the temp
-    /// path of the verified bundle so the maintainer can inspect it. This is what
-    /// `TOKENPACE_UPDATE_DRYRUN` always yields until Phase 3 wires the real replacement.
+    /// **Dry-run success** (`TOKENPACE_UPDATE_DRYRUN`): downloaded, verified, and unzipped into a temp
+    /// directory, but deliberately **not** installed (no replacement, no relaunch). Carries the temp
+    /// path of the verified bundle so the maintainer can inspect it.
     case dryRunVerified(bundlePath: String)
+    /// The atomic replacement of the target `.app` failed (permissions / I/O). The old bundle is left
+    /// intact (or restored from backup); fall back to the manual Download. Carries a reason.
+    case replaceFailed(String)
+    /// **Terminal success**: the target `.app` was atomically replaced with the verified new build and
+    /// a relaunch was requested — the process is about to exit. Carries the installed version tag.
+    case installedRelaunching(tag: String)
 }
 
 // MARK: - AppUpdateInstalling
@@ -42,10 +45,10 @@ protocol AppUpdateInstalling: Sendable {
 
 // MARK: - UpdateInstaller
 
-/// The real auto-installer (#123, ADR-0033): downloads the notarized `.zip`, verifies its code
-/// signature / notarization / Team ID, and unzips it into a temp directory. **Phase 2 stops there**
-/// — the `/Applications` replacement and relaunch land in Phase 3 (#124). Until then every run behaves
-/// as a dry run, and `TOKENPACE_UPDATE_DRYRUN` makes that explicit in the logs.
+/// The real auto-installer (#123/#124, ADR-0033): downloads the notarized `.zip`, verifies its code
+/// signature / notarization / Team ID, unzips it, then atomically replaces the target `.app` and
+/// relaunches. `TOKENPACE_UPDATE_DRYRUN` stops after verify (no replace/relaunch);
+/// `TOKENPACE_UPDATE_TARGET` redirects the replacement to a throwaway copy for safe testing.
 ///
 /// This is a thin **shell** type, not kit: it does file I/O and spawns `ditto`/`codesign`/`spctl`
 /// (platform side-effects, per ADR-0009). The *decision* of whether to install lives in the pure
@@ -93,27 +96,65 @@ struct UpdateInstaller: AppUpdateInstalling {
             return .downloadFailed("asset url is not https")
         }
 
-        AppLogger.network.notice(
-            "update-install: download started tag=\(expectedTag, privacy: .public) asset=\(asset.name, privacy: .public)")
+        // The bundle to replace. Normally the running app's own bundle (`Bundle.main`), but a test can
+        // point the installer at a throwaway copy via `TOKENPACE_UPDATE_TARGET` so a real replace +
+        // relaunch can be exercised without touching the installed /Applications app.
+        let target = Self.targetBundleURL()
 
-        // The download (URLSession) and the verify/unzip (subprocesses + file I/O) all happen on a
-        // detached task off the main actor; the returned outcome is Sendable, so resuming on the main
-        // actor here is safe.
+        // The download (URLSession/gh) and the verify/unzip/replace (subprocesses + file I/O) all
+        // happen on a detached task off the main actor; the returned outcome is Sendable, so resuming
+        // on the main actor here is safe.
         let teamID = Self.expectedTeamID
         let dryRun = dryRunForced
         let ghAuth = ghAuthEnabled
-        return await Task.detached {
+        let outcome = await Task.detached {
             await Self.runPipeline(url: url, assetName: asset.name, tag: expectedTag,
-                                   expectedTeamID: teamID, dryRunForced: dryRun, ghAuth: ghAuth)
+                                   expectedTeamID: teamID, dryRunForced: dryRun, ghAuth: ghAuth,
+                                   targetBundle: target)
         }.value
+
+        // Relaunch must happen on the main actor (NSWorkspace/NSApp). Only on a real install.
+        if case .installedRelaunching = outcome {
+            relaunch(from: target)
+        }
+        return outcome
+    }
+
+    /// The `.app` bundle the installer replaces. `TOKENPACE_UPDATE_TARGET` (a test-only override)
+    /// redirects it to a throwaway copy; otherwise it is the running app's own bundle.
+    private static func targetBundleURL() -> URL {
+        if let override = ProcessInfo.processInfo.environment["TOKENPACE_UPDATE_TARGET"], !override.isEmpty {
+            return URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
+        }
+        return Bundle.main.bundleURL
+    }
+
+    /// Launch the freshly-installed bundle and terminate this process (#124). Runs on the main actor.
+    /// If the launch can't even be requested we do **not** terminate — the replaced bundle is already
+    /// on disk, so the next manual launch picks up the new version.
+    private func relaunch(from bundle: URL) {
+        let config = NSWorkspace.OpenConfiguration()
+        config.createsNewApplicationInstance = true
+        AppLogger.lifecycle.notice("update-install: relaunching from \(bundle.path, privacy: .public)")
+        NSWorkspace.shared.openApplication(at: bundle, configuration: config) { _, error in
+            if let error {
+                AppLogger.lifecycle.error(
+                    "update-install: relaunch failed \(error.localizedDescription, privacy: .public)")
+            } else {
+                Task { @MainActor in NSApp.terminate(nil) }
+            }
+        }
     }
 
     // MARK: pipeline (off-actor)
 
-    /// The full download → verify → unzip pipeline, off the main actor. Returns a fail-safe outcome;
-    /// each step logs its own success/failure. Phase 2 ends at ``dryRunVerified``.
+    /// The full download → unzip → verify → (dry-run stop | replace) pipeline, off the main actor.
+    /// Returns a fail-safe outcome; each step logs its own success/failure. A dry run ends at
+    /// ``dryRunVerified``; a real run ends at ``installedRelaunching`` (the caller then relaunches) or
+    /// a `…Failed` case.
     private nonisolated static func runPipeline(
-        url: URL, assetName: String, tag: String, expectedTeamID: String, dryRunForced: Bool, ghAuth: Bool
+        url: URL, assetName: String, tag: String, expectedTeamID: String, dryRunForced: Bool,
+        ghAuth: Bool, targetBundle: URL
     ) async -> UpdateInstallOutcome {
         // A scratch directory for this attempt; removed on any exit. Placed under the system temp dir
         // (Phase 3 will instead stage on the /Applications volume for an atomic same-volume rename).
@@ -155,15 +196,52 @@ struct UpdateInstaller: AppUpdateInstalling {
         AppLogger.lifecycle.notice(
             "update-install: verify ok teamID=\(expectedTeamID, privacy: .public) gatekeeper=accepted")
 
-        // 4. Phase 2 stops here — no replacement, no relaunch. Copy the verified bundle out of the
-        // auto-removed scratch dir so the maintainer can inspect it after the run.
-        let keptBundle = FileManager.default.temporaryDirectory
-            .appendingPathComponent("TokenPace-update-\(tag).app", isDirectory: true)
-        try? FileManager.default.removeItem(at: keptBundle)
-        try? FileManager.default.copyItem(at: bundleURL, to: keptBundle)
-        AppLogger.lifecycle.notice(
-            "update-install: dry-run — would replace /Applications/TokenPace.app with \(tag, privacy: .public) (verified OK)\(dryRunForced ? " [TOKENPACE_UPDATE_DRYRUN]" : "")")
-        return .dryRunVerified(bundlePath: keptBundle.path)
+        // 4a. Dry run — stop before any replacement. Copy the verified bundle out of the auto-removed
+        //     scratch dir so it can be inspected after the run.
+        if dryRunForced {
+            let keptBundle = FileManager.default.temporaryDirectory
+                .appendingPathComponent("TokenPace-update-\(tag).app", isDirectory: true)
+            try? FileManager.default.removeItem(at: keptBundle)
+            try? FileManager.default.copyItem(at: bundleURL, to: keptBundle)
+            AppLogger.lifecycle.notice(
+                "update-install: dry-run — would replace \(targetBundle.path, privacy: .public) with \(tag, privacy: .public) (verified OK) [TOKENPACE_UPDATE_DRYRUN]")
+            return .dryRunVerified(bundlePath: keptBundle.path)
+        }
+
+        // 4b. Real install — atomically replace the target bundle with the verified one, keeping a
+        //     backup so an interrupted swap leaves either the whole old or the whole new bundle.
+        if let failure = replaceBundle(at: targetBundle, with: bundleURL) {
+            AppLogger.lifecycle.error("update-install: replace FAILED reason=\(failure, privacy: .public)")
+            return .replaceFailed(failure)
+        }
+        AppLogger.lifecycle.notice("update-install: replace ok target=\(targetBundle.path, privacy: .public)")
+        AppLogger.lifecycle.notice("update-install: installed \(tag, privacy: .public), relaunching")
+        return .installedRelaunching(tag: tag)
+    }
+
+    /// Atomically replace the bundle at `target` with `newBundle`, via `FileManager.replaceItemAt`
+    /// (a single rename with a backup — the OS leaves either the whole old or the whole new item, never
+    /// a half-written one). `newBundle` is first copied next to `target` so the swap is a same-volume
+    /// rename, not a cross-volume copy that could fail partway. Returns a failure string, or `nil`.
+    private nonisolated static func replaceBundle(at target: URL, with newBundle: URL) -> String? {
+        let stagingDir = target.deletingLastPathComponent()
+        let staged = stagingDir.appendingPathComponent(".TokenPace-staged-\(target.lastPathComponent)")
+        do {
+            try? FileManager.default.removeItem(at: staged)
+            // Copy onto the target's volume first (ditto preserves the signature; FileManager.copy also
+            // works, but ditto matches how the archive was produced).
+            if let failure = runTool("/usr/bin/ditto", [newBundle.path, staged.path]) {
+                return "stage copy: \(failure)"
+            }
+            _ = try FileManager.default.replaceItemAt(
+                target, withItemAt: staged,
+                backupItemName: ".TokenPace-backup-\(target.lastPathComponent)",
+                options: [.usingNewMetadataOnly])
+            return nil
+        } catch {
+            try? FileManager.default.removeItem(at: staged)
+            return error.localizedDescription
+        }
     }
 
     // MARK: download

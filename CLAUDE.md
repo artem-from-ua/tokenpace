@@ -82,6 +82,12 @@ swift run          # запуск
   через launchd): `defaults read com.artem-n.tokenpace lastSeenLatestVersion` = знайдений тег, і
   збережений верифікований bundle `$TMPDIR/TokenPace-update-<tag>.app` (перевір `codesign -dv` +
   `spctl --assess`). Після тесту **віднови чинний реліз** у `/Applications`.
+  Для **реальної** заміни+relaunch (без dry-run) є стуб **`TOKENPACE_UPDATE_TARGET=<шлях>`** —
+  націлює інсталятор на тестову копію `.app` поза `/Applications`, тож робочий інстанс не чіпається:
+  `cp -R build/TokenPace.app ~/UpdateTest/TokenPace.app`, тоді
+  `TOKENPACE_GH_AUTH=1 TOKENPACE_UPDATE_TARGET=~/UpdateTest/TokenPace.app ~/UpdateTest/TokenPace.app/Contents/MacOS/TokenPace`
+  → копія має замінитись на новіший тег і перезапуститись; перевір версію копії + що новий процес
+  стартував + `codesign`/`spctl` заміненого bundle. Прибери `~/UpdateTest` після тесту.
 - **Скриншоти з тимчасового dev-only коду НЕ рахуються за верифікацію.** Синтетичний рендер
   `StatusItemView`/PNG-матриці доводить лише логіку малювання, а не те, що фіча працює в живому
   віджеті, вікні Settings і потоці даних. Не заявляй «працює»/`готово` на їх основі.
