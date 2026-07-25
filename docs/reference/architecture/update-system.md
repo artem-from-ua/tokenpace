@@ -69,46 +69,46 @@ Environment-гейти (місце / живлення / metered) — **лише 
 title Auto-install decision gates (UpdateInstallPlan.decide)
 start
 if (auto-install enabled?) then (no)
-  #FDE8E8:skip: auto-install-off;
+  :skip — auto-install-off; <<#FDE8E8>>
   stop
 else (yes)
 endif
 if (newer than installed?) then (no)
-  #FDE8E8:skip: not-newer;
+  :skip — not-newer; <<#FDE8E8>>
   stop
 else (yes)
 endif
 if (running as .app in /Applications?) then (no)
-  #FDE8E8:skip: not-app-bundle;
+  :skip — not-app-bundle; <<#FDE8E8>>
   stop
 else (yes)
 endif
 if (matching version-named .zip asset?) then (no)
-  #FDE8E8:skip: no-asset;
+  :skip — no-asset; <<#FDE8E8>>
   stop
 else (yes)
 endif
-if (free space ≥ 5 GB after download?) then (no)
-  #FFF8E1:defer: insufficient-space;
+if (free space >= 5 GB after download?) then (no)
+  :defer — insufficient-space; <<#FFF8E1>>
   stop
 else (yes)
 endif
 if (on AC power?) then (no)
-  #FFF8E1:defer: on-battery;
+  :defer — on-battery; <<#FFF8E1>>
   stop
 else (yes)
 endif
 if (network un-metered?) then (no)
-  #FFF8E1:defer: metered-network;
+  :defer — metered-network; <<#FFF8E1>>
   stop
 else (yes)
 endif
-#E8F5E9:install:\ndownload → unzip → verify\n→ replace → relaunch;
+:install —\ndownload -> unzip -> verify\n-> replace -> relaunch; <<#E8F5E9>>
 stop
 @enduml
 ```
 
-![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/XPEnJiCm48RtFCL9NTB1HGoLIZhG0YbYOs7huiRdrgfpjcA7gZm04Yllm8lrIRYO8XK1wNPA_l_xdV-SMOYoYMrjisYYHPYtqGb3_DHQK5YPO1p1MaOCa3zvnSF3rzj7AsdKAHGEiqJ9Z8PSdWAGvCgYkXv2t211JcwO0GmMT-Mad1HXQtm1fmRXj9wo8aJdCxG18TzZ66P8okY49znXmpH9SFISmPEB8fdwkKrBP6WDCi18Uizmk9XxRqqb8pSGpcQmIQnQKXRxWsePgqsNz8nDrwqWMQE2qOln71umdaaIITIVeHj425vM28Ut3nZ3_Gr87RauvNPadVnTsM8nAIyBXHgRecksrTfK1YcAnEdFuniolmNlkEL-C7_kIaO-oFxSbkFEDLjeITJ8yZzs_8Dx58cZxt_ue9minkLLSRmxnPA-6u73wpldTMle9jwEqVibTNE3tgOkqsnbIzLccgM06MFvv_a4)
+![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/ZPF1JW8n48Rl-nIJU853CHv841L1NOmtBzwu3DifD9Hfi-rAyEH3-8G-YRCBH18YxctI_lD_k_zCnp5XcQgrov9DZc1I9QyiowbpeAcmqNg61IQAq7aBMegNtUshG-xL2atTh779h84E7XiGuzoHlkz2MX93Xtqt0nZ6bGtm_Va5nsBbZRc1szkBwLC-o0UZaIXZyY4Z5mawMuhTZ5XRqs2ODbIAApBi-yzWs2VLDBJtBojcoml023qCGI1mEGd1sGAJ91BFigH1pIlMZje3rvYAPKryfxBEN36kIKFlGtmnHafdYAeHj6UPaWXYm89WT0TzU7u0D4dor7x3pkD9afgCtDOm2RionXQMEAd6OeUTJWVvrJzOMQJ98mGlW_WR87y-noGVisrlp9Gslbn1nMfDqdgw2h_-Uu7QzxI330yBBGupFgG4QYJ8Ua1IoDYisSvOofA2gxDjIeSL5yi6am-c_VnQC0raBDRoxdu0)
 
 ## Компоненти системи оновлень
 
