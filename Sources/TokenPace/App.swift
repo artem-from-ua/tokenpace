@@ -97,6 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastKnownRelease: GitHubRelease?
     /// The in-flight update fetch, if any — cancelled before a new check and on terminate.
     private var updateTask: Task<Void, Never>?
+    /// The in-flight auto-install (dry-run in Phase 2, #123), if any — cancelled before a new one and
+    /// on terminate.
+    private var installTask: Task<Void, Never>?
     /// The in-flight archive sync, if any (#110) — cancelled before a new sync and on terminate.
     private var archiveTask: Task<Void, Never>?
     /// The result of the last archive sync, retained so the Settings status line can show
@@ -500,6 +503,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pollTask?.cancel()
         statusTask?.cancel()
         updateTask?.cancel()
+        installTask?.cancel()
         archiveTask?.cancel()
         ageTimer?.invalidate()
         resetTimer?.invalidate()
@@ -789,24 +793,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UpdateNotifier.post(release: release)
         }
 
-        logAutoInstallDecision(for: release)
+        evaluateAutoInstall(for: release)
     }
 
-    /// Evaluate — and, for now, only **log** — whether this release would be auto-installed (#122).
-    /// The pure `UpdateInstallPlan.decide` folds every gate (opt-in, newer, real `.app`, has asset)
-    /// into one verdict; later phases (#123/#124) turn a `.install` verdict into an actual download +
-    /// replace. Keeping the decision wired but inert here lets the whole gate matrix be exercised on a
-    /// live build (via `TOKENPACE_FAKE_LATEST`) before any destructive I/O exists.
-    private func logAutoInstallDecision(for release: GitHubRelease) {
+    /// Decide whether to auto-install this release and, on a `.install` verdict, run the installer
+    /// (#122/#123). The pure `UpdateInstallPlan.decide` folds every gate (opt-in, newer, real `.app`,
+    /// has asset, AC power, unmetered) into one verdict; the log line names the outcome either way.
+    ///
+    /// The power/metered facts are read from the shell (`PowerSource`, `NetworkMonitor.isMetered`) and
+    /// injected into the pure plan — they gate *installation only*, never the lightweight update check
+    /// (`pollUpdateIfDue`), which keeps running on the 12 h cadence regardless of power or network.
+    ///
+    /// A **forced** run (a deliberate dry run via `TOKENPACE_UPDATE_DRYRUN`) bypasses the environment
+    /// gates by passing favourable values — the maintainer asked for it explicitly, so battery/metered
+    /// courtesy doesn't apply. The `deferOnBattery`/`deferMeteredNetwork` verdicts are *temporary*: the
+    /// next update heartbeat re-evaluates, so the install happens once conditions improve.
+    ///
+    /// **Phase 2 scope:** on `.install` the installer downloads → verifies → unzips, but stops before
+    /// any `/Applications` replacement (a dry run) — the real replace + relaunch lands in Phase 3
+    /// (#124). The download only runs when the run is a deliberate dry run (`TOKENPACE_UPDATE_DRYRUN`),
+    /// so a normal build never fetches until Phase 3 makes installation real; without the flag the
+    /// verdict is logged and the signal path (banner/menu/Download) carries the update as before.
+    private func evaluateAutoInstall(for release: GitHubRelease) {
+        let forced = ProcessInfo.processInfo.environment["TOKENPACE_UPDATE_DRYRUN"] == "1"
         let decision = UpdateInstallPlan.decide(
             release: release,
             currentVersion: TokenPaceKit.version,
             isAppBundle: LaunchAtLoginController.isAppBundle,
-            autoInstallEnabled: PersistedConfig.installUpdatesAutomatically)
+            autoInstallEnabled: PersistedConfig.installUpdatesAutomatically,
+            onACPower: forced ? true : PowerSource.isOnACPower,
+            networkIsMetered: forced ? false : network.isMetered)
         switch decision {
         case let .install(asset, targetVersion):
             AppLogger.lifecycle.notice(
                 "update-install: decision=install target=\(targetVersion, privacy: .public) asset=\(asset.name, privacy: .public)")
+            startDryRunInstallIfRequested(asset: asset, tag: targetVersion)
+        case let .deferOnBattery(_, targetVersion):
+            AppLogger.lifecycle.notice(
+                "update-install: decision=defer reason=on-battery target=\(targetVersion, privacy: .public)")
+        case let .deferMeteredNetwork(_, targetVersion):
+            AppLogger.lifecycle.notice(
+                "update-install: decision=defer reason=metered-network target=\(targetVersion, privacy: .public)")
         case .skipAutoInstallOff:
             AppLogger.lifecycle.notice("update-install: decision=skip reason=auto-install-off")
         case .skipNotNewer:
@@ -815,6 +842,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppLogger.lifecycle.notice("update-install: decision=skip reason=not-app-bundle")
         case .skipNoAsset:
             AppLogger.lifecycle.notice("update-install: decision=skip reason=no-asset")
+        }
+    }
+
+    /// Run the Phase 2 dry-run installer, but only under `TOKENPACE_UPDATE_DRYRUN` — a verification
+    /// affordance, never a normal-run action. Downloads/verifies/unzips `asset` and logs the outcome;
+    /// nothing is replaced. Dispatched on `installTask` (cancelled before a new one / on terminate);
+    /// because `AppDelegate` is `@MainActor`, the continuation after `await` is main-actor-safe.
+    private func startDryRunInstallIfRequested(asset: GitHubReleaseAsset, tag: String) {
+        guard ProcessInfo.processInfo.environment["TOKENPACE_UPDATE_DRYRUN"] == "1" else { return }
+        installTask?.cancel()
+        let installer = UpdateInstaller(ghAuthEnabled: ghAuthEnabled)
+        installTask = Task { [weak self] in
+            let outcome = await installer.install(asset, expectedTag: tag)
+            guard self != nil, !Task.isCancelled else { return }
+            switch outcome {
+            case let .dryRunVerified(bundlePath):
+                AppLogger.lifecycle.notice(
+                    "update-install: dry-run complete, verified bundle at \(bundlePath, privacy: .public)")
+            case .notApplicable, .downloadFailed, .verifyFailed, .unzipFailed:
+                AppLogger.lifecycle.error("update-install: dry-run did not complete (\(String(describing: outcome), privacy: .public))")
+            }
         }
     }
 

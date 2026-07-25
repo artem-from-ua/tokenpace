@@ -2,10 +2,15 @@ import Foundation
 
 // MARK: - UpdateInstallDecision
 
-/// The outcome of ``UpdateInstallPlan/decide(release:currentVersion:isAppBundle:autoInstallEnabled:)``
+/// The outcome of ``UpdateInstallPlan/decide(release:currentVersion:isAppBundle:autoInstallEnabled:onACPower:networkIsMetered:)``
 /// (#122): whether to auto-install `release`, and if not, why not. The non-`install` cases are
 /// distinct so the shell can log a precise reason and, where relevant, keep the manual "Download"
 /// fallback visible.
+///
+/// Two flavours of "not now": a **skip** is a settled no for this release (opt-out, not newer, dev
+/// build, no asset); a **defer** is a *temporary* no on an otherwise-installable release because the
+/// environment is unfavourable (on battery, or a metered network). A deferred release is re-evaluated
+/// on the next update heartbeat, so it installs as soon as conditions improve — no state to persist.
 public enum UpdateInstallDecision: Sendable, Equatable {
     /// Install now: `asset` is the verified-name installable `.zip`, `targetVersion` its release tag.
     case install(asset: GitHubReleaseAsset, targetVersion: String)
@@ -19,6 +24,13 @@ public enum UpdateInstallDecision: Sendable, Equatable {
     /// The release is newer but carries no installable asset (no `TokenPace-<version>.zip`, or the only
     /// match was not HTTPS) — fall back to the manual "Download" link.
     case skipNoAsset
+    /// Installable, but the Mac is on battery — **defer** until it is plugged into AC power, so an
+    /// interrupted download/replace can't be caused by a drained battery (retried next heartbeat).
+    case deferOnBattery(asset: GitHubReleaseAsset, targetVersion: String)
+    /// Installable, but the network is metered (expensive / constrained — cellular, hotspot, Low Data
+    /// Mode) — **defer** until an unmetered network, so a ~10 MB download isn't spent on a capped link
+    /// (retried next heartbeat).
+    case deferMeteredNetwork(asset: GitHubReleaseAsset, targetVersion: String)
 }
 
 // MARK: - UpdateInstallPlan
@@ -32,10 +44,18 @@ public enum UpdateInstallDecision: Sendable, Equatable {
 /// 2. **newer** — ``UpdateComparison/isNewer(tag:than:)`` guards downgrade/replay/unparsable tags.
 /// 3. **real bundle** — `isAppBundle` (a `swift run` binary cannot be swapped in place).
 /// 4. **asset** — ``UpdateAssetSelector`` finds the version-named HTTPS `.zip`.
+/// 5. **AC power** — on battery, *defer* (don't risk a mid-install battery drain).
+/// 6. **unmetered** — on a metered link, *defer* (don't spend a capped connection on the download).
 ///
-/// The order is deliberate: opt-in and "newer" are checked before the bundle/asset gates so that a
-/// user who has the feature off, or is already current, gets a cheap early return without inspecting
-/// assets — and so the logged reason names the *why-not* the user would most expect.
+/// The order is deliberate. The settled-no gates (1–4) come first, cheapest and most fundamental
+/// first, so a user who has the feature off, is already current, or has no installable asset gets an
+/// early return naming the reason they'd expect. The environment gates (5–6) come last, because they
+/// only make sense on an otherwise-installable release and are *temporary* — they carry the chosen
+/// `asset` so the shell need not re-select, and produce a `defer…` the next heartbeat re-evaluates.
+///
+/// A caller performing a **forced** install (a deliberate dry run, or a manual "install now") passes
+/// `onACPower: true, networkIsMetered: false` to bypass gates 5–6 — the user has explicitly asked, so
+/// the environment courtesy does not apply.
 public enum UpdateInstallPlan {
 
     /// Decide whether to auto-install `release`.
@@ -47,11 +67,17 @@ public enum UpdateInstallPlan {
     ///   - isAppBundle: Whether the process is a real installed `.app` (`LaunchAtLoginController
     ///     .isAppBundle`), injected so this stays pure.
     ///   - autoInstallEnabled: The `PersistedConfig.installUpdatesAutomatically` opt-in.
+    ///   - onACPower: Whether the Mac is on AC power (adapter connected). A desktop Mac is always
+    ///     `true`; injected so this stays pure. `true` for a forced install.
+    ///   - networkIsMetered: Whether the current network is expensive/constrained (cellular, hotspot,
+    ///     Low Data Mode). Injected so this stays pure. `false` for a forced install.
     public static func decide(
         release: GitHubRelease,
         currentVersion: String,
         isAppBundle: Bool,
-        autoInstallEnabled: Bool
+        autoInstallEnabled: Bool,
+        onACPower: Bool,
+        networkIsMetered: Bool
     ) -> UpdateInstallDecision {
         guard autoInstallEnabled else { return .skipAutoInstallOff }
         guard UpdateComparison.isNewer(tag: release.tagName, than: currentVersion) else {
@@ -59,6 +85,11 @@ public enum UpdateInstallPlan {
         }
         guard isAppBundle else { return .skipNotAppBundle }
         guard let asset = UpdateAssetSelector.selectZIP(from: release) else { return .skipNoAsset }
+        // Environment gates last — the release is installable, only the conditions aren't right yet.
+        guard onACPower else { return .deferOnBattery(asset: asset, targetVersion: release.tagName) }
+        guard !networkIsMetered else {
+            return .deferMeteredNetwork(asset: asset, targetVersion: release.tagName)
+        }
         return .install(asset: asset, targetVersion: release.tagName)
     }
 }
