@@ -56,6 +56,11 @@ final class SettingsWindowController: NSWindowController {
     /// by the time this fires.
     var onServiceDotChange: ((Bool) -> Void)?
 
+    /// Called when the user toggles "Pause polling while the screen is locked" (#114), with the new
+    /// on/off state — wired by `AppDelegate.openSettings` to un-park the loop when turned off. Already
+    /// persisted (via `PersistedConfig`) by the time this fires; the observer reads the pref live.
+    var onPausePollingChange: ((Bool) -> Void)?
+
     /// Called when the user clicks "Archive now" (#110) — wired by `AppDelegate.openSettings` to run
     /// an immediate archive sync that bypasses the daily cadence.
     var onArchiveNow: (() -> Void)?
@@ -96,6 +101,10 @@ final class SettingsWindowController: NSWindowController {
     /// The launch-at-login checkbox — its state is synced from the live `SMAppService` status every
     /// time the window is shown (the user may have changed it in System Settings meanwhile).
     private var launchToggle: NSButton!
+
+    /// The "Pause polling while the screen is locked" checkbox (#114), synced from `PersistedConfig`
+    /// on every `show()`.
+    private var pausePollingToggle: NSButton!
 
     /// The "Calm MenuBar Widget colors" checkbox (#105), synced from `PersistedConfig` on every
     /// `show()`.
@@ -158,6 +167,7 @@ final class SettingsWindowController: NSWindowController {
     func show() {
         lastToggleFailed = false   // a fresh open starts from the status-derived hint (#69)
         syncToggleFromSystem()
+        pausePollingToggle.state = PersistedConfig.pausePollingWhenScreenLocked ? .on : .off
         syncMonitoredServicesFromConfig()
         calmColorsToggle.state = PersistedConfig.calmMenuBarColors ? .on : .off
         syncResetCountdownFromConfig()
@@ -197,6 +207,24 @@ final class SettingsWindowController: NSWindowController {
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
         stack.addArrangedSubview(hintLabel)
         hintLabel.widthAnchor.constraint(
+            equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
+
+        pausePollingToggle = NSButton(
+            checkboxWithTitle: "Pause polling while the screen is locked",
+            target: self,
+            action: #selector(togglePausePolling(_:)))
+        stack.setCustomSpacing(12, after: hintLabel)   // separate from the launch-at-login group
+        stack.addArrangedSubview(pausePollingToggle)
+
+        // Explains the toggle: no usage-API calls while the screen is off; resumes on wake.
+        let pausePollingHint = NSTextField(wrappingLabelWithString:
+            "Skips usage polls while the screen is locked, off, or the screensaver is running, "
+            + "and refreshes right away on unlock. System sleep always pauses regardless.")
+        pausePollingHint.font = .systemFont(ofSize: 11)
+        pausePollingHint.textColor = .secondaryLabelColor
+        pausePollingHint.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(pausePollingHint)
+        pausePollingHint.widthAnchor.constraint(
             equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
 
         stack.addArrangedSubview(sectionSeparator())
@@ -642,6 +670,15 @@ final class SettingsWindowController: NSWindowController {
         PersistedConfig.showServiceStatusDot = on
         AppLogger.lifecycle.notice("service-status-dot: menu-bar set \(on, privacy: .public)")
         onServiceDotChange?(on)
+    }
+
+    /// Persist the "Pause polling while the screen is locked" choice (#114) and notify the app so a
+    /// loop already parked by a screen lock resumes when the pause is turned off.
+    @objc private func togglePausePolling(_ sender: NSButton) {
+        let on = sender.state == .on
+        PersistedConfig.pausePollingWhenScreenLocked = on
+        AppLogger.lifecycle.notice("screen-lock-pause: setting set \(on, privacy: .public)")
+        onPausePollingChange?(on)
     }
 
     /// A "Display reset countdown" control changed (#103): refresh the checkbox enablement, read the

@@ -1,9 +1,16 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [0032]
 date: 2026-06-22
 ---
 
 # ADR-0011: PollingEngine — async-цикл, адаптивний інтервал і seam'и sleep/wake/мережі
+
+> **Заміщено [ADR-0032](0032-simplified-polling-cadence.md).** Модель інтервалу спрощено: `AdaptiveCadence`
+> прибрано, база стала пласкі 3 хв, idle-оверрайд — 15 хв (замість 30), а 429-backoff більше не ескалює
+> `3→6→12→15 хв`, а лише honor'ить `Retry-After`. Async-цикл, seam'и (`PollScheduler`,
+> `ClaudeActivityProbe`, `NWPathMonitor`, `NSWorkspace`), `minInterval` floor і принцип «лог лише при
+> зміні» з цього ADR лишаються чинними — замінено саме *правила частоти*, не архітектуру циклу.
 
 ## Контекст
 

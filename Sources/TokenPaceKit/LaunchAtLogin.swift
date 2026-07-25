@@ -8,7 +8,7 @@ import Foundation
 /// `register()`/`unregister()`/`status` must live in the `TokenPace` glue target
 /// (`LaunchAtLoginController`). What *can* be tested — and reused in Phase 2 — is the semantic
 /// status mirror plus the handful of decisions made against it. Keeping those here follows the same
-/// pure-core / thin-shell split as `UsageHealth` and `AdaptiveCadence` (ADR-0010, ADR-0011).
+/// pure-core / thin-shell split as `UsageHealth` and `PollingBackoff` (ADR-0010, ADR-0011).
 ///
 /// The enum deliberately does **not** import `ServiceManagement`: it is a localisation- and
 /// platform-free value type, so `TokenPaceKit` stays dependency-light and the predicates are unit

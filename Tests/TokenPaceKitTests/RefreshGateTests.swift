@@ -43,7 +43,7 @@ struct RefreshGateTests {
     }
 
     @Test func stepsAreInSeconds() {
-        // 1, 5, 30, 60 minutes — the `* 60` factor is load-bearing (see PollingBackoff.steps).
+        // 1, 5, 30, 60 minutes — the `* 60` factor is load-bearing (minutes stored as seconds).
         #expect(RefreshGate.steps == [60, 300, 1800, 3600])
     }
 }
