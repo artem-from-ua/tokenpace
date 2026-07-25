@@ -11,23 +11,23 @@ struct UpdateCheckCadenceTests {
         #expect(UpdateCheckCadence.isDue(lastCheck: nil, now: now))
     }
 
-    @Test func notDueBeforeADay() {
-        let twelveHoursAgo = now.addingTimeInterval(-12 * 60 * 60)
-        #expect(!UpdateCheckCadence.isDue(lastCheck: twelveHoursAgo, now: now))
+    @Test func notDueBeforeInterval() {
+        let sixHoursAgo = now.addingTimeInterval(-6 * 60 * 60)   // < the 12 h interval
+        #expect(!UpdateCheckCadence.isDue(lastCheck: sixHoursAgo, now: now))
     }
 
     @Test func dueExactlyAtBoundary() {
-        // The 24 h boundary counts as due (>=), matching StatusCadence.
-        let exactlyADayAgo = now.addingTimeInterval(-UpdateCheckCadence.interval)
-        #expect(UpdateCheckCadence.isDue(lastCheck: exactlyADayAgo, now: now))
+        // The 12 h boundary counts as due (>=), matching StatusCadence.
+        let exactlyIntervalAgo = now.addingTimeInterval(-UpdateCheckCadence.interval)
+        #expect(UpdateCheckCadence.isDue(lastCheck: exactlyIntervalAgo, now: now))
     }
 
-    @Test func dueAfterADay() {
-        let overADayAgo = now.addingTimeInterval(-(UpdateCheckCadence.interval + 1))
-        #expect(UpdateCheckCadence.isDue(lastCheck: overADayAgo, now: now))
+    @Test func dueAfterInterval() {
+        let overIntervalAgo = now.addingTimeInterval(-(UpdateCheckCadence.interval + 1))
+        #expect(UpdateCheckCadence.isDue(lastCheck: overIntervalAgo, now: now))
     }
 
-    @Test func intervalIsTwentyFourHours() {
-        #expect(UpdateCheckCadence.interval == 24 * 60 * 60)
+    @Test func intervalIsTwelveHours() {
+        #expect(UpdateCheckCadence.interval == 12 * 60 * 60)
     }
 }

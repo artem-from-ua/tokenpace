@@ -259,9 +259,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UpdateNotifier.installDelegate()
         if PersistedConfig.automaticUpdateChecks {
             UpdateNotifier.requestAuthorizationIfNeeded()
-            // Always check once on launch, bypassing the 24 h cadence: a build the user just
-            // installed/relaunched should surface a pending update immediately, not up to a day later.
-            // The cadence still governs re-checks during a long-running session (`pollUpdateIfDue`).
+            // Always check once on launch, bypassing the 12 h cadence: a build the user just
+            // installed/relaunched should surface a pending update immediately, not up to half a day
+            // later. The cadence still governs re-checks during a long-running session
+            // (`pollUpdateIfDue`).
             performUpdateCheck(userInitiated: false)
         }
 
@@ -649,8 +650,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Update check (#37)
 
-    /// Run the daily GitHub-release check when it is due, riding the usage heartbeat like the status
-    /// poll. No-op when the user turned the feature off, or when the 24 h cadence has not elapsed.
+    /// Run the periodic GitHub-release check when it is due, riding the usage heartbeat like the
+    /// status poll. No-op when the user turned the feature off, or when the 12 h cadence has not
+    /// elapsed.
     private func pollUpdateIfDue() {
         guard PersistedConfig.automaticUpdateChecks else { return }
         guard UpdateCheckCadence.isDue(lastCheck: PersistedConfig.lastUpdateCheck, now: Date()) else { return }
@@ -658,7 +660,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Perform one update check — shared by three callers: the launch-time check (always, bypassing
-    /// the cadence), the daily heartbeat (`pollUpdateIfDue`, gated by `UpdateCheckCadence`), and the
+    /// the cadence), the periodic heartbeat (`pollUpdateIfDue`, gated by `UpdateCheckCadence`), and the
     /// Settings… "Check now" button (`userInitiated: true`). `userInitiated` only affects logging; all
     /// three record the attempt and surface a result identically.
     ///

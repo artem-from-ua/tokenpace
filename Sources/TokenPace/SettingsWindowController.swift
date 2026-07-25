@@ -83,7 +83,8 @@ final class SettingsWindowController: NSWindowController {
     /// is available.
     private var archiveStatusLabel: NSTextField!
 
-    /// The "Check for updates daily" checkbox (#37), synced from `PersistedConfig` on every `show()`.
+    /// The "Check for updates automatically" checkbox (#37), synced from `PersistedConfig` on every
+    /// `show()`.
     private var updatesToggle: NSButton!
     /// The "Check now" button (#37).
     private var checkNowButton: NSButton!
@@ -395,7 +396,7 @@ final class SettingsWindowController: NSWindowController {
         stack.addArrangedSubview(sectionHeader("Updates"))
 
         updatesToggle = NSButton(
-            checkboxWithTitle: "Check for updates daily",
+            checkboxWithTitle: "Check for updates automatically",
             target: self,
             action: #selector(toggleAutomaticUpdates(_:)))
         stack.addArrangedSubview(updatesToggle)
@@ -706,8 +707,8 @@ final class SettingsWindowController: NSWindowController {
 
     // MARK: Updates (#37)
 
-    /// Persist the "Check for updates daily" choice. Turning it on also (re)requests notification
-    /// authorization so a later banner can appear — a no-op outside a real `.app`.
+    /// Persist the "Check for updates automatically" choice. Turning it on also (re)requests
+    /// notification authorization so a later banner can appear — a no-op outside a real `.app`.
     @objc private func toggleAutomaticUpdates(_ sender: NSButton) {
         let on = sender.state == .on
         PersistedConfig.automaticUpdateChecks = on
