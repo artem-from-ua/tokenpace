@@ -3,33 +3,37 @@ import TokenPaceKit
 
 // MARK: - SettingsWindowController
 
-/// The "Settings…" window (#14): a small, single-instance panel reached from the bottom
-/// of the popup menu. It carries the minimal Phase-1 settings the user asked for — a launch-at-login
-/// toggle, the app version, and a link to the repository.
+/// The "Settings…" window (#14, redesigned #131): a macOS System Settings-style window reached from
+/// the popup menu — a sidebar of sections on the left, a detail pane of grouped-inset cards on the
+/// right. It replaces the original flat single-column panel (ADR-0012) once the settings outgrew a
+/// short scroll: a sidebar scales as options grow, where one long column did not.
 ///
-/// This window intentionally exists despite SPEC.md's "Без екрана налаштувань" (no settings screen):
-/// a launch-at-login toggle needs *some* affordance, and a window reads more discoverably than a
-/// menu-item checkbox (ADR-0012).
+/// The controller keeps the same public contract the `AppDelegate` wires (`AppDelegate.openSettings`):
+/// eight `on…Change`/provider callbacks plus `updateAvailability(_:)` and `updateArchiveStatus()`. All
+/// controls are still owned here and synced from `PersistedConfig`/the system on every `show()`; the
+/// per-section detail views are just the layout those controls live in. Every detail pane is built
+/// **eagerly** in `init`, because `updateAvailability`/`updateArchiveStatus` fire from background poll
+/// completions while the window is closed — a lazily-built pane would hit nil outlets.
 ///
-/// Opened from an accessory (menu-bar) app, so it relies on `NSApp.activate` + a floating window
-/// level to come to the front, rather than switching the activation policy to `.regular` (which
-/// would flash a Dock icon for one window — see `show()`).
+/// Opened from an accessory (menu-bar) app, so it uses `NSApp.activate` + a floating window level to
+/// come to the front (ADR-0012 §6), rather than switching activation policy to `.regular`.
 @MainActor
 final class SettingsWindowController: NSWindowController {
 
     private static let repoURL = URL(string: "https://github.com/artem-from-ua/tokenpace")!
 
-    /// The scroll view wrapping all settings content (#110) — the window scrolls when the content is
-    /// taller than the capped window height. Retained so `resizeToFit()` can read its document view.
-    private var scrollView: NSScrollView!
-
     private enum Metrics {
-        static let width: CGFloat = 400
+        static let contentWidth: CGFloat = 620
+        static let contentHeight: CGFloat = 480
+        static let sidebarWidth: CGFloat = 200
         static let padding: CGFloat = 20
-        static let rowSpacing: CGFloat = 12
-        /// Leading inset of the radio group nested under the "Claude WEB/Desktop" checkbox (#89).
+        static let cardSpacing: CGFloat = 20
+        static let sectionTitleGap: CGFloat = 7
+        /// Leading inset of the radio group nested under a parent switch (#89, #103).
         static let nestIndent: CGFloat = 18
     }
+
+    // MARK: Public callbacks (the AppDelegate contract — unchanged from the flat design)
 
     /// Called when the user changes the monitored-services selection (#89), with the new config —
     /// wired by `AppDelegate.openSettings` to re-poll the status page immediately. The config is
@@ -37,150 +41,104 @@ final class SettingsWindowController: NSWindowController {
     var onMonitoredServicesChange: ((MonitoredServices) -> Void)?
 
     /// Called when the user clicks "Check now" (#37) — wired by `AppDelegate.openSettings` to run an
-    /// immediate update check that bypasses the 12 h cadence.
+    /// immediate update check that bypasses the 24 h cadence.
     var onCheckForUpdatesNow: (() -> Void)?
 
     /// Called when the user toggles "Calm MenuBar Widget colors" (#105), with the new on/off state —
-    /// wired by `AppDelegate.openSettings` to re-render the menu-bar image immediately. The choice is
-    /// already persisted (via `PersistedConfig`) by the time this fires.
+    /// wired by `AppDelegate.openSettings` to re-render the menu-bar image immediately.
     var onCalmColorsChange: ((Bool) -> Void)?
 
-    /// Called when the user changes the menu-bar "Reset countdown" mode (#103), with the new mode —
-    /// wired by `AppDelegate.openSettings` to re-render the menu-bar image immediately. Already
-    /// persisted (via `PersistedConfig`) by the time this fires.
+    /// Called when the user changes the menu-bar "Reset countdown" mode (#103), with the new mode.
     var onResetCountdownModeMenuBarChange: ((ResetCountdownMode) -> Void)?
 
-    /// Called when the user toggles "Show service status dot on issues" (#31), with the new on/off
-    /// state — wired by `AppDelegate.openSettings` to re-render the menu-bar image immediately (the
-    /// dot changes both what is drawn and the item width). Already persisted (via `PersistedConfig`)
-    /// by the time this fires.
+    /// Called when the user toggles "Show service status dot on issues" (#31), with the new state.
     var onServiceDotChange: ((Bool) -> Void)?
 
     /// Called when the user toggles "Hide 7-day bar when calm" (#94), with the new on/off state —
     /// wired by `AppDelegate.openSettings` to re-render the menu-bar image immediately (the toggle
-    /// changes what is drawn — the 7-day bar and the 5h bar's vertical centring). Already persisted
-    /// (via `PersistedConfig`) by the time this fires.
+    /// changes what is drawn — the 7-day bar and the 5h bar's vertical centring).
     var onHideCalmSevenDayChange: ((Bool) -> Void)?
 
-    /// Called when the user toggles "Pause polling while the screen is locked" (#114), with the new
-    /// on/off state — wired by `AppDelegate.openSettings` to un-park the loop when turned off. Already
-    /// persisted (via `PersistedConfig`) by the time this fires; the observer reads the pref live.
+    /// Called when the user toggles "Pause polling while the screen is locked" (#114) — wired to
+    /// un-park the loop when turned off.
     var onPausePollingChange: ((Bool) -> Void)?
 
-    /// Called when the user clicks "Archive now" (#110) — wired by `AppDelegate.openSettings` to run
-    /// an immediate archive sync that bypasses the daily cadence.
+    /// Called when the user clicks "Archive now" (#110) — wired to run an immediate archive sync.
     var onArchiveNow: (() -> Void)?
 
-    /// Provides the last archive summary for the status line (#110), read from the app on each
-    /// `show()` / `updateArchiveStatus()`. `nil` until the first sync of the session completes.
+    /// Provides the last archive summary for the status line (#110), read on each `show()` /
+    /// `updateArchiveStatus()`. `nil` until the first sync of the session completes.
     var archiveSummaryProvider: (() -> LogArchiver.Summary?)?
 
-    /// The "Archive session logs to a folder" checkbox (#110), synced from `PersistedConfig` on every
-    /// `show()`.
-    private var archiveToggle: NSButton!
-    /// The "Choose…" button that opens an `NSOpenPanel` to pick the archive folder (#110).
-    private var archiveChooseButton: NSButton!
-    /// The "Archive now" button (#110), enabled only when the feature is on and a folder is set.
-    private var archiveNowButton: NSButton!
-    /// Shows the chosen destination path, or "No folder selected" (#110).
-    private var archivePathLabel: NSTextField!
-    /// Shows "Last archived: … · N updated · M files · <size>", or a pending hint (#110). Files and
-    /// size come from a live scan of the archive folder; "N updated" only when a fresh sync summary
-    /// is available.
-    private var archiveStatusLabel: NSTextField!
+    // MARK: Controls (owned here; the detail panes just lay them out)
 
-    /// The "Check for updates automatically" checkbox (#37), synced from `PersistedConfig` on every
-    /// `show()`.
-    private var updatesToggle: NSButton!
-    /// The "Install updates automatically" checkbox (#122), nested under `updatesToggle`; synced from
-    /// `PersistedConfig` on every `show()`. Enabled only while the parent is on and this is a real
-    /// `.app` bundle.
-    private var installAutomaticallyToggle: NSButton!
-    /// Explanatory line under `installAutomaticallyToggle` (#122): what it does and its `/Applications`
-    /// precondition, or why it is unavailable on a dev build. Text set in `syncUpdatesFromConfig`.
-    private var installAutomaticallyHint: NSTextField!
-    /// The "Check now" button (#37).
-    private var checkNowButton: NSButton!
-    /// The "Update available: vX.Y.Z — Download" line (#37), hidden until a newer release is known.
-    private var updateLineLabel: NSTextField!
-    /// The "Download" link button next to `updateLineLabel` (#37); hidden alongside it.
-    private var updateDownloadLink: NSButton!
-    /// The row holding the update-available label + Download link; hidden as a whole when up to date so
-    /// the stack drops it from layout (no empty gap under "Check now").
-    private var updateRow: NSStackView!
-    /// The release currently offered by the update line, or `nil` when up to date. Drives the
-    /// Download link's target.
-    private var latestRelease: GitHubRelease?
+    // General
+    private var launchToggle: NSSwitch!
+    private var hintLabel: NSTextField!
+    private var pausePollingToggle: NSSwitch!
 
-    /// The launch-at-login checkbox — its state is synced from the live `SMAppService` status every
-    /// time the window is shown (the user may have changed it in System Settings meanwhile).
-    private var launchToggle: NSButton!
-
-    /// The "Pause polling while the screen is locked" checkbox (#114), synced from `PersistedConfig`
-    /// on every `show()`.
-    private var pausePollingToggle: NSButton!
-
-    /// The "Calm MenuBar Widget colors" checkbox (#105), synced from `PersistedConfig` on every
-    /// `show()`.
-    private var calmColorsToggle: NSButton!
-
-    /// The "Hide 7-day bar when calm" checkbox (#94), synced from `PersistedConfig` on every `show()`.
-    private var hideCalmSevenDayToggle: NSButton!
-
-    /// The "Display reset countdown" controls (#103): a three-radio exclusive group plus one nested
-    /// checkbox. The radios pick the coarse intent — always show / smart / never — and the checkbox
-    /// under the middle ("smart") radio decides the one bit that separates ``ResetCountdownMode``'s
-    /// two smart cases: whether a *distant* (≥24 h) well-ahead-of-pace 7d reset is included
-    /// (``ResetCountdownMode/showDistant7d``) or dropped (``ResetCountdownMode/hideDistant7d``).
-    /// Collapsing the four flat radios this way makes the sole difference between the two smart modes
-    /// a single toggle instead of two near-identical long labels. Synced from `PersistedConfig` on
-    /// every `show()`.
+    // Menu Bar
+    private var calmColorsToggle: NSSwitch!
+    private var hideCalmSevenDayToggle: NSSwitch!
+    private var serviceDotToggle: NSSwitch!
     private var resetAlwaysRadio: NSButton!
     private var resetSmartRadio: NSButton!
-    /// Enabled only while `resetSmartRadio` is on; gates ``showDistant7d`` ↔ ``hideDistant7d``.
     private var resetIncludeDistantCheckbox: NSButton!
     private var resetNeverRadio: NSButton!
 
-    /// The "Show service status dot on issues" checkbox (#31), synced from `PersistedConfig` on every
-    /// `show()`.
-    private var serviceDotToggle: NSButton!
-
-    /// The "Claude Code" monitoring checkbox (#89).
-    private var claudeCodeToggle: NSButton!
-    /// The "Claude WEB/Desktop" monitoring checkbox (#89); gates the mode radios below it.
-    private var webDesktopToggle: NSButton!
-    /// The WEB/Desktop mode radios (#89): "Chat only" / "Chat and Cowork". Enabled only while
-    /// `webDesktopToggle` is on.
+    // Monitored Services
+    private var claudeCodeToggle: NSSwitch!
+    private var webDesktopToggle: NSSwitch!
     private var chatOnlyRadio: NSButton!
     private var chatAndCoworkRadio: NSButton!
 
-    /// Explanatory line under the checkbox (`hintText(inAppBundle:)`). Three states: a `swift run`
-    /// dev build is unavailable; an `.app` where a click just failed points at recovery; otherwise
-    /// a neutral note.
-    private var hintLabel: NSTextField!
+    // Session Logs
+    private var archiveToggle: NSSwitch!
+    private var archiveChooseButton: NSButton!
+    private var archiveNowButton: NSButton!
+    private var archivePathLabel: NSTextField!
+    private var archiveStatusLabel: NSTextField!
 
-    /// Whether the last toggle click failed to register in an `.app` bundle (e.g. an ad-hoc bundle
-    /// SMAppService refuses). Drives the recovery hint; reset on a successful toggle or a fresh
-    /// `show()` so a state the user has since fixed in System Settings is not shadowed by a stale
-    /// failure. Only meaningful when the checkbox is enabled (i.e. in an `.app` bundle).
+    // About / Updates
+    private var updatesToggle: NSSwitch!
+    private var checkNowButton: NSButton!
+    private var updateLineLabel: NSTextField!
+    private var updateDownloadLink: NSButton!
+    private var updateRow: NSView!
+    /// The card holding the update row, so it can collapse the row + its divider together (#37).
+    private var updatesCard: SettingsCard!
+    /// The release currently offered by the update line, or `nil` when up to date.
+    private var latestRelease: GitHubRelease?
+
+    /// Whether the last launch-at-login toggle failed in an `.app` bundle (drives the recovery hint,
+    /// #69); reset on a successful toggle or a fresh `show()`.
     private var lastToggleFailed = false
+
+    /// Whether the window has been positioned yet — so the first `show()` centres it (unless an
+    /// autosaved frame already placed it), and later shows leave the user's position alone (#131).
+    private var hasBeenPositioned = false
+
+    /// The split VC (sidebar + detail); the window's content view controller and single instance.
+    private var splitVC: SettingsSplitViewController!
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: Metrics.width, height: 160),
-            styleMask: [.titled, .closable],   // not .resizable — content is fixed-size
+            contentRect: NSRect(x: 0, y: 0, width: Metrics.contentWidth, height: Metrics.contentHeight),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false)
         window.title = "TokenPace"
-        window.level = .floating               // float above other apps' windows from a menu-bar app
+        window.level = .floating               // float above other apps from a menu-bar app (ADR-0012 §6)
         window.isReleasedWhenClosed = false    // keep the controller alive so re-opening reuses it
+        window.setFrameAutosaveName("TokenPaceSettings")   // remember size/position across opens
         self.init(window: window)
         buildContent()
     }
 
-    /// Show or re-focus the window. Re-syncs the toggle from the system, brings the app forward, and
-    /// centres on first display. Calling this while the window is already on screen just focuses it —
-    /// the single instance is never duplicated (see `AppDelegate.openSettings`).
+    /// Show or re-focus the window. Re-syncs every control from `PersistedConfig`/the system, brings
+    /// the app forward, and centres on first display (unless an autosaved frame restored a position).
+    /// Calling this while the window is already on screen just focuses it — the single instance is
+    /// never duplicated.
     func show() {
         lastToggleFailed = false   // a fresh open starts from the status-derived hint (#69)
         syncToggleFromSystem()
@@ -190,384 +148,281 @@ final class SettingsWindowController: NSWindowController {
         hideCalmSevenDayToggle.state = PersistedConfig.hideCalmSevenDayBar ? .on : .off
         syncResetCountdownFromConfig()
         serviceDotToggle.state = PersistedConfig.showServiceStatusDot ? .on : .off
-        syncUpdatesFromConfig()
+        updatesToggle.state = PersistedConfig.automaticUpdateChecks ? .on : .off
         archiveToggle.state = PersistedConfig.archiveEnabled ? .on : .off
         updateArchiveStatus()
         NSApp.activate(ignoringOtherApps: true)
-        if !(window?.isVisible ?? false) { window?.center() }
         showWindow(nil)
+        // Centre once, on the first show — but only if `setFrameUsingName` didn't restore an autosaved
+        // frame (a menu-bar app's window otherwise defaults to the bottom-left origin). Later shows keep
+        // wherever the user moved it. `frameAutosaveName` is non-empty, so try the saved frame first.
+        if !hasBeenPositioned {
+            hasBeenPositioned = true
+            let restored = window?.setFrameUsingName("TokenPaceSettings") ?? false
+            if !restored { window?.center() }
+        }
         window?.makeKeyAndOrderFront(nil)
     }
 
-    // MARK: Content
+    // MARK: Content assembly
 
     private func buildContent() {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Metrics.rowSpacing
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        let split = SettingsSplitViewController(
+            sidebarWidth: Metrics.sidebarWidth,
+            sections: [
+                .init(title: "General", symbol: "gearshape", tint: .systemGray, make: buildGeneralPane),
+                .init(title: "Menu Bar", symbol: "menubar.rectangle", tint: .systemIndigo, make: buildMenuBarPane),
+                .init(title: "Monitored Services", symbol: "dot.radiowaves.left.and.right", tint: .systemGreen, make: buildServicesPane),
+                .init(title: "Session Logs", symbol: "folder", tint: .systemOrange, make: buildSessionLogsPane),
+                .init(title: "About", symbol: "info.circle", tint: .systemBlue, make: buildAboutPane),
+            ])
+        // The window title stays "TokenPace" across sections — the selected section is already obvious
+        // from the highlighted sidebar row, exactly like macOS System Settings (which never repeats the
+        // pane name in the title bar). `onSelect` is left unused for the title (#131).
+        split.onSelect = nil
+        splitVC = split
+        window?.contentViewController = split   // triggers viewDidLoad → sidebar + first selection
+        // Build every pane up front so no outlet is nil when a background callback (updateAvailability
+        // / updateArchiveStatus) fires while the window is closed (#131). `contentViewController` above
+        // has already run `viewDidLoad`, which built + cached the first pane; this fills in the rest.
+        split.buildAllPanes()
+        window?.title = "TokenPace"
+    }
 
-        // ── General ───────────────────────────────────────────────────────────────────────────
-        stack.addArrangedSubview(sectionHeader("General"))
+    // MARK: Pane builders (all eager, called once from `buildContent`)
 
-        launchToggle = NSButton(
-            checkboxWithTitle: "Launch TokenPace at login",
-            target: self,
-            action: #selector(toggleLaunchAtLogin(_:)))
-        stack.addArrangedSubview(launchToggle)
+    private func buildGeneralPane() -> NSView {
+        let card = SettingsCard()
 
-        // Explains the launch-at-login state; text is set in `syncToggleFromSystem` from the live
-        // availability (a fixed-width wrap so the longer "unavailable" message stays readable).
-        hintLabel = NSTextField(wrappingLabelWithString: "")
-        hintLabel.font = .systemFont(ofSize: 11)
-        hintLabel.textColor = .secondaryLabelColor
-        hintLabel.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(hintLabel)
-        hintLabel.widthAnchor.constraint(
-            equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
+        launchToggle = SettingsRow.makeSwitch(target: self, action: #selector(toggleLaunchAtLogin(_:)))
+        hintLabel = SettingsRow.wrappingHint("")
+        let launchCol = NSStackView(views: [
+            leadingLabel("Launch TokenPace at login"), hintLabel,
+        ])
+        launchCol.orientation = .vertical
+        launchCol.alignment = .leading
+        launchCol.spacing = 2
+        card.addRow(SettingsRow.container(leading: launchCol, trailing: launchToggle))
 
-        pausePollingToggle = NSButton(
-            checkboxWithTitle: "Pause polling while the screen is locked",
-            target: self,
-            action: #selector(togglePausePolling(_:)))
-        stack.setCustomSpacing(12, after: hintLabel)   // separate from the launch-at-login group
-        stack.addArrangedSubview(pausePollingToggle)
+        pausePollingToggle = SettingsRow.makeSwitch(target: self, action: #selector(togglePausePolling(_:)))
+        let pauseCol = SettingsRow.labelColumn(
+            "Pause polling while the screen is locked",
+            hint: "Skips usage polls while the screen is locked, off, or the screensaver is running, "
+                + "and refreshes right away on unlock. System sleep always pauses regardless.")
+        card.addRow(SettingsRow.container(leading: pauseCol.view, trailing: pausePollingToggle))
 
-        // Explains the toggle: no usage-API calls while the screen is off; resumes on wake.
-        let pausePollingHint = NSTextField(wrappingLabelWithString:
-            "Skips usage polls while the screen is locked, off, or the screensaver is running, "
-            + "and refreshes right away on unlock. System sleep always pauses regardless.")
-        pausePollingHint.font = .systemFont(ofSize: 11)
-        pausePollingHint.textColor = .secondaryLabelColor
-        pausePollingHint.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(pausePollingHint)
-        pausePollingHint.widthAnchor.constraint(
-            equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
+        return pane(sections: [("General", card)])
+    }
 
-        stack.addArrangedSubview(sectionSeparator())
+    private func buildMenuBarPane() -> NSView {
+        // Appearance card: calm colours + service dot.
+        let appearance = SettingsCard()
 
-        // ── Menu bar widget (#105) ────────────────────────────────────────────────────────────
-        stack.addArrangedSubview(sectionHeader("Menu bar widget"))
-
-        calmColorsToggle = NSButton(
-            checkboxWithTitle: "Calm MenuBar Widget colors",
-            target: self,
-            action: #selector(toggleCalmColors(_:)))
-        stack.addArrangedSubview(calmColorsToggle)
-
-        // Explains what the toggle does — warning colours and the service dot are deliberately spared.
-        let calmHint = NSTextField(wrappingLabelWithString:
-            "Shows blue/green/yellow pacing bars as white in the menu bar. "
-            + "Warning colours and the service dot stay coloured.")
-        calmHint.font = .systemFont(ofSize: 11)
-        calmHint.textColor = .secondaryLabelColor
-        calmHint.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(calmHint)
-        calmHint.widthAnchor.constraint(
-            equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
+        calmColorsToggle = SettingsRow.makeSwitch(target: self, action: #selector(toggleCalmColors(_:)))
+        let calmCol = SettingsRow.labelColumn(
+            "Calm colors",
+            hint: "Shows blue/green/yellow pacing bars as white in the menu bar. Warning colours and "
+                + "the service dot stay coloured.")
+        appearance.addRow(SettingsRow.container(leading: calmCol.view, trailing: calmColorsToggle))
 
         // "Hide 7-day bar when calm" (#94): drop the 7-day bar while it is green/mild-yellow, leaving
         // the 5h bar centred alone — one fewer element on the tiny widget when the week is on track.
-        hideCalmSevenDayToggle = NSButton(
-            checkboxWithTitle: "Hide 7-day bar when calm",
-            target: self,
-            action: #selector(toggleHideCalmSevenDay(_:)))
-        stack.setCustomSpacing(12, after: calmHint)   // separate this toggle from the calm-colours hint
-        stack.addArrangedSubview(hideCalmSevenDayToggle)
+        hideCalmSevenDayToggle = SettingsRow.makeSwitch(target: self, action: #selector(toggleHideCalmSevenDay(_:)))
+        let hideCalmCol = SettingsRow.labelColumn(
+            "Hide 7-day bar when calm",
+            hint: "When the 7-day bar is green or mild-yellow, hides it and centres the 5-hour bar "
+                + "alone. An orange or red 7-day bar always stays visible.")
+        appearance.addRow(SettingsRow.container(leading: hideCalmCol.view, trailing: hideCalmSevenDayToggle))
 
-        // Explains what stays visible — an orange/red 7-day bar is never hidden.
-        let hideCalmHint = NSTextField(wrappingLabelWithString:
-            "When the 7-day bar is green or mild-yellow, hides it and centres the 5-hour bar alone. "
-            + "An orange or red 7-day bar always stays visible.")
-        hideCalmHint.font = .systemFont(ofSize: 11)
-        hideCalmHint.textColor = .secondaryLabelColor
-        hideCalmHint.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(hideCalmHint)
-        hideCalmHint.widthAnchor.constraint(
-            equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
+        serviceDotToggle = SettingsRow.makeSwitch(target: self, action: #selector(toggleServiceDot(_:)))
+        let dotCol = SettingsRow.labelColumn(
+            "Show service status dot on issues",
+            hint: "Draws a small coloured dot in the menu bar when a monitored Claude service has issues.")
+        appearance.addRow(SettingsRow.container(leading: dotCol.view, trailing: serviceDotToggle))
 
-        // "Display reset countdown" (#103): three radios pick the coarse intent, and a checkbox nested
-        // under the middle ("smart") radio flips the one bit between the two smart modes. AppKit groups
-        // radios sharing an `action` in one superview into an exclusive set; the vertical stack keeps
-        // them a single group. The checkbox shares that action too, so any change routes through
-        // `resetCountdownModeChanged`, which reads the whole group back into a `ResetCountdownMode`.
-        let resetLabel = NSTextField(labelWithString: "Display reset countdown:")
-        resetLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
-        stack.addArrangedSubview(resetLabel)
-        stack.setCustomSpacing(12, after: hideCalmHint)   // separate the countdown sub-section from the hide-calm hint
-
-        resetAlwaysRadio = NSButton(
-            radioButtonWithTitle: "Always",
+        // Reset-countdown card: the three-radio exclusive group + one nested checkbox (#103). The
+        // radios and the checkbox all share `resetCountdownModeChanged` and live as siblings in one
+        // stack inside a *single* card row, so AppKit's shared-action auto-grouping keeps them an
+        // exclusive set — splitting them across separate card rows would break exclusivity (#131).
+        let countdown = SettingsCard()
+        resetAlwaysRadio = NSButton(radioButtonWithTitle: "Always",
             target: self, action: #selector(resetCountdownModeChanged(_:)))
-        resetSmartRadio = NSButton(
-            radioButtonWithTitle: "When well ahead or limit reached",
+        resetSmartRadio = NSButton(radioButtonWithTitle: "When well ahead or limit reached",
             target: self, action: #selector(resetCountdownModeChanged(_:)))
-        resetNeverRadio = NSButton(
-            radioButtonWithTitle: "Never",
+        resetNeverRadio = NSButton(radioButtonWithTitle: "Never",
             target: self, action: #selector(resetCountdownModeChanged(_:)))
-        // The "smart" radio's sub-option: whether a distant (≥24 h) well-ahead 7d reset is included.
-        // Nesting is the same `indented(_:)` treatment the WEB/Desktop mode radios use.
         resetIncludeDistantCheckbox = NSButton(
             checkboxWithTitle: "Include distant 7d limit reset (≥ 24 h away)",
             target: self, action: #selector(resetCountdownModeChanged(_:)))
         let resetGroup = NSStackView(views: [
-            resetAlwaysRadio,
-            resetSmartRadio,
-            indented(resetIncludeDistantCheckbox),
-            resetNeverRadio,
+            resetAlwaysRadio, resetSmartRadio, indented(resetIncludeDistantCheckbox), resetNeverRadio,
         ])
         resetGroup.orientation = .vertical
         resetGroup.alignment = .leading
-        resetGroup.spacing = 4
-        let resetGroupWrapper = indented(resetGroup)
-        stack.addArrangedSubview(resetGroupWrapper)
+        resetGroup.spacing = 6
+        countdown.addRow(SettingsRow.container(leading: resetGroup))
 
-        serviceDotToggle = NSButton(
-            checkboxWithTitle: "Show service status dot on issues",
-            target: self,
-            action: #selector(toggleServiceDot(_:)))
-        stack.setCustomSpacing(12, after: resetGroupWrapper)   // separate the service-dot toggle from the countdown group
-        stack.addArrangedSubview(serviceDotToggle)
+        return pane(sections: [("Appearance", appearance), ("Reset Countdown", countdown)])
+    }
 
-        // Explains the toggle: the dot is a coloured marker that appears only on a service issue.
-        let serviceDotHint = NSTextField(wrappingLabelWithString:
-            "Draws a small coloured dot in the menu bar when a monitored Claude service has issues.")
-        serviceDotHint.font = .systemFont(ofSize: 11)
-        serviceDotHint.textColor = .secondaryLabelColor
-        serviceDotHint.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(serviceDotHint)
-        serviceDotHint.widthAnchor.constraint(
-            equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
+    private func buildServicesPane() -> NSView {
+        let card = SettingsCard()
 
-        stack.addArrangedSubview(sectionSeparator())
+        // Claude API — always monitored, not configurable. A disabled `NSSwitch` has no title, so the
+        // "always monitored" note is a muted trailing label beside the on+disabled switch (#89).
+        let apiNote = NSTextField(labelWithString: "always monitored")
+        apiNote.font = .systemFont(ofSize: 11)
+        apiNote.textColor = .secondaryLabelColor
+        let apiSwitch = NSSwitch()
+        apiSwitch.state = .on
+        apiSwitch.isEnabled = false
+        let apiTrailing = NSStackView(views: [apiNote, apiSwitch])
+        apiTrailing.orientation = .horizontal
+        apiTrailing.alignment = .centerY
+        apiTrailing.spacing = 8
+        card.addRow(SettingsRow.container(leading: leadingLabel("Claude API"), trailing: apiTrailing))
 
-        // ── Monitored services (#89) ──────────────────────────────────────────────────────────
-        stack.addArrangedSubview(sectionHeader("Monitored services"))
+        claudeCodeToggle = SettingsRow.makeSwitch(target: self, action: #selector(monitoredServicesToggled))
+        card.addRow(SettingsRow.container(leading: leadingLabel("Claude Code"), trailing: claudeCodeToggle))
 
-        // Claude API — always monitored, not configurable (TokenPace's own usage API depends on it),
-        // so the checkbox is shown on and disabled; the "(always monitored)" suffix says why. The
-        // title is drawn in `secondaryLabelColor` (an `attributedTitle`, since a disabled NSButton
-        // otherwise applies its own greying) — the same muted tone the explanatory hints use, rather
-        // than the default disabled grey.
-        let apiToggle = NSButton(checkboxWithTitle: "Claude API (always monitored)", target: nil, action: nil)
-        apiToggle.attributedTitle = NSAttributedString(
-            string: "Claude API (always monitored)",
-            attributes: [
-                .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
-                .foregroundColor: NSColor.secondaryLabelColor,
-            ])
-        apiToggle.state = .on
-        apiToggle.isEnabled = false
-        stack.addArrangedSubview(apiToggle)
-
-        claudeCodeToggle = NSButton(
-            checkboxWithTitle: "Claude Code", target: self, action: #selector(monitoredServicesToggled))
-        stack.addArrangedSubview(claudeCodeToggle)
-
-        webDesktopToggle = NSButton(
-            checkboxWithTitle: "Claude WEB/Desktop", target: self, action: #selector(monitoredServicesToggled))
-        stack.addArrangedSubview(webDesktopToggle)
-
-        // Nested mode radios under the WEB/Desktop checkbox. AppKit groups radios with the same
-        // action within one superview into an exclusive set; wrapping them in an indented vertical
-        // stack gives the visual nesting and keeps them a single group.
-        chatOnlyRadio = NSButton(
-            radioButtonWithTitle: "Chat only", target: self, action: #selector(monitoredServicesToggled))
-        chatAndCoworkRadio = NSButton(
-            radioButtonWithTitle: "Chat and Cowork", target: self, action: #selector(monitoredServicesToggled))
+        // WEB/Desktop + its two mode radios nested underneath, in one card row so the label, switch,
+        // and the indented radio group read as one grouped control.
+        webDesktopToggle = SettingsRow.makeSwitch(target: self, action: #selector(monitoredServicesToggled))
+        chatOnlyRadio = NSButton(radioButtonWithTitle: "Chat only",
+            target: self, action: #selector(monitoredServicesToggled))
+        chatAndCoworkRadio = NSButton(radioButtonWithTitle: "Chat and Cowork",
+            target: self, action: #selector(monitoredServicesToggled))
         let radioGroup = NSStackView(views: [chatOnlyRadio, chatAndCoworkRadio])
         radioGroup.orientation = .vertical
         radioGroup.alignment = .leading
-        radioGroup.spacing = 4
-        stack.addArrangedSubview(indented(radioGroup))
+        radioGroup.spacing = 6
 
-        stack.addArrangedSubview(sectionSeparator())
+        // Label + switch on top, indented radios directly beneath — as one grouped control in a single
+        // card row, hand-laid so there is exactly one set of vertical insets (two stacked container
+        // rows doubled the inset, leaving too big a gap above the radios, #131 feedback). The switch
+        // aligns to the label line (top), not the centre of the whole block; the radios hang 4 pt under
+        // the label with the standard 12 pt horizontal nest.
+        webDesktopToggle.translatesAutoresizingMaskIntoConstraints = false
+        let webLabel = leadingLabel("Claude WEB/Desktop")
+        webLabel.translatesAutoresizingMaskIntoConstraints = false
+        let webRadios = indented(radioGroup, by: 12)
+        webRadios.translatesAutoresizingMaskIntoConstraints = false
+        let webRow = NSView()
+        webRow.translatesAutoresizingMaskIntoConstraints = false
+        [webLabel, webDesktopToggle, webRadios].forEach { webRow.addSubview($0) }
+        let hInset = SettingsRow.Metrics.horizontalInset
+        let vInset = SettingsRow.Metrics.verticalInset
+        NSLayoutConstraint.activate([
+            webLabel.leadingAnchor.constraint(equalTo: webRow.leadingAnchor, constant: hInset),
+            webLabel.topAnchor.constraint(equalTo: webRow.topAnchor, constant: vInset),
+            webDesktopToggle.trailingAnchor.constraint(equalTo: webRow.trailingAnchor, constant: -hInset),
+            webDesktopToggle.centerYAnchor.constraint(equalTo: webLabel.centerYAnchor),
+            webLabel.trailingAnchor.constraint(lessThanOrEqualTo: webDesktopToggle.leadingAnchor, constant: -12),
+            webRadios.topAnchor.constraint(equalTo: webLabel.bottomAnchor, constant: 8),
+            webRadios.leadingAnchor.constraint(equalTo: webRow.leadingAnchor, constant: hInset),
+            webRadios.bottomAnchor.constraint(equalTo: webRow.bottomAnchor, constant: -vInset),
+        ])
+        card.addRow(webRow)
 
-        // ── Session logs (#110) ───────────────────────────────────────────────────────────────
-        stack.addArrangedSubview(sectionHeader("Session logs"))
+        return pane(sections: [("Monitored Services", card)])
+    }
 
-        archiveToggle = NSButton(
-            checkboxWithTitle: "Archive session logs to a folder",
-            target: self,
-            action: #selector(toggleArchive(_:)))
-        stack.addArrangedSubview(archiveToggle)
+    private func buildSessionLogsPane() -> NSView {
+        let card = SettingsCard()
 
-        // Explains what the archiver does and why — accumulate-only, survives Claude Code's cleanup.
-        let archiveHint = NSTextField(wrappingLabelWithString:
-            "Copies Claude Code's raw session logs to a folder you choose, daily. Files Claude Code "
-            + "deletes after 30 days are kept in the archive.")
-        archiveHint.font = .systemFont(ofSize: 11)
-        archiveHint.textColor = .secondaryLabelColor
-        archiveHint.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(archiveHint)
-        archiveHint.widthAnchor.constraint(
-            equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
+        archiveToggle = SettingsRow.makeSwitch(target: self, action: #selector(toggleArchive(_:)))
+        let archiveCol = SettingsRow.labelColumn(
+            "Archive session logs to a folder",
+            hint: "Copies Claude Code's raw session logs to a folder you choose, daily. Files Claude "
+                + "Code deletes after 30 days are kept in the archive.")
+        card.addRow(SettingsRow.container(leading: archiveCol.view, trailing: archiveToggle))
 
-        // The chosen-folder line + "Choose…" button on one row.
+        // Destination row: a "Destination" label above the chosen path (standard body size, not the
+        // small caption used for hints), with the Choose… button trailing (#131 feedback).
         archivePathLabel = NSTextField(labelWithString: "")
-        archivePathLabel.font = .systemFont(ofSize: 11)
+        archivePathLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
         archivePathLabel.textColor = .secondaryLabelColor
         archivePathLabel.lineBreakMode = .byTruncatingMiddle
-        archiveChooseButton = NSButton(title: "Choose…", target: self, action: #selector(chooseArchiveFolder))
-        archiveChooseButton.bezelStyle = .rounded
-        let archiveFolderRow = NSStackView(views: [archiveChooseButton, archivePathLabel])
-        archiveFolderRow.orientation = .horizontal
-        archiveFolderRow.alignment = .firstBaseline
-        archiveFolderRow.spacing = 8
-        stack.addArrangedSubview(archiveFolderRow)
-
-        archiveNowButton = NSButton(title: "Archive now", target: self, action: #selector(archiveNow))
-        archiveNowButton.bezelStyle = .rounded
-        stack.addArrangedSubview(archiveNowButton)
-        stack.setCustomSpacing(8, after: archiveNowButton)
+        let destinationCol = NSStackView(views: [leadingLabel("Destination"), archivePathLabel])
+        destinationCol.orientation = .vertical
+        destinationCol.alignment = .leading
+        destinationCol.spacing = 2
+        archiveChooseButton = SettingsRow.makeButton("Choose…", target: self, action: #selector(chooseArchiveFolder))
+        card.addRow(SettingsRow.container(leading: destinationCol, trailing: archiveChooseButton))
 
         archiveStatusLabel = NSTextField(labelWithString: "")
         archiveStatusLabel.font = .systemFont(ofSize: 11)
         archiveStatusLabel.textColor = .secondaryLabelColor
-        stack.addArrangedSubview(archiveStatusLabel)
+        archiveStatusLabel.lineBreakMode = .byWordWrapping
+        archiveStatusLabel.maximumNumberOfLines = 0
+        archiveNowButton = SettingsRow.makeButton("Archive Now", target: self, action: #selector(archiveNow))
+        card.addRow(SettingsRow.container(leading: archiveStatusLabel, trailing: archiveNowButton))
 
-        stack.addArrangedSubview(sectionSeparator())
+        return pane(sections: [("Archive", card)])
+    }
 
-        // ── Updates (#37) ─────────────────────────────────────────────────────────────────────
-        stack.addArrangedSubview(sectionHeader("Updates"))
+    private func buildAboutPane() -> NSView {
+        // About card: version + source link.
+        let about = SettingsCard()
 
-        updatesToggle = NSButton(
-            checkboxWithTitle: "Check for updates automatically",
-            target: self,
-            action: #selector(toggleAutomaticUpdates(_:)))
-        stack.addArrangedSubview(updatesToggle)
+        let versionValue = NSTextField(labelWithString: Self.versionText())
+        versionValue.font = .systemFont(ofSize: NSFont.systemFontSize)
+        versionValue.textColor = .secondaryLabelColor
+        about.addRow(SettingsRow.container(leading: leadingLabel("Version"), trailing: versionValue))
 
-        // Nested under "Check for updates automatically": whether a found update is also installed
-        // automatically (#122). Indented via `indented(_:)` like the other sub-options. Enabled only
-        // while the parent is on AND we are a real `.app` bundle (a `swift run` build can't self-
-        // replace) — see `updateInstallAvailability`.
-        installAutomaticallyToggle = NSButton(
-            checkboxWithTitle: "Install updates automatically",
-            target: self,
-            action: #selector(toggleInstallAutomatically(_:)))
-        stack.addArrangedSubview(indented(installAutomaticallyToggle))
+        let link = SettingsRow.makeLink("github.com/artem-from-ua/tokenpace", target: self, action: #selector(openRepo))
+        about.addRow(SettingsRow.container(leading: leadingLabel("Source code"), trailing: link))
 
-        // Explains the toggle and its precondition (a real .app in /Applications). Text is set in
-        // `syncUpdatesFromConfig` so a dev build can say why the option is unavailable.
-        installAutomaticallyHint = NSTextField(wrappingLabelWithString: "")
-        installAutomaticallyHint.font = .systemFont(ofSize: 11)
-        installAutomaticallyHint.textColor = .secondaryLabelColor
-        installAutomaticallyHint.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(indented(installAutomaticallyHint))
-        installAutomaticallyHint.widthAnchor.constraint(
-            equalToConstant: Metrics.width - 2 * Metrics.padding - Metrics.nestIndent).isActive = true
-        stack.setCustomSpacing(10, after: installAutomaticallyHint.superview ?? installAutomaticallyHint)
+        // Updates card (folded into About, #131): daily-check toggle, Check Now, and the hidden
+        // update-available row.
+        let updates = SettingsCard()
+        updatesCard = updates
 
-        checkNowButton = NSButton(title: "Check now", target: self, action: #selector(checkNow))
-        checkNowButton.bezelStyle = .rounded
-        stack.addArrangedSubview(checkNowButton)
-        // Tighten the gap below the button — the update-available row that follows is usually hidden,
-        // so the default row spacing leaves too much air under "Check now".
-        stack.setCustomSpacing(8, after: checkNowButton)
+        updatesToggle = SettingsRow.makeSwitch(target: self, action: #selector(toggleAutomaticUpdates(_:)))
+        checkNowButton = SettingsRow.makeButton("Check Now", target: self, action: #selector(checkNow))
+        let updatesTrailing = NSStackView(views: [checkNowButton, updatesToggle])
+        updatesTrailing.orientation = .horizontal
+        updatesTrailing.alignment = .centerY
+        updatesTrailing.spacing = 10
+        updates.addRow(SettingsRow.container(leading: leadingLabel("Check for updates daily"), trailing: updatesTrailing))
 
-        // The "Update available: vX.Y.Z" line + a "Download" link, both hidden until a newer release
-        // is found. Kept as two controls on one row: a plain label and a link button (same inline
-        // link style as the repo link in the About section).
         updateLineLabel = NSTextField(labelWithString: "")
-        updateLineLabel.font = .systemFont(ofSize: 11)
+        updateLineLabel.font = .systemFont(ofSize: 12)
         updateLineLabel.textColor = .secondaryLabelColor
-        updateDownloadLink = NSButton(title: "Download", target: self, action: #selector(openDownload))
-        updateDownloadLink.isBordered = false
-        updateDownloadLink.bezelStyle = .inline
-        updateDownloadLink.contentTintColor = .linkColor
-        updateDownloadLink.font = .systemFont(ofSize: 11)
-        updateRow = NSStackView(views: [updateLineLabel, updateDownloadLink])
-        updateRow.orientation = .horizontal
-        updateRow.alignment = .firstBaseline
-        updateRow.spacing = 6
-        updateRow.isHidden = true   // whole row hidden until an update is known (drops it from layout)
-        stack.addArrangedSubview(updateRow)
+        updateDownloadLink = SettingsRow.makeLink("Download", target: self, action: #selector(openDownload))
+        updateRow = SettingsRow.container(leading: updateLineLabel, trailing: updateDownloadLink)
+        updates.addRow(updateRow)
+        updates.setRow(updateRow, hidden: true)   // hidden (with its divider) until an update is known
 
-        stack.addArrangedSubview(sectionSeparator())
-
-        // ── About ─────────────────────────────────────────────────────────────────────────────
-        stack.addArrangedSubview(sectionHeader("About"))
-
-        let versionLabel = NSTextField(labelWithString: Self.versionText())
-        versionLabel.font = .systemFont(ofSize: 11)
-        versionLabel.textColor = .secondaryLabelColor
-        stack.addArrangedSubview(versionLabel)
-
-        let link = NSButton(
-            title: "github.com/artem-from-ua/tokenpace",
-            target: self,
-            action: #selector(openRepo))
-        link.isBordered = false
-        link.bezelStyle = .inline
-        link.contentTintColor = .linkColor
-        link.font = .systemFont(ofSize: 11)
-        stack.addArrangedSubview(link)
-
-        // The settings have outgrown a short panel (#110 added a Session-logs section), so the
-        // content lives in a document view inside a vertical scroll view: on a tall screen the window
-        // sizes to fit (no scroller shows), on a short one it caps its height and the extra content
-        // scrolls rather than running off-screen.
-        let documentView = NSView()
-        documentView.translatesAutoresizingMaskIntoConstraints = false
-        documentView.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: Metrics.padding),
-            stack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: Metrics.padding),
-            documentView.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: Metrics.padding),
-            documentView.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: Metrics.padding),
-            documentView.widthAnchor.constraint(equalToConstant: Metrics.width),
-        ])
-
-        let scrollView = NSScrollView()
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
-        scrollView.autohidesScrollers = true
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.documentView = documentView
-        self.scrollView = scrollView
-
-        window?.contentView = scrollView
-        resizeToFit()
+        return pane(sections: [("About", about), ("Updates", updates)])
     }
 
-    /// Size the window to the content, but never taller than most of the visible screen — beyond that
-    /// the scroll view takes over. Called after `buildContent` and whenever a status line grows/shrinks
-    /// (the archive line, the launch hint, the update row) so the window keeps hugging its content.
-    private func resizeToFit() {
-        guard let scrollView, let documentView = scrollView.documentView else { return }
-        let contentHeight = documentView.fittingSize.height
-        let maxHeight = (window?.screen ?? NSScreen.main)
-            .map { $0.visibleFrame.height * 0.85 } ?? 900
-        let height = min(contentHeight, maxHeight)
-        window?.setContentSize(NSSize(width: Metrics.width, height: height))
-    }
+    // MARK: Layout helpers
 
-    /// A bold section heading (`General` / `Monitored services`), the visual anchor of each group.
-    private func sectionHeader(_ title: String) -> NSView {
+    /// A plain leading label at the standard body size/colour.
+    private func leadingLabel(_ title: String) -> NSTextField {
         let label = NSTextField(labelWithString: title)
-        label.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
+        label.font = .systemFont(ofSize: NSFont.systemFontSize)
         label.textColor = .labelColor
         return label
     }
 
-    /// A full-content-width horizontal rule between sections (same technique as the original one).
-    private func sectionSeparator() -> NSView {
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        separator.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
-        return separator
+    /// A small semibold section title above a card (System Settings groups its cards under a muted
+    /// caption).
+    private func sectionTitle(_ title: String) -> NSTextField {
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 12, weight: .semibold)
+        label.textColor = .secondaryLabelColor
+        return label
     }
 
-    /// Wrap a view in a leading-indented row, for controls nested under a parent checkbox (the
-    /// WEB/Desktop mode radios). A fixed-width leading spacer gives the indent within the
-    /// leading-aligned vertical stack.
-    private func indented(_ view: NSView) -> NSView {
+    /// Wrap a view in a leading-indented row, for controls nested under a parent (the WEB/Desktop
+    /// mode radios, the "include distant 7d" checkbox). A fixed-width leading spacer gives the indent;
+    /// `by` overrides the default `nestIndent` where the row is already inset by a card container.
+    private func indented(_ view: NSView, by amount: CGFloat = Metrics.nestIndent) -> NSView {
         let spacer = NSView()
         spacer.translatesAutoresizingMaskIntoConstraints = false
-        spacer.widthAnchor.constraint(equalToConstant: Metrics.nestIndent).isActive = true
+        spacer.widthAnchor.constraint(equalToConstant: amount).isActive = true
         let row = NSStackView(views: [spacer, view])
         row.orientation = .horizontal
         row.alignment = .top
@@ -575,34 +430,71 @@ final class SettingsWindowController: NSWindowController {
         return row
     }
 
-    // MARK: Actions
+    /// Assemble a detail pane: a vertical run of `(title, card)` groups inside a scroll view, so a tall
+    /// pane scrolls rather than clipping. Each card stretches to the content width; the title sits above
+    /// it. Replaces the old window-wide `resizeToFit()` (each pane now scrolls independently, #131).
+    private func pane(sections: [(String, SettingsCard)]) -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Metrics.cardSpacing
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        for (title, card) in sections {
+            let group = NSStackView(views: [sectionTitle(title), card])
+            group.orientation = .vertical
+            group.alignment = .leading
+            group.spacing = Metrics.sectionTitleGap
+            group.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(group)
+            group.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            card.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+        }
+
+        // A flipped document so short content pins to the *top* of the pane (an NSScrollView document is
+        // bottom-origin otherwise, which pushed the cards down with a big gap above them, #131).
+        let document = FlippedView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: Metrics.padding),
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: Metrics.padding),
+            document.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: Metrics.padding),
+            // ≥ so a short pane doesn't stretch the stack to fill height; the document grows only when
+            // content is taller than the scroll view (then it scrolls).
+            document.bottomAnchor.constraint(greaterThanOrEqualTo: stack.bottomAnchor, constant: Metrics.padding),
+        ])
+
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.documentView = document
+        // Pin the document to the scroll view's width so cards fill the pane and only height scrolls.
+        document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
+        // At least as tall as the viewport so a short pane fills it (flipped → content sits at the top);
+        // taller content wins via the ≥ bottom constraint above and scrolls.
+        document.heightAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.heightAnchor).isActive = true
+        return scroll
+    }
+
+    // MARK: Sync from config / system
 
     private func syncToggleFromSystem() {
         let status = LaunchAtLoginController.currentStatus()
         launchToggle.state = LaunchAtLogin.toggleState(for: status) ? .on : .off
 
-        // Availability is gated on being a real `.app` bundle, not on status. A bare `swift run`
-        // binary is a dev build we never launch at login: the checkbox stays disabled and greyed,
-        // exactly as before (ADR-0012 §4). In a real `.app`, the checkbox is always enabled — even
-        // on `.notFound`, which for an installed bundle means the login-item dropped with a replaced
-        // bundle on update; clicking re-`register()`s and recovers it (#69, ADR-0018). We deliberately
-        // do NOT try to read "signed + in /Applications" from status alone — `isAppBundle` is the one
-        // reliable discriminator, and `register()` adjudicates the rest on click.
+        // Availability is gated on being a real `.app` bundle, not on status (ADR-0012 §4, ADR-0018).
         let inAppBundle = LaunchAtLoginController.isAppBundle
         launchToggle.isEnabled = inAppBundle
         let hint = hintText(inAppBundle: inAppBundle)
         hintLabel.stringValue = hint
-        // Hide the hint when empty (the neutral state) so the stack drops it from layout — otherwise an
-        // empty wrapping label still claims a row's height plus spacing, leaving a gap under General.
+        // Collapse the hint when empty (the neutral state) so the row doesn't keep a dead gap.
         hintLabel.isHidden = hint.isEmpty
-
-        // The hint wraps to a different height per message; refit so neither text is clipped.
-        resizeToFit()
     }
 
-    /// Load the persisted monitored-services config (#89) into the checkboxes and radios. Called on
-    /// every `show()`, so the window always reflects the stored choice (which a prior session or the
-    /// popup may have changed).
     private func syncMonitoredServicesFromConfig() {
         let config = PersistedConfig.monitoredServices
         claudeCodeToggle.state = config.claudeCodeEnabled ? .on : .off
@@ -612,18 +504,12 @@ final class SettingsWindowController: NSWindowController {
         updateRadioAvailability()
     }
 
-    /// The radios are only meaningful while WEB/Desktop is monitored, so they enable/disable with
-    /// the parent checkbox (the mode is still remembered in the config when disabled).
     private func updateRadioAvailability() {
         let enabled = webDesktopToggle.state == .on
         chatOnlyRadio.isEnabled = enabled
         chatAndCoworkRadio.isEnabled = enabled
     }
 
-    /// Load the persisted reset-countdown mode (#103) into the radio group + nested checkbox. The two
-    /// smart modes share the middle radio and differ only in the checkbox; `.always`/`.never` leave
-    /// the checkbox at `.on` (the `showDistant7d` default) so returning to the smart radio lands on a
-    /// predictable state. Called on every `show()`.
     private func syncResetCountdownFromConfig() {
         switch PersistedConfig.resetCountdownModeMenuBar {
         case .always:
@@ -642,14 +528,12 @@ final class SettingsWindowController: NSWindowController {
         updateResetCheckboxAvailability()
     }
 
-    /// The "include distant 7d reset" checkbox only distinguishes the two smart modes, so it is
-    /// enabled only while the middle radio is on (the choice is still remembered when disabled).
     private func updateResetCheckboxAvailability() {
         resetIncludeDistantCheckbox.isEnabled = (resetSmartRadio.state == .on)
     }
 
-    /// A monitored-services control changed (#89): read the current UI into a config, persist it,
-    /// refresh the radio enablement, and notify the app so it re-polls the status page immediately.
+    // MARK: Actions
+
     @objc private func monitoredServicesToggled() {
         updateRadioAvailability()
         let config = MonitoredServices(
@@ -660,9 +544,6 @@ final class SettingsWindowController: NSWindowController {
         onMonitoredServicesChange?(config)
     }
 
-    /// The explanatory line under the checkbox. A dev build (`swift run`) is not an `.app`, so
-    /// launch-at-login is unavailable; an `.app` where a click just failed points the user at
-    /// recovery; otherwise the hint is empty (the checkbox label speaks for itself).
     private func hintText(inAppBundle: Bool) -> String {
         if !inAppBundle {
             return "Unavailable in this build. Install TokenPace.app and launch it from "
@@ -673,15 +554,11 @@ final class SettingsWindowController: NSWindowController {
                  + "open it from Finder/Launchpad, or add it manually in System Settings → General → "
                  + "Login Items."
         }
-        // Neutral state: no hint — the checkbox label already says what it does.
         return ""
     }
 
-    /// The version line under the separator: just the version for an installed `.app`; a
-    /// "— Dev Build" tag for a bare `swift run` binary; and, under a stub, the stub mode too —
-    /// "Version 0.17.0 — Dev Build (stub: error)" — so a stubbed dev window is unmistakable.
     private static func versionText() -> String {
-        let base = "Version \(TokenPaceKit.version)"
+        let base = TokenPaceKit.version
         guard !LaunchAtLoginController.isAppBundle else { return base }
         if let stub = ProcessInfo.processInfo.environment["TOKENPACE_STUB"] {
             return "\(base) — Dev Build (stub: \(stub))"
@@ -689,7 +566,7 @@ final class SettingsWindowController: NSWindowController {
         return "\(base) — Dev Build"
     }
 
-    @objc private func toggleLaunchAtLogin(_ sender: NSButton) {
+    @objc private func toggleLaunchAtLogin(_ sender: NSSwitch) {
         let wantOn = sender.state == .on
         do {
             if wantOn { try LaunchAtLoginController.enable() }
@@ -697,34 +574,26 @@ final class SettingsWindowController: NSWindowController {
             lastToggleFailed = false
             AppLogger.lifecycle.notice("launch-at-login: user set \(wantOn, privacy: .public)")
         } catch {
-            // Best-effort: a throw on an unsigned build must not crash — roll the checkbox back and
-            // remember the failure so the hint explains it (#69). A deliberate user action, so this
-            // stays `.error` (unlike the routine startup attempt, which logs `.notice`).
+            // Best-effort: roll the switch back and remember the failure so the hint explains it (#69).
             lastToggleFailed = true
             AppLogger.lifecycle.error(
                 "launch-at-login: toggle failed: \(error.localizedDescription, privacy: .public)")
             sender.state = wantOn ? .off : .on
         }
-        // register() may resolve to .requiresApproval (user disabled it in Login Items) rather than
-        // .enabled — send them to System Settings, then reflect the real status on the checkbox.
         if LaunchAtLogin.needsSystemSettings(LaunchAtLoginController.currentStatus()) {
             LaunchAtLoginController.openLoginItemsSettings()
         }
         syncToggleFromSystem()
     }
 
-    /// Persist the "Calm MenuBar Widget colors" choice (#105) and notify the app so the menu-bar
-    /// image repaints immediately.
-    @objc private func toggleCalmColors(_ sender: NSButton) {
+    @objc private func toggleCalmColors(_ sender: NSSwitch) {
         let on = sender.state == .on
         PersistedConfig.calmMenuBarColors = on
         AppLogger.lifecycle.notice("calm-colors: menu-bar set \(on, privacy: .public)")
         onCalmColorsChange?(on)
     }
 
-    /// Persist the "Show service status dot on issues" choice (#31) and notify the app so the
-    /// menu-bar image repaints immediately (the dot changes both the drawing and the item width).
-    @objc private func toggleServiceDot(_ sender: NSButton) {
+    @objc private func toggleServiceDot(_ sender: NSSwitch) {
         let on = sender.state == .on
         PersistedConfig.showServiceStatusDot = on
         AppLogger.lifecycle.notice("service-status-dot: menu-bar set \(on, privacy: .public)")
@@ -733,26 +602,20 @@ final class SettingsWindowController: NSWindowController {
 
     /// Persist the "Hide 7-day bar when calm" choice (#94) and notify the app so the menu-bar image
     /// repaints immediately (the toggle changes both the drawing and the vertical layout).
-    @objc private func toggleHideCalmSevenDay(_ sender: NSButton) {
+    @objc private func toggleHideCalmSevenDay(_ sender: NSSwitch) {
         let on = sender.state == .on
         PersistedConfig.hideCalmSevenDayBar = on
         AppLogger.lifecycle.notice("hide-calm-7d: menu-bar set \(on, privacy: .public)")
         onHideCalmSevenDayChange?(on)
     }
 
-    /// Persist the "Pause polling while the screen is locked" choice (#114) and notify the app so a
-    /// loop already parked by a screen lock resumes when the pause is turned off.
-    @objc private func togglePausePolling(_ sender: NSButton) {
+    @objc private func togglePausePolling(_ sender: NSSwitch) {
         let on = sender.state == .on
         PersistedConfig.pausePollingWhenScreenLocked = on
         AppLogger.lifecycle.notice("screen-lock-pause: setting set \(on, privacy: .public)")
         onPausePollingChange?(on)
     }
 
-    /// A "Display reset countdown" control changed (#103): refresh the checkbox enablement, read the
-    /// radio group + checkbox back into a `ResetCountdownMode`, persist it, and notify the app so the
-    /// menu-bar image repaints immediately. The middle radio maps to one of the two smart modes per
-    /// the checkbox; `Always`/`Never` map straight through.
     @objc private func resetCountdownModeChanged(_ sender: NSButton) {
         updateResetCheckboxAvailability()
         let mode: ResetCountdownMode
@@ -774,95 +637,39 @@ final class SettingsWindowController: NSWindowController {
 
     // MARK: Updates (#37)
 
-    /// Load both update toggles from `PersistedConfig` and refresh the nested checkbox's enablement +
-    /// hint. Called on every `show()`, so the window always reflects the stored choice.
-    private func syncUpdatesFromConfig() {
-        updatesToggle.state = PersistedConfig.automaticUpdateChecks ? .on : .off
-        installAutomaticallyToggle.state = PersistedConfig.installUpdatesAutomatically ? .on : .off
-        updateInstallAvailability()
-    }
-
-    /// The "Install updates automatically" checkbox is only meaningful when update checks are on and
-    /// this is a real `.app` bundle (a `swift run` dev build cannot self-replace). Enable it only
-    /// then; otherwise disable it and explain why in the hint. The stored choice is preserved either
-    /// way — turning the parent back on re-enables it at its remembered state.
-    ///
-    /// Hint precedence puts the **`.app`-bundle** requirement first: in a dev build auto-install is
-    /// permanently impossible, so "Available only for TokenPace.app in /Applications" is the honest
-    /// message even with the parent toggle off — telling a dev user to "Turn on Check for updates"
-    /// would imply the option would then work, which it never will. In a real `.app`
-    /// (`inAppBundle == true`) that branch never fires, so a user only ever sees the parent-dependency
-    /// hint or the enabled description — the two cases that actually differ for them.
-    private func updateInstallAvailability() {
-        let inAppBundle = LaunchAtLoginController.isAppBundle
-        let checksOn = updatesToggle.state == .on
-        installAutomaticallyToggle.isEnabled = checksOn && inAppBundle
-
-        let hint: String
-        if !inAppBundle {
-            hint = "Available only for TokenPace.app installed in /Applications — a developer build "
-                 + "can't replace itself."
-        } else if !checksOn {
-            hint = "Turn on \u{201C}Check for updates automatically\u{201D} to enable this."
-        } else {
-            hint = "Downloads and installs a newer release in the background, then restarts. "
-                 + "Falls back to the manual download if anything fails."
-        }
-        installAutomaticallyHint.stringValue = hint
-        resizeToFit()
-    }
-
-    /// Persist the "Check for updates automatically" choice. Turning it on also (re)requests
-    /// notification authorization so a later banner can appear — a no-op outside a real `.app`.
-    /// Refreshes the nested "Install updates automatically" enablement, which depends on this.
-    @objc private func toggleAutomaticUpdates(_ sender: NSButton) {
+    @objc private func toggleAutomaticUpdates(_ sender: NSSwitch) {
         let on = sender.state == .on
         PersistedConfig.automaticUpdateChecks = on
         AppLogger.lifecycle.notice("update: automatic checks set \(on, privacy: .public)")
         if on { UpdateNotifier.requestAuthorizationIfNeeded() }
-        updateInstallAvailability()
     }
 
-    /// Persist the "Install updates automatically" choice (#122). No immediate action — the decision
-    /// to install rides the next found-update path (`AppDelegate.handleUpdateFound`).
-    @objc private func toggleInstallAutomatically(_ sender: NSButton) {
-        let on = sender.state == .on
-        PersistedConfig.installUpdatesAutomatically = on
-        AppLogger.lifecycle.notice("update-install: auto set \(on, privacy: .public)")
-    }
-
-    /// Run an immediate update check (bypasses the 12 h cadence) via the app's shared path.
     @objc private func checkNow() {
         onCheckForUpdatesNow?()
     }
 
-    /// Open the release page for the currently-offered update.
     @objc private func openDownload() {
         guard let release = latestRelease, let url = URL(string: release.htmlURL) else { return }
         NSWorkspace.shared.open(url)
     }
 
-    /// Reflect the current update state in the window (#37): show "Update available: vX.Y.Z" + the
-    /// Download link when `release` is non-nil, hide the line when up to date. Called by `AppDelegate`
-    /// after each check and on window open. Re-fits the window so the appearing/disappearing line is
-    /// not clipped.
+    /// Reflect the current update state (#37): show "Update available: vX.Y.Z" + the Download link when
+    /// `release` is non-nil, hide the row (and its divider) when up to date. Safe to call while the
+    /// window is closed — the About pane is built eagerly, so the outlets always exist.
     func updateAvailability(_ release: GitHubRelease?) {
         latestRelease = release
         if let release {
             updateLineLabel.stringValue = "Update available: \(release.tagName)"
-            updateRow.isHidden = false
+            updatesCard.setRow(updateRow, hidden: false)
         } else {
             updateLineLabel.stringValue = ""
-            updateRow.isHidden = true
+            updatesCard.setRow(updateRow, hidden: true)
         }
-        resizeToFit()
     }
 
     // MARK: Session logs (#110)
 
-    /// Persist the "Archive session logs" choice. A first-time enable with no folder yet chosen nudges
-    /// the user straight into the folder picker, since the archiver stays inert without a destination.
-    @objc private func toggleArchive(_ sender: NSButton) {
+    @objc private func toggleArchive(_ sender: NSSwitch) {
         let on = sender.state == .on
         PersistedConfig.archiveEnabled = on
         AppLogger.lifecycle.notice("archive: enabled set \(on, privacy: .public)")
@@ -872,8 +679,6 @@ final class SettingsWindowController: NSWindowController {
         updateArchiveStatus()
     }
 
-    /// Open an `NSOpenPanel` to pick (or create) the archive folder, and persist the chosen path.
-    /// No security-scoped bookmark: the app isn't sandboxed, so a plain path suffices (ADR-0030).
     @objc private func chooseArchiveFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -891,14 +696,13 @@ final class SettingsWindowController: NSWindowController {
         updateArchiveStatus()
     }
 
-    /// Run an immediate archive sync (bypasses the daily cadence) via the app's shared path.
     @objc private func archiveNow() {
         onArchiveNow?()
     }
 
-    /// Reflect the current archive state in the window (#110): the chosen path (or "No folder
-    /// selected"), the "Last archived …" line, and the enablement of the Choose…/Archive-now buttons.
-    /// Called on `show()`, after each toggle/choose, and by `AppDelegate` when a sync finishes.
+    /// Reflect the current archive state (#110): the chosen path (or "No folder selected"), the "Last
+    /// archived …" line, and the enablement of the Choose…/Archive-now buttons. Safe to call while the
+    /// window is closed (the pane is built eagerly).
     func updateArchiveStatus() {
         let enabled = PersistedConfig.archiveEnabled
         let destination = PersistedConfig.archiveDestination
@@ -909,23 +713,15 @@ final class SettingsWindowController: NSWindowController {
         guard let destination else {
             archivePathLabel.stringValue = "No folder selected"
             archiveStatusLabel.stringValue = ""
-            resizeToFit()
             return
         }
         archivePathLabel.stringValue = (destination as NSString).abbreviatingWithTildeInPath
 
-        // Files + size come from a live scan of the archive folder, so they show on every window open
-        // regardless of whether a sync has run this session (the in-memory Summary is lost across
-        // relaunches; the folder on disk is not). "N updated" is only meaningful right after a sync,
-        // so it's appended only when a fresh Summary is available.
         let destURL = URL(fileURLWithPath: (destination as NSString).expandingTildeInPath)
         let stats = LogArchiver().archiveStats(at: destURL)
         let totals = "\(stats.files) files · \(ByteSize.humanReadable(stats.bytes))"
 
         if let last = PersistedConfig.lastArchiveSync {
-            // Reuse the popup's data-age formatter — plain English ("just now" / "2h ago"), never a
-            // locale-formatted string (the whole UI is English) and never a future "in 0 seconds"
-            // when a sync just finished and `last ≈ now`.
             let when = PopupViewController.ageText(max(0, Date().timeIntervalSince(last)))
             if let summary = archiveSummaryProvider?() {
                 archiveStatusLabel.stringValue = "Last archived: \(when) · \(summary.copied) updated · \(totals)"
@@ -933,11 +729,7 @@ final class SettingsWindowController: NSWindowController {
                 archiveStatusLabel.stringValue = "Last archived: \(when) · \(totals)"
             }
         } else {
-            // Folder set but nothing synced yet this install: still show what's already there (0 files
-            // on a fresh folder), plus the hint that a sync is pending.
             archiveStatusLabel.stringValue = "Not archived yet — runs daily, or use Archive now. (\(totals))"
         }
-
-        resizeToFit()
     }
 }
