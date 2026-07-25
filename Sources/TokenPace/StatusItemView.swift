@@ -219,36 +219,51 @@ final class StatusItemView: NSView {
 
     // MARK: Expanded
 
-    private func drawExpanded(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset?, in rect: NSRect) {
+    private func drawExpanded(fiveHour: BarView, sevenDay: BarView?, reset: TimeToReset?, in rect: NSRect) {
         drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset,
                  originX: rect.minX + Metrics.hPadding, in: rect)
     }
 
-    /// Draw the stacked 5h/7d bars, with the bars block starting at `originX`; the reset label is
-    /// drawn to their right only when `reset != nil`.
+    /// Draw the pacing bars starting at `originX`; the reset label is drawn to their right only when
+    /// `reset != nil`. Two layouts by whether the 7-day bar is present:
+    /// - **`sevenDay != nil`**: 5h on top, 7d below, the pair vertically centred as one block.
+    /// - **`sevenDay == nil`** (the calm 7-day was hidden, #94): the 5h bar **alone**, vertically
+    ///   centred on the item — so a single bar sits mid-height, not clinging to the top row.
     ///
     /// Shared by ``drawExpanded(fiveHour:sevenDay:reset:in:)`` and the bars-beside-⚠️ error phase so
     /// the geometry is identical; only the left origin differs (the error glyph shifts it right). The
-    /// error phase always passes a non-nil `reset` (the countdown is diagnostic there); in the normal
-    /// expanded mode `nil` means the countdown was dropped per the selection table (ADR-0029).
-    private func drawBars(fiveHour: BarView, sevenDay: BarView, reset: TimeToReset?,
+    /// error phase always passes a non-nil `sevenDay` (the 7-day bar is diagnostic there, never
+    /// hidden) and a non-nil `reset`; in the normal expanded mode `nil` `reset` means the countdown
+    /// was dropped per the selection table (ADR-0029).
+    private func drawBars(fiveHour: BarView, sevenDay: BarView?, reset: TimeToReset?,
                           originX: CGFloat, in rect: NSRect) {
-        // Two bars stacked, vertically centred as a block.
-        let blockHeight = Metrics.barHeight * 2 + Metrics.barGap
-        let topY = rect.minY + (rect.height - blockHeight) / 2
-        let barsRect = NSRect(x: originX, y: topY, width: Metrics.barWidth, height: blockHeight)
+        // Right edge of the bar column (same `barWidth` for one or two bars) — where the reset label
+        // starts. The item width does not change when the 7-day bar is hidden (only the vertical
+        // layout does), so this stays aligned with `barsBlockWidth`/`itemWidth`.
+        let barsMaxX = originX + Metrics.barWidth
 
-        drawBar(fiveHour, in: NSRect(
-            x: barsRect.minX, y: barsRect.minY,
-            width: Metrics.barWidth, height: Metrics.barHeight
-        ))
-        drawBar(sevenDay, in: NSRect(
-            x: barsRect.minX, y: barsRect.minY + Metrics.barHeight + Metrics.barGap,
-            width: Metrics.barWidth, height: Metrics.barHeight
-        ))
+        if let sevenDay {
+            // Two bars stacked, vertically centred as a block.
+            let blockHeight = Metrics.barHeight * 2 + Metrics.barGap
+            let topY = rect.minY + (rect.height - blockHeight) / 2
+            drawBar(fiveHour, in: NSRect(
+                x: originX, y: topY,
+                width: Metrics.barWidth, height: Metrics.barHeight
+            ))
+            drawBar(sevenDay, in: NSRect(
+                x: originX, y: topY + Metrics.barHeight + Metrics.barGap,
+                width: Metrics.barWidth, height: Metrics.barHeight
+            ))
+        } else {
+            // Single 5h bar (calm 7-day hidden, #94): vertically centred on the item.
+            drawBar(fiveHour, in: NSRect(
+                x: originX, y: rect.midY - Metrics.barHeight / 2,
+                width: Metrics.barWidth, height: Metrics.barHeight
+            ))
+        }
 
         if let reset {
-            drawResetLabel(reset, leftOf: barsRect.maxX + Metrics.labelGap, in: rect)
+            drawResetLabel(reset, leftOf: barsMaxX + Metrics.labelGap, in: rect)
         }
     }
 

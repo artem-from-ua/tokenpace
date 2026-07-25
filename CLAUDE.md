@@ -58,43 +58,17 @@ swift run          # запуск
 
 ## Верифікація UI перед PR
 
-- **Не відкривати PR, доки мейнтейнер не перевірив зміну вживу.** Запусти реальний застосунок і
-  дай мейнтейнеру перевірити на стубах (`TOKENPACE_STUB=…`) та/або на реальній даті. Лише після його
-  підтвердження — PR. Доступні стуби: `1` (climbing), `screenshot`, `error`, `idle`,
-  `optimistic-reset` (5h ресетиться через ~20 с — бар стрибає 60 %→0 % без ⏰ + форс-рефреш, #36),
-  а також фрейми для вибору reset-часу (#103): `5h-orange`, `both-orange`, `both-red`, `red-orange`,
-  `calm5-orange7` (5h calm + 7d orange distant — єдиний кейс, де чекбокс «Include distant 7d limit
-  reset» дає видиму різницю). Додаючи нову фічу зі своїм станом — **додай стуб і онови цей перелік**
-  (як зробили для #103).
-- **Пауза опитування на екрані (#114)** не має окремого стубу — перевіряється будь-яким стубом +
-  реальним блокуванням екрана. Запусти dev-білд, заблокуй екран (⌃⌘Q), розблокуй, і перевір логи:
-  `log show --last 3m --predicate 'process == "TokenPace" AND eventMessage CONTAINS "screen-lock-pause"'`
-  → мають бути `screen locked, pausing polling` і `screen unlocked, polling immediately`, і **жодного**
-  `interval`/usage-логу між ними. Чекбокс — Settings → General → «Pause polling while the screen is locked».
-- **Авто-встановлення оновлень (#122–#125, ADR-0033)** повний флоу (download→verify→unzip→replace)
-  працює **лише в нотаризованому `.app` із `/Applications`** — у `swift run` інсталятор одразу
-  `.notApplicable`. Стуб **`TOKENPACE_UPDATE_DRYRUN=1`** ганяє download→verify→unzip **без** заміни й
-  перезапуску (і оминає гейти AC-power/metered — це forced-шлях). Приватний репо: asset качається
-  через `gh` за `TOKENPACE_GH_AUTH=1`. Верифікація: збери нотаризований білд із **заниженою** версією
-  (щоб реальний GitHub-реліз був новішим), постав у `/Applications` (зроби backup чинного релізу!),
-  запусти `TOKENPACE_GH_AUTH=1 TOKENPACE_UPDATE_DRYRUN=1 /Applications/TokenPace.app/Contents/MacOS/TokenPace`
-  з увімкненими обома чекбоксами Updates. Докази проходження (логи невидимі при прямому запуску, не
-  через launchd): `defaults read com.artem-n.tokenpace lastSeenLatestVersion` = знайдений тег, і
-  збережений верифікований bundle `$TMPDIR/TokenPace-update-<tag>.app` (перевір `codesign -dv` +
-  `spctl --assess`). Після тесту **віднови чинний реліз** у `/Applications`.
-  Для **реальної** заміни+relaunch (без dry-run) є стуб **`TOKENPACE_UPDATE_TARGET=<шлях>`** —
-  націлює інсталятор на тестову копію `.app` поза `/Applications`, тож робочий інстанс не чіпається:
-  `cp -R build/TokenPace.app ~/UpdateTest/TokenPace.app`, тоді
-  `TOKENPACE_GH_AUTH=1 TOKENPACE_UPDATE_TARGET=~/UpdateTest/TokenPace.app ~/UpdateTest/TokenPace.app/Contents/MacOS/TokenPace`
-  → копія має замінитись на новіший тег і перезапуститись; перевір версію копії + що новий процес
-  стартував + `codesign`/`spctl` заміненого bundle. Прибери `~/UpdateTest` після тесту.
-- **Скриншоти з тимчасового dev-only коду НЕ рахуються за верифікацію.** Синтетичний рендер
-  `StatusItemView`/PNG-матриці доводить лише логіку малювання, а не те, що фіча працює в живому
-  віджеті, вікні Settings і потоці даних. Не заявляй «працює»/`готово` на їх основі.
-- **Для фіч, що залежать від підпису** (launch-at-login/SMAppService, банери оновлень) потрібен
-  **локальний нотаризований `.app`** із `/Applications` — у dev `swift run` вони не працюють.
-- Робочий цикл: коміт у feature-гілку → `swift build` → **віддати мейнтейнеру на перевірку** →
-  дочекатися підтвердження → лише тоді PR.
+- **Не відкривати PR, доки мейнтейнер не перевірив зміну вживу** — на стубах (`TOKENPACE_STUB=…`)
+  та/або на реальній даті. Лише після підтвердження — PR.
+- **Скриншоти з тимчасового dev-only коду НЕ рахуються за верифікацію** (синтетичний рендер доводить
+  лише логіку малювання, не роботу в живому віджеті/Settings/потоці даних).
+- **Фічі, що залежать від підпису** (launch-at-login/SMAppService, банери оновлень) потребують
+  локального нотаризованого `.app` із `/Applications` — у `swift run` не працюють.
+- Робочий цикл: коміт у feature-гілку → `swift build` → **віддати мейнтейнеру** → підтвердження → PR.
+
+Повний перелік стубів, сценарії без стубу (screen-lock #114, авто-апдейт), і деталі команд — у
+[docs/ui-verification.md](docs/ui-verification.md). **Додаючи фічу зі своїм станом — додай стуб і
+онови той перелік.**
 
 ## Стиль release notes
 

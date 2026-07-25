@@ -56,6 +56,12 @@ final class SettingsWindowController: NSWindowController {
     /// by the time this fires.
     var onServiceDotChange: ((Bool) -> Void)?
 
+    /// Called when the user toggles "Hide 7-day bar when calm" (#94), with the new on/off state —
+    /// wired by `AppDelegate.openSettings` to re-render the menu-bar image immediately (the toggle
+    /// changes what is drawn — the 7-day bar and the 5h bar's vertical centring). Already persisted
+    /// (via `PersistedConfig`) by the time this fires.
+    var onHideCalmSevenDayChange: ((Bool) -> Void)?
+
     /// Called when the user toggles "Pause polling while the screen is locked" (#114), with the new
     /// on/off state — wired by `AppDelegate.openSettings` to un-park the loop when turned off. Already
     /// persisted (via `PersistedConfig`) by the time this fires; the observer reads the pref live.
@@ -118,6 +124,9 @@ final class SettingsWindowController: NSWindowController {
     /// `show()`.
     private var calmColorsToggle: NSButton!
 
+    /// The "Hide 7-day bar when calm" checkbox (#94), synced from `PersistedConfig` on every `show()`.
+    private var hideCalmSevenDayToggle: NSButton!
+
     /// The "Display reset countdown" controls (#103): a three-radio exclusive group plus one nested
     /// checkbox. The radios pick the coarse intent — always show / smart / never — and the checkbox
     /// under the middle ("smart") radio decides the one bit that separates ``ResetCountdownMode``'s
@@ -178,6 +187,7 @@ final class SettingsWindowController: NSWindowController {
         pausePollingToggle.state = PersistedConfig.pausePollingWhenScreenLocked ? .on : .off
         syncMonitoredServicesFromConfig()
         calmColorsToggle.state = PersistedConfig.calmMenuBarColors ? .on : .off
+        hideCalmSevenDayToggle.state = PersistedConfig.hideCalmSevenDayBar ? .on : .off
         syncResetCountdownFromConfig()
         serviceDotToggle.state = PersistedConfig.showServiceStatusDot ? .on : .off
         syncUpdatesFromConfig()
@@ -257,6 +267,26 @@ final class SettingsWindowController: NSWindowController {
         calmHint.widthAnchor.constraint(
             equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
 
+        // "Hide 7-day bar when calm" (#94): drop the 7-day bar while it is green/mild-yellow, leaving
+        // the 5h bar centred alone — one fewer element on the tiny widget when the week is on track.
+        hideCalmSevenDayToggle = NSButton(
+            checkboxWithTitle: "Hide 7-day bar when calm",
+            target: self,
+            action: #selector(toggleHideCalmSevenDay(_:)))
+        stack.setCustomSpacing(12, after: calmHint)   // separate this toggle from the calm-colours hint
+        stack.addArrangedSubview(hideCalmSevenDayToggle)
+
+        // Explains what stays visible — an orange/red 7-day bar is never hidden.
+        let hideCalmHint = NSTextField(wrappingLabelWithString:
+            "When the 7-day bar is green or mild-yellow, hides it and centres the 5-hour bar alone. "
+            + "An orange or red 7-day bar always stays visible.")
+        hideCalmHint.font = .systemFont(ofSize: 11)
+        hideCalmHint.textColor = .secondaryLabelColor
+        hideCalmHint.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(hideCalmHint)
+        hideCalmHint.widthAnchor.constraint(
+            equalToConstant: Metrics.width - 2 * Metrics.padding).isActive = true
+
         // "Display reset countdown" (#103): three radios pick the coarse intent, and a checkbox nested
         // under the middle ("smart") radio flips the one bit between the two smart modes. AppKit groups
         // radios sharing an `action` in one superview into an exclusive set; the vertical stack keeps
@@ -265,7 +295,7 @@ final class SettingsWindowController: NSWindowController {
         let resetLabel = NSTextField(labelWithString: "Display reset countdown:")
         resetLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
         stack.addArrangedSubview(resetLabel)
-        stack.setCustomSpacing(12, after: calmHint)   // separate the countdown sub-section from the calm hint
+        stack.setCustomSpacing(12, after: hideCalmHint)   // separate the countdown sub-section from the hide-calm hint
 
         resetAlwaysRadio = NSButton(
             radioButtonWithTitle: "Always",
@@ -699,6 +729,15 @@ final class SettingsWindowController: NSWindowController {
         PersistedConfig.showServiceStatusDot = on
         AppLogger.lifecycle.notice("service-status-dot: menu-bar set \(on, privacy: .public)")
         onServiceDotChange?(on)
+    }
+
+    /// Persist the "Hide 7-day bar when calm" choice (#94) and notify the app so the menu-bar image
+    /// repaints immediately (the toggle changes both the drawing and the vertical layout).
+    @objc private func toggleHideCalmSevenDay(_ sender: NSButton) {
+        let on = sender.state == .on
+        PersistedConfig.hideCalmSevenDayBar = on
+        AppLogger.lifecycle.notice("hide-calm-7d: menu-bar set \(on, privacy: .public)")
+        onHideCalmSevenDayChange?(on)
     }
 
     /// Persist the "Pause polling while the screen is locked" choice (#114) and notify the app so a

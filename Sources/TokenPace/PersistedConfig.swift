@@ -44,6 +44,9 @@ enum PersistedConfig {
         /// Whether the menu-bar widget draws the service-status dot on a service issue (#31).
         /// Default-on (opt-out) — see the property.
         static let showServiceStatusDot = "showServiceStatusDot"
+        /// Whether the menu-bar widget hides the 7-day bar while it is calm (green/yellow),
+        /// centring the 5h bar alone (#94). Default-on (opt-out) — see the property.
+        static let hideCalmSevenDayBar = "hideCalmSevenDayBar"
         /// Whether polling pauses while the screen is locked / off / running a screensaver (#114).
         /// Default-on (opt-out) — see the property.
         static let pausePollingWhenScreenLocked = "pausePollingWhenScreenLocked"
@@ -147,6 +150,19 @@ enum PersistedConfig {
     static var showServiceStatusDot: Bool {
         get { defaults.object(forKey: Key.showServiceStatusDot) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.showServiceStatusDot) }
+    }
+
+    /// Whether the **menu-bar** widget hides the **7-day** bar while it is calm — green (on pace or
+    /// behind) or mild-ahead yellow (`BarView.isCalm`) — leaving the 5h bar as the single, vertically
+    /// centred bar (#94). **Default-on** (opt-out): an absent key reads as `true`, so the quieter
+    /// single-bar look is the out-of-the-box behaviour. `object(forKey:) as? Bool ?? true`
+    /// distinguishes "unset" (→ true) from an explicit `false` the user chose — `bool(forKey:)` would
+    /// collapse both to `false` and silently defeat the opt-out default. An **orange/red** 7-day bar
+    /// always stays visible; the error state (⚠️ + stale bars, #12) is unaffected — the 7-day bar is
+    /// kept there for diagnostics regardless of this toggle.
+    static var hideCalmSevenDayBar: Bool {
+        get { defaults.object(forKey: Key.hideCalmSevenDayBar) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.hideCalmSevenDayBar) }
     }
 
     /// Whether polling pauses while the screen is **locked, off, or running a screensaver** (#114,

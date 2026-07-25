@@ -313,6 +313,10 @@ actor StubUsageTransport: UsageTransport {
         /// "Display reset countdown" checkbox toggles a visible difference: `showDistant7d` shows the
         /// 7d countdown, `hideDistant7d` hides it (the "lone distant 7d orange" cell, #103/ADR-0029).
         case calmFiveOrangeSeven
+        /// Both bars **calm**: 5h green (usage 10 vs elapsed ~20) + 7d green (usage 20 vs elapsed ~29).
+        /// Exercises "Hide 7-day bar when calm" (#94): with the toggle on (default) the 7-day bar is
+        /// dropped and a lone green 5h bar sits centred; both calm → no reset countdown either.
+        case calmBoth
 
         /// (fiveUtil, sevenUtil, fiveResetSeconds, sevenResetSeconds).
         var values: (five: Double, seven: Double, fiveIn: TimeInterval, sevenIn: TimeInterval) {
@@ -322,6 +326,7 @@ actor StubUsageTransport: UsageTransport {
             case .bothRed:            return (100, 100, 2 * 3600, 4 * 24 * 3600)
             case .redOrange:          return (100, 55, 2 * 3600, 5 * 24 * 3600)
             case .calmFiveOrangeSeven: return (10, 55, 4 * 3600, 5 * 24 * 3600)
+            case .calmBoth:           return (10, 20, 4 * 3600, 5 * 24 * 3600)
             }
         }
     }

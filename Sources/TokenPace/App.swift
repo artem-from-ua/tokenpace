@@ -297,6 +297,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // menu-bar layout from the last poll (render reads PersistedConfig for the toggle).
                 self?.reRenderForCurrentTime()
             }
+            wc.onHideCalmSevenDayChange = { [weak self] _ in
+                // Toggling this changes the layout (7-day bar drawn or not, 5h vertical centring),
+                // not just a colour — rebuild from the last poll (render reads PersistedConfig).
+                self?.reRenderForCurrentTime()
+            }
             wc.onPausePollingChange = { [weak self] on in
                 // Turning the pause OFF must un-stick a loop already parked by a screen lock: send a
                 // `.wake` so it resumes immediately. Turning it ON changes nothing now — the next lock
@@ -548,6 +553,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //                  → fixed 5h×7d severity frames for the reset-countdown table (#103).
         //                    `calm5-orange7` is the lone-distant-7d-orange cell where the Settings
         //                    "Include distant 7d limit reset" checkbox toggles a visible difference.
+        //  • `=calm-both`  → both bars calm (5h green + 7d green): with the default "Hide 7-day bar
+        //                    when calm" (#94) on, the 7-day bar is dropped and a lone green 5h bar
+        //                    sits centred (no reset text — both calm). Turn the toggle off to see
+        //                    both bars again.
         let stubMode = Self.stubName
         let transport: UsageTransport = switch stubMode {
         case "1":          StubUsageTransport(mode: .climbing)
@@ -561,6 +570,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "both-red":    StubUsageTransport(mode: .pacing(.bothRed))
         case "red-orange":  StubUsageTransport(mode: .pacing(.redOrange))
         case "calm5-orange7": StubUsageTransport(mode: .pacing(.calmFiveOrangeSeven))
+        // Both-calm frame (#94): exercises the "Hide 7-day bar when calm" opt-out (lone centred 5h).
+        case "calm-both":  StubUsageTransport(mode: .pacing(.calmBoth))
         default:           URLSession.shared
         }
         // The status poll uses the same transport seam (the stub answers the status endpoint too).
@@ -924,7 +935,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             from: output.snapshot, health: output.health, now: now,
             // #31: honour the "Show service status dot" toggle — nil hides the dot and reclaims its width.
             serviceProblem: PersistedConfig.showServiceStatusDot ? lastStatusHealth?.worstProblem : nil,
-            resetMode: PersistedConfig.resetCountdownModeMenuBar)   // #103: which reset countdown to show
+            resetMode: PersistedConfig.resetCountdownModeMenuBar,   // #103: which reset countdown to show
+            // #94: honour the "Hide 7-day bar when calm" toggle — drops a calm 7-day bar, centring 5h.
+            hideCalmSevenDay: PersistedConfig.hideCalmSevenDayBar)
         refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
         setPopupLayout(PopupLayout.make(
             from: output.snapshot, health: output.health, now: now, interval: output.interval,
