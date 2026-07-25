@@ -57,6 +57,7 @@ struct GitHubReleaseDecodeTests {
             {
               "name": "TokenPace-0.31.0.zip",
               "id": 42,
+              "size": 861234,
               "content_type": "application/zip",
               "browser_download_url": "https://github.com/artem-from-ua/tokenpace/releases/download/v0.31.0/TokenPace-0.31.0.zip"
             }
@@ -66,7 +67,20 @@ struct GitHubReleaseDecodeTests {
         let release = try GitHubReleaseDecoder.decode(from: payload)
         #expect(release.assets == [GitHubReleaseAsset(
             name: "TokenPace-0.31.0.zip",
-            browserDownloadURL: "https://github.com/artem-from-ua/tokenpace/releases/download/v0.31.0/TokenPace-0.31.0.zip")])
+            browserDownloadURL: "https://github.com/artem-from-ua/tokenpace/releases/download/v0.31.0/TokenPace-0.31.0.zip",
+            size: 861234)])
+    }
+
+    @Test func absentAssetSizeDecodesToZero() throws {
+        // A stub / older blob may omit `size` — decode to 0 (the safe default for the space check).
+        let payload = Data("""
+        {
+          "tag_name": "v0.31.0", "html_url": "https://example.com/x",
+          "assets": [{"name": "TokenPace-0.31.0.zip", "browser_download_url": "https://example.com/z"}]
+        }
+        """.utf8)
+        let release = try GitHubReleaseDecoder.decode(from: payload)
+        #expect(release.assets.first?.size == 0)
     }
 
     @Test func absentAssetsDecodesToEmpty() throws {

@@ -24,3 +24,22 @@ enum PowerSource {
         return type == kIOPMACPowerKey
     }
 }
+
+// MARK: - DiskSpace
+
+/// Reads free space on a volume (#124) — the fact behind the free-space defer gate, which holds an
+/// auto-install back unless downloading it would still leave ≥ 5 GB free
+/// (``TokenPaceKit/UpdateInstallPlan/minFreeBytesAfterDownload``). Synchronous; the *decision* is pure.
+enum DiskSpace {
+
+    /// Bytes available for "important usage" on the volume containing `url`, or `nil` on error.
+    /// `volumeAvailableCapacityForImportantUsage` is the modern, purgeable-aware figure Finder shows —
+    /// preferred over the raw `systemFreeSize`, which ignores space macOS could reclaim on demand.
+    static func availableBytes(forVolumeContaining url: URL) -> Int? {
+        guard let values = try? url.resourceValues(
+            forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+              let capacity = values.volumeAvailableCapacityForImportantUsage
+        else { return nil }
+        return Int(capacity)
+    }
+}

@@ -31,6 +31,10 @@ public enum UpdateInstallDecision: Sendable, Equatable {
     /// Mode) — **defer** until an unmetered network, so a ~10 MB download isn't spent on a capped link
     /// (retried next heartbeat).
     case deferMeteredNetwork(asset: GitHubReleaseAsset, targetVersion: String)
+    /// Installable, but downloading the asset would leave less than the required free-space headroom
+    /// (``UpdateInstallPlan/minFreeBytesAfterDownload``) on the volume — **defer** until enough space
+    /// frees up, so the update never fills the disk (retried next heartbeat).
+    case deferInsufficientSpace(asset: GitHubReleaseAsset, targetVersion: String)
 }
 
 // MARK: - UpdateInstallPlan
@@ -44,19 +48,27 @@ public enum UpdateInstallDecision: Sendable, Equatable {
 /// 2. **newer** — ``UpdateComparison/isNewer(tag:than:)`` guards downgrade/replay/unparsable tags.
 /// 3. **real bundle** — `isAppBundle` (a `swift run` binary cannot be swapped in place).
 /// 4. **asset** — ``UpdateAssetSelector`` finds the version-named HTTPS `.zip`.
-/// 5. **AC power** — on battery, *defer* (don't risk a mid-install battery drain).
-/// 6. **unmetered** — on a metered link, *defer* (don't spend a capped connection on the download).
+/// 5. **free space** — downloading must leave ≥ ``minFreeBytesAfterDownload`` free; else *defer*.
+/// 6. **AC power** — on battery, *defer* (don't risk a mid-install battery drain).
+/// 7. **unmetered** — on a metered link, *defer* (don't spend a capped connection on the download).
 ///
 /// The order is deliberate. The settled-no gates (1–4) come first, cheapest and most fundamental
 /// first, so a user who has the feature off, is already current, or has no installable asset gets an
-/// early return naming the reason they'd expect. The environment gates (5–6) come last, because they
+/// early return naming the reason they'd expect. The environment gates (5–7) come last, because they
 /// only make sense on an otherwise-installable release and are *temporary* — they carry the chosen
 /// `asset` so the shell need not re-select, and produce a `defer…` the next heartbeat re-evaluates.
+/// Free space is checked before power/metered: a full disk is the hardest physical blocker, and there
+/// is no point deferring "for AC" if the download couldn't land anyway.
 ///
 /// A caller performing a **forced** install (a deliberate dry run, or a manual "install now") passes
-/// `onACPower: true, networkIsMetered: false` to bypass gates 5–6 — the user has explicitly asked, so
-/// the environment courtesy does not apply.
+/// `onACPower: true, networkIsMetered: false` to bypass gates 6–7 — the user has explicitly asked, so
+/// the environment courtesy does not apply. The free-space gate is **not** bypassed: no amount of user
+/// intent makes it safe to fill the disk.
 public enum UpdateInstallPlan {
+
+    /// The free space that must remain **after** downloading the asset: 5 GB. Keeps an auto-update from
+    /// pushing the volume to the brink even when the archive itself is small.
+    public static let minFreeBytesAfterDownload = 5 * 1_000_000_000   // 5 GB (decimal, matching Finder)
 
     /// Decide whether to auto-install `release`.
     ///
@@ -67,6 +79,7 @@ public enum UpdateInstallPlan {
     ///   - isAppBundle: Whether the process is a real installed `.app` (`LaunchAtLoginController
     ///     .isAppBundle`), injected so this stays pure.
     ///   - autoInstallEnabled: The `PersistedConfig.installUpdatesAutomatically` opt-in.
+    ///   - freeDiskBytes: Free space on the download/install volume, injected so this stays pure.
     ///   - onACPower: Whether the Mac is on AC power (adapter connected). A desktop Mac is always
     ///     `true`; injected so this stays pure. `true` for a forced install.
     ///   - networkIsMetered: Whether the current network is expensive/constrained (cellular, hotspot,
@@ -76,6 +89,7 @@ public enum UpdateInstallPlan {
         currentVersion: String,
         isAppBundle: Bool,
         autoInstallEnabled: Bool,
+        freeDiskBytes: Int,
         onACPower: Bool,
         networkIsMetered: Bool
     ) -> UpdateInstallDecision {
@@ -86,6 +100,10 @@ public enum UpdateInstallPlan {
         guard isAppBundle else { return .skipNotAppBundle }
         guard let asset = UpdateAssetSelector.selectZIP(from: release) else { return .skipNoAsset }
         // Environment gates last — the release is installable, only the conditions aren't right yet.
+        // Free space first among them (hardest physical blocker); not bypassed by a forced install.
+        guard freeDiskBytes - asset.size >= minFreeBytesAfterDownload else {
+            return .deferInsufficientSpace(asset: asset, targetVersion: release.tagName)
+        }
         guard onACPower else { return .deferOnBattery(asset: asset, targetVersion: release.tagName) }
         guard !networkIsMetered else {
             return .deferMeteredNetwork(asset: asset, targetVersion: release.tagName)

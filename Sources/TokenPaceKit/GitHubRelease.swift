@@ -53,9 +53,9 @@ public struct GitHubRelease: Sendable, Equatable, Decodable {
 // MARK: - GitHubReleaseAsset
 
 /// One downloadable file attached to a GitHub release (#122) — the subset TokenPace's auto-installer
-/// needs: the asset's file `name` (matched against the version-named `.zip` pattern) and its
-/// `browser_download_url` (the direct HTTPS download). Other keys (`id`, `size`, `content_type`, …)
-/// are unmodeled; `Decodable` drops them.
+/// needs: the asset's file `name` (matched against the version-named `.zip` pattern), its
+/// `browser_download_url` (the direct HTTPS download), and its `size` in bytes (the free-space
+/// pre-flight, #124). Other keys (`id`, `content_type`, …) are unmodeled; `Decodable` drops them.
 public struct GitHubReleaseAsset: Sendable, Equatable, Decodable {
     /// The asset's file name, e.g. `"TokenPace-0.31.0.zip"`. Matched by ``UpdateAssetSelector``.
     public let name: String
@@ -63,15 +63,28 @@ public struct GitHubReleaseAsset: Sendable, Equatable, Decodable {
     /// `https://github.com/.../releases/download/v0.31.0/TokenPace-0.31.0.zip`. Always HTTPS from
     /// GitHub; the selector rejects any non-`https` URL defensively.
     public let browserDownloadURL: String
+    /// The asset size in bytes (`size`), used by the free-disk-space pre-flight (#124). Decodes to `0`
+    /// when absent (a hand-built stub / older blob) — a `0`-size asset trivially passes the space
+    /// check, which is the safe default (the download itself would still fail if space ran out).
+    public let size: Int
 
     private enum CodingKeys: String, CodingKey {
         case name
         case browserDownloadURL = "browser_download_url"
+        case size
     }
 
-    public init(name: String, browserDownloadURL: String) {
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        browserDownloadURL = try c.decode(String.self, forKey: .browserDownloadURL)
+        size = try c.decodeIfPresent(Int.self, forKey: .size) ?? 0
+    }
+
+    public init(name: String, browserDownloadURL: String, size: Int = 0) {
         self.name = name
         self.browserDownloadURL = browserDownloadURL
+        self.size = size
     }
 }
 

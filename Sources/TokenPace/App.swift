@@ -797,37 +797,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Decide whether to auto-install this release and, on a `.install` verdict, run the installer
-    /// (#122/#123). The pure `UpdateInstallPlan.decide` folds every gate (opt-in, newer, real `.app`,
-    /// has asset, AC power, unmetered) into one verdict; the log line names the outcome either way.
+    /// (#122–#124, ADR-0033). The pure `UpdateInstallPlan.decide` folds every gate (opt-in, newer, real
+    /// `.app`, has asset, free space, AC power, unmetered) into one verdict; the log line names the
+    /// outcome either way.
     ///
-    /// The power/metered facts are read from the shell (`PowerSource`, `NetworkMonitor.isMetered`) and
-    /// injected into the pure plan — they gate *installation only*, never the lightweight update check
-    /// (`pollUpdateIfDue`), which keeps running on the 12 h cadence regardless of power or network.
+    /// The environment facts are read from the shell (`DiskSpace`, `PowerSource`,
+    /// `NetworkMonitor.isMetered`) and injected into the pure plan — they gate *installation only*,
+    /// never the lightweight update check (`pollUpdateIfDue`), which keeps running on the 12 h cadence
+    /// regardless of disk/power/network.
     ///
-    /// A **forced** run (a deliberate dry run via `TOKENPACE_UPDATE_DRYRUN`) bypasses the environment
-    /// gates by passing favourable values — the maintainer asked for it explicitly, so battery/metered
-    /// courtesy doesn't apply. The `deferOnBattery`/`deferMeteredNetwork` verdicts are *temporary*: the
-    /// next update heartbeat re-evaluates, so the install happens once conditions improve.
+    /// A **forced** run (a deliberate dry run via `TOKENPACE_UPDATE_DRYRUN`) bypasses the power/metered
+    /// gates — the maintainer asked for it explicitly — but **not** the free-space gate (nothing makes
+    /// it safe to fill the disk). The `defer…` verdicts are *temporary*: the next update heartbeat
+    /// re-evaluates, so the install happens once conditions improve.
     ///
-    /// **Phase 2 scope:** on `.install` the installer downloads → verifies → unzips, but stops before
-    /// any `/Applications` replacement (a dry run) — the real replace + relaunch lands in Phase 3
-    /// (#124). The download only runs when the run is a deliberate dry run (`TOKENPACE_UPDATE_DRYRUN`),
-    /// so a normal build never fetches until Phase 3 makes installation real; without the flag the
-    /// verdict is logged and the signal path (banner/menu/Download) carries the update as before.
+    /// On `.install` the installer downloads → verifies → unzips → (dry-run stop, or) atomically
+    /// replaces the app bundle and relaunches. `deferInsufficientSpace`/`deferOnBattery`/
+    /// `deferMeteredNetwork`/`skip…` only log; the signal path (banner/menu/Download) carries the
+    /// update as a fallback.
     private func evaluateAutoInstall(for release: GitHubRelease) {
         let forced = ProcessInfo.processInfo.environment["TOKENPACE_UPDATE_DRYRUN"] == "1"
+        let freeBytes = DiskSpace.availableBytes(forVolumeContaining: Bundle.main.bundleURL) ?? .max
         let decision = UpdateInstallPlan.decide(
             release: release,
             currentVersion: TokenPaceKit.version,
             isAppBundle: LaunchAtLoginController.isAppBundle,
             autoInstallEnabled: PersistedConfig.installUpdatesAutomatically,
+            freeDiskBytes: freeBytes,
             onACPower: forced ? true : PowerSource.isOnACPower,
             networkIsMetered: forced ? false : network.isMetered)
         switch decision {
         case let .install(asset, targetVersion):
             AppLogger.lifecycle.notice(
                 "update-install: decision=install target=\(targetVersion, privacy: .public) asset=\(asset.name, privacy: .public)")
-            startDryRunInstallIfRequested(asset: asset, tag: targetVersion)
+            startInstall(asset: asset, tag: targetVersion)
+        case let .deferInsufficientSpace(_, targetVersion):
+            AppLogger.lifecycle.notice(
+                "update-install: decision=defer reason=insufficient-space target=\(targetVersion, privacy: .public)")
         case let .deferOnBattery(_, targetVersion):
             AppLogger.lifecycle.notice(
                 "update-install: decision=defer reason=on-battery target=\(targetVersion, privacy: .public)")
@@ -845,23 +851,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Run the Phase 2 dry-run installer, but only under `TOKENPACE_UPDATE_DRYRUN` — a verification
-    /// affordance, never a normal-run action. Downloads/verifies/unzips `asset` and logs the outcome;
-    /// nothing is replaced. Dispatched on `installTask` (cancelled before a new one / on terminate);
-    /// because `AppDelegate` is `@MainActor`, the continuation after `await` is main-actor-safe.
-    private func startDryRunInstallIfRequested(asset: GitHubReleaseAsset, tag: String) {
-        guard ProcessInfo.processInfo.environment["TOKENPACE_UPDATE_DRYRUN"] == "1" else { return }
+    /// Run the installer for an `.install` verdict — a dry run under `TOKENPACE_UPDATE_DRYRUN`
+    /// (download/verify/unzip, no replace), otherwise the real install (atomic replace + relaunch).
+    /// Any failure logs and falls back to the manual Download link (already shown by `updateAvailability`
+    /// from `handleUpdateFound`). Dispatched on `installTask` (cancelled before a new one / on
+    /// terminate); because `AppDelegate` is `@MainActor`, the continuation after `await` is safe.
+    private func startInstall(asset: GitHubReleaseAsset, tag: String) {
         installTask?.cancel()
         let installer = UpdateInstaller(ghAuthEnabled: ghAuthEnabled)
         installTask = Task { [weak self] in
             let outcome = await installer.install(asset, expectedTag: tag)
             guard self != nil, !Task.isCancelled else { return }
             switch outcome {
+            case let .installedRelaunching(tag):
+                // The installer requests the relaunch + terminate itself; just note it.
+                AppLogger.lifecycle.notice("update-install: installed \(tag, privacy: .public), app will relaunch")
             case let .dryRunVerified(bundlePath):
                 AppLogger.lifecycle.notice(
                     "update-install: dry-run complete, verified bundle at \(bundlePath, privacy: .public)")
-            case .notApplicable, .downloadFailed, .verifyFailed, .unzipFailed:
-                AppLogger.lifecycle.error("update-install: dry-run did not complete (\(String(describing: outcome), privacy: .public))")
+            case .notApplicable, .downloadFailed, .verifyFailed, .unzipFailed, .replaceFailed:
+                AppLogger.lifecycle.error(
+                    "update-install: did not complete (\(String(describing: outcome), privacy: .public)) — manual Download remains")
             }
         }
     }
