@@ -27,11 +27,12 @@ final class StatusItemView: NSView {
         }
     }
 
-    /// "Calm colours" (#105): when `true`, the widget's **soft** pacing colours — the idle blue
-    /// track, the on-pace green gap, and the mild ahead-of-pace yellow — are drawn white; the strong
-    /// warnings (orange/red), the time-indicator dot, the service dot, and the ⚠️ glyph keep their
-    /// colour. Set by `AppDelegate` from `PersistedConfig.calmMenuBarColors`; the view stays a thin
-    /// shell and does not read the config itself. Changing it requests a redraw (no size change).
+    /// "Calm colours" (#105): when `true`, the widget's **soft** signals are drawn white — the idle
+    /// blue track, the on-pace green gap, the mild ahead-of-pace yellow, and the **degraded (yellow)
+    /// service dot**; the strong warnings (orange/red), the time-indicator marker, the stronger
+    /// service states (orange/red/blue/grey), and the ⚠️ glyph keep their colour. Set by `AppDelegate`
+    /// from `PersistedConfig.calmMenuBarColors`; the view stays a thin shell and does not read the
+    /// config itself. Changing it requests a redraw (no size change).
     var calmColors: Bool = false {
         didSet {
             guard calmColors != oldValue else { return }
@@ -59,7 +60,7 @@ final class StatusItemView: NSView {
         static let labelGap: CGFloat = 5
         /// Width of the time-indicator marker — a slim vertical bar (#…), narrower than the diameter
         /// of the old dot so it reads as a crisp position tick rather than a blob.
-        static let tickWidth: CGFloat = 3
+        static let tickWidth: CGFloat = 3.5
         /// Height of the time-indicator marker — taller than the bar so it stands proud above and
         /// below the pacing zone.
         static let tickHeight: CGFloat = 9
@@ -132,9 +133,14 @@ final class StatusItemView: NSView {
 
     /// The dot colour for a non-operational service state. `operational` should never reach here
     /// (the dot is drawn only for a problem) but maps to gray defensively.
+    ///
+    /// Calm colours (#105): `.degraded` is the **soft** service signal — the yellow counterpart of
+    /// the mild ahead-of-pace yellow — so it mutes to white alongside the pacing colours. The strong
+    /// states (partial/major outage → orange/red) and the neutral ones (maintenance blue, unknown
+    /// grey) keep their colour, matching how the pacing gap keeps orange/red under calm.
     private func statusDotColor(_ status: ServiceStatus) -> NSColor {
         switch status {
-        case .degraded:         return Palette.statusYellow
+        case .degraded:         return calmColors ? Palette.calmWhite : Palette.statusYellow
         case .partialOutage:    return Palette.statusOrange
         case .majorOutage:      return Palette.statusRed
         case .underMaintenance: return Palette.statusBlue
