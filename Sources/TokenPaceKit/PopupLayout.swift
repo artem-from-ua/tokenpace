@@ -45,6 +45,11 @@ public struct LimitRow: Sendable, Equatable {
     /// numeric fields (`utilization`, `pacing`, `indicator`, the three `reset*`) are inert placeholders
     /// the idle render path ignores. `false` on every normal row.
     public let sessionIdle: Bool
+    /// Whether this idle 5-hour row is also **blocked** (#158): the 7-day limit is exhausted and paid
+    /// credits cannot cover, so there is no path to start a session. When `true` the view draws the
+    /// solid idle bar **grey** (not blue) and shows the status word "waiting for limit reset" instead
+    /// of "ready to start". Only ever `true` alongside ``sessionIdle``; `false` on every other row.
+    public let sessionBlocked: Bool
 
     public init(
         title: String,
@@ -56,7 +61,8 @@ public struct LimitRow: Sendable, Equatable {
         resetRelative: String?,
         resetAbsolute: String?,
         resetWeekday: String? = nil,
-        sessionIdle: Bool = false
+        sessionIdle: Bool = false,
+        sessionBlocked: Bool = false
     ) {
         self.title = title
         self.utilization = utilization
@@ -68,6 +74,7 @@ public struct LimitRow: Sendable, Equatable {
         self.resetAbsolute = resetAbsolute
         self.resetWeekday = resetWeekday
         self.sessionIdle = sessionIdle
+        self.sessionBlocked = sessionBlocked
     }
 }
 
@@ -160,6 +167,15 @@ public struct PopupLayout: Sendable, Equatable {
     /// ``rows`` — a credits section is not a limit window (see ``CreditsRow``). The view renders it as
     /// its own "Extra usage" block below the limit rows.
     public let credits: CreditsRow?
+    /// Which one reset the view should highlight in **red** as the **blocking** reset — the reset that
+    /// actually unblocks work in the idle-blocked state (#158, the "last stand" rule in
+    /// ``BlockingReset``). `nil` unless the snapshot is idle **and** blocked. When non-`nil`:
+    /// - ``BlockingReset/Choice/token(id:resetsAt:)`` — `id` is the index into ``rows`` whose reset
+    ///   line the view paints red;
+    /// - ``BlockingReset/Choice/credits(resetsAt:)`` — the "Extra usage" section's reset line is painted
+    ///   red instead.
+    /// Exactly one reset is ever highlighted, even when several limits are simultaneously exhausted.
+    public let blockingReset: BlockingReset.Choice?
 
     public init(
         lastUpdateAge: TimeInterval,
@@ -167,7 +183,8 @@ public struct PopupLayout: Sendable, Equatable {
         rows: [LimitRow],
         warning: FailureReason? = nil,
         serviceStatus: StatusHealth? = nil,
-        credits: CreditsRow? = nil
+        credits: CreditsRow? = nil,
+        blockingReset: BlockingReset.Choice? = nil
     ) {
         self.lastUpdateAge = lastUpdateAge
         self.intervalSeconds = intervalSeconds
@@ -175,6 +192,7 @@ public struct PopupLayout: Sendable, Equatable {
         self.warning = warning
         self.serviceStatus = serviceStatus
         self.credits = credits
+        self.blockingReset = blockingReset
     }
 
     // MARK: make
@@ -197,7 +215,8 @@ public struct PopupLayout: Sendable, Equatable {
             lastUpdateAge: max(0, now.timeIntervalSince(lastUpdate)),
             intervalSeconds: interval,
             rows: rows,
-            credits: self.creditsRow(from: snapshot, now: now)
+            credits: self.creditsRow(from: snapshot, now: now),
+            blockingReset: self.blockingReset(from: snapshot, now: now)
         )
     }
 
@@ -233,13 +252,15 @@ public struct PopupLayout: Sendable, Equatable {
         let lastUpdateAge = health.lastSuccess.map { max(0, now.timeIntervalSince($0)) } ?? 0
         let warning = health.isFailing ? health.reason : nil
         let credits = snapshot.flatMap { self.creditsRow(from: $0, now: now) }
+        let blockingReset = snapshot.flatMap { self.blockingReset(from: $0, now: now) }
         return PopupLayout(
             lastUpdateAge: lastUpdateAge,
             intervalSeconds: interval,
             rows: rows,
             warning: warning,
             serviceStatus: serviceStatus,
-            credits: credits
+            credits: credits,
+            blockingReset: blockingReset
         )
     }
 
@@ -252,9 +273,14 @@ public struct PopupLayout: Sendable, Equatable {
     /// `.sevenDay`. Shared by both ``make`` overloads.
     private static func rows(from snapshot: UsageSnapshot, now: Date) -> [LimitRow] {
         // The 5-hour row is the idle placeholder when the window has no active session (#100); every
-        // other row is built normally, including the 7-day one (which always exists).
+        // other row is built normally, including the 7-day one (which always exists). When idle is also
+        // **blocked** (#158) the placeholder carries `sessionBlocked` so the view greys it and swaps the
+        // status word to "waiting for limit reset". (An *active* fully-exhausted 5h row is not idle, so
+        // it shows the normal "limit reached" — only the red blocking-reset badge marks it, via
+        // `blockingReset`.)
+        let idleBlocked = snapshot.sessionIdle && CreditsPacing.isBlocked(in: snapshot)
         var rows: [LimitRow] = [
-            snapshot.sessionIdle ? idleFiveHourRow() : row(title: "5-hour", window: snapshot.fiveHour, as: .fiveHour, now: now),
+            snapshot.sessionIdle ? idleFiveHourRow(blocked: idleBlocked) : row(title: "5-hour", window: snapshot.fiveHour, as: .fiveHour, now: now),
             row(title: "7-day", window: snapshot.sevenDay, as: .sevenDay, now: now),
         ]
         if let opus = snapshot.sevenDayOpus {
@@ -320,7 +346,7 @@ public struct PopupLayout: Sendable, Equatable {
     /// reset strings `nil`, and an inert zeroed bar (the view fills it solid blue and skips the second
     /// line). `subdivisions` stays the 5-hour value so the under-bar tick ruler keeps the row's anatomy
     /// in family with the active rows; the numeric fields are placeholders the idle render path ignores.
-    private static func idleFiveHourRow() -> LimitRow {
+    private static func idleFiveHourRow(blocked: Bool = false) -> LimitRow {
         LimitRow(
             title: "5-hour",
             utilization: 0,
@@ -331,7 +357,19 @@ public struct PopupLayout: Sendable, Equatable {
             resetRelative: nil,
             resetAbsolute: nil,
             resetWeekday: nil,
-            sessionIdle: true)
+            sessionIdle: true,
+            sessionBlocked: blocked)
+    }
+
+    /// The blocking reset for the popup (#158) — `nil` unless the snapshot is **blocked** (no path to
+    /// work: idle-blocked, or an active state with both 5h and 7d exhausted and credits not covering;
+    /// ``CreditsPacing/isBlocked(in:)``). Delegates to the shared ``BlockingReset/forBlocked(snapshot:now:)``
+    /// so the popup badge and the menu-bar countdown pick the same reset. The returned
+    /// ``BlockingReset/Choice`` carries a popup **row index** (`token(id:)`) or the credits section
+    /// (`credits`) — the view maps it to the one reset line it paints as a red badge.
+    private static func blockingReset(from snapshot: UsageSnapshot, now: Date) -> BlockingReset.Choice? {
+        guard CreditsPacing.isBlocked(in: snapshot) else { return nil }
+        return BlockingReset.forBlocked(snapshot: snapshot, now: now)
     }
 
     /// Build one `LimitRow`, delegating all arithmetic to tested pure logic. An unparseable

@@ -3,7 +3,7 @@ status: accepted
 date: 2026-07-26
 ---
 
-# ADR-0038: Нотифікація «Back to work!» — фронт blocked→unblocked, quiet-hours, opt-in
+# ADR-0039: Нотифікація «Back to work!» — фронт blocked→unblocked, quiet-hours, opt-in
 
 > Реалізовано в [#160](https://github.com/artem-from-ua/tokenpace/issues/160).
 

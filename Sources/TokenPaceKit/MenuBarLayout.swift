@@ -23,12 +23,22 @@ public struct BarView: Sendable, Equatable {
     /// `layout`/`indicator` are inert placeholders (`usage 0 / time 0`, `.neutral`) that the idle draw
     /// path ignores. `false` on every normal bar, including a genuine 0 %-with-valid-reset 5h window.
     public let idle: Bool
+    /// Whether this **idle** 5-hour bar is also **blocked** — the 7-day limit is exhausted and paid
+    /// credits cannot cover, so there is no path to start a session (#158, `CreditsPacing.isBlocked`).
+    /// When `true` the view draws the solid idle track in **grey** (not the "ready" blue), meaning
+    /// "waiting for a limit to reset" rather than "ready to start, full quota available". Only ever
+    /// `true` alongside ``idle``; `false` on every normal bar and on a non-blocked idle bar.
+    public let blocked: Bool
 
-    public init(layout: BarLayout, indicator: LimitIndicator, window: LimitWindow, idle: Bool = false) {
+    public init(
+        layout: BarLayout, indicator: LimitIndicator, window: LimitWindow,
+        idle: Bool = false, blocked: Bool = false
+    ) {
         self.layout = layout
         self.indicator = indicator
         self.window = window
         self.idle = idle
+        self.blocked = blocked
     }
 
     /// The bar's pacing **severity** for reset-countdown selection (#103, ADR-0028/0029). Delegates to
@@ -239,15 +249,26 @@ public struct MenuBarLayout: Sendable, Equatable {
 
         if snapshot.sessionIdle {
             // No active 5h window: an inert, knobless placeholder bar (the idle draw path ignores its
-            // geometry). The 5h bar is always calm here, so only the 7-day bar drives the countdown —
-            // pass a nil 5h reset (never derived from the empty `fiveHour.resetsAt`).
+            // geometry). When the idle state is genuinely **blocked** (#158 — 7d exhausted and credits
+            // cannot cover) the bar is drawn grey and the countdown switches to the **blocking** reset
+            // (the "last stand" rule, shared with the popup). Otherwise it stays the "ready" idle bar
+            // with the plain 7-day countdown.
+            let blocked = CreditsPacing.isBlocked(in: snapshot)
             let five = BarView(
                 layout: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind),
-                indicator: .neutral, window: .fiveHour, idle: true)
-            let resetToShow = selectReset(
-                fiveSeverity: .calm, fiveResetsAt: nil,
-                sevenSeverity: seven.severity, sevenResetsAt: sevenResetsAt,
-                now: now, mode: resetMode)
+                indicator: .neutral, window: .fiveHour, idle: true, blocked: blocked)
+            let resetToShow: ResetToShow?
+            if blocked, let choice = BlockingReset.forBlocked(snapshot: snapshot, now: now) {
+                // Every blocking candidate in the idle state is a long (7-day-cadence or monthly)
+                // window — the 5h window is gone — so format it with the compact-days variant.
+                let text = ResetClock.timeToResetCompactDays(resetsAt: choice.resetsAt, now: now)
+                resetToShow = ResetToShow(which: .sevenDay, display: text)
+            } else {
+                resetToShow = selectReset(
+                    fiveSeverity: .calm, fiveResetsAt: nil,
+                    sevenSeverity: seven.severity, sevenResetsAt: sevenResetsAt,
+                    now: now, mode: resetMode)
+            }
             return MenuBarLayout(mode: .expanded(
                 fiveHour: five, sevenDay: sevenToShow, resetToShow: resetToShow))
         }

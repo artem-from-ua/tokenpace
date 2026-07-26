@@ -45,6 +45,16 @@ final class PopupBarView: NSView {
         }
     }
 
+    /// Whether this idle bar is **blocked** (#158): the 7-day limit is exhausted and paid credits cannot
+    /// cover, so the solid track is drawn **grey** (`monochromeGrey`) instead of the "ready" blue —
+    /// "waiting for a limit to reset", not "ready to start". Only meaningful alongside ``idle``.
+    var blocked: Bool = false {
+        didSet {
+            guard blocked != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
     private enum Metrics {
         /// Height of the pacing bar itself (the coloured zones + indicator dot).
         static let barHeight: CGFloat = 6
@@ -148,6 +158,10 @@ final class PopupBarView: NSView {
     /// draws the menu-bar bars identically.
     static let monochromeGrey = Palette.monochromeGrey
 
+    /// The exhausted-pacing red (`aheadColor`'s cap rung). Exposed so the popup can paint the **one**
+    /// blocking reset time red (#158) in the same tone the bars use for an exhausted limit.
+    static let gapRed = Palette.gapRed
+
     override var isFlipped: Bool { true }
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: Metrics.height) }
 
@@ -165,7 +179,8 @@ final class PopupBarView: NSView {
         // the pacing path so the (inert, zeroed) `bar` layout is never consulted.
         if idle {
             let idlePath = NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner)
-            Palette.idleBlue.setFill()
+            // Blocked idle (#158) → grey (no path to start); otherwise the "ready to start" blue.
+            (blocked ? Self.monochromeGrey : Palette.idleBlue).setFill()
             idlePath.fill()
             drawTicks(in: rect, width: w)
             return
@@ -326,11 +341,16 @@ final class StatusLineLabel: NSTextField {
 
 // MARK: - PillView
 
-/// A small rounded, layer-backed capsule filled with `controlAccentColor` — the blue "in use" badge
-/// beside the "Extra usage" heading (#146). The corner radius tracks the height (half of it, so it is
-/// a true pill), and the fill CGColor is re-resolved in `updateLayer()` because CGColor is not
-/// appearance-dynamic (the same trap `SettingsCard`/`DividerView` document).
+/// A small rounded, layer-backed capsule — the "in use" badge beside the "Extra usage" heading (#146,
+/// `controlAccentColor` blue) and the blocking-reset badge on a limit row (#158, the exhausted red).
+/// The corner radius tracks the height (half of it, so it is a true pill), and the fill CGColor is
+/// re-resolved in `updateLayer()` because CGColor is not appearance-dynamic (the same trap
+/// `SettingsCard`/`DividerView` document).
 final class PillView: NSView {
+    /// The capsule fill. Defaults to the accent blue; the blocking-reset badge sets it to the
+    /// exhausted red. A closure (not a stored `NSColor`) so a dynamic colour re-resolves per appearance.
+    var fill: () -> NSColor = { .controlAccentColor }
+
     override var wantsUpdateLayer: Bool { true }
 
     override func layout() {
@@ -340,7 +360,7 @@ final class PillView: NSView {
 
     override func updateLayer() {
         layer?.cornerRadius = bounds.height / 2
-        layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        layer?.backgroundColor = fill().cgColor
     }
 }
 
@@ -408,6 +428,12 @@ final class PopupViewController: NSViewController {
     /// line. The localisation seam (ADR-0009) — like the other status phrases, the English word lives
     /// here, not in the kit.
     static let idleStatusText = "ready to start"
+
+    /// The status word for a **blocked** idle 5-hour row (#158): the 5h window is idle, but the 7-day
+    /// limit is exhausted and paid credits cannot cover, so there is no path to start — the user is
+    /// waiting for a reset, not "ready to start". Neutral wording (not "7d" specifically) because the
+    /// blocker can be the 7-day limit *or* a reached credits cap. The localisation seam (ADR-0009).
+    static let blockedStatusText = "waiting for limit reset"
 
     /// The heading of the "Extra usage" money-credits section (#145) — the localisation seam. Styled
     /// like the limit-window titles (plain label colour), the section reads from its numbers/bar.
@@ -531,9 +557,13 @@ final class PopupViewController: NSViewController {
         for (index, row) in layout.rows.enumerated() {
             addTitleStatusLine(title: row.title, status: Self.statusText(row))
             // The idle 5-hour row (#100) has **no** second line at all — no "0%", no reset — so it reads
-            // as a compact "5-hour  ready to start" + solid-blue bar. Every other row shows the detail.
+            // as a compact "5-hour  ready to start" (or "waiting for limit reset" when blocked, #158) +
+            // solid bar. Every other row shows the detail; its reset goes red when it is *the* blocking
+            // reset (the "last stand" pick from `layout.blockingReset`).
             if !row.sessionIdle {
-                addDetailLine(used: Self.usedText(row), reset: Self.resetText(row))
+                addDetailLine(
+                    used: Self.usedText(row), reset: Self.resetText(row),
+                    resetIsBlocking: Self.isBlockingRow(index, in: layout))
             }
             // No inter-section gap after the **last** bar — but only when there is no credits section
             // below. If the "Extra usage" block follows, this bar is *not* the last thing in the popup,
@@ -547,8 +577,22 @@ final class PopupViewController: NSViewController {
         // credits are active for this snapshot. Two shapes, keyed by whether a cap is set — see
         // `addCreditsSection`. Absent (`layout.credits == nil`) → nothing is drawn.
         if let credits = layout.credits {
-            addCreditsSection(credits)
+            addCreditsSection(credits, resetIsBlocking: Self.isBlockingCredits(in: layout))
         }
+    }
+
+    /// Whether popup row `index` is the one carrying the **blocking** reset (#158) — the single reset
+    /// `layout.blockingReset` picked (the "last stand" rule). `false` unless the layout is blocked and
+    /// the pick is that row. Drives the red reset colour on exactly one row.
+    private static func isBlockingRow(_ index: Int, in layout: PopupLayout) -> Bool {
+        if case let .token(id, _)? = layout.blockingReset { return id == index }
+        return false
+    }
+
+    /// Whether the "Extra usage" credits section carries the blocking reset (#158).
+    private static func isBlockingCredits(in layout: PopupLayout) -> Bool {
+        if case .credits? = layout.blockingReset { return true }
+        return false
     }
 
     // MARK: Extra usage (money-credits) section (#145)
@@ -568,7 +612,7 @@ final class PopupViewController: NSViewController {
     ///
     /// The heading "Extra usage" is styled like the limit-window titles (plain `labelColor`, not the
     /// brand-coloured "Claude" header): the section reads from its numbers and bar, not a heavy heading.
-    private func addCreditsSection(_ credits: CreditsRow) {
+    private func addCreditsSection(_ credits: CreditsRow, resetIsBlocking creditsResetIsBlocking: Bool = false) {
         guard let bar = credits.bar, let limit = credits.limit else {
             // Unlimited: "Extra usage … €X.XX spent". No bar, no reset line — no cap to pace.
             addTitleStatusLine(title: Self.extraUsageTitle, status: Self.creditsSpentOnlyText(credits.spent))
@@ -583,7 +627,8 @@ final class PopupViewController: NSViewController {
             badge: credits.inUse ? Self.makeInUsePill() : nil)
         addDetailLine(
             used: Self.creditsAmountText(spent: credits.spent, limit: limit),
-            reset: Self.creditsResetText(credits.resetRelative))
+            reset: Self.creditsResetText(credits.resetRelative),
+            resetIsBlocking: creditsResetIsBlocking)
         // Credits pace over the whole calendar month; there is no window-tick ruler like the token bars,
         // so the bar draws with no subdivisions (a plain pacing bar). `isLast: true` — the credits
         // section is always the popup's final block, so it sits tight above the menu separator.
@@ -622,21 +667,42 @@ final class PopupViewController: NSViewController {
     /// Claude web UI puts on usage credits. Sizing comes from the text + insets; the capsule radius is
     /// half the height, so it reads as a pill at any font size.
     private static func makeInUsePill() -> NSView {
-        let text = NSTextField(labelWithString: inUseBadgeText)
-        text.font = .systemFont(ofSize: Metrics.textSize - 2, weight: .medium)
-        text.textColor = .white
-        text.translatesAutoresizingMaskIntoConstraints = false
+        makePill(text: inUseBadgeText, fill: { .controlAccentColor })
+    }
+
+    /// The blocking-reset badge (#158): a red capsule carrying the reset countdown (e.g. "4d"), shown
+    /// flush-right on the one row whose reset actually unblocks work. Same pill shape as the "in use"
+    /// badge, filled with the exhausted red (`PopupBarView.gapRed`) so it reads as the blocker. A
+    /// hover tooltip ("Effective blocker") explains why this one reset is highlighted.
+    private static func makeResetBadge(text: String) -> NSView {
+        let pill = makePill(text: text, fill: { PopupBarView.gapRed })
+        pill.toolTip = blockingResetHint
+        return pill
+    }
+
+    /// Localisation seam for the blocking-reset badge's hover hint (#158).
+    static let blockingResetHint = "Effective blocker"
+
+    /// Shared pill factory (#146/#158): white medium text on a rounded, layer-backed capsule whose
+    /// fill is `fill()` (re-resolved per appearance). Sizing comes from the text + insets; the radius is
+    /// half the height, so it reads as a pill at any font size.
+    private static func makePill(text: String, fill: @escaping () -> NSColor) -> NSView {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: Metrics.textSize - 2, weight: .medium)
+        label.textColor = .white
+        label.translatesAutoresizingMaskIntoConstraints = false
 
         let pill = PillView()
+        pill.fill = fill
         pill.wantsLayer = true
         pill.translatesAutoresizingMaskIntoConstraints = false
-        pill.addSubview(text)
+        pill.addSubview(label)
         let hInset: CGFloat = 6, vInset: CGFloat = 2
         NSLayoutConstraint.activate([
-            text.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: hInset),
-            text.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -hInset),
-            text.topAnchor.constraint(equalTo: pill.topAnchor, constant: vInset),
-            text.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -vInset),
+            label.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: hInset),
+            label.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -hInset),
+            label.topAnchor.constraint(equalTo: pill.topAnchor, constant: vInset),
+            label.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -vInset),
         ])
         return pill
     }
@@ -657,11 +723,21 @@ final class PopupViewController: NSViewController {
     /// the content width — the percent leads the line (under the "% used" reading) while the reset time
     /// lines up with the bar's right edge below it.
     @discardableResult
-    private func addDetailLine(used: String, reset: String) -> NSView {
+    private func addDetailLine(used: String, reset: String, resetIsBlocking: Bool = false) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
-        return addSplitLine(
-            left: used, right: reset, leftFont: font, rightFont: font,
-            leftColor: Self.dimmedLabelColor, rightColor: Self.dimmedLabelColor)
+        let usedLabel = NSTextField(labelWithString: used)
+        usedLabel.font = font
+        usedLabel.textColor = Self.dimmedLabelColor
+        // When this reset is the one blocking work (#158), show it as a red **badge** so the eye lands on
+        // the single reset that will actually unblock — every other reset stays the plain dimmed label,
+        // even if its own limit is also exhausted.
+        if resetIsBlocking {
+            return addSplitRow(leadingView: usedLabel, rightView: Self.makeResetBadge(text: reset))
+        }
+        let resetLabel = NSTextField(labelWithString: reset)
+        resetLabel.font = font
+        resetLabel.textColor = Self.dimmedLabelColor
+        return addSplitRow(leftLabel: usedLabel, rightLabel: resetLabel)
     }
 
     /// A two-column row spanning the full content width: `left` flush against the leading edge,
@@ -692,9 +768,15 @@ final class PopupViewController: NSViewController {
 
     /// `addSplitRow` variant whose leading half is an arbitrary view (e.g. a `[title • badge]` stack),
     /// not just a label — the trailing label still pins flush right at the content width.
-    @discardableResult
     private func addSplitRow(leadingView: NSView, rightLabel: NSTextField) -> NSView {
-        let row = NSStackView(views: [leadingView, rightLabel])
+        addSplitRow(leadingView: leadingView, rightView: rightLabel)
+    }
+
+    /// `addSplitRow` variant whose **trailing** half is an arbitrary view (e.g. the blocking-reset
+    /// pill, #158), not just a label — the leading view still pins flush left at the content width.
+    @discardableResult
+    private func addSplitRow(leadingView: NSView, rightView: NSView) -> NSView {
+        let row = NSStackView(views: [leadingView, rightView])
         row.orientation = .horizontal
         row.distribution = .equalSpacing
         row.translatesAutoresizingMaskIntoConstraints = false
@@ -754,7 +836,8 @@ final class PopupViewController: NSViewController {
     /// Add a pacing bar for one ``LimitRow`` (token windows) — a thin wrapper over the raw
     /// ``addBar(bar:subdivisions:idle:isLast:)`` that unpacks the row's geometry.
     private func addBar(_ row: LimitRow, isLast: Bool) {
-        addBar(bar: row.bar, subdivisions: row.subdivisions, idle: row.sessionIdle, isLast: isLast)
+        addBar(bar: row.bar, subdivisions: row.subdivisions, idle: row.sessionIdle,
+               blocked: row.sessionBlocked, isLast: isLast)
     }
 
     /// Add a pacing bar from raw geometry — shared by the token limit rows and the "Extra usage"
@@ -762,11 +845,12 @@ final class PopupViewController: NSViewController {
     /// (the credits bar paces the whole calendar month, with no window boundaries to mark); `idle`
     /// draws the solid-blue knobless 5h track (#100). When `bar` is `nil` the view draws nothing —
     /// but callers only reach here with a real bar (idle uses the flag, not the layout).
-    private func addBar(bar: BarLayout?, subdivisions: Int, idle: Bool, isLast: Bool) {
+    private func addBar(bar: BarLayout?, subdivisions: Int, idle: Bool, blocked: Bool = false, isLast: Bool) {
         let view = PopupBarView()
         view.bar = bar
         view.subdivisions = subdivisions
         view.idle = idle   // solid-blue knobless track when the 5h window is idle (#100)
+        view.blocked = blocked   // grey instead of blue when that idle state is blocked (#158)
         view.translatesAutoresizingMaskIntoConstraints = false
         view.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.hPadding).isActive = true
         view.heightAnchor.constraint(equalToConstant: PopupBarView.viewHeight).isActive = true
@@ -991,8 +1075,10 @@ final class PopupViewController: NSViewController {
     /// of pace".
     private static func statusText(_ row: LimitRow) -> String {
         // Idle 5-hour row (#100): "ready to start" instead of a pacing phrase — there is no active
-        // window to pace. Guarded first so the inert placeholder indicator/pacing are never consulted.
-        if row.sessionIdle { return idleStatusText }
+        // window to pace. When that idle state is also blocked (#158 — 7d exhausted, credits cannot
+        // cover) it becomes "waiting for limit reset". Guarded first so the inert placeholder
+        // indicator/pacing are never consulted.
+        if row.sessionIdle { return row.sessionBlocked ? blockedStatusText : idleStatusText }
         switch row.indicator {
         case .critical: return "limit reached"
         case .warning:  return aheadPhrase(row) + " ⚠"
