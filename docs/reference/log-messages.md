@@ -2,7 +2,7 @@
 
 A complete, verbatim inventory of every log statement TokenPace emits, grouped by
 source file. All logging goes through the `AppLogger` facade (`os.Logger` /
-unified logging) — see [`Sources/TokenPaceKit/AppLogger.swift`](../Sources/TokenPaceKit/AppLogger.swift).
+unified logging) — see [`Sources/TokenPaceKit/AppLogger.swift`](../../Sources/TokenPaceKit/AppLogger.swift).
 
 > **Keep this in sync.** Whenever you add, remove, or change the text of a log
 > statement, update the matching row here in the same change. See

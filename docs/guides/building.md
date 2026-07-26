@@ -38,7 +38,7 @@ Silicon, і на Intel-Mac (SwiftPM не має єдиного `--arch`, тож 
 Developer ID identity збірка лишається непідписаною — Gatekeeper може заблокувати при першому
 запуску (`права кнопка → Відкрити`, або `xattr -dr com.apple.quarantine ./build/TokenPace.app`).
 
-Повна процедура релізу — [docs/releasing.md](releasing.md).
+Повна процедура релізу — [releasing.md](releasing.md).
 
 ## Launch-at-login
 

@@ -18,8 +18,8 @@
   ```
 - `gh` CLI автентифікований (`gh auth status`).
 
-Деталі налаштування підпису — [ADR-0004](adr/0004-build-system.md),
-[ADR-0012](adr/0012-configure-window-and-launch-at-login.md).
+Деталі налаштування підпису — [ADR-0004](../adr/0004-build-system.md),
+[ADR-0012](../adr/0012-configure-window-and-launch-at-login.md).
 
 ## Кроки
 

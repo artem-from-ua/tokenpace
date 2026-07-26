@@ -116,7 +116,7 @@ end note
 Наскрізна обгортка логування — **AppLogger** (`os.Logger`, 4 категорії
 `network`/`keychain`/`lifecycle`/`ui`, subsystem `com.artem-n.tokenpace`). Токен і секрети
 **ніколи не логуються** (дефолтний `<private>` redaction; лише безпечні діагностичні поля —
-`.public`). Повний каталог меседжів — [log-messages.md](../../log-messages.md).
+`.public`). Повний каталог меседжів — [log-messages.md](../log-messages.md).
 
 ## Мапа компонентів
 

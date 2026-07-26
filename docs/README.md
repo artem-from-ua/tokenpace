@@ -16,17 +16,17 @@
 
 ## Як зробити X (процес)
 
-- [building.md](building.md) — збірка з джерел (для контриб'юторів).
-- [releasing.md](releasing.md) — зібрати, нотаризувати й опублікувати реліз; стиль release notes.
-- [ui-verification.md](ui-verification.md) — жива перевірка menu-bar / Settings змін перед PR:
+- [building.md](guides/building.md) — збірка з джерел (для контриб'юторів).
+- [releasing.md](guides/releasing.md) — зібрати, нотаризувати й опублікувати реліз; стиль release notes.
+- [ui-verification.md](guides/ui-verification.md) — жива перевірка menu-bar / Settings змін перед PR:
   перелік стубів (`TOKENPACE_STUB=…`), сценарії без стубу, фічі, що потребують підпису.
 - [guides/agent-workflow.md](guides/agent-workflow.md) — операційні правила для AI-агента:
   worktrees, гілки/PR, запуск для перевірки UI, зупинка застосунку та логи, GitHub Project.
 
 ## Довідник (що це)
 
-- [conventions.md](conventions.md) — конвенції розробки: мова, стиль, логування, версіонування.
-- [log-messages.md](log-messages.md) — повний перелік кожного лог-повідомлення, згрупований за файлом.
+- [conventions.md](reference/conventions.md) — конвенції розробки: мова, стиль, логування, версіонування.
+- [log-messages.md](reference/log-messages.md) — повний перелік кожного лог-повідомлення, згрупований за файлом.
 - [architecture.md](architecture.md) — архітектура (індекс), розбита на під-сторінки:
   - [reference/architecture/overview.md](reference/architecture/overview.md) — принципи, розгортання, каденції, SPM.
   - [reference/architecture/data-flow.md](reference/architecture/data-flow.md) — полінг, токен, pacing, рендер, діаграми потоку.
