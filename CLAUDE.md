@@ -69,6 +69,7 @@ swift run          # запуск
   підходами → новий ADR; **зміна логування** (новий/видалений виклик, інший текст меседжа,
   рівень чи категорія) → оновити `docs/log-messages.md` у тому самому коміті.
 - **Не стверджувати з пам'яті** факти про зовнішні API/інструменти — перевіряти (curl/--help/docs).
+- **`gh release create` runs only after the maintainer's explicit go-ahead.** A direct instruction to publish this release — "релізь", "make release", "publish the release" or equivalent — is required each time. Building, notarizing, tagging and drafting release notes may proceed without it, but the actual `gh release create` waits for that explicit word. This is separate from and additional to the `RELEASE_NOTES_APPROVED=1` notes-approval gate (that gate guards the notes; this rule guards the act of publishing).
 
 ## Робочий процес
 
