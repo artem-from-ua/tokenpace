@@ -83,24 +83,32 @@ unlimited. Verbatim-body збережено як regression-фікстури в 
    момент. Показ додатково гейтиться реальним використанням кредитів (хоча б один базовий ліміт
    5h/7d/scoped вичерпаний — саме тоді витрати йдуть з кредитів).
 
-5. **Severity кольору — власні пороги з `used_credits / limit`, серверний `spend.severity` ІГНОРУЄМО.**
-   Дзеркалимо наявну `PacingModel.PacingSeverity` (calm / ahead / exhausted) та її пороги
-   ([ADR-0005](0005-pacing-fractions-not-blocks.md)), щоб іконка кредитів була узгоджена з рештою
-   pacing-кольорів menu bar і не залежала від внутрішньої (непрозорої) градації сервера. `spend_limit_reached`
-   (або `used >= limit`) → `exhausted` (red). Гасіння в білий під `calmMenuBarColors` — як у решти
-   calm-кольорів ([ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md), #105).
+5. **Колір іконки рахується ТАК САМО, як бари токенів — `usage` vs `time`, серверний `spend.severity`
+   ІГНОРУЄМО.** `CreditsPacing.barLayout(...)` віддає той самий `BarLayout`, що й 5h/7d-бари, тож view
+   фарбує іконку тим самим `PopupBarView.aheadColor(usage:time:)`: зелений (у нормі) → жовтий (трохи
+   випереджаєш) → оранжевий (сильно) → **червоний лише при досягнутому ліміті**. Осі:
+   - `usageFraction = used_credits / limit`;
+   - **`timeFraction` = частка календарного місяця, що минула, від 00:00 UTC 1-го числа.** Грошове
+     вікно = календарний місяць у UTC — підтверджено офіційними [Anthropic Spend Limits API
+     docs](https://platform.claude.com/docs/en/manage-claude/spend-limits-api) («monthly spend resets
+     at 00 UTC on the first of each calendar month»). API **не дає** reset-часу грошей (факт 5-bis:
+     `spend`/`extra_usage` без часових полів), тож `timeFraction` рахуємо локально (`monthElapsedFraction`,
+     TZ інжектована, дефолт UTC — на відміну від токенних вікон, чий reset-час `ResetClock` показує в
+     **локальній** TZ). `spend_limit_reached` (або `used >= limit`) форсує `usageFraction = 1` → `aheadColor`
+     дає червоний. Це навмисно НЕ окрема severity-формула з порогом «% від стелі» — колір узгоджений із
+     рештою pacing 1:1. Гасіння calm-кольорів під `calmMenuBarColors` — як у барів (#105).
 
 6. **База pacing — тільки ЛІМІТ. Balance-логіку прибрано з обсягу.** Оскільки `balance` недоступний
    (факт 5), будь-який розрахунок «відносно балансу» неможливий:
-   - **ліміт встановлений** → pacing відносно ліміту (`used / limit`), як звичайні бари;
-   - **ліміт не встановлений** (unlimited, `limit == null`) → **без pacing**, лише витрачена сума
-     (немає `utilization`/`percent` → немає чого фарбувати).
+   - **ліміт встановлений** → pacing відносно ліміту (`used / limit` × час місяця), як звичайні бари;
+   - **ліміт не встановлений** (unlimited, `limit == null`) → **без pacing / без бару**, лише витрачена
+     сума (немає стелі → немає `usageFraction` → `barLayout` віддає `nil`).
    Balance / auto-reload / поповнення — **окрема майбутня фіча**, коли (і якщо) з'ясуємо джерело даних.
 
 7. **Розкол pure/shell — як усюди** ([ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md)):
-   decode-модель і чиста pacing-функція (`CreditsPacing`: тригер + severity + база) живуть у
-   `TokenPaceKit` (AppKit-free, юнітяться на 5 станах-фікстурах); мапінг severity → колір, SF-Symbol
-   валюти й форматування сум — у shell (`StatusItemView` / `PopupViewController`).
+   decode-модель і чиста `CreditsPacing` (тригер + `barLayout` usage-vs-time + `monthElapsedFraction`)
+   живуть у `TokenPaceKit` (AppKit-free, юнітяться); мапінг `BarLayout` → колір (спільний `aheadColor`),
+   SF-Symbol валюти й форматування сум — у shell (`StatusItemView` / `PopupViewController`).
 
 ## Наслідки
 
