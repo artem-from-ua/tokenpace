@@ -12,7 +12,7 @@ iPhone та комплікейшен Apple Watch.
 
 - [SPEC.md](SPEC.md) — повний продуктовий спек: архітектура, UI, поведінка, обсяг Фази 1, план робіт.
 - [docs/architecture.md](docs/architecture.md) — архітектура та потік даних.
-- [docs/conventions.md](docs/conventions.md) — конвенції розробки.
+- [docs/conventions.md](docs/reference/conventions.md) — конвенції розробки.
 - [docs/adr/](docs/adr/) — архітектурні рішення (Swift, українська дока, закритий агент, збірка).
 
 ## Мова
@@ -67,13 +67,13 @@ swift run          # запуск
 - Робочий цикл: коміт у feature-гілку → `swift build` → **віддати мейнтейнеру** → підтвердження → PR.
 
 Повний перелік стубів, сценарії без стубу (screen-lock #114, авто-апдейт #130), і деталі команд — у
-[docs/ui-verification.md](docs/ui-verification.md). **Додаючи фічу зі своїм станом — додай стуб і
+[docs/ui-verification.md](docs/guides/ui-verification.md). **Додаючи фічу зі своїм станом — додай стуб і
 онови той перелік.**
 
 ## Стиль release notes
 
 **НІКОЛИ не склад release notes з пам'яті.** Перед написанням нотаток **обов'язково відкрий і прочитай
-[docs/releasing.md](docs/releasing.md)** (розділ «Зміст і стиль release notes») — саме там канонічні
+[docs/releasing.md](docs/guides/releasing.md)** (розділ «Зміст і стиль release notes») — саме там канонічні
 правила, а не в пам'яті чи в цьому файлі. Ключове звідти:
 
 - **Канонічний шлях встановлення — автооновлення** (Settings → About → «Check for updates daily» +

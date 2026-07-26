@@ -3,7 +3,7 @@
 ## Мова
 
 - **Документація — українська** (README, SPEC, docs/, ADR). Проєктне рішення (див.
-  [ADR-0002](adr/0002-ukrainian-documentation.md)).
+  [ADR-0002](../adr/0002-ukrainian-documentation.md)).
 - **Код** — англійською: ідентифікатори, коментарі, повідомлення комітів, рядки UI до
   локалізації.
 - Ідентифікатори API (`five_hour`, `resets_at`, `client_id` тощо) — в оригіналі навіть в
@@ -12,11 +12,11 @@
 ## Стек
 
 - **Swift** для всього проєкту (menu bar app, згодом iOS/watchOS). Див.
-  [ADR-0001](adr/0001-swift-stack.md).
+  [ADR-0001](../adr/0001-swift-stack.md).
 - macOS: AppKit (`NSStatusItem`) + SwiftUI всередині (`NSHostingView`).
 - **Мінімальний target: macOS 15 Sequoia.**
 - **Збірка Фази 1:** Swift Package Manager + build-скрипт (bundle/sign/notarize). Xcode —
-  у Фазі 2 для iOS/watchOS. Див. [ADR-0004](adr/0004-build-system.md).
+  у Фазі 2 для iOS/watchOS. Див. [ADR-0004](../adr/0004-build-system.md).
 - **Тести:** `swift-testing` (`import Testing`, `@Test func`, `#expect(…)`) — `XCTest` недоступний
   на Command Line Tools без повного Xcode. `swift-testing` вбудований у Swift 6.1 CLT.
 
@@ -97,7 +97,7 @@ git config core.hooksPath .githooks
   транспортом (`StubUsageTransport`), тож застосунок ганяється end-to-end без usage/status API й без
   Keychain (`1` — зростаюча утилізація; `screenshot` — застиглий кадр для README; `error` — 401 +
   деградовані сервіси). Повний перелік усіх стубів (idle, pacing-фрейми, calm-both тощо) — у
-  [ui-verification.md](ui-verification.md).
+  [ui-verification.md](../guides/ui-verification.md).
 - **`TOKENPACE_GH_AUTH`** (прапорець присутності, будь-яке непорожнє значення) — вмикає `gh`-шлях
   update-чеку (`GHReleaseFetcher`): `gh api …/releases/latest` як subprocess, `gh` бере токен із
   keyring. Для мейнтейнерів, поки репо приватне; без змінної — анонімний HTTPS (ADR-0025).

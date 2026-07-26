@@ -52,7 +52,7 @@
   вбивством релізу.
 - Тимчасовий `.app`-бандл потрібен лише для фіч, залежних від підпису (launch-at-login /
   SMAppService, апдейт-сигнали) — і навіть тоді не в `/Applications` без явного дозволу. Деталі й
-  перелік стубів — у [ui-verification.md](../ui-verification.md).
+  перелік стубів — у [ui-verification.md](ui-verification.md).
 
 ## Зупинка застосунку та логи
 
@@ -86,9 +86,9 @@
 - Зміна модуля → онови [architecture.md](../architecture.md).
 - Рішення між двома підходами → новий ADR у [../adr/](../adr/).
 - Зміна логування (новий/видалений виклик, інший текст/рівень/категорія) → онови
-  [log-messages.md](../log-messages.md) у **тому самому** коміті.
-- Нова конвенція/інструмент → онови [conventions.md](../conventions.md).
-- Нова фіча зі своїм станом → додай стуб і онови таблицю стубів у [ui-verification.md](../ui-verification.md).
+  [log-messages.md](../reference/log-messages.md) у **тому самому** коміті.
+- Нова конвенція/інструмент → онови [conventions.md](../reference/conventions.md).
+- Нова фіча зі своїм станом → додай стуб і онови таблицю стубів у [ui-verification.md](ui-verification.md).
 
 ## Верифікація перед PR
 
