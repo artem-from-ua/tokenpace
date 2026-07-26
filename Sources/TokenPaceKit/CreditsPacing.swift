@@ -111,21 +111,30 @@ public enum CreditsPacing {
         return windows.contains { $0 >= 100 }
     }
 
-    /// Whether an **idle** 5-hour state is actually **blocked** — no path left to start a new session
-    /// (#158). The 5h window is gone (idle), so the only barrier is the 7-day limit, which paid
-    /// credits can lift:
+    /// Whether the user is **blocked** — no path left to do work right now (#158). Blocked means every
+    /// way to start/continue is closed:
     ///
     /// ```
-    /// blocked = seven_day exhausted (>= 100)  AND NOT creditsCanCover(spend)
+    /// blocked = noFiveHourQuota  AND  seven_day exhausted (>= 100)  AND NOT creditsCanCover(spend)
+    /// noFiveHourQuota = sessionIdle  OR  five_hour exhausted (>= 100)
     /// ```
     ///
-    /// A 7-day limit at 100 % with credits still covering (`enabled` & not capped) is **not** blocked —
-    /// work continues on the paid tier, so the UI stays "ready to start". Only when 7d is exhausted
-    /// **and** credits cannot cover (disabled / capped / absent) is the user genuinely waiting for a
-    /// reset. Caller gates this on ``UsageSnapshot/sessionIdle`` — it is meaningful only in the idle
-    /// state (an active 5h session is a different, non-idle scenario).
-    public static func idleBlocked(in snapshot: UsageSnapshot) -> Bool {
-        snapshot.sevenDay.utilization >= 100 && !creditsCanCover(snapshot.spend)
+    /// The 5-hour window is the near-term gate: you can work if it has quota — either an **idle** 5h
+    /// (no window yet, but starting one is allowed *unless* the 7-day cap blocks it) or an active 5h
+    /// below 100 %. So `noFiveHourQuota` holds when the 5h window is idle **or** itself exhausted. On top
+    /// of that the 7-day cap must be exhausted **and** paid credits unable to cover (`enabled` & not
+    /// capped) — a 7-day at 100 % with credits still covering is **not** blocked (work continues on the
+    /// paid tier). Only when all three hold is the user genuinely waiting for a reset.
+    ///
+    /// This is the general predicate behind both the idle-blocked grey bar (`sessionIdle` case) and the
+    /// red blocking-reset badge on a fully-exhausted active state (both `five_hour` and `seven_day` at
+    /// 100 %). Per-model sub-windows with spare quota (e.g. a model at 60 %) do **not** unblock: the main
+    /// 5h/7d windows gate all work.
+    public static func isBlocked(in snapshot: UsageSnapshot) -> Bool {
+        let noFiveHourQuota = snapshot.sessionIdle || snapshot.fiveHour.utilization >= 100
+        return noFiveHourQuota
+            && snapshot.sevenDay.utilization >= 100
+            && !creditsCanCover(snapshot.spend)
     }
 
     // MARK: - Pacing (usage vs. time — same as the token bars)

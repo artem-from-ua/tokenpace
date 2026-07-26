@@ -28,33 +28,41 @@ date: 2026-07-26
 
 ### D1. Модель «заблоковано» (чиста логіка в Kit)
 
+«Заблоковано» = немає жодного шляху працювати зараз — незалежно від того, idle ти чи мав активну
+сесію:
+
 ```
-idleBlocked = seven_day.utilization >= 100  AND NOT creditsCanCover(spend)
+isBlocked = noFiveHourQuota  AND  seven_day >= 100  AND NOT creditsCanCover(spend)
+noFiveHourQuota = sessionIdle  OR  five_hour >= 100
 creditsCanCover(spend) = spend != nil AND spend.enabled AND NOT spend.spend_limit_reached
 ```
 
-Тобто 7d вичерпаний **і** credits не рятують (вимкнені / capped / відсутні). Якщо credits ще
-покривають (enabled і не capped) — робота триває на платному тарифі, стан лишається «ready to start»
-(синій). Прапорці `BarView.blocked` / `LimitRow.sessionBlocked` несуть це у view; обчислення — у
-`make(...)` обох layout-ів, гейтоване на `sessionIdle`.
+5h-вікно — близький бар'єр: працювати можна, якщо в нього є квота (idle-5h, який дозволено стартувати,
+або активний 5h < 100). Тому `noFiveHourQuota` = idle **або** 5h вичерпаний. Плюс 7d має бути вичерпаний
+**і** credits не покривати. Per-model вікна з запасом (напр. модель на 60 %) **не** розблоковують —
+головні 5h/7d гейтують усю роботу. Обчислення — у `make(...)` обох layout-ів.
 
-### D2. Сірий бар + «waiting for limit reset»
+### D2. Сірий бар + «waiting for limit reset» (лише idle)
 
-- **Заблокований** idle-бар малюється **базовим сірим пейсинг-стрічки** (`PopupBarView.monochromeGrey` —
+Це — **idle-специфіка** (при активній сесії 5h-рядок показує звичайне «limit reached», а не «waiting»):
+
+- **Заблокований idle**-бар малюється **базовим сірим пейсинг-стрічки** (`PopupBarView.monochromeGrey` —
   той самий тон, що `used`/future-зони бару), не «готовим» синім. На menu bar — у **обох** colour-режимах
-  (blocked не залежить від «Calm colours» #105).
+  (blocked не залежить від «Calm colours» #105). Прапорці `BarView.blocked` / `LimitRow.sessionBlocked`.
 - **Ready** idle-бар лишається синім (`idleBlue`); під «Calm colours» він тепер мутиться в **м'який
   світло-сірий** (`idleCalmGrey`), а не в чистий білий — білий читався надто яскраво для idle-стрічки.
   Тобто menu-bar idle: ready = синій / calm→світло-сірий; blocked = базовий сірий (обидва режими).
 - **Попап**, статус-слово: `ready to start` → **`waiting for limit reset`**. Формулювання нейтральне
   (не «7d»), бо блокувати може і credits-cap. Idle-рядок лишається **компактним** (без detail-рядка) —
-  час розблокування несе червоний бейдж (D3), не дублюється в idle-рядку.
+  час розблокування несе червоний бейдж (D3).
 
 ### D3. Єдиний червоний блокуючий ресет — правило «останнього рубежу»
 
 На попапі рівно **один** ресет-час показується як **червоний бейдж** (пігулка `PillView` в
-exhausted-червоному, як «active»-бейдж кредитів, лише червоний) — той, що реально розблокує роботу;
-з'являється **лише** коли заблоковано. Menu bar показує **той самий** обраний ресет як countdown.
+exhausted-червоному, як «active»-бейдж кредитів, лише червоний, із hover-тултипом **«Effective
+blocker»**) — той, що реально розблокує роботу. З'являється **щоразу, коли `isBlocked`** — і в idle, і
+при активній сесії з усіма вичерпаними базовими лімітами (кадр `both-red`: 5h+7d+per-model на 100 % →
+бейдж на 7d, бо його ресет пізніший за 5h). Menu bar показує **той самий** обраний ресет як countdown.
 
 Правило (`BlockingReset`, спільне для попапу й menu bar) над вичерпаними ресетами `5` (5h≥100),
 `7` (7d≥100), `e` (credits `monthEnd`, коли `CreditsPacing.isActive`):

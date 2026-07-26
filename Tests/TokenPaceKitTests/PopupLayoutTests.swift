@@ -502,6 +502,29 @@ struct PopupLayoutIdleTests {
         }
         #expect(id == 1)
     }
+
+    @Test func activeFullyExhaustedBadgesSevenDayNotIdle() {
+        // The `both-red` screen: active session, 5h and 7d both at 100 %, no credits. Not idle → the 5h
+        // row is a normal "limit reached" row (NOT sessionBlocked), but the blocking reset still points
+        // at the 7-day row (index 1, its reset is later than 5h) so the red badge shows there.
+        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100,
+                            fiveHourResetsIn: 2 * 3600, sevenDayResetsIn: 4 * 24 * 3600)
+        let p = layout(from: snap)
+        #expect(!p.rows[0].sessionIdle)
+        #expect(!p.rows[0].sessionBlocked)
+        guard case let .token(id, _)? = p.blockingReset else {
+            Issue.record("expected a token blocking reset, got \(String(describing: p.blockingReset))")
+            return
+        }
+        #expect(id == 1)   // 7-day, the later reset
+    }
+
+    @Test func activeFiveExhaustedSevenHasQuotaNoBadge() {
+        // 5h spent but 7d still has room → not blocked, no badge.
+        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 40)
+        let p = layout(from: snap)
+        #expect(p.blockingReset == nil)
+    }
 }
 
 // MARK: - Extra usage (money-credits) row (#145)

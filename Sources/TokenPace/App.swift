@@ -608,6 +608,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "both-orange": StubUsageTransport(mode: .pacing(.bothOrange))
         case "both-red":    StubUsageTransport(mode: .pacing(.bothRed))
         case "red-orange":  StubUsageTransport(mode: .pacing(.redOrange))
+        case "red-green":   StubUsageTransport(mode: .pacing(.redGreen))
         case "calm5-orange7": StubUsageTransport(mode: .pacing(.calmFiveOrangeSeven))
         // Both-calm frame (#94): exercises the "Hide 7-day bar when calm" opt-out (lone centred 5h).
         case "calm-both":  StubUsageTransport(mode: .pacing(.calmBoth))

@@ -275,8 +275,10 @@ public struct PopupLayout: Sendable, Equatable {
         // The 5-hour row is the idle placeholder when the window has no active session (#100); every
         // other row is built normally, including the 7-day one (which always exists). When idle is also
         // **blocked** (#158) the placeholder carries `sessionBlocked` so the view greys it and swaps the
-        // status word to "waiting for limit reset".
-        let idleBlocked = snapshot.sessionIdle && CreditsPacing.idleBlocked(in: snapshot)
+        // status word to "waiting for limit reset". (An *active* fully-exhausted 5h row is not idle, so
+        // it shows the normal "limit reached" — only the red blocking-reset badge marks it, via
+        // `blockingReset`.)
+        let idleBlocked = snapshot.sessionIdle && CreditsPacing.isBlocked(in: snapshot)
         var rows: [LimitRow] = [
             snapshot.sessionIdle ? idleFiveHourRow(blocked: idleBlocked) : row(title: "5-hour", window: snapshot.fiveHour, as: .fiveHour, now: now),
             row(title: "7-day", window: snapshot.sevenDay, as: .sevenDay, now: now),
@@ -359,14 +361,15 @@ public struct PopupLayout: Sendable, Equatable {
             sessionBlocked: blocked)
     }
 
-    /// The blocking reset for the popup (#158) — `nil` unless the snapshot is idle **and** blocked.
-    /// Delegates to the shared ``BlockingReset/forIdleBlocked(snapshot:now:)`` so the popup badge and
-    /// the menu-bar countdown pick the same reset. The returned ``BlockingReset/Choice`` carries a popup
-    /// **row index** (`token(id:)`) or the credits section (`credits`) — the view maps it to the one
-    /// reset line it paints red.
+    /// The blocking reset for the popup (#158) — `nil` unless the snapshot is **blocked** (no path to
+    /// work: idle-blocked, or an active state with both 5h and 7d exhausted and credits not covering;
+    /// ``CreditsPacing/isBlocked(in:)``). Delegates to the shared ``BlockingReset/forBlocked(snapshot:now:)``
+    /// so the popup badge and the menu-bar countdown pick the same reset. The returned
+    /// ``BlockingReset/Choice`` carries a popup **row index** (`token(id:)`) or the credits section
+    /// (`credits`) — the view maps it to the one reset line it paints as a red badge.
     private static func blockingReset(from snapshot: UsageSnapshot, now: Date) -> BlockingReset.Choice? {
-        guard snapshot.sessionIdle, CreditsPacing.idleBlocked(in: snapshot) else { return nil }
-        return BlockingReset.forIdleBlocked(snapshot: snapshot, now: now)
+        guard CreditsPacing.isBlocked(in: snapshot) else { return nil }
+        return BlockingReset.forBlocked(snapshot: snapshot, now: now)
     }
 
     /// Build one `LimitRow`, delegating all arithmetic to tested pure logic. An unparseable

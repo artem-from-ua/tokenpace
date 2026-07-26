@@ -672,10 +672,16 @@ final class PopupViewController: NSViewController {
 
     /// The blocking-reset badge (#158): a red capsule carrying the reset countdown (e.g. "4d"), shown
     /// flush-right on the one row whose reset actually unblocks work. Same pill shape as the "in use"
-    /// badge, filled with the exhausted red (`PopupBarView.gapRed`) so it reads as the blocker.
+    /// badge, filled with the exhausted red (`PopupBarView.gapRed`) so it reads as the blocker. A
+    /// hover tooltip ("Effective blocker") explains why this one reset is highlighted.
     private static func makeResetBadge(text: String) -> NSView {
-        makePill(text: text, fill: { PopupBarView.gapRed })
+        let pill = makePill(text: text, fill: { PopupBarView.gapRed })
+        pill.toolTip = blockingResetHint
+        return pill
     }
+
+    /// Localisation seam for the blocking-reset badge's hover hint (#158).
+    static let blockingResetHint = "Effective blocker"
 
     /// Shared pill factory (#146/#158): white medium text on a rounded, layer-backed capsule whose
     /// fill is `fill()` (re-resolved per appearance). Sizing comes from the text + insets; the radius is

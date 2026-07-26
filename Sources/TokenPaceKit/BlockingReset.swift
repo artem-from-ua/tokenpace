@@ -100,21 +100,22 @@ public enum BlockingReset: Sendable, Equatable {
 
     // MARK: - Snapshot bridge
 
-    /// The blocking reset for a snapshot in the **idle-blocked** state (#158) — the single decision
-    /// both the popup (red badge) and the menu bar (countdown) read, so they always agree.
+    /// The blocking reset for a **blocked** snapshot (#158) — the single decision both the popup (red
+    /// badge) and the menu bar (countdown) read, so they always agree. Works for both the idle-blocked
+    /// state and a fully-exhausted active state (see ``CreditsPacing/isBlocked(in:)``).
     ///
     /// Builds the candidate set from the snapshot and applies ``select(tokenWindows:creditsReset:)``:
     /// - **Token candidates** are every base/per-model window with `utilization >= 100`, each keyed by
     ///   its **popup row index** — `0` = 5h, `1` = 7d, then `sevenDayOpus`, `sevenDaySonnet`, and the
     ///   `scopedModelWindows` in order (the exact order `PopupLayout.rows` builds). A window whose
     ///   `resets_at` does not parse is dropped (it cannot anchor a countdown). In the idle state the 5h
-    ///   window is gone, so index `0` never appears — but the mapping is defined so the popup can reuse
-    ///   this in non-idle states later.
+    ///   window is gone (util 0), so index `0` never appears; in an active exhausted state the 5h window
+    ///   at 100 % *is* a candidate.
     /// - **Credits** contribute their `monthEnd` reset **iff** `CreditsPacing.isActive` (the escape
     ///   hatch is in play); otherwise `creditsReset` is `nil` and the rule uses tokens only.
     ///
     /// Returns `nil` when nothing blocks (no exhausted token parsed **and** credits inactive).
-    public static func forIdleBlocked(snapshot: UsageSnapshot, now: Date) -> Choice? {
+    public static func forBlocked(snapshot: UsageSnapshot, now: Date) -> Choice? {
         var tokens: [TokenCandidate] = []
         func consider(_ index: Int, _ window: UsageWindow) {
             guard window.utilization >= 100, let at = ResetClock.parse(window.resetsAt) else { return }

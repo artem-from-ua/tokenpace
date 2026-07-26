@@ -376,6 +376,9 @@ actor StubUsageTransport: UsageTransport {
         case bothRed
         /// 5h red (usage 100) + 7d orange (usage 55) — the red bar (5h) drives the countdown.
         case redOrange
+        /// 5h **red** (usage 100) + 7d **green** on-pace (usage 20 vs elapsed ~29) — one red stroke and
+        /// one green stroke side by side, for comparing the lightened menu-bar pacing colours (#158).
+        case redGreen
         /// 5h **calm** (usage 10 vs elapsed ~20 → green) + 7d **orange** ahead-of-pace (usage 55 vs
         /// elapsed ~29 → ahead ~26 pts) with a **distant** reset (5 d ≥ 24 h). The only frame where the
         /// "Display reset countdown" checkbox toggles a visible difference: `showDistant7d` shows the
@@ -393,6 +396,7 @@ actor StubUsageTransport: UsageTransport {
             case .bothOrange:         return (50, 55, 4 * 3600, 5 * 24 * 3600)
             case .bothRed:            return (100, 100, 2 * 3600, 4 * 24 * 3600)
             case .redOrange:          return (100, 55, 2 * 3600, 5 * 24 * 3600)
+            case .redGreen:           return (100, 20, 2 * 3600, 5 * 24 * 3600)
             case .calmFiveOrangeSeven: return (10, 55, 4 * 3600, 5 * 24 * 3600)
             case .calmBoth:           return (10, 20, 4 * 3600, 5 * 24 * 3600)
             }

@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import TokenPaceKit
 
-// MARK: - CreditsPacing.creditsCanCover / idleBlocked
+// MARK: - CreditsPacing.creditsCanCover / isBlocked
 
 @Suite("CreditsPacing.creditsCanCover")
 struct CreditsCanCoverTests {
@@ -25,8 +25,8 @@ struct CreditsCanCoverTests {
     }
 }
 
-@Suite("CreditsPacing.idleBlocked")
-struct IdleBlockedTests {
+@Suite("CreditsPacing.isBlocked")
+struct IsBlockedTests {
     private let now = Date(timeIntervalSince1970: 1_000_000)
     private func iso(_ seconds: TimeInterval) -> String {
         let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]
@@ -38,28 +38,54 @@ struct IdleBlockedTests {
             sevenDay: UsageWindow(utilization: sevenDayUtil, resetsAt: iso(4 * 24 * 3600)),
             sessionIdle: true, spend: spend)
     }
-
-    @Test func sevenDayBelow100NotBlocked() {
-        #expect(!CreditsPacing.idleBlocked(in: idle(sevenDayUtil: 80, spend: nil)))
+    /// An **active** (non-idle) snapshot with explicit 5h / 7d utilisations.
+    private func active(fiveDayUtil: Double, sevenDayUtil: Double, spend: SpendInfo? = nil) -> UsageSnapshot {
+        UsageSnapshot(
+            fiveHour: UsageWindow(utilization: fiveDayUtil, resetsAt: iso(2 * 3600)),
+            sevenDay: UsageWindow(utilization: sevenDayUtil, resetsAt: iso(4 * 24 * 3600)),
+            spend: spend)
     }
 
-    @Test func sevenDayExhaustedNoCreditsIsBlocked() {
-        #expect(CreditsPacing.idleBlocked(in: idle(sevenDayUtil: 100, spend: nil)))
+    // Idle-blocked cases (5h window absent).
+
+    @Test func idleSevenDayBelow100NotBlocked() {
+        #expect(!CreditsPacing.isBlocked(in: idle(sevenDayUtil: 80, spend: nil)))
     }
 
-    @Test func sevenDayExhaustedButCreditsCoverIsNotBlocked() {
+    @Test func idleSevenDayExhaustedNoCreditsIsBlocked() {
+        #expect(CreditsPacing.isBlocked(in: idle(sevenDayUtil: 100, spend: nil)))
+    }
+
+    @Test func idleSevenDayExhaustedButCreditsCoverIsNotBlocked() {
         let cover = SpendInfo(enabled: true, spendLimitReached: false)
-        #expect(!CreditsPacing.idleBlocked(in: idle(sevenDayUtil: 100, spend: cover)))
+        #expect(!CreditsPacing.isBlocked(in: idle(sevenDayUtil: 100, spend: cover)))
     }
 
-    @Test func sevenDayExhaustedAndCreditsCappedIsBlocked() {
+    @Test func idleSevenDayExhaustedAndCreditsCappedIsBlocked() {
         let capped = SpendInfo(enabled: false, spendLimitReached: true)
-        #expect(CreditsPacing.idleBlocked(in: idle(sevenDayUtil: 100, spend: capped)))
+        #expect(CreditsPacing.isBlocked(in: idle(sevenDayUtil: 100, spend: capped)))
     }
 
-    @Test func sevenDayExhaustedAndCreditsDisabledIsBlocked() {
-        let off = SpendInfo(enabled: false, spendLimitReached: false)
-        #expect(CreditsPacing.idleBlocked(in: idle(sevenDayUtil: 100, spend: off)))
+    // Active (non-idle) cases.
+
+    @Test func activeBothExhaustedNoCreditsIsBlocked() {
+        // The `both-red` screen: active session, 5h and 7d both at 100 %, no credits → blocked.
+        #expect(CreditsPacing.isBlocked(in: active(fiveDayUtil: 100, sevenDayUtil: 100)))
+    }
+
+    @Test func activeFiveExhaustedButSevenHasQuotaNotBlocked() {
+        // 5h spent but 7d still has room → the 5h window will reset soon and unblock; not blocked.
+        #expect(!CreditsPacing.isBlocked(in: active(fiveDayUtil: 100, sevenDayUtil: 40)))
+    }
+
+    @Test func activeSevenExhaustedButFiveHasQuotaNotBlocked() {
+        // 7d at 100 but the active 5h still has quota → you can keep working now; not blocked.
+        #expect(!CreditsPacing.isBlocked(in: active(fiveDayUtil: 30, sevenDayUtil: 100)))
+    }
+
+    @Test func activeBothExhaustedButCreditsCoverNotBlocked() {
+        let cover = SpendInfo(enabled: true, spendLimitReached: false)
+        #expect(!CreditsPacing.isBlocked(in: active(fiveDayUtil: 100, sevenDayUtil: 100, spend: cover)))
     }
 }
 
