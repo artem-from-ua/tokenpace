@@ -297,6 +297,11 @@ actor StubUsageTransport: UsageTransport {
         /// overlay, no ⏰), then the forced refresh lands: from the second poll on the stub returns a
         /// freshly-reset window (0 %, `now + 5h`), mirroring what the real API would report post-reset.
         case optimisticReset
+        /// The "Back to work!" edge frame (#160): the first poll returns a **blocked** body (7-day
+        /// window at 100 %, no credits → `canWork == false`), so the persisted "was blocked" flag is
+        /// set; every later poll returns a **workable** body (7-day back to 40 %), which is a genuine
+        /// blocked→unblocked edge that fires the notification (subject to quiet hours + authorization).
+        case justUnblocked
         /// A fixed 5h×7d severity frame for verifying the reset-countdown selection table (#103).
         case pacing(PacingFrame)
         /// Calm bars + a **degraded** (yellow) service dot (#…): the usage side mirrors
@@ -536,6 +541,26 @@ actor StubUsageTransport: UsageTransport {
             let body = """
             {"five_hour":{"utilization":\(fiveUtil),"resets_at":"\(fiveReset)"},\
             "seven_day":{"utilization":40.0,"resets_at":"\(sevenReset)"},\
+            "limits":[]}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
+        // Back-to-work frame (#160): first poll = blocked (7-day at 100 %, no credits → canWork false),
+        // so the persisted "was blocked" flag is set; every later poll = workable (7-day at 40 %). The
+        // blocked→unblocked edge fires once, posting the "Back to work!" banner (if enabled + in the
+        // allowed hours + not a suppressed day + authorized).
+        if mode == .justUnblocked {
+            let blocked = calls == 0
+            calls += 1
+            let sevenUtil = blocked ? 100.0 : 40.0
+            let fiveReset = Self.resetsAt(inSeconds: 3 * 3600)
+            let sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
+            let body = """
+            {"five_hour":{"utilization":18.0,"resets_at":"\(fiveReset)"},\
+            "seven_day":{"utilization":\(sevenUtil),"resets_at":"\(sevenReset)"},\
             "limits":[]}
             """.data(using: .utf8)!
             let response = HTTPURLResponse(

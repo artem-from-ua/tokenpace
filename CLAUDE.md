@@ -38,6 +38,25 @@ swift test         # unit-тести (PacingModel, парсинг/формат �
 swift run          # запуск
 ```
 
+## Логи — читати ПРАВИЛЬНО (не гатити не в ті логи)
+
+**Перед будь-якою `log`-командою прочитай розділ «Collecting logs — methods & gotchas» у
+[docs/reference/log-messages.md](docs/reference/log-messages.md).** Це найчастіша пастка в цьому
+проєкті: майже всі наші рядки — `.notice`/`.info`, а вони **не пишуться в persistent store**.
+
+- **`log show` НЕ показує `.notice`/`.info`/`.debug`** — лише `.error`/`.fault`. Порожній
+  `log show` **не** означає «застосунок не логує». Не роби такого висновку.
+- **Живий стрім — дефолт, і `--level debug` ОБОВʼЯЗКОВИЙ** (без нього видно лише `.error`):
+  ```sh
+  log stream --predicate 'subsystem == "com.artem-n.tokenpace"' --level debug
+  ```
+- **Launch-time / одноразові події** (перший пол, edge-детект, міграція): підніми стрім **першим**,
+  тоді запускай застосунок — інакше подія станеться до того, як стрім приєднається:
+  ```sh
+  ( log stream --predicate 'subsystem == "com.artem-n.tokenpace"' --level debug > /tmp/tp.log ) &
+  sleep 2 ; open -n /Applications/TokenPace.app   # або бінарник зі стубом
+  ```
+
 ## Критичні правила
 
 - **Ніколи не комітити токени/креденшали.** Токен лежить у macOS Keychain

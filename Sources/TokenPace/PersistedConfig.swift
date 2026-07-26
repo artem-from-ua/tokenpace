@@ -66,6 +66,22 @@ enum PersistedConfig {
         static let archiveDestination = "archiveDestination"
         /// Instant of the last **successful** archive sync (#110), gating the 24 h cadence.
         static let lastArchiveSync = "lastArchiveSync"
+        /// Whether the "Back to work!" notification fires when a usage limit becomes usable again
+        /// (#160). Default-off (opt-in) — see the property.
+        static let backToWorkEnabled = "backToWorkEnabled"
+        /// Start of the allowed-notification window (#160), as minute-of-day `0…1439` local time.
+        /// Default 480 (08:00) — see the property.
+        static let notifyWindowStartMinute = "notifyWindowStartMinute"
+        /// End of the allowed-notification window (#160), as minute-of-day `0…1439` local time.
+        /// Default 1020 (17:00) — see the property.
+        static let notifyWindowEndMinute = "notifyWindowEndMinute"
+        /// Which weekday pair the "Back to work!" notification is suppressed on (#160), stored as the
+        /// raw `SuppressDays` string. Default `.never` — see the property.
+        static let notifySuppressDays = "notifySuppressDays"
+        /// Persisted "was blocked" edge state for the "Back to work!" notification (#160). Survives
+        /// app restart and toggle off→on so the blocked→unblocked edge is never missed — see the
+        /// property.
+        static let backToWorkWasBlocked = "backToWorkWasBlocked"
     }
 
     /// The marketing version the config was last written under, or `nil` if none has been recorded
@@ -246,5 +262,55 @@ enum PersistedConfig {
     static var lastArchiveSync: Date? {
         get { defaults.object(forKey: Key.lastArchiveSync) as? Date }
         set { defaults.set(newValue, forKey: Key.lastArchiveSync) }
+    }
+
+    // MARK: - Back-to-work notification (#160)
+
+    /// Whether the "Back to work!" notification fires when a usage limit becomes usable again (#160).
+    /// **Default-off** (opt-in): an absent key reads as `false`, so nothing is ever posted until the
+    /// user turns it on (and grants notification authorization). `object(forKey:) as? Bool ?? false`
+    /// distinguishes "unset" from an explicit choice, consistent with the other opt-in toggles.
+    static var backToWorkEnabled: Bool {
+        get { defaults.object(forKey: Key.backToWorkEnabled) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.backToWorkEnabled) }
+    }
+
+    /// Start of the allowed-notification window (#160), as minute-of-day `0…1439` in local wall-clock
+    /// time. **Default 480 (08:00).** Clamped to the valid range on read so a corrupt value can never
+    /// feed an out-of-range minute into `NotificationSchedule`. The Settings time picker is display
+    /// only — the stored form is this Int (see the Notifications pane).
+    static var notifyWindowStartMinute: Int {
+        get { min(1439, max(0, defaults.object(forKey: Key.notifyWindowStartMinute) as? Int ?? 480)) }
+        set { defaults.set(newValue, forKey: Key.notifyWindowStartMinute) }
+    }
+
+    /// End of the allowed-notification window (#160), as minute-of-day `0…1439` local time.
+    /// **Default 1020 (17:00).** A value ≤ the start makes the window wrap across midnight; equal
+    /// endpoints mean the whole day (see ``NotificationSchedule``). Clamped on read like the start.
+    static var notifyWindowEndMinute: Int {
+        get { min(1439, max(0, defaults.object(forKey: Key.notifyWindowEndMinute) as? Int ?? 1020)) }
+        set { defaults.set(newValue, forKey: Key.notifyWindowEndMinute) }
+    }
+
+    /// Which weekday pair the "Back to work!" notification is suppressed on (#160). **Default
+    /// `.never`.** Stored as the raw `SuppressDays` string with a forward-compatible decode (an
+    /// unknown raw reads as `.never`), mirroring ``resetCountdownModeMenuBar``.
+    static var notifySuppressDays: SuppressDays {
+        get { SuppressDays(rawValue: defaults.string(forKey: Key.notifySuppressDays) ?? "") ?? .never }
+        set { defaults.set(newValue.rawValue, forKey: Key.notifySuppressDays) }
+    }
+
+    /// Persisted "was blocked" edge state for the "Back to work!" notification (#160). **Default
+    /// false.** This is **internal state, not a user setting** — it is not shown in Settings.
+    ///
+    /// It must be persisted (not an in-memory flag) so the blocked→unblocked edge survives an app
+    /// restart or a Mac sleep/reboot between the block and the reset: on the first successful poll
+    /// after relaunch, a still-`true` value plus a now-workable snapshot is a genuine edge that fires
+    /// the notification. It is updated **every** successful poll regardless of ``backToWorkEnabled``
+    /// (so toggling the feature off→on never forgets a pending edge, and never fires a stale one for a
+    /// reset that happened while the feature was off); the toggle gates only the posting.
+    static var backToWorkWasBlocked: Bool {
+        get { defaults.object(forKey: Key.backToWorkWasBlocked) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.backToWorkWasBlocked) }
     }
 }
