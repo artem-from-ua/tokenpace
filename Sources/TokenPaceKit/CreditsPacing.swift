@@ -155,6 +155,34 @@ public enum CreditsPacing {
         return min(1, max(0, elapsed / total))
     }
 
+    /// The **instant** the current money window ends — `00:00` on the 1st of the *next* calendar
+    /// month, in ``resetTimeZone`` (UTC) — i.e. the moment the monthly spend counter resets.
+    ///
+    /// The dropdown's "resets in Nd/Nh" line (#145) needs an actual `Date` to feed the shared
+    /// relative-time formatter (`ResetClock.relativeRounded`), whereas ``monthElapsedFraction`` only
+    /// yields the *fraction* elapsed. This is that fraction's numerator boundary made explicit: the
+    /// same next-month `00:00` UTC computed in ``monthElapsedFraction`` (see ``resetTimeZone`` for why
+    /// the reset is fixed to UTC, not the device zone). Returns `nil` only if the calendar can't
+    /// resolve the boundary (never in practice) — the caller then simply omits the reset line.
+    ///
+    /// - Parameters:
+    ///   - now: Current instant (inject for deterministic tests; do **not** call `Date()` here).
+    ///   - timeZone: Wall-clock zone whose month boundary defines the reset. Default ``resetTimeZone``
+    ///     (UTC) — the zone the monthly spend limit actually resets in.
+    public static func monthEnd(
+        now: Date,
+        timeZone: TimeZone = CreditsPacing.resetTimeZone
+    ) -> Date? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        guard
+            let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now))
+        else {
+            return nil
+        }
+        return calendar.date(byAdding: .month, value: 1, to: monthStart)
+    }
+
     /// The `used / limit` fraction (spent share of the money cap), or `nil` when there is **no**
     /// usable cap to pace against — `limit == nil` (unlimited) or a limit of zero minor units.
     ///

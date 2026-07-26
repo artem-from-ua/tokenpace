@@ -71,6 +71,48 @@ public struct LimitRow: Sendable, Equatable {
     }
 }
 
+// MARK: - CreditsRow
+
+/// The "Extra usage" (money-credits) section of the popup — the pure-data counterpart of
+/// ``LimitRow`` for the paid overspend that covers you past the plan limits (#143/#145).
+///
+/// Like ``LimitRow`` it carries **raw** values only — money objects, a drawable ``BarLayout``, and a
+/// pre-formatted relative reset string (`ResetClock`, the one prose exception) — and **no**
+/// human-readable sentences: the view (`PopupViewController`) assembles "on pace / ahead / limit
+/// reached" and "€spent / €limit" from these (ADR-0009). It is a **separate** field on
+/// ``PopupLayout`` (not one of ``PopupLayout/rows``) because a credits section is not a limit window:
+/// it has no utilisation percent, no tick subdivisions, and its "cap" may be absent (unlimited).
+///
+/// ## Two shapes, keyed by ``bar``
+/// - **Limit set** (`bar != nil`): a full section — status word (from `bar.pacing` / cap-reached),
+///   `spent / limit`, a pacing bar, and a "resets in Nd/Nh" line (``resetRelative``).
+/// - **Unlimited** (`bar == nil`, ``limit`` is `nil`): a bare "Extra usage … €spent spent" line —
+///   no cap to pace against, so no bar, no status word, no reset (``resetRelative`` is `nil`).
+public struct CreditsRow: Sendable, Equatable {
+    /// The exact amount spent this money window (`spend.used`, e.g. €10.77) — always present. The view
+    /// formats the label from the integer minor units + exponent + currency, never a rounded `Double`.
+    public let spent: Money
+    /// The money cap (`spend.limit`), or `nil` when the monthly limit is **unlimited**. `nil` ⇒
+    /// ``bar`` is also `nil` (nothing to pace) and the view shows the spent-only line.
+    public let limit: Money?
+    /// The pacing bar (`CreditsPacing.barLayout`), graded exactly like a token bar (usage vs. month
+    /// elapsed), or `nil` for an **unlimited** limit — then the view draws no bar and no status word.
+    /// The view colours it with the **same** `PopupBarView.aheadColor(usage:time:)` the token bars use.
+    public let bar: BarLayout?
+    /// The rounded relative countdown to the end of the money window — the next `00:00` UTC on the 1st
+    /// (`CreditsPacing.monthEnd` → `ResetClock.relativeRounded`), e.g. `"6d"` / `"3h"`. `nil` when the
+    /// limit is unlimited (no reset line) or the boundary was unresolvable. Unlike ``LimitRow`` the
+    /// money window is always days-to-weeks out, so there is no absolute-clock/weekday counterpart.
+    public let resetRelative: String?
+
+    public init(spent: Money, limit: Money?, bar: BarLayout?, resetRelative: String?) {
+        self.spent = spent
+        self.limit = limit
+        self.bar = bar
+        self.resetRelative = resetRelative
+    }
+}
+
 // MARK: - PopupLayout
 
 /// The pure, AppKit-free model of the click-to-open popup for one usage snapshot — the testable
@@ -106,19 +148,26 @@ public struct PopupLayout: Sendable, Equatable {
     /// the localisation/colour seam, this layer carries only the semantic ``ServiceStatus`` values.
     /// Independent of `warning`: the usage poll and the status poll fail and succeed separately.
     public let serviceStatus: StatusHealth?
+    /// The "Extra usage" money-credits section (#145), or `nil` when credits are inactive for this
+    /// snapshot (`snapshot.spend == nil` or `!CreditsPacing.isActive`). A **separate** field from
+    /// ``rows`` — a credits section is not a limit window (see ``CreditsRow``). The view renders it as
+    /// its own "Extra usage" block below the limit rows.
+    public let credits: CreditsRow?
 
     public init(
         lastUpdateAge: TimeInterval,
         intervalSeconds: TimeInterval,
         rows: [LimitRow],
         warning: FailureReason? = nil,
-        serviceStatus: StatusHealth? = nil
+        serviceStatus: StatusHealth? = nil,
+        credits: CreditsRow? = nil
     ) {
         self.lastUpdateAge = lastUpdateAge
         self.intervalSeconds = intervalSeconds
         self.rows = rows
         self.warning = warning
         self.serviceStatus = serviceStatus
+        self.credits = credits
     }
 
     // MARK: make
@@ -140,7 +189,8 @@ public struct PopupLayout: Sendable, Equatable {
         return PopupLayout(
             lastUpdateAge: max(0, now.timeIntervalSince(lastUpdate)),
             intervalSeconds: interval,
-            rows: rows
+            rows: rows,
+            credits: self.creditsRow(from: snapshot, now: now)
         )
     }
 
@@ -175,12 +225,14 @@ public struct PopupLayout: Sendable, Equatable {
         let rows = snapshot.map { self.rows(from: $0, now: now) } ?? []
         let lastUpdateAge = health.lastSuccess.map { max(0, now.timeIntervalSince($0)) } ?? 0
         let warning = health.isFailing ? health.reason : nil
+        let credits = snapshot.flatMap { self.creditsRow(from: $0, now: now) }
         return PopupLayout(
             lastUpdateAge: lastUpdateAge,
             intervalSeconds: interval,
             rows: rows,
             warning: warning,
-            serviceStatus: serviceStatus
+            serviceStatus: serviceStatus,
+            credits: credits
         )
     }
 
@@ -208,6 +260,46 @@ public struct PopupLayout: Sendable, Equatable {
             rows.append(row(title: scoped.name, window: scoped.window, as: .sevenDay, now: now))
         }
         return rows
+    }
+
+    /// Build the "Extra usage" money-credits section from a snapshot's ``UsageSnapshot/spend``, or
+    /// `nil` when credits are inactive for this snapshot.
+    ///
+    /// ## Show gate — deliberately softer than the menu-bar icon's
+    /// The menu-bar credits **icon** shows only when `CreditsPacing.shouldShowIcon` holds — credits
+    /// active **and** a base limit exhausted (a glanceable badge should be quiet until the paid tier is
+    /// actually in play). The **dropdown** is the detail view the user has explicitly opened, so the
+    /// gate is only ``CreditsPacing/isActive(_:)`` (`enabled` **or** `spend_limit_reached`): once
+    /// credits are switched on, showing the amount spent is useful even before a plan limit is spent.
+    /// We do **not** additionally require `baseLimitExhausted` here (that stays the icon's concern).
+    ///
+    /// ## Shape
+    /// - `spent` is `spend.used` (exact ``Money``); when absent, it is reconstructed from the
+    ///   `used_credits` scalar + `currency` / `decimal_places` so the line always has an amount.
+    /// - `bar` is `CreditsPacing.barLayout` — `nil` for an unlimited limit (view shows spent-only).
+    /// - `resetRelative` is the rounded countdown to `CreditsPacing.monthEnd` (next `00:00` UTC on the
+    ///   1st), and is `nil` when the limit is unlimited (no cap ⇒ no reset line).
+    private static func creditsRow(from snapshot: UsageSnapshot, now: Date) -> CreditsRow? {
+        guard let spend = snapshot.spend, CreditsPacing.isActive(spend) else { return nil }
+        let spent = spentMoney(from: spend)
+        let bar = CreditsPacing.barLayout(for: spend, now: now)
+        // A reset line only makes sense when there is a cap to reset against (bar != nil ⇔ limited).
+        let resetRelative = bar == nil
+            ? nil
+            : CreditsPacing.monthEnd(now: now).flatMap { ResetClock.relativeRounded(resetsAt: $0, now: now) }
+        return CreditsRow(spent: spent, limit: spend.limit, bar: bar, resetRelative: resetRelative)
+    }
+
+    /// The amount spent as a ``Money``, preferring the exact `spend.used` object and falling back to a
+    /// reconstructed `Money` from the `extra_usage` scalars (`used_credits` minor units + `currency` +
+    /// `decimal_places`) so a payload that carries only the `extra_usage` half still yields an amount.
+    /// Last-ditch fallback is a zero in the credits `currency` (or empty) — the section still renders.
+    private static func spentMoney(from spend: SpendInfo) -> Money {
+        if let used = spend.used { return used }
+        let currency = spend.currency ?? spend.limit?.currency ?? ""
+        let exponent = spend.decimalPlaces ?? spend.limit?.exponent ?? 2
+        let minor = spend.usedCredits.map { Int($0.rounded()) } ?? 0
+        return Money(amountMinor: minor, currency: currency, exponent: exponent)
     }
 
     /// The idle 5-hour placeholder row (#100, ADR-0027): title `"5-hour"`, `sessionIdle: true`, all
