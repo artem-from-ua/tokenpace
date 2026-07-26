@@ -104,12 +104,19 @@ public struct CreditsRow: Sendable, Equatable {
     /// limit is unlimited (no reset line) or the boundary was unresolvable. Unlike ``LimitRow`` the
     /// money window is always days-to-weeks out, so there is no absolute-clock/weekday counterpart.
     public let resetRelative: String?
+    /// Whether paid credits are **actually being spent right now** — `enabled` **and** at least one base
+    /// limit is exhausted (`CreditsPacing.shouldShowIcon`, the same gate as the menu-bar icon). Drives
+    /// the blue **"in use"** badge next to the heading: the section itself shows whenever credits are
+    /// merely *active* (enabled/reached), but the badge appears only while the plan limit is actually
+    /// overflowing into credits.
+    public let inUse: Bool
 
-    public init(spent: Money, limit: Money?, bar: BarLayout?, resetRelative: String?) {
+    public init(spent: Money, limit: Money?, bar: BarLayout?, resetRelative: String?, inUse: Bool = false) {
         self.spent = spent
         self.limit = limit
         self.bar = bar
         self.resetRelative = resetRelative
+        self.inUse = inUse
     }
 }
 
@@ -287,7 +294,13 @@ public struct PopupLayout: Sendable, Equatable {
         let resetRelative = bar == nil
             ? nil
             : CreditsPacing.monthEnd(now: now).flatMap { ResetClock.relativeRounded(resetsAt: $0, now: now) }
-        return CreditsRow(spent: spent, limit: spend.limit, bar: bar, resetRelative: resetRelative)
+        // "in use" = credits are actually covering an exhausted plan limit right now — the same gate as
+        // the menu-bar icon (`shouldShowIcon`). The section shows for any active credits; the badge only
+        // when the plan limit is genuinely overflowing into paid credits.
+        let inUse = CreditsPacing.shouldShowIcon(
+            spend, baseLimitExhausted: CreditsPacing.anyBaseLimitExhausted(in: snapshot))
+        return CreditsRow(
+            spent: spent, limit: spend.limit, bar: bar, resetRelative: resetRelative, inUse: inUse)
     }
 
     /// The amount spent as a ``Money``, preferring the exact `spend.used` object and falling back to a

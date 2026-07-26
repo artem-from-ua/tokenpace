@@ -245,12 +245,6 @@ final class SettingsWindowController: NSWindowController {
                 + "alone. An orange or red 7-day bar always stays visible.")
         appearance.addRow(SettingsRow.container(leading: hideCalmCol.view, trailing: hideCalmSevenDayToggle))
 
-        serviceDotToggle = SettingsRow.makeSwitch(target: self, action: #selector(toggleServiceDot(_:)))
-        let dotCol = SettingsRow.labelColumn(
-            "Show service status dot on issues",
-            hint: "Draws a small coloured dot in the menu bar when a monitored Claude service has issues.")
-        appearance.addRow(SettingsRow.container(leading: dotCol.view, trailing: serviceDotToggle))
-
         // "Show extra-usage credits icon" (#146): the trailing currency glyph that appears while paid
         // usage credits are covering an exhausted plan limit. Opt-out, like the service dot.
         extraUsageToggle = SettingsRow.makeSwitch(target: self, action: #selector(toggleExtraUsage(_:)))
@@ -259,6 +253,12 @@ final class SettingsWindowController: NSWindowController {
             hint: "Draws a currency icon in the menu bar when paid usage credits are covering an "
                 + "exhausted plan limit. Its colour paces with your spend against the monthly limit.")
         appearance.addRow(SettingsRow.container(leading: creditsCol.view, trailing: extraUsageToggle))
+
+        serviceDotToggle = SettingsRow.makeSwitch(target: self, action: #selector(toggleServiceDot(_:)))
+        let dotCol = SettingsRow.labelColumn(
+            "Show service status dot on issues",
+            hint: "Draws a small coloured dot in the menu bar when a monitored Claude service has issues.")
+        appearance.addRow(SettingsRow.container(leading: dotCol.view, trailing: serviceDotToggle))
 
         // Reset-countdown card: the three-radio exclusive group + one nested checkbox (#103). The
         // radios and the checkbox all share `resetCountdownModeChanged` and live as siblings in one

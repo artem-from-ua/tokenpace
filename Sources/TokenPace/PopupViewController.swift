@@ -324,6 +324,26 @@ final class StatusLineLabel: NSTextField {
     }
 }
 
+// MARK: - PillView
+
+/// A small rounded, layer-backed capsule filled with `controlAccentColor` — the blue "in use" badge
+/// beside the "Extra usage" heading (#146). The corner radius tracks the height (half of it, so it is
+/// a true pill), and the fill CGColor is re-resolved in `updateLayer()` because CGColor is not
+/// appearance-dynamic (the same trap `SettingsCard`/`DividerView` document).
+final class PillView: NSView {
+    override var wantsUpdateLayer: Bool { true }
+
+    override func layout() {
+        super.layout()
+        layer?.cornerRadius = bounds.height / 2
+    }
+
+    override func updateLayer() {
+        layer?.cornerRadius = bounds.height / 2
+        layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+    }
+}
+
 // MARK: - PopupViewController
 
 /// The click-to-open detail popup's content — the thin AppKit shell of issue #11, styled after
@@ -555,8 +575,12 @@ final class PopupViewController: NSViewController {
             return
         }
 
-        // Limit set: title + status word, then "spent / limit … resets in …", then the pacing bar.
-        addTitleStatusLine(title: Self.extraUsageTitle, status: Self.creditsStatusText(bar))
+        // Limit set: title (+ "in use" badge when credits are actually covering an exhausted limit) +
+        // status word, then "spent / limit … resets in …", then the pacing bar.
+        addTitleStatusLine(
+            title: Self.extraUsageTitle,
+            status: Self.creditsStatusText(bar),
+            badge: credits.inUse ? Self.makeInUsePill() : nil)
         addDetailLine(
             used: Self.creditsAmountText(spent: credits.spent, limit: limit),
             reset: Self.creditsResetText(credits.resetRelative))
@@ -573,12 +597,52 @@ final class PopupViewController: NSViewController {
     /// the window titles (`"5-hour"`/`"7-day"`) and the bare per-model names (`"Opus"`/`"Fable"`) render
     /// whole in `labelColor`.
     @discardableResult
-    private func addTitleStatusLine(title: String, status: String) -> NSView {
+    private func addTitleStatusLine(title: String, status: String, badge: NSView? = nil) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
-        return addSplitLine(
-            left: title, right: status, leftFont: font, rightFont: font,
-            leftColor: .labelColor, rightColor: .labelColor)
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = font
+        titleLabel.textColor = .labelColor
+        let statusLabel = NSTextField(labelWithString: status)
+        statusLabel.font = font
+        statusLabel.textColor = .labelColor
+        guard let badge else {
+            return addSplitRow(leftLabel: titleLabel, rightLabel: statusLabel)
+        }
+        // With a badge, the left half is [title • badge]; the status stays flush right.
+        let leading = NSStackView(views: [titleLabel, badge])
+        leading.orientation = .horizontal
+        leading.alignment = .centerY
+        leading.spacing = 6
+        return addSplitRow(leadingView: leading, rightLabel: statusLabel)
     }
+
+    /// The blue **"in use"** pill shown next to the "Extra usage" heading while paid credits are actually
+    /// covering an exhausted plan limit (`CreditsRow.inUse`). A small rounded, layer-backed capsule in
+    /// `controlAccentColor` with white text — mirroring the native "Up to 30 % off" style badge the
+    /// Claude web UI puts on usage credits. Sizing comes from the text + insets; the capsule radius is
+    /// half the height, so it reads as a pill at any font size.
+    private static func makeInUsePill() -> NSView {
+        let text = NSTextField(labelWithString: inUseBadgeText)
+        text.font = .systemFont(ofSize: Metrics.textSize - 2, weight: .medium)
+        text.textColor = .white
+        text.translatesAutoresizingMaskIntoConstraints = false
+
+        let pill = PillView()
+        pill.wantsLayer = true
+        pill.translatesAutoresizingMaskIntoConstraints = false
+        pill.addSubview(text)
+        let hInset: CGFloat = 6, vInset: CGFloat = 2
+        NSLayoutConstraint.activate([
+            text.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: hInset),
+            text.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -hInset),
+            text.topAnchor.constraint(equalTo: pill.topAnchor, constant: vInset),
+            text.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -vInset),
+        ])
+        return pill
+    }
+
+    /// Localisation seam for the credits "in use" badge text.
+    static let inUseBadgeText = "in use"
 
     @discardableResult
     private func addLabel(_ text: String, font: NSFont, secondary: Bool = false, color: NSColor? = nil) -> NSView {
@@ -623,7 +687,14 @@ final class PopupViewController: NSViewController {
     /// arranges them.
     @discardableResult
     private func addSplitRow(leftLabel: NSTextField, rightLabel: NSTextField) -> NSView {
-        let row = NSStackView(views: [leftLabel, rightLabel])
+        addSplitRow(leadingView: leftLabel, rightLabel: rightLabel)
+    }
+
+    /// `addSplitRow` variant whose leading half is an arbitrary view (e.g. a `[title • badge]` stack),
+    /// not just a label — the trailing label still pins flush right at the content width.
+    @discardableResult
+    private func addSplitRow(leadingView: NSView, rightLabel: NSTextField) -> NSView {
+        let row = NSStackView(views: [leadingView, rightLabel])
         row.orientation = .horizontal
         row.distribution = .equalSpacing
         row.translatesAutoresizingMaskIntoConstraints = false
