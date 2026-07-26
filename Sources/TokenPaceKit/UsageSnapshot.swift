@@ -141,6 +141,182 @@ public struct UsageLimit: Sendable, Equatable, Decodable {
     }
 }
 
+// MARK: - Money
+
+/// An exact money amount as delivered by the credits blocks of `GET /api/oauth/usage`
+/// (`spend.used`, `spend.limit`, `spend.cap.money`).
+///
+/// The API sends money as an **integer minor unit** plus its currency and exponent — e.g.
+/// `{"amount_minor":1077,"currency":"EUR","exponent":2}` is €10.77. We keep that integer form
+/// verbatim rather than collapsing it to a `Double`: floating point cannot represent every decimal
+/// cent exactly, and this value feeds a money label. The currency is **not** hard-coded to USD — the
+/// spike (#142) observed EUR — so it travels with the amount.
+///
+/// `majorUnitValue` reconstitutes the human amount (`amount_minor / 10^exponent`) as a `Double`
+/// **only** for pacing arithmetic (fraction against a limit); the display layer (#144/#145) should
+/// format from the integer + exponent to avoid rounding the label.
+public struct Money: Sendable, Equatable, Decodable {
+    /// The amount in the currency's minor unit (e.g. cents): `1077` == €10.77 at `exponent: 2`.
+    public let amountMinor: Int
+    /// ISO currency code as sent, e.g. `"EUR"` — dynamic, never assumed to be USD.
+    public let currency: String
+    /// Number of fractional digits: `2` for EUR/USD. `amountMinor / 10^exponent` is the major value.
+    public let exponent: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case amountMinor = "amount_minor"
+        case currency
+        case exponent
+    }
+
+    public init(amountMinor: Int, currency: String, exponent: Int) {
+        self.amountMinor = amountMinor
+        self.currency = currency
+        self.exponent = exponent
+    }
+
+    /// Tolerant decode: every field defaults rather than failing, matching the rest of this file.
+    /// A malformed/partial money object degrades to zeros/`""` instead of killing the whole snapshot
+    /// (the credits blocks are auxiliary; a schema wobble there must never lose the core windows).
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.amountMinor = try container.decodeIfPresent(Int.self, forKey: .amountMinor) ?? 0
+        self.currency = try container.decodeIfPresent(String.self, forKey: .currency) ?? ""
+        self.exponent = try container.decodeIfPresent(Int.self, forKey: .exponent) ?? 0
+    }
+
+    /// The amount as a major-unit `Double` (`amount_minor / 10^exponent`), e.g. `10.77` for
+    /// `1077`/`exponent: 2`. **For pacing arithmetic only** — format the display label from the
+    /// integer + exponent, not from this, to avoid representation error on the shown value.
+    public var majorUnitValue: Double {
+        Double(amountMinor) / pow(10, Double(exponent))
+    }
+}
+
+// MARK: - SpendInfo
+
+/// The "extra usage" money-credits state of one poll — the paid overspend that covers you past the
+/// plan limits (Settings → *Usage credits*). Introduced by the spike (#142); rendered by #144/#145.
+///
+/// The API delivers this across **two parallel blocks**, and this type merges the useful half of
+/// each (the raw blocks are private decode helpers below):
+/// - **`spend`** is the primary, cleaner source: exact `used` / `limit` **money objects** and the
+///   `enabled` flag.
+/// - **`extra_usage`** is the reserve for the fields `spend` lacks: `spend_limit_reached` (the
+///   over-limit signal the icon trigger needs), plus `currency` / `decimal_places` and the
+///   `used_credits` scalar (the same amount as `spend.used`, kept as a cross-check / fallback).
+///
+/// **Deliberately not modeled** (spike findings, #142):
+/// - The server `spend.severity` — the maintainer decided the icon colour is computed the same way as
+///   the token bars (usage vs. time, ``CreditsPacing/barLayout(for:now:timeZone:)``), never the server tier.
+/// - `spend.balance` / `spend.auto_reload` — Current balance is **not** delivered by this endpoint
+///   (null in every observed state); balance-relative pacing is a future feature, out of scope.
+///
+/// Every field is optional-friendly and defaults so an unknown/partial credits payload never fails
+/// the snapshot (the two blocks are auxiliary to the core windows).
+public struct SpendInfo: Sendable, Equatable {
+    /// `spend.used` — the exact amount spent this period (e.g. €10.77). Source of truth for "spent".
+    public let used: Money?
+    /// `spend.limit` — the money cap, or `nil` when the user set the monthly limit to *unlimited*
+    /// (`spend.limit: null`). `nil` means **no pacing** — show the spent amount only, no bar/percent.
+    public let limit: Money?
+    /// `spend.enabled` — whether credits are actively covering overspend right now. The server flips
+    /// this to **false** the moment the money cap is exceeded, which is why the icon trigger also
+    /// checks ``spendLimitReached`` (see ``CreditsPacing/isActive(_:)``).
+    public let enabled: Bool
+    /// `extra_usage.spend_limit_reached` — `true` once the money cap is hit. Paired with `enabled`
+    /// because the two never overlap: at the cap the server sends `enabled: false` +
+    /// `spend_limit_reached: true`, so relying on `enabled` alone would hide the icon exactly when
+    /// the user most needs it.
+    public let spendLimitReached: Bool
+    /// `extra_usage.used_credits` — the spent amount as a minor-unit scalar (e.g. `1077.0`), mirroring
+    /// ``used``. Kept as a decimal cross-check / fallback; prefer ``used`` for exactness.
+    public let usedCredits: Double?
+    /// `extra_usage.currency` — currency code from the extra-usage block (e.g. `"EUR"`), a fallback
+    /// for ``used``/``limit`` currency when a money object is absent.
+    public let currency: String?
+    /// `extra_usage.decimal_places` — fractional-digit count for `used_credits` (e.g. `2`), the
+    /// exponent to apply to the scalar credits when no ``Money`` object carries one.
+    public let decimalPlaces: Int?
+
+    public init(
+        used: Money? = nil,
+        limit: Money? = nil,
+        enabled: Bool = false,
+        spendLimitReached: Bool = false,
+        usedCredits: Double? = nil,
+        currency: String? = nil,
+        decimalPlaces: Int? = nil
+    ) {
+        self.used = used
+        self.limit = limit
+        self.enabled = enabled
+        self.spendLimitReached = spendLimitReached
+        self.usedCredits = usedCredits
+        self.currency = currency
+        self.decimalPlaces = decimalPlaces
+    }
+
+    // MARK: raw block decoders
+
+    /// Minimal mirror of the top-level `spend` block — only the fields we surface are decoded, the
+    /// rest (`percent`, `severity`, `cap`, `balance`, `auto_reload`, `disclaimer`, …) stay ignored.
+    struct SpendBlock: Decodable {
+        let used: Money?
+        let limit: Money?
+        let enabled: Bool
+
+        private enum CodingKeys: String, CodingKey { case used, limit, enabled }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.used = try container.decodeIfPresent(Money.self, forKey: .used)
+            self.limit = try container.decodeIfPresent(Money.self, forKey: .limit)
+            self.enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        }
+    }
+
+    /// Minimal mirror of the top-level `extra_usage` block — only the fields `spend` lacks (or that
+    /// serve as a fallback) are decoded; `is_enabled`, `utilization`, `monthly_limit`,
+    /// `disabled_reason`, `user_disabled`, `credits_ever_enabled`, `daily`, `weekly`, … stay ignored.
+    struct ExtraUsageBlock: Decodable {
+        let spendLimitReached: Bool
+        let usedCredits: Double?
+        let currency: String?
+        let decimalPlaces: Int?
+
+        private enum CodingKeys: String, CodingKey {
+            case spendLimitReached = "spend_limit_reached"
+            case usedCredits = "used_credits"
+            case currency
+            case decimalPlaces = "decimal_places"
+        }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.spendLimitReached =
+                try container.decodeIfPresent(Bool.self, forKey: .spendLimitReached) ?? false
+            self.usedCredits = try container.decodeIfPresent(Double.self, forKey: .usedCredits)
+            self.currency = try container.decodeIfPresent(String.self, forKey: .currency)
+            self.decimalPlaces = try container.decodeIfPresent(Int.self, forKey: .decimalPlaces)
+        }
+    }
+
+    /// Merge the two raw blocks into a `SpendInfo`. Returns `nil` only when **both** blocks are
+    /// absent (a pre-credits payload) — a present-but-empty block still yields a value with defaults.
+    static func merged(spend: SpendBlock?, extraUsage: ExtraUsageBlock?) -> SpendInfo? {
+        guard spend != nil || extraUsage != nil else { return nil }
+        return SpendInfo(
+            used: spend?.used,
+            limit: spend?.limit,
+            enabled: spend?.enabled ?? false,
+            spendLimitReached: extraUsage?.spendLimitReached ?? false,
+            usedCredits: extraUsage?.usedCredits,
+            currency: extraUsage?.currency,
+            decimalPlaces: extraUsage?.decimalPlaces)
+    }
+}
+
 // MARK: - UsageSnapshot
 
 /// Decoded, immutable result of one successful usage poll.
@@ -154,12 +330,13 @@ public struct UsageLimit: Sendable, Equatable, Decodable {
 /// an explicit `null` and an absent key decode to `nil` via the synthesized
 /// `decodeIfPresent`.
 ///
-/// `extra_usage` / `spend` are intentionally **not** modeled — `Decodable` ignores
-/// unknown keys, so their presence is tolerated without any work (issue #9 scope).
+/// `spend` / `extra_usage` carry the money-credits state (#143) merged into the optional
+/// ``spend`` field (``SpendInfo``). They stay **optional**: a pre-credits payload has neither
+/// block, so `spend` decodes to `nil` and the (many) existing fixtures keep passing.
 ///
 /// The custom ``init(from:)`` hardens `limits`: an omitted array decodes to `[]` rather
-/// than failing the whole snapshot. The memberwise ``init(fiveHour:sevenDay:sevenDayOpus:sevenDaySonnet:limits:sessionIdle:)``
-/// is kept so tests can build fixtures directly.
+/// than failing the whole snapshot. The memberwise ``init(fiveHour:sevenDay:sevenDayOpus:sevenDaySonnet:limits:sessionIdle:spend:)``
+/// is kept so tests can build fixtures directly; `spend` defaults to `nil` there.
 public struct UsageSnapshot: Sendable, Equatable, Decodable {
     public let fiveHour: UsageWindow
     public let sevenDay: UsageWindow
@@ -176,6 +353,10 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
     /// snapshot (an active 5h window, or a genuine reset-boundary `null` that `limits[]` still
     /// backfills). Applies only to `five_hour`; the 7-day window keeps its local-estimate fallback.
     public let sessionIdle: Bool
+    /// The money-credits ("extra usage") state (#143), merged from the `spend` + `extra_usage`
+    /// blocks. `nil` on a pre-credits payload where neither block is present — the (many) legacy
+    /// fixtures rely on that default. Consumed by ``CreditsPacing`` (#144/#145 render it).
+    public let spend: SpendInfo?
 
     private enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
@@ -183,6 +364,8 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         case sevenDayOpus = "seven_day_opus"
         case sevenDaySonnet = "seven_day_sonnet"
         case limits
+        case spend
+        case extraUsage = "extra_usage"
     }
 
     public init(
@@ -191,7 +374,8 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         sevenDayOpus: UsageWindow? = nil,
         sevenDaySonnet: UsageWindow? = nil,
         limits: [UsageLimit] = [],
-        sessionIdle: Bool = false
+        sessionIdle: Bool = false,
+        spend: SpendInfo? = nil
     ) {
         self.fiveHour = fiveHour
         self.sevenDay = sevenDay
@@ -199,6 +383,7 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         self.sevenDaySonnet = sevenDaySonnet
         self.limits = limits
         self.sessionIdle = sessionIdle
+        self.spend = spend
     }
 
     public init(from decoder: any Decoder) throws {
@@ -246,6 +431,12 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
             in: container, key: .sevenDayOpus, parentResetsAt: sevenDay.resetsAt)
         self.sevenDaySonnet = try Self.subWindow(
             in: container, key: .sevenDaySonnet, parentResetsAt: sevenDay.resetsAt)
+
+        // Money-credits state (#143): merge the two parallel blocks. `decodeIfPresent` on each keeps
+        // a pre-credits payload (neither block) → `spend == nil`, so legacy fixtures are unaffected.
+        let spendBlock = try container.decodeIfPresent(SpendInfo.SpendBlock.self, forKey: .spend)
+        let extraUsage = try container.decodeIfPresent(SpendInfo.ExtraUsageBlock.self, forKey: .extraUsage)
+        self.spend = SpendInfo.merged(spend: spendBlock, extraUsage: extraUsage)
     }
 
     /// Decode an optional per-model sub-window (`seven_day_opus` / `seven_day_sonnet`).
