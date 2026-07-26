@@ -257,6 +257,17 @@ public struct SpendInfo: Sendable, Equatable {
         self.decimalPlaces = decimalPlaces
     }
 
+    /// The single resolved ISO currency code for display, with a fallback chain: the `spend.used`
+    /// money object first (the amount actually shown), then `spend.limit`, then the `extra_usage`
+    /// `currency` scalar. Empty string if none is present. Both the menu-bar glyph
+    /// (``MenuBarLayout/CreditsMarker/currency``) and the popup money formatter read this so a single
+    /// currency drives every rendering of the credits.
+    public var currencyCode: String {
+        if let c = used?.currency, !c.isEmpty { return c }
+        if let c = limit?.currency, !c.isEmpty { return c }
+        return currency ?? ""
+    }
+
     // MARK: raw block decoders
 
     /// Minimal mirror of the top-level `spend` block — only the fields we surface are decoded, the

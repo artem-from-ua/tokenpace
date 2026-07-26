@@ -970,36 +970,52 @@ final class PopupViewController: NSViewController {
         return "resets in \(relative)"
     }
 
-    /// Format a ``Money`` for display — `"€10.77"`, `"$4.20"`, or `"MYR 12.00"` (code + space when the
-    /// currency has no known symbol). The amount is built from the **integer** minor units + exponent
-    /// (`amount_minor / 10^exponent`) to two fixed fractional digits by exponent, so no representation
-    /// error creeps into the shown value; the currency is resolved from the code (never hard-coded to
-    /// USD — the spike saw EUR, #142). A known symbol prefixes with no space (`€10.77`); an unknown
-    /// code prefixes with a space (`MYR 12.00`).
+    /// Format a ``Money`` for display. For a **known** currency the symbol sits in that currency's
+    /// standard position — `"$10.77"` and `"€10.77"` (symbol before) but `"10,77 kr"` (symbol after) —
+    /// resolved by `NumberFormatter`'s `.currency` style, which carries ICU's per-currency placement
+    /// and grouping. For an **unknown** currency there is no reliable symbol/placement, so we render
+    /// the amount followed by the ISO code — `"12.00 UAH"`.
+    ///
+    /// The amount always comes from the **integer** minor units + exponent (`amount_minor / 10^exponent`),
+    /// so no representation error creeps into the shown value; `NumberFormatter` is asked for exactly
+    /// `exponent` fraction digits (not the currency's own default) so the value we computed is what
+    /// shows. The currency is resolved from the code — never hard-coded to USD (the spike saw EUR, #142).
     static func moneyText(_ money: Money) -> String {
         let value = Double(money.amountMinor) / pow(10, Double(money.exponent))
         let digits = max(0, money.exponent)
-        let amount = String(format: "%.\(digits)f", value)
-        if let symbol = currencySymbol(money.currency) {
-            return "\(symbol)\(amount)"
+        if isKnownCurrency(money.currency), let text = currencyFormatted(value, code: money.currency, digits: digits) {
+            return text
         }
-        // Unknown currency → show the ISO code before the amount, space-separated.
-        let code = money.currency.isEmpty ? "" : "\(money.currency) "
-        return "\(code)\(amount)"
+        // Unknown currency → amount then ISO code (e.g. "12.00 UAH"); no symbol/placement to trust.
+        let amount = String(format: "%.\(digits)f", value)
+        let code = money.currency.isEmpty ? "" : " \(money.currency.uppercased())"
+        return "\(amount)\(code)"
     }
 
-    /// The display symbol for an ISO currency code, or `nil` to fall back to the code itself. A small
-    /// explicit table for the currencies actually seen / likely (EUR, USD, GBP, JPY) rather than
-    /// hard-coding `$`; `NSLocale`'s symbol lookup is locale-dependent and unreliable for a bare code,
-    /// so a fixed map keeps the label deterministic. An unlisted code renders as its ISO code.
-    static func currencySymbol(_ code: String) -> String? {
-        switch code.uppercased() {
-        case "EUR": return "€"
-        case "USD": return "$"
-        case "GBP": return "£"
-        case "JPY": return "¥"
-        default:    return nil
-        }
+    /// Whether we treat this ISO code as "known" — mirrors ``StatusItemView/creditsSymbolName(for:)``
+    /// so the menu-bar glyph and the dropdown label agree on which currencies get a symbol vs. a code.
+    static func isKnownCurrency(_ code: String) -> Bool {
+        ["EUR", "USD", "GBP", "JPY", "CNY", "INR"].contains(code.uppercased())
+    }
+
+    /// `NumberFormatter`-formatted currency string with the symbol in the currency's standard position
+    /// and exactly `digits` fraction digits. Returns `nil` if formatting fails (caller falls back to the
+    /// code form). A fixed `en_US_POSIX` base locale keeps grouping/decimal marks deterministic across
+    /// the user's locale while `currencyCode` still drives the symbol and its placement.
+    private static func currencyFormatted(_ value: Double, code: String, digits: Int) -> String? {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.currencyCode = code.uppercased()
+        f.minimumFractionDigits = digits
+        f.maximumFractionDigits = digits
+        guard let s = f.string(from: NSNumber(value: value)) else { return nil }
+        // en_US_POSIX inserts a NBSP (U+00A0, or narrow NBSP U+202F) between a leading symbol and the
+        // digits (rendered as `€ 10.77`); the conventional form is `€10.77`. Strip that space only when
+        // it sits between a non-digit (the symbol) and the first digit — a trailing-symbol currency's
+        // space (`10,77 kr`) is preceded by a digit, so it is left untouched.
+        return s.replacingOccurrences(
+            of: "(?<=\\D)[\u{00A0}\u{202F}](?=\\d)", with: "", options: .regularExpression)
     }
 
 }

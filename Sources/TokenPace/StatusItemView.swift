@@ -190,7 +190,7 @@ final class StatusItemView: NSView {
         }
         if let credits = layout.credits {
             drawCreditsIcon(credits, in: contentRect)
-            let inset = creditsIconWidth() + Metrics.creditsIconGap
+            let inset = creditsIconWidth(for: credits.currency) + Metrics.creditsIconGap
             contentRect = NSRect(x: contentRect.minX, y: contentRect.minY,
                                  width: contentRect.width - inset, height: contentRect.height)
         }
@@ -217,28 +217,44 @@ final class StatusItemView: NSView {
 
     // MARK: Money-credits icon (issue #144)
 
-    /// Draw the money-credits currency glyph (`coloncurrencysign` ¤) at the **right edge** of `rect`,
-    /// vertically centred — the trailing element just left of the service dot (whose width the caller
-    /// has already reserved by passing an inset `rect`). `hPadding` keeps it off the very edge, like
-    /// the bars.
+    /// Draw the money-credits currency glyph at the **right edge** of `rect`, vertically centred — the
+    /// trailing element just left of the service dot (whose width the caller has already reserved by
+    /// passing an inset `rect`). `hPadding` keeps it off the very edge, like the bars.
     ///
-    /// The symbol is **generic-currency** (`coloncurrencysign`), not `dollarsign` — the credits
-    /// currency is dynamic (EUR observed, #142), so a `$` would be wrong. It is rendered as a
-    /// **non-template palette image** in the marker's pacing colour (``creditsIconColor(_:)``), matching
-    /// how the rest of the widget is drawn (the menu-bar image is non-template so macOS does not retint
-    /// it). Drawn with `respectFlipped: true` because this view is `isFlipped` (same as the ⚠️ glyph).
+    /// The glyph is **currency-specific** (``creditsSymbolName(for:)``): a known currency draws its own
+    /// SF Symbol (`eurosign`/`dollarsign`/…), an unknown/empty code falls back to the generic
+    /// `coloncurrencysign` (¤) — never a hard-coded `$` (the currency is dynamic; EUR observed, #142).
+    /// Rendered as a **non-template palette image** in the marker's pacing colour (``creditsIconColor(_:)``),
+    /// matching the rest of the widget (non-template so macOS does not retint it). Drawn with
+    /// `respectFlipped: true` because this view is `isFlipped` (same as the ⚠️ glyph).
     private func drawCreditsIcon(_ credits: CreditsMarker, in rect: NSRect) {
         let color = creditsIconColor(credits)
         let config = NSImage.SymbolConfiguration(pointSize: Metrics.creditsIconSize, weight: .semibold)
             .applying(.init(paletteColors: [color]))
         guard let symbol = NSImage(
-            systemSymbolName: "coloncurrencysign", accessibilityDescription: "usage credits")?
+            systemSymbolName: Self.creditsSymbolName(for: credits.currency),
+            accessibilityDescription: "usage credits")?
             .withSymbolConfiguration(config) else { return }
         let size = symbol.size
         let x = rect.maxX - Metrics.hPadding - size.width
         let drawRect = NSRect(x: x, y: rect.midY - size.height / 2, width: size.width, height: size.height)
         symbol.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1,
                     respectFlipped: true, hints: nil)
+    }
+
+    /// The SF Symbol name for a currency's menu-bar glyph: a known ISO code maps to its own currency
+    /// symbol, anything else (unknown code, empty) to the generic `coloncurrencysign` (¤). The set
+    /// mirrors ``PopupViewController``'s known-symbol table so the menu bar and dropdown agree on which
+    /// currencies are "known". SF Symbols ships a `…sign` glyph for each of these.
+    static func creditsSymbolName(for currency: String) -> String {
+        switch currency.uppercased() {
+        case "EUR": return "eurosign"
+        case "USD": return "dollarsign"
+        case "GBP": return "sterlingsign"
+        case "JPY", "CNY": return "yensign"   // ¥ symbol is shared by JPY and CNY
+        case "INR": return "indianrupeesign"
+        default:    return "coloncurrencysign"
+        }
     }
 
     /// The colour of the money-credits icon, from its ``CreditsMarker/bar`` via the **same** mapping
@@ -266,9 +282,9 @@ final class StatusItemView: NSView {
     /// it is drawn (the configured symbol image) so the reserved width matches exactly. Falls back to
     /// the icon point size if the symbol is unavailable, so the item never collapses. The palette
     /// colour does not affect the metrics, so a plain configuration is enough here.
-    private func creditsIconWidth() -> CGFloat {
+    private func creditsIconWidth(for currency: String) -> CGFloat {
         let config = NSImage.SymbolConfiguration(pointSize: Metrics.creditsIconSize, weight: .semibold)
-        let symbol = NSImage(systemSymbolName: "coloncurrencysign", accessibilityDescription: nil)?
+        let symbol = NSImage(systemSymbolName: Self.creditsSymbolName(for: currency), accessibilityDescription: nil)?
             .withSymbolConfiguration(config)
         return ceil(symbol?.size.width ?? Metrics.creditsIconSize)
     }
@@ -523,7 +539,7 @@ final class StatusItemView: NSView {
         // The trailing decorations, when present, widen every mode by the same insets: the service dot
         // (#31) by dot + gap, the money-credits icon (#144) by glyph + gap. Both are additive.
         let dotInset = layout?.serviceProblem != nil ? Metrics.statusDotDiameter + Metrics.statusDotGap : 0
-        let creditsInset = layout?.credits != nil ? creditsIconWidth() + Metrics.creditsIconGap : 0
+        let creditsInset = layout?.credits.map { creditsIconWidth(for: $0.currency) + Metrics.creditsIconGap } ?? 0
         let trailingInset = dotInset + creditsInset
         switch layout?.mode {
         case .none:

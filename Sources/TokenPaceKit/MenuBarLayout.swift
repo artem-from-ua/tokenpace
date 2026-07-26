@@ -127,8 +127,15 @@ public struct CreditsMarker: Sendable, Equatable {
     /// the token bars, so a yellow credits icon and a yellow 7-day bar read as the same amber.
     public let bar: BarLayout?
 
-    public init(bar: BarLayout?) {
+    /// The ISO currency code of the credits (e.g. `"EUR"`, `"USD"`) — drives *which glyph* the view
+    /// draws: a known currency uses its own SF Symbol (`eurosign`/`dollarsign`/…), an unknown or empty
+    /// code falls back to the generic `coloncurrencysign` (¤). Kept here (not resolved to a glyph) so
+    /// `TokenPaceKit` stays AppKit-free — `StatusItemView.creditsSymbolName` maps code → symbol.
+    public let currency: String
+
+    public init(bar: BarLayout?, currency: String = "") {
         self.bar = bar
+        self.currency = currency
     }
 
     /// Whether the icon's pacing is "calm" (green/yellow) — the same predicate the bars use to mute
@@ -318,7 +325,9 @@ public struct MenuBarLayout: Sendable, Equatable {
         guard let spend = snapshot.spend else { return nil }
         let baseExhausted = CreditsPacing.anyBaseLimitExhausted(in: snapshot)
         guard CreditsPacing.shouldShowIcon(spend, baseLimitExhausted: baseExhausted) else { return nil }
-        return CreditsMarker(bar: CreditsPacing.barLayout(for: spend, now: now))
+        return CreditsMarker(
+            bar: CreditsPacing.barLayout(for: spend, now: now),
+            currency: spend.currencyCode)
     }
 
     /// The usage-driven `mode` only (no service dot) — the existing #12 decision tree, factored out
