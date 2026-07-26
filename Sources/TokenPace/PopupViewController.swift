@@ -389,6 +389,10 @@ final class PopupViewController: NSViewController {
     /// here, not in the kit.
     static let idleStatusText = "ready to start"
 
+    /// The heading of the "Extra usage" money-credits section (#145) — the localisation seam. Styled
+    /// like the limit-window titles (plain label colour), the section reads from its numbers/bar.
+    static let extraUsageTitle = "Extra usage"
+
     /// Anthropic's official primary accent colour (`#d97757`, a terracotta orange) — confirmed
     /// against `anthropics/skills`' `brand-guidelines/SKILL.md` on GitHub, the same value the local
     /// Claude Code "claude" theme slot resolves to. Used only for the "Claude Code" section header,
@@ -511,10 +515,55 @@ final class PopupViewController: NSViewController {
             if !row.sessionIdle {
                 addDetailLine(used: Self.usedText(row), reset: Self.resetText(row))
             }
-            // No inter-section gap after the **last** bar — it sits just above the menu's own separator,
-            // so the section gap plus the bottom padding read as too much air. Later bars need the gap.
-            addBar(row, isLast: index == layout.rows.count - 1)
+            // No inter-section gap after the **last** bar — but only when there is no credits section
+            // below. If the "Extra usage" block follows, this bar is *not* the last thing in the popup,
+            // so it needs the normal inter-section gap; the credits block then owns the tight-to-separator
+            // bottom instead.
+            let isLastLimitRow = index == layout.rows.count - 1
+            addBar(row, isLast: isLastLimitRow && layout.credits == nil)
         }
+
+        // The "Extra usage" (money-credits) section (#145), rendered below the limit windows when
+        // credits are active for this snapshot. Two shapes, keyed by whether a cap is set — see
+        // `addCreditsSection`. Absent (`layout.credits == nil`) → nothing is drawn.
+        if let credits = layout.credits {
+            addCreditsSection(credits)
+        }
+    }
+
+    // MARK: Extra usage (money-credits) section (#145)
+
+    /// Render the "Extra usage" section from a ``CreditsRow``. Two shapes:
+    ///
+    /// - **Limit set** (`credits.bar != nil`): a full section mirroring a limit window —
+    ///   ```
+    ///   Extra usage ............... on pace | ahead | limit reached
+    ///   €10.77 / €15.00 ........... resets in 6d
+    ///   ```
+    ///   plus a pacing bar (same `PopupBarView`, coloured by `credits.bar` via `aheadColor`).
+    /// - **Unlimited** (`credits.bar == nil`): a single bare line, no bar, no reset —
+    ///   ```
+    ///   Extra usage ............... €10.77 spent
+    ///   ```
+    ///
+    /// The heading "Extra usage" is styled like the limit-window titles (plain `labelColor`, not the
+    /// brand-coloured "Claude" header): the section reads from its numbers and bar, not a heavy heading.
+    private func addCreditsSection(_ credits: CreditsRow) {
+        guard let bar = credits.bar, let limit = credits.limit else {
+            // Unlimited: "Extra usage … €X.XX spent". No bar, no reset line — no cap to pace.
+            addTitleStatusLine(title: Self.extraUsageTitle, status: Self.creditsSpentOnlyText(credits.spent))
+            return
+        }
+
+        // Limit set: title + status word, then "spent / limit … resets in …", then the pacing bar.
+        addTitleStatusLine(title: Self.extraUsageTitle, status: Self.creditsStatusText(bar))
+        addDetailLine(
+            used: Self.creditsAmountText(spent: credits.spent, limit: limit),
+            reset: Self.creditsResetText(credits.resetRelative))
+        // Credits pace over the whole calendar month; there is no window-tick ruler like the token bars,
+        // so the bar draws with no subdivisions (a plain pacing bar). `isLast: true` — the credits
+        // section is always the popup's final block, so it sits tight above the menu separator.
+        addBar(bar: bar, subdivisions: 0, idle: false, isLast: true)
     }
 
     /// The section's first line: title and pacing status, both `labelColor` — the same weight and
@@ -631,11 +680,22 @@ final class PopupViewController: NSViewController {
         return label
     }
 
+    /// Add a pacing bar for one ``LimitRow`` (token windows) — a thin wrapper over the raw
+    /// ``addBar(bar:subdivisions:idle:isLast:)`` that unpacks the row's geometry.
     private func addBar(_ row: LimitRow, isLast: Bool) {
+        addBar(bar: row.bar, subdivisions: row.subdivisions, idle: row.sessionIdle, isLast: isLast)
+    }
+
+    /// Add a pacing bar from raw geometry — shared by the token limit rows and the "Extra usage"
+    /// credits section (#145), which has no ``LimitRow``. `subdivisions == 0` draws no tick ruler
+    /// (the credits bar paces the whole calendar month, with no window boundaries to mark); `idle`
+    /// draws the solid-blue knobless 5h track (#100). When `bar` is `nil` the view draws nothing —
+    /// but callers only reach here with a real bar (idle uses the flag, not the layout).
+    private func addBar(bar: BarLayout?, subdivisions: Int, idle: Bool, isLast: Bool) {
         let view = PopupBarView()
-        view.bar = row.bar
-        view.subdivisions = row.subdivisions
-        view.idle = row.sessionIdle   // solid-blue knobless track when the 5h window is idle (#100)
+        view.bar = bar
+        view.subdivisions = subdivisions
+        view.idle = idle   // solid-blue knobless track when the 5h window is idle (#100)
         view.translatesAutoresizingMaskIntoConstraints = false
         view.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.hPadding).isActive = true
         view.heightAnchor.constraint(equalToConstant: PopupBarView.viewHeight).isActive = true
@@ -873,6 +933,89 @@ final class PopupViewController: NSViewController {
     /// else "ahead of pace" (yellow). Same threshold as the gap colour, so word and colour agree.
     private static func aheadPhrase(_ row: LimitRow) -> String {
         (row.bar.usageFraction - row.bar.timeFraction) >= 0.15 ? "well ahead of pace" : "ahead of pace"
+    }
+
+    // MARK: Extra usage (money-credits) formatters (#145)
+
+    /// The credits section's status word (limit set), from the pacing bar — the money counterpart of
+    /// ``statusText(_:)``. Uses the **same** thresholds/wording family as the token bars so the two
+    /// agree at a glance:
+    /// - cap reached (`usageFraction >= 1`) → "limit reached" (the red rung of `aheadColor`);
+    /// - ahead of pace (`usage > time`) → "ahead of pace" / "well ahead of pace" by the 15-point gap
+    ///   (the yellow→orange split, matching ``aheadPhrase(_:)``);
+    /// - otherwise (`.onPaceOrBehind`, incl. the tie) → "on pace".
+    static func creditsStatusText(_ bar: BarLayout) -> String {
+        if bar.usageFraction >= 1 { return "limit reached" }
+        guard bar.pacing == .ahead else { return "on pace" }
+        return (bar.usageFraction - bar.timeFraction) >= 0.15 ? "well ahead of pace" : "ahead of pace"
+    }
+
+    /// The detail line's **left** half when a cap is set: `"€10.77 / €15.00"` — spent over limit, both
+    /// formatted from their exact ``Money`` integers (never a rounded `Double`).
+    static func creditsAmountText(spent: Money, limit: Money) -> String {
+        "\(moneyText(spent)) / \(moneyText(limit))"
+    }
+
+    /// The **unlimited** line's right half: `"€10.77 spent"` — the spent amount with a trailing word,
+    /// no cap and no reset (there is nothing to pace against).
+    static func creditsSpentOnlyText(_ spent: Money) -> String {
+        "\(moneyText(spent)) spent"
+    }
+
+    /// The credits detail line's **right** half (limit set): `"resets in 6d"`, or `"resetting…"` when
+    /// the countdown is unavailable (unresolvable month boundary) — mirroring ``resetText(_:)``'s
+    /// fallback for a missing relative string.
+    static func creditsResetText(_ relative: String?) -> String {
+        guard let relative else { return "resetting…" }
+        return "resets in \(relative)"
+    }
+
+    /// Format a ``Money`` for display. For a **known** currency the symbol sits in that currency's
+    /// standard position — `"$10.77"` and `"€10.77"` (symbol before) but `"10,77 kr"` (symbol after) —
+    /// resolved by `NumberFormatter`'s `.currency` style, which carries ICU's per-currency placement
+    /// and grouping. For an **unknown** currency there is no reliable symbol/placement, so we render
+    /// the amount followed by the ISO code — `"12.00 UAH"`.
+    ///
+    /// The amount always comes from the **integer** minor units + exponent (`amount_minor / 10^exponent`),
+    /// so no representation error creeps into the shown value; `NumberFormatter` is asked for exactly
+    /// `exponent` fraction digits (not the currency's own default) so the value we computed is what
+    /// shows. The currency is resolved from the code — never hard-coded to USD (the spike saw EUR, #142).
+    static func moneyText(_ money: Money) -> String {
+        let value = Double(money.amountMinor) / pow(10, Double(money.exponent))
+        let digits = max(0, money.exponent)
+        if isKnownCurrency(money.currency), let text = currencyFormatted(value, code: money.currency, digits: digits) {
+            return text
+        }
+        // Unknown currency → amount then ISO code (e.g. "12.00 UAH"); no symbol/placement to trust.
+        let amount = String(format: "%.\(digits)f", value)
+        let code = money.currency.isEmpty ? "" : " \(money.currency.uppercased())"
+        return "\(amount)\(code)"
+    }
+
+    /// Whether we treat this ISO code as "known" — mirrors ``StatusItemView/creditsSymbolName(for:)``
+    /// so the menu-bar glyph and the dropdown label agree on which currencies get a symbol vs. a code.
+    static func isKnownCurrency(_ code: String) -> Bool {
+        ["EUR", "USD", "GBP", "JPY", "CNY", "INR"].contains(code.uppercased())
+    }
+
+    /// `NumberFormatter`-formatted currency string with the symbol in the currency's standard position
+    /// and exactly `digits` fraction digits. Returns `nil` if formatting fails (caller falls back to the
+    /// code form). A fixed `en_US_POSIX` base locale keeps grouping/decimal marks deterministic across
+    /// the user's locale while `currencyCode` still drives the symbol and its placement.
+    private static func currencyFormatted(_ value: Double, code: String, digits: Int) -> String? {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.currencyCode = code.uppercased()
+        f.minimumFractionDigits = digits
+        f.maximumFractionDigits = digits
+        guard let s = f.string(from: NSNumber(value: value)) else { return nil }
+        // en_US_POSIX inserts a NBSP (U+00A0, or narrow NBSP U+202F) between a leading symbol and the
+        // digits (rendered as `€ 10.77`); the conventional form is `€10.77`. Strip that space only when
+        // it sits between a non-digit (the symbol) and the first digit — a trailing-symbol currency's
+        // space (`10,77 kr`) is preceded by a digit, so it is left untouched.
+        return s.replacingOccurrences(
+            of: "(?<=\\D)[\u{00A0}\u{202F}](?=\\d)", with: "", options: .regularExpression)
     }
 
 }

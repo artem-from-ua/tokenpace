@@ -54,6 +54,9 @@ enum PersistedConfig {
         /// Whether the menu-bar widget hides the 7-day bar while it is calm (green/yellow),
         /// centring the 5h bar alone (#94). Default-on (opt-out) — see the property.
         static let hideCalmSevenDayBar = "hideCalmSevenDayBar"
+        /// Whether the menu-bar widget draws the money-credits ("extra usage") icon when credits are
+        /// active and a base limit is exhausted (#144). Default-on (opt-out) — see the property.
+        static let showExtraUsage = "showExtraUsage"
         /// Whether polling pauses while the screen is locked / off / running a screensaver (#114).
         /// Default-on (opt-out) — see the property.
         static let pausePollingWhenScreenLocked = "pausePollingWhenScreenLocked"
@@ -192,6 +195,20 @@ enum PersistedConfig {
     static var hideCalmSevenDayBar: Bool {
         get { defaults.object(forKey: Key.hideCalmSevenDayBar) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.hideCalmSevenDayBar) }
+    }
+
+    /// Whether the **menu-bar** widget draws the money-credits ("extra usage") icon — the trailing
+    /// currency glyph (¤) shown when paid credits are active **and** a base limit is exhausted (#144,
+    /// `MenuBarLayout.creditsMarker`). **Default-on** (opt-out): an absent key reads as `true`, so the
+    /// icon appears out of the box, matching the service-status dot's default. `object(forKey:) as?
+    /// Bool ?? true` distinguishes "unset" (→ true) from an explicit `false` the user chose —
+    /// `bool(forKey:)` would collapse both to `false` and silently defeat the opt-out default.
+    ///
+    /// - Note: The Settings toggle for this lives in #146; until then the gate is read from this
+    ///   default-on property, so the icon is on for everyone with credits.
+    static var showExtraUsage: Bool {
+        get { defaults.object(forKey: Key.showExtraUsage) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.showExtraUsage) }
     }
 
     /// Whether polling pauses while the screen is **locked, off, or running a screensaver** (#114,

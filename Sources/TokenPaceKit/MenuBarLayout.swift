@@ -101,6 +101,50 @@ public struct ResetToShow: Sendable, Equatable {
     }
 }
 
+// MARK: - CreditsMarker
+
+/// The money-credits ("extra usage") icon the menu bar should draw — the pure decision behind the
+/// trailing currency glyph (`coloncurrencysign` ¤) of issue #144.
+///
+/// Its **presence** answers "draw the icon at all?" (a `nil` ``MenuBarLayout/credits`` means "no
+/// icon"); its ``bar`` answers "which colour?", using the **same** ``BarLayout`` → colour mapping the
+/// pacing bars use (`PopupBarView.aheadColor` in the AppKit layer). This mirrors the ``BarView`` split
+/// (ADR-0005/0009): the Kit owns only the semantic `BarLayout`, and `StatusItemView` resolves the
+/// `NSColor` — so `TokenPaceKit` never imports AppKit.
+///
+/// - ``bar`` **non-`nil`** — there is a money cap to pace against, so the icon is coloured by the same
+///   `usage`-vs-`time` grading as a token bar: green (on pace / behind) → yellow → orange → **red only
+///   at the cap** (`CreditsPacing.barLayout` forces `usage = 1` when `spend_limit_reached`).
+/// - ``bar`` **`nil`** — the monthly limit is *unlimited* (`spend.limit: null`): there is nothing to
+///   pace, so the view draws the icon in a **neutral** foreground colour (no pacing tint). The icon
+///   still shows (credits are active), it just carries no severity.
+///
+/// Built by ``MenuBarLayout/make(from:now:credits:)`` from `CreditsPacing.shouldShowIcon` (presence)
+/// and `CreditsPacing.barLayout` (the `bar`); the view maps it in `StatusItemView.drawCreditsIcon`.
+public struct CreditsMarker: Sendable, Equatable {
+    /// The pacing bar whose colour tints the icon, or `nil` for an **unlimited** monthly limit —
+    /// then the view draws the icon neutrally (no pacing colour). Fed the same `aheadColor` mapping as
+    /// the token bars, so a yellow credits icon and a yellow 7-day bar read as the same amber.
+    public let bar: BarLayout?
+
+    /// The ISO currency code of the credits (e.g. `"EUR"`, `"USD"`) — drives *which glyph* the view
+    /// draws: a known currency uses its own SF Symbol (`eurosign`/`dollarsign`/…), an unknown or empty
+    /// code falls back to the generic `coloncurrencysign` (¤). Kept here (not resolved to a glyph) so
+    /// `TokenPaceKit` stays AppKit-free — `StatusItemView.creditsSymbolName` maps code → symbol.
+    public let currency: String
+
+    public init(bar: BarLayout?, currency: String = "") {
+        self.bar = bar
+        self.currency = currency
+    }
+
+    /// Whether the icon's pacing is "calm" (green/yellow) — the same predicate the bars use to mute
+    /// their colour under "Calm colours" (#105). An **unlimited** marker (`bar == nil`) is treated as
+    /// calm: a neutral, non-pacing icon is a soft signal, so it mutes to white alongside the calm bars
+    /// rather than staying a stray tint over a quieted menu bar. Delegates to ``BarLayout/isCalm``.
+    public var isCalm: Bool { bar?.isCalm ?? true }
+}
+
 // MARK: - MenuBarLayout
 
 /// The pure, AppKit-free model of the menu-bar widget for one usage snapshot — the testable core
@@ -134,9 +178,18 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// when `nil`, no dot. Orthogonal to `mode` — a service problem and the usage state are independent.
     public let serviceProblem: ServiceStatus?
 
-    public init(mode: MenuBarMode, serviceProblem: ServiceStatus? = nil) {
+    /// The money-credits icon to draw as a **trailing** element (before the service dot), or `nil`
+    /// when no credits icon should be shown (#144). Presence is decided by
+    /// `CreditsPacing.shouldShowIcon` (`enabled`/`spend_limit_reached` **and** a base limit exhausted);
+    /// its ``CreditsMarker/bar`` carries the colour. Orthogonal to `mode`/`serviceProblem` — the credits
+    /// state is independent of the usage bars and the service status. When `nil`, no icon and no width
+    /// is reserved for it, exactly as before this feature.
+    public let credits: CreditsMarker?
+
+    public init(mode: MenuBarMode, serviceProblem: ServiceStatus? = nil, credits: CreditsMarker? = nil) {
         self.mode = mode
         self.serviceProblem = serviceProblem
+        self.credits = credits
     }
 
     // MARK: make
@@ -237,14 +290,44 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///   - hideCalmSevenDay: Elide the calm 7-day bar on the **healthy/stale** path (#94) — see the
     ///     plain ``make(from:now:resetMode:hideCalmSevenDay:)``. The error state (⚠️ + stale bars)
     ///     ignores it: the 7-day bar is diagnostic there and always kept.
+    ///   - showCredits: Whether to compute the money-credits icon (#144), gated by the user's
+    ///     `PersistedConfig.showExtraUsage` toggle. When `false`, the credits marker is always `nil`
+    ///     (no icon, no width) regardless of the snapshot — the gate is honoured here, at the top, so
+    ///     the whole credits path is skipped rather than computed-then-discarded. When `true`, the
+    ///     marker is derived from `snapshot.spend` via ``creditsMarker(for:now:)`` — `nil` unless the
+    ///     credits show-trigger fires. Independent of `mode`: even the error/cold-start states can
+    ///     carry a credits icon (the money state is orthogonal to polling health). Default `false` so
+    ///     existing callers and tests are unaffected.
     public static func make(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
         serviceProblem: ServiceStatus? = nil, resetMode: ResetCountdownMode = .showDistant7d,
-        hideCalmSevenDay: Bool = false
+        hideCalmSevenDay: Bool = false, showCredits: Bool = false
     ) -> MenuBarLayout {
-        usageMode(from: snapshot, health: health, now: now,
-                  resetMode: resetMode, hideCalmSevenDay: hideCalmSevenDay)
-            .withServiceProblem(serviceProblem)
+        let credits = showCredits ? snapshot.flatMap { creditsMarker(for: $0, now: now) } : nil
+        return usageMode(from: snapshot, health: health, now: now,
+                         resetMode: resetMode, hideCalmSevenDay: hideCalmSevenDay)
+            .with(serviceProblem: serviceProblem, credits: credits)
+    }
+
+    /// The money-credits icon marker for a snapshot at `now`, or `nil` when no credits icon should
+    /// be drawn (#144). Pure/testable — the single Kit-side bridge between ``CreditsPacing`` and the
+    /// view.
+    ///
+    /// Returns `nil` unless **both** halves of the trigger hold (`CreditsPacing.shouldShowIcon`):
+    /// credits are active (`enabled` OR `spend_limit_reached`) **and** at least one base limit is
+    /// exhausted (`CreditsPacing.anyBaseLimitExhausted`). When it does show, the marker's
+    /// ``CreditsMarker/bar`` is `CreditsPacing.barLayout` — the same `usage`-vs-`time` pacing the token
+    /// bars use — or `nil` for an unlimited monthly limit (the view then draws a neutral icon).
+    ///
+    /// A snapshot without a `spend` block (pre-credits payload) yields `nil` — there is nothing to
+    /// show. Injects `now` for the month-elapsed `timeFraction`; never calls `Date()`.
+    public static func creditsMarker(for snapshot: UsageSnapshot, now: Date) -> CreditsMarker? {
+        guard let spend = snapshot.spend else { return nil }
+        let baseExhausted = CreditsPacing.anyBaseLimitExhausted(in: snapshot)
+        guard CreditsPacing.shouldShowIcon(spend, baseLimitExhausted: baseExhausted) else { return nil }
+        return CreditsMarker(
+            bar: CreditsPacing.barLayout(for: spend, now: now),
+            currency: spend.currencyCode)
     }
 
     /// The usage-driven `mode` only (no service dot) — the existing #12 decision tree, factored out
@@ -282,9 +365,10 @@ public struct MenuBarLayout: Sendable, Equatable {
         return MenuBarLayout(mode: .error(fiveHour: five, sevenDay: seven, reset: reset, which: which))
     }
 
-    /// A copy of this layout carrying `serviceProblem` (the `mode` is unchanged).
-    func withServiceProblem(_ serviceProblem: ServiceStatus?) -> MenuBarLayout {
-        MenuBarLayout(mode: mode, serviceProblem: serviceProblem)
+    /// A copy of this layout carrying `serviceProblem` and `credits` (the `mode` is unchanged) — the
+    /// two trailing decorations grafted onto the usage `mode` computed by ``usageMode(from:health:now:resetMode:hideCalmSevenDay:)``.
+    func with(serviceProblem: ServiceStatus?, credits: CreditsMarker?) -> MenuBarLayout {
+        MenuBarLayout(mode: mode, serviceProblem: serviceProblem, credits: credits)
     }
 
     // MARK: - Private

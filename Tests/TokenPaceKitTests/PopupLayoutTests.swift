@@ -24,16 +24,21 @@ private func snapshot(
     sevenDayResetsIn: TimeInterval = 3 * 24 * 3600,
     opus: (util: Double, resetsIn: TimeInterval)? = nil,
     sonnet: (util: Double, resetsIn: TimeInterval)? = nil,
-    limits: [UsageLimit] = []
+    limits: [UsageLimit] = [],
+    spend: SpendInfo? = nil
 ) -> UsageSnapshot {
     UsageSnapshot(
         fiveHour: UsageWindow(utilization: fiveHourUtil, resetsAt: resetsAt(inSeconds: fiveHourResetsIn)),
         sevenDay: UsageWindow(utilization: sevenDayUtil, resetsAt: resetsAt(inSeconds: sevenDayResetsIn)),
         sevenDayOpus: opus.map { UsageWindow(utilization: $0.util, resetsAt: resetsAt(inSeconds: $0.resetsIn)) },
         sevenDaySonnet: sonnet.map { UsageWindow(utilization: $0.util, resetsAt: resetsAt(inSeconds: $0.resetsIn)) },
-        limits: limits
+        limits: limits,
+        spend: spend
     )
 }
+
+/// A EUR ``Money`` in minor units (e.g. `eur(1077)` == €10.77).
+private func eur(_ minor: Int) -> Money { Money(amountMinor: minor, currency: "EUR", exponent: 2) }
 
 /// A `weekly_scoped` limits[] entry for a named model — the only API shape carrying models
 /// without a top-level window (e.g. Fable, #65).
@@ -445,5 +450,98 @@ struct PopupLayoutIdleTests {
         let p = layout(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30))
         #expect(!p.rows[0].sessionIdle)
         #expect(!p.rows[1].sessionIdle)
+    }
+}
+
+// MARK: - Extra usage (money-credits) row (#145)
+
+@Suite("PopupLayout credits row")
+struct PopupLayoutCreditsTests {
+
+    /// No `spend` block → no credits section (the pre-credits path).
+    @Test func absentWhenNoSpend() {
+        let p = layout(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30))
+        #expect(p.credits == nil)
+    }
+
+    /// `spend` present but inactive (not enabled, cap not reached) → no section — the dropdown gate is
+    /// `CreditsPacing.isActive`.
+    @Test func absentWhenInactive() {
+        let spend = SpendInfo(used: eur(1077), limit: eur(1500), enabled: false, spendLimitReached: false)
+        let p = layout(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30, spend: spend))
+        #expect(p.credits == nil)
+    }
+
+    /// Dropdown gate is **softer** than the menu-bar icon's: credits enabled is enough — no base limit
+    /// need be exhausted (the icon requires that, the detail view does not).
+    @Test func shownWhenEnabledEvenWithNoBaseLimitExhausted() {
+        let spend = SpendInfo(used: eur(1077), limit: eur(1500), enabled: true)
+        // Both base windows low → no base limit exhausted; the section must still appear.
+        let p = layout(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 20, spend: spend))
+        #expect(p.credits != nil)
+    }
+
+    /// Limit set: spent/limit carried verbatim, a bar present, and a reset countdown to month end.
+    @Test func limitSetCarriesRawFieldsAndBar() {
+        let spend = SpendInfo(used: eur(1077), limit: eur(1500), enabled: true)
+        let p = layout(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 20, spend: spend))
+        let credits = try! #require(p.credits)
+        #expect(credits.spent == eur(1077))
+        #expect(credits.limit == eur(1500))
+        #expect(credits.bar == CreditsPacing.barLayout(for: spend, now: now))
+        #expect(credits.bar != nil)
+        // Reset string matches the shared formatter fed the month-end instant.
+        let monthEnd = CreditsPacing.monthEnd(now: now)!
+        #expect(credits.resetRelative == ResetClock.relativeRounded(resetsAt: monthEnd, now: now))
+    }
+
+    /// Cap reached: `spend_limit_reached` forces a full bar (red rung) even below the raw fraction.
+    @Test func limitReachedForcesFullBar() {
+        let spend = SpendInfo(
+            used: eur(1077), limit: eur(500), enabled: false, spendLimitReached: true)
+        let p = layout(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 20, spend: spend))
+        let credits = try! #require(p.credits)
+        #expect(credits.bar?.usageFraction == 1)
+    }
+
+    /// Unlimited (`limit == nil`): a spent amount, but **no** bar and **no** reset line.
+    @Test func unlimitedHasNoBarNoReset() {
+        let spend = SpendInfo(used: eur(1077), limit: nil, enabled: true)
+        let p = layout(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 20, spend: spend))
+        let credits = try! #require(p.credits)
+        #expect(credits.spent == eur(1077))
+        #expect(credits.limit == nil)
+        #expect(credits.bar == nil)
+        #expect(credits.resetRelative == nil)
+    }
+
+    /// When `spend.used` is absent, the amount is reconstructed from the `used_credits` scalar +
+    /// currency/decimal_places so the line still shows a value.
+    @Test func spentReconstructedFromScalarWhenUsedAbsent() {
+        let spend = SpendInfo(
+            used: nil, limit: eur(1500), enabled: true,
+            usedCredits: 1077.0, currency: "EUR", decimalPlaces: 2)
+        let p = layout(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 20, spend: spend))
+        let credits = try! #require(p.credits)
+        #expect(credits.spent == eur(1077))
+    }
+}
+
+// MARK: - CreditsPacing.monthEnd (#145)
+
+@Suite("CreditsPacing.monthEnd")
+struct CreditsPacingMonthEndTests {
+
+    /// Month end is the next 00:00 UTC on the 1st, and it is > now.
+    @Test func isNextMonthStartInUTC() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        // A fixed mid-month instant: 2026-03-15 12:00 UTC.
+        let comps = DateComponents(year: 2026, month: 3, day: 15, hour: 12)
+        let mid = cal.date(from: comps)!
+        let end = CreditsPacing.monthEnd(now: mid)!
+        let expected = cal.date(from: DateComponents(year: 2026, month: 4, day: 1))!
+        #expect(end == expected)
+        #expect(end > mid)
     }
 }

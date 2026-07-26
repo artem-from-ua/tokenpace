@@ -579,6 +579,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //  • `=calm-degraded` → calm bars + a **degraded (yellow)** service dot: with "Calm colours"
         //                    (#105) off the dot is yellow; turn Calm on (Settings → General) and it
         //                    mutes to white alongside the bars. The frame that verifies #… .
+        //  • `=credits-active` / `credits-limit-reached` / `credits-no-limit` (#144)
+        //                  → the trailing money-credits ¤ icon. All three pin the 7-day window at
+        //                    100 % (a base limit exhausted → the icon shows) and vary `spend`:
+        //                    `credits-active` = enabled €15 limit, €10.77 spent (paced colour);
+        //                    `credits-limit-reached` = spend_limit_reached (RED icon);
+        //                    `credits-no-limit` = unlimited limit (NEUTRAL icon). Toggle "Calm
+        //                    colours" to see the calm frames (active/no-limit) mute to white.
         let stubMode = Self.stubName
         let transport: UsageTransport = switch stubMode {
         case "1":          StubUsageTransport(mode: .climbing)
@@ -596,6 +603,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "calm-both":  StubUsageTransport(mode: .pacing(.calmBoth))
         // Calm bars + degraded (yellow) service dot: verifies calm colours muting the dot (#…).
         case "calm-degraded": StubUsageTransport(mode: .calmDegraded)
+        // Money-credits icon (#144): three frames for the trailing ¤ icon. Each pins the 7-day window
+        // at 100 % (a base limit exhausted, so the icon's show-trigger fires) and differs in `spend`:
+        //  • `credits-active`        → enabled, €15 limit, €10.77 spent (~72 %) → paced icon colour.
+        //  • `credits-limit-reached` → spend_limit_reached (€5 limit below €10.77 spent) → RED icon.
+        //  • `credits-no-limit`      → enabled, unlimited (limit: null) → NEUTRAL (foreground) icon.
+        case "credits-active":        StubUsageTransport(mode: .credits(.active))
+        case "credits-limit-reached": StubUsageTransport(mode: .credits(.limitReached))
+        case "credits-no-limit":      StubUsageTransport(mode: .credits(.noLimit))
         default:           URLSession.shared
         }
         // The status poll uses the same transport seam (the stub answers the status endpoint too).
@@ -1054,7 +1069,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             serviceProblem: PersistedConfig.showServiceStatusDot ? lastStatusHealth?.worstProblem : nil,
             resetMode: PersistedConfig.resetCountdownModeMenuBar,   // #103: which reset countdown to show
             // #94: honour the "Hide 7-day bar when calm" toggle — drops a calm 7-day bar, centring 5h.
-            hideCalmSevenDay: PersistedConfig.hideCalmSevenDayBar)
+            hideCalmSevenDay: PersistedConfig.hideCalmSevenDayBar,
+            // #144: honour the "Show extra-usage credits" toggle — draws the trailing ¤ icon when
+            // credits are active and a base limit is exhausted; false hides it and reclaims its width.
+            showCredits: PersistedConfig.showExtraUsage)
         refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
         setPopupLayout(PopupLayout.make(
             from: output.snapshot, health: output.health, now: now, interval: output.interval,

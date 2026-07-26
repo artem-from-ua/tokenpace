@@ -80,6 +80,13 @@ final class StatusItemView: NSView {
         static let statusDotDiameter: CGFloat = 6
         /// Gap between the service-status dot and the content to its right (bars / glyph).
         static let statusDotGap: CGFloat = 4
+        /// Point size of the trailing money-credits currency glyph (`coloncurrencysign` ¤, #144).
+        /// Tuned to read at the same visual weight as the bars block and the ⚠️ glyph — a touch
+        /// larger than the bars are tall so the generic-currency mark stays legible at menu-bar size.
+        static let creditsIconSize: CGFloat = 12
+        /// Gap between the money-credits icon and the content to its **left** (bars / glyph). The icon
+        /// sits between the bars block and the service dot, so this is its leading separation.
+        static let creditsIconGap: CGFloat = 4
     }
 
     // MARK: Colour mapping (exact statusline 256-colour palette → NSColor)
@@ -168,15 +175,24 @@ final class StatusItemView: NSView {
     private func render(in rect: NSRect) {
         guard let layout else { return }
 
-        // Rightmost service-status dot (issue #31): drawn at the trailing edge, then everything else
-        // is rendered in a content rect inset from the right by the dot + gap, so the bars/glyph keep
-        // their leading position. When there is no problem, the inset is zero and the layout is
-        // exactly as before.
+        // Trailing decorations, drawn right-to-left so each reclaims width from the right edge and the
+        // bars/glyph keep their leading position:
+        //  1. the service-status dot (#31) is the **rightmost** element (its long-established slot);
+        //  2. the money-credits icon (#144) sits just **left of the dot**, between it and the bars —
+        //     the two can appear together (they are independent signals). When either is absent its
+        //     inset is zero and the layout is exactly as before that feature.
         var contentRect = rect
         if let problem = layout.serviceProblem {
-            drawStatusDot(problem, in: rect)
+            drawStatusDot(problem, in: contentRect)
             let inset = Metrics.statusDotDiameter + Metrics.statusDotGap
-            contentRect = NSRect(x: rect.minX, y: rect.minY, width: rect.width - inset, height: rect.height)
+            contentRect = NSRect(x: contentRect.minX, y: contentRect.minY,
+                                 width: contentRect.width - inset, height: contentRect.height)
+        }
+        if let credits = layout.credits {
+            drawCreditsIcon(credits, in: contentRect)
+            let inset = creditsIconWidth(for: credits.currency) + Metrics.creditsIconGap
+            contentRect = NSRect(x: contentRect.minX, y: contentRect.minY,
+                                 width: contentRect.width - inset, height: contentRect.height)
         }
 
         switch layout.mode {
@@ -197,6 +213,80 @@ final class StatusItemView: NSView {
         let dot = NSBezierPath(ovalIn: NSRect(x: x, y: y, width: d, height: d))
         statusDotColor(status).setFill()
         dot.fill()
+    }
+
+    // MARK: Money-credits icon (issue #144)
+
+    /// Draw the money-credits currency glyph at the **right edge** of `rect`, vertically centred — the
+    /// trailing element just left of the service dot (whose width the caller has already reserved by
+    /// passing an inset `rect`). `hPadding` keeps it off the very edge, like the bars.
+    ///
+    /// The glyph is **currency-specific** (``creditsSymbolName(for:)``): a known currency draws its own
+    /// SF Symbol (`eurosign`/`dollarsign`/…), an unknown/empty code falls back to the generic
+    /// `coloncurrencysign` (¤) — never a hard-coded `$` (the currency is dynamic; EUR observed, #142).
+    /// Rendered as a **non-template palette image** in the marker's pacing colour (``creditsIconColor(_:)``),
+    /// matching the rest of the widget (non-template so macOS does not retint it). Drawn with
+    /// `respectFlipped: true` because this view is `isFlipped` (same as the ⚠️ glyph).
+    private func drawCreditsIcon(_ credits: CreditsMarker, in rect: NSRect) {
+        let color = creditsIconColor(credits)
+        let config = NSImage.SymbolConfiguration(pointSize: Metrics.creditsIconSize, weight: .semibold)
+            .applying(.init(paletteColors: [color]))
+        guard let symbol = NSImage(
+            systemSymbolName: Self.creditsSymbolName(for: credits.currency),
+            accessibilityDescription: "usage credits")?
+            .withSymbolConfiguration(config) else { return }
+        let size = symbol.size
+        let x = rect.maxX - Metrics.hPadding - size.width
+        let drawRect = NSRect(x: x, y: rect.midY - size.height / 2, width: size.width, height: size.height)
+        symbol.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1,
+                    respectFlipped: true, hints: nil)
+    }
+
+    /// The SF Symbol name for a currency's menu-bar glyph: a known ISO code maps to its own currency
+    /// symbol, anything else (unknown code, empty) to the generic `coloncurrencysign` (¤). The set
+    /// mirrors ``PopupViewController``'s known-symbol table so the menu bar and dropdown agree on which
+    /// currencies are "known". SF Symbols ships a `…sign` glyph for each of these.
+    static func creditsSymbolName(for currency: String) -> String {
+        switch currency.uppercased() {
+        case "EUR": return "eurosign"
+        case "USD": return "dollarsign"
+        case "GBP": return "sterlingsign"
+        case "JPY", "CNY": return "yensign"   // ¥ symbol is shared by JPY and CNY
+        case "INR": return "indianrupeesign"
+        default:    return "coloncurrencysign"
+        }
+    }
+
+    /// The colour of the money-credits icon, from its ``CreditsMarker/bar`` via the **same** mapping
+    /// the pacing bars use — so a yellow credits icon and a yellow 7-day bar read as the same amber:
+    /// - `bar == nil` (unlimited monthly limit) → the neutral menu-bar foreground: the icon shows the
+    ///   credits are active but carries no pacing tint.
+    /// - on pace / behind (`usage <= time`) → the on-pace green (`dotGreen`, the brighter knob green,
+    ///   so a single glyph reads as clearly green rather than the darker gap fill).
+    /// - ahead of pace → the graded ahead colour (`PopupBarView.aheadColor`: amber → orange → red at
+    ///   the cap), identical to the bars' gap/knob.
+    ///
+    /// Calm mode (#105): the icon follows the bars — it mutes to white in exactly the **calm** states
+    /// (on pace / behind, mild-ahead yellow, and the neutral unlimited icon), and keeps its colour for
+    /// the strong warnings (orange/red). `CreditsMarker.isCalm` is the one predicate that decides this,
+    /// so the icon and the bars always agree.
+    private func creditsIconColor(_ credits: CreditsMarker) -> NSColor {
+        if calmColors && credits.isCalm { return Palette.calmWhite }
+        guard let l = credits.bar else { return Palette.foreground }   // unlimited → neutral
+        return l.timeFraction < l.usageFraction
+            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction)
+            : Palette.dotGreen
+    }
+
+    /// Rendered width of the money-credits glyph at ``Metrics/creditsIconSize`` — measured the same way
+    /// it is drawn (the configured symbol image) so the reserved width matches exactly. Falls back to
+    /// the icon point size if the symbol is unavailable, so the item never collapses. The palette
+    /// colour does not affect the metrics, so a plain configuration is enough here.
+    private func creditsIconWidth(for currency: String) -> CGFloat {
+        let config = NSImage.SymbolConfiguration(pointSize: Metrics.creditsIconSize, weight: .semibold)
+        let symbol = NSImage(systemSymbolName: Self.creditsSymbolName(for: currency), accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+        return ceil(symbol?.size.width ?? Metrics.creditsIconSize)
     }
 
     // MARK: NSImage snapshot
@@ -446,17 +536,20 @@ final class StatusItemView: NSView {
     /// the bars + label, widest for the ⚠️ + stale-bars phase (the glyph adds its own width). Driven
     /// dynamically so the item hugs exactly the content currently drawn.
     private func itemWidth(for layout: MenuBarLayout?) -> CGFloat {
-        // The trailing service dot, when present, widens every mode by the same dot + gap inset.
+        // The trailing decorations, when present, widen every mode by the same insets: the service dot
+        // (#31) by dot + gap, the money-credits icon (#144) by glyph + gap. Both are additive.
         let dotInset = layout?.serviceProblem != nil ? Metrics.statusDotDiameter + Metrics.statusDotGap : 0
+        let creditsInset = layout?.credits.map { creditsIconWidth(for: $0.currency) + Metrics.creditsIconGap } ?? 0
+        let trailingInset = dotInset + creditsInset
         switch layout?.mode {
         case .none:
-            return Metrics.height + dotInset            // square-ish compact item (no layout yet)
+            return Metrics.height + trailingInset       // square-ish compact item (no layout yet)
         case let .expanded(_, _, resetToShow):
-            return dotInset + Metrics.hPadding + barsBlockWidth(reset: resetToShow?.display) + Metrics.hPadding
+            return trailingInset + Metrics.hPadding + barsBlockWidth(reset: resetToShow?.display) + Metrics.hPadding
         case let .error(five, _, reset, _):
             // ⚠️ alone (cold start / >60 min) → compact; ⚠️ + stale bars (30–60 min) → glyph + bars.
-            guard five != nil, let reset else { return Metrics.height + dotInset }
-            return dotInset + Metrics.hPadding + errorGlyphWidth() + Metrics.errorGlyphGap
+            guard five != nil, let reset else { return Metrics.height + trailingInset }
+            return trailingInset + Metrics.hPadding + errorGlyphWidth() + Metrics.errorGlyphGap
                 + barsBlockWidth(reset: reset) + Metrics.hPadding
         }
     }
