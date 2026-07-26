@@ -13,17 +13,22 @@ import TokenPaceKit
 /// (`AppDelegate`) using the pure Kit types; this type only *requests authorization* and *posts*, so
 /// the impure surface stays as small as possible.
 ///
+/// **Actor isolation.** This enum is deliberately **not** `@MainActor`: `UNUserNotificationCenter`
+/// invokes its completion handlers on a private background queue, and a `@MainActor`-isolated closure
+/// run there trips a `dispatch_assert_queue` fatal error (SIGTRAP). So the `UNUserNotificationCenter`
+/// calls and their handlers run wherever UN calls them (the center is thread-safe), and we hop to the
+/// main actor **only** to invoke the caller's `completion`, which touches `@MainActor` UI state.
+///
 /// Local notifications need **no** entitlement and **no** Info.plist key — only a valid bundle
 /// identifier, which the shipped `.app` has (`com.artem-n.tokenpace`). A bare `swift run` binary has
 /// no real bundle, so `UNUserNotificationCenter` cannot authorize there; every call degrades
 /// gracefully (never crashes) and the Settings hint tells the user the feature needs the installed app
 /// (mirrors launch-at-login / auto-install, which are also `.app`-only).
-@MainActor
 enum BackToWorkNotifier {
 
     /// The reported authorization status for the app, for the Settings hint. `.dev` is the synthetic
     /// state for a non-bundle `swift run` build where authorization is impossible.
-    enum AuthState {
+    enum AuthState: Sendable {
         case dev
         case authorized
         case denied
@@ -33,16 +38,17 @@ enum BackToWorkNotifier {
     private static var center: UNUserNotificationCenter { .current() }
 
     /// Whether local notifications can work at all in this build. False on a bare `swift run` binary.
-    static var isSupported: Bool { LaunchAtLoginController.isAppBundle }
+    /// `LaunchAtLoginController.isAppBundle` only reads `Bundle.main`, which is safe off the main actor.
+    static var isSupported: Bool { Bundle.main.bundleIdentifier != nil && Bundle.main.bundleURL.pathExtension == "app" }
 
     /// Ask for alert+sound authorization if it has not been decided yet. Called lazily the first time
     /// the user enables the feature (never at launch — this is an opt-in feature and we must not prompt
-    /// users who never turn it on). No-op on a dev build. The `completion` reports the resolved state
-    /// so Settings can refresh its hint.
-    static func requestAuthorizationIfNeeded(completion: @escaping (AuthState) -> Void) {
+    /// users who never turn it on). No-op on a dev build. The `completion` is always invoked on the
+    /// **main actor** so callers can update UI state directly.
+    static func requestAuthorizationIfNeeded(completion: @escaping @MainActor (AuthState) -> Void) {
         guard isSupported else {
             AppLogger.lifecycle.info("back-to-work: authorization dev (no bundle)")
-            completion(.dev)
+            Task { @MainActor in completion(.dev) }
             return
         }
         center.requestAuthorization(options: [.alert, .sound]) { granted, error in
@@ -54,10 +60,13 @@ enum BackToWorkNotifier {
         }
     }
 
-    /// Query the current authorization state (async → main) for the Settings hint. Returns `.dev`
-    /// immediately on a non-bundle build.
-    static func currentAuthState(completion: @escaping (AuthState) -> Void) {
-        guard isSupported else { completion(.dev); return }
+    /// Query the current authorization state for the Settings hint. Returns `.dev` immediately on a
+    /// non-bundle build. `completion` is invoked on the **main actor**.
+    static func currentAuthState(completion: @escaping @MainActor (AuthState) -> Void) {
+        guard isSupported else {
+            Task { @MainActor in completion(.dev) }
+            return
+        }
         center.getNotificationSettings { settings in
             let state: AuthState
             switch settings.authorizationStatus {
@@ -72,7 +81,8 @@ enum BackToWorkNotifier {
 
     /// Post the "Back to work!" banner immediately. The caller has already confirmed the
     /// blocked→unblocked edge and passed the quiet-hours gate; this only checks authorization and
-    /// delivers. No-op (logged) on a dev build or when not authorized.
+    /// delivers. No-op (logged) on a dev build or when not authorized. All work runs on UN's own
+    /// queue — nothing here touches `@MainActor` state.
     static func postBackToWork() {
         guard isSupported else { return }
         center.getNotificationSettings { settings in

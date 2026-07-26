@@ -73,7 +73,7 @@ final class SettingsWindowController: NSWindowController {
     /// `AppDelegate.openSettings` to lazily request notification authorization (never at launch, since
     /// this is an opt-in feature). The `completion` reports the resolved auth state back so the pane
     /// can refresh its hint.
-    var onBackToWorkEnabled: ((@escaping (BackToWorkNotifier.AuthState) -> Void) -> Void)?
+    var onBackToWorkEnabled: ((@escaping @MainActor (BackToWorkNotifier.AuthState) -> Void) -> Void)?
 
     /// Provides the last archive summary for the status line (#110), read on each `show()` /
     /// `updateArchiveStatus()`. `nil` until the first sync of the session completes.
@@ -112,6 +112,10 @@ final class SettingsWindowController: NSWindowController {
     private var notifySatSunRadio: NSButton!
     /// Hint under the master switch: notification-authorization status, or the dev-build note.
     private var notifyAuthHint: NSTextField!
+    /// The hint's own card row + its card, so the whole row (and its divider) collapses when the hint
+    /// is empty — no orphan divider pair above "Allowed hours".
+    private var notifyAuthRow: NSView!
+    private var notificationsCard: SettingsCard!
 
     // Session Logs
     private var archiveToggle: NSSwitch!
@@ -404,20 +408,24 @@ final class SettingsWindowController: NSWindowController {
 
     private func buildNotificationsPane() -> NSView {
         let card = SettingsCard()
+        notificationsCard = card
 
         // Master switch: the whole feature. Off by default (opt-in). A wrapping hint under the label
         // carries the authorization status / dev-build note, set by `refreshNotifyAuthHint`.
         backToWorkToggle = SettingsRow.makeSwitch(target: self, action: #selector(toggleBackToWork(_:)))
         let masterCol = SettingsRow.labelColumn(
             "Back to work",
-            hint: "Shows a system notification when your Claude usage limit resets and you can work "
-                + "again.")
+            hint: "If you hit a Claude usage limit, notifies you when it resets so you can get back "
+                + "to work.")
         card.addRow(SettingsRow.container(leading: masterCol.view, trailing: backToWorkToggle))
 
-        // Second wrapping hint row for the auth/dev status — its own row so the toggle row's hint stays
-        // the static description. Placed in a leading column so it reads as continuation text.
-        notifyAuthHint = SettingsRow.wrappingHint(" ")
-        card.addRow(SettingsRow.container(leading: indented(notifyAuthHint)))
+        // Auth/dev status hint as its own row, hidden (with its divider) whenever the hint is empty —
+        // so the common "authorized / not-yet-decided" case shows no orphan divider pair. Only the
+        // `denied` / dev-build cases reveal it (`applyNotifyAuthHint`).
+        notifyAuthHint = SettingsRow.wrappingHint("")
+        notifyAuthRow = SettingsRow.container(leading: indented(notifyAuthHint))
+        card.addRow(notifyAuthRow)
+        card.setRow(notifyAuthRow, hidden: true)
 
         // Allowed-hours row: two hour/minute pickers with an en-dash between, plus a live "Nh window"
         // duration label. `NSDatePicker` in `.hourMinute` honours the user's locale (12h/24h) and zone.
@@ -717,7 +725,9 @@ final class SettingsWindowController: NSWindowController {
             text = ""
         }
         notifyAuthHint.stringValue = text
-        notifyAuthHint.isHidden = text.isEmpty
+        // Collapse the whole row (and its preceding divider) when there's nothing to say, so the card
+        // shows no empty band between the switch and "Allowed hours".
+        notificationsCard.setRow(notifyAuthRow, hidden: text.isEmpty)
     }
 
     // MARK: Minute-of-day ↔ Date (display only)
