@@ -277,6 +277,11 @@ actor StubUsageTransport: UsageTransport {
     ///    the snapshot decodes `sessionIdle == true`. The 5h bar renders solid blue with no knob and the
     ///    menu-bar time falls back to the 7-day reset (set ~4.2 days out → "4d" live). The status
     ///    endpoint stays all-operational so the frame is clean.
+    ///  • `.idleBlocked` (`=idle-blocked`) — the **blocked** idle frame (#158): the same idle 5h shape,
+    ///    but `seven_day` is exhausted (100 %) and there is **no** `spend` block, so credits cannot cover
+    ///    → `sessionIdle && idleBlocked`. The idle bar renders **grey** (menu bar + popup, both colour
+    ///    modes), the popup status word is "waiting for limit reset", and the 7-day reset (the sole
+    ///    exhausted candidate, ~4 days out) is drawn **red** as the blocking reset.
     ///  • `.optimisticReset` (`=optimistic-reset`) — the reset-boundary frame (#36): the first poll's 5h
     ///    window resets in ~20 s at 60 % util, so the coordinator's one-shot timer fires shortly after
     ///    launch — the 5h bar flips 60 % → 0 % with a fresh ~5 h countdown (no ⏰) and a forced refresh
@@ -285,7 +290,7 @@ actor StubUsageTransport: UsageTransport {
     /// (#65) — Fable / Mythos — so the scoped-model popup rows are exercised end-to-end, and their
     /// utilisations (plus the 7-day window) show a couple of the ahead-of-pace gap colours.
     enum Mode: Equatable {
-        case climbing, screenshot, authError, idle
+        case climbing, screenshot, authError, idle, idleBlocked
         /// The optimistic-reset frame (#36): the first poll returns an **active** 5h window whose reset
         /// is only ~20 s out (utilisation 60 %), so the coordinator's one-shot timer fires shortly after
         /// launch. On fire the 5h bar flips 60 % → 0 % with a fresh ~5 h countdown (the optimistic
@@ -371,6 +376,9 @@ actor StubUsageTransport: UsageTransport {
         case bothRed
         /// 5h red (usage 100) + 7d orange (usage 55) — the red bar (5h) drives the countdown.
         case redOrange
+        /// 5h **red** (usage 100) + 7d **green** on-pace (usage 20 vs elapsed ~29) — one red stroke and
+        /// one green stroke side by side, for comparing the lightened menu-bar pacing colours (#158).
+        case redGreen
         /// 5h **calm** (usage 10 vs elapsed ~20 → green) + 7d **orange** ahead-of-pace (usage 55 vs
         /// elapsed ~29 → ahead ~26 pts) with a **distant** reset (5 d ≥ 24 h). The only frame where the
         /// "Display reset countdown" checkbox toggles a visible difference: `showDistant7d` shows the
@@ -388,6 +396,7 @@ actor StubUsageTransport: UsageTransport {
             case .bothOrange:         return (50, 55, 4 * 3600, 5 * 24 * 3600)
             case .bothRed:            return (100, 100, 2 * 3600, 4 * 24 * 3600)
             case .redOrange:          return (100, 55, 2 * 3600, 5 * 24 * 3600)
+            case .redGreen:           return (100, 20, 2 * 3600, 5 * 24 * 3600)
             case .calmFiveOrangeSeven: return (10, 55, 4 * 3600, 5 * 24 * 3600)
             case .calmBoth:           return (10, 20, 4 * 3600, 5 * 24 * 3600)
             }
@@ -478,6 +487,23 @@ actor StubUsageTransport: UsageTransport {
             {"kind":"weekly_scoped","group":"weekly","percent":15,"severity":"normal",\
             "resets_at":"\(sevenReset)","scope":{"model":{"id":null,"display_name":"Fable"},\
             "surface":null},"is_active":false}]}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
+        // Idle-blocked frame (#158): same idle 5h shape as `.idle`, but the `seven_day` window is
+        // **exhausted** (100 %) and there is **no** `spend` block, so credits cannot cover — the
+        // snapshot is `sessionIdle && idleBlocked`. Verifies the grey idle bar (menu bar + popup), the
+        // "waiting for limit reset" status word, and the red blocking-reset badge on the 7-day row (its
+        // reset is ~4 days out, the only exhausted candidate → the blocking reset).
+        if mode == .idleBlocked {
+            let sevenReset = Self.resetsAt(inSeconds: 4.2 * 24 * 3600)   // ≥ 24 h → "4d"
+            let body = """
+            {"five_hour":{"utilization":0.0,"resets_at":null},\
+            "seven_day":{"utilization":100.0,"resets_at":"\(sevenReset)"},\
+            "limits":[]}
             """.data(using: .utf8)!
             let response = HTTPURLResponse(
                 url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!

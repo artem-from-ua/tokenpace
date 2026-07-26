@@ -103,6 +103,16 @@ final class StatusItemView: NSView {
         /// ahead-of-pace colours are NOT here: they come from `PopupBarView.aheadColor` (graded amber →
         /// orange → red), shared with the popup so both bars agree.
         static let gapGreen = NSColor(srgbRed: 95/255, green: 175/255, blue: 95/255, alpha: 1)
+
+        /// Lighten a **menu-bar** pacing colour a touch (mix ~10 % toward white) so every coloured
+        /// stroke — the pacing gap and the vertical time marker, green through red — sits a shade lighter
+        /// and reads a little softer against the grey bar strip. A gentle nudge (not the earlier 18 %,
+        /// which read too washed). Menu-bar-only: applied at the draw site, so the shared `PopupBarView`
+        /// colours (and the popup) are untouched. Fixed sRGB (the menu-bar image is non-template),
+        /// resolved eagerly so no per-appearance drift.
+        static func lightened(_ color: NSColor) -> NSColor {
+            color.blended(withFraction: 0.10, of: .white) ?? color
+        }
         /// Time-indicator dot when on pace — the gap green lightened ~30 % (white-mixed) so the dot
         /// reads brighter than the pacing gap it sits over.
         static let dotGreen = NSColor(srgbRed: 143/255, green: 199/255, blue: 143/255, alpha: 1)
@@ -117,6 +127,12 @@ final class StatusItemView: NSView {
         /// greens/ambers, on both light and dark menu bars. Fixed sRGB (not `systemBlue`) because the
         /// menu-bar image is non-template, drawn in a resolved appearance.
         static let idleBlue = NSColor(srgbRed: 85/255, green: 130/255, blue: 180/255, alpha: 1)
+        /// The **calm-colours** replacement for the "ready to start" idle blue (#105/#158): under Calm
+        /// colours the idle blue mutes to this soft light grey rather than the plain `calmWhite` — pure
+        /// white read too bright for the idle track. Only the *ready* idle bar uses it; a *blocked* idle
+        /// bar is the darker base `monochromeGrey` in both colour modes (see `drawBar`). Fixed sRGB, like
+        /// the other menu-bar bar colours (non-template image).
+        static let idleCalmGrey = NSColor(srgbRed: 150/255, green: 150/255, blue: 150/255, alpha: 1)
         /// Idle glyph + reset label — follow the menu-bar foreground.
         static let foreground = NSColor.labelColor
 
@@ -417,7 +433,15 @@ final class StatusItemView: NSView {
         // In calm mode (#105) the soft idle blue mutes to white.
         if bar.idle {
             let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
-            (calmColors ? Palette.calmWhite : Palette.idleBlue).setFill()
+            // Idle bar fill (#100/#158):
+            //  • blocked → the bar's base pacing grey (`monochromeGrey`, as the used/future zones), in
+            //    BOTH colour modes — an inactive track "waiting for a reset";
+            //  • ready   → the "ready to start" blue, muted under calm colours to a soft light grey
+            //    (`idleCalmGrey`, not the plain white — pure white read too bright for the idle track).
+            let fill: NSColor = bar.blocked
+                ? PopupBarView.monochromeGrey
+                : (calmColors ? Palette.idleCalmGrey : Palette.idleBlue)
+            fill.setFill()
             path.fill()
             return
         }
@@ -480,9 +504,10 @@ final class StatusItemView: NSView {
     /// label (`BarLayout.isCalm`, ADR-0028) — one source of truth, so colour and countdown always agree.
     private func indicatorColor(_ l: BarLayout) -> NSColor {
         if calmColors && l.isCalm { return Palette.calmWhite }
-        return l.timeFraction < l.usageFraction
+        let base = l.timeFraction < l.usageFraction
             ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction)
             : Palette.dotGreen
+        return Palette.lightened(base)   // menu-bar strokes sit a touch lighter over the grey strip
     }
 
     /// The pacing-gap fill colour, with calm mode (#105) applied. Normally this is the on-pace green
@@ -491,9 +516,10 @@ final class StatusItemView: NSView {
     /// (orange/red) stay coloured.
     private func calmedGapColor(_ l: BarLayout) -> NSColor {
         if calmColors && l.isCalm { return Palette.calmWhite }
-        return l.pacing == .ahead
+        let base = l.pacing == .ahead
             ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction)
             : Palette.gapGreen
+        return Palette.lightened(base)   // menu-bar strokes sit a touch lighter over the grey strip
     }
 
     /// Fill the sub-rect spanning the fraction range `[from, to)` of a bar.

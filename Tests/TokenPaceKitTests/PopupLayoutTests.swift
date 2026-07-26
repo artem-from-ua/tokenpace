@@ -451,6 +451,80 @@ struct PopupLayoutIdleTests {
         #expect(!p.rows[0].sessionIdle)
         #expect(!p.rows[1].sessionIdle)
     }
+
+    // MARK: idle-blocked (#158)
+
+    /// An idle snapshot with an explicit 7-day utilisation and optional spend, for the blocked-state
+    /// tests (`idleSnapshot` cannot carry spend).
+    private func idleBlockedSnapshot(sevenDayUtil: Double, spend: SpendInfo?) -> UsageSnapshot {
+        UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
+            sevenDay: UsageWindow(utilization: sevenDayUtil, resetsAt: resetsAt(inSeconds: 4 * 24 * 3600)),
+            sessionIdle: true, spend: spend)
+    }
+
+    @Test func plainIdleIsNotBlocked() {
+        let p = layout(from: idleSnapshot())
+        #expect(p.rows[0].sessionIdle)
+        #expect(!p.rows[0].sessionBlocked)
+        #expect(p.blockingReset == nil)
+    }
+
+    @Test func idleBlockedFlagsRowAndPointsAtSevenDay() {
+        // 7d exhausted, no credits → idle row is blocked and the blocking reset is the 7-day row.
+        // 7-day is popup row index 1.
+        let p = layout(from: idleBlockedSnapshot(sevenDayUtil: 100, spend: nil))
+        #expect(p.rows[0].sessionBlocked)
+        guard case let .token(id, _)? = p.blockingReset else {
+            Issue.record("expected a token blocking reset, got \(String(describing: p.blockingReset))")
+            return
+        }
+        #expect(id == 1)   // the 7-day row
+        #expect(p.rows[id].title == "7-day")
+    }
+
+    @Test func idleWithCreditsCoverIsNotBlocked() {
+        let cover = SpendInfo(enabled: true, spendLimitReached: false)
+        let p = layout(from: idleBlockedSnapshot(sevenDayUtil: 100, spend: cover))
+        #expect(!p.rows[0].sessionBlocked)
+        #expect(p.blockingReset == nil)
+    }
+
+    @Test func idleWithCappedCreditsPointsAtSevenDay() {
+        // Both 7d and credits exhausted; 7-day reset (4d) is far sooner than the monthly credits reset,
+        // so the blocking reset is the 7-day row (last-stand rule), not the credits section.
+        let capped = SpendInfo(limit: eur(500), enabled: false, spendLimitReached: true)
+        let p = layout(from: idleBlockedSnapshot(sevenDayUtil: 100, spend: capped))
+        #expect(p.rows[0].sessionBlocked)
+        guard case let .token(id, _)? = p.blockingReset else {
+            Issue.record("expected a token blocking reset, got \(String(describing: p.blockingReset))")
+            return
+        }
+        #expect(id == 1)
+    }
+
+    @Test func activeFullyExhaustedBadgesSevenDayNotIdle() {
+        // The `both-red` screen: active session, 5h and 7d both at 100 %, no credits. Not idle → the 5h
+        // row is a normal "limit reached" row (NOT sessionBlocked), but the blocking reset still points
+        // at the 7-day row (index 1, its reset is later than 5h) so the red badge shows there.
+        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100,
+                            fiveHourResetsIn: 2 * 3600, sevenDayResetsIn: 4 * 24 * 3600)
+        let p = layout(from: snap)
+        #expect(!p.rows[0].sessionIdle)
+        #expect(!p.rows[0].sessionBlocked)
+        guard case let .token(id, _)? = p.blockingReset else {
+            Issue.record("expected a token blocking reset, got \(String(describing: p.blockingReset))")
+            return
+        }
+        #expect(id == 1)   // 7-day, the later reset
+    }
+
+    @Test func activeFiveExhaustedSevenHasQuotaNoBadge() {
+        // 5h spent but 7d still has room → not blocked, no badge.
+        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 40)
+        let p = layout(from: snap)
+        #expect(p.blockingReset == nil)
+    }
 }
 
 // MARK: - Extra usage (money-credits) row (#145)

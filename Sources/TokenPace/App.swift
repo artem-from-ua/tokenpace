@@ -571,6 +571,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //  • `=error`      → 401 auth failure + both Claude services degraded (the warning block).
         //  • `=idle`       → the honest "no active 5h session" state (#100): solid-blue 5h bar, no
         //                    phantom reset, menu-bar time falls back to the 7-day reset ("4d").
+        //  • `=idle-blocked` → the **blocked** idle state (#158): idle 5h + 7-day exhausted (100 %) and
+        //                    no credits → the idle bar goes **grey** (menu bar + popup, both colour
+        //                    modes), the popup status reads "waiting for limit reset", and the 7-day
+        //                    reset time is painted **red** (the blocking reset). Compare against `=idle`.
         //  • `=optimistic-reset` → the reset-boundary flow (#36): the 5h window resets ~20 s after
         //                    launch, so the bar flips 60 % → 0 % (no ⏰) and a forced refresh follows.
         //  • `=5h-orange` / `both-orange` / `both-red` / `red-orange` / `calm5-orange7`
@@ -597,12 +601,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "screenshot": StubUsageTransport(mode: .screenshot)
         case "error":      StubUsageTransport(mode: .authError)
         case "idle":       StubUsageTransport(mode: .idle)
+        case "idle-blocked": StubUsageTransport(mode: .idleBlocked)
         case "optimistic-reset": StubUsageTransport(mode: .optimisticReset)
         // Reset-countdown (#103) verification frames: fixed 5h×7d severities to exercise the table.
         case "5h-orange":   StubUsageTransport(mode: .pacing(.fiveOrange))
         case "both-orange": StubUsageTransport(mode: .pacing(.bothOrange))
         case "both-red":    StubUsageTransport(mode: .pacing(.bothRed))
         case "red-orange":  StubUsageTransport(mode: .pacing(.redOrange))
+        case "red-green":   StubUsageTransport(mode: .pacing(.redGreen))
         case "calm5-orange7": StubUsageTransport(mode: .pacing(.calmFiveOrangeSeven))
         // Both-calm frame (#94): exercises the "Hide 7-day bar when calm" opt-out (lone centred 5h).
         case "calm-both":  StubUsageTransport(mode: .pacing(.calmBoth))

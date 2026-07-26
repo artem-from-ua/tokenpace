@@ -252,6 +252,52 @@ struct MenuBarLayoutIdleTests {
         #expect(e.resetToShow == nil)
     }
 
+    // MARK: idle-blocked (#158)
+
+    @Test func idleNotBlockedWhenSevenDayHasQuota() {
+        // A normal idle state (7d below 100) is "ready to start", never blocked.
+        let layout = MenuBarLayout.make(from: idleSnapshot(sevenDayUtil: 31), now: now)
+        guard let e = expanded(layout) else { return }
+        #expect(e.five.idle)
+        #expect(!e.five.blocked)
+    }
+
+    @Test func idleBlockedWhenSevenDayExhaustedNoCredits() {
+        // 7d at 100 with no credits → blocked; the grey-bar flag is set and the countdown surfaces the
+        // 7-day reset even in the default mode (blocked overrides the calm-hides-countdown table).
+        let layout = MenuBarLayout.make(from: idleSnapshot(sevenDayUtil: 100), now: now)
+        guard let e = expanded(layout) else { return }
+        #expect(e.five.blocked)
+        guard let r = e.resetToShow else { Issue.record("blocked idle must show a countdown"); return }
+        #expect(r.display == .relative("4d"))   // 7d reset 4 days out, compact-days
+    }
+
+    @Test func idleNotBlockedWhenCreditsCover() {
+        // 7d at 100 but credits enabled and not capped → work continues on the paid tier, not blocked.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
+            sevenDay: UsageWindow(utilization: 100, resetsAt: resetsAt(inSeconds: 4 * 24 * 3600)),
+            sessionIdle: true, spend: SpendInfo(enabled: true, spendLimitReached: false))
+        let layout = MenuBarLayout.make(from: snap, now: now)
+        guard let e = expanded(layout) else { return }
+        #expect(!e.five.blocked)
+    }
+
+    @Test func idleBlockedWhenCreditsCapped() {
+        // 7d at 100 and credits capped → blocked; both windows are exhausted. The 7-day reset (4d) is
+        // sooner than the monthly credits reset, so the token reset wins (last-stand rule).
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
+            sevenDay: UsageWindow(utilization: 100, resetsAt: resetsAt(inSeconds: 4 * 24 * 3600)),
+            sessionIdle: true, spend: SpendInfo(enabled: false, spendLimitReached: true))
+        let layout = MenuBarLayout.make(from: snap, now: now)
+        guard let e = expanded(layout) else { return }
+        #expect(e.five.blocked)
+        guard let r = e.resetToShow else { Issue.record("blocked idle must show a countdown"); return }
+        // 7-day reset is 4 days out; the credits month-end is weeks away, so 7d is the blocking reset.
+        #expect(r.display == .relative("4d"))
+    }
+
     @Test func idleSnapshotStalePhaseCarriesIdleBar() {
         // The idle 5h bar rides through the 30–60 min stale error phase unchanged (issue #12 reuse).
         let health = UsageHealth(
