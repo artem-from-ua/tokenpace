@@ -59,9 +59,18 @@ unlimited. Verbatim-body збережено як regression-фікстури в 
    не 215. Реальне перевищення видно лише через `spend_limit_reached` + порівняння `used_credits` vs `limit`.
 4. **При перевищенні грошового ліміту сервер робить `spend.enabled: false`** (+ `spend_limit_reached: true`,
    `disabled_reason: "org_level_disabled_until"`) — кредити авто-вимикаються.
-5. **`balance` / `auto_reload` — завжди `null`** у всіх 5 станах. Current balance, який показує веб-UI
+5. **`balance` / `auto_reload` — завжди `null`** у всіх станах. Current balance, який показує веб-UI
    Claude (€10.00), **не приходить** у `/api/oauth/usage` — обхід усього дерева payload не знайшов його.
-   Він живе в іншому (billing / member-dashboard) ендпоінті, недоступному TokenPace.
+   Він живе в іншому (billing / member-dashboard) ендпоінті, недоступному TokenPace. **Перевірено на
+   обох станах auto-reload** (2026-07-26): увімкнення Auto-reload у Settings (UI «On») **не змінює
+   payload** — `balance`/`auto_reload`/`cap.credits` лишаються `null`; наявність поля в схемі ≠
+   наявність даних.
+
+5-bis. **`cap` дублює `limit`, `cap.credits` завжди `null`.** У всіх станах `spend.cap.money`
+   **дорівнює** `spend.limit` (та сама стеля витрат — місячний ліміт у грошах), а `cap.credits` (стеля
+   в *кредитах*, а не грошах) завжди `null`. Тому **тригеритись на `cap` немає сенсу** — він не несе
+   сигналу понад `limit`, яким ми вже користуємось (`used/limit`). `cap.credits != null` — гіпотетичний
+   майбутній кейс «стеля в кредитах», якого ми не спостерігали; поза обсягом.
 
 ## Рішення
 
