@@ -299,6 +299,64 @@ actor StubUsageTransport: UsageTransport {
         /// `degraded_performance`, so the menu bar shows the lone calm 5h bar *and* a yellow service
         /// dot. The one frame that verifies calm colours muting the yellow service dot to white.
         case calmDegraded
+        /// A money-credits ("extra usage") frame for the trailing ¤ icon (#144). Each `CreditsFrame`
+        /// pins the 7-day window at 100 % (so `anyBaseLimitExhausted` holds and the icon shows) and
+        /// carries a `spend` + `extra_usage` block covering one credits state (paced / limit-reached /
+        /// unlimited). The bodies reuse the exact shapes from `CreditsModelTests`.
+        case credits(CreditsFrame)
+    }
+
+    /// A money-credits state for the `=credits-*` verification stubs (#144). Each supplies the raw
+    /// `spend` + `extra_usage` JSON blocks and drives the trailing ¤ icon's colour:
+    ///  • `.active`       — enabled, €15.00 limit, €10.77 spent (~72 %): a **paced** icon (green while
+    ///    behind the month's time-fraction, amber/orange when ahead) — the healthy "within limit".
+    ///  • `.limitReached` — €5.00 limit below €10.77 spent: `enabled: false` + `spend_limit_reached:
+    ///    true` → the icon forces to **red** (the cap is hit).
+    ///  • `.noLimit`      — enabled, `limit: null` (unlimited): no cap to pace → a **neutral**
+    ///    (foreground-coloured) icon, no pacing tint.
+    enum CreditsFrame: Equatable {
+        case active, limitReached, noLimit
+
+        /// The `spend` + `extra_usage` block pair for this frame, as raw JSON fragments (no braces) to
+        /// splice into the usage body. Verbatim from `CreditsModelTests` fixtures so the stub exercises
+        /// the same shapes the decoder is tested against — EUR money objects, the `used_credits`
+        /// scalar, and the `spend_limit_reached`/`enabled` pairing.
+        var blocks: String {
+            switch self {
+            case .active:
+                return """
+                "extra_usage":{"is_enabled":true,"monthly_limit":1500,"used_credits":1077.0,\
+                "utilization":71.8,"currency":"EUR","decimal_places":2,"disabled_reason":null,\
+                "user_disabled":false,"spend_limit_reached":false,"credits_ever_enabled":true,\
+                "daily":null,"weekly":null},\
+                "spend":{"used":{"amount_minor":1077,"currency":"EUR","exponent":2},\
+                "limit":{"amount_minor":1500,"currency":"EUR","exponent":2},"percent":72,\
+                "severity":"normal","enabled":true,"disabled_reason":null,"balance":null,\
+                "auto_reload":null}
+                """
+            case .limitReached:
+                return """
+                "extra_usage":{"is_enabled":false,"monthly_limit":500,"used_credits":1077.0,\
+                "utilization":100.0,"currency":"EUR","decimal_places":2,\
+                "disabled_reason":"org_level_disabled_until","user_disabled":false,\
+                "spend_limit_reached":true,"credits_ever_enabled":true,"daily":null,"weekly":null},\
+                "spend":{"used":{"amount_minor":1077,"currency":"EUR","exponent":2},\
+                "limit":{"amount_minor":500,"currency":"EUR","exponent":2},"percent":100,\
+                "severity":"critical","enabled":false,\
+                "disabled_reason":"org_level_disabled_until","balance":null,"auto_reload":null}
+                """
+            case .noLimit:
+                return """
+                "extra_usage":{"is_enabled":true,"monthly_limit":null,"used_credits":1077.0,\
+                "utilization":null,"currency":"EUR","decimal_places":2,"disabled_reason":null,\
+                "user_disabled":false,"spend_limit_reached":false,"credits_ever_enabled":true,\
+                "daily":null,"weekly":null},\
+                "spend":{"used":{"amount_minor":1077,"currency":"EUR","exponent":2},"limit":null,\
+                "percent":0,"severity":"normal","enabled":true,"disabled_reason":null,\
+                "balance":null,"auto_reload":null}
+                """
+            }
+        }
     }
 
     /// Hand-picked top-level 5h/7d frames covering the reset-countdown cells the other stubs miss
@@ -453,6 +511,26 @@ actor StubUsageTransport: UsageTransport {
             {"five_hour":{"utilization":\(fiveUtil),"resets_at":"\(fiveReset)"},\
             "seven_day":{"utilization":40.0,"resets_at":"\(sevenReset)"},\
             "limits":[]}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
+        // Money-credits frame (#144): a healthy 5h bar plus a **7-day window pinned at 100 %** so a
+        // base limit is exhausted and the credits icon's show-trigger fires (`anyBaseLimitExhausted`).
+        // The `spend` + `extra_usage` blocks come from the frame; the icon colour then follows the
+        // month-elapsed pacing (`CreditsPacing.barLayout`). Status endpoint stays all-operational so the
+        // frame reads clean (handled in the status branch above).
+        if case let .credits(frame) = mode {
+            let fiveReset = Self.resetsAt(inSeconds: 3 * 3600)          // active 5h, mid-window
+            let sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)    // weekly limit hit, resets in 5 d
+            let body = """
+            {"five_hour":{"utilization":18.0,"resets_at":"\(fiveReset)"},\
+            "seven_day":{"utilization":100.0,"resets_at":"\(sevenReset)"},\
+            "limits":[{"kind":"weekly_all","group":"weekly","percent":100,"severity":"critical",\
+            "resets_at":"\(sevenReset)","scope":null,"is_active":true}],\
+            \(frame.blocks)}
             """.data(using: .utf8)!
             let response = HTTPURLResponse(
                 url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!

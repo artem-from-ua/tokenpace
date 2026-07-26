@@ -669,3 +669,100 @@ struct MenuBarLayoutHideCalmSevenDayTests {
         #expect(eh.resetToShow == es.resetToShow)   // same countdown, bar presence aside
     }
 }
+
+// MARK: - money-credits icon (#144)
+
+/// A `SpendInfo` builder for the credits-icon tests — mirrors the observed API shapes (EUR money
+/// objects, the `spend_limit_reached`/`enabled` pairing) from `CreditsModelTests`.
+private func spend(
+    used: Int? = 1077, limit: Int?, enabled: Bool, spendLimitReached: Bool = false
+) -> SpendInfo {
+    SpendInfo(
+        used: used.map { Money(amountMinor: $0, currency: "EUR", exponent: 2) },
+        limit: limit.map { Money(amountMinor: $0, currency: "EUR", exponent: 2) },
+        enabled: enabled,
+        spendLimitReached: spendLimitReached,
+        usedCredits: used.map(Double.init),
+        currency: "EUR",
+        decimalPlaces: 2)
+}
+
+/// A snapshot carrying a `spend` block; the 7-day utilisation drives whether a base limit is
+/// exhausted (the second half of the icon show-trigger).
+private func creditsSnapshot(sevenDayUtil: Double, spend: SpendInfo?) -> UsageSnapshot {
+    UsageSnapshot(
+        fiveHour: UsageWindow(utilization: 20, resetsAt: resetsAt(inSeconds: 3 * 3600)),
+        sevenDay: UsageWindow(utilization: sevenDayUtil, resetsAt: resetsAt(inSeconds: 5 * 24 * 3600)),
+        spend: spend)
+}
+
+@Suite("MenuBarLayout credits icon (#144)")
+struct MenuBarLayoutCreditsTests {
+
+    @Test func hiddenWhenGateOff() {
+        // `showCredits: false` (the default, and the "Show extra usage" opt-out) → never a marker,
+        // even with an active spend and an exhausted base limit.
+        let snap = creditsSnapshot(sevenDayUtil: 100, spend: spend(limit: 1500, enabled: true))
+        let layout = MenuBarLayout.make(from: snap, health: .healthy(lastSuccess: now), now: now)
+        #expect(layout.credits == nil)
+    }
+
+    @Test func hiddenWhenNoBaseLimitExhausted() {
+        // Credits active but no base limit is spent yet (7-day at 50 %) → the icon does not kick in.
+        let snap = creditsSnapshot(sevenDayUtil: 50, spend: spend(limit: 1500, enabled: true))
+        let layout = MenuBarLayout.make(
+            from: snap, health: .healthy(lastSuccess: now), now: now, showCredits: true)
+        #expect(layout.credits == nil)
+    }
+
+    @Test func hiddenWhenNoSpendBlock() {
+        // A pre-credits snapshot (no `spend`) → no marker regardless of the gate/limits.
+        let snap = creditsSnapshot(sevenDayUtil: 100, spend: nil)
+        let layout = MenuBarLayout.make(
+            from: snap, health: .healthy(lastSuccess: now), now: now, showCredits: true)
+        #expect(layout.credits == nil)
+    }
+
+    @Test func shownWhenActiveAndBaseExhausted() {
+        // Enabled €15 limit, €10.77 spent + a 100 % base limit → the icon shows with a paced bar.
+        let snap = creditsSnapshot(sevenDayUtil: 100, spend: spend(limit: 1500, enabled: true))
+        let layout = MenuBarLayout.make(
+            from: snap, health: .healthy(lastSuccess: now), now: now, showCredits: true)
+        let marker = try? #require(layout.credits)
+        #expect(marker?.bar != nil)   // a cap to pace against → a coloured bar
+    }
+
+    @Test func limitReachedForcesRedAndShows() {
+        // `spend_limit_reached` shows the icon (even though `enabled: false`) and forces usage to 1 →
+        // an exhausted bar (red rung), regardless of the raw used/limit fraction.
+        let snap = creditsSnapshot(
+            sevenDayUtil: 100, spend: spend(limit: 500, enabled: false, spendLimitReached: true))
+        let layout = MenuBarLayout.make(
+            from: snap, health: .healthy(lastSuccess: now), now: now, showCredits: true)
+        let marker = try? #require(layout.credits)
+        #expect(marker?.bar?.usageFraction == 1)
+        #expect(marker?.bar?.severity == .exhausted)
+        #expect(marker?.isCalm == false)
+    }
+
+    @Test func noLimitYieldsNeutralMarker() {
+        // Unlimited monthly limit (`limit: nil`) → the icon still shows (credits active + base
+        // exhausted) but carries a nil bar → the view draws it neutrally, and it counts as calm.
+        let snap = creditsSnapshot(sevenDayUtil: 100, spend: spend(limit: nil, enabled: true))
+        let layout = MenuBarLayout.make(
+            from: snap, health: .healthy(lastSuccess: now), now: now, showCredits: true)
+        let marker = try? #require(layout.credits)
+        #expect(marker?.bar == nil)
+        #expect(marker?.isCalm == true)
+    }
+
+    @Test func creditsIndependentOfServiceDot() {
+        // The credits marker and the service dot are orthogonal — both can ride the same layout.
+        let snap = creditsSnapshot(sevenDayUtil: 100, spend: spend(limit: 1500, enabled: true))
+        let layout = MenuBarLayout.make(
+            from: snap, health: .healthy(lastSuccess: now), now: now,
+            serviceProblem: .majorOutage, showCredits: true)
+        #expect(layout.credits != nil)
+        #expect(layout.serviceProblem == .majorOutage)
+    }
+}

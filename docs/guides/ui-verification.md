@@ -23,6 +23,23 @@
 | `optimistic-reset` | reset-boundary (#36): 5h ресетиться через ~20 с — бар стрибає 60 %→0 % без ⏰ + форс-рефреш |
 | `calm-degraded` | calm-бари + **degraded (жовта)** service-крапка: за вимкненого «Calm colours» (#105) крапка жовта; увімкни Calm (Settings → General) — крапка **біліє** разом із барами. Кадр для перевірки гасіння service-крапки |
 
+### Іконка грошових кредитів (#144)
+
+Трейлінг-іконка валюти (`coloncurrencysign` ¤) ліворуч від service-крапки. Усі три фрейми
+фіксують 7d на 100 % (базовий ліміт вичерпано → тригер показу спрацьовує) і різняться блоком
+`spend`. За замовчуванням гейт `showExtraUsage` увімкнений (default-ON), тож іконка видима одразу.
+Перемикач у Settings — на #146.
+
+| Стуб | Стан кредитів | Колір іконки |
+|---|---|---|
+| `credits-active` | enabled, ліміт €15.00, витрачено €10.77 (~72 %) | pacing usage-vs-time (зелена поза випередженням, бурштин/помаранч при випередженні) |
+| `credits-limit-reached` | `spend_limit_reached` (ліміт €5.00 нижчий за €10.77) | **червона** (форсований usage = 1) |
+| `credits-no-limit` | enabled, ліміт «unlimited» (`limit: null`) | **нейтральна** (foreground, без pacing) |
+
+> Увімкни «Calm colours» (Settings → General) — calm-фрейми (`credits-active` у нормі,
+> `credits-no-limit`) **біліють** разом із барами; `credits-limit-reached` (червона) лишається
+> кольоровою.
+
 ### Фрейми вибору reset-часу (#103, ADR-0029)
 
 Фіксовані severity 5h × 7d для таблиці вибору reset-часу:
