@@ -525,6 +525,35 @@ struct PopupLayoutCreditsTests {
         let credits = try! #require(p.credits)
         #expect(credits.spent == eur(1077))
     }
+
+    /// `inUse` (the blue "in use" badge, #146) is `false` when the section shows only because credits
+    /// are enabled but **no** base limit is exhausted — credits are armed, not actually spending yet.
+    @Test func inUseFalseWhenNoBaseLimitExhausted() {
+        let spend = SpendInfo(used: eur(1077), limit: eur(1500), enabled: true)
+        let p = layout(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 20, spend: spend))
+        let credits = try! #require(p.credits)
+        #expect(credits.inUse == false)
+    }
+
+    /// `inUse` is `true` once a base limit is exhausted (here 7-day at 100 %) — the same gate as the
+    /// menu-bar icon, so credits are genuinely covering an overflowing plan limit.
+    @Test func inUseTrueWhenBaseLimitExhausted() {
+        let spend = SpendInfo(used: eur(1077), limit: eur(1500), enabled: true)
+        let p = layout(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 100, spend: spend))
+        let credits = try! #require(p.credits)
+        #expect(credits.inUse == true)
+    }
+
+    /// `inUse` is **`false`** once the money cap is reached (`spend_limit_reached` → the server sets
+    /// `enabled: false`): credits are no longer covering anything (Claude is blocked), so the "active"
+    /// badge must not show — even though the section (and the red menu-bar icon) still appear.
+    @Test func inUseFalseWhenSpendLimitReached() {
+        let spend = SpendInfo(
+            used: eur(1077), limit: eur(500), enabled: false, spendLimitReached: true)
+        let p = layout(from: snapshot(fiveHourUtil: 100, sevenDayUtil: 30, spend: spend))
+        let credits = try! #require(p.credits)
+        #expect(credits.inUse == false)
+    }
 }
 
 // MARK: - CreditsPacing.monthEnd (#145)

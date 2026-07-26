@@ -54,6 +54,9 @@ final class SettingsWindowController: NSWindowController {
     /// Called when the user toggles "Show service status dot on issues" (#31), with the new state.
     var onServiceDotChange: ((Bool) -> Void)?
 
+    /// Called when the user toggles "Show extra-usage credits icon" (#146), with the new state.
+    var onExtraUsageChange: ((Bool) -> Void)?
+
     /// Called when the user toggles "Hide 7-day bar when calm" (#94), with the new on/off state —
     /// wired by `AppDelegate.openSettings` to re-render the menu-bar image immediately (the toggle
     /// changes what is drawn — the 7-day bar and the 5h bar's vertical centring).
@@ -81,6 +84,7 @@ final class SettingsWindowController: NSWindowController {
     private var calmColorsToggle: NSSwitch!
     private var hideCalmSevenDayToggle: NSSwitch!
     private var serviceDotToggle: NSSwitch!
+    private var extraUsageToggle: NSSwitch!
     private var resetAlwaysRadio: NSButton!
     private var resetSmartRadio: NSButton!
     private var resetIncludeDistantCheckbox: NSButton!
@@ -154,6 +158,7 @@ final class SettingsWindowController: NSWindowController {
         hideCalmSevenDayToggle.state = PersistedConfig.hideCalmSevenDayBar ? .on : .off
         syncResetCountdownFromConfig()
         serviceDotToggle.state = PersistedConfig.showServiceStatusDot ? .on : .off
+        extraUsageToggle.state = PersistedConfig.showExtraUsage ? .on : .off
         syncUpdatesFromConfig()
         archiveToggle.state = PersistedConfig.archiveEnabled ? .on : .off
         updateArchiveStatus()
@@ -239,6 +244,15 @@ final class SettingsWindowController: NSWindowController {
             hint: "When the 7-day bar is green or mild-yellow, hides it and centres the 5-hour bar "
                 + "alone. An orange or red 7-day bar always stays visible.")
         appearance.addRow(SettingsRow.container(leading: hideCalmCol.view, trailing: hideCalmSevenDayToggle))
+
+        // "Show extra-usage credits icon" (#146): the trailing currency glyph that appears while paid
+        // usage credits are covering an exhausted plan limit. Opt-out, like the service dot.
+        extraUsageToggle = SettingsRow.makeSwitch(target: self, action: #selector(toggleExtraUsage(_:)))
+        let creditsCol = SettingsRow.labelColumn(
+            "Show extra-usage credits icon",
+            hint: "Draws a currency icon in the menu bar when paid usage credits are covering an "
+                + "exhausted plan limit. Its colour paces with your spend against the monthly limit.")
+        appearance.addRow(SettingsRow.container(leading: creditsCol.view, trailing: extraUsageToggle))
 
         serviceDotToggle = SettingsRow.makeSwitch(target: self, action: #selector(toggleServiceDot(_:)))
         let dotCol = SettingsRow.labelColumn(
@@ -615,6 +629,13 @@ final class SettingsWindowController: NSWindowController {
         PersistedConfig.showServiceStatusDot = on
         AppLogger.lifecycle.notice("service-status-dot: menu-bar set \(on, privacy: .public)")
         onServiceDotChange?(on)
+    }
+
+    @objc private func toggleExtraUsage(_ sender: NSSwitch) {
+        let on = sender.state == .on
+        PersistedConfig.showExtraUsage = on
+        AppLogger.lifecycle.notice("extra-usage-icon: menu-bar set \(on, privacy: .public)")
+        onExtraUsageChange?(on)
     }
 
     /// Persist the "Hide 7-day bar when calm" choice (#94) and notify the app so the menu-bar image

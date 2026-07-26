@@ -316,6 +316,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // menu-bar layout from the last poll (render reads PersistedConfig for the toggle).
                 self?.reRenderForCurrentTime()
             }
+            wc.onExtraUsageChange = { [weak self] _ in
+                // The credits icon changes the layout (drawn + item width), not just a colour — rebuild
+                // from the last poll (render reads PersistedConfig.showExtraUsage for the gate).
+                self?.reRenderForCurrentTime()
+            }
             wc.onHideCalmSevenDayChange = { [weak self] _ in
                 // Toggling this changes the layout (7-day bar drawn or not, 5h vertical centring),
                 // not just a colour — rebuild from the last poll (render reads PersistedConfig).

@@ -65,6 +65,20 @@ public enum CreditsPacing {
         isActive(spend) && baseLimitExhausted
     }
 
+    /// Whether credits are **actively being spent right now** — the stricter predicate behind the popup's
+    /// blue "active" badge (#146).
+    ///
+    /// Differs from ``shouldShowIcon(_:baseLimitExhausted:)`` in the over-limit case: the icon shows
+    /// even when the money cap is hit (red, "you've hit the ceiling"), but the **badge must not** — once
+    /// `spend_limit_reached`, the server has set `enabled: false` and credits are **no longer covering**
+    /// anything (Claude is blocked until the limit resets). So "actively spending" requires credits to be
+    /// **enabled and not yet capped**, on top of a base limit being exhausted (otherwise nothing is
+    /// overflowing into credits):
+    /// - `enabled == true` **and** `spend_limit_reached == false` **and** `baseLimitExhausted`.
+    public static func isSpending(_ spend: SpendInfo, baseLimitExhausted: Bool) -> Bool {
+        spend.enabled && !spend.spendLimitReached && baseLimitExhausted
+    }
+
     /// Heuristic "is any base limit exhausted?" from a snapshot's `utilization` values — `true` when
     /// any of `five_hour` / `seven_day` / the per-model sub-windows / the `weekly_scoped` entries has
     /// `utilization >= 100`.
