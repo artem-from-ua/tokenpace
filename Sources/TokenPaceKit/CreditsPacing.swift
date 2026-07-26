@@ -79,6 +79,22 @@ public enum CreditsPacing {
         spend.enabled && !spend.spendLimitReached && baseLimitExhausted
     }
 
+    /// Whether paid credits can **still cover** new work — the money escape hatch that keeps an
+    /// exhausted plan limit from actually blocking you (#158).
+    ///
+    /// `true` only when a `spend` block is present, credits are **enabled**, and the money cap is **not
+    /// yet reached** (`spend_limit_reached == false`). This is deliberately the base-limit-agnostic
+    /// half of ``isSpending(_:baseLimitExhausted:)``: the caller (idle-blocked detection) already knows
+    /// the plan limit is exhausted, and asks only "is there paid headroom left to keep working?".
+    ///
+    /// A `nil` spend (pre-credits payload / no money window) is **not** cover — there is no paid tier
+    /// in play. Once `spend_limit_reached`, the server flips `enabled` to false and credits stop
+    /// covering anything, so both flags gate this together.
+    public static func creditsCanCover(_ spend: SpendInfo?) -> Bool {
+        guard let spend else { return false }
+        return spend.enabled && !spend.spendLimitReached
+    }
+
     /// Heuristic "is any base limit exhausted?" from a snapshot's `utilization` values — `true` when
     /// any of `five_hour` / `seven_day` / the per-model sub-windows / the `weekly_scoped` entries has
     /// `utilization >= 100`.
@@ -93,6 +109,23 @@ public enum CreditsPacing {
             + [snapshot.sevenDayOpus, snapshot.sevenDaySonnet].compactMap { $0?.utilization }
             + snapshot.scopedModelWindows.map(\.window.utilization)
         return windows.contains { $0 >= 100 }
+    }
+
+    /// Whether an **idle** 5-hour state is actually **blocked** — no path left to start a new session
+    /// (#158). The 5h window is gone (idle), so the only barrier is the 7-day limit, which paid
+    /// credits can lift:
+    ///
+    /// ```
+    /// blocked = seven_day exhausted (>= 100)  AND NOT creditsCanCover(spend)
+    /// ```
+    ///
+    /// A 7-day limit at 100 % with credits still covering (`enabled` & not capped) is **not** blocked —
+    /// work continues on the paid tier, so the UI stays "ready to start". Only when 7d is exhausted
+    /// **and** credits cannot cover (disabled / capped / absent) is the user genuinely waiting for a
+    /// reset. Caller gates this on ``UsageSnapshot/sessionIdle`` — it is meaningful only in the idle
+    /// state (an active 5h session is a different, non-idle scenario).
+    public static func idleBlocked(in snapshot: UsageSnapshot) -> Bool {
+        snapshot.sevenDay.utilization >= 100 && !creditsCanCover(snapshot.spend)
     }
 
     // MARK: - Pacing (usage vs. time — same as the token bars)
