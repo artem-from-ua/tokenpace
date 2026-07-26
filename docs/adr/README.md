@@ -20,7 +20,7 @@
 | [0006](0006-reset-time-absolute-vs-relative.md) | ResetClock — абсолютний `hh:mm` для далеких ресетів, не лише відносний час | accepted |
 | [0007](0007-token-provider-throws-and-scope-split.md) | TokenProvider — `throws`+enum та розбивка обсягу #8 | accepted |
 | [0008](0008-usageclient-pure-backoff-and-transport-seam.md) | UsageClient — чистий backoff, інжекція токена і transport-seam | accepted |
-| ~~[0009](0009-statusitemview-pure-layout-and-thin-shell.md)~~ | ~~StatusItemView — чиста MenuBarLayout + тонкий AppKit-shell; idle-поріг 5%~~ | superseded |
+| ~~[0009](0009-statusitemview-pure-layout-and-thin-shell.md)~~ | ~~StatusItemView — чиста MenuBarLayout + тонкий AppKit-shell; idle-поріг 5%~~ | partially superseded → 0015 (idle-поріг + idle-гліф) |
 | [0010](0010-usage-health-and-error-states.md) | UsageHealth — стани помилок (⚠️ menu bar + банер popup + stale); пороги 30/60 хв | accepted |
 | ~~[0011](0011-polling-engine-adaptive-cadence-and-signal-seams.md)~~ | ~~PollingEngine — async-цикл, адаптивний інтервал і seam'и sleep/wake/мережі~~ | superseded (0032) |
 | ~~[0012](0012-configure-window-and-launch-at-login.md)~~ | ~~Вікно «Configure…» та launch-at-login (SMAppService); opt-out, best-effort на unsigned~~ | superseded |
