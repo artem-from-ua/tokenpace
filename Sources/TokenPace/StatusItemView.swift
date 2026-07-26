@@ -117,13 +117,12 @@ final class StatusItemView: NSView {
         /// greens/ambers, on both light and dark menu bars. Fixed sRGB (not `systemBlue`) because the
         /// menu-bar image is non-template, drawn in a resolved appearance.
         static let idleBlue = NSColor(srgbRed: 85/255, green: 130/255, blue: 180/255, alpha: 1)
-        /// The **blocked** idle bar's solid fill (#158): the 5h window is idle, but the 7-day limit is
-        /// exhausted and paid credits cannot cover, so there is no path to start — "waiting for a reset",
-        /// not "ready to start". A neutral mid grey (150/150/150, the same tone as the `statusGray`
-        /// service dot) so the bar reads as *inactive* rather than the "ready" blue. Drawn in **both**
-        /// colour modes (grey overrides the calm-white too — blocked is more important than the calm
-        /// muting). Fixed sRGB, like the other menu-bar bar colours (non-template image).
-        static let idleGrey = NSColor(srgbRed: 150/255, green: 150/255, blue: 150/255, alpha: 1)
+        /// The **calm-colours** replacement for the "ready to start" idle blue (#105/#158): under Calm
+        /// colours the idle blue mutes to this soft light grey rather than the plain `calmWhite` — pure
+        /// white read too bright for the idle track. Only the *ready* idle bar uses it; a *blocked* idle
+        /// bar is the darker base `monochromeGrey` in both colour modes (see `drawBar`). Fixed sRGB, like
+        /// the other menu-bar bar colours (non-template image).
+        static let idleCalmGrey = NSColor(srgbRed: 150/255, green: 150/255, blue: 150/255, alpha: 1)
         /// Idle glyph + reset label — follow the menu-bar foreground.
         static let foreground = NSColor.labelColor
 
@@ -424,11 +423,14 @@ final class StatusItemView: NSView {
         // In calm mode (#105) the soft idle blue mutes to white.
         if bar.idle {
             let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
-            // Blocked idle (#158) → grey in both colour modes (no path to start, waiting for a reset).
-            // Otherwise the "ready to start" blue, muted to white under calm colours (#105).
+            // Idle bar fill (#100/#158):
+            //  • blocked → the bar's base pacing grey (`monochromeGrey`, as the used/future zones), in
+            //    BOTH colour modes — an inactive track "waiting for a reset";
+            //  • ready   → the "ready to start" blue, muted under calm colours to a soft light grey
+            //    (`idleCalmGrey`, not the plain white — pure white read too bright for the idle track).
             let fill: NSColor = bar.blocked
-                ? Palette.idleGrey
-                : (calmColors ? Palette.calmWhite : Palette.idleBlue)
+                ? PopupBarView.monochromeGrey
+                : (calmColors ? Palette.idleCalmGrey : Palette.idleBlue)
             fill.setFill()
             path.fill()
             return

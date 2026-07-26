@@ -341,11 +341,16 @@ final class StatusLineLabel: NSTextField {
 
 // MARK: - PillView
 
-/// A small rounded, layer-backed capsule filled with `controlAccentColor` — the blue "in use" badge
-/// beside the "Extra usage" heading (#146). The corner radius tracks the height (half of it, so it is
-/// a true pill), and the fill CGColor is re-resolved in `updateLayer()` because CGColor is not
-/// appearance-dynamic (the same trap `SettingsCard`/`DividerView` document).
+/// A small rounded, layer-backed capsule — the "in use" badge beside the "Extra usage" heading (#146,
+/// `controlAccentColor` blue) and the blocking-reset badge on a limit row (#158, the exhausted red).
+/// The corner radius tracks the height (half of it, so it is a true pill), and the fill CGColor is
+/// re-resolved in `updateLayer()` because CGColor is not appearance-dynamic (the same trap
+/// `SettingsCard`/`DividerView` document).
 final class PillView: NSView {
+    /// The capsule fill. Defaults to the accent blue; the blocking-reset badge sets it to the
+    /// exhausted red. A closure (not a stored `NSColor`) so a dynamic colour re-resolves per appearance.
+    var fill: () -> NSColor = { .controlAccentColor }
+
     override var wantsUpdateLayer: Bool { true }
 
     override func layout() {
@@ -355,7 +360,7 @@ final class PillView: NSView {
 
     override func updateLayer() {
         layer?.cornerRadius = bounds.height / 2
-        layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        layer?.backgroundColor = fill().cgColor
     }
 }
 
@@ -662,21 +667,36 @@ final class PopupViewController: NSViewController {
     /// Claude web UI puts on usage credits. Sizing comes from the text + insets; the capsule radius is
     /// half the height, so it reads as a pill at any font size.
     private static func makeInUsePill() -> NSView {
-        let text = NSTextField(labelWithString: inUseBadgeText)
-        text.font = .systemFont(ofSize: Metrics.textSize - 2, weight: .medium)
-        text.textColor = .white
-        text.translatesAutoresizingMaskIntoConstraints = false
+        makePill(text: inUseBadgeText, fill: { .controlAccentColor })
+    }
+
+    /// The blocking-reset badge (#158): a red capsule carrying the reset countdown (e.g. "4d"), shown
+    /// flush-right on the one row whose reset actually unblocks work. Same pill shape as the "in use"
+    /// badge, filled with the exhausted red (`PopupBarView.gapRed`) so it reads as the blocker.
+    private static func makeResetBadge(text: String) -> NSView {
+        makePill(text: text, fill: { PopupBarView.gapRed })
+    }
+
+    /// Shared pill factory (#146/#158): white medium text on a rounded, layer-backed capsule whose
+    /// fill is `fill()` (re-resolved per appearance). Sizing comes from the text + insets; the radius is
+    /// half the height, so it reads as a pill at any font size.
+    private static func makePill(text: String, fill: @escaping () -> NSColor) -> NSView {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: Metrics.textSize - 2, weight: .medium)
+        label.textColor = .white
+        label.translatesAutoresizingMaskIntoConstraints = false
 
         let pill = PillView()
+        pill.fill = fill
         pill.wantsLayer = true
         pill.translatesAutoresizingMaskIntoConstraints = false
-        pill.addSubview(text)
+        pill.addSubview(label)
         let hInset: CGFloat = 6, vInset: CGFloat = 2
         NSLayoutConstraint.activate([
-            text.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: hInset),
-            text.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -hInset),
-            text.topAnchor.constraint(equalTo: pill.topAnchor, constant: vInset),
-            text.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -vInset),
+            label.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: hInset),
+            label.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -hInset),
+            label.topAnchor.constraint(equalTo: pill.topAnchor, constant: vInset),
+            label.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -vInset),
         ])
         return pill
     }
@@ -699,13 +719,19 @@ final class PopupViewController: NSViewController {
     @discardableResult
     private func addDetailLine(used: String, reset: String, resetIsBlocking: Bool = false) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
-        // When this reset is the one blocking work (#158), paint it red so the eye lands on the single
-        // reset that will actually unblock — every other reset stays the dimmed neutral colour, even if
-        // its own limit is also exhausted.
-        return addSplitLine(
-            left: used, right: reset, leftFont: font, rightFont: font,
-            leftColor: Self.dimmedLabelColor,
-            rightColor: resetIsBlocking ? PopupBarView.gapRed : Self.dimmedLabelColor)
+        let usedLabel = NSTextField(labelWithString: used)
+        usedLabel.font = font
+        usedLabel.textColor = Self.dimmedLabelColor
+        // When this reset is the one blocking work (#158), show it as a red **badge** so the eye lands on
+        // the single reset that will actually unblock — every other reset stays the plain dimmed label,
+        // even if its own limit is also exhausted.
+        if resetIsBlocking {
+            return addSplitRow(leadingView: usedLabel, rightView: Self.makeResetBadge(text: reset))
+        }
+        let resetLabel = NSTextField(labelWithString: reset)
+        resetLabel.font = font
+        resetLabel.textColor = Self.dimmedLabelColor
+        return addSplitRow(leftLabel: usedLabel, rightLabel: resetLabel)
     }
 
     /// A two-column row spanning the full content width: `left` flush against the leading edge,
@@ -736,9 +762,15 @@ final class PopupViewController: NSViewController {
 
     /// `addSplitRow` variant whose leading half is an arbitrary view (e.g. a `[title • badge]` stack),
     /// not just a label — the trailing label still pins flush right at the content width.
-    @discardableResult
     private func addSplitRow(leadingView: NSView, rightLabel: NSTextField) -> NSView {
-        let row = NSStackView(views: [leadingView, rightLabel])
+        addSplitRow(leadingView: leadingView, rightView: rightLabel)
+    }
+
+    /// `addSplitRow` variant whose **trailing** half is an arbitrary view (e.g. the blocking-reset
+    /// pill, #158), not just a label — the leading view still pins flush left at the content width.
+    @discardableResult
+    private func addSplitRow(leadingView: NSView, rightView: NSView) -> NSView {
+        let row = NSStackView(views: [leadingView, rightView])
         row.orientation = .horizontal
         row.distribution = .equalSpacing
         row.translatesAutoresizingMaskIntoConstraints = false
