@@ -469,6 +469,80 @@ struct UsageDecodeTests {
         ])
         #expect(!snapshot.sessionIdle)   // five_hour has a real reset (26 %) → active, not idle
     }
+
+    /// Spike baseline (#142, captured 2026-07-26 from a live account that has **run out of paid
+    /// credits**). This is the richest `spend` / `extra_usage` shape we can observe today — but only
+    /// in the *disabled* state (`enabled: false`, `disabled_reason: "out_of_credits"`). It carries
+    /// fields absent from earlier fixtures: a **non-USD** currency (`EUR`), `used_credits`, and the
+    /// `extra_usage` flags `user_disabled` / `spend_limit_reached` / `credits_ever_enabled`. The
+    /// decoder must still tolerate all of it — `spend` / `extra_usage` remain **unmodeled** until the
+    /// decode-model ticket (#143), and the enabled-state shape of `balance` / `auto_reload` / `cap` /
+    /// `limit` is **still unverified** (this account never supplies them non-null). See #142.
+    @Test func liveBodyOutOfCreditsEURDecodes() throws {
+        let body = #"""
+        {"five_hour":{"utilization":6.0,"resets_at":"2026-07-26T04:10:00.157569+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day":{"utilization":65.0,"resets_at":"2026-07-28T07:00:00.157592+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day_oauth_apps":null,"seven_day_opus":null,"seven_day_sonnet":null,"seven_day_cowork":null,"seven_day_omelette":null,"tangelo":null,"iguana_necktie":null,"omelette_promotional":null,"nimbus_quill":null,"cinder_cove":null,"amber_ladder":null,"extra_usage":{"is_enabled":false,"monthly_limit":null,"used_credits":1077.0,"utilization":null,"currency":"EUR","decimal_places":2,"disabled_reason":"out_of_credits","user_disabled":false,"spend_limit_reached":false,"credits_ever_enabled":true,"daily":null,"weekly":null},"limits":[{"kind":"session","group":"session","percent":6,"severity":"normal","resets_at":"2026-07-26T04:10:00.157569+00:00","scope":null,"is_active":false},{"kind":"weekly_all","group":"weekly","percent":65,"severity":"normal","resets_at":"2026-07-28T07:00:00.157592+00:00","scope":null,"is_active":true},{"kind":"weekly_scoped","group":"weekly","percent":36,"severity":"normal","resets_at":"2026-07-28T07:00:00.157890+00:00","scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":false}],"spend":{"used":{"amount_minor":1077,"currency":"EUR","exponent":2},"limit":null,"percent":0,"severity":"normal","enabled":false,"disabled_reason":"out_of_credits","cap":null,"balance":null,"auto_reload":null,"disclaimer":"Usage credits cover you when you hit your plan limits. [Learn more](https://support.claude.com/articles/12429409)","can_purchase_credits":false,"can_toggle":false},"member_dashboard_available":false}
+        """#
+        let snapshot = try UsageClient.decode(from: Data(body.utf8), now: now)
+        #expect(snapshot.fiveHour.utilization == 6.0)
+        #expect(snapshot.sevenDay.utilization == 65.0)
+        #expect(snapshot.limits.count == 3)
+        // Fable is present only as a weekly_scoped entry (no top-level window), at 36 %.
+        let fable = try #require(snapshot.limits.first { $0.kind == "weekly_scoped" })
+        #expect(fable.modelDisplayName == "Fable")
+        #expect(fable.percent == 36)
+        #expect(!snapshot.sessionIdle)   // an active 5h window (6 %) → not idle
+        // `spend` / `extra_usage` are still ignored — their presence must not fail the decode.
+    }
+
+    // MARK: spike #142 — enabled-state credit shapes (captured live 2026-07-26)
+    //
+    // The account holder toggled the Monthly spend limit to three values so the spike could observe
+    // the `enabled: true` shapes the out-of-credits baseline never supplies. All three must still
+    // decode cleanly — `spend` / `extra_usage` remain unmodeled until #143. Key facts these fixtures
+    // pin down (full analysis in #142):
+    //   • `spend.limit` / `spend.cap.money` are money OBJECTS `{amount_minor, currency, exponent}`,
+    //     while `extra_usage.monthly_limit` is a bare minor-unit integer.
+    //   • `extra_usage.used_credits` is the source of truth for amount spent (mirrors `spend.used`).
+    //   • The server CAPS `percent` / `utilization` at 100 — real over-limit shows only via
+    //     `spend_limit_reached` + `used_credits > limit`, not a >100 percentage.
+    //   • When the money limit is exceeded the server FLIPS `spend.enabled` to false
+    //     (`disabled_reason: "org_level_disabled_until"`, `spend_limit_reached: true`).
+    //   • `spend.balance` / `auto_reload` stay null in every case — Current balance (shown in the
+    //     Claude UI) is NOT delivered by /api/oauth/usage.
+
+    /// Credits enabled, monthly limit €15.00, 72 % — the healthy "actively spending, within limit" shape.
+    @Test func liveBodyCreditsEnabledWithinLimitDecodes() throws {
+        let body = #"""
+        {"five_hour":{"utilization":16.0,"resets_at":"2026-07-26T04:09:59.746567+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day":{"utilization":66.0,"resets_at":"2026-07-28T06:59:59.746589+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day_oauth_apps":null,"seven_day_opus":null,"seven_day_sonnet":null,"seven_day_cowork":null,"seven_day_omelette":null,"tangelo":null,"iguana_necktie":null,"omelette_promotional":null,"nimbus_quill":null,"cinder_cove":null,"amber_ladder":null,"extra_usage":{"is_enabled":true,"monthly_limit":1500,"used_credits":1077.0,"utilization":71.8,"currency":"EUR","decimal_places":2,"disabled_reason":null,"user_disabled":false,"spend_limit_reached":false,"credits_ever_enabled":true,"daily":null,"weekly":null},"limits":[{"kind":"session","group":"session","percent":16,"severity":"normal","resets_at":"2026-07-26T04:09:59.746567+00:00","scope":null,"is_active":false},{"kind":"weekly_all","group":"weekly","percent":66,"severity":"normal","resets_at":"2026-07-28T06:59:59.746589+00:00","scope":null,"is_active":true},{"kind":"weekly_scoped","group":"weekly","percent":36,"severity":"normal","resets_at":"2026-07-28T06:59:59.746846+00:00","scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":false}],"spend":{"used":{"amount_minor":1077,"currency":"EUR","exponent":2},"limit":{"amount_minor":1500,"currency":"EUR","exponent":2},"percent":72,"severity":"normal","enabled":true,"disabled_reason":null,"cap":{"money":{"amount_minor":1500,"currency":"EUR","exponent":2},"credits":null},"balance":null,"auto_reload":null,"disclaimer":"Usage credits cover you when you hit your plan limits. [Learn more](https://support.claude.com/articles/12429409)","can_purchase_credits":false,"can_toggle":false},"member_dashboard_available":false}
+        """#
+        let snapshot = try UsageClient.decode(from: Data(body.utf8), now: now)
+        #expect(snapshot.fiveHour.utilization == 16.0)
+        #expect(snapshot.sevenDay.utilization == 66.0)
+        #expect(snapshot.limits.count == 3)
+        #expect(!snapshot.sessionIdle)
+    }
+
+    /// Money limit €5.00 set BELOW the €10.77 already spent — the "limit exceeded" shape: the server
+    /// caps `percent` at 100, flips `enabled` to false, and sets `spend_limit_reached: true`.
+    @Test func liveBodyCreditsLimitBelowSpentDecodes() throws {
+        let body = #"""
+        {"five_hour":{"utilization":22.0,"resets_at":"2026-07-26T04:10:00.940049+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day":{"utilization":67.0,"resets_at":"2026-07-28T07:00:00.940073+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day_oauth_apps":null,"seven_day_opus":null,"seven_day_sonnet":null,"seven_day_cowork":null,"seven_day_omelette":null,"tangelo":null,"iguana_necktie":null,"omelette_promotional":null,"nimbus_quill":null,"cinder_cove":null,"amber_ladder":null,"extra_usage":{"is_enabled":false,"monthly_limit":500,"used_credits":1077.0,"utilization":100.0,"currency":"EUR","decimal_places":2,"disabled_reason":"org_level_disabled_until","user_disabled":false,"spend_limit_reached":true,"credits_ever_enabled":true,"daily":null,"weekly":null},"limits":[{"kind":"session","group":"session","percent":22,"severity":"normal","resets_at":"2026-07-26T04:10:00.940049+00:00","scope":null,"is_active":false},{"kind":"weekly_all","group":"weekly","percent":67,"severity":"normal","resets_at":"2026-07-28T07:00:00.940073+00:00","scope":null,"is_active":true},{"kind":"weekly_scoped","group":"weekly","percent":36,"severity":"normal","resets_at":"2026-07-28T06:59:59.940386+00:00","scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":false}],"spend":{"used":{"amount_minor":1077,"currency":"EUR","exponent":2},"limit":{"amount_minor":500,"currency":"EUR","exponent":2},"percent":100,"severity":"critical","enabled":false,"disabled_reason":"org_level_disabled_until","cap":{"money":{"amount_minor":500,"currency":"EUR","exponent":2},"credits":null},"balance":null,"auto_reload":null,"disclaimer":"Usage credits cover you when you hit your plan limits. [Learn more](https://support.claude.com/articles/12429409)","can_purchase_credits":false,"can_toggle":false},"member_dashboard_available":false}
+        """#
+        let snapshot = try UsageClient.decode(from: Data(body.utf8), now: now)
+        #expect(snapshot.limits.count == 3)
+        #expect(!snapshot.sessionIdle)
+    }
+
+    /// Monthly limit set to "unlimited" while credits are enabled — the "no limit set" shape:
+    /// `spend.limit` / `cap` / `monthly_limit` / `utilization` are all null and `percent` is 0.
+    @Test func liveBodyCreditsUnlimitedDecodes() throws {
+        let body = #"""
+        {"five_hour":{"utilization":22.0,"resets_at":"2026-07-26T04:09:59.671333+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day":{"utilization":67.0,"resets_at":"2026-07-28T06:59:59.671352+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null},"seven_day_oauth_apps":null,"seven_day_opus":null,"seven_day_sonnet":null,"seven_day_cowork":null,"seven_day_omelette":null,"tangelo":null,"iguana_necktie":null,"omelette_promotional":null,"nimbus_quill":null,"cinder_cove":null,"amber_ladder":null,"extra_usage":{"is_enabled":true,"monthly_limit":null,"used_credits":1077.0,"utilization":null,"currency":"EUR","decimal_places":2,"disabled_reason":null,"user_disabled":false,"spend_limit_reached":false,"credits_ever_enabled":true,"daily":null,"weekly":null},"limits":[{"kind":"session","group":"session","percent":22,"severity":"normal","resets_at":"2026-07-26T04:09:59.671333+00:00","scope":null,"is_active":false},{"kind":"weekly_all","group":"weekly","percent":67,"severity":"normal","resets_at":"2026-07-28T06:59:59.671352+00:00","scope":null,"is_active":true},{"kind":"weekly_scoped","group":"weekly","percent":36,"severity":"normal","resets_at":"2026-07-28T06:59:59.671587+00:00","scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":false}],"spend":{"used":{"amount_minor":1077,"currency":"EUR","exponent":2},"limit":null,"percent":0,"severity":"normal","enabled":true,"disabled_reason":null,"cap":null,"balance":null,"auto_reload":null,"disclaimer":"Usage credits cover you when you hit your plan limits. [Learn more](https://support.claude.com/articles/12429409)","can_purchase_credits":false,"can_toggle":false},"member_dashboard_available":false}
+        """#
+        let snapshot = try UsageClient.decode(from: Data(body.utf8), now: now)
+        #expect(snapshot.limits.count == 3)
+        #expect(!snapshot.sessionIdle)
+    }
 }
 
 // MARK: - buildRequest
