@@ -294,10 +294,11 @@ public struct PopupLayout: Sendable, Equatable {
         let resetRelative = bar == nil
             ? nil
             : CreditsPacing.monthEnd(now: now).flatMap { ResetClock.relativeRounded(resetsAt: $0, now: now) }
-        // "in use" = credits are actually covering an exhausted plan limit right now — the same gate as
-        // the menu-bar icon (`shouldShowIcon`). The section shows for any active credits; the badge only
-        // when the plan limit is genuinely overflowing into paid credits.
-        let inUse = CreditsPacing.shouldShowIcon(
+        // "active" badge = credits are actually being spent right now — `isSpending` (enabled AND not
+        // capped AND a base limit exhausted). Deliberately stricter than the icon's `shouldShowIcon`:
+        // once the money cap is reached the server disables credits (Claude is blocked), so the badge
+        // must NOT claim they are active even though the icon still shows (red "ceiling hit").
+        let inUse = CreditsPacing.isSpending(
             spend, baseLimitExhausted: CreditsPacing.anyBaseLimitExhausted(in: snapshot))
         return CreditsRow(
             spent: spent, limit: spend.limit, bar: bar, resetRelative: resetRelative, inUse: inUse)

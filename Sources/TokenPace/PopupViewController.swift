@@ -641,8 +641,8 @@ final class PopupViewController: NSViewController {
         return pill
     }
 
-    /// Localisation seam for the credits "in use" badge text.
-    static let inUseBadgeText = "in use"
+    /// Localisation seam for the credits "active" badge text.
+    static let inUseBadgeText = "active"
 
     @discardableResult
     private func addLabel(_ text: String, font: NSFont, secondary: Bool = false, color: NSColor? = nil) -> NSView {
