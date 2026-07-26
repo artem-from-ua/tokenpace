@@ -69,6 +69,12 @@ final class SettingsWindowController: NSWindowController {
     /// Called when the user clicks "Archive now" (#110) — wired to run an immediate archive sync.
     var onArchiveNow: (() -> Void)?
 
+    /// Called when the user turns the "Back to work" notification on (#160) — wired by
+    /// `AppDelegate.openSettings` to lazily request notification authorization (never at launch, since
+    /// this is an opt-in feature). The `completion` reports the resolved auth state back so the pane
+    /// can refresh its hint.
+    var onBackToWorkEnabled: ((@escaping (BackToWorkNotifier.AuthState) -> Void) -> Void)?
+
     /// Provides the last archive summary for the status line (#110), read on each `show()` /
     /// `updateArchiveStatus()`. `nil` until the first sync of the session completes.
     var archiveSummaryProvider: (() -> LogArchiver.Summary?)?
@@ -95,6 +101,17 @@ final class SettingsWindowController: NSWindowController {
     private var webDesktopToggle: NSSwitch!
     private var chatOnlyRadio: NSButton!
     private var chatAndCoworkRadio: NSButton!
+
+    // Notifications (#160)
+    private var backToWorkToggle: NSSwitch!
+    private var notifyStartPicker: NSDatePicker!
+    private var notifyEndPicker: NSDatePicker!
+    private var notifyDurationLabel: NSTextField!
+    private var notifyNeverRadio: NSButton!
+    private var notifyFriSatRadio: NSButton!
+    private var notifySatSunRadio: NSButton!
+    /// Hint under the master switch: notification-authorization status, or the dev-build note.
+    private var notifyAuthHint: NSTextField!
 
     // Session Logs
     private var archiveToggle: NSSwitch!
@@ -162,6 +179,7 @@ final class SettingsWindowController: NSWindowController {
         syncUpdatesFromConfig()
         archiveToggle.state = PersistedConfig.archiveEnabled ? .on : .off
         updateArchiveStatus()
+        syncNotificationsFromConfig()
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         // Centre once, on the first show — but only if `setFrameUsingName` didn't restore an autosaved
@@ -185,6 +203,7 @@ final class SettingsWindowController: NSWindowController {
                 .init(title: "Menu Bar", symbol: "menubar.rectangle", tint: .systemIndigo, make: buildMenuBarPane),
                 .init(title: "Monitored Services", symbol: "dot.radiowaves.left.and.right", tint: .systemGreen, make: buildServicesPane),
                 .init(title: "Session Logs", symbol: "folder", tint: .systemOrange, make: buildSessionLogsPane),
+                .init(title: "Notifications", symbol: "bell", tint: .systemRed, make: buildNotificationsPane),
                 .init(title: "About", symbol: "info.circle", tint: .systemBlue, make: buildAboutPane),
             ])
         // The window title stays "TokenPace" across sections — the selected section is already obvious
@@ -381,6 +400,84 @@ final class SettingsWindowController: NSWindowController {
         return pane(sections: [("Archive", card)])
     }
 
+    // MARK: Notifications (#160)
+
+    private func buildNotificationsPane() -> NSView {
+        let card = SettingsCard()
+
+        // Master switch: the whole feature. Off by default (opt-in). A wrapping hint under the label
+        // carries the authorization status / dev-build note, set by `refreshNotifyAuthHint`.
+        backToWorkToggle = SettingsRow.makeSwitch(target: self, action: #selector(toggleBackToWork(_:)))
+        let masterCol = SettingsRow.labelColumn(
+            "Back to work",
+            hint: "Shows a system notification when your Claude usage limit resets and you can work "
+                + "again.")
+        card.addRow(SettingsRow.container(leading: masterCol.view, trailing: backToWorkToggle))
+
+        // Second wrapping hint row for the auth/dev status — its own row so the toggle row's hint stays
+        // the static description. Placed in a leading column so it reads as continuation text.
+        notifyAuthHint = SettingsRow.wrappingHint(" ")
+        card.addRow(SettingsRow.container(leading: indented(notifyAuthHint)))
+
+        // Allowed-hours row: two hour/minute pickers with an en-dash between, plus a live "Nh window"
+        // duration label. `NSDatePicker` in `.hourMinute` honours the user's locale (12h/24h) and zone.
+        notifyStartPicker = makeTimePicker()
+        notifyEndPicker = makeTimePicker()
+        let dash = NSTextField(labelWithString: "–")
+        dash.font = .systemFont(ofSize: NSFont.systemFontSize)
+        dash.textColor = .secondaryLabelColor
+        notifyDurationLabel = NSTextField(labelWithString: "")
+        notifyDurationLabel.font = .systemFont(ofSize: 11)
+        notifyDurationLabel.textColor = .secondaryLabelColor
+        let hoursRow = NSStackView(views: [
+            notifyStartPicker, dash, notifyEndPicker, notifyDurationLabel,
+        ])
+        hoursRow.orientation = .horizontal
+        hoursRow.alignment = .centerY
+        hoursRow.spacing = 8
+        let hoursCol = NSStackView(views: [leadingLabel("Allowed hours"), indented(hoursRow, by: 0)])
+        hoursCol.orientation = .vertical
+        hoursCol.alignment = .leading
+        hoursCol.spacing = 6
+        card.addRow(SettingsRow.container(leading: indented(hoursCol)))
+
+        // Suppress-days radio group: three radios sharing one action so AppKit auto-groups them into an
+        // exclusive set (same pattern as the reset-countdown group).
+        notifyNeverRadio = NSButton(radioButtonWithTitle: "Never",
+            target: self, action: #selector(notifySuppressChanged(_:)))
+        notifyFriSatRadio = NSButton(radioButtonWithTitle: "Friday-Saturday",
+            target: self, action: #selector(notifySuppressChanged(_:)))
+        notifySatSunRadio = NSButton(radioButtonWithTitle: "Saturday-Sunday",
+            target: self, action: #selector(notifySuppressChanged(_:)))
+        let suppressRadios = NSStackView(views: [notifyNeverRadio, notifyFriSatRadio, notifySatSunRadio])
+        suppressRadios.orientation = .vertical
+        suppressRadios.alignment = .leading
+        suppressRadios.spacing = 6
+        let suppressCol = NSStackView(views: [
+            leadingLabel("Suppress notifications on"), indented(suppressRadios, by: 0),
+        ])
+        suppressCol.orientation = .vertical
+        suppressCol.alignment = .leading
+        suppressCol.spacing = 6
+        card.addRow(SettingsRow.container(leading: indented(suppressCol)))
+
+        return pane(sections: [("Back to Work", card)])
+    }
+
+    /// An hour/minute `NSDatePicker` (stepper style) that renders in the user's locale (12h/24h) and
+    /// zone. The stored form is a minute-of-day Int; the picker's date is display only, so the calendar
+    /// day it carries is irrelevant.
+    private func makeTimePicker() -> NSDatePicker {
+        let picker = NSDatePicker()
+        picker.datePickerStyle = .textFieldAndStepper
+        picker.datePickerElements = .hourMinute
+        picker.locale = .current
+        picker.timeZone = .current
+        picker.target = self
+        picker.action = #selector(notifyTimeChanged(_:))
+        return picker
+    }
+
     private func buildAboutPane() -> NSView {
         // About card: version + source link.
         let about = SettingsCard()
@@ -563,6 +660,85 @@ final class SettingsWindowController: NSWindowController {
         resetIncludeDistantCheckbox.isEnabled = (resetSmartRadio.state == .on)
     }
 
+    // MARK: Notifications sync (#160)
+
+    private func syncNotificationsFromConfig() {
+        backToWorkToggle.state = PersistedConfig.backToWorkEnabled ? .on : .off
+        notifyStartPicker.dateValue = date(fromMinuteOfDay: PersistedConfig.notifyWindowStartMinute)
+        notifyEndPicker.dateValue = date(fromMinuteOfDay: PersistedConfig.notifyWindowEndMinute)
+        switch PersistedConfig.notifySuppressDays {
+        case .never:  notifyNeverRadio.state = .on
+        case .friSat: notifyFriSatRadio.state = .on
+        case .satSun: notifySatSunRadio.state = .on
+        }
+        updateNotifyControlsAvailability()
+        updateNotifyDurationLabel()
+        refreshNotifyAuthHint()
+    }
+
+    /// Grey out (never hide, so the layout doesn't jump) the pickers and radios when the master switch
+    /// is off — mirrors the reset-countdown checkbox / WEB-Desktop radio disabling.
+    private func updateNotifyControlsAvailability() {
+        let on = backToWorkToggle.state == .on
+        notifyStartPicker.isEnabled = on
+        notifyEndPicker.isEnabled = on
+        notifyNeverRadio.isEnabled = on
+        notifyFriSatRadio.isEnabled = on
+        notifySatSunRadio.isEnabled = on
+    }
+
+    /// Update the live "Nh window" duration label from the two pickers (handles wrap + whole-day).
+    private func updateNotifyDurationLabel() {
+        let start = minuteOfDay(from: notifyStartPicker.dateValue)
+        let end = minuteOfDay(from: notifyEndPicker.dateValue)
+        let minutes = NotificationSchedule.windowLengthMinutes(startMinute: start, endMinute: end)
+        let h = minutes / 60
+        let m = minutes % 60
+        notifyDurationLabel.stringValue = m == 0 ? "\(h)h window" : "\(h)h \(m)m window"
+    }
+
+    /// Refresh the auth/dev hint under the master switch by querying the current notification state.
+    private func refreshNotifyAuthHint() {
+        BackToWorkNotifier.currentAuthState { [weak self] state in
+            self?.applyNotifyAuthHint(state)
+        }
+    }
+
+    private func applyNotifyAuthHint(_ state: BackToWorkNotifier.AuthState) {
+        let text: String
+        switch state {
+        case .dev:
+            text = "Available only for TokenPace.app in /Applications — a dev build can't post "
+                + "system notifications."
+        case .denied:
+            text = "Notifications are turned off for TokenPace. Enable them in System Settings → "
+                + "Notifications → TokenPace."
+        case .authorized, .notDetermined:
+            text = ""
+        }
+        notifyAuthHint.stringValue = text
+        notifyAuthHint.isHidden = text.isEmpty
+    }
+
+    // MARK: Minute-of-day ↔ Date (display only)
+
+    /// Map a stored minute-of-day (0…1439) to a `Date` for a picker — on an arbitrary reference day,
+    /// since only the hour/minute are ever read back.
+    private func date(fromMinuteOfDay minute: Int) -> Date {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let base = cal.startOfDay(for: Date())
+        return cal.date(byAdding: .minute, value: min(1439, max(0, minute)), to: base) ?? base
+    }
+
+    /// Read a picker's `Date` back as a minute-of-day (0…1439) in the current zone.
+    private func minuteOfDay(from date: Date) -> Int {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let c = cal.dateComponents([.hour, .minute], from: date)
+        return (c.hour ?? 0) * 60 + (c.minute ?? 0)
+    }
+
     // MARK: Actions
 
     @objc private func monitoredServicesToggled() {
@@ -667,6 +843,42 @@ final class SettingsWindowController: NSWindowController {
         PersistedConfig.resetCountdownModeMenuBar = mode
         AppLogger.lifecycle.notice("reset-countdown: menu-bar mode set \(mode.rawValue, privacy: .public)")
         onResetCountdownModeMenuBarChange?(mode)
+    }
+
+    // MARK: Notification actions (#160)
+
+    @objc private func toggleBackToWork(_ sender: NSSwitch) {
+        let on = sender.state == .on
+        PersistedConfig.backToWorkEnabled = on
+        AppLogger.lifecycle.notice("back-to-work: enabled set \(on, privacy: .public)")
+        updateNotifyControlsAvailability()
+        if on {
+            // Lazily request authorization on first enable, then refresh the hint with the result.
+            onBackToWorkEnabled?({ [weak self] state in self?.applyNotifyAuthHint(state) })
+        } else {
+            refreshNotifyAuthHint()
+        }
+    }
+
+    @objc private func notifyTimeChanged(_ sender: NSDatePicker) {
+        PersistedConfig.notifyWindowStartMinute = minuteOfDay(from: notifyStartPicker.dateValue)
+        PersistedConfig.notifyWindowEndMinute = minuteOfDay(from: notifyEndPicker.dateValue)
+        updateNotifyDurationLabel()
+        AppLogger.lifecycle.notice(
+            "back-to-work: time window set \(PersistedConfig.notifyWindowStartMinute, privacy: .public)–\(PersistedConfig.notifyWindowEndMinute, privacy: .public)")
+    }
+
+    @objc private func notifySuppressChanged(_ sender: NSButton) {
+        let choice: SuppressDays
+        if notifyFriSatRadio.state == .on {
+            choice = .friSat
+        } else if notifySatSunRadio.state == .on {
+            choice = .satSun
+        } else {
+            choice = .never
+        }
+        PersistedConfig.notifySuppressDays = choice
+        AppLogger.lifecycle.notice("back-to-work: suppress set \(choice.rawValue, privacy: .public)")
     }
 
     @objc private func openRepo() {

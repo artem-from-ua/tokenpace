@@ -334,6 +334,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             wc.onArchiveNow = { [weak self] in self?.performArchiveSync(userInitiated: true) }
             wc.archiveSummaryProvider = { [weak self] in self?.lastArchiveSummary }
+            wc.onBackToWorkEnabled = { completion in
+                // Lazily request notification authorization the first time the user enables the
+                // feature (#160) — never at launch, since this is opt-in.
+                BackToWorkNotifier.requestAuthorizationIfNeeded(completion: completion)
+            }
             settingsWC = wc
         }
         // Reflect the latest known update state whenever the window opens (#37).
@@ -616,6 +621,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "credits-active":        StubUsageTransport(mode: .credits(.active))
         case "credits-limit-reached": StubUsageTransport(mode: .credits(.limitReached))
         case "credits-no-limit":      StubUsageTransport(mode: .credits(.noLimit))
+        // Back-to-work edge (#160): first poll blocked (7d 100 %), then workable → fires the
+        // "Back to work!" notification once, subject to quiet hours + authorization.
+        case "just-unblocked":        StubUsageTransport(mode: .justUnblocked)
         default:           URLSession.shared
         }
         // The status poll uses the same transport seam (the stub answers the status endpoint too).
@@ -656,6 +664,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// timer can re-render it against a later `now`. Also rides this heartbeat to poll the Claude
     /// status page when due (#31) — no separate timer.
     private func apply(_ output: PollOutput) {
+        detectBackToWorkEdge(output)
         lastOutput = output
         render(output, at: Date())
         // Re-arm the optimistic-reset timer against this poll's `resets_at` (#36). A successful poll
@@ -668,6 +677,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pollStatusIfDue(usageInterval: output.interval)
         pollUpdateIfDue()
         pollArchiveIfDue()
+    }
+
+    /// Detect the blocked→unblocked edge for the "Back to work!" notification (#160) and post when it
+    /// fires. Called at the top of `apply`, before `lastOutput` is overwritten.
+    ///
+    /// The "was blocked" state is **persisted** (`PersistedConfig.backToWorkWasBlocked`), not an
+    /// in-memory flag, so the edge survives an app restart or a Mac sleep/reboot between the block and
+    /// the reset. Tracking and posting live in separate guards on purpose:
+    /// - **Tracking runs on every successful poll**, regardless of whether the feature is enabled, so
+    ///   the persisted state is always current — toggling the feature off→on never forgets a pending
+    ///   edge, and never fires a stale one for a reset that happened while the feature was off.
+    /// - **Posting runs only when the feature is enabled** *and* the previous successful reading was
+    ///   genuinely blocked *and* we are now workable.
+    ///
+    /// Only genuine successful polls update the state: a failing/stale poll carries the last-known
+    /// snapshot forward (`health.failingSince != nil`), and the optimistic-reset overlay bypasses
+    /// `apply` entirely (it calls `render`, not `apply`), so neither can produce a false "unblocked".
+    private func detectBackToWorkEdge(_ output: PollOutput) {
+        guard output.health.failingSince == nil, let snapshot = output.snapshot else { return }
+        let nowWorkable = WorkAvailability.canWork(snapshot)
+        if PersistedConfig.backToWorkEnabled, PersistedConfig.backToWorkWasBlocked, nowWorkable {
+            maybePostBackToWork()
+        }
+        PersistedConfig.backToWorkWasBlocked = !nowWorkable
+    }
+
+    /// Apply the quiet-hours gate and post the "Back to work!" banner if allowed (#160). The pure
+    /// evaluation (`NotificationSchedule`) runs against the user's window/suppress choice in a
+    /// device-zone gregorian calendar; the impure post lives in `BackToWorkNotifier`.
+    private func maybePostBackToWork() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        calendar.locale = .current
+        let allowed = NotificationSchedule.isAllowed(
+            at: Date(),
+            window: (PersistedConfig.notifyWindowStartMinute, PersistedConfig.notifyWindowEndMinute),
+            suppress: PersistedConfig.notifySuppressDays,
+            calendar: calendar
+        )
+        guard allowed else {
+            AppLogger.lifecycle.info("back-to-work: suppressed by quiet hours")
+            return
+        }
+        BackToWorkNotifier.postBackToWork()
     }
 
     /// Fetch the Claude status page when `StatusCadence` says it is due — riding the usage poll's
