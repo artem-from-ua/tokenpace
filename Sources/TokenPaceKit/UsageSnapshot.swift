@@ -207,8 +207,8 @@ public struct Money: Sendable, Equatable, Decodable {
 ///   `used_credits` scalar (the same amount as `spend.used`, kept as a cross-check / fallback).
 ///
 /// **Deliberately not modeled** (spike findings, #142):
-/// - The server `spend.severity` — the maintainer decided the icon colour is computed from our own
-///   `used / limit` thresholds (``CreditsPacing/severity(for:)``), never the server tier.
+/// - The server `spend.severity` — the maintainer decided the icon colour is computed the same way as
+///   the token bars (usage vs. time, ``CreditsPacing/barLayout(for:now:timeZone:)``), never the server tier.
 /// - `spend.balance` / `spend.auto_reload` — Current balance is **not** delivered by this endpoint
 ///   (null in every observed state); balance-relative pacing is a future feature, out of scope.
 ///

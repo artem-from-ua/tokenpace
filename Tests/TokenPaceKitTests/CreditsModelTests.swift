@@ -185,75 +185,31 @@ struct CreditsPacingTriggerTests {
     }
 }
 
-// MARK: - CreditsPacing.severity
+// MARK: - CreditsPacing.spentFraction
 
-@Suite("CreditsPacing.severity")
-struct CreditsPacingSeverityTests {
+@Suite("CreditsPacing.spentFraction")
+struct CreditsPacingFractionTests {
 
-    @Test func noLimitIsCalm() throws {
-        // Unlimited: nothing to pace against → neutral (calm), amount-only UI.
-        let spend = try decodeSpend(bodyUnlimited)
-        #expect(CreditsPacing.spentFraction(of: spend) == nil)
-        #expect(CreditsPacing.severity(for: spend) == .calm)
+    @Test func noLimitHasNoFraction() throws {
+        // Unlimited: nothing to pace against → nil (amount-only UI, no bar/colour).
+        #expect(CreditsPacing.spentFraction(of: try decodeSpend(bodyUnlimited)) == nil)
     }
 
-    @Test func outOfCreditsNoLimitIsCalm() throws {
-        // limit:null even though disabled → no fraction, calm.
-        let spend = try decodeSpend(bodyOutOfCredits)
-        #expect(CreditsPacing.severity(for: spend) == .calm)
+    @Test func outOfCreditsNoLimitHasNoFraction() throws {
+        // limit:null even though disabled → no fraction.
+        #expect(CreditsPacing.spentFraction(of: try decodeSpend(bodyOutOfCredits)) == nil)
     }
 
-    @Test func withinLimitBelow85IsCalm() throws {
-        // €10.77 / €15.00 = 71.8 % → calm.
-        let spend = try decodeSpend(bodyEnabledWithinLimit)
-        let fraction = try #require(CreditsPacing.spentFraction(of: spend))
+    @Test func withinLimit() throws {
+        // €10.77 / €15.00 = 71.8 %.
+        let fraction = try #require(CreditsPacing.spentFraction(of: try decodeSpend(bodyEnabledWithinLimit)))
         #expect(abs(fraction - 0.718) < 0.001)
-        #expect(CreditsPacing.severity(for: spend) == .calm)
     }
 
-    @Test func nearCapAbove85IsAhead() {
-        // €10.77 / €11.00 = 97.9 % → ahead (orange), not yet exhausted.
-        let spend = SpendInfo(
-            used: Money(amountMinor: 1077, currency: "EUR", exponent: 2),
-            limit: Money(amountMinor: 1100, currency: "EUR", exponent: 2),
-            enabled: true)
-        #expect(CreditsPacing.severity(for: spend) == .ahead)
-    }
-
-    @Test func exactly85IsAhead() {
-        // Strict boundary: 85 % spent is ahead, not calm (mirrors BarLayout's strict 15-pt boundary).
-        let spend = SpendInfo(
-            used: Money(amountMinor: 85, currency: "EUR", exponent: 2),
-            limit: Money(amountMinor: 100, currency: "EUR", exponent: 2),
-            enabled: true)
-        #expect(CreditsPacing.spentFraction(of: spend) == 0.85)
-        #expect(CreditsPacing.severity(for: spend) == .ahead)
-    }
-
-    @Test func justBelow85IsCalm() {
-        let spend = SpendInfo(
-            used: Money(amountMinor: 84, currency: "EUR", exponent: 2),
-            limit: Money(amountMinor: 100, currency: "EUR", exponent: 2),
-            enabled: true)
-        #expect(CreditsPacing.severity(for: spend) == .calm)
-    }
-
-    @Test func spendLimitReachedIsExhausted() throws {
-        // €10.77 spent against a €5.00 limit, server flagged reached → exhausted (red).
-        let spend = try decodeSpend(bodyLimitBelowSpent)
-        #expect(CreditsPacing.severity(for: spend) == .exhausted)
-        let fraction = try #require(CreditsPacing.spentFraction(of: spend))
-        #expect(fraction > 1)   // 1077 / 500 = 2.154, unclamped
-    }
-
-    @Test func fractionAtOrAbove1IsExhaustedEvenWithoutReachedFlag() {
-        // Defensive: used >= limit exhausts even if the server did not set spend_limit_reached.
-        let spend = SpendInfo(
-            used: Money(amountMinor: 1000, currency: "EUR", exponent: 2),
-            limit: Money(amountMinor: 1000, currency: "EUR", exponent: 2),
-            enabled: true,
-            spendLimitReached: false)
-        #expect(CreditsPacing.severity(for: spend) == .exhausted)
+    @Test func overLimitIsUnclamped() throws {
+        // €10.77 / €5.00 = 2.154 — over-limit fraction is meaningful, not clamped here.
+        let fraction = try #require(CreditsPacing.spentFraction(of: try decodeSpend(bodyLimitBelowSpent)))
+        #expect(fraction > 1)
     }
 
     @Test func usesUsedCreditsFallbackWhenMoneyUsedAbsent() {
@@ -264,16 +220,126 @@ struct CreditsPacingSeverityTests {
             enabled: true,
             usedCredits: 900.0)
         #expect(CreditsPacing.spentFraction(of: spend) == 0.9)
-        #expect(CreditsPacing.severity(for: spend) == .ahead)
     }
 
     @Test func zeroLimitHasNoFraction() {
-        // A zero-minor limit is not a usable cap → no fraction, calm (avoids divide-by-zero).
+        // A zero-minor limit is not a usable cap → nil (avoids divide-by-zero).
         let spend = SpendInfo(
             used: Money(amountMinor: 100, currency: "EUR", exponent: 2),
             limit: Money(amountMinor: 0, currency: "EUR", exponent: 2),
             enabled: true)
         #expect(CreditsPacing.spentFraction(of: spend) == nil)
-        #expect(CreditsPacing.severity(for: spend) == .calm)
+    }
+}
+
+// MARK: - CreditsPacing.monthElapsedFraction
+
+@Suite("CreditsPacing.monthElapsedFraction")
+struct CreditsMonthFractionTests {
+
+    private static let utc = TimeZone(identifier: "UTC")!
+
+    /// Build a UTC instant from components — deterministic, no environment clock.
+    private func utcDate(_ y: Int, _ mo: Int, _ d: Int, _ h: Int = 0, _ mi: Int = 0) -> Date {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = Self.utc
+        return cal.date(from: DateComponents(year: y, month: mo, day: d, hour: h, minute: mi))!
+    }
+
+    @Test func startOfMonthIsZero() {
+        // 1st at 00:00 UTC → nothing elapsed.
+        let f = CreditsPacing.monthElapsedFraction(now: utcDate(2026, 7, 1), timeZone: Self.utc)
+        #expect(f == 0)
+    }
+
+    @Test func midMonthIsAboutHalf() {
+        // 16th of a 31-day month at 00:00 → 15/31 ≈ 0.484.
+        let f = CreditsPacing.monthElapsedFraction(now: utcDate(2026, 7, 16), timeZone: Self.utc)
+        #expect(abs(f - 15.0 / 31.0) < 0.001)
+    }
+
+    @Test func lastInstantIsNearOne() {
+        // 31st 23:59 → almost the whole month elapsed.
+        let f = CreditsPacing.monthElapsedFraction(now: utcDate(2026, 7, 31, 23, 59), timeZone: Self.utc)
+        #expect(f > 0.99 && f <= 1)
+    }
+
+    @Test func februaryLengthHandled() {
+        // 15th of Feb 2026 (28 days) → 14/28 = 0.5 exactly. Month length comes from Foundation.
+        let f = CreditsPacing.monthElapsedFraction(now: utcDate(2026, 2, 15), timeZone: Self.utc)
+        #expect(abs(f - 0.5) < 0.001)
+    }
+
+    @Test func timeZoneShiftsTheBoundary() {
+        // At 2026-07-01T02:00 UTC it is still June 30 in a UTC-3 zone → that zone reports a
+        // near-full (June) fraction, while UTC reports a near-zero (July) one. Proves the boundary
+        // is time-zone dependent, which is why the zone is injected.
+        let instant = utcDate(2026, 7, 1, 2, 0)
+        let utcFraction = CreditsPacing.monthElapsedFraction(now: instant, timeZone: Self.utc)
+        let westFraction = CreditsPacing.monthElapsedFraction(
+            now: instant, timeZone: TimeZone(secondsFromGMT: -3 * 3600)!)
+        #expect(utcFraction < 0.01)     // just into July (UTC)
+        #expect(westFraction > 0.99)    // still end of June (UTC-3)
+    }
+}
+
+// MARK: - CreditsPacing.barLayout (usage vs. time, same grading as the token bars)
+
+@Suite("CreditsPacing.barLayout")
+struct CreditsBarLayoutTests {
+
+    private static let utc = TimeZone(identifier: "UTC")!
+
+    private func utcDate(_ y: Int, _ mo: Int, _ d: Int) -> Date {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = Self.utc
+        return cal.date(from: DateComponents(year: y, month: mo, day: d))!
+    }
+
+    @Test func noLimitProducesNoBar() throws {
+        // Unlimited → no cap to pace against → nil (view shows amount only).
+        let spend = try decodeSpend(bodyUnlimited)
+        #expect(CreditsPacing.barLayout(for: spend, now: utcDate(2026, 7, 16), timeZone: Self.utc) == nil)
+    }
+
+    @Test func spentBelowTimePaceIsOnPaceOrBehind() {
+        // 20 % spent, ~48 % of month elapsed (16th of 31) → usage <= time → green (on pace/behind).
+        let spend = SpendInfo(
+            used: Money(amountMinor: 200, currency: "EUR", exponent: 2),
+            limit: Money(amountMinor: 1000, currency: "EUR", exponent: 2),
+            enabled: true)
+        let bar = CreditsPacing.barLayout(for: spend, now: utcDate(2026, 7, 16), timeZone: Self.utc)
+        #expect(bar?.pacing == .onPaceOrBehind)
+        #expect(abs((bar?.usageFraction ?? -1) - 0.2) < 0.001)
+    }
+
+    @Test func spentAheadOfTimePaceIsAhead() {
+        // 80 % spent by the 16th (~48 % elapsed) → usage > time → ahead (yellow/orange, not red).
+        let spend = SpendInfo(
+            used: Money(amountMinor: 800, currency: "EUR", exponent: 2),
+            limit: Money(amountMinor: 1000, currency: "EUR", exponent: 2),
+            enabled: true)
+        let bar = CreditsPacing.barLayout(for: spend, now: utcDate(2026, 7, 16), timeZone: Self.utc)
+        #expect(bar?.pacing == .ahead)
+    }
+
+    @Test func spendLimitReachedForcesFullUsageBar() throws {
+        // Over-limit / reached → usageFraction forced to 1 so the view's aheadColor renders it red
+        // (usage >= 1), regardless of where in the month we are.
+        let spend = try decodeSpend(bodyLimitBelowSpent)   // reached: true, used > limit
+        let bar = CreditsPacing.barLayout(for: spend, now: utcDate(2026, 7, 2), timeZone: Self.utc)
+        #expect(bar?.usageFraction == 1)
+        #expect(bar?.pacing == .ahead)   // usage(1) > time(early month) → ahead; view paints red at usage>=1
+    }
+
+    @Test func usageIsClampedForRendering() {
+        // Raw fraction 2.15 (used 1077 / limit 500) clamps to 1 in the bar even without the reached flag.
+        let spend = SpendInfo(
+            used: Money(amountMinor: 1077, currency: "EUR", exponent: 2),
+            limit: Money(amountMinor: 500, currency: "EUR", exponent: 2),
+            enabled: true,
+            spendLimitReached: false)
+        let bar = CreditsPacing.barLayout(for: spend, now: utcDate(2026, 7, 16), timeZone: Self.utc)
+        #expect(bar?.usageFraction == 1)
     }
 }

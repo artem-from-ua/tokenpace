@@ -5,23 +5,31 @@ import Foundation
 /// Pure, AppKit-free pacing logic for the money-credits ("extra usage") state (#143).
 ///
 /// Turns a decoded ``SpendInfo`` into the two decisions the credits icon needs — **whether to show
-/// it** and **which colour tier** — without importing the view palette (ADR-0009). The menu bar /
-/// dropdown (#144/#145) map ``PacingSeverity`` to a colour and format the amount label; this type
-/// owns only the arithmetic.
+/// it** and **how to pace its colour** — without importing the view palette (ADR-0009). The menu bar
+/// / dropdown (#144/#145) map the resulting ``BarLayout`` to a colour with the **same**
+/// `PopupBarView.aheadColor(usage:time:)` used for the token bars, and format the amount label; this
+/// type owns only the arithmetic.
 ///
-/// ## Why credits pace differently from a window
-/// A rolling limit (5h/7d) paces **usage against elapsed time** — you can be "ahead" or "behind" the
-/// clock. The money cap has **no time axis in scope**: `spend.balance` / `auto_reload` are not in
-/// this endpoint (spike #142), so the base is the **limit alone**. Severity is therefore graded from
-/// the plain `used / limit` fraction, not a usage-vs-time gap. When there is **no limit** (the user
-/// set the monthly cap to *unlimited*, `spend.limit: null`) there is nothing to pace against — the
-/// UI shows the spent amount only, with no bar and a neutral (``calm``) tier.
+/// ## Credits pace exactly like a token limit — usage vs. time
+/// The maintainer's rule: the credits icon colour is computed **the same way as the 5h/7d bars**, not
+/// with a bespoke "percent of the cap" threshold. That means a `usage`-vs-`time` gap, feeding the same
+/// ``BarLayout`` the token bars use, so `aheadColor` grades it identically:
+/// green (on pace / behind) → yellow (mildly ahead) → orange (well ahead) → **red only at the cap**.
+///
+/// The two axes for credits:
+/// - **`usageFraction` = `used_credits / limit`** — the share of the money cap spent.
+/// - **`timeFraction` = the share of the calendar month elapsed** — the money window is the calendar
+///   month, resetting at **00:00 UTC on the 1st** (confirmed via Anthropic's Spend Limits API docs;
+///   the web UI's "Resets Aug 1"). The API delivers **no** `resets_at` for spend (spike #142:
+///   `spend`/`extra_usage` carry no time field, `daily`/`weekly` are null), so we derive the month
+///   fraction locally in UTC (see ``monthElapsedFraction(now:timeZone:)`` and ``resetTimeZone``).
 ///
 /// ## Decisions the maintainer already made (spike #142, do not revisit here)
 /// - The icon trigger is `enabled == true` **OR** `spend_limit_reached == true` — never `enabled`
 ///   alone, because the server flips `enabled` to false at the exact moment the cap is hit.
-/// - The colour is computed from **our own** `used / limit` thresholds, never the server
-///   `spend.severity` tier.
+/// - The colour comes from the **same** `usage`-vs-`time` pacing as the token bars — never the server
+///   `spend.severity`. Red appears **only** at the cap (`used >= limit` or `spend_limit_reached`),
+///   matching `aheadColor`'s `usage >= 1 → red` rung; being "ahead of pace" is yellow/orange, not red.
 public enum CreditsPacing {
 
     // MARK: - Trigger
@@ -31,7 +39,7 @@ public enum CreditsPacing {
     /// `true` when credits are enabled **or** the money cap has been reached. The `OR` is
     /// load-bearing: when the cap is exceeded the server sends `enabled: false` +
     /// `spend_limit_reached: true`, so testing `enabled` alone would drop the icon precisely when the
-    /// user has hit their money ceiling (the ``PacingSeverity/exhausted`` state). See spike #142.
+    /// user has hit their money ceiling. See spike #142.
     ///
     /// This is **not** the full show decision on its own — the icon is additionally gated on at least
     /// one base limit being exhausted; see ``shouldShowIcon(_:baseLimitExhausted:)``.
@@ -73,29 +81,78 @@ public enum CreditsPacing {
         return windows.contains { $0 >= 100 }
     }
 
-    // MARK: - Severity
+    // MARK: - Pacing (usage vs. time — same as the token bars)
 
-    /// The colour tier for the credits icon, from **our own** `used / limit` thresholds — never the
-    /// server `spend.severity` (maintainer decision, spike #142).
+    /// The pacing bar for the credits icon, graded **exactly like a token limit** (usage vs. time), or
+    /// `nil` when there is **no** cap to pace against (`limit == nil` / unlimited / zero limit) — the
+    /// UI then shows the spent amount only, no bar/colour.
     ///
-    /// Mirrors the grading of ``BarLayout/severity`` so the credits icon reads on the same scale as
-    /// the pacing bars, adapted for an axis that has **no time component** (see the type doc):
-    /// - ``PacingSeverity/exhausted`` (red) — the cap is hit: `spend_limit_reached == true` **or** the
-    ///   `used / limit` fraction is `>= 1`. Mirrors `BarLayout`'s `usageFraction >= 1` rung.
-    /// - ``PacingSeverity/ahead`` (orange) — within the last 15 points of the cap (`fraction >= 0.85`)
-    ///   but not yet exhausted. Mirrors `BarLayout`'s strict 15-point boundary (there the gap between
-    ///   the usage and time edges; here, with no time edge, the distance from the cap itself).
-    /// - ``PacingSeverity/calm`` (green/yellow) — everything below, **and** the no-limit case: when
-    ///   `limit == nil` there is nothing to pace against, so the tier is neutral (`calm`) and the UI
-    ///   shows the spent amount only.
+    /// Feeds the same ``BarLayout`` the 5h/7d bars use, so the view's `aheadColor(usage:time:)` grades
+    /// it identically: green → yellow → orange → **red at the cap**. Built with the same rule as
+    /// `PacingModel.barLayout`: `pacing = timeFraction >= usageFraction ? .onPaceOrBehind : .ahead`.
     ///
-    /// The `>= 0.85` boundary is strict (no epsilon), matching the integer-percent contract of
-    /// `BarLayout.severity` — exactly 85 % spent is `ahead`, 84 % is `calm`.
-    public static func severity(for spend: SpendInfo) -> PacingSeverity {
-        if spend.spendLimitReached { return .exhausted }
-        guard let fraction = spentFraction(of: spend) else { return .calm }  // no limit → neutral
-        if fraction >= 1 { return .exhausted }
-        return fraction >= 0.85 ? .ahead : .calm
+    /// `usageFraction` = `used / limit`; `timeFraction` = ``monthElapsedFraction(now:)``. When the cap
+    /// is hit (`spend_limit_reached`, or `used >= limit`) `usageFraction` is forced to `1`, so the view
+    /// renders it red via `aheadColor`'s `usage >= 1` rung even if the raw fraction rounds just under.
+    ///
+    /// - Parameters:
+    ///   - spend: The decoded credits state.
+    ///   - now: Current instant (inject for deterministic tests; do **not** call `Date()` here).
+    ///   - timeZone: Wall-clock zone whose month boundaries define the window (see
+    ///     ``monthElapsedFraction(now:timeZone:)`` for why this matters). Default ``resetTimeZone``
+    ///     (UTC) — the zone the monthly spend limit actually resets in.
+    public static func barLayout(
+        for spend: SpendInfo,
+        now: Date,
+        timeZone: TimeZone = CreditsPacing.resetTimeZone
+    ) -> BarLayout? {
+        guard let rawUsage = spentFraction(of: spend) else { return nil }  // no cap → no pacing
+        // At the cap, force a full bar so `aheadColor` shows red (`usage >= 1`) regardless of rounding.
+        let usageFraction = spend.spendLimitReached ? 1 : min(1, max(0, rawUsage))
+        let timeFraction = monthElapsedFraction(now: now, timeZone: timeZone)
+        let pacing: PacingState = timeFraction >= usageFraction ? .onPaceOrBehind : .ahead
+        return BarLayout(usageFraction: usageFraction, timeFraction: timeFraction, pacing: pacing)
+    }
+
+    /// The time zone the monthly spend limit resets in — **UTC**.
+    ///
+    /// Confirmed against Anthropic's official Spend Limits API docs: *"monthly spend resets at 00 UTC
+    /// on the first of each calendar month"* (https://platform.claude.com/docs/en/manage-claude/spend-limits-api).
+    /// This is a **calendar** month in UTC, not a billing anniversary and not the device's local zone —
+    /// so, unlike the token windows (whose reset *time* `ResetClock` renders in the device's local
+    /// zone), the money window's boundary is fixed to UTC. Injectable so tests are deterministic.
+    public static let resetTimeZone = TimeZone(identifier: "UTC") ?? TimeZone(secondsFromGMT: 0)!
+
+    /// The fraction of the current **calendar month** that has elapsed, in `[0, 1]` — the money
+    /// window's `timeFraction`, mirroring `PacingModel.elapsedFraction` but for a variable-length
+    /// month rather than a fixed rolling window.
+    ///
+    /// The money limit resets at **00:00 UTC on the 1st of each calendar month** (see
+    /// ``resetTimeZone``; the web UI's "Resets Aug 1"), and the API carries no reset time for it
+    /// (spike #142), so we compute it locally: elapsed since the start of this UTC month divided by the
+    /// month's full length.
+    ///
+    /// **Time zone is injected** (mirroring `ResetClock`) and defaults to ``resetTimeZone`` (UTC):
+    /// "the 1st at 00:00" lands at a different instant per zone, shifting `timeFraction` by up to a
+    /// day's worth around the month boundary, so the zone must match the actual reset zone. DST and
+    /// month length (28–31 days) are handled by Foundation via the constructed `Calendar`. Degrades to
+    /// `0` if boundaries can't be resolved (never crashes, never over-paces).
+    public static func monthElapsedFraction(
+        now: Date,
+        timeZone: TimeZone = CreditsPacing.resetTimeZone
+    ) -> Double {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        guard
+            let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)),
+            let nextMonth = calendar.date(byAdding: .month, value: 1, to: monthStart)
+        else {
+            return 0
+        }
+        let total = nextMonth.timeIntervalSince(monthStart)
+        guard total > 0 else { return 0 }
+        let elapsed = now.timeIntervalSince(monthStart)
+        return min(1, max(0, elapsed / total))
     }
 
     /// The `used / limit` fraction (spent share of the money cap), or `nil` when there is **no**
@@ -104,7 +161,7 @@ public enum CreditsPacing {
     /// Uses the exact integer ``Money`` values (`used.amount_minor / limit.amount_minor`) when both
     /// are present, falling back to the `extra_usage.used_credits` scalar for the numerator when
     /// `spend.used` is absent. The result is **not** clamped — a fraction `> 1` (spent past the cap)
-    /// is meaningful and drives the ``PacingSeverity/exhausted`` decision above.
+    /// is meaningful; ``barLayout(for:now:calendar:)`` clamps it for rendering.
     public static func spentFraction(of spend: SpendInfo) -> Double? {
         guard let limit = spend.limit, limit.amountMinor > 0 else { return nil }
         let usedMinor: Double
