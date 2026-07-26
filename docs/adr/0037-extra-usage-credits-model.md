@@ -1,15 +1,15 @@
 ---
-status: proposed
+status: accepted
 date: 2026-07-26
 ---
 
-# ADR-0037: Модель грошових кредитів (extra usage) — `spend` як primary, тригер і власна severity
+# ADR-0037: Модель грошових кредитів (extra usage) — `spend` як primary, тригер і pacing як у токенів
 
-> **Чернетка.** Рішення ухвалені під час спайку [#142](https://github.com/artem-from-ua/tokenpace/issues/142)
-> (жива структура API) і продуктового інтерв'ю. Реалізація decode-моделі — [#143](https://github.com/artem-from-ua/tokenpace/issues/143),
-> menu bar / dropdown — [#144](https://github.com/artem-from-ua/tokenpace/issues/144) /
+> Рішення ухвалені під час спайку [#142](https://github.com/artem-from-ua/tokenpace/issues/142)
+> (жива структура API) і продуктового інтерв'ю; decode-модель + pacing реалізовано в
+> [#143](https://github.com/artem-from-ua/tokenpace/issues/143). UI — menu bar
+> [#144](https://github.com/artem-from-ua/tokenpace/issues/144) / dropdown
 > [#145](https://github.com/artem-from-ua/tokenpace/issues/145). Epic — [#141](https://github.com/artem-from-ua/tokenpace/issues/141).
-> Статус стане `accepted` після мержу #143.
 
 ## Контекст
 
