@@ -35,18 +35,21 @@ struct MonitoredServicesPane: View {
                     get: { model.webDesktopEnabled },
                     set: { model.webDesktopEnabled = $0; model.commitMonitoredServices() }))
 
-                // The sub-mode belongs to Web/Desktop: shown only while it's on, and indented so it
-                // reads as a child of that toggle rather than a sibling service. No label — it's clearly
-                // the mode for the toggle right above it.
+                // The sub-mode belongs to Web/Desktop: shown only while it's on. A trailing (right-
+                // aligned) menu picker, like any other Form control, with no label — it's clearly the
+                // mode for the toggle right above it.
                 if model.webDesktopEnabled {
-                    Picker("", selection: Binding(
-                        get: { model.webDesktopMode },
-                        set: { model.webDesktopMode = $0; model.commitMonitoredServices() })) {
-                        Text("Chat only").tag(WebDesktopMode.chatOnly)
-                        Text("Chat and Cowork").tag(WebDesktopMode.chatAndCowork)
+                    HStack {
+                        Spacer()
+                        Picker("", selection: Binding(
+                            get: { model.webDesktopMode },
+                            set: { model.webDesktopMode = $0; model.commitMonitoredServices() })) {
+                            Text("Chat only").tag(WebDesktopMode.chatOnly)
+                            Text("Chat and Cowork").tag(WebDesktopMode.chatAndCowork)
+                        }
+                        .labelsHidden()
+                        .fixedSize()
                     }
-                    .labelsHidden()
-                    .padding(.leading, 20)
                 }
             }
         }

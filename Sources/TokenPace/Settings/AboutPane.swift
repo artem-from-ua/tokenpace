@@ -20,14 +20,12 @@ struct AboutPane: View {
             }
 
             Section {
-                LabeledContent("Check for updates periodically") {
-                    HStack(spacing: 10) {
-                        Button("Check Now") { model.checkForUpdatesNow() }
-                        Toggle("", isOn: Binding(
-                            get: { model.automaticUpdateChecks },
-                            set: { model.setAutomaticUpdateChecks($0) }))
-                        .labelsHidden()
-                    }
+                Toggle("Check for updates periodically", isOn: Binding(
+                    get: { model.automaticUpdateChecks },
+                    set: { model.setAutomaticUpdateChecks($0) }))
+
+                LabeledContent("Check for updates now") {
+                    Button("Check Now") { model.checkForUpdatesNow() }
                 }
 
                 // Only meaningful when periodic checks are on — hidden entirely otherwise (not just
