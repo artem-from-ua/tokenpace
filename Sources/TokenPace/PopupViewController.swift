@@ -620,14 +620,16 @@ final class PopupViewController: NSViewController {
         }
 
         // Limit set: title (+ "in use" badge when credits are actually covering an exhausted limit) +
-        // status word, then "spent / limit … resets in …", then the pacing bar.
+        // status word, then "spent / limit … <relative>", then the bar. The reset is shown as the bare
+        // relative value ("6d"), without the "resets in " prefix that the token rows use (#156). When
+        // this reset is the one blocking work it's shown as a red badge instead (`resetIsBlocking`).
         addTitleStatusLine(
             title: Self.extraUsageTitle,
             status: Self.creditsStatusText(bar),
             badge: credits.inUse ? Self.makeInUsePill() : nil)
         addDetailLine(
             used: Self.creditsAmountText(spent: credits.spent, limit: limit),
-            reset: Self.creditsResetText(credits.resetRelative),
+            reset: Self.creditsResetRelativeOnly(credits.resetRelative),
             resetIsBlocking: creditsResetIsBlocking)
         // Credits pace over the whole calendar month; there is no window-tick ruler like the token bars,
         // so the bar draws with no subdivisions (a plain pacing bar). `isLast: true` — the credits
@@ -1125,6 +1127,12 @@ final class PopupViewController: NSViewController {
     static func creditsResetText(_ relative: String?) -> String {
         guard let relative else { return "resetting…" }
         return "resets in \(relative)"
+    }
+
+    /// The credits reset shown as the bare relative value only ("6d"), without the "resets in " prefix
+    /// (#156) — for the non-blocking detail line. Falls back to "resetting…" when unavailable.
+    static func creditsResetRelativeOnly(_ relative: String?) -> String {
+        relative ?? "resetting…"
     }
 
     /// Format a ``Money`` for display. For a **known** currency the symbol sits in that currency's
