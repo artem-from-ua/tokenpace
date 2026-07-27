@@ -22,7 +22,11 @@ struct SessionLogsPane: View {
                                 .foregroundStyle(model.archiveDestination == nil ? .secondary : .primary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
+                                // Take the available width and truncate inside it, so a long path can't
+                                // push the button off the row.
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             Button("Choose…") { model.chooseArchiveFolder() }
+                                .layoutPriority(1)
                         }
                     }
 
