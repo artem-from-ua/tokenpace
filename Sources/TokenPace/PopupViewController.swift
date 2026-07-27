@@ -344,8 +344,8 @@ final class StatusLineLabel: NSTextField {
 /// A small rounded, layer-backed capsule — the "in use" badge beside the "Extra usage" heading (#146,
 /// `controlAccentColor` blue) and the blocking-reset badge on a limit row (#158, the exhausted red).
 /// The corner radius tracks the height (half of it, so it is a true pill), and the fill CGColor is
-/// re-resolved in `updateLayer()` because CGColor is not appearance-dynamic (the same trap
-/// `SettingsCard`/`DividerView` document).
+/// re-resolved in `updateLayer()` because CGColor is not appearance-dynamic (the standard
+/// layer-backed dark/light trap).
 final class PillView: NSView {
     /// The capsule fill. Defaults to the accent blue; the blocking-reset badge sets it to the
     /// exhausted red. A closure (not a stored `NSColor`) so a dynamic colour re-resolves per appearance.
