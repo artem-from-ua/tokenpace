@@ -29,8 +29,6 @@ final class SettingsWindowController: NSWindowController {
         /// window never resizes; the sidebar/detail split moves inside it (sidebar 258, detail 599).
         static let contentWidth: CGFloat = 857
         static let contentHeight: CGFloat = 480
-        /// Fixed sidebar width, matching System Settings (measured 258 pt).
-        static let sidebarWidth: CGFloat = 258
     }
 
     /// The single observable state object, alive for the controller's lifetime (so background
@@ -115,17 +113,17 @@ final class SettingsWindowController: NSWindowController {
         window.setFrameAutosaveName("TokenPaceSettings")   // remember position across opens (size is fixed)
         window.standardWindowButton(.zoomButton)?.isHidden = true
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        // Pin the content width so the hosting view can't shrink the window to its SwiftUI content: the
-        // window stays exactly `contentWidth` (857) and the sidebar/detail split moves inside it.
+        // Fixed content size (857×480), like System Settings — a non-resizable single-pane form. Pin
+        // min == max so the window never resizes by pane or by the hosting view's ideal size, and the
+        // sidebar/detail split moves inside it.
         window.contentMinSize = NSSize(width: Metrics.contentWidth, height: Metrics.contentHeight)
-        window.contentMaxSize = NSSize(width: Metrics.contentWidth, height: .greatestFiniteMagnitude)
+        window.contentMaxSize = NSSize(width: Metrics.contentWidth, height: Metrics.contentHeight)
         self.init(window: window)
-        window.contentViewController = NSHostingController(
-            rootView: SettingsRootView(
-                model: model,
-                sidebarWidth: Metrics.sidebarWidth,
-                contentWidth: Metrics.contentWidth,
-                contentHeight: Metrics.contentHeight))
+        let hosting = NSHostingController(rootView: SettingsRootView(model: model))
+        // Don't let the hosting controller drive the window size from SwiftUI's ideal — the window is
+        // fixed (above), and a NavigationSplitView's ideal would otherwise collapse it to a sliver.
+        hosting.sizingOptions = []
+        window.contentViewController = hosting
     }
 
     /// Show or re-focus the window. Re-syncs every field from `PersistedConfig`/the system into the
@@ -142,10 +140,11 @@ final class SettingsWindowController: NSWindowController {
             let restored = window?.setFrameUsingName("TokenPaceSettings") ?? false
             if !restored { window?.center() }
         }
-        // Force the fixed content width every show: an autosaved frame can otherwise shrink the window.
-        if let window, abs(window.contentLayoutRect.width - Metrics.contentWidth) > 0.5 {
-            window.setContentSize(NSSize(width: Metrics.contentWidth, height: window.contentLayoutRect.height))
-        }
+        // The window is a fixed-size single-pane form (857×480). An autosaved frame restores the last
+        // *position* but may carry a stale size, and the SwiftUI hosting view has no intrinsic size —
+        // so force the full content size every show, not just the width. Otherwise the window can open
+        // as a title-bar-only sliver.
+        window?.setContentSize(NSSize(width: Metrics.contentWidth, height: Metrics.contentHeight))
         window?.makeKeyAndOrderFront(nil)
         // Dev helper: `TOKENPACE_SETTINGS_SECTION=<index>` opens straight to a given pane (0-based).
         if let raw = ProcessInfo.processInfo.environment["TOKENPACE_SETTINGS_SECTION"],

@@ -4,17 +4,18 @@ import SwiftUI
 
 /// The SwiftUI root of the Settings window: a `NavigationSplitView` with a source-list sidebar of
 /// sections and a detail pane that swaps to the selected section's `Form`. Modelled on macOS System
-/// Settings (a sidebar of sections + a detail area). Hosted in the fixed-size `NSWindow` by
-/// `SettingsWindowController`.
+/// Settings — a sidebar of sections + a grouped-form detail area. Hosted in the fixed-size `NSWindow`
+/// by `SettingsWindowController`. The root asks to fill the window (`.frame(minWidth:…)`) and the
+/// sidebar column is width-constrained; the detail `Form` then gets its system-default insets — no
+/// hand-tuned card/row/padding metrics (the whole point of moving to `Form.formStyle(.grouped)`).
 struct SettingsRootView: View {
     @Bindable var model: SettingsModel
-    /// The fixed sidebar width, matching System Settings (258 pt) — locked so the sidebar never resizes.
-    let sidebarWidth: CGFloat
-    /// The fixed window content size (857×480). An `NSHostingController` sizes to its SwiftUI content's
-    /// ideal, and a `NavigationSplitView`'s ideal collapses — so pin the root to the window size, else
-    /// the window shrinks to a tiny sliver.
-    let contentWidth: CGFloat
-    let contentHeight: CGFloat
+    /// The window's fixed content size (857×480). The hosting view has no intrinsic size for a
+    /// `NavigationSplitView`, so the root asks to fill at least the window — otherwise the whole
+    /// SwiftUI content lays out narrower than the window and the split's columns shrink with it (a
+    /// too-narrow sidebar that truncates, plus dead space on the right of the detail).
+    var minWidth: CGFloat = 857
+    var minHeight: CGFloat = 480
 
     var body: some View {
         NavigationSplitView {
@@ -26,16 +27,18 @@ struct SettingsRootView: View {
                 }
                 .tag(section)
             }
-            .navigationSplitViewColumnWidth(sidebarWidth)
             .listStyle(.sidebar)
+            // `.navigationSplitViewColumnWidth` is unreliable for a `.sidebar` List (it leaves the
+            // sidebar at SwiftUI's narrow default, truncating "Monitored Services"). Constrain the
+            // List's own width instead so it holds the longest label, matching System Settings' 258 pt.
+            .frame(minWidth: 258, idealWidth: 258, maxWidth: 258)
             // A menu-bar Settings window has no collapsible sidebar (System Settings doesn't either);
             // suppress the automatic sidebar toggle so only the fixed split shows.
             .toolbar(removing: .sidebarToggle)
         } detail: {
             detailPane
         }
-        .navigationSplitViewStyle(.balanced)
-        .frame(width: contentWidth, height: contentHeight)
+        .frame(minWidth: minWidth, maxWidth: .infinity, minHeight: minHeight, maxHeight: .infinity)
     }
 
     @ViewBuilder
@@ -53,15 +56,15 @@ struct SettingsRootView: View {
 
 // MARK: - SidebarChip
 
-/// The coloured rounded-rect chip behind a sidebar section's SF Symbol, matching System Settings.
-/// A white glyph on a tinted rounded rect (the standard System Settings sidebar icon treatment).
+/// The coloured rounded-rect chip behind a sidebar section's SF Symbol, matching System Settings —
+/// a white glyph on a tinted rounded rect (the standard System Settings sidebar icon treatment).
 private struct SidebarChip: View {
     let symbol: String
     let tint: Color
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 11, weight: .regular))
+            .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: 20, height: 20)
             .background(tint, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
