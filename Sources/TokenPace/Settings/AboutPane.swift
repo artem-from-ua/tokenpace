@@ -9,20 +9,12 @@ import AppKit
 struct AboutPane: View {
     @Bindable var model: SettingsModel
 
-    /// The app icon for the header. Uses the bundle's own icon when it has one; otherwise the generic
-    /// **application** icon (`NSWorkspace.icon(for: .application)`) — the blank white app icon — rather
-    /// than `NSApp.applicationIconImage`, which for a build with no custom `.icns` resolves to a
-    /// folder-looking placeholder.
+    /// The app icon for the header — the app's own icon, exactly as Launchpad/Dock show it
+    /// (`NSApp.applicationIconImage`): the custom icon once the bundle has one, or the system's default
+    /// grid placeholder until then. On a bare `swift run` dev build this resolves to a folder-looking
+    /// image (no bundle), but in the real `.app` it is the proper app icon.
     private static var appIcon: NSImage {
-        if let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleIconName") as? String,
-           let icon = NSImage(named: name) {
-            return icon
-        }
-        if let file = Bundle.main.object(forInfoDictionaryKey: "CFBundleIconFile") as? String,
-           let icon = NSImage(named: file) {
-            return icon
-        }
-        return NSWorkspace.shared.icon(for: .application)
+        NSApp.applicationIconImage ?? NSWorkspace.shared.icon(for: .application)
     }
 
     /// One-line description of what TokenPace is, shown under the app name (System Settings shows the
@@ -87,7 +79,10 @@ struct AboutPane: View {
                             get: { model.installAutoEnabled && model.installAutomatically },
                             set: { model.setInstallAutomatically($0) }))
                         .disabled(!model.installAutoEnabled)
-                        SettingsHint(text: model.installAutoHint.text, warning: model.installAutoHint.devBuild)
+                        // Only the dev-build ⚠️ note remains; the enabled description was dropped.
+                        if model.installAutoHint.devBuild {
+                            SettingsHint(text: model.installAutoHint.text, warning: true)
+                        }
                     }
                 }
 

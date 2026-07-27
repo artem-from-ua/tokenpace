@@ -26,31 +26,35 @@ struct NotificationsPane: View {
                     SettingsHint(text: model.backToWorkHint, warning: !model.backToWorkHint.isEmpty)
                 }
 
-                LabeledContent("Allowed hours") {
-                    HStack(spacing: 8) {
-                        Text(model.notifyWindowLengthText).foregroundStyle(.secondary)
-                        DatePicker("", selection: model.notifyStartBinding(anchor: anchor),
-                                   displayedComponents: .hourAndMinute)
-                            .labelsHidden()
-                        Text("–").foregroundStyle(.secondary)
-                        DatePicker("", selection: model.notifyEndBinding(anchor: anchor),
-                                   displayedComponents: .hourAndMinute)
-                            .labelsHidden()
+                // The allowed-hours window and weekend-suppress only matter when the feature is on —
+                // hidden (not just disabled) otherwise.
+                if model.backToWorkEnabled {
+                    LabeledContent("Allowed hours") {
+                        HStack(spacing: 8) {
+                            Text(model.notifyWindowLengthText).foregroundStyle(.secondary)
+                            DatePicker("", selection: model.notifyStartBinding(anchor: anchor),
+                                       displayedComponents: .hourAndMinute)
+                                .labelsHidden()
+                            Text("–").foregroundStyle(.secondary)
+                            DatePicker("", selection: model.notifyEndBinding(anchor: anchor),
+                                       displayedComponents: .hourAndMinute)
+                                .labelsHidden()
+                        }
                     }
-                    .disabled(!model.notifyDependentsEnabled)
-                }
 
-                Picker("Suppress on weekends", selection: Binding(
-                    get: { model.suppressDays },
-                    set: { model.setSuppressDays($0) })) {
-                    ForEach(SuppressDays.allCases, id: \.self) { day in
-                        Text(day.displayName).tag(day)
+                    Picker("Suppress on weekends", selection: Binding(
+                        get: { model.suppressDays },
+                        set: { model.setSuppressDays($0) })) {
+                        ForEach(SuppressDays.allCases, id: \.self) { day in
+                            Text(day.displayName).tag(day)
+                        }
                     }
+                    .pickerStyle(.menu)
                 }
-                .pickerStyle(.menu)
-                .disabled(!model.notifyDependentsEnabled)
             }
         }
         .formStyle(.grouped)
+        // Show/hide dependent rows without an insertion animation (avoids neighbour-height flicker).
+        .animation(nil, value: model.backToWorkEnabled)
     }
 }
