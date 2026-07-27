@@ -9,6 +9,22 @@ import AppKit
 struct AboutPane: View {
     @Bindable var model: SettingsModel
 
+    /// The app icon for the header. Uses the bundle's own icon when it has one; otherwise the generic
+    /// **application** icon (`NSWorkspace.icon(for: .application)`) — the blank white app icon — rather
+    /// than `NSApp.applicationIconImage`, which for a build with no custom `.icns` resolves to a
+    /// folder-looking placeholder.
+    private static var appIcon: NSImage {
+        if let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleIconName") as? String,
+           let icon = NSImage(named: name) {
+            return icon
+        }
+        if let file = Bundle.main.object(forInfoDictionaryKey: "CFBundleIconFile") as? String,
+           let icon = NSImage(named: file) {
+            return icon
+        }
+        return NSWorkspace.shared.icon(for: .application)
+    }
+
     /// One-line description of what TokenPace is, shown under the app name (System Settings shows the
     /// same kind of tagline under its pane title).
     private static let tagline =
@@ -20,11 +36,9 @@ struct AboutPane: View {
         Form {
             Section {
                 VStack(spacing: 8) {
-                    if let icon = NSApp.applicationIconImage {
-                        Image(nsImage: icon)
-                            .resizable()
-                            .frame(width: 64, height: 64)
-                    }
+                    Image(nsImage: Self.appIcon)
+                        .resizable()
+                        .frame(width: 64, height: 64)
                     Text("TokenPace")
                         .font(.title2).bold()
                     Text(Self.tagline)

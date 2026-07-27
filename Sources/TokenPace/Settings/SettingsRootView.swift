@@ -26,6 +26,8 @@ struct SettingsRootView: View {
                 } icon: {
                     SidebarChip(symbol: section.symbol, tint: section.tint, metrics: model.sidebarIcons)
                 }
+                // SwiftUI's default Label gap is ~half the System Settings sidebar gap; set it explicitly.
+                .labelStyle(SidebarLabelStyle(gap: model.sidebarIcons.chipLabelGap))
                 .tag(section)
             }
             .listStyle(.sidebar)
@@ -52,6 +54,21 @@ struct SettingsRootView: View {
         case .monitoredServices: MonitoredServicesPane(model: model)
         case .notifications:     NotificationsPane(model: model)
         case .sessionLogs:       SessionLogsPane(model: model)
+        }
+    }
+}
+
+// MARK: - SidebarLabelStyle
+
+/// A `LabelStyle` that lays out the icon and title with an explicit gap — SwiftUI's default `Label`
+/// spacing is narrower than the System Settings sidebar's, and there is no API to request the system
+/// sidebar gap, so it's set from the measured `SidebarIconMetrics.chipLabelGap` (ADR-0040 exception).
+private struct SidebarLabelStyle: LabelStyle {
+    let gap: CGFloat
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: gap) {
+            configuration.icon
+            configuration.title
         }
     }
 }

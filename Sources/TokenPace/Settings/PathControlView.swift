@@ -3,19 +3,20 @@ import AppKit
 
 // MARK: - PathControlView (#168, ADR-0041)
 
-/// A SwiftUI wrapper around AppKit's `NSPathControl` — the native control for showing a chosen file
-/// or folder. In `.popUp` style it shows the folder icon + name, **truncates itself** when the path
-/// is long (so it never widens the row), and reveals the folder in Finder on click. This is the same
-/// control the previous AppKit Settings used (ADR-0040: a system mechanism, not a bare label that a
-/// long path would stretch). `url == nil` shows the muted "No folder selected" placeholder.
+/// A SwiftUI wrapper around AppKit's `NSPathControl` — the native control for showing a chosen file or
+/// folder, used for the archive destination. It draws the folder icon + name with the **system's own**
+/// icon-to-name spacing and icon size (no hand-picked numbers), truncates itself when the path is long
+/// so it never widens the row, and reveals the folder in Finder on click. This is the system mechanism
+/// ADR-0040 calls for (the same control the pre-#168 AppKit Settings used). `url == nil` shows the
+/// muted placeholder.
 struct PathControlView: NSViewRepresentable {
     let url: URL?
     var placeholder: String = "No folder selected"
 
     func makeNSView(context: Context) -> NSPathControl {
         let control = NSPathControl()
-        // `.popUp` shows just the chosen folder (icon + name) with a chevron, self-truncating — not the
-        // full breadcrumb trail that `.standard` draws.
+        // `.popUp` shows just the chosen folder (not the full breadcrumb trail `.standard` draws) and
+        // stays clickable → Finder. All sizing/spacing is the control's own system default.
         control.pathStyle = .popUp
         control.isEditable = false
         control.target = context.coordinator
@@ -27,20 +28,8 @@ struct PathControlView: NSViewRepresentable {
     }
 
     func updateNSView(_ control: NSPathControl, context: Context) {
-        if let url {
-            // Build the single path item ourselves so we can add a little space between the folder
-            // icon and the name — the default `.popUp` cell packs them tightly, unlike the roomier
-            // Finder/System-Settings look.
-            let item = NSPathControlItem()
-            item.title = " " + url.lastPathComponent
-            item.image = NSWorkspace.shared.icon(forFile: url.path)
-            control.pathItems = [item]
-            control.placeholderString = nil
-        } else {
-            control.url = nil
-            control.pathItems = []
-            control.placeholderString = placeholder
-        }
+        control.url = url
+        control.placeholderString = url == nil ? placeholder : nil
         context.coordinator.url = url
     }
 

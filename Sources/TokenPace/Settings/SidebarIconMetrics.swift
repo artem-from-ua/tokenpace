@@ -23,6 +23,10 @@ final class SidebarIconMetrics {
     private(set) var symbol: CGFloat = 13
     /// Sidebar row label point size.
     private(set) var label: CGFloat = 13
+    /// Gap between the icon chip and the label. SwiftUI's `Label` default is ~half the System Settings
+    /// sidebar gap, so we set it explicitly (measured ≈ 8 pt against the live sidebar) — a documented
+    /// value, since SwiftUI exposes no "match the system sidebar gap" API (ADR-0040 measured exception).
+    private(set) var chipLabelGap: CGFloat = 8
 
     /// Sidebar column width. System Settings widens the sidebar with the icon size (measured live: the
     /// visible sidebar is ≈ 278 pt at Large). SwiftUI's `.frame` on the List eats ≈ 30 pt of inset, so
