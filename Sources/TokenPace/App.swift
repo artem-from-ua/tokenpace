@@ -638,6 +638,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Back-to-work edge (#160): first poll blocked (7d 100 %), then workable → fires the
         // "Back to work!" notification once, subject to quiet hours + authorization.
         case "just-unblocked":        StubUsageTransport(mode: .justUnblocked)
+        // Reset-boundary idle grace (ADR-0041): active → post-reset empty five_hour → active again.
+        // The 5h bar must stay "ready" (non-idle) across the empty polls — no "waiting for limit
+        // reset" flicker between the active windows.
+        case "reset-grace":           StubUsageTransport(mode: .resetGrace)
         default:           URLSession.shared
         }
         // The status poll uses the same transport seam (the stub answers the status endpoint too).

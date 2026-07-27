@@ -297,6 +297,14 @@ actor StubUsageTransport: UsageTransport {
         /// overlay, no ⏰), then the forced refresh lands: from the second poll on the stub returns a
         /// freshly-reset window (0 %, `now + 5h`), mirroring what the real API would report post-reset.
         case optimisticReset
+        /// The reset-boundary idle-grace frame (ADR-0041): the first two polls return an **active** 5h
+        /// window (mid-window, 40 %), then two polls return the post-reset **empty** body
+        /// (`five_hour.resets_at: null`, no `session` limit → the decoder would report
+        /// `sessionIdle == true`), then the window is **active again** (a fresh ~5 h window). The grace
+        /// gate must keep the 5h bar **non-idle** ("ready", solid, 0 %) across the two empty polls
+        /// instead of flipping to the grey/blue idle bar — the bug this verifies. Watch the menu bar:
+        /// it must **not** blink to "waiting for limit reset" between the active windows.
+        case resetGrace
         /// The "Back to work!" edge frame (#160): the first poll returns a **blocked** body (7-day
         /// window at 100 %, no credits → `canWork == false`), so the persisted "was blocked" flag is
         /// set; every later poll returns a **workable** body (7-day back to 40 %), which is a genuine
@@ -540,6 +548,36 @@ actor StubUsageTransport: UsageTransport {
             let sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
             let body = """
             {"five_hour":{"utilization":\(fiveUtil),"resets_at":"\(fiveReset)"},\
+            "seven_day":{"utilization":40.0,"resets_at":"\(sevenReset)"},\
+            "limits":[]}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
+        // Reset-boundary idle-grace frame (ADR-0041): active window (polls 0–1) → post-reset **empty**
+        // body (polls 2–3, `five_hour.resets_at: null`, no `session` limit → would decode
+        // `sessionIdle == true`) → active again (polls 4+). The grace gate must hold the 5h bar
+        // non-idle across the two empty polls, so the menu bar must NOT blink to "waiting for limit
+        // reset" between the active windows — that flicker is exactly the bug this stub verifies.
+        if mode == .resetGrace {
+            let n = calls
+            calls += 1
+            let empty = (n == 2 || n == 3)
+            let sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
+            let fiveBody: String
+            if empty {
+                // Post-reset gap: server has no 5h window yet (created by the first token spend).
+                fiveBody = #""five_hour":{"utilization":0.0,"resets_at":null}"#
+            } else {
+                // Active window, mid-window (n<2) or freshly reset (n>3).
+                let fiveReset = Self.resetsAt(inSeconds: 3 * 3600)
+                let fiveUtil = n < 2 ? 40.0 : 5.0
+                fiveBody = #""five_hour":{"utilization":\#(fiveUtil),"resets_at":"\#(fiveReset)"}"#
+            }
+            let body = """
+            {\(fiveBody),\
             "seven_day":{"utilization":40.0,"resets_at":"\(sevenReset)"},\
             "limits":[]}
             """.data(using: .utf8)!
