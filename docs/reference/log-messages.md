@@ -293,10 +293,11 @@ One log line per interval change. The format is built by
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 435 | `lifecycle` | `.notice` | `interval <from>→<to>: <phrase>` | the polling interval moved; emitted once per change |
-| 441 | `network` | `.notice` | `five_hour idle — no active session (resets_at absent)` | the 5h window flipped to session-idle (`sessionIdleTransition`); emitted **once per transition**, not every poll (#100, ADR-0027) |
-| 441 | `network` | `.notice` | `five_hour window active again` | the 5h window came back (idle → active); same call site, once per transition (#100, ADR-0027) |
-| 511 | `keychain` | `.notice` | `token expired, len=<count>` | `pollOnce` — the read credentials are expired (`isExpired` true); moved here from `TokenProvider` with the expiry decision (ADR-0020) |
+| 514 | `lifecycle` | `.notice` | `interval <from>→<to>: <phrase>` | the polling interval moved; emitted once per change |
+| 520 | `network` | `.notice` | `five_hour idle — no active session (resets_at absent)` | the 5h window flipped to session-idle (`sessionIdleTransition`); emitted **once per transition**, not every poll (#100, ADR-0027) |
+| 520 | `network` | `.notice` | `five_hour window active again` | the 5h window came back (idle → active); same call site, once per transition (#100, ADR-0027) |
+| 526 | `network` | `.notice` | `five_hour idle suppressed — within reset grace` | the reset-boundary idle grace armed (`applyIdleGrace`, `idleSuppressedUntil` nil → non-nil); emitted **once per transition**, not every poll (ADR-0041) |
+| 614 | `keychain` | `.notice` | `token expired, len=<count>` | `pollOnce` — the read credentials are expired (`isExpired` true); moved here from `TokenProvider` with the expiry decision (ADR-0020) |
 
 `<from>`/`<to>` render as whole minutes (`3m`) or fall back to seconds (`90s`).
 `<phrase>` is one of four, keyed by `IntervalDecision.Cause` (ADR-0032):
@@ -312,13 +313,15 @@ One log line per interval change. The format is built by
 
 | Category | Calls | Files |
 |----------|-------|-------|
-| `network` | 27 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `UpdateInstaller` (3), `PollingEngine` (1), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
+| `network` | 28 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `UpdateInstaller` (3), `PollingEngine` (2), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
 | `lifecycle` | 62 | `App` (29), `UpdateInstaller` (13), `SettingsWindowController` (10), `PollingShell` (7), `PollingEngine` (2), `ShellEnvironment` (1) |
 | `keychain` | 11 | `ClaudeCLIRefresher` (6), `TokenProvider` (4), `PollingEngine` (1) |
 | `ui` | 0 | — (category defined, unused) |
 | `archive` | 5 | `App` (3), `LogArchiver` (2) |
 
-**Total: 105 log statements** — `.error` ×33, `.notice` ×68, `.info` ×1, `.debug` ×3.
+**Total: 106 log statements** — `.error` ×33, `.notice` ×69, `.info` ×1, `.debug` ×3.
 
 The `five_hour idle …` / `window active again` pair is one call site (`sessionIdleTransition`) that
-emits one of two strings; it is counted once under `PollingEngine` network.
+emits one of two strings; it is counted once under `PollingEngine` network. The
+`five_hour idle suppressed …` grace line (`applyIdleGrace`, ADR-0041) is a separate call site,
+counted as the second `PollingEngine` network statement.
