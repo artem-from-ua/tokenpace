@@ -12,12 +12,16 @@ struct MonitoredServicesPane: View {
     var body: some View {
         Form {
             Section {
-                // Claude API is always monitored — a disabled on-switch + a muted trailing note. It is
-                // not part of the persisted MonitoredServices; it never participates in a commit.
+                // Claude API is always monitored — a disabled on-switch (a real switch, like the other
+                // rows) + a muted trailing note. It is not part of the persisted MonitoredServices; it
+                // never participates in a commit.
                 LabeledContent {
                     HStack(spacing: 8) {
                         Text("always monitored").foregroundStyle(.secondary)
-                        Toggle("", isOn: .constant(true)).labelsHidden().disabled(true)
+                        Toggle("", isOn: .constant(true))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .disabled(true)
                     }
                 } label: {
                     Text("Claude API")
@@ -27,22 +31,19 @@ struct MonitoredServicesPane: View {
                     get: { model.claudeCodeEnabled },
                     set: { model.claudeCodeEnabled = $0; model.commitMonitoredServices() }))
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Toggle("Claude WEB / Desktop", isOn: Binding(
-                        get: { model.webDesktopEnabled },
-                        set: { model.webDesktopEnabled = $0; model.commitMonitoredServices() }))
+                Toggle("Claude WEB / Desktop", isOn: Binding(
+                    get: { model.webDesktopEnabled },
+                    set: { model.webDesktopEnabled = $0; model.commitMonitoredServices() }))
 
-                    Picker("", selection: Binding(
-                        get: { model.webDesktopMode },
-                        set: { model.webDesktopMode = $0; model.commitMonitoredServices() })) {
-                        Text("Chat only").tag(WebDesktopMode.chatOnly)
-                        Text("Chat and Cowork").tag(WebDesktopMode.chatAndCowork)
-                    }
-                    .pickerStyle(.radioGroup)
-                    .labelsHidden()
-                    .disabled(!model.webDesktopRadioEnabled)
-                    .padding(.leading, 18)
+                // The sub-mode as its own row — a menu picker with a real label, so Form aligns it like
+                // any other row (no hand-tuned indent). Disabled unless Web/Desktop is on.
+                Picker("Scope", selection: Binding(
+                    get: { model.webDesktopMode },
+                    set: { model.webDesktopMode = $0; model.commitMonitoredServices() })) {
+                    Text("Chat only").tag(WebDesktopMode.chatOnly)
+                    Text("Chat and Cowork").tag(WebDesktopMode.chatAndCowork)
                 }
+                .disabled(!model.webDesktopRadioEnabled)
             }
         }
         .formStyle(.grouped)

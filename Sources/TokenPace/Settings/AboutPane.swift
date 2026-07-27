@@ -19,7 +19,7 @@ struct AboutPane: View {
                 }
             }
 
-            Section("Updates") {
+            Section {
                 LabeledContent("Check for updates periodically") {
                     HStack(spacing: 10) {
                         Button("Check Now") { model.checkForUpdatesNow() }
@@ -30,14 +30,17 @@ struct AboutPane: View {
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Install updates automatically", isOn: Binding(
-                        get: { model.installAutomatically },
-                        set: { model.setInstallAutomatically($0) }))
-                    .disabled(!model.installAutoEnabled)
-                    SettingsHint(text: model.installAutoHint.text, warning: model.installAutoHint.devBuild)
+                // Only meaningful when periodic checks are on — hidden entirely otherwise (not just
+                // disabled), so the card shows only what applies.
+                if model.automaticUpdateChecks {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle("Install updates automatically", isOn: Binding(
+                            get: { model.installAutomatically },
+                            set: { model.setInstallAutomatically($0) }))
+                        .disabled(!model.installAutoEnabled)
+                        SettingsHint(text: model.installAutoHint.text, warning: model.installAutoHint.devBuild)
+                    }
                 }
-                .padding(.leading, 18)
 
                 if let release = model.latestRelease {
                     LabeledContent {

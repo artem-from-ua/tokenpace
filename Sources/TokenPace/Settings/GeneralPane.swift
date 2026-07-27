@@ -14,7 +14,7 @@ struct GeneralPane: View {
                         get: { model.launchAtLogin },
                         set: { model.toggleLaunchAtLogin($0) }))
                     .disabled(!model.launchToggleEnabled)
-                    SettingsHint(text: model.launchHint)
+                    SettingsHint(text: model.launchHint.text, warning: model.launchHint.devBuild)
                 }
 
                 Toggle("Pause usage API polling while the screen is locked", isOn: Binding(

@@ -20,22 +20,23 @@ struct AppearancePane: View {
                     get: { model.showServiceDot }, set: { model.setShowServiceDot($0) }))
             }
 
-            Section("Show Reset Countdown in Menu Bar") {
-                Picker("", selection: Binding(
+            Section("Reset countdown in menu bar") {
+                // A menu picker for the mode (like System Settings' few-option choices), then a
+                // dependent toggle as its own row — Form gives the row its standard leading alignment,
+                // so no hand-tuned indent. The toggle only applies to the "smart" mode and is disabled
+                // otherwise.
+                Picker("Show", selection: Binding(
                     get: { model.resetRadio },
                     set: { model.resetRadio = $0; model.commitResetCountdownMode() })) {
                     Text("Always").tag(ResetRadio.always)
                     Text("When well ahead or limit reached").tag(ResetRadio.smart)
                     Text("Never").tag(ResetRadio.never)
                 }
-                .pickerStyle(.radioGroup)
-                .labelsHidden()
 
                 Toggle("Include distant 7-day limit reset (≥ 24 h away)", isOn: Binding(
                     get: { model.includeDistant7d },
                     set: { model.includeDistant7d = $0; model.commitResetCountdownMode() }))
                 .disabled(!model.includeDistantEnabled)
-                .padding(.leading, 18)
             }
         }
         .formStyle(.grouped)

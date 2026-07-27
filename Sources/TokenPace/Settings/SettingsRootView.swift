@@ -22,16 +22,18 @@ struct SettingsRootView: View {
             List(SettingsSection.allCases, selection: $model.selection) { section in
                 Label {
                     Text(section.title)
+                        .font(.system(size: model.sidebarIcons.label))
                 } icon: {
-                    SidebarChip(symbol: section.symbol, tint: section.tint)
+                    SidebarChip(symbol: section.symbol, tint: section.tint, metrics: model.sidebarIcons)
                 }
                 .tag(section)
             }
             .listStyle(.sidebar)
             // `.navigationSplitViewColumnWidth` is unreliable for a `.sidebar` List (it leaves the
             // sidebar at SwiftUI's narrow default, truncating "Monitored Services"). Constrain the
-            // List's own width instead so it holds the longest label, matching System Settings' 258 pt.
-            .frame(minWidth: 258, idealWidth: 258, maxWidth: 258)
+            // List's own width instead so it holds the longest label; the width tracks the system
+            // sidebar-icon-size bucket, like System Settings.
+            .frame(width: model.sidebarIcons.sidebarWidth)
             // A menu-bar Settings window has no collapsible sidebar (System Settings doesn't either);
             // suppress the automatic sidebar toggle so only the fixed split shows.
             .toolbar(removing: .sidebarToggle)
@@ -57,16 +59,19 @@ struct SettingsRootView: View {
 // MARK: - SidebarChip
 
 /// The coloured rounded-rect chip behind a sidebar section's SF Symbol, matching System Settings —
-/// a white glyph on a tinted rounded rect (the standard System Settings sidebar icon treatment).
+/// a white glyph on a tinted rounded rect. Chip/symbol sizes follow the system "Sidebar icon size"
+/// via `SidebarIconMetrics` (no single hardcoded size).
 private struct SidebarChip: View {
     let symbol: String
     let tint: Color
+    var metrics: SidebarIconMetrics
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: 11, weight: .semibold))
+            .font(.system(size: metrics.symbol, weight: .regular))
             .foregroundStyle(.white)
-            .frame(width: 20, height: 20)
+            .frame(width: metrics.chip, height: metrics.chip)
+            // Fixed 5 pt corner radius, matching the previous AppKit ChipView (System Settings' chip).
             .background(tint, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
     }
 }

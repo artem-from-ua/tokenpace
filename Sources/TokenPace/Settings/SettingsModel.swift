@@ -42,6 +42,10 @@ final class SettingsModel {
     /// The section the root view should show. Seeded once from `TOKENPACE_SETTINGS_SECTION` on `show()`.
     var selection: SettingsSection = .about
 
+    /// Live sidebar icon sizing, keyed off the system "Sidebar icon size" (System Settings). Lives here
+    /// so it persists with the window and keeps observing while open.
+    let sidebarIcons = SidebarIconMetrics()
+
     // MARK: General
 
     private(set) var launchAtLogin = false
@@ -99,18 +103,20 @@ final class SettingsModel {
     // MARK: Computed enablement (was the scattered imperative `updateX Availability()` methods)
 
     var launchToggleEnabled: Bool { inAppBundle }
-    /// The recovery/dev hint under the launch-at-login switch; empty in the neutral case.
-    var launchHint: String {
+    /// The hint under the launch-at-login switch, and whether it is the standard dev-build warning
+    /// (⚠️ styling, same as auto-install / back-to-work). On a dev build the feature can never work, so
+    /// it shows the shared "Unavailable in development builds." line; in a real `.app` it is empty
+    /// unless a toggle failed, then a recovery hint (not a dev warning). Empty in the neutral case.
+    var launchHint: (text: String, devBuild: Bool) {
         if !inAppBundle {
-            return "Unavailable in this build. Install TokenPace.app and launch it from "
-                 + "Launchpad/Finder (not a developer build) for this option to work."
+            return ("Unavailable in development builds.", true)
         }
         if launchToggleFailed {
-            return "Couldn't enable launch at login. Reinstall TokenPace.app in /Applications and "
-                 + "open it from Finder/Launchpad, or add it manually in System Settings → General → "
-                 + "Login Items."
+            return ("Couldn't enable launch at login. Reinstall TokenPace.app in /Applications and "
+                  + "open it from Finder/Launchpad, or add it manually in System Settings → General → "
+                  + "Login Items.", false)
         }
-        return ""
+        return ("", false)
     }
 
     var webDesktopRadioEnabled: Bool { webDesktopEnabled }
@@ -142,15 +148,12 @@ final class SettingsModel {
     }
 
     var installAutoEnabled: Bool { automaticUpdateChecks && inAppBundle }
-    /// The hint under "Install updates automatically" — `.app`-requirement first (in a dev build
-    /// auto-install is permanently impossible, so that's the honest message even with checks off).
-    /// A non-empty `devBuild` flag tells the view to render the ⚠️ warning styling.
+    /// The hint under "Install updates automatically". The row is shown only when periodic checks are
+    /// on (the view hides it otherwise), so the only cases here are a dev build (⚠️ — auto-install can
+    /// never work) or the enabled description. A non-empty `devBuild` flag drives the ⚠️ styling.
     var installAutoHint: (text: String, devBuild: Bool) {
         if !inAppBundle {
             return ("Unavailable in development builds.", true)
-        }
-        if !automaticUpdateChecks {
-            return ("Turn on \u{201C}Check for updates periodically\u{201D} to enable this.", false)
         }
         return ("On by default: downloads and installs a newer release in the background, then "
               + "restarts. If anything fails, the menu shows a \u{201C}New version available\u{201D} "
