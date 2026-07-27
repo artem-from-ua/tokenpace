@@ -24,10 +24,10 @@ final class SidebarIconMetrics {
     /// Sidebar row label point size.
     private(set) var label: CGFloat = 13
 
-    /// Sidebar column width — **fixed** at 258 pt, matching System Settings and the previous AppKit
-    /// design (the sidebar width itself does not change with the icon size; only the cell chip/label
-    /// sizes do, above).
-    let sidebarWidth: CGFloat = 258
+    /// Sidebar column width. System Settings widens the sidebar with the icon size (measured live: the
+    /// visible sidebar is ≈ 278 pt at Large). SwiftUI's `.frame` on the List eats ≈ 30 pt of inset, so
+    /// these are the *frame* values tuned to render to the measured visible widths.
+    private(set) var sidebarWidth: CGFloat = 288
 
     nonisolated(unsafe) private var observer: NSObjectProtocol?
 
@@ -60,9 +60,9 @@ final class SidebarIconMetrics {
         // Measured from the live macOS 15 System Settings sidebar (#156): chip 14/20/26, symbol ≈ 0.65
         // chip → 9/13/17, label 11/13/15 for Small/Medium/Large.
         switch Self.systemBucket() {
-        case 1:  (chip, symbol, label) = (14, 9, 11)    // Small
-        case 3:  (chip, symbol, label) = (26, 17, 15)   // Large
-        default: (chip, symbol, label) = (20, 13, 13)   // Medium
+        case 1:  (chip, symbol, label, sidebarWidth) = (14, 9, 11, 274)    // Small
+        case 3:  (chip, symbol, label, sidebarWidth) = (26, 17, 15, 309)   // Large  (≈ 278 visible)
+        default: (chip, symbol, label, sidebarWidth) = (20, 13, 13, 288)   // Medium
         }
     }
 }

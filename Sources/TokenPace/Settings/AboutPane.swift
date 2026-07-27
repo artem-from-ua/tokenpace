@@ -34,8 +34,11 @@ struct AboutPane: View {
                 // disabled), so the card shows only what applies.
                 if model.automaticUpdateChecks {
                     VStack(alignment: .leading, spacing: 4) {
+                        // When the feature can't work (a dev build), show the switch as OFF regardless
+                        // of the stored value — an on-but-disabled switch reads as "it's on" when it
+                        // isn't. The stored choice is preserved; it just isn't reflected while unusable.
                         Toggle("Install updates automatically", isOn: Binding(
-                            get: { model.installAutomatically },
+                            get: { model.installAutoEnabled && model.installAutomatically },
                             set: { model.setInstallAutomatically($0) }))
                         .disabled(!model.installAutoEnabled)
                         SettingsHint(text: model.installAutoHint.text, warning: model.installAutoHint.devBuild)
