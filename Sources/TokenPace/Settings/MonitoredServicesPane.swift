@@ -54,5 +54,8 @@ struct MonitoredServicesPane: View {
             }
         }
         .formStyle(.grouped)
+        // Show/hide the sub-mode row without an insertion animation (avoids the neighbour-height
+        // flicker; SwiftUI Form quirk).
+        .animation(nil, value: model.webDesktopEnabled)
     }
 }

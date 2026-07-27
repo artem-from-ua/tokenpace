@@ -20,12 +20,17 @@ struct AboutPane: View {
             }
 
             Section {
-                Toggle("Check for updates periodically", isOn: Binding(
-                    get: { model.automaticUpdateChecks },
-                    set: { model.setAutomaticUpdateChecks($0) }))
-
-                LabeledContent("Check for updates now") {
-                    Button("Check Now") { model.checkForUpdatesNow() }
+                // The periodic-check switch, with "Check Now" as a trailing button on the same row.
+                LabeledContent {
+                    HStack(spacing: 10) {
+                        Button("Check Now") { model.checkForUpdatesNow() }
+                        Toggle("", isOn: Binding(
+                            get: { model.automaticUpdateChecks },
+                            set: { model.setAutomaticUpdateChecks($0) }))
+                        .labelsHidden()
+                    }
+                } label: {
+                    Text("Check for updates periodically")
                 }
 
                 // Only meaningful when periodic checks are on — hidden entirely otherwise (not just
@@ -55,5 +60,8 @@ struct AboutPane: View {
             }
         }
         .formStyle(.grouped)
+        // Show/hide the dependent row without an insertion animation — otherwise the neighbouring row
+        // visibly changes height during the transition (SwiftUI Form quirk).
+        .animation(nil, value: model.automaticUpdateChecks)
     }
 }
