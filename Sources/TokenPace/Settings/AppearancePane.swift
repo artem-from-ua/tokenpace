@@ -9,16 +9,18 @@ struct AppearancePane: View {
 
     var body: some View {
         Form {
-            Section("Menu Bar") {
-                Toggle("Calm menu-bar widget colors", isOn: Binding(
+            Section("Menu Bar Widget") {
+                Toggle("Calm non-critical colors", isOn: Binding(
                     get: { model.calmColors }, set: { model.setCalmColors($0) }))
-                Toggle("Hide 7-day bar when calm", isOn: Binding(
-                    get: { model.hideCalmSevenDay }, set: { model.setHideCalmSevenDay($0) }))
+                // Shown to the user as "Show 7-day bar when calm" — the inverse of the stored
+                // `hideCalmSevenDay` flag (off by default = the calm 7-day bar is hidden by default).
+                Toggle("Show 7-day bar when calm", isOn: Binding(
+                    get: { !model.hideCalmSevenDay }, set: { model.setHideCalmSevenDay(!$0) }))
 
                 // Reset-countdown mode: a menu picker (like System Settings' few-option choices). The
                 // distant-7d toggle only applies to the "smart" mode, so it's shown only then (hidden,
                 // not just disabled, for the other modes).
-                Picker("Reset countdown", selection: Binding(
+                Picker("Show reset countdown", selection: Binding(
                     get: { model.resetRadio },
                     set: { model.resetRadio = $0; model.commitResetCountdownMode() })) {
                     Text("Always").tag(ResetRadio.always)

@@ -60,9 +60,9 @@ final class SidebarIconMetrics {
         // Measured from the live macOS 15 System Settings sidebar (#156): chip 14/20/26, symbol ≈ 0.65
         // chip → 9/13/17, label 11/13/15 for Small/Medium/Large.
         switch Self.systemBucket() {
-        case 1:  (chip, symbol, label, sidebarWidth) = (14, 9, 11, 274)    // Small
-        case 3:  (chip, symbol, label, sidebarWidth) = (26, 17, 15, 309)   // Large  (≈ 278 visible)
-        default: (chip, symbol, label, sidebarWidth) = (20, 13, 13, 288)   // Medium
+        case 1:  (chip, symbol, label, sidebarWidth) = (14, 9, 11, 248)    // Small
+        case 3:  (chip, symbol, label, sidebarWidth) = (26, 17, 15, 283)   // Large
+        default: (chip, symbol, label, sidebarWidth) = (20, 13, 13, 262)   // Medium
         }
     }
 }

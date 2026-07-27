@@ -10,32 +10,36 @@ struct SessionLogsPane: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Archive session logs to a folder", isOn: Binding(
+                Toggle("Archive session logs daily", isOn: Binding(
                     get: { model.archiveEnabled },
                     set: { model.setArchiveEnabled($0) }))
 
-                LabeledContent("Destination") {
-                    HStack(spacing: 8) {
-                        Text(destinationDisplay)
-                            .foregroundStyle(model.archiveDestination == nil ? .secondary : .primary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Button("Choose…") { model.chooseArchiveFolder() }
-                            .disabled(!model.archiveEnabled)
+                // Destination + status are only relevant once archiving is on — hidden otherwise.
+                if model.archiveEnabled {
+                    LabeledContent("Destination") {
+                        HStack(spacing: 8) {
+                            Text(destinationDisplay)
+                                .foregroundStyle(model.archiveDestination == nil ? .secondary : .primary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Button("Choose…") { model.chooseArchiveFolder() }
+                        }
                     }
-                }
 
-                LabeledContent {
-                    Button("Archive Now") { model.archiveNow() }
-                        .disabled(!(model.archiveEnabled && model.archiveDestination != nil))
-                } label: {
-                    Text(model.archiveStatusText)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    LabeledContent {
+                        Button("Archive Now") { model.archiveNow() }
+                            .disabled(model.archiveDestination == nil)
+                    } label: {
+                        Text(model.archiveStatusText)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
         .formStyle(.grouped)
+        // Show/hide the dependent rows without an insertion animation (avoids neighbour-height flicker).
+        .animation(nil, value: model.archiveEnabled)
     }
 
     private var destinationDisplay: String {
