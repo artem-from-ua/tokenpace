@@ -592,8 +592,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //                    launch, so the bar flips 60 % → 0 % (no ⏰) and a forced refresh follows.
         //  • `=5h-orange` / `both-orange` / `both-red` / `red-orange` / `calm5-orange7`
         //                  → fixed 5h×7d severity frames for the reset-countdown table (#103).
-        //                    `calm5-orange7` is the lone-distant-7d-orange cell where the Settings
-        //                    "Include distant 7d limit reset" checkbox toggles a visible difference.
+        //                    `calm5-orange7` is the lone days-away 7d-orange cell where the reset-
+        //                    countdown mode (smart vs never) changes what's shown.
         //  • `=calm-both`  → both bars calm (5h green + 7d green): with the default "Hide 7-day bar
         //                    when calm" (#94) on, the 7-day bar is dropped and a lone green 5h bar
         //                    sits centred (no reset text — both calm). Turn the toggle off to see

@@ -61,9 +61,8 @@ final class SettingsModel {
     var showExtraUsage = false
     var showServiceDot = false
     /// The reset-countdown radio choice (always / smart / never) — three visible options; the fourth
-    /// `ResetCountdownMode` case (show vs hide distant 7d) is the `includeDistant7d` checkbox below.
+    /// The reset-countdown choice (always / smart / never), shown as a menu picker.
     var resetRadio: ResetRadio = .smart
-    var includeDistant7d = true
 
     // MARK: Monitored Services
 
@@ -120,7 +119,6 @@ final class SettingsModel {
     }
 
     var webDesktopRadioEnabled: Bool { webDesktopEnabled }
-    var includeDistantEnabled: Bool { resetRadio == .smart }
 
     /// The master "Back to work" switch is disabled on a dev build (authorization is impossible there,
     /// so the feature can never work — like launch-at-login / auto-install).
@@ -175,7 +173,7 @@ final class SettingsModel {
         hideCalmSevenDay = PersistedConfig.hideCalmSevenDayBar
         showExtraUsage = PersistedConfig.showExtraUsage
         showServiceDot = PersistedConfig.showServiceStatusDot
-        (resetRadio, includeDistant7d) = ResetCountdownMode.decompose(PersistedConfig.resetCountdownModeMenuBar)
+        resetRadio = PersistedConfig.resetCountdownModeMenuBar.radio
 
         let ms = PersistedConfig.monitoredServices
         claudeCodeEnabled = ms.claudeCodeEnabled
@@ -232,10 +230,9 @@ final class SettingsModel {
         onServiceDotChange?(on)
     }
 
-    /// Fold the radio + checkbox into a `ResetCountdownMode`, persist, and fire the callback. Called
-    /// whenever either the radio or the checkbox changes (the view writes the model prop first).
+    /// Map the picker choice to a `ResetCountdownMode`, persist, and fire the callback.
     func commitResetCountdownMode() {
-        let mode = ResetCountdownMode.recompose(radio: resetRadio, includeDistant7d: includeDistant7d)
+        let mode = ResetCountdownMode.from(radio: resetRadio)
         PersistedConfig.resetCountdownModeMenuBar = mode
         AppLogger.lifecycle.notice("reset-countdown: menu-bar mode set \(mode.rawValue, privacy: .public)")
         onResetCountdownModeMenuBarChange?(mode)
@@ -314,12 +311,20 @@ final class SettingsModel {
     func checkForUpdatesNow() { onCheckForUpdatesNow?() }
 
     func setArchiveEnabled(_ on: Bool) {
+        if on, PersistedConfig.archiveDestination == nil {
+            // Turning on with no folder yet → prompt. If the user cancels (still no folder), the
+            // feature can't do anything, so flip the toggle back off rather than leaving it stuck on.
+            chooseArchiveFolder()
+            if PersistedConfig.archiveDestination == nil {
+                archiveEnabled = false
+                PersistedConfig.archiveEnabled = false
+                refreshArchiveStatus()
+                return
+            }
+        }
         archiveEnabled = on
         PersistedConfig.archiveEnabled = on
         AppLogger.lifecycle.notice("archive: enabled set \(on, privacy: .public)")
-        if on, PersistedConfig.archiveDestination == nil {
-            chooseArchiveFolder()   // no folder yet → prompt now, or the toggle does nothing
-        }
         refreshArchiveStatus()
     }
 

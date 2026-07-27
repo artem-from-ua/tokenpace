@@ -385,9 +385,9 @@ actor StubUsageTransport: UsageTransport {
         /// one green stroke side by side, for comparing the lightened menu-bar pacing colours (#158).
         case redGreen
         /// 5h **calm** (usage 10 vs elapsed ~20 → green) + 7d **orange** ahead-of-pace (usage 55 vs
-        /// elapsed ~29 → ahead ~26 pts) with a **distant** reset (5 d ≥ 24 h). The only frame where the
-        /// "Display reset countdown" checkbox toggles a visible difference: `showDistant7d` shows the
-        /// 7d countdown, `hideDistant7d` hides it (the "lone distant 7d orange" cell, #103/ADR-0029).
+        /// elapsed ~29 → ahead ~26 pts) with a days-away reset (5 d ≥ 24 h). The frame where the
+        /// reset-countdown mode changes what's shown: `smart` shows the 7d countdown here, `never`
+        /// hides it (the lone days-away 7d-orange cell, #103/ADR-0029).
         case calmFiveOrangeSeven
         /// Both bars **calm**: 5h green (usage 10 vs elapsed ~20) + 7d green (usage 20 vs elapsed ~29).
         /// Exercises "Hide 7-day bar when calm" (#94): with the toggle on (default) the 7-day bar is

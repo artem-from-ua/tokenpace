@@ -1,32 +1,44 @@
 import Testing
+import Foundation
 @testable import TokenPaceKit
 
-// MARK: - ResetCountdownMode fold/decompose (#168, ADR-0041)
+// MARK: - ResetCountdownMode ↔ ResetRadio (#168, ADR-0041)
 
-@Suite("ResetCountdownMode radio fold/decompose")
+@Suite("ResetCountdownMode radio mapping")
 struct ResetCountdownModeRadioTests {
 
-    @Test func decomposeMapsEveryCase() {
-        #expect(ResetCountdownMode.decompose(.always)        == (.always, true))
-        #expect(ResetCountdownMode.decompose(.showDistant7d) == (.smart, true))
-        #expect(ResetCountdownMode.decompose(.hideDistant7d) == (.smart, false))
-        #expect(ResetCountdownMode.decompose(.never)         == (.never, true))
+    @Test func modeToRadio() {
+        #expect(ResetCountdownMode.always.radio == .always)
+        #expect(ResetCountdownMode.smart.radio == .smart)
+        #expect(ResetCountdownMode.never.radio == .never)
     }
 
-    @Test func recomposeMapsEveryRadioChoice() {
-        #expect(ResetCountdownMode.recompose(radio: .always, includeDistant7d: true)  == .always)
-        #expect(ResetCountdownMode.recompose(radio: .always, includeDistant7d: false) == .always)
-        #expect(ResetCountdownMode.recompose(radio: .never,  includeDistant7d: true)  == .never)
-        #expect(ResetCountdownMode.recompose(radio: .smart,  includeDistant7d: true)  == .showDistant7d)
-        #expect(ResetCountdownMode.recompose(radio: .smart,  includeDistant7d: false) == .hideDistant7d)
+    @Test func radioToMode() {
+        #expect(ResetCountdownMode.from(radio: .always) == .always)
+        #expect(ResetCountdownMode.from(radio: .smart) == .smart)
+        #expect(ResetCountdownMode.from(radio: .never) == .never)
     }
 
-    /// Every mode round-trips through decompose → recompose. This is the invariant the Settings UI
-    /// relies on: opening the pane (decompose) then re-committing (recompose) must not change the mode.
+    /// Every mode round-trips through radio → mode. Opening the Settings picker then re-committing
+    /// must not change the stored mode.
     @Test func roundTripPreservesEveryMode() {
         for mode in ResetCountdownMode.allCases {
-            let (radio, include) = ResetCountdownMode.decompose(mode)
-            #expect(ResetCountdownMode.recompose(radio: radio, includeDistant7d: include) == mode)
+            #expect(ResetCountdownMode.from(radio: mode.radio) == mode)
         }
+    }
+
+    /// The removed legacy raw values decode to the default (smart).
+    @Test func legacyRawValuesDecodeToDefault() throws {
+        for raw in ["show_distant_7d", "hide_distant_7d", "bogus"] {
+            let decoded = try JSONDecoder().decode(ResetCountdownMode.self, from: Data("\"\(raw)\"".utf8))
+            #expect(decoded == .smart)
+        }
+    }
+
+    /// A days-away ahead-of-pace 7d countdown is shown for every mode except `never`.
+    @Test func showsSevenDayAheadExceptNever() {
+        #expect(ResetCountdownMode.always.showsSevenDayAheadWhenFar)
+        #expect(ResetCountdownMode.smart.showsSevenDayAheadWhenFar)
+        #expect(!ResetCountdownMode.never.showsSevenDayAheadWhenFar)
     }
 }

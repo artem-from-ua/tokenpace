@@ -46,7 +46,7 @@ enum PersistedConfig {
         /// (opt-in) — see the property.
         static let calmMenuBarColors = "calmMenuBarColors"
         /// How the menu-bar widget picks/hides the reset countdown (#103), stored as the raw
-        /// `ResetCountdownMode` string. Default `.showDistant7d` — see the property.
+        /// `ResetCountdownMode` string. Default `.smart` — see the property.
         static let resetCountdownModeMenuBar = "resetCountdownModeMenuBar"
         /// Whether the menu-bar widget draws the service-status dot on a service issue (#31).
         /// Default-on (opt-out) — see the property.
@@ -175,17 +175,17 @@ enum PersistedConfig {
     /// The strong warnings (orange/red), the time-indicator dot, the service-status dot, and the
     /// error triangle are unaffected; the popup keeps its full colour too.
     static var calmMenuBarColors: Bool {
-        get { defaults.object(forKey: Key.calmMenuBarColors) as? Bool ?? false }
+        get { defaults.object(forKey: Key.calmMenuBarColors) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.calmMenuBarColors) }
     }
 
     /// How the **menu-bar** widget picks or hides the reset countdown (#103, ADR-0029). Named for the
     /// menu bar specifically because the popup has its own countdown logic. Stored as the raw
-    /// `ResetCountdownMode` string; an absent key or an unrecognised value (e.g. one a newer build
-    /// wrote) reads as the default ``ResetCountdownMode/showDistant7d`` — same forward-compatible
-    /// fallback the type's own decoder uses, so an older build never trips on a future value.
+    /// `ResetCountdownMode` string; an absent key or an unrecognised value (a newer build's value, or a
+    /// legacy `show_distant_7d`/`hide_distant_7d` from before #168) reads as the default
+    /// ``ResetCountdownMode/smart`` — so an older build never trips on a future value.
     static var resetCountdownModeMenuBar: ResetCountdownMode {
-        get { ResetCountdownMode(rawValue: defaults.string(forKey: Key.resetCountdownModeMenuBar) ?? "") ?? .showDistant7d }
+        get { ResetCountdownMode(rawValue: defaults.string(forKey: Key.resetCountdownModeMenuBar) ?? "") ?? .smart }
         set { defaults.set(newValue.rawValue, forKey: Key.resetCountdownModeMenuBar) }
     }
 

@@ -100,7 +100,7 @@
 | `both-orange` | orange | orange | обидва ahead ~26 пт |
 | `both-red` | red | red | обидва вичерпані; пізніший ресет — 7d |
 | `red-orange` | red | orange | red-бар (5h) керує countdown |
-| `calm5-orange7` | calm | orange (distant) | єдиний кейс, де чекбокс «Include distant 7d limit reset» дає видиму різницю |
+| `calm5-orange7` | calm | orange (days away) | кейс, де режим reset-countdown (smart vs never) дає видиму різницю |
 | `calm-both` | green | green | обидва calm; за default-ON #94 7d ховається → **одинока центрована зелена 5h** без reset-тексту (зніми чекбокс — знову дві смужки) |
 
 > Додаючи нову фічу зі своїм станом — **додай стуб і онови цю таблицю** (як зробили для #103, #94).
