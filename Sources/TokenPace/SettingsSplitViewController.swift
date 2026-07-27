@@ -28,6 +28,7 @@ final class SettingsSplitViewController: NSSplitViewController {
     private(set) var selectedTitle: String?
 
     private let sections: [Section]
+    /// The fixed sidebar width — matches System Settings' sidebar and never changes at runtime (#156).
     private let sidebarWidth: CGFloat
     private let sidebar: SettingsSidebarController
     private let detailContainer = NSView()
@@ -52,6 +53,8 @@ final class SettingsSplitViewController: NSSplitViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        // Fixed-width sidebar, exactly like System Settings: min == max thickness, no runtime resize.
+        // The window is fixed too, so the detail pane simply gets `windowWidth − sidebarWidth`.
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
         sidebarItem.minimumThickness = sidebarWidth
         sidebarItem.maximumThickness = sidebarWidth
@@ -61,7 +64,6 @@ final class SettingsSplitViewController: NSSplitViewController {
         let detailVC = NSViewController()
         detailVC.view = detailContainer   // split VC sizes this root view via autoresizing — leave it
         let detailItem = NSSplitViewItem(viewController: detailVC)
-        detailItem.minimumThickness = 380
         addSplitViewItem(detailItem)
 
         sidebar.onSelect = { [weak self] index in self?.select(index) }
@@ -94,6 +96,9 @@ final class SettingsSplitViewController: NSSplitViewController {
         onSelect?(sections[index].title)
         sidebar.select(index)
     }
+
+    /// Select a section by index (used by a dev helper to open straight to a given pane).
+    func selectSection(_ index: Int) { select(index) }
 
     /// Eagerly build every pane up front. Called by `SettingsWindowController` right after init so no
     /// pane's outlets are nil when a background callback fires while the window is closed.
