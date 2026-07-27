@@ -16,15 +16,15 @@ struct SessionLogsPane: View {
 
                 // Destination + status are only relevant once archiving is on — hidden otherwise.
                 if model.archiveEnabled {
-                    LabeledContent("Destination") {
-                        HStack(spacing: 8) {
-                            // Native NSPathControl: folder icon + name, self-truncating, click →
-                            // Finder — the system control for a chosen folder (ADR-0040).
-                            PathControlView(url: destinationURL)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Button("Choose…") { model.chooseArchiveFolder() }
-                                .layoutPriority(1)
-                        }
+                    HStack(spacing: 8) {
+                        Text("Destination")
+                        // Native NSPathControl: folder icon + name, self-truncating, click → Finder —
+                        // the system control for a chosen folder (ADR-0040). Left-aligned right after
+                        // the label; the button stays on the trailing edge.
+                        PathControlView(url: destinationURL)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Choose…") { model.chooseArchiveFolder() }
+                            .layoutPriority(1)
                     }
 
                     LabeledContent {

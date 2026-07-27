@@ -169,9 +169,9 @@ enum PersistedConfig {
     }
 
     /// Whether the menu-bar widget renders its **soft** pacing colours as white (#105) — the idle
-    /// blue track, the on-pace green, and the mild ahead-of-pace yellow. **Default-off** (opt-in):
-    /// an absent key reads as `false`, so the vivid statusline colours are the out-of-the-box look.
-    /// `object(forKey:) as? Bool ?? false` distinguishes "unset" (→ false) from an explicit choice.
+    /// blue track, the on-pace green, and the mild ahead-of-pace yellow. **Default-on** (opt-out, #168):
+    /// an absent key reads as `true`, so the calm/non-critical look is the out-of-the-box default.
+    /// `object(forKey:) as? Bool ?? true` distinguishes "unset" (→ true) from an explicit choice.
     /// The strong warnings (orange/red), the time-indicator dot, the service-status dot, and the
     /// error triangle are unaffected; the popup keeps its full colour too.
     static var calmMenuBarColors: Bool {

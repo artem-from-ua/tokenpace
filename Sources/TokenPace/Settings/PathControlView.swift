@@ -14,6 +14,8 @@ struct PathControlView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSPathControl {
         let control = NSPathControl()
+        // `.popUp` shows just the chosen folder (icon + name) with a chevron, self-truncating — not the
+        // full breadcrumb trail that `.standard` draws.
         control.pathStyle = .popUp
         control.isEditable = false
         control.target = context.coordinator
@@ -25,8 +27,20 @@ struct PathControlView: NSViewRepresentable {
     }
 
     func updateNSView(_ control: NSPathControl, context: Context) {
-        control.url = url
-        control.placeholderString = url == nil ? placeholder : nil
+        if let url {
+            // Build the single path item ourselves so we can add a little space between the folder
+            // icon and the name — the default `.popUp` cell packs them tightly, unlike the roomier
+            // Finder/System-Settings look.
+            let item = NSPathControlItem()
+            item.title = " " + url.lastPathComponent
+            item.image = NSWorkspace.shared.icon(forFile: url.path)
+            control.pathItems = [item]
+            control.placeholderString = nil
+        } else {
+            control.url = nil
+            control.pathItems = []
+            control.placeholderString = placeholder
+        }
         context.coordinator.url = url
     }
 

@@ -60,7 +60,6 @@ final class SettingsModel {
     var hideCalmSevenDay = false
     var showExtraUsage = false
     var showServiceDot = false
-    /// The reset-countdown radio choice (always / smart / never) — three visible options; the fourth
     /// The reset-countdown choice (always / smart / never), shown as a menu picker.
     var resetRadio: ResetRadio = .smart
 
