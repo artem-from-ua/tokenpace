@@ -13,8 +13,8 @@ struct AboutPane: View {
     /// same kind of tagline under its pane title).
     private static let tagline =
         "A minimal, unobtrusive menu-bar companion for agentic coding. It surfaces exactly what you "
-        + "need — usage, limits and budgets across Claude Code (Codex and Gemini next) — so you pace "
-        + "yourself and stay productive without leaving your flow."
+        + "need — usage, limits and budgets across Claude Code (more coming) — so you pace yourself "
+        + "and stay productive without leaving your flow."
 
     var body: some View {
         Form {
