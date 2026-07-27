@@ -291,6 +291,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppLogger.lifecycle.info(
             "TokenPace status item attached (\(TokenPaceKit.version, privacy: .public)); live polling started"
         )
+
+        // Dev helper: `TOKENPACE_OPEN_SETTINGS=1 swift run` auto-opens the Settings window on launch, so
+        // a settings change can be inspected without an AX menu-bar click — which is unsafe when the
+        // installed `.app` and a dev build run side by side (the click can land on the wrong instance).
+        // Opt-in via env (not gated on dev-build) so a plain `swift run` still starts quietly.
+        if ProcessInfo.processInfo.environment["TOKENPACE_OPEN_SETTINGS"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.openSettings() }
+        }
     }
 
     // MARK: - Menu actions (#14)

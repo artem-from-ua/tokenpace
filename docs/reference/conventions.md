@@ -52,6 +52,15 @@ git config core.hooksPath .githooks
 
 ## UI-дизайн (AppKit)
 
+- **Мета: максимально слідувати дизайну рідних застосунків macOS** (System Settings передусім). Для
+  стандартних системних елементів — **нуль захардкоджених** розмірів/шрифтів/відступів/кольорів;
+  використовувати системні механізми (семантичні `NSColor`, `NSFont.systemFontSize`/text styles,
+  `NSSwitch.controlSize`, `rowSizeStyle`/`NSTableViewDefaultSizeMode`, `NSStackView.firstBaseline`,
+  `NSPathControl` тощо). Де AppKit **не має** API (grouped-inset контейнер, grouped-фон, скруглений
+  `NSDatePicker`) — значення **виміряні** з живого System Settings (AX/скриншот ÷2), не вгадані, і
+  задокументовані. **Перед PR перевіряти в обох темах (light+dark) і всіх станах** (sidebar icon size,
+  dev-білд/`.app`) скриншотами. Повний розбір, метод вимірювання й типові помилки —
+  [system-settings-parity.md](system-settings-parity.md); рішення-принцип — ADR-0040.
 - **Перед комітом UI-зміни (menu bar popup, вікна, будь-який AppKit-екран) — звірити з актуальними
   Apple Human Interface Guidelines** (developer.apple.com/design/human-interface-guidelines).
   Не стверджувати деталі гайдлайну з пам'яті — HIG-сайт SPA-рендериться і часто не піддається

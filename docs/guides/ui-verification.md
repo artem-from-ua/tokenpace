@@ -165,6 +165,28 @@ locked».
   → копія має замінитись на новіший тег і перезапуститись; перевір версію копії + що новий процес
   стартував + `codesign`/`spctl` заміненого bundle. Прибери `~/UpdateTest` після тесту.
 
+### Авто-відкриття вікна Settings при запуску
+
+`TOKENPACE_OPEN_SETTINGS=1 swift run` (можна разом зі стубом даних) — dev-білд відкриває вікно
+**Settings** одразу після старту, ~0.6 с. Це прибирає потребу клікати menu-bar item через AX, що
+**небезпечно за кількох інстансів TokenPace** (клік може влучити не в той білд — див. нижче). Зручно
+для швидкого перегляду змін у Settings.
+
+```sh
+TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_STUB=screenshot swift run
+```
+
+Флаг opt-in (не прив'язаний до dev-білда), тож звичайний `swift run` стартує тихо. Продакшн-`.app`
+поводиться так само лише за явно виставленого env, чого при нормальному запуску не буває.
+
+Додатково `TOKENPACE_SETTINGS_SECTION=<index>` відкриває **конкретну** секцію Settings за 0-based
+індексом (0=About, 1=General, 2=Appearance, 3=Monitored Services, 4=Notifications, 5=Session Logs) —
+щоб зробити скриншот потрібної панелі без AX-кліку по sidebar-рядку:
+
+```sh
+TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=4 swift run   # відкриє одразу на Notifications
+```
+
 ## Що НЕ рахується за верифікацію
 
 - **Скриншоти з тимчасового dev-only коду.** Синтетичний рендер `StatusItemView` / PNG-матриці

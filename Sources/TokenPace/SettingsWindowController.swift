@@ -23,9 +23,15 @@ final class SettingsWindowController: NSWindowController {
     private static let repoURL = URL(string: "https://github.com/artem-from-ua/tokenpace")!
 
     private enum Metrics {
-        static let contentWidth: CGFloat = 620
+        // Fixed window content width, matching System Settings exactly (measured 857 pt, #156). The
+        // window never resizes — neither by pane nor by sidebar icon size. Inside it, the sidebar and
+        // detail split dynamically: the sidebar takes just enough for the longest label, the detail
+        // absorbs the rest (System Settings holds 857 and lets the detail shrink when the sidebar grows
+        // at the Large icon size). The detail keeps a minimum so its cards never wrap/clip.
+        static let contentWidth: CGFloat = 857
         static let contentHeight: CGFloat = 480
-        static let sidebarWidth: CGFloat = 200
+        // Fixed sidebar width, matching System Settings (measured 258 pt). Detail = contentWidth − this.
+        static let sidebarWidth: CGFloat = 258
         static let padding: CGFloat = 20
         static let cardSpacing: CGFloat = 20
         static let sectionTitleGap: CGFloat = 7
@@ -86,7 +92,7 @@ final class SettingsWindowController: NSWindowController {
     private var hintLabel: NSTextField!
     private var pausePollingToggle: NSSwitch!
 
-    // Menu Bar
+    // Appearance (menu-bar widget)
     private var calmColorsToggle: NSSwitch!
     private var hideCalmSevenDayToggle: NSSwitch!
     private var serviceDotToggle: NSSwitch!
@@ -107,11 +113,14 @@ final class SettingsWindowController: NSWindowController {
     private var notifyStartPicker: NSDatePicker!
     private var notifyEndPicker: NSDatePicker!
     private var notifyDurationLabel: NSTextField!
-    private var notifyNeverRadio: NSButton!
-    private var notifyFriSatRadio: NSButton!
-    private var notifySatSunRadio: NSButton!
+    private var notifySuppressPopup: NSPopUpButton!
+    /// Width constraint on the suppress popup, recomputed per selection so the button fits the CURRENT
+    /// title (System Settings sizes to the selected item, not the widest, #156).
+    private var notifySuppressPopupWidth: NSLayoutConstraint!
     /// Hint under the master switch: notification-authorization status, or the dev-build note.
     private var notifyAuthHint: NSTextField!
+    /// Warning triangle shown beside the dev-build / denied hint.
+    private var notifyAuthIcon: NSImageView!
     /// The hint's own card row + its card, so the whole row (and its divider) collapses when the hint
     /// is empty — no orphan divider pair above "Allowed hours".
     private var notifyAuthRow: NSView!
@@ -121,7 +130,7 @@ final class SettingsWindowController: NSWindowController {
     private var archiveToggle: NSSwitch!
     private var archiveChooseButton: NSButton!
     private var archiveNowButton: NSButton!
-    private var archivePathLabel: NSTextField!
+    private var archivePathControl: NSPathControl!
     private var archiveStatusLabel: NSTextField!
 
     // About / Updates
@@ -153,15 +162,31 @@ final class SettingsWindowController: NSWindowController {
     private var splitVC: SettingsSplitViewController!
 
     convenience init() {
+        // A settings window is fixed-size, not user-resizable: HIG says it "accommodates the size of the
+        // current pane," so minimize/maximize are dimmed (#156). Dropping `.resizable`/`.miniaturizable`
+        // from the style mask stops the window resizing, but AppKit still *draws* the zoom and minimize
+        // buttons for any `.titled` window — they'd just look active-but-inert. So the two buttons are
+        // also hidden outright below (`standardWindowButton`), leaving only close. The window keeps
+        // `Metrics.content*` as its one fixed size; taller panes scroll inside their own pane.
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: Metrics.contentWidth, height: Metrics.contentHeight),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false)
-        window.title = "TokenPace"
+        window.title = "TokenPace Settings"
         window.level = .floating               // float above other apps from a menu-bar app (ADR-0012 §6)
         window.isReleasedWhenClosed = false    // keep the controller alive so re-opening reuses it
-        window.setFrameAutosaveName("TokenPaceSettings")   // remember size/position across opens
+        window.setFrameAutosaveName("TokenPaceSettings")   // remember position across opens (size is fixed)
+        // Hide the zoom (maximize) and minimize traffic-light buttons — a fixed-size settings window
+        // offers neither. Close stays. (`.resizable`/`.miniaturizable` are already omitted above; this
+        // removes the still-drawn buttons rather than leaving them as dead controls.)
+        window.standardWindowButton(.zoomButton)?.isHidden = true
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        // Pin the content width so the split controller can't shrink the window to its panes' sum: the
+        // window stays exactly `contentWidth` (857, System Settings' width), and the sidebar/detail
+        // split moves inside it. Height stays fixed too (fixed-size settings window).
+        window.contentMinSize = NSSize(width: Metrics.contentWidth, height: Metrics.contentHeight)
+        window.contentMaxSize = NSSize(width: Metrics.contentWidth, height: .greatestFiniteMagnitude)
         self.init(window: window)
         buildContent()
     }
@@ -194,7 +219,18 @@ final class SettingsWindowController: NSWindowController {
             let restored = window?.setFrameUsingName("TokenPaceSettings") ?? false
             if !restored { window?.center() }
         }
+        // Force the fixed content width every show: the split controller (and an autosaved frame) can
+        // otherwise shrink the window to the sum of its panes, so it wouldn't stay at the System
+        // Settings width. Pin the width to `contentWidth`; the split distributes it (#156).
+        if let window, abs(window.contentLayoutRect.width - Metrics.contentWidth) > 0.5 {
+            window.setContentSize(NSSize(width: Metrics.contentWidth, height: window.contentLayoutRect.height))
+        }
         window?.makeKeyAndOrderFront(nil)
+        // Dev helper: `TOKENPACE_SETTINGS_SECTION=<index>` opens straight to a given pane (0-based), so a
+        // specific pane can be inspected without an AX click. No effect in normal use.
+        if let raw = ProcessInfo.processInfo.environment["TOKENPACE_SETTINGS_SECTION"], let idx = Int(raw) {
+            splitVC.selectSection(idx)
+        }
     }
 
     // MARK: Content assembly
@@ -203,24 +239,29 @@ final class SettingsWindowController: NSWindowController {
         let split = SettingsSplitViewController(
             sidebarWidth: Metrics.sidebarWidth,
             sections: [
-                .init(title: "General", symbol: "gearshape", tint: .systemGray, make: buildGeneralPane),
-                .init(title: "Menu Bar", symbol: "menubar.rectangle", tint: .systemIndigo, make: buildMenuBarPane),
-                .init(title: "Monitored Services", symbol: "dot.radiowaves.left.and.right", tint: .systemGreen, make: buildServicesPane),
-                .init(title: "Session Logs", symbol: "folder", tint: .systemOrange, make: buildSessionLogsPane),
-                .init(title: "Notifications", symbol: "bell", tint: .systemRed, make: buildNotificationsPane),
                 .init(title: "About", symbol: "info.circle", tint: .systemBlue, make: buildAboutPane),
+                // Symbols/tints match the actual System Settings panes read from their .appex Info.plist
+                // (#156): General uses `gear` on gray (not `gearshape`); Notifications is a red bell.
+                .init(title: "General", symbol: "gear", tint: .systemGray, make: buildGeneralPane),
+                .init(title: "Appearance", symbol: "menubar.rectangle", tint: .systemIndigo, make: buildMenuBarPane),
+                .init(title: "Monitored Services", symbol: "dot.radiowaves.left.and.right", tint: .systemGreen, make: buildServicesPane),
+                .init(title: "Notifications", symbol: "bell.badge.fill", tint: .systemRed, make: buildNotificationsPane),
+                .init(title: "Session Logs", symbol: "folder", tint: .systemOrange, make: buildSessionLogsPane),
             ])
-        // The window title stays "TokenPace" across sections — the selected section is already obvious
-        // from the highlighted sidebar row, exactly like macOS System Settings (which never repeats the
-        // pane name in the title bar). `onSelect` is left unused for the title (#131).
+        // The window title is the static "TokenPace Settings" (HIG's single-pane form). It does not yet
+        // track the selected section — the HIG "update the title to the visible pane" behaviour is a
+        // separate open item (issue #156 §2); until then the highlighted sidebar row shows the section.
+        // `onSelect` is left unused for the title.
         split.onSelect = nil
+        // Both the window and the sidebar are fixed-width, exactly like System Settings: window 857,
+        // sidebar 258, detail = 599. Neither resizes at runtime (#156).
         splitVC = split
         window?.contentViewController = split   // triggers viewDidLoad → sidebar + first selection
         // Build every pane up front so no outlet is nil when a background callback (updateAvailability
         // / updateArchiveStatus) fires while the window is closed (#131). `contentViewController` above
         // has already run `viewDidLoad`, which built + cached the first pane; this fills in the rest.
         split.buildAllPanes()
-        window?.title = "TokenPace"
+        window?.title = "TokenPace Settings"
     }
 
     // MARK: Pane builders (all eager, called once from `buildContent`)
@@ -240,12 +281,12 @@ final class SettingsWindowController: NSWindowController {
 
         pausePollingToggle = SettingsRow.makeSwitch(target: self, action: #selector(togglePausePolling(_:)))
         let pauseCol = SettingsRow.labelColumn(
-            "Pause polling while the screen is locked",
+            "Pause usage API polling while the screen is locked",
             hint: "Skips usage polls while the screen is locked, off, or the screensaver is running, "
                 + "and refreshes right away on unlock. System sleep always pauses regardless.")
         card.addRow(SettingsRow.container(leading: pauseCol.view, trailing: pausePollingToggle))
 
-        return pane(sections: [("General", card)])
+        return pane(cards: [(nil, card)])
     }
 
     private func buildMenuBarPane() -> NSView {
@@ -305,7 +346,7 @@ final class SettingsWindowController: NSWindowController {
         resetGroup.spacing = 6
         countdown.addRow(SettingsRow.container(leading: resetGroup))
 
-        return pane(sections: [("Appearance", appearance), ("Reset Countdown", countdown)])
+        return pane(cards: [(nil, appearance), ("Show Reset Countdown in Menu Bar", countdown)])
     }
 
     private func buildServicesPane() -> NSView {
@@ -314,9 +355,10 @@ final class SettingsWindowController: NSWindowController {
         // Claude API — always monitored, not configurable. A disabled `NSSwitch` has no title, so the
         // "always monitored" note is a muted trailing label beside the on+disabled switch (#89).
         let apiNote = NSTextField(labelWithString: "always monitored")
-        apiNote.font = .systemFont(ofSize: 11)
+        apiNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         apiNote.textColor = .secondaryLabelColor
         let apiSwitch = NSSwitch()
+        apiSwitch.controlSize = .mini   // match the other rows' switches (#156)
         apiSwitch.state = .on
         apiSwitch.isEnabled = false
         let apiTrailing = NSStackView(views: [apiNote, apiSwitch])
@@ -367,7 +409,7 @@ final class SettingsWindowController: NSWindowController {
         ])
         card.addRow(webRow)
 
-        return pane(sections: [("Monitored Services", card)])
+        return pane(cards: [(nil, card)])
     }
 
     private func buildSessionLogsPane() -> NSView {
@@ -380,13 +422,17 @@ final class SettingsWindowController: NSWindowController {
                 + "Code deletes after 30 days are kept in the archive.")
         card.addRow(SettingsRow.container(leading: archiveCol.view, trailing: archiveToggle))
 
-        // Destination row: a "Destination" label above the chosen path (standard body size, not the
-        // small caption used for hints), with the Choose… button trailing (#131 feedback).
-        archivePathLabel = NSTextField(labelWithString: "")
-        archivePathLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
-        archivePathLabel.textColor = .secondaryLabelColor
-        archivePathLabel.lineBreakMode = .byTruncatingMiddle
-        let destinationCol = NSStackView(views: [leadingLabel("Destination"), archivePathLabel])
+        // Destination row: a "Destination" label above the chosen path, shown with an `NSPathControl`
+        // (#156). System Settings uses a path control for folder paths: a folder icon + path segments
+        // that truncate themselves and open in Finder on click — unlike a plain label, it never forces
+        // the row (and window) wider to fit a long path. `.popUp` style keeps it compact and clickable.
+        archivePathControl = NSPathControl()
+        archivePathControl.pathStyle = .popUp
+        archivePathControl.target = self
+        archivePathControl.action = #selector(revealArchiveFolder)
+        archivePathControl.translatesAutoresizingMaskIntoConstraints = false
+        archivePathControl.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let destinationCol = NSStackView(views: [leadingLabel("Destination"), archivePathControl])
         destinationCol.orientation = .vertical
         destinationCol.alignment = .leading
         destinationCol.spacing = 2
@@ -394,14 +440,14 @@ final class SettingsWindowController: NSWindowController {
         card.addRow(SettingsRow.container(leading: destinationCol, trailing: archiveChooseButton))
 
         archiveStatusLabel = NSTextField(labelWithString: "")
-        archiveStatusLabel.font = .systemFont(ofSize: 11)
+        archiveStatusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         archiveStatusLabel.textColor = .secondaryLabelColor
         archiveStatusLabel.lineBreakMode = .byWordWrapping
         archiveStatusLabel.maximumNumberOfLines = 0
         archiveNowButton = SettingsRow.makeButton("Archive Now", target: self, action: #selector(archiveNow))
         card.addRow(SettingsRow.container(leading: archiveStatusLabel, trailing: archiveNowButton))
 
-        return pane(sections: [("Archive", card)])
+        return pane(cards: [(nil, card)])
     }
 
     // MARK: Notifications (#160)
@@ -419,12 +465,22 @@ final class SettingsWindowController: NSWindowController {
                 + "to work.")
         card.addRow(SettingsRow.container(leading: masterCol.view, trailing: backToWorkToggle))
 
-        // Auth/dev status hint as its own row, hidden (with its divider) whenever the hint is empty —
-        // so the common "authorized / not-yet-decided" case shows no orphan divider pair. Only the
-        // `denied` / dev-build cases reveal it (`applyNotifyAuthHint`).
+        // Auth/dev status hint — a warning row belonging to "Back to work" above it, so it's attached
+        // with NO divider (`divider: false`). Hidden whenever the hint is empty (the common authorized /
+        // not-yet-decided case); only `denied` / dev-build reveal it (`applyNotifyAuthHint`). A warning
+        // triangle precedes the text.
+        notifyAuthIcon = NSImageView()
+        notifyAuthIcon.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)
+        notifyAuthIcon.contentTintColor = .secondaryLabelColor
+        notifyAuthIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: NSFont.smallSystemFontSize, weight: .regular)
+        notifyAuthIcon.setContentHuggingPriority(.required, for: .horizontal)
         notifyAuthHint = SettingsRow.wrappingHint("")
-        notifyAuthRow = SettingsRow.container(leading: indented(notifyAuthHint))
-        card.addRow(notifyAuthRow)
+        let authStack = NSStackView(views: [notifyAuthIcon, notifyAuthHint])
+        authStack.orientation = .horizontal
+        authStack.alignment = .firstBaseline
+        authStack.spacing = 5
+        notifyAuthRow = SettingsRow.container(leading: authStack)
+        card.addRow(notifyAuthRow, divider: false)
         card.setRow(notifyAuthRow, hidden: true)
 
         // Allowed-hours row: two hour/minute pickers with an en-dash between, plus a live "Nh window"
@@ -435,41 +491,45 @@ final class SettingsWindowController: NSWindowController {
         dash.font = .systemFont(ofSize: NSFont.systemFontSize)
         dash.textColor = .secondaryLabelColor
         notifyDurationLabel = NSTextField(labelWithString: "")
-        notifyDurationLabel.font = .systemFont(ofSize: 11)
+        notifyDurationLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         notifyDurationLabel.textColor = .secondaryLabelColor
-        let hoursRow = NSStackView(views: [
-            notifyStartPicker, dash, notifyEndPicker, notifyDurationLabel,
-        ])
+        // "Allowed hours" laid out like System Settings' Night Shift schedule row: the label on the
+        // leading edge, and on the trailing edge the live "Nh window" duration caption followed by the
+        // two stepper time fields (`from – to`) (#156).
+        let startBox = SettingsRow.roundedFieldBox(wrapping: notifyStartPicker)
+        let endBox = SettingsRow.roundedFieldBox(wrapping: notifyEndPicker)
+        let hoursRow = NSStackView(views: [notifyDurationLabel, startBox, dash, endBox])
         hoursRow.orientation = .horizontal
         hoursRow.alignment = .centerY
         hoursRow.spacing = 8
-        let hoursCol = NSStackView(views: [leadingLabel("Allowed hours"), indented(hoursRow, by: 0)])
-        hoursCol.orientation = .vertical
-        hoursCol.alignment = .leading
-        hoursCol.spacing = 6
-        card.addRow(SettingsRow.container(leading: indented(hoursCol)))
+        hoursRow.setContentHuggingPriority(.required, for: .horizontal)
+        hoursRow.setHuggingPriority(.required, for: .horizontal)
+        card.addRow(SettingsRow.container(leading: leadingLabel("Allowed hours"), trailing: hoursRow))
 
-        // Suppress-days radio group: three radios sharing one action so AppKit auto-groups them into an
-        // exclusive set (same pattern as the reset-countdown group).
-        notifyNeverRadio = NSButton(radioButtonWithTitle: "Never",
-            target: self, action: #selector(notifySuppressChanged(_:)))
-        notifyFriSatRadio = NSButton(radioButtonWithTitle: "Friday-Saturday",
-            target: self, action: #selector(notifySuppressChanged(_:)))
-        notifySatSunRadio = NSButton(radioButtonWithTitle: "Saturday-Sunday",
-            target: self, action: #selector(notifySuppressChanged(_:)))
-        let suppressRadios = NSStackView(views: [notifyNeverRadio, notifyFriSatRadio, notifySatSunRadio])
-        suppressRadios.orientation = .vertical
-        suppressRadios.alignment = .leading
-        suppressRadios.spacing = 6
-        let suppressCol = NSStackView(views: [
-            leadingLabel("Suppress notifications on"), indented(suppressRadios, by: 0),
-        ])
-        suppressCol.orientation = .vertical
-        suppressCol.alignment = .leading
-        suppressCol.spacing = 6
-        card.addRow(SettingsRow.container(leading: indented(suppressCol)))
+        // Suppress-days: a pop-up menu (HIG prefers a pop-up over a radio group for a few mutually
+        // exclusive options), as a trailing control beside the "Suppress on weekends" label. The item
+        // order maps 1:1 to `SuppressDays` (Never / Friday–Saturday / Saturday–Sunday).
+        notifySuppressPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        // Match the System Settings Form popup look: `.flexiblePush` + `.small` + border-only-on-hover
+        // gives the compact, resting-borderless popup with the small double-chevron (the closest public
+        // AppKit equivalent of SwiftUI's `.menu` Picker; verified empirically, #156).
+        notifySuppressPopup.bezelStyle = .flexiblePush
+        notifySuppressPopup.controlSize = .small
+        notifySuppressPopup.showsBorderOnlyWhileMouseInside = true
+        notifySuppressPopup.addItems(withTitles: ["Never", "Friday–Saturday", "Saturday–Sunday"])
+        notifySuppressPopup.target = self
+        notifySuppressPopup.action = #selector(notifySuppressChanged(_:))
+        // Width tracks the CURRENT item, not the widest — System Settings' menu popups size to the
+        // selected title (so "Never" is narrow), rather than reserving room for "Saturday–Sunday" (#156).
+        // A stored width constraint is recomputed on every selection/sync by `resizeSuppressPopup()`.
+        notifySuppressPopup.translatesAutoresizingMaskIntoConstraints = false
+        notifySuppressPopupWidth = notifySuppressPopup.widthAnchor.constraint(equalToConstant: 60)
+        notifySuppressPopupWidth.isActive = true
+        card.addRow(SettingsRow.container(
+            leading: leadingLabel("Suppress on weekends"), trailing: notifySuppressPopup))
+        resizeSuppressPopup()   // initial width for the default selection
 
-        return pane(sections: [("Back to Work", card)])
+        return pane(cards: [(nil, card)])
     }
 
     /// An hour/minute `NSDatePicker` (stepper style) that renders in the user's locale (12h/24h) and
@@ -479,6 +539,13 @@ final class SettingsWindowController: NSWindowController {
         let picker = NSDatePicker()
         picker.datePickerStyle = .textFieldAndStepper
         picker.datePickerElements = .hourMinute
+        picker.controlSize = .small
+        // NSDatePicker has no way to round its own bezel (verified) — System Settings' rounded time
+        // field is a custom control. So draw nothing here and host the picker inside a `RoundedFieldBox`
+        // that provides the rounded-rect bezel (#156).
+        picker.isBezeled = false
+        picker.isBordered = false
+        picker.drawsBackground = false
         picker.locale = .current
         picker.timeZone = .current
         picker.target = self
@@ -509,7 +576,7 @@ final class SettingsWindowController: NSWindowController {
         updatesTrailing.orientation = .horizontal
         updatesTrailing.alignment = .centerY
         updatesTrailing.spacing = 10
-        updates.addRow(SettingsRow.container(leading: leadingLabel("Check for updates daily"), trailing: updatesTrailing))
+        updates.addRow(SettingsRow.container(leading: leadingLabel("Check for updates periodically"), trailing: updatesTrailing))
 
         // Nested "Install updates automatically" (#122, restored in the sidebar design): label + its
         // dynamic hint stacked in one leading column (so no divider splits them), switch on the right,
@@ -523,14 +590,14 @@ final class SettingsWindowController: NSWindowController {
             leading: indented(installCol.view), trailing: installAutomaticallyToggle))
 
         updateLineLabel = NSTextField(labelWithString: "")
-        updateLineLabel.font = .systemFont(ofSize: 12)
+        updateLineLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         updateLineLabel.textColor = .secondaryLabelColor
         updateDownloadLink = SettingsRow.makeLink("Download", target: self, action: #selector(openDownload))
         updateRow = SettingsRow.container(leading: updateLineLabel, trailing: updateDownloadLink)
         updates.addRow(updateRow)
         updates.setRow(updateRow, hidden: true)   // hidden (with its divider) until an update is known
 
-        return pane(sections: [("About", about), ("Updates", updates)])
+        return pane(cards: [(nil, about), ("Updates", updates)])
     }
 
     // MARK: Layout helpers
@@ -543,11 +610,12 @@ final class SettingsWindowController: NSWindowController {
         return label
     }
 
-    /// A small semibold section title above a card (System Settings groups its cards under a muted
-    /// caption).
+    /// A small semibold caption above a card (System Settings groups its cards under a muted caption).
+    /// Only used for a title that *distinguishes* a card from others in the same pane (e.g. "Reset
+    /// Countdown", "Updates") — a title that merely repeats the section name is dropped (#156 feedback).
     private func sectionTitle(_ title: String) -> NSTextField {
         let label = NSTextField(labelWithString: title)
-        label.font = .systemFont(ofSize: 12, weight: .semibold)
+        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
         label.textColor = .secondaryLabelColor
         return label
     }
@@ -566,25 +634,32 @@ final class SettingsWindowController: NSWindowController {
         return row
     }
 
-    /// Assemble a detail pane: a vertical run of `(title, card)` groups inside a scroll view, so a tall
-    /// pane scrolls rather than clipping. Each card stretches to the content width; the title sits above
-    /// it. Replaces the old window-wide `resizeToFit()` (each pane now scrolls independently, #131).
-    private func pane(sections: [(String, SettingsCard)]) -> NSView {
+    /// Assemble a detail pane: a vertical run of cards inside a scroll view, so a tall pane scrolls
+    /// rather than clipping. Each card stretches to the content width. A card may carry an optional muted
+    /// caption above it: pass a title only when it *distinguishes* a card from siblings in the same pane
+    /// ("Reset Countdown", "Updates"). A `nil` title — the common case — drops the caption, since the
+    /// highlighted sidebar row already names the section and a repeated title added nothing (#156).
+    private func pane(cards: [(title: String?, card: SettingsCard)]) -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Metrics.cardSpacing
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        for (title, card) in sections {
-            let group = NSStackView(views: [sectionTitle(title), card])
-            group.orientation = .vertical
-            group.alignment = .leading
-            group.spacing = Metrics.sectionTitleGap
-            group.translatesAutoresizingMaskIntoConstraints = false
-            stack.addArrangedSubview(group)
-            group.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-            card.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+        for (title, card) in cards {
+            if let title {
+                let group = NSStackView(views: [sectionTitle(title), card])
+                group.orientation = .vertical
+                group.alignment = .leading
+                group.spacing = Metrics.sectionTitleGap
+                group.translatesAutoresizingMaskIntoConstraints = false
+                stack.addArrangedSubview(group)
+                group.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+                card.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+            } else {
+                stack.addArrangedSubview(card)
+                card.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            }
         }
 
         // A flipped document so short content pins to the *top* of the pane (an NSScrollView document is
@@ -605,7 +680,10 @@ final class SettingsWindowController: NSWindowController {
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
-        scroll.drawsBackground = false
+        // The detail pane background — a dynamic colour matching System Settings (246 light / 40 dark),
+        // lighter than the card so the grouped cards read as a subtle darker offset (#156).
+        scroll.drawsBackground = true
+        scroll.backgroundColor = SettingsColors.paneBackground
         scroll.borderType = .noBorder
         scroll.documentView = document
         // Pin the document to the scroll view's width so cards fill the pane and only height scrolls.
@@ -675,10 +753,11 @@ final class SettingsWindowController: NSWindowController {
         notifyStartPicker.dateValue = date(fromMinuteOfDay: PersistedConfig.notifyWindowStartMinute)
         notifyEndPicker.dateValue = date(fromMinuteOfDay: PersistedConfig.notifyWindowEndMinute)
         switch PersistedConfig.notifySuppressDays {
-        case .never:  notifyNeverRadio.state = .on
-        case .friSat: notifyFriSatRadio.state = .on
-        case .satSun: notifySatSunRadio.state = .on
+        case .never:  notifySuppressPopup.selectItem(at: 0)
+        case .friSat: notifySuppressPopup.selectItem(at: 1)
+        case .satSun: notifySuppressPopup.selectItem(at: 2)
         }
+        resizeSuppressPopup()
         updateNotifyControlsAvailability()
         updateNotifyDurationLabel()
         refreshNotifyAuthHint()
@@ -687,12 +766,11 @@ final class SettingsWindowController: NSWindowController {
     /// Grey out (never hide, so the layout doesn't jump) the pickers and radios when the master switch
     /// is off — mirrors the reset-countdown checkbox / WEB-Desktop radio disabling.
     private func updateNotifyControlsAvailability() {
-        let on = backToWorkToggle.state == .on
+        // Enabled only when the master switch is both on AND itself enabled (a dev build disables it).
+        let on = backToWorkToggle.isEnabled && backToWorkToggle.state == .on
         notifyStartPicker.isEnabled = on
         notifyEndPicker.isEnabled = on
-        notifyNeverRadio.isEnabled = on
-        notifyFriSatRadio.isEnabled = on
-        notifySatSunRadio.isEnabled = on
+        notifySuppressPopup.isEnabled = on
     }
 
     /// Update the live "Nh window" duration label from the two pickers (handles wrap + whole-day).
@@ -716,14 +794,21 @@ final class SettingsWindowController: NSWindowController {
         let text: String
         switch state {
         case .dev:
-            text = "Available only for TokenPace.app in /Applications — a dev build can't post "
-                + "system notifications."
+            text = "Unavailable in development builds."
         case .denied:
             text = "Notifications are turned off for TokenPace. Enable them in System Settings → "
                 + "Notifications → TokenPace."
         case .authorized, .notDetermined:
             text = ""
         }
+        // On a dev build, authorization is impossible (`BackToWorkNotifier.isSupported == false`), so the
+        // whole feature can never work — disable the master switch entirely (like launch-at-login /
+        // auto-install do for a non-`.app` build), leaving just the explanatory hint. The dependent
+        // controls follow the disabled master via `updateNotifyControlsAvailability`.
+        let devBuild = (state == .dev)
+        backToWorkToggle.isEnabled = !devBuild
+        if devBuild { backToWorkToggle.state = .off }
+        updateNotifyControlsAvailability()
         notifyAuthHint.stringValue = text
         // Collapse the whole row (and its preceding divider) when there's nothing to say, so the card
         // shows no empty band between the switch and "Allowed hours".
@@ -878,17 +963,28 @@ final class SettingsWindowController: NSWindowController {
             "back-to-work: time window set \(PersistedConfig.notifyWindowStartMinute, privacy: .public)–\(PersistedConfig.notifyWindowEndMinute, privacy: .public)")
     }
 
-    @objc private func notifySuppressChanged(_ sender: NSButton) {
+    @objc private func notifySuppressChanged(_ sender: NSPopUpButton) {
+        // Item order matches the SuppressDays cases 1:1 (0 = never, 1 = friSat, 2 = satSun).
         let choice: SuppressDays
-        if notifyFriSatRadio.state == .on {
-            choice = .friSat
-        } else if notifySatSunRadio.state == .on {
-            choice = .satSun
-        } else {
-            choice = .never
+        switch notifySuppressPopup.indexOfSelectedItem {
+        case 1:  choice = .friSat
+        case 2:  choice = .satSun
+        default: choice = .never
         }
         PersistedConfig.notifySuppressDays = choice
         AppLogger.lifecycle.notice("back-to-work: suppress set \(choice.rawValue, privacy: .public)")
+        resizeSuppressPopup()
+    }
+
+    /// Size the suppress popup to its CURRENTLY selected title (+ chevron + bezel padding), so it fits
+    /// "Never" tightly instead of reserving room for the widest item (#156).
+    private func resizeSuppressPopup() {
+        let title = notifySuppressPopup.titleOfSelectedItem ?? ""
+        let font = notifySuppressPopup.font ?? .systemFont(ofSize: NSFont.smallSystemFontSize)
+        let textWidth = (title as NSString).size(withAttributes: [.font: font]).width
+        // Chevron + left/right bezel padding for a small `.flexiblePush` popup, tuned so the text sits
+        // close to the chevron (no dead space between them), matching System Settings (#156).
+        notifySuppressPopupWidth.constant = ceil(textWidth) + 22
     }
 
     @objc private func openRepo() {
@@ -922,20 +1018,41 @@ final class SettingsWindowController: NSWindowController {
         let checksOn = updatesToggle.state == .on
         installAutomaticallyToggle.isEnabled = checksOn && inAppBundle
 
-        let hint: String
         if !inAppBundle {
-            // U+2060 word-joiner keeps "/Applications" from wrapping mid-path; the surrounding spaces
-            // stay ordinary so the line can still break cleanly before or after the path.
-            hint = "Available only for the TokenPace app in /\u{2060}Applications — a developer build "
-                 + "can't replace itself."
+            // Dev build: auto-install is permanently impossible — show the same warning as "Back to
+            // work" (a ⚠️ triangle + "Unavailable in development builds."), as an attributed hint.
+            installAutomaticallyHint.attributedStringValue = Self.devBuildWarning()
         } else if !checksOn {
-            hint = "Turn on \u{201C}Check for updates automatically\u{201D} to enable this."
+            installAutomaticallyHint.stringValue =
+                "Turn on \u{201C}Check for updates periodically\u{201D} to enable this."
         } else {
-            hint = "On by default: downloads and installs a newer release in the background, then "
-                 + "restarts. If anything fails, the menu shows a \u{201C}New version available\u{201D} "
-                 + "item linking to the release instead."
+            installAutomaticallyHint.stringValue =
+                "On by default: downloads and installs a newer release in the background, then "
+                + "restarts. If anything fails, the menu shows a \u{201C}New version available\u{201D} "
+                + "item linking to the release instead."
         }
-        installAutomaticallyHint.stringValue = hint
+    }
+
+    /// The shared "⚠️ Unavailable in development builds." warning as an attributed string: a
+    /// secondary-colour warning-triangle SF Symbol followed by the text, for dev-build hints (#156).
+    static func devBuildWarning() -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let config = NSImage.SymbolConfiguration(pointSize: NSFont.smallSystemFontSize, weight: .regular)
+        if let symbol = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)?
+            .withSymbolConfiguration(config) {
+            let attachment = NSTextAttachment()
+            attachment.image = symbol
+            let imageString = NSMutableAttributedString(attachment: attachment)
+            imageString.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor,
+                                     range: NSRange(location: 0, length: imageString.length))
+            result.append(imageString)
+            result.append(NSAttributedString(string: "  "))
+        }
+        result.append(NSAttributedString(string: "Unavailable in development builds.", attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]))
+        return result
     }
 
     /// Persist the "Check for updates automatically" choice. Refreshes the nested "Install updates
@@ -1008,6 +1125,13 @@ final class SettingsWindowController: NSWindowController {
         updateArchiveStatus()
     }
 
+    /// Clicking the destination path control reveals the archive folder in Finder (the standard action
+    /// for an `NSPathControl` showing a folder).
+    @objc private func revealArchiveFolder() {
+        guard let url = archivePathControl.url else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
     @objc private func archiveNow() {
         onArchiveNow?()
     }
@@ -1023,13 +1147,14 @@ final class SettingsWindowController: NSWindowController {
         archiveNowButton.isEnabled = enabled && destination != nil
 
         guard let destination else {
-            archivePathLabel.stringValue = "No folder selected"
+            // No folder yet: clear the path control and show the hint as a placeholder string.
+            archivePathControl.url = nil
+            archivePathControl.placeholderString = "No folder selected"
             archiveStatusLabel.stringValue = ""
             return
         }
-        archivePathLabel.stringValue = (destination as NSString).abbreviatingWithTildeInPath
-
         let destURL = URL(fileURLWithPath: (destination as NSString).expandingTildeInPath)
+        archivePathControl.url = destURL
         let stats = LogArchiver().archiveStats(at: destURL)
         let totals = "\(stats.files) files · \(ByteSize.humanReadable(stats.bytes))"
 
