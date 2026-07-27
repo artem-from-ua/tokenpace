@@ -18,12 +18,9 @@ struct SessionLogsPane: View {
                 if model.archiveEnabled {
                     LabeledContent("Destination") {
                         HStack(spacing: 8) {
-                            Text(destinationDisplay)
-                                .foregroundStyle(model.archiveDestination == nil ? .secondary : .primary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                // Take the available width and truncate inside it, so a long path can't
-                                // push the button off the row.
+                            // Native NSPathControl: folder icon + name, self-truncating, click →
+                            // Finder — the system control for a chosen folder (ADR-0040).
+                            PathControlView(url: destinationURL)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Button("Choose…") { model.chooseArchiveFolder() }
                                 .layoutPriority(1)
@@ -46,8 +43,8 @@ struct SessionLogsPane: View {
         .animation(nil, value: model.archiveEnabled)
     }
 
-    private var destinationDisplay: String {
-        guard let path = model.archiveDestination else { return "No folder selected" }
-        return (path as NSString).abbreviatingWithTildeInPath
+    private var destinationURL: URL? {
+        guard let path = model.archiveDestination else { return nil }
+        return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
     }
 }
