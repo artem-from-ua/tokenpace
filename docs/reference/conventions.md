@@ -58,7 +58,7 @@ git config core.hooksPath .githooks
   `NSSwitch.controlSize`, `rowSizeStyle`/`NSTableViewDefaultSizeMode`, `NSStackView.firstBaseline`,
   `NSPathControl` тощо).
 - **Вікно Settings — SwiftUI** `Form { Section }.formStyle(.grouped)` + `NavigationSplitView`, вбудований
-  у `NSWindow` через `NSHostingController` (ADR-0041, #168) — як і сам System Settings. Grouped-inset
+  у `NSWindow` через `NSHostingController` (ADR-0042, #168) — як і сам System Settings. Grouped-inset
   картки, chip і time-picker більше **не** ручні AppKit-винятки: row height/padding/corner
   radius/dividers, grouped-фон, скруглений `DatePicker` дає система без жодної константи. Раніше тут були
   виміряні константи (`SettingsCard` тощо) — усунено. **Menu-bar-віджет і popup лишаються AppKit** (див.
@@ -66,7 +66,7 @@ git config core.hooksPath .githooks
 - **Перед PR перевіряти в обох темах (light+dark) і всіх станах** (sidebar icon size, dev-білд/`.app`)
   скриншотами. Повний розбір, метод вимірювання й типові помилки —
   [system-settings-parity.md](system-settings-parity.md); рішення-принципи — ADR-0040 (нуль хардкоду),
-  ADR-0041 (SwiftUI Form для Settings).
+  ADR-0042 (SwiftUI Form для Settings).
 - **Перед комітом UI-зміни (menu bar popup, вікна, будь-який AppKit-екран) — звірити з актуальними
   Apple Human Interface Guidelines** (developer.apple.com/design/human-interface-guidelines).
   Не стверджувати деталі гайдлайну з пам'яті — HIG-сайт SPA-рендериться і часто не піддається

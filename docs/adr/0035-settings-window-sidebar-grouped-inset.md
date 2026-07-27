@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-07-25
-superseded_by: [0040, 0041]
+superseded_by: [0040, 0042]
 ---
 
 # ADR-0035: Вікно Settings — sidebar-навігація та grouped-inset картки
@@ -13,7 +13,7 @@ superseded_by: [0040, 0041]
 > вирівнювання, `NSPathControl` для шляху. Загальна структура (sidebar + grouped-inset картки, eager-
 > build, `AppDelegate`-контракт) лишається чинною; тіло цього ADR історичне.
 >
-> **Далі переглянуто [ADR-0041](0041-settings-swiftui-form.md) (#168):** *реалізацію* переписано з
+> **Далі переглянуто [ADR-0042](0042-settings-swiftui-form.md) (#168):** *реалізацію* переписано з
 > ручного AppKit (`SettingsCard`/`NSSplitViewController`/source-list) на SwiftUI
 > `Form.formStyle(.grouped)` + `NavigationSplitView` через `NSHostingController`; eager-build прибрано
 > (стан у `@Observable SettingsModel`). **Публічний контракт `AppDelegate` і sidebar-навігація-як-ідея

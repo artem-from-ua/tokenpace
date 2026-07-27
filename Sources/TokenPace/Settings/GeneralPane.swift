@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - GeneralPane (#168, ADR-0041)
+// MARK: - GeneralPane (#168, ADR-0042)
 
 /// Settings → General: launch-at-login and screen-lock polling pause.
 struct GeneralPane: View {

@@ -1,7 +1,7 @@
 import SwiftUI
 import TokenPaceKit
 
-// MARK: - NotificationsPane (#168, ADR-0041)
+// MARK: - NotificationsPane (#168, ADR-0042)
 
 /// Settings → Notifications: the "Back to work!" notification (#160, ADR-0039) — a master switch, the
 /// allowed-hours window with a live duration, and a weekend-suppress picker.

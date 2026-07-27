@@ -4,7 +4,7 @@ import TokenPaceKit
 
 // MARK: - SettingsWindowController
 
-/// The "Settings…" window (#14, redesigned #131, rewritten on SwiftUI #168 / ADR-0041): a macOS
+/// The "Settings…" window (#14, redesigned #131, rewritten on SwiftUI #168 / ADR-0042): a macOS
 /// System Settings-style window reached from the popup menu — a sidebar of sections on the left, a
 /// detail pane of grouped `Form` cards on the right, hosted in an `NSWindow` via `NSHostingController`.
 ///
@@ -17,7 +17,7 @@ import TokenPaceKit
 /// Because the model is created in `init` and lives as long as the controller, the background poll
 /// completions (`updateAvailability`/`updateArchiveStatus`, fired while the window is closed) mutate
 /// model state rather than a view outlet — so the panes can build lazily and the old eager-build
-/// invariant is gone (ADR-0041).
+/// invariant is gone (ADR-0042).
 ///
 /// Opened from an accessory (menu-bar) app, so it uses `NSApp.activate` + a floating window level to
 /// come to the front (ADR-0012 §6), rather than switching activation policy to `.regular`.
@@ -154,7 +154,7 @@ final class SettingsWindowController: NSWindowController {
     }
 
     /// Reflect the current update state (#37). Safe to call while the window is closed — it mutates
-    /// model state, which lives independent of any view (ADR-0041).
+    /// model state, which lives independent of any view (ADR-0042).
     func updateAvailability(_ release: GitHubRelease?) {
         model.updateAvailability(release)
     }

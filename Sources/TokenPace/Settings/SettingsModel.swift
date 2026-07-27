@@ -1,7 +1,7 @@
 import Observation
 import TokenPaceKit
 
-// MARK: - SettingsModel (#168, ADR-0041)
+// MARK: - SettingsModel (#168, ADR-0042)
 
 /// The observable state behind the Settings window. It lives as long as `SettingsWindowController`
 /// (created in its `init`, **not** inside any SwiftUI view), so the background poll/archive callbacks

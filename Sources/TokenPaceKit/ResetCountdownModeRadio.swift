@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - ResetRadio ↔ ResetCountdownMode (#168, ADR-0041)
+// MARK: - ResetRadio ↔ ResetCountdownMode (#168, ADR-0042)
 
 /// The reset-countdown choices in the Settings "Menu Bar Widget" section, shown as a menu picker.
 /// These map one-to-one to ``ResetCountdownMode``. Kept in the kit (not the app) so the mapping is

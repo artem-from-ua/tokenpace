@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - SettingsSection (#168, ADR-0041)
+// MARK: - SettingsSection (#168, ADR-0042)
 
 /// The Settings window's sidebar sections, in display order. The raw `Int` is the **0-based index**
 /// that the `TOKENPACE_SETTINGS_SECTION` dev hook selects (0 = About … 5 = Session Logs) — this enum

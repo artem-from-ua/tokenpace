@@ -1,7 +1,7 @@
 import SwiftUI
 import TokenPaceKit
 
-// MARK: - AppearancePane (#168, ADR-0041)
+// MARK: - AppearancePane (#168, ADR-0042)
 
 /// Settings → Appearance: the menu-bar widget options, in one "Menu Bar" section.
 struct AppearancePane: View {

@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - SettingsRootView (#168, ADR-0041)
+// MARK: - SettingsRootView (#168, ADR-0042)
 
 /// The SwiftUI root of the Settings window: a `NavigationSplitView` with a source-list sidebar of
 /// sections and a detail pane that swaps to the selected section's `Form`. Modelled on macOS System

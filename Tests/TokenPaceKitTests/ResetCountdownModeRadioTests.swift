@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import TokenPaceKit
 
-// MARK: - ResetCountdownMode ↔ ResetRadio (#168, ADR-0041)
+// MARK: - ResetCountdownMode ↔ ResetRadio (#168, ADR-0042)
 
 @Suite("ResetCountdownMode radio mapping")
 struct ResetCountdownModeRadioTests {

@@ -1,7 +1,7 @@
 import AppKit
 import TokenPaceKit
 
-// MARK: - Settings shell support (#168, ADR-0041)
+// MARK: - Settings shell support (#168, ADR-0042)
 
 /// Static links used by the Settings About pane.
 enum SettingsLinks {
@@ -20,7 +20,7 @@ enum NSWorkspaceOpener {
 
 /// The archive-destination folder picker — an imperative modal `NSOpenPanel`, invoked from a SwiftUI
 /// button action. `.fileImporter` can't set the prompt/message/seed directory, so the AppKit panel is
-/// kept verbatim (ADR-0041). Returns the chosen path, or `nil` if cancelled.
+/// kept verbatim (ADR-0042). Returns the chosen path, or `nil` if cancelled.
 enum FolderPicker {
     @MainActor static func choose(current: String?) -> String? {
         let panel = NSOpenPanel()

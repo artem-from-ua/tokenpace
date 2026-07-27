@@ -1,7 +1,7 @@
 import SwiftUI
 import TokenPaceKit
 
-// MARK: - Settings field support (#168, ADR-0041)
+// MARK: - Settings field support (#168, ADR-0042)
 
 /// Cross-pane SwiftUI helpers shared by the Settings panes.
 

@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - MinuteOfDay (#168, ADR-0041)
+// MARK: - MinuteOfDay (#168, ADR-0042)
 
 /// Conversions between a stored minute-of-day (0…1439) and a `Date` for a SwiftUI `DatePicker` in
 /// `.hourMinute` mode. Only the hour/minute are ever read back, so the calendar day the `Date` carries

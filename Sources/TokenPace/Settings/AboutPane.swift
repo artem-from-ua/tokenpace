@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-// MARK: - AboutPane (#168, ADR-0041)
+// MARK: - AboutPane (#168, ADR-0042)
 
 /// Settings → About: a header (app icon + name + tagline, System Settings-style), version + source
 /// link, and the Updates card (#37) — the daily-check toggle, Check Now, the nested "Install updates

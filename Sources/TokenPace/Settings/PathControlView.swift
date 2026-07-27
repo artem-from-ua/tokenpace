@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-// MARK: - PathControlView (#168, ADR-0041)
+// MARK: - PathControlView (#168, ADR-0042)
 
 /// A SwiftUI wrapper around AppKit's `NSPathControl` — the native control for showing a chosen file or
 /// folder, used for the archive destination. It draws the folder icon + name with the **system's own**

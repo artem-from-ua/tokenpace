@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - SidebarIconMetrics (#168, ADR-0041)
+// MARK: - SidebarIconMetrics (#168, ADR-0042)
 
 /// The System Settings "Sidebar icon size" (System Settings → Appearance) drives the size of the
 /// coloured SF-Symbol chips in a source-list sidebar. macOS keys this off `NSTableViewDefaultSizeMode`

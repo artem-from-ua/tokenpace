@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - SessionLogsPane (#168, ADR-0041)
+// MARK: - SessionLogsPane (#168, ADR-0042)
 
 /// Settings → Session Logs: the raw-log archiver (#110, ADR-0031) — enable, destination folder,
 /// and the "Last archived …" status with an on-demand Archive Now.

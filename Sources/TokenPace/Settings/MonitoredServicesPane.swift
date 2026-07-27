@@ -1,7 +1,7 @@
 import SwiftUI
 import TokenPaceKit
 
-// MARK: - MonitoredServicesPane (#168, ADR-0041)
+// MARK: - MonitoredServicesPane (#168, ADR-0042)
 
 /// Settings → Monitored Services: which Claude services feed the menu-bar status (#89, ADR-0024).
 /// Claude API is always monitored (a disabled on-switch); Claude Code and Web/Desktop are optional,

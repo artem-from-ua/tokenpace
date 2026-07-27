@@ -3,7 +3,7 @@ status: accepted
 date: 2026-07-27
 ---
 
-# ADR-0041: Вікно Settings — SwiftUI Form.grouped замість ручного AppKit-малювання
+# ADR-0042: Вікно Settings — SwiftUI Form.grouped замість ручного AppKit-малювання
 
 ## Контекст
 

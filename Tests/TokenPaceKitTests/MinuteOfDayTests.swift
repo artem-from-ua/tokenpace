@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import TokenPaceKit
 
-// MARK: - MinuteOfDay round-trip (#168, ADR-0041)
+// MARK: - MinuteOfDay round-trip (#168, ADR-0042)
 
 @Suite("MinuteOfDay")
 struct MinuteOfDayTests {

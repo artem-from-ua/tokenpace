@@ -1,12 +1,12 @@
 ---
 status: accepted
 date: 2026-07-27
-superseded_by: [0041]
+superseded_by: [0042]
 ---
 
 # ADR-0040: Нативний вигляд UI через системні механізми, а не захардкоджені метрики
 
-> **Частково переглянуто [ADR-0041](0041-settings-swiftui-form.md) (#168):** §2 (винятки-хардкод для
+> **Частково переглянуто [ADR-0042](0042-settings-swiftui-form.md) (#168):** §2 (винятки-хардкод для
 > grouped-inset контейнера, chip і time-picker) і §4 («поки лишаємо AppKit hand-drawing») виконано —
 > вікно Settings переписано на SwiftUI `Form.formStyle(.grouped)` + `NavigationSplitView`, тож
 > grouped-inset/chip/time-picker більше **не** ручні винятки (їх дають Form/List/DatePicker системними

@@ -17,7 +17,7 @@
 1. **Спершу перевір, чи є системний механізм.** Історично більшість «магічних чисел» у Settings
    існувала лише тому, що ми **малювали grouped-inset вручну**, а не використовували системний
    контейнер. Перш ніж підбирати число — спитай: «а чи система не дає це сама?».
-2. **Detail-панелі Settings тепер на SwiftUI `Form { Section }.formStyle(.grouped)`** (ADR-0041, #168) —
+2. **Detail-панелі Settings тепер на SwiftUI `Form { Section }.formStyle(.grouped)`** (ADR-0042, #168) —
    як і сам System Settings. Row height/padding/corner radius/dividers — **системні дефолти, нуль
    констант**. Виміряна таблиця метрик картки, що жила тут раніше, **видалена** — вона описувала
    `SettingsCard`, якого більше немає. AppKit усе ще не має grouped-inset контейнера — тому й перейшли
@@ -51,7 +51,7 @@
 ## Що дає SwiftUI Form безкоштовно (колишні AppKit-винятки)
 
 macOS AppKit не має iOS-подібних grouped-примітивів. Раніше через це доводилося малювати вручну з
-виміряними константами. **Тепер detail-панелі на SwiftUI (ADR-0041)**, і всі ці місця дає система:
+виміряними константами. **Тепер detail-панелі на SwiftUI (ADR-0042)**, і всі ці місця дає система:
 
 - **Grouped-inset контейнер** (row height, corner radius, padding, dividers, card-spacing) →
   `Form { Section }.formStyle(.grouped)`. Колишній `SettingsCard`/`SettingsRow` і виміряні константи
@@ -100,11 +100,11 @@ macOS AppKit не має iOS-подібних grouped-примітивів. Ра
 
 ## Пов'язане
 
-- [ADR-0041](../adr/0041-settings-swiftui-form.md) — перехід detail-панелей на SwiftUI Form (усунув
+- [ADR-0042](../adr/0042-settings-swiftui-form.md) — перехід detail-панелей на SwiftUI Form (усунув
   виміряні константи картки, що жили в цьому довіднику).
 - [ADR-0040](../adr/0040-native-system-metrics-no-hardcoded-ui.md) — рішення-принцип «нуль хардкоду».
 - [ADR-0035](../adr/0035-settings-window-sidebar-grouped-inset.md) — початковий redesign (двічі
-  переглянутий: 0040 material/dynamic-колір, 0041 SwiftUI Form).
+  переглянутий: 0040 material/dynamic-колір, 0042 SwiftUI Form).
 - [conventions.md](conventions.md) § UI-дизайн (AppKit).
 - [ui-verification.md](../guides/ui-verification.md) — стуби й процес живої верифікації.
 - Issue #156 (паритет), #168 (SwiftUI-Form-переписання).
