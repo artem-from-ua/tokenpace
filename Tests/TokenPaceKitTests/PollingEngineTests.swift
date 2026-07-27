@@ -948,3 +948,117 @@ struct SessionIdleTransitionTests {
         #expect(PollingEngine.sessionIdleTransition(previous: idle(), current: nil) == nil)
     }
 }
+
+// MARK: - applyIdleGrace (reset-boundary idle suppression, ADR-0041)
+
+@Suite("PollingEngine.applyIdleGrace")
+struct ApplyIdleGraceTests {
+
+    /// An active snapshot — a real five_hour window with a present reset.
+    private func active() -> UsageSnapshot { snap(five: 40, seven: 84) }
+
+    /// A session-idle snapshot — five_hour with no reset (what the decoder yields right after a reset).
+    private func idle() -> UsageSnapshot {
+        UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
+            sevenDay: UsageWindow(utilization: 84, resetsAt: "2026-06-28T00:00:00+00:00"),
+            sessionIdle: true)
+    }
+
+    private let window = PollingEngine.idleGraceWindow  // 300 s
+
+    @Test func activeToIdleArmsGraceAndSuppresses() {
+        // Previous poll held an active window; the new poll is idle and no grace is armed yet →
+        // arm the grace and render a non-idle bar.
+        let out = PollingEngine.applyIdleGrace(
+            decoded: idle(), previous: active(), activeUntil: nil, now: t0)
+        #expect(out.snapshot.sessionIdle == false)
+        #expect(out.suppressedUntil == t0.addingTimeInterval(window))
+    }
+
+    @Test func heldWhileGraceActive() {
+        // Grace armed, still before the deadline → keep suppressing, deadline unchanged.
+        let deadline = t0.addingTimeInterval(window)
+        let out = PollingEngine.applyIdleGrace(
+            decoded: idle(), previous: idle(), activeUntil: deadline,
+            now: t0.addingTimeInterval(120))
+        #expect(out.snapshot.sessionIdle == false)
+        #expect(out.suppressedUntil == deadline)
+    }
+
+    @Test func graceExpiredSurfacesRealIdle() {
+        // Grace armed but the deadline has passed → the window never came back, show the real idle.
+        let deadline = t0.addingTimeInterval(window)
+        let out = PollingEngine.applyIdleGrace(
+            decoded: idle(), previous: idle(), activeUntil: deadline,
+            now: deadline.addingTimeInterval(1))
+        #expect(out.snapshot.sessionIdle == true)
+        #expect(out.suppressedUntil == nil)
+    }
+
+    @Test func genuineIdleFromNilPreviousNotSuppressed() {
+        // Cold start (no previous snapshot) → a genuine idle from the first poll is never suppressed.
+        let out = PollingEngine.applyIdleGrace(
+            decoded: idle(), previous: nil, activeUntil: nil, now: t0)
+        #expect(out.snapshot.sessionIdle == true)
+        #expect(out.suppressedUntil == nil)
+    }
+
+    @Test func genuineIdleFromIdlePreviousNotSuppressed() {
+        // Previous poll was already idle (a settled idle session) → no arming, stays idle.
+        let out = PollingEngine.applyIdleGrace(
+            decoded: idle(), previous: idle(), activeUntil: nil, now: t0)
+        #expect(out.snapshot.sessionIdle == true)
+        #expect(out.suppressedUntil == nil)
+    }
+
+    @Test func activeDecodedClearsGrace() {
+        // The window reappeared while a grace was armed → pass the active snapshot through and drop
+        // the grace.
+        let out = PollingEngine.applyIdleGrace(
+            decoded: active(), previous: idle(), activeUntil: t0.addingTimeInterval(window), now: t0)
+        #expect(out.snapshot.sessionIdle == false)
+        #expect(out.suppressedUntil == nil)
+    }
+
+    @Test func previousNonIdleWithoutResetsAtNotArmed() {
+        // A previous snapshot that is technically non-idle but has an empty five_hour resets_at is
+        // not a genuine active window → do not arm the grace.
+        let prev = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
+            sevenDay: UsageWindow(utilization: 84, resetsAt: "2026-06-28T00:00:00+00:00"),
+            sessionIdle: false)
+        let out = PollingEngine.applyIdleGrace(
+            decoded: idle(), previous: prev, activeUntil: nil, now: t0)
+        #expect(out.snapshot.sessionIdle == true)
+        #expect(out.suppressedUntil == nil)
+    }
+
+    // MARK: integration through advance
+
+    @Test func advanceSuppressesBoundaryIdle() {
+        // Two successive successes: active → idle. The second must land a non-idle lastSnapshot with
+        // an armed grace deadline.
+        let afterActive = PollingEngine.advance(
+            previous: PollState(), outcome: .success(active()), claudeActive: true, now: t0)
+        let afterIdle = PollingEngine.advance(
+            previous: afterActive, outcome: .success(idle()), claudeActive: true,
+            now: t0.addingTimeInterval(180))
+        #expect(afterIdle.lastSnapshot?.sessionIdle == false)
+        #expect(afterIdle.idleSuppressedUntil == t0.addingTimeInterval(180 + window))
+    }
+
+    @Test func advanceExpiresGraceAcrossTime() {
+        // A third idle poll after the deadline surfaces the genuine idle and clears the grace.
+        let afterActive = PollingEngine.advance(
+            previous: PollState(), outcome: .success(active()), claudeActive: true, now: t0)
+        let afterIdle = PollingEngine.advance(
+            previous: afterActive, outcome: .success(idle()), claudeActive: true,
+            now: t0.addingTimeInterval(180))
+        let afterExpiry = PollingEngine.advance(
+            previous: afterIdle, outcome: .success(idle()), claudeActive: true,
+            now: t0.addingTimeInterval(180 + window + 1))
+        #expect(afterExpiry.lastSnapshot?.sessionIdle == true)
+        #expect(afterExpiry.idleSuppressedUntil == nil)
+    }
+}
