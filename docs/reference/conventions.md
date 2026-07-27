@@ -50,17 +50,23 @@ git config core.hooksPath .githooks
   (`git rev-list --count HEAD`). `TokenPaceKit.version` у коді дублює значення з `VERSION`
   і оновлюється разом із ним.
 
-## UI-дизайн (AppKit)
+## UI-дизайн (AppKit + SwiftUI)
 
 - **Мета: максимально слідувати дизайну рідних застосунків macOS** (System Settings передусім). Для
   стандартних системних елементів — **нуль захардкоджених** розмірів/шрифтів/відступів/кольорів;
   використовувати системні механізми (семантичні `NSColor`, `NSFont.systemFontSize`/text styles,
   `NSSwitch.controlSize`, `rowSizeStyle`/`NSTableViewDefaultSizeMode`, `NSStackView.firstBaseline`,
-  `NSPathControl` тощо). Де AppKit **не має** API (grouped-inset контейнер, grouped-фон, скруглений
-  `NSDatePicker`) — значення **виміряні** з живого System Settings (AX/скриншот ÷2), не вгадані, і
-  задокументовані. **Перед PR перевіряти в обох темах (light+dark) і всіх станах** (sidebar icon size,
-  dev-білд/`.app`) скриншотами. Повний розбір, метод вимірювання й типові помилки —
-  [system-settings-parity.md](system-settings-parity.md); рішення-принцип — ADR-0040.
+  `NSPathControl` тощо).
+- **Вікно Settings — SwiftUI** `Form { Section }.formStyle(.grouped)` + `NavigationSplitView`, вбудований
+  у `NSWindow` через `NSHostingController` (ADR-0041, #168) — як і сам System Settings. Grouped-inset
+  картки, chip і time-picker більше **не** ручні AppKit-винятки: row height/padding/corner
+  radius/dividers, grouped-фон, скруглений `DatePicker` дає система без жодної константи. Раніше тут були
+  виміряні константи (`SettingsCard` тощо) — усунено. **Menu-bar-віджет і popup лишаються AppKit** (див.
+  ADR-0009/0021/0022) — там свідома фіксована палітра, не System Settings-елементи.
+- **Перед PR перевіряти в обох темах (light+dark) і всіх станах** (sidebar icon size, dev-білд/`.app`)
+  скриншотами. Повний розбір, метод вимірювання й типові помилки —
+  [system-settings-parity.md](system-settings-parity.md); рішення-принципи — ADR-0040 (нуль хардкоду),
+  ADR-0041 (SwiftUI Form для Settings).
 - **Перед комітом UI-зміни (menu bar popup, вікна, будь-який AppKit-екран) — звірити з актуальними
   Apple Human Interface Guidelines** (developer.apple.com/design/human-interface-guidelines).
   Не стверджувати деталі гайдлайну з пам'яті — HIG-сайт SPA-рендериться і часто не піддається

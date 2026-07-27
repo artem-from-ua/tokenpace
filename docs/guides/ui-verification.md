@@ -187,6 +187,10 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_STUB=screenshot swift run
 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=4 swift run   # відкриє одразу на Notifications
 ```
 
+Джерело істини цього порядку/індексів — `enum SettingsSection: Int` (ADR-0041); змінюючи секції, онови
+його і цей рядок разом. Detail-панелі тепер SwiftUI `Form.formStyle(.grouped)` (ADR-0041), тож паритет
+grouped-inset карток доводиться скриншотами light+dark так само, як раніше для AppKit-версії.
+
 ## Що НЕ рахується за верифікацію
 
 - **Скриншоти з тимчасового dev-only коду.** Синтетичний рендер `StatusItemView` / PNG-матриці
