@@ -28,6 +28,7 @@ struct AboutPane: View {
                             get: { model.automaticUpdateChecks },
                             set: { model.setAutomaticUpdateChecks($0) }))
                         .labelsHidden()
+                        .toggleStyle(.switch)
                     }
                 } label: {
                     Text("Check for updates periodically")
