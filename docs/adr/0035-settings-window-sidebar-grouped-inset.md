@@ -1,9 +1,17 @@
 ---
 status: accepted
 date: 2026-07-25
+superseded_by: [0040]
 ---
 
 # ADR-0035: Вікно Settings — sidebar-навігація та grouped-inset картки
+
+> **Частково переглянуто [ADR-0040](0040-native-system-metrics-no-hardcoded-ui.md) (#156):** проходом
+> паритету з System Settings уточнено *реалізацію* карток і метрик — ручний `controlBackgroundColor`
+> fill (давав чисто-білу картку) замінено на dynamic grouped-колір (242/43 light/dark), додано material/
+> виміряні row-height/corner-radius, sidebar-іконки за системним розміром, `NSStackView.firstBaseline`-
+> вирівнювання, `NSPathControl` для шляху. Загальна структура (sidebar + grouped-inset картки, eager-
+> build, `AppDelegate`-контракт) лишається чинною; тіло цього ADR історичне.
 
 ## Контекст
 
