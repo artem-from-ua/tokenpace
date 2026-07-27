@@ -10,6 +10,11 @@ struct SettingsRootView: View {
     @Bindable var model: SettingsModel
     /// The fixed sidebar width, matching System Settings (258 pt) — locked so the sidebar never resizes.
     let sidebarWidth: CGFloat
+    /// The fixed window content size (857×480). An `NSHostingController` sizes to its SwiftUI content's
+    /// ideal, and a `NavigationSplitView`'s ideal collapses — so pin the root to the window size, else
+    /// the window shrinks to a tiny sliver.
+    let contentWidth: CGFloat
+    let contentHeight: CGFloat
 
     var body: some View {
         NavigationSplitView {
@@ -23,13 +28,14 @@ struct SettingsRootView: View {
             }
             .navigationSplitViewColumnWidth(sidebarWidth)
             .listStyle(.sidebar)
+            // A menu-bar Settings window has no collapsible sidebar (System Settings doesn't either);
+            // suppress the automatic sidebar toggle so only the fixed split shows.
+            .toolbar(removing: .sidebarToggle)
         } detail: {
             detailPane
         }
         .navigationSplitViewStyle(.balanced)
-        // A menu-bar Settings window has no collapsible sidebar (System Settings doesn't either);
-        // suppress the automatic sidebar toggle so only the fixed split shows.
-        .toolbar(removing: .sidebarToggle)
+        .frame(width: contentWidth, height: contentHeight)
     }
 
     @ViewBuilder

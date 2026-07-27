@@ -121,7 +121,11 @@ final class SettingsWindowController: NSWindowController {
         window.contentMaxSize = NSSize(width: Metrics.contentWidth, height: .greatestFiniteMagnitude)
         self.init(window: window)
         window.contentViewController = NSHostingController(
-            rootView: SettingsRootView(model: model, sidebarWidth: Metrics.sidebarWidth))
+            rootView: SettingsRootView(
+                model: model,
+                sidebarWidth: Metrics.sidebarWidth,
+                contentWidth: Metrics.contentWidth,
+                contentHeight: Metrics.contentHeight))
     }
 
     /// Show or re-focus the window. Re-syncs every field from `PersistedConfig`/the system into the
