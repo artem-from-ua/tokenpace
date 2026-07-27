@@ -14,13 +14,14 @@
 
 ## TL;DR (для того, хто прийшов сюди перед правкою Settings-UI)
 
-1. **Спершу перевір, чи є системний механізм.** Більшість «магічних чисел» у нашому Settings існують
-   лише тому, що ми **малюємо grouped-inset вручну**, а не використовуємо системний контейнер. Перш
-   ніж підбирати число — спитай: «а чи AppKit не дає це сам?».
-2. **AppKit macOS НЕ має grouped-inset контейнера.** System Settings — це **SwiftUI**
-   `Form { Section }.formStyle(.grouped)`. Немає NSTableView-стилю, немає NSBox-типу, що малює цю
-   картку. Тому наш AppKit-`SettingsCard` — ручне малювання, і частина констант тут **неминуча**
-   (див. «Винятки»). Повний паритет без констант = переписати на SwiftUI Form (#168).
+1. **Спершу перевір, чи є системний механізм.** Історично більшість «магічних чисел» у Settings
+   існувала лише тому, що ми **малювали grouped-inset вручну**, а не використовували системний
+   контейнер. Перш ніж підбирати число — спитай: «а чи система не дає це сама?».
+2. **Detail-панелі Settings тепер на SwiftUI `Form { Section }.formStyle(.grouped)`** (ADR-0042, #168) —
+   як і сам System Settings. Row height/padding/corner radius/dividers — **системні дефолти, нуль
+   констант**. Виміряна таблиця метрик картки, що жила тут раніше, **видалена** — вона описувала
+   `SettingsCard`, якого більше немає. AppKit усе ще не має grouped-inset контейнера — тому й перейшли
+   на SwiftUI Form, а не підбирали числа.
 3. **Не підбирай числа з голови й «на око».** Якщо константа неминуча — вона має бути **виміряна** з
    живого System Settings (AX `AXSize` / Retina-скриншот ÷2), а не вгадана. Задокументуй, звідки взята.
 4. **Перевіряй ОБИДВІ теми і ВСІ стани.** Light **і** dark. Малий/середній/великий розмір sidebar-
@@ -47,41 +48,24 @@
 | Довгі sidebar-мітки | truncate на одному рядку + `allowsExpansionToolTips = true` (HIG) | не wrap |
 | Шлях до папки | `NSPathControl` (сам обрізається, клік→Finder, не розпирає layout) | не голий `NSTextField` (розпирає вікно) |
 
-## Винятки: де AppKit НЕ має API (хардкод неминучий, але виміряний)
+## Що дає SwiftUI Form безкоштовно (колишні AppKit-винятки)
 
-macOS AppKit не має iOS-подібних grouped-примітивів. У цих місцях System Settings рендерить через
-SwiftUI/приватні механізми, а чистого AppKit-аналога немає. Тут ми малюємо вручну — але значення
-**виміряні** з живого System Settings, не вгадані, і задокументовані:
+macOS AppKit не має iOS-подібних grouped-примітивів. Раніше через це доводилося малювати вручну з
+виміряними константами. **Тепер detail-панелі на SwiftUI (ADR-0042)**, і всі ці місця дає система:
 
-- **Колір картки / фону панелі.** macOS не має семантичного grouped-background (немає iOS
-  `secondarySystemGroupedBackground`). Жодна семантична `NSColor` чи `NSVisualEffectView`-матеріал
-  не дає пари з фліпом light↔dark. → фіксований **dynamic** `NSColor`: картка 242/43, фон 246/40
-  (light/dark). `.contentBackground`-матеріал давав чисто-білий (255) — це був баг.
-- **Скруглені кутики time picker.** `NSDatePicker` не вміє округлити власний bezel; System Settings —
-  bespoke SwiftUI-контрол. → bezelless picker (`isBezeled/isBordered/drawsBackground = false`)
-  всередині кастомного `RoundedFieldBox`. Insets виміряні (leading 4, trailing −1).
-- **Кольоровий chip за sidebar-іконкою.** Стандартний `NSTableCellView.imageView` outlet накладає
-  source-list template-tint + vibrancy (робить glyph блідо-сірим і ховає на неактивному вікні) →
-  chip лишається кастомним; розмір із виміряної таблиці (chip 14/20/26 pt для S/M/L).
-- **Сам grouped-inset контейнер** (`SettingsCard`): row height, corner radius, padding. AppKit не має
-  контейнера, що дає ці системні дефолти. → ручне малювання; значення виміряні (див. `SettingsCard`).
-  **Правильний остаточний фікс — SwiftUI `Form.formStyle(.grouped)` через `NSHostingView`** (окремий
-  тікет), який дав би всі ці метрики системними дефолтами без жодної константи.
+- **Grouped-inset контейнер** (row height, corner radius, padding, dividers, card-spacing) →
+  `Form { Section }.formStyle(.grouped)`. Колишній `SettingsCard`/`SettingsRow` і виміряні константи
+  (row 37 / inset 12/11 / corner 4 / divider 10 / hairline 0.5 pt) **усунено** — тепер це системні
+  дефолти без жодної константи.
+- **Колір картки / фону панелі** → `Form.grouped` бере системний grouped-background сам (раніше —
+  ручний dynamic `NSColor` 242/43, 246/40, бо `.contentBackground`-матеріал давав чисто-білий баг).
+- **Скруглені кутики time picker** → нативний `DatePicker(.hourMinute)` (раніше — bezelless
+  `NSDatePicker` у кастомному `RoundedFieldBox` з виміряними insets).
+- **Кольоровий chip за sidebar-іконкою** → `List(.sidebar)` + `Label`/`.foregroundStyle` (раніше —
+  кастомний `ChipView`, бо стандартний `.imageView` outlet накладав source-list tint/vibrancy).
 
-### Виміряні метрики картки (System Settings, Retina ÷2)
-
-Оскільки AppKit не має grouped-контейнера, ці значення в `SettingsCard`/`SettingsRow` — **виміряні**
-з живого System Settings (не вгадані), і мають лишатися такими, доки не буде переходу на SwiftUI Form:
-
-| Метрика | Значення | Примітка |
-|---|---|---|
-| Висота однорядкового рядка | **37 pt** | текст вертикально центрований |
-| Вертикальний inset (пер бік) | **12 pt** | 13 pt шрифт у 37 pt рядку |
-| Горизонтальний inset (край→мітка) | **11 pt** | |
-| Corner radius картки | **4 pt** | делікатне скруглення (НЕ 10 — типова помилка) |
-| Divider inset (обидва боки) | **10 pt** | симетричний, ~на межі тексту |
-| Товщина hairline (border/divider) | **0.5 pt** | 1 px @2×, не 1 pt |
-
+Свідома фіксована палітра menu-bar (`StatusItemView`, ADR-0009) і pacing-барів попапа (ADR-0022)
+лишається — це **не** System Settings-елементи, і SwiftUI Form їх не стосується.
 
 ## Мої (агента) помилки в цьому проході — і як їх уникати
 
@@ -116,9 +100,11 @@ SwiftUI/приватні механізми, а чистого AppKit-анало
 
 ## Пов'язане
 
-- [ADR-0040](../adr/0040-native-system-metrics-no-hardcoded-ui.md) — рішення-принцип + винятки.
-- [ADR-0035](../adr/0035-settings-window-sidebar-grouped-inset.md) — початковий redesign (частково
-  переглянутий цим проходом: material/dynamic-колір замість `controlBackgroundColor`).
+- [ADR-0042](../adr/0042-settings-swiftui-form.md) — перехід detail-панелей на SwiftUI Form (усунув
+  виміряні константи картки, що жили в цьому довіднику).
+- [ADR-0040](../adr/0040-native-system-metrics-no-hardcoded-ui.md) — рішення-принцип «нуль хардкоду».
+- [ADR-0035](../adr/0035-settings-window-sidebar-grouped-inset.md) — початковий redesign (двічі
+  переглянутий: 0040 material/dynamic-колір, 0042 SwiftUI Form).
 - [conventions.md](conventions.md) § UI-дизайн (AppKit).
 - [ui-verification.md](../guides/ui-verification.md) — стуби й процес живої верифікації.
 - Issue #156 (паритет), #168 (SwiftUI-Form-переписання).

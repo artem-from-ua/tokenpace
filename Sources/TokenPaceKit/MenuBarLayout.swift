@@ -229,7 +229,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// - Parameters:
     ///   - snapshot: A decoded usage poll (`UsageClient`/#9).
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
-    ///   - resetMode: How to pick/hide the reset countdown (#103, ADR-0029). Default `.showDistant7d`.
+    ///   - resetMode: How to pick/hide the reset countdown (#103, ADR-0029). Default `.smart`.
     ///   - hideCalmSevenDay: When `true`, the 7-day bar is dropped (`sevenDay == nil`) whenever it is
     ///     **calm** (`BarView.isCalm` — green on-pace/behind or mild-ahead yellow), leaving the 5h bar
     ///     as the single, vertically-centred bar (#94, opt-out `PersistedConfig.hideCalmSevenDayBar`).
@@ -238,7 +238,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///     severities, so the reset countdown is unchanged (a hidden calm 7-day never drove it anyway).
     ///     In the session-idle state a calm 7-day is likewise dropped, leaving only the idle 5h bar.
     public static func make(
-        from snapshot: UsageSnapshot, now: Date, resetMode: ResetCountdownMode = .showDistant7d,
+        from snapshot: UsageSnapshot, now: Date, resetMode: ResetCountdownMode = .smart,
         hideCalmSevenDay: Bool = false
     ) -> MenuBarLayout {
         let seven = bar(for: snapshot.sevenDay, window: .sevenDay, now: now)
@@ -321,7 +321,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///     existing callers and tests are unaffected.
     public static func make(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
-        serviceProblem: ServiceStatus? = nil, resetMode: ResetCountdownMode = .showDistant7d,
+        serviceProblem: ServiceStatus? = nil, resetMode: ResetCountdownMode = .smart,
         hideCalmSevenDay: Bool = false, showCredits: Bool = false
     ) -> MenuBarLayout {
         let credits = showCredits ? snapshot.flatMap { creditsMarker(for: $0, now: now) } : nil
@@ -422,7 +422,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// The semantics ("show the next real unblock"):
     /// - both bars **calm** → hidden, unless the mode shows a countdown even then (`always` → nearest).
     /// - exactly one bar **noisy** → that bar's reset. A lone **7d ahead-of-pace (orange)** is gated:
-    ///   shown when `< 24 h` out, or when the mode allows a distant one; a 7d **exhausted (red)** is
+    ///   shown when `< 24 h` out, or when the mode shows a days-away one; a 7d **exhausted (red)** is
     ///   always shown. A noisy **5h** is always shown (its reset is near by definition).
     /// - both bars **noisy** → the next unblock: both **exhausted** → the **later** reset (blocked
     ///   until both clear); both **ahead** → the **earlier** reset (neither blocks yet); **red+orange**
@@ -477,7 +477,7 @@ public struct MenuBarLayout: Sendable, Equatable {
                 chosen = display(.sevenDay, sevenResetsAt)
             } else {
                 let far = (sevenResetsAt?.timeIntervalSince(now) ?? 0) >= 24 * 3_600
-                chosen = (far && !mode.showsDistantAhead7d) ? nil : display(.sevenDay, sevenResetsAt)
+                chosen = (far && !mode.showsSevenDayAheadWhenFar) ? nil : display(.sevenDay, sevenResetsAt)
             }
         case (false, false):
             // Both calm → hidden, unless the mode shows a countdown anyway (nearest).

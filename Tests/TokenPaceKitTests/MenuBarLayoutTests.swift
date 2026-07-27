@@ -140,7 +140,7 @@ struct MenuBarLayoutExpandedTests {
     }
 
     @Test func bothCalmHidesResetByDefault() {
-        // Default mode (.showDistant7d): 50%/30% both behind pace → both calm → no countdown.
+        // Default mode (.smart): 50%/30% both behind pace → both calm → no countdown.
         let snap = snapshot(fiveHourUtil: 50, sevenDayUtil: 30,
                             fiveHourResetsIn: 30 * 60, sevenDayResetsIn: 3 * 24 * 3600)
         let layout = MenuBarLayout.make(from: snap, now: now)
@@ -451,7 +451,7 @@ struct MenuBarLayoutServiceProblemTests {
 struct MenuBarLayoutShowResetTests {
 
     /// Whether the default-mode layout draws a countdown (`resetToShow != nil`), or `nil` (recording a
-    /// failure) if not expanded. All tests here use the default `.showDistant7d` mode.
+    /// failure) if not expanded. All tests here use the default `.smart` mode.
     private func showReset(_ layout: MenuBarLayout) -> Bool? {
         guard case let .expanded(_, _, resetToShow) = layout.mode else {
             Issue.record("expected .expanded, got \(layout.mode)")
@@ -544,62 +544,60 @@ struct MenuBarLayoutSelectResetTests {
 
     // ── Both calm ────────────────────────────────────────────────────────────────────────────
     @Test func bothCalmHiddenExceptAlways() {
-        #expect(Self.select(five: .calm, seven: .calm, mode: .showDistant7d) == nil)
-        #expect(Self.select(five: .calm, seven: .calm, mode: .hideDistant7d) == nil)
+        #expect(Self.select(five: .calm, seven: .calm, mode: .smart) == nil)
         // Always → nearest (5h at 2 h is nearer than 7d).
         #expect(Self.select(five: .calm, seven: .calm, mode: .always)?.which == .fiveHour)
     }
 
     // ── One noisy: 5h ────────────────────────────────────────────────────────────────────────
     @Test func onlyFiveNoisyShowsFive() {
-        for m: ResetCountdownMode in [.always, .showDistant7d, .hideDistant7d] {
+        for m: ResetCountdownMode in [.always, .smart] {
             #expect(Self.select(five: .ahead, seven: .calm, mode: m)?.which == .fiveHour)
             #expect(Self.select(five: .exhausted, seven: .calm, mode: m)?.which == .fiveHour)
         }
     }
 
-    // ── One noisy: 7d orange (gated) ─────────────────────────────────────────────────────────
-    @Test func onlySevenOrangeFarGatedByMode() {
-        // Far (≥24 h): Always/Show → shown; Hide → hidden.
+    // ── One noisy: 7d orange, days away (now always shown, #168) ─────────────────────────────
+    @Test func onlySevenOrangeFarShownForAllShowingModes() {
+        // Far (≥24 h): both `always` and `smart` show it (the "hide the days-away 7d" option was removed).
         #expect(Self.select(five: .calm, seven: .ahead, sevenAt: Self.sevenFar, mode: .always)?.which == .sevenDay)
-        #expect(Self.select(five: .calm, seven: .ahead, sevenAt: Self.sevenFar, mode: .showDistant7d)?.which == .sevenDay)
-        #expect(Self.select(five: .calm, seven: .ahead, sevenAt: Self.sevenFar, mode: .hideDistant7d) == nil)
+        #expect(Self.select(five: .calm, seven: .ahead, sevenAt: Self.sevenFar, mode: .smart)?.which == .sevenDay)
     }
 
     @Test func onlySevenOrangeNearAlwaysShown() {
-        // Near (< 24 h): shown regardless of mode (Hide only hides the *distant* one).
-        #expect(Self.select(five: .calm, seven: .ahead, sevenAt: Self.sevenNear, mode: .hideDistant7d)?.which == .sevenDay)
+        // Near (< 24 h): shown for the smart mode.
+        #expect(Self.select(five: .calm, seven: .ahead, sevenAt: Self.sevenNear, mode: .smart)?.which == .sevenDay)
     }
 
     // ── One noisy: 7d red (always) ───────────────────────────────────────────────────────────
-    @Test func onlySevenRedAlwaysShownEvenFarAndHideMode() {
-        #expect(Self.select(five: .calm, seven: .exhausted, sevenAt: Self.sevenFar, mode: .hideDistant7d)?.which == .sevenDay)
+    @Test func onlySevenRedAlwaysShownEvenFar() {
+        #expect(Self.select(five: .calm, seven: .exhausted, sevenAt: Self.sevenFar, mode: .smart)?.which == .sevenDay)
     }
 
     // ── Both noisy: next unblock ─────────────────────────────────────────────────────────────
     @Test func bothExhaustedShowsLater() {
         // 5h at 2 h, 7d at 5 d → later is 7d.
-        let r = Self.select(five: .exhausted, seven: .exhausted, mode: .showDistant7d)
+        let r = Self.select(five: .exhausted, seven: .exhausted, mode: .smart)
         #expect(r?.which == .sevenDay)
     }
 
     @Test func bothOrangeShowsEarlier() {
         // 5h at 2 h, 7d at 5 d → earlier is 5h.
-        let r = Self.select(five: .ahead, seven: .ahead, mode: .showDistant7d)
+        let r = Self.select(five: .ahead, seven: .ahead, mode: .smart)
         #expect(r?.which == .fiveHour)
     }
 
     @Test func redPlusOrangeShowsRed() {
         // 5h red + 7d orange → red bar (5h).
-        #expect(Self.select(five: .exhausted, seven: .ahead, mode: .showDistant7d)?.which == .fiveHour)
+        #expect(Self.select(five: .exhausted, seven: .ahead, mode: .smart)?.which == .fiveHour)
         // 5h orange + 7d red → red bar (7d).
-        #expect(Self.select(five: .ahead, seven: .exhausted, mode: .showDistant7d)?.which == .sevenDay)
+        #expect(Self.select(five: .ahead, seven: .exhausted, mode: .smart)?.which == .sevenDay)
     }
 
     // ── Broken resets_at ─────────────────────────────────────────────────────────────────────
     @Test func brokenResetOfChosenBarIsResetNow() {
         // 5h noisy but its resets_at is nil → chosen 5h, display .resetNow.
-        let r = Self.select(five: .exhausted, seven: .calm, fiveAt: nil, mode: .showDistant7d)
+        let r = Self.select(five: .exhausted, seven: .calm, fiveAt: nil, mode: .smart)
         #expect(r?.which == .fiveHour)
         #expect(r?.display == .resetNow)
     }

@@ -2,9 +2,17 @@
 status: accepted
 date: 2026-07-24
 supersedes: [0028]
+superseded_by: [0042]
 ---
 
 # ADR-0029: Вибір reset-часу в menu bar за станами 5h × 7d + режим-радіогрупа
+
+> **Частково переглянуто [ADR-0042](0042-settings-swiftui-form.md) (#168):** режим `hideDistant7d`
+> прибрано разом із чекбоксом «Include distant 7-day limit reset». `ResetCountdownMode` тепер має три
+> варіанти — `always` / `smart` (колишній `showDistant7d`, у Settings «When pacing well ahead or limit
+> reached») / `never`; days-away ahead-of-pace 7d-countdown показується завжди, коли countdown
+> показується взагалі (`showsSevenDayAheadWhenFar`). Таблиця вибору за severity (нижче) лишається
+> чинною; згадки `showDistant7d`/`hideDistant7d`/`showsDistantAhead7d` в тілі — історичні.
 
 Суперсідить [ADR-0028](0028-hide-reset-label-when-pacing-is-calm.md), який робив лише бінарне
 рішення «ховати, коли обидва бари спокійні».
