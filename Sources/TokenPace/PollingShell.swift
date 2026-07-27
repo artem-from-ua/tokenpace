@@ -312,6 +312,11 @@ actor StubUsageTransport: UsageTransport {
         case justUnblocked
         /// A fixed 5h×7d severity frame for verifying the reset-countdown selection table (#103).
         case pacing(PacingFrame)
+        /// The broken-`resets_at` frame (#167, ADR-0043): a healthy poll whose 5h window is **noisy**
+        /// (exhausted, 100 %) but carries `resets_at: null` — an API data error on the chosen window.
+        /// `selectReset` returns `.dataError(.fiveHour)` and the menu bar promotes to the ⚠️ error state
+        /// (glyph + last bars) instead of inventing a countdown — the same treatment as other API errors.
+        case brokenReset
         /// Calm bars + a **degraded** (yellow) service dot (#…): the usage side mirrors
         /// `.pacing(.calmBoth)` (both bars calm) while the status side reports `Claude Code`
         /// `degraded_performance`, so the menu bar shows the lone calm 5h bar *and* a yellow service
@@ -516,6 +521,27 @@ actor StubUsageTransport: UsageTransport {
             let body = """
             {"five_hour":{"utilization":0.0,"resets_at":null},\
             "seven_day":{"utilization":100.0,"resets_at":"\(sevenReset)"},\
+            "limits":[]}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
+        // Broken-`resets_at` frame (#167, ADR-0043): a healthy 200 whose **noisy** 5h window (100 %)
+        // carries `resets_at: null`. `selectReset` chooses the noisy 5h, finds no valid instant →
+        // `.dataError(.fiveHour)`, so `make(...)` promotes the layout to the ⚠️ error state (glyph +
+        // the last bars) rather than a fabricated "<1m". The 7-day window is calm with a valid reset,
+        // so it is not the data-error source — the error comes purely from the chosen 5h.
+        if mode == .brokenReset {
+            let sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
+            // A **non-empty but unparseable** `resets_at` — NOT `null`. A null/empty 5h date decodes to
+            // the honest `sessionIdle` state (ADR-0027), not a data error; a malformed *present* string
+            // keeps the window active (`hasResetsAt == true`) while `ResetClock.parse` returns nil, which
+            // is the real case-B path: an active window with a broken reset → ⚠️ (#167, ADR-0043).
+            let body = """
+            {"five_hour":{"utilization":100.0,"resets_at":"not-a-date"},\
+            "seven_day":{"utilization":20.0,"resets_at":"\(sevenReset)"},\
             "limits":[]}
             """.data(using: .utf8)!
             let response = HTTPURLResponse(

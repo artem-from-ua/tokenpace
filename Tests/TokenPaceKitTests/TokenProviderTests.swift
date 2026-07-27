@@ -106,7 +106,7 @@ struct ValidityTests {
     }
 
     @Test func exactBoundaryIsExpired() {
-        // `expiresAt == now` counts as expired (`<=`), mirroring ResetClock's `.resetNow` on equality.
+        // `expiresAt == now` counts as expired (`<=`), mirroring ResetClock's "at or past now is past".
         #expect(creds(expiresAt: now).isExpired(now: now))
     }
 

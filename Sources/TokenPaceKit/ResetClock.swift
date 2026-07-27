@@ -8,33 +8,31 @@ import Foundation
 /// presentation and the logic layer owns none of the glyphs. Tests assert on the case and
 /// its associated value, not on a fully styled UI string.
 ///
-/// The three cases map to the three time bands defined in SPEC ("Поведінка агента — час"),
-/// with two deliberate divergences from `statusline.sh` (see ADR-0006):
+/// The two cases map to the SPEC time bands ("Поведінка агента — час"), with two deliberate
+/// divergences from `statusline.sh` (see ADR-0006):
 /// - ``absolute(_:)`` replaces statusline's coarse `~Nh`/`~Nd` for far-off resets.
-/// - ``relative(_:)`` adds a sub-minute **seconds** band that statusline does not have.
+/// - ``relative(_:)`` adds a sub-minute band (`"<1m"`) that statusline does not have.
+///
+/// There is no longer a distinct "reset now / unknown" case (the old `.resetNow`, removed in #167 /
+/// ADR-0043): a window past its boundary is rolled forward before formatting
+/// (``ResetClock/optimisticReset(_:now:)``, applied on every render), and a **missing/unparseable**
+/// `resets_at` is now surfaced as the menu bar's ⚠️ error state (via ``MenuBarLayout/ResetSelection``),
+/// not as a fabricated countdown.
 public enum TimeToReset: Sendable, Equatable {
     /// Reset is **more than 90 minutes** away: show the absolute wall-clock time,
     /// already formatted to the injected `Locale`/`TimeZone` (e.g. `"5:30 PM"` for a
     /// 12-hour locale, `"17:30"` for a 24-hour locale). DST is applied by Foundation.
     case absolute(String)
 
-    /// Reset is **within (0, 90] minutes**: a compact relative duration — `"1h10m"`, `"45m"`, `"1h"`,
-    /// or `"<1m"` for anything under a minute. No spaces, no zero-padding, no seconds band (the menu
-    /// bar re-renders on a ~30 s cadence, so a per-second countdown would jump raggedly — #36 follow-up).
+    /// Reset is **within (0, 90] minutes** (or a degenerate ≤ 0 remnant): a compact relative duration
+    /// — `"1h10m"`, `"45m"`, `"1h"`, or `"<1m"` for anything under a minute. No spaces, no zero-padding,
+    /// no seconds band (the menu bar re-renders on a ~30 s cadence, so a per-second countdown would jump
+    /// raggedly — #36 follow-up).
     ///
     /// Also reused by ``ResetClock/timeToResetCompactDays(resetsAt:now:locale:timeZone:)`` to carry a
     /// **compact day count** (`"4d"`, `"1d"`) for the menu-bar idle countdown to a far 7-day reset —
     /// the view renders the string verbatim, so no new case is needed for that band.
     case relative(String)
-
-    /// Reset is **now or in the past** (remaining ≤ 0), or the window's `resets_at` is
-    /// missing/unparseable: a boundary/unknown state. The view renders a neutral `"<1m"`
-    /// ("about to reset"), not the old ⏰ glyph (#36). In the normal reset-boundary flow
-    /// this case is not reached — the coordinator's one-shot timer applies an optimistic
-    /// reset (``optimisticReset(_:now:)``) and forces a refresh before the countdown hits
-    /// zero — so `.resetNow` now marks only genuinely degenerate data. `ResetClock` stays
-    /// pure: scheduling the re-poll is the coordinator's job, not this module's.
-    case resetNow
 }
 
 // MARK: - NearestReset
@@ -77,7 +75,8 @@ public struct NearestReset: Sendable, Equatable {
 /// - drops trailing zero minutes (`2h`, not `2h0m`), rounds to the nearest minute, and renders any
 ///   sub-minute remainder as `"<1m"` rather than a seconds value (#36 follow-up — the menu bar's
 ///   ~30 s re-render cadence makes a per-second countdown jump raggedly);
-/// - returns ``TimeToReset/resetNow`` instead of hard-coding a glyph (the view renders `"<1m"`, #36).
+/// - has no "reset now / unknown" state: a past-boundary window is rolled forward before formatting,
+///   and a missing/unparseable `resets_at` becomes the menu bar's ⚠️ error state (#167, ADR-0043).
 public enum ResetClock {
 
     // MARK: parse
@@ -180,10 +179,16 @@ public enum ResetClock {
     ///
     /// | remaining            | statusline                          | TokenPace (this fn)             |
     /// |----------------------|-------------------------------------|--------------------------------|
-    /// | `≤ 0`                | `⏰`                                 | ``TimeToReset/resetNow``        |
+    /// | `≤ 0`                | `⏰`                                 | `"<1m"` — degenerate only (see below) |
     /// | `(0, 60) s`          | (n/a — bash floors to `0m`)         | `"<1m"` — sub-minute, no seconds |
     /// | `[60 s, 90 min]`     | `"\(h)h\(m)m"` / `"\(m)m"`          | same, rounded to nearest minute, trailing `0m` dropped |
     /// | `> 90 min`           | coarse `~Nh` / `~Nd`                | ``TimeToReset/absolute(_:)`` — **new** |
+    ///
+    /// A **non-positive** `remaining` no longer has its own state: the render pipeline rolls any
+    /// window past its boundary forward before formatting (`ResetClock.optimisticReset`, applied on
+    /// every render — #167, ADR-0043), so a reset "at or past now" cannot reach here in the normal
+    /// flow. On genuinely degenerate input it falls through to `"<1m"` ("about to reset") rather than
+    /// a removed `.resetNow` — the same string the old glyph-free state rendered.
     ///
     /// Boundary: strict `>` 90 min → absolute; **exactly 90 min → relative** (`1h30m`), since
     /// near the cap the live `Nh Nm` countdown is more useful than a static clock.
@@ -211,7 +216,7 @@ public enum ResetClock {
         timeZone: TimeZone = .current
     ) -> TimeToReset {
         let remaining = resetsAt.timeIntervalSince(now)
-        if remaining <= 0 { return .resetNow }
+        if remaining <= 0 { return .relative("<1m") }   // degenerate (see doc): about-to-reset, no own state
         if remaining > absoluteThreshold {
             return .absolute(absoluteString(for: resetsAt, locale: locale, timeZone: timeZone))
         }
@@ -230,12 +235,12 @@ public enum ResetClock {
     ///   which at ≥ 24 h is always its nearest-**day** branch (`"4d"`, `"1d"`) — the *same* arithmetic
     ///   the popup uses for a far reset, so the menu bar and popup never disagree by a day.
     /// - `< 24 h`  → delegates verbatim to ``timeToReset(resetsAt:now:locale:timeZone:)`` (absolute
-    ///   `"20:40"` above 90 min, the relative `"45m"` bands below, ``TimeToReset/resetNow`` at ≤ 0).
+    ///   `"20:40"` above 90 min, the relative `"45m"` bands below, `"<1m"` at ≤ 0).
     ///
     /// No new ``TimeToReset`` cases: the day count rides in ``TimeToReset/relative(_:)`` and the view
     /// renders it verbatim. `relativeRounded` returns `nil` only for a non-positive remaining, which the
-    /// `≥ 24 h` guard already excludes — but if it ever did, we fall through to `timeToReset` (→
-    /// ``TimeToReset/resetNow``) rather than force-unwrap.
+    /// `≥ 24 h` guard already excludes — but if it ever did, we fall through to `timeToReset`
+    /// (→ `.relative("<1m")`) rather than force-unwrap.
     ///
     /// - Parameters:
     ///   - resetsAt: The 7-day reset instant (from ``parse(_:)``).
@@ -288,10 +293,10 @@ public enum ResetClock {
 
     // MARK: - Popup countdown (relative-always + bounded absolute)
 
-    /// A **single-unit, rounded** relative countdown for the popup's "resets in ~…" line (#11, #38):
+    /// A **single-unit, rounded** relative countdown for the popup's reset line (#11, #38):
     /// one of `"1m"`, `"20m"`, `"3h"`, `"3d"` — the unit picked by how far off the reset is, the
-    /// magnitude **rounded to the nearest** unit. The caller prepends `"~"` (every value is an
-    /// approximation) and the `"resets in …"` / `"at hh:mm"` prose (the localisation seam, ADR-0009).
+    /// magnitude **rounded to the nearest** unit. Used as the numeric core of ``resetLine`` and,
+    /// via ``timeToResetCompactDays(resetsAt:now:locale:timeZone:)``, of the menu-bar idle countdown.
     ///
     /// Bands (remaining time → output):
     /// - `≤ 0`          → `nil` (reset now/past — the caller renders a stale signal)
@@ -303,8 +308,8 @@ public enum ResetClock {
     /// The 50-min and 23-h cut-offs (rather than 60/24) leave headroom so rounding never prints a
     /// value that reads as the next unit — e.g. 55 min rounds to `1h`, not `60m`; 23.5 h → `1d`.
     ///
-    /// Unlike `timeToReset`, this never switches to an absolute clock — the absolute "at hh:mm" is a
-    /// separate, bounded piece (see ``absoluteWithin(resetsAt:now:withinHours:locale:timeZone:)``).
+    /// Unlike `timeToReset`, this never switches to an absolute clock — the absolute "at hh:mm" and
+    /// "on <weekday>" qualifiers are assembled by ``resetLine(resetsAt:now:locale:timeZone:)``.
     public static func relativeRounded(resetsAt: Date, now: Date) -> String? {
         let remaining = resetsAt.timeIntervalSince(now)
         guard remaining > 0 else { return nil }
@@ -314,52 +319,52 @@ public enum ResetClock {
         return "\(Int((remaining / 86_400).rounded()))d"                    // nearest day
     }
 
-    /// The absolute local wall-clock `hh:mm` of the reset — but **only when it is within
-    /// `withinHours`** of `now`; otherwise `nil`.
+    /// The complete popup reset line — **one unified format for every limit** (the token 5h / 7d /
+    /// per-model windows *and* the Extra-usage credits row), so the dropdown never shows two different
+    /// shapes for "time until reset" (#167). The rounded number comes from ``relativeRounded``; a
+    /// qualifier (weekday or clock) is appended by how far off the reset is, in **local** time.
     ///
-    /// The popup shows "resets in <relative> @ <absolute>" only when a clock time is actually
-    /// useful (the reset is soon); for a reset days away the "@ hh:mm" is noise, so the caller
-    /// omits it. 5h windows are always within 24 h (→ always a time); 7d windows and per-model
-    /// sub-windows show the time only in their final day. Locale/zone drive 12/24h + DST, reusing
-    /// the same formatter as ``timeToReset(resetsAt:now:)``.
+    /// Bands (by actual remaining time — the number rounds independently, so the two may diverge by a
+    /// unit at a boundary, which is acceptable):
+    /// - `> 7 d`            → `"15d"`               — bare day count, no qualifier
+    /// - `6 d < r ≤ 7 d`    → `"7d next Monday"`    — the weekday, disambiguated with **next**
+    /// - `24 h < r ≤ 6 d`   → `"5d on Friday"`      — the weekday it lands on
+    /// - `r ≤ 24 h`         → `"20h at 03:00"` / `"45m at 03:00"` — the local wall-clock time
+    /// - `r ≤ 0`            → `nil` (reset now/past — the caller renders its "resetting…" fallback)
     ///
-    /// - Parameter withinHours: The threshold; default 24 h (SPEC: per the user's popup spec).
-    /// - Returns: `"10:30"` / `"5:30 PM"` when within the window, else `nil`.
-    public static func absoluteWithin(
+    /// The `≤ 24 h` band covers both the `Nh` and `Nm` cases automatically — `relativeRounded` picks
+    /// the unit; the `at <time>` qualifier is the same for both. The weekday is the fixed **English**
+    /// name (never localised), while the clock respects the locale's 12/24h convention; both are
+    /// computed in `timeZone` (default `.current`), so a `00:00 UTC` credits reset reads as the user's
+    /// local day and time. See ADR-0009 (pure/shell split): the whole line is assembled here; the shell
+    /// only prepends nothing and falls back to `"resetting…"` on `nil`.
+    ///
+    /// - Parameters:
+    ///   - resetsAt: The reset instant.
+    ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
+    ///   - locale: Drives 12/24h in the clock qualifier. Default `.current`.
+    ///   - timeZone: Wall-clock zone + weekday-day source. Default `.current`.
+    /// - Returns: The assembled line, or `nil` for a non-positive remaining.
+    public static func resetLine(
         resetsAt: Date,
         now: Date,
-        withinHours: Double = 24,
         locale: Locale = .current,
         timeZone: TimeZone = .current
     ) -> String? {
         let remaining = resetsAt.timeIntervalSince(now)
-        guard remaining > 0, remaining < withinHours * 3_600 else { return nil }
-        return absoluteString(for: resetsAt, locale: locale, timeZone: timeZone)
-    }
-
-    /// The reset's weekday name — always the **English** `"Monday"` — but **only when it is
-    /// `beyondHours` or more** away; otherwise `nil`. The counterpart of
-    /// ``absoluteWithin(resetsAt:now:withinHours:locale:timeZone:)``: a near reset gets a clock time
-    /// (`at 17:00`), a far one gets the day it lands on (`on Monday`), which is the useful granularity
-    /// for a reset days out. The two thresholds match (both 24 h by default), so exactly one of the
-    /// pair is non-`nil` for any future reset. Only the caller decides which windows use it — the popup
-    /// applies it to 7-day windows, whose resets are typically days away.
-    ///
-    /// Deliberately **not** localised: unlike the clock time (which respects the device's 12/24h
-    /// convention), the weekday is always the fixed English name, so there is no `locale` parameter.
-    /// `timeZone` still matters — it decides which calendar day the reset instant falls on.
-    ///
-    /// - Parameter beyondHours: The threshold; default 24 h (the mirror of `absoluteWithin`).
-    /// - Returns: The English `"Monday"` when the reset is ≥ `beyondHours` away, else `nil`.
-    public static func weekdayBeyond(
-        resetsAt: Date,
-        now: Date,
-        beyondHours: Double = 24,
-        timeZone: TimeZone = .current
-    ) -> String? {
-        let remaining = resetsAt.timeIntervalSince(now)
-        guard remaining >= beyondHours * 3_600 else { return nil }
-        return weekdayString(for: resetsAt, timeZone: timeZone)
+        guard remaining > 0, let number = relativeRounded(resetsAt: resetsAt, now: now) else {
+            return nil
+        }
+        let day = 86_400.0
+        if remaining > 7 * day { return number }                              // "15d"
+        if remaining > 6 * day {                                              // "7d next Monday"
+            return "\(number) next \(weekdayString(for: resetsAt, timeZone: timeZone))"
+        }
+        if remaining > day {                                                  // "5d on Friday"
+            return "\(number) on \(weekdayString(for: resetsAt, timeZone: timeZone))"
+        }
+        // ≤ 24 h → clock time; relativeRounded already picked "Nh" / "Nm" / "<1m".
+        return "\(number) at \(absoluteString(for: resetsAt, locale: locale, timeZone: timeZone))"
     }
 
     // MARK: - Private formatting
@@ -474,8 +479,10 @@ public enum ResetClock {
     // MARK: optimisticReset (#36)
 
     /// Apply a **local, optimistic reset** to a snapshot the instant a window's reset boundary passes,
-    /// so the menu bar never shows the stale `.resetNow` state (the colored ⏰) while it waits for the
-    /// forced API refresh to land. Each window whose parsed `resets_at` is at or past `now` is reset
+    /// so a countdown never computes a non-positive remaining while the menu bar waits for the forced
+    /// API refresh to land. Applied both on the exact `resetTimer` fire **and** on every render (#167,
+    /// ADR-0043), so no timer race can surface a "reset now" placeholder. Each window whose parsed
+    /// `resets_at` is at or past `now` is reset
     /// to zero usage and rolled forward to its next window; a window still in the future is left
     /// untouched. The result is a temporary local overlay — the next **successful** API response
     /// overwrites it wholesale (the API is the source of truth, even if usage is still non-zero there).
@@ -534,7 +541,11 @@ public enum ResetClock {
             sevenDayOpus: sevenDayOpus,
             sevenDaySonnet: sevenDaySonnet,
             limits: snapshot.limits,
-            sessionIdle: snapshot.sessionIdle)
+            sessionIdle: snapshot.sessionIdle,
+            // The money-credits state is orthogonal to the token windows this rolls forward — carry it
+            // through untouched so the "Extra usage" section / icon survive the overlay. (Dropping it
+            // here was a latent bug, made visible once the overlay runs on every render — #167.)
+            spend: snapshot.spend)
     }
 
     /// Render a `Date` as an ISO-8601 string (`.withInternetDateTime`, UTC, no fractional seconds) so a

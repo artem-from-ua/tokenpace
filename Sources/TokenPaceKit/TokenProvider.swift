@@ -49,8 +49,8 @@ public struct OAuthCredentials: Sendable, Equatable {
     /// Whether the token is expired at `now` — equality counts as expired (`expiresAt <= now`).
     ///
     /// The injected `now` keeps the check deterministic, matching the `now:` parameter convention
-    /// of `ResetClock`/`PacingModel`. The `<=` boundary mirrors `ResetClock`'s `.resetNow` on
-    /// equality: an instant exactly at the deadline is already stale.
+    /// of `ResetClock`/`PacingModel`. The `<=` boundary mirrors `ResetClock`'s "at or past now is
+    /// past" rule: an instant exactly at the deadline is already stale.
     public func isExpired(now: Date) -> Bool { expiresAt <= now }
 
     /// Convenience inverse of ``isExpired(now:)``: the token is still usable (`expiresAt > now`).

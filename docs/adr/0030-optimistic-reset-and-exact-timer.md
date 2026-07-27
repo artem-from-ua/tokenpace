@@ -1,7 +1,15 @@
 ---
-status: accepted
+status: superseded
 date: 2026-07-25
+superseded_by: [0043]
 ---
+
+> **Постскрипт (ADR-0043, #167):** рішення **D5** нижче заміщено — стан `TimeToReset.resetNow`
+> **видалено**, а не лишено safety-net'ом. Три його джерела тепер розрулено явно: `remaining ≤ 0`
+> перекочується (`optimisticReset` застосовується на **кожному** рендері, не лише за таймером —
+> усуває суб-секундну гонку), зламаний `resets_at` обраного noisy-вікна → ⚠️ error-стан, error-branch
+> fallback → без countdown. Решта рішень (D1–D4, D6) лишаються чинними. Див.
+> [ADR-0043](0043-unified-reset-line-and-remove-resetnow.md).
 
 # ADR-0030: Оптимістичний ресет за точним таймером замість пасивного стану `.resetNow` (⏰)
 

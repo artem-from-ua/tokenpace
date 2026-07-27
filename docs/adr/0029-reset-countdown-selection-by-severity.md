@@ -2,7 +2,7 @@
 status: accepted
 date: 2026-07-24
 supersedes: [0028]
-superseded_by: [0042]
+superseded_by: [0042, 0043]
 ---
 
 # ADR-0029: Вибір reset-часу в menu bar за станами 5h × 7d + режим-радіогрупа
@@ -13,6 +13,13 @@ superseded_by: [0042]
 > reached») / `never`; days-away ahead-of-pace 7d-countdown показується завжди, коли countdown
 > показується взагалі (`showsSevenDayAheadWhenFar`). Таблиця вибору за severity (нижче) лишається
 > чинною; згадки `showDistant7d`/`hideDistant7d`/`showsDistantAhead7d` в тілі — історичні.
+
+> **Постскрипт (2026-07-27, [ADR-0043](0043-unified-reset-line-and-remove-resetnow.md), #167):**
+> `selectReset` тепер повертає `ResetSelection` (`.hide`/`.show`/`.dataError`), не `ResetToShow?`.
+> Реалізації-пункт «битий/nil `resets_at` обраного шумного бару → ⏰ (`.resetNow`)» замінено:
+> такий випадок → `.dataError`, і menu bar промотується в ⚠️ error-стан (як інша помилка API), а не
+> показує фейковий countdown. «Обидва calm без валідних дат → нічого» лишається (`.hide`). Таблиця
+> вибору 5h×7d незмінна.
 
 Суперсідить [ADR-0028](0028-hide-reset-label-when-pacing-is-calm.md), який робив лише бінарне
 рішення «ховати, коли обидва бари спокійні».
