@@ -334,6 +334,10 @@ final class SettingsModel {
         PersistedConfig.archiveDestination = path
         AppLogger.lifecycle.notice("archive: destination chosen")
         refreshArchiveStatus()
+        // Archive into the newly chosen folder right away, so the status reflects a real sync instead
+        // of sitting at "Not archived yet". The sync runs in the shell; its completion refreshes the
+        // status (via updateArchiveStatus).
+        onArchiveNow?()
     }
 
     func archiveNow() { onArchiveNow?() }

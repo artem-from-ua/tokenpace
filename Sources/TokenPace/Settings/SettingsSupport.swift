@@ -55,13 +55,15 @@ extension SettingsModel {
     /// or the not-yet-archived placeholder. Empty when no destination is set.
     static func composeArchiveStatus(destination: String?, lastSync: Date?, summary: LogArchiver.Summary?) -> String {
         guard let destination else { return "" }
+
+        // Before this app's first archive there is nothing to report — the destination folder's own
+        // file count is not our archive (it may hold unrelated files), so don't show totals that would
+        // contradict "Not archived yet".
+        guard let last = lastSync else { return "Not archived yet." }
+
         let destURL = URL(fileURLWithPath: (destination as NSString).expandingTildeInPath)
         let stats = LogArchiver().archiveStats(at: destURL)
         let totals = "\(stats.files) files · \(ByteSize.humanReadable(stats.bytes))"
-
-        guard let last = lastSync else {
-            return "Not archived yet — runs daily, or use Archive now. (\(totals))"
-        }
         let when = PopupViewController.ageText(max(0, Date().timeIntervalSince(last)))
         if let summary {
             return "Last archived: \(when) · \(summary.copied) updated · \(totals)"
