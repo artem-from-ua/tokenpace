@@ -111,6 +111,23 @@ public struct ResetToShow: Sendable, Equatable {
     }
 }
 
+// MARK: - ResetSelection
+
+/// The outcome of ``MenuBarLayout/selectReset(...)`` — three distinct results, so the caller can tell
+/// "hide the countdown" apart from "the chosen window's `resets_at` is broken" (which is an API data
+/// error, not an empty state — #167, ADR-0043):
+/// - ``hide`` — draw no countdown (both bars calm and the mode does not force one, or a distant
+///   ahead-of-pace 7-day gated off). A legitimate quiet state.
+/// - ``show(_:)`` — draw this countdown.
+/// - ``dataError(_:)`` — the chosen (noisy) window has a missing/unparseable `resets_at`: the layer
+///   promotes the whole menu bar to its ⚠️ error state, exactly as for other API failures, rather than
+///   inventing a fake countdown. Carries the window whose date was broken (for diagnostics/tests).
+public enum ResetSelection: Sendable, Equatable {
+    case hide
+    case show(ResetToShow)
+    case dataError(LimitWindow)
+}
+
 // MARK: - CreditsMarker
 
 /// The money-credits ("extra usage") icon the menu bar should draw — the pure decision behind the
@@ -212,10 +229,11 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// 3. Return ``MenuBarMode/expanded`` — the healthy path always shows both bars (there is no
     ///    idle/compact collapse; ADR-0015).
     ///
-    /// When neither `resets_at` parses (both `nil`/malformed), the reset display falls back to
-    /// ``TimeToReset/resetNow`` — the snapshot is unusable for a countdown, which the view renders
-    /// as the neutral `"<1m"` boundary text (#36). The normal reset-boundary flow does not reach this:
-    /// the coordinator's optimistic-reset timer rolls the window forward before zero (see ADR-0030).
+    /// When a **noisy** window's `resets_at` is missing/unparseable, ``selectReset(...)`` returns
+    /// ``ResetSelection/dataError(_:)`` and the layout is promoted to ``MenuBarMode/error`` (⚠️ + last
+    /// bars) — an API data error is shown as one, not as a fabricated countdown (#167, ADR-0043). A
+    /// past-boundary window is instead rolled forward before formatting (`optimisticReset`), so no
+    /// "reset now" placeholder is ever needed.
     ///
     /// **Session-idle (#100, ADR-0027).** When `snapshot.sessionIdle` (the 5h window does not exist
     /// server-side — no active session), the mode is still ``MenuBarMode/expanded`` with **both** bars
@@ -257,6 +275,14 @@ public struct MenuBarLayout: Sendable, Equatable {
             let five = BarView(
                 layout: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind),
                 indicator: .neutral, window: .fiveHour, idle: true, blocked: blocked)
+            // In the idle state the 5h window is legitimately date-less (ADR-0027, not an error), but the
+            // 7-day window is real: if it reports usage yet its `resets_at` is unparseable, that is the
+            // same broken-payload data error as on the active path (#167, ADR-0043) → ⚠️.
+            // `hasBrokenActiveReset` already excludes the idle 5h, so it checks only the real 7-day here.
+            if snapshot.hasBrokenActiveReset {
+                return MenuBarLayout(mode: .error(
+                    fiveHour: five, sevenDay: sevenToShow, reset: nil, which: nil))
+            }
             let resetToShow: ResetToShow?
             if blocked, let choice = BlockingReset.forBlocked(snapshot: snapshot, now: now) {
                 // Every blocking candidate in the idle state is a long (7-day-cadence or monthly)
@@ -264,10 +290,19 @@ public struct MenuBarLayout: Sendable, Equatable {
                 let text = ResetClock.timeToResetCompactDays(resetsAt: choice.resetsAt, now: now)
                 resetToShow = ResetToShow(which: .sevenDay, display: text)
             } else {
-                resetToShow = selectReset(
+                // The idle 5h passes `fiveResetsAt: nil` deliberately (no 5h window) with `.calm`
+                // severity, so it is never the *chosen* window; a broken 7-day date was already caught
+                // above, so `.dataError` should not arise here — handle it coherently regardless.
+                switch selectReset(
                     fiveSeverity: .calm, fiveResetsAt: nil,
                     sevenSeverity: seven.severity, sevenResetsAt: sevenResetsAt,
-                    now: now, mode: resetMode)
+                    now: now, mode: resetMode) {
+                case .hide: resetToShow = nil
+                case .show(let r): resetToShow = r
+                case .dataError:
+                    return MenuBarLayout(mode: .error(
+                        fiveHour: five, sevenDay: sevenToShow, reset: nil, which: nil))
+                }
             }
             return MenuBarLayout(mode: .expanded(
                 fiveHour: five, sevenDay: sevenToShow, resetToShow: resetToShow))
@@ -276,13 +311,31 @@ public struct MenuBarLayout: Sendable, Equatable {
         let five = bar(for: snapshot.fiveHour, window: .fiveHour, now: now)
         let fiveResetsAt = ResetClock.parse(snapshot.fiveHour.resetsAt)
 
+        // API data error (#167, ADR-0043): a window the server reports as **active** (real usage) but
+        // with a present-yet-unparseable `resets_at` is a malformed payload — surface the ⚠️ error state
+        // (glyph + last bars), not a fabricated countdown. Checked on the raw snapshot, *before*
+        // `bar(for:)` masks a broken date as `elapsedFraction == 1.0` / `.calm` (which would otherwise
+        // hide the inconsistency). Shared with the popup via `UsageSnapshot.hasBrokenActiveReset`.
+        if snapshot.hasBrokenActiveReset {
+            return MenuBarLayout(mode: .error(fiveHour: five, sevenDay: sevenToShow, reset: nil, which: nil))
+        }
+
         // Pick which reset countdown to show (or hide) from the 5h×7d severity table + mode (ADR-0029).
-        let resetToShow = selectReset(
+        switch selectReset(
             fiveSeverity: five.severity, fiveResetsAt: fiveResetsAt,
             sevenSeverity: seven.severity, sevenResetsAt: sevenResetsAt,
-            now: now, mode: resetMode)
-        return MenuBarLayout(mode: .expanded(
-            fiveHour: five, sevenDay: sevenToShow, resetToShow: resetToShow))
+            now: now, mode: resetMode) {
+        case .hide:
+            return MenuBarLayout(mode: .expanded(fiveHour: five, sevenDay: sevenToShow, resetToShow: nil))
+        case .show(let resetToShow):
+            return MenuBarLayout(mode: .expanded(
+                fiveHour: five, sevenDay: sevenToShow, resetToShow: resetToShow))
+        case .dataError:
+            // Defensive: a chosen (noisy) window with no valid instant. In practice
+            // `hasBrokenActiveReset` above already promotes this to `.error` before the severity table
+            // runs, but keep the branch coherent — an unparseable date is never a countdown.
+            return MenuBarLayout(mode: .error(fiveHour: five, sevenDay: sevenToShow, reset: nil, which: nil))
+        }
     }
 
     // MARK: make (health-aware, issue #12)
@@ -378,12 +431,13 @@ public struct MenuBarLayout: Sendable, Equatable {
               case let .expanded(five, seven, _) = make(from: snapshot, now: now, resetMode: resetMode).mode else {
             return MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
         }
-        let (which, reset) = ResetClock.resetDisplay(
+        // Both `resets_at` unparseable → no diagnostic countdown (the ⚠️ + stale bars still show).
+        let resolved = ResetClock.resetDisplay(
             fiveHourResetsAt: snapshot.fiveHour.resetsAt,
             sevenDayResetsAt: snapshot.sevenDay.resetsAt,
-            now: now
-        ) ?? (.fiveHour, .resetNow)
-        return MenuBarLayout(mode: .error(fiveHour: five, sevenDay: seven, reset: reset, which: which))
+            now: now)
+        return MenuBarLayout(mode: .error(
+            fiveHour: five, sevenDay: seven, reset: resolved?.display, which: resolved?.which))
     }
 
     /// A copy of this layout carrying `serviceProblem` and `credits` (the `mode` is unchanged) — the
@@ -416,8 +470,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     // MARK: - Reset-countdown selection (#103, ADR-0029)
 
     /// Choose which reset countdown (5h or 7d) the menu bar should show, per the 5h×7d severity table
-    /// and the user's ``ResetCountdownMode``. Returns `nil` to hide the countdown. Pure/testable — the
-    /// single source of the selection table.
+    /// and the user's ``ResetCountdownMode``. Pure/testable — the single source of the selection table.
     ///
     /// The semantics ("show the next real unblock"):
     /// - both bars **calm** → hidden, unless the mode shows a countdown even then (`always` → nearest).
@@ -428,63 +481,66 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///   until both clear); both **ahead** → the **earlier** reset (neither blocks yet); **red+orange**
     ///   → the **red** bar's reset (only it blocks).
     ///
-    /// `nil` `resetsAt` (missing/unparseable) is tolerated: a chosen bar with a `nil` instant yields
-    /// `.resetNow` (rendered as the neutral `"<1m"`, #36), matching the rest of the layer.
+    /// A chosen (noisy) window whose `resets_at` is **missing/unparseable** yields ``ResetSelection/dataError(_:)``
+    /// — an API data error, so the caller promotes the menu bar to its ⚠️ error state rather than
+    /// inventing a countdown (#167, ADR-0043). A window that is merely **not chosen** (gated off, both
+    /// calm) yields ``ResetSelection/hide`` — a quiet state, not an error.
     static func selectReset(
         fiveSeverity: PacingSeverity, fiveResetsAt: Date?,
         sevenSeverity: PacingSeverity, sevenResetsAt: Date?,
         now: Date, mode: ResetCountdownMode,
         locale: Locale = .current, timeZone: TimeZone = .current
-    ) -> ResetToShow? {
-        if mode == .never { return nil }
+    ) -> ResetSelection {
+        if mode == .never { return .hide }
 
         let fiveNoisy = fiveSeverity != .calm
         let sevenNoisy = sevenSeverity != .calm
 
-        // Format a chosen window's reset (5h → live countdown; 7d → compact-days variant).
-        func display(_ window: LimitWindow, _ resetsAt: Date?) -> ResetToShow {
-            guard let at = resetsAt else { return ResetToShow(which: window, display: .resetNow) }
+        // Format a chosen window's reset (5h → live countdown; 7d → compact-days variant). A chosen
+        // window with no valid instant is a data error, not a countdown.
+        func display(_ window: LimitWindow, _ resetsAt: Date?) -> ResetSelection {
+            guard let at = resetsAt else { return .dataError(window) }
             let text = window == .sevenDay
                 ? ResetClock.timeToResetCompactDays(resetsAt: at, now: now, locale: locale, timeZone: timeZone)
                 : ResetClock.timeToReset(resetsAt: at, now: now, locale: locale, timeZone: timeZone)
-            return ResetToShow(which: window, display: text)
+            return .show(ResetToShow(which: window, display: text))
         }
-        func pick(_ nr: NearestReset?) -> ResetToShow? {
-            guard let nr else { return nil }
+        // A "nearest/latest of two calm-ish windows" pick: no window to show → hide (not an error —
+        // this branch is only reached when neither window is individually blocking).
+        func pick(_ nr: NearestReset?) -> ResetSelection {
+            guard let nr else { return .hide }
             return display(nr.window, nr.resetsAt)
         }
 
-        let chosen: ResetToShow?
         switch (fiveNoisy, sevenNoisy) {
         case (true, true):
             // Both noisy → next unblock.
             if fiveSeverity == .exhausted && sevenSeverity == .exhausted {
-                chosen = pick(ResetClock.latestReset(fiveHour: fiveResetsAt, sevenDay: sevenResetsAt))
+                return pick(ResetClock.latestReset(fiveHour: fiveResetsAt, sevenDay: sevenResetsAt))
             } else if fiveSeverity == .ahead && sevenSeverity == .ahead {
-                chosen = pick(ResetClock.nearestReset(fiveHour: fiveResetsAt, sevenDay: sevenResetsAt))
+                return pick(ResetClock.nearestReset(fiveHour: fiveResetsAt, sevenDay: sevenResetsAt))
             } else {
                 // red + orange → the red (exhausted) bar.
-                chosen = fiveSeverity == .exhausted
+                return fiveSeverity == .exhausted
                     ? display(.fiveHour, fiveResetsAt)
                     : display(.sevenDay, sevenResetsAt)
             }
         case (true, false):
             // Only 5h noisy → its reset (always near enough to matter).
-            chosen = display(.fiveHour, fiveResetsAt)
+            return display(.fiveHour, fiveResetsAt)
         case (false, true):
             // Only 7d noisy. Red → always; orange → gated by distance + mode.
             if sevenSeverity == .exhausted {
-                chosen = display(.sevenDay, sevenResetsAt)
+                return display(.sevenDay, sevenResetsAt)
             } else {
                 let far = (sevenResetsAt?.timeIntervalSince(now) ?? 0) >= 24 * 3_600
-                chosen = (far && !mode.showsSevenDayAheadWhenFar) ? nil : display(.sevenDay, sevenResetsAt)
+                return (far && !mode.showsSevenDayAheadWhenFar) ? .hide : display(.sevenDay, sevenResetsAt)
             }
         case (false, false):
             // Both calm → hidden, unless the mode shows a countdown anyway (nearest).
-            chosen = mode.showsWhenBothCalm
+            return mode.showsWhenBothCalm
                 ? pick(ResetClock.nearestReset(fiveHour: fiveResetsAt, sevenDay: sevenResetsAt))
-                : nil
+                : .hide
         }
-        return chosen
     }
 }

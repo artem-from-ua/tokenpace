@@ -602,7 +602,7 @@ final class PopupViewController: NSViewController {
     /// - **Limit set** (`credits.bar != nil`): a full section mirroring a limit window —
     ///   ```
     ///   Extra usage ............... on pace | ahead | limit reached
-    ///   €10.77 / €15.00 ........... resets in 6d
+    ///   €10.77 / €15.00 ........... 5d on Friday
     ///   ```
     ///   plus a pacing bar (same `PopupBarView`, coloured by `credits.bar` via `aheadColor`).
     /// - **Unlimited** (`credits.bar == nil`): a single bare line, no bar, no reset —
@@ -620,16 +620,17 @@ final class PopupViewController: NSViewController {
         }
 
         // Limit set: title (+ "in use" badge when credits are actually covering an exhausted limit) +
-        // status word, then "spent / limit … <relative>", then the bar. The reset is shown as the bare
-        // relative value ("6d"), without the "resets in " prefix that the token rows use (#156). When
-        // this reset is the one blocking work it's shown as a red badge instead (`resetIsBlocking`).
+        // status word, then "spent / limit … <reset line>", then the bar. The reset uses the same
+        // unified line as the token rows (`resetText`) — "5d on Friday", "20h at 03:00" — no prefix
+        // (#167). When this reset is the one blocking work it's shown as a red badge instead
+        // (`resetIsBlocking`).
         addTitleStatusLine(
             title: Self.extraUsageTitle,
             status: Self.creditsStatusText(bar),
             badge: credits.inUse ? Self.makeInUsePill() : nil)
         addDetailLine(
             used: Self.creditsAmountText(spent: credits.spent, limit: limit),
-            reset: Self.creditsResetRelativeOnly(credits.resetRelative),
+            reset: credits.resetLine ?? "resetting…",
             resetIsBlocking: creditsResetIsBlocking)
         // Credits pace over the whole calendar month; there is no window-tick ruler like the token bars,
         // so the bar draws with no subdivisions (a plain pacing bar). `isLast: true` — the credits
@@ -985,20 +986,12 @@ final class PopupViewController: NSViewController {
     /// The per-limit detail line's **left**-aligned half: `"20%"` — the bare utilisation percentage.
     static func usedText(_ row: LimitRow) -> String { percent(row.utilization) }
 
-    /// The per-limit detail line's **right**-aligned half: `"20m at 05:30"` for a near reset,
-    /// `"3d on Monday"` for a far 7-day reset, or `"resetting…"` when the model carries no relative
-    /// countdown (reset is now/past). The relative countdown is rounded (``ResetClock/relativeRounded``);
-    /// exactly one qualifier is appended — " at hh:mm" when the reset is < 24 h away (``resetAbsolute``),
-    /// otherwise " on <weekday>" for a 7-day window a day or more out (``resetWeekday``).
+    /// The per-limit detail line's **right**-aligned half: the unified reset line
+    /// (`ResetClock.resetLine`) — `"20h at 03:00"` for a near reset, `"5d on Friday"` /
+    /// `"7d next Monday"` for a far one, `"15d"` for a distant one — or `"resetting…"` when the model
+    /// carries no line (reset is now/past). One shape for every limit, credits included (#167).
     static func resetText(_ row: LimitRow) -> String {
-        guard let rel = row.resetRelative else { return "resetting…" }
-        var reset = rel
-        if let abs = row.resetAbsolute {
-            reset += " at \(abs)"
-        } else if let weekday = row.resetWeekday {
-            reset += " on \(weekday)"
-        }
-        return reset
+        row.resetLine ?? "resetting…"
     }
 
     /// The data age shown flush-right in the "Claude Code" header (under the ⌥/problem gate):
@@ -1119,20 +1112,6 @@ final class PopupViewController: NSViewController {
     /// no cap and no reset (there is nothing to pace against).
     static func creditsSpentOnlyText(_ spent: Money) -> String {
         "\(moneyText(spent)) spent"
-    }
-
-    /// The credits detail line's **right** half (limit set): `"resets in 6d"`, or `"resetting…"` when
-    /// the countdown is unavailable (unresolvable month boundary) — mirroring ``resetText(_:)``'s
-    /// fallback for a missing relative string.
-    static func creditsResetText(_ relative: String?) -> String {
-        guard let relative else { return "resetting…" }
-        return "resets in \(relative)"
-    }
-
-    /// The credits reset shown as the bare relative value only ("6d"), without the "resets in " prefix
-    /// (#156) — for the non-blocking detail line. Falls back to "resetting…" when unavailable.
-    static func creditsResetRelativeOnly(_ relative: String?) -> String {
-        relative ?? "resetting…"
     }
 
     /// Format a ``Money`` for display. For a **known** currency the symbol sits in that currency's

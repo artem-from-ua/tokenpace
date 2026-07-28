@@ -590,6 +590,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //                    reset time is painted **red** (the blocking reset). Compare against `=idle`.
         //  • `=optimistic-reset` → the reset-boundary flow (#36): the 5h window resets ~20 s after
         //                    launch, so the bar flips 60 % → 0 % (no ⏰) and a forced refresh follows.
+        //  • `=broken-reset` → a noisy 5h (100 %) with `resets_at: null` (#167): an API data error on
+        //                    the chosen window → the menu bar shows the ⚠️ error state (glyph + bars),
+        //                    not a fabricated "<1m". The 7-day window is calm with a valid reset.
         //  • `=5h-orange` / `both-orange` / `both-red` / `red-orange` / `calm5-orange7`
         //                  → fixed 5h×7d severity frames for the reset-countdown table (#103).
         //                    `calm5-orange7` is the lone days-away 7d-orange cell where the reset-
@@ -616,6 +619,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "idle":       StubUsageTransport(mode: .idle)
         case "idle-blocked": StubUsageTransport(mode: .idleBlocked)
         case "optimistic-reset": StubUsageTransport(mode: .optimisticReset)
+        // Broken-`resets_at` (#167): noisy 5h with `resets_at: null` → ⚠️ error state, not a fake "<1m".
+        case "broken-reset": StubUsageTransport(mode: .brokenReset)
         // Reset-countdown (#103) verification frames: fixed 5h×7d severities to exercise the table.
         case "5h-orange":   StubUsageTransport(mode: .pacing(.fiveOrange))
         case "both-orange": StubUsageTransport(mode: .pacing(.bothOrange))
@@ -1139,8 +1144,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Render a poll result into the menu-bar image and popup model at instant `now`.
     private func render(_ output: PollOutput, at now: Date) {
+        // Roll any window whose reset boundary has already passed forward to its next window *before*
+        // formatting, so a countdown never computes `remaining <= 0` (which used to surface the removed
+        // `.resetNow` state). The exact `resetTimer` normally fires the roll-forward at the boundary
+        // (`fireOptimisticReset`), but a render driven by another timer (the 30 s `ageTimer`, a poll
+        // tick) can land in the sub-second gap before it fires — so we apply the same pure overlay here
+        // on every render. It is a no-op when nothing has crossed a boundary, and the next authoritative
+        // poll overwrites it wholesale (the API stays the source of truth). See ADR-0043.
+        let snapshot = output.snapshot.map { ResetClock.optimisticReset($0, now: now) }
         statusView?.layout = MenuBarLayout.make(
-            from: output.snapshot, health: output.health, now: now,
+            from: snapshot, health: output.health, now: now,
             // #31: honour the "Show service status dot" toggle — nil hides the dot and reclaims its width.
             serviceProblem: PersistedConfig.showServiceStatusDot ? lastStatusHealth?.worstProblem : nil,
             resetMode: PersistedConfig.resetCountdownModeMenuBar,   // #103: which reset countdown to show
@@ -1151,7 +1164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showCredits: PersistedConfig.showExtraUsage)
         refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
         setPopupLayout(PopupLayout.make(
-            from: output.snapshot, health: output.health, now: now, interval: output.interval,
+            from: snapshot, health: output.health, now: now, interval: output.interval,
             serviceStatus: lastStatusHealth))
     }
 

@@ -397,6 +397,25 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         self.spend = spend
     }
 
+    /// Whether the snapshot carries a **broken-`resets_at` data error** on an **active** window — the
+    /// server reports real usage (`utilization > 0`) yet the window's `resets_at` string is present but
+    /// unparseable (`ResetClock.parse == nil`). Such a 200 body is malformed, so both the menu bar (⚠️
+    /// error mode) and the popup (a red warning banner) surface it as an API error rather than a
+    /// fabricated countdown / `resetting…` (#167, ADR-0043). The single source of truth for the check,
+    /// shared by `MenuBarLayout` and `PopupLayout`.
+    ///
+    /// Deliberately **not** an error for: a **zero-usage** window (nothing to reset yet), the
+    /// session-idle 5h (legitimately date-less, ADR-0027 — its `resetsAt` is `""`, which `parse` also
+    /// rejects, so `sessionIdle` is excluded explicitly), or a `""`/`null` date (a boundary/idle state,
+    /// not a malformed value). Only a **non-empty, unparseable** date on a used window qualifies.
+    public var hasBrokenActiveReset: Bool {
+        func broken(_ window: UsageWindow) -> Bool {
+            window.utilization > 0 && window.hasResetsAt && ResetClock.parse(window.resetsAt) == nil
+        }
+        let fiveBroken = !sessionIdle && broken(fiveHour)
+        return fiveBroken || broken(sevenDay)
+    }
+
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 

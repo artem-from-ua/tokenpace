@@ -154,12 +154,14 @@ struct RelativeTests {
         if case .absolute = got { } else { Issue.record("expected .absolute for 2h, got \(got)") }
     }
 
-    @Test func resetExactlyNowIsResetNow() {
-        #expect(ResetClock.timeToReset(resetsAt: now, now: now) == .resetNow)
+    @Test func resetExactlyNowIsAboutToReset() {
+        // No `.resetNow` state: a non-positive remaining falls through to `.relative("<1m")` — the
+        // render pipeline rolls a past-boundary window forward before this can surface (#167).
+        #expect(ResetClock.timeToReset(resetsAt: now, now: now) == .relative("<1m"))
     }
 
-    @Test func resetInPastIsResetNow() {
-        #expect(ResetClock.timeToReset(resetsAt: now - 1, now: now) == .resetNow)
+    @Test func resetInPastIsAboutToReset() {
+        #expect(ResetClock.timeToReset(resetsAt: now - 1, now: now) == .relative("<1m"))
     }
 }
 
@@ -368,87 +370,148 @@ struct RelativeRoundedTests {
     }
 }
 
-// MARK: - absoluteWithin (clock time only inside the threshold)
+// MARK: - resetLine (unified popup line: bare / next / on / at, in local time — #167)
 
-@Suite("ResetClock.absoluteWithin")
-struct AbsoluteWithinTests {
+@Suite("ResetClock.resetLine")
+struct ResetLineTests {
+    // now = 1970-01-12 13:46:40 UTC — a Monday. Offsets land on known weekdays under UTC.
     private let now = Date(timeIntervalSince1970: 1_000_000)
     private func at(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(seconds) }
     private let utc = TimeZone(identifier: "UTC")!
     private let gb = Locale(identifier: "en_GB")   // 24-hour
+    private let us = Locale(identifier: "en_US")   // 12-hour
 
-    @Test func withinThresholdReturnsClock() {
-        let s = ResetClock.absoluteWithin(resetsAt: at(5 * 3600), now: now, locale: gb, timeZone: utc)
-        #expect(s != nil)
+    /// The English weekday name the private `weekdayString` would emit for `date` in `tz` — computed
+    /// with an identically-configured formatter so a future change to that helper is caught, not
+    /// hardcoded. Ceils to the minute first, matching the helper.
+    private func expectedWeekday(_ date: Date, _ tz: TimeZone) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = tz
+        f.dateFormat = "EEEE"
+        return f.string(from: ResetClock.ceilToMinute(date))
     }
 
-    @Test func beyondThresholdReturnsNil() {
-        // 3 days out → no clock time.
-        #expect(ResetClock.absoluteWithin(resetsAt: at(3 * 86_400), now: now, locale: gb, timeZone: utc) == nil)
+    /// The wall-clock string the private `absoluteString` would emit for `date` in `locale`/`tz`.
+    private func expectedClock(_ date: Date, _ locale: Locale, _ tz: TimeZone) -> String {
+        let f = DateFormatter()
+        f.locale = locale
+        f.timeZone = tz
+        f.setLocalizedDateFormatFromTemplate("jmm")
+        return f.string(from: ResetClock.ceilToMinute(date))
     }
 
-    @Test func exactlyAtThresholdIsExcluded() {
-        // Strict `<` 24 h: exactly 24 h away → nil.
-        #expect(ResetClock.absoluteWithin(resetsAt: at(24 * 3600), now: now, locale: gb, timeZone: utc) == nil)
+    // ── Zone: > 7 d → bare "Nd" ──────────────────────────────────────────────────────────────
+    @Test func beyondSevenDaysIsBareDayCount() {
+        #expect(ResetClock.resetLine(resetsAt: at(15 * 86_400), now: now, locale: gb, timeZone: utc) == "15d")
+        // 8d exactly out → still bare (> 7 d), no weekday.
+        #expect(ResetClock.resetLine(resetsAt: at(8 * 86_400), now: now, locale: gb, timeZone: utc) == "8d")
     }
 
-    @Test func justInsideThresholdIncluded() {
-        #expect(ResetClock.absoluteWithin(resetsAt: at(24 * 3600 - 60), now: now, locale: gb, timeZone: utc) != nil)
+    // ── Zone: 6 d < r ≤ 7 d → "Nd next <weekday>" ────────────────────────────────────────────
+    @Test func withinSevenDaysNamesNextWeekday() {
+        let d = at(7 * 86_400)
+        #expect(ResetClock.resetLine(resetsAt: d, now: now, locale: gb, timeZone: utc)
+                == "7d next \(expectedWeekday(d, utc))")
+        // Just inside the 6-day boundary (6d 12h) → "next" band, number rounds to 7d.
+        let d2 = at(6 * 86_400 + 12 * 3_600)
+        #expect(ResetClock.resetLine(resetsAt: d2, now: now, locale: gb, timeZone: utc)
+                == "7d next \(expectedWeekday(d2, utc))")
     }
 
-    @Test func nilWhenPast() {
-        #expect(ResetClock.absoluteWithin(resetsAt: at(-60), now: now) == nil)
+    // ── Zone: 24 h < r ≤ 6 d → "Nd on <weekday>" ─────────────────────────────────────────────
+    @Test func withinSixDaysNamesWeekday() {
+        let d = at(5 * 86_400)
+        #expect(ResetClock.resetLine(resetsAt: d, now: now, locale: gb, timeZone: utc)
+                == "5d on \(expectedWeekday(d, utc))")
+        // 6 d exactly (≤ 6 d) → "on" band, not "next".
+        let d6 = at(6 * 86_400)
+        #expect(ResetClock.resetLine(resetsAt: d6, now: now, locale: gb, timeZone: utc)
+                == "6d on \(expectedWeekday(d6, utc))")
     }
 
-    @Test func customThreshold() {
-        // withinHours: 1 → 90 min away is outside.
-        #expect(ResetClock.absoluteWithin(resetsAt: at(90 * 60), now: now, withinHours: 1, locale: gb, timeZone: utc) == nil)
-        #expect(ResetClock.absoluteWithin(resetsAt: at(30 * 60), now: now, withinHours: 1, locale: gb, timeZone: utc) != nil)
-    }
-}
-
-// MARK: - weekdayBeyond (weekday name only beyond the threshold — the far-reset counterpart)
-
-@Suite("ResetClock.weekdayBeyond")
-struct WeekdayBeyondTests {
-    // now = 1970-01-12 13:46:40 UTC — a Monday; +3 days lands on a Thursday.
-    private let now = Date(timeIntervalSince1970: 1_000_000)
-    private func at(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(seconds) }
-    private let utc = TimeZone(identifier: "UTC")!
-
-    @Test func beyondThresholdReturnsWeekday() {
-        // 3 days out → the weekday it lands on. Deterministic under UTC.
-        #expect(ResetClock.weekdayBeyond(resetsAt: at(3 * 86_400), now: now, timeZone: utc) == "Thursday")
+    // ── Zone: r ≤ 24 h → "Nh at <time>" / "Nm at <time>" ─────────────────────────────────────
+    @Test func withinTwentyFourHoursShowsClock() {
+        let d = at(20 * 3_600)
+        #expect(ResetClock.resetLine(resetsAt: d, now: now, locale: gb, timeZone: utc)
+                == "20h at \(expectedClock(d, gb, utc))")
+        // 24 h exactly (≤ 24 h) → clock band, not weekday. relativeRounded gives "1d" at 24h boundary.
+        let d24 = at(24 * 3_600)
+        #expect(ResetClock.resetLine(resetsAt: d24, now: now, locale: gb, timeZone: utc)
+                == "1d at \(expectedClock(d24, gb, utc))")
     }
 
-    @Test func weekdayIsEnglishRegardlessOfDeviceLocale() {
-        // The name is pinned to en_US_POSIX inside — there is no `locale` parameter to override it, so
-        // whatever the device locale, a Thursday reads "Thursday", never a localised form. This test
-        // documents that contract: the call takes no locale and the English name is the only output.
-        let s = ResetClock.weekdayBeyond(resetsAt: at(3 * 86_400), now: now, timeZone: utc)
-        #expect(s == "Thursday")
+    @Test func minutesShowClock() {
+        let d = at(45 * 60)
+        #expect(ResetClock.resetLine(resetsAt: d, now: now, locale: gb, timeZone: utc)
+                == "45m at \(expectedClock(d, gb, utc))")
+        // 60 m exactly (≤ 24 h, > 0) → still the clock band.
+        let d60 = at(60 * 60)
+        #expect(ResetClock.resetLine(resetsAt: d60, now: now, locale: gb, timeZone: utc)
+                == "1h at \(expectedClock(d60, gb, utc))")
     }
 
-    @Test func withinThresholdReturnsNil() {
-        // 5 h out → a clock time is shown instead, so no weekday here.
-        #expect(ResetClock.weekdayBeyond(resetsAt: at(5 * 3600), now: now, timeZone: utc) == nil)
+    @Test func subMinuteShowsLessThanOneMinuteAtClock() {
+        let d = at(30)
+        #expect(ResetClock.resetLine(resetsAt: d, now: now, locale: gb, timeZone: utc)
+                == "<1m at \(expectedClock(d, gb, utc))")
     }
 
-    @Test func exactlyAtThresholdIncluded() {
-        // Mirror of absoluteWithin's strict `<`: `>=` here, so exactly 24 h away is a weekday (and
-        // absoluteWithin returns nil at the same instant — the two never both fire).
-        #expect(ResetClock.weekdayBeyond(resetsAt: at(24 * 3600), now: now, timeZone: utc) != nil)
-        #expect(ResetClock.absoluteWithin(
-            resetsAt: at(24 * 3600), now: now,
-            locale: Locale(identifier: "en_GB"), timeZone: utc) == nil)
+    // ── Local timezone conversion: a UTC 00:00 reset reads in local wall-clock ────────────────
+    @Test func clockIsInLocalTimeZoneNotUTC() {
+        // A reset instant that is 00:00 UTC, shown in Europe/Kyiv (UTC+2 in this era), must NOT read
+        // "00:00" — it converts to the local wall clock. Build the instant explicitly at 00:00 UTC.
+        let kyiv = TimeZone(identifier: "Europe/Kyiv")!
+        var utcCal = Calendar(identifier: .gregorian)
+        utcCal.timeZone = utc
+        let midnightUTC = utcCal.date(from: DateComponents(year: 1970, month: 1, day: 15, hour: 0))!
+        // Choose a `now` a few hours before so it lands in the ≤ 24 h clock band.
+        let justBefore = midnightUTC.addingTimeInterval(-20 * 3_600)
+        let line = ResetClock.resetLine(resetsAt: midnightUTC, now: justBefore, locale: gb, timeZone: kyiv)
+        let expected = expectedClock(midnightUTC, gb, kyiv)
+        #expect(line == "20h at \(expected)")
+        #expect(expected != "00:00", "00:00 UTC must render in local time, not midnight")
     }
 
-    @Test func justInsideThresholdExcluded() {
-        #expect(ResetClock.weekdayBeyond(resetsAt: at(24 * 3600 - 60), now: now, timeZone: utc) == nil)
+    @Test func weekdayIsInLocalTimeZone() {
+        // Same 00:00 UTC instant, far enough out to hit the weekday band, shown in a tz where the local
+        // day differs. Under a positive offset (Kyiv) midnight UTC is still the same date; use a
+        // NEGATIVE offset zone so 00:00 UTC falls on the *previous* local day, proving tz is honoured.
+        let la = TimeZone(identifier: "America/Los_Angeles")!  // UTC-8/-7 → previous local day
+        var utcCal = Calendar(identifier: .gregorian)
+        utcCal.timeZone = utc
+        let midnightUTC = utcCal.date(from: DateComponents(year: 1970, month: 1, day: 18, hour: 0))!
+        let justBefore = midnightUTC.addingTimeInterval(-5 * 86_400)
+        let line = ResetClock.resetLine(resetsAt: midnightUTC, now: justBefore, locale: gb, timeZone: la)
+        #expect(line == "5d on \(expectedWeekday(midnightUTC, la))")
+        // The local (LA) weekday must differ from the UTC one for this instant (00:00 UTC = prev day).
+        #expect(expectedWeekday(midnightUTC, la) != expectedWeekday(midnightUTC, utc))
     }
 
-    @Test func nilWhenPast() {
-        #expect(ResetClock.weekdayBeyond(resetsAt: at(-60), now: now) == nil)
+    // ── Locale: 12h vs 24h clock ─────────────────────────────────────────────────────────────
+    @Test func clockRespectsLocaleHourCycle() {
+        let d = at(3 * 3_600)   // 3 h out → clock band
+        let gbLine = ResetClock.resetLine(resetsAt: d, now: now, locale: gb, timeZone: utc)
+        let usLine = ResetClock.resetLine(resetsAt: d, now: now, locale: us, timeZone: utc)
+        #expect(gbLine == "3h at \(expectedClock(d, gb, utc))")
+        #expect(usLine == "3h at \(expectedClock(d, us, utc))")
+        // 24-hour vs 12-hour differ (e.g. "16:46" vs "4:46 PM"); the two must not be equal here.
+        #expect(gbLine != usLine)
+    }
+
+    // ── Weekday is English regardless of locale ──────────────────────────────────────────────
+    @Test func weekdayIsEnglishRegardlessOfLocale() {
+        // Even under a non-English locale the weekday name stays English (helper pins en_US_POSIX).
+        let d = at(5 * 86_400)
+        let fr = Locale(identifier: "fr_FR")
+        let line = ResetClock.resetLine(resetsAt: d, now: now, locale: fr, timeZone: utc)
+        #expect(line == "5d on \(expectedWeekday(d, utc))")   // expectedWeekday is always English
+    }
+
+    // ── Fallback: non-positive remaining → nil ───────────────────────────────────────────────
+    @Test func nilWhenNowOrPast() {
+        #expect(ResetClock.resetLine(resetsAt: at(0), now: now, locale: gb, timeZone: utc) == nil)
+        #expect(ResetClock.resetLine(resetsAt: at(-60), now: now, locale: gb, timeZone: utc) == nil)
     }
 }
 
@@ -573,8 +636,9 @@ struct TimeToResetCompactDaysTests {
         #expect(ResetClock.timeToResetCompactDays(resetsAt: at(45 * 60), now: now) == .relative("45m"))
     }
 
-    @Test func pastIsResetNow() {
-        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(-60), now: now) == .resetNow)
-        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(0), now: now) == .resetNow)
+    @Test func pastIsAboutToReset() {
+        // No `.resetNow`: past/now delegates to timeToReset, which yields `.relative("<1m")` (#167).
+        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(-60), now: now) == .relative("<1m"))
+        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(0), now: now) == .relative("<1m"))
     }
 }

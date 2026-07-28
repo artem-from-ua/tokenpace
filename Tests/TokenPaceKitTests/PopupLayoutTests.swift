@@ -127,49 +127,53 @@ struct PopupLayoutSubdivisionsTests {
     }
 }
 
-// MARK: - Reset split: relative always, absolute only within 24 h
+// MARK: - Unified reset line (one format for every row — #167)
 
-@Suite("PopupLayout reset split")
+@Suite("PopupLayout reset line")
 struct PopupLayoutResetTests {
 
-    @Test func fiveHourAlwaysHasAbsolute() {
-        // 5h resets within 24 h by definition → "at hh:mm" shown, never a weekday.
+    @Test func fiveHourWithinDayShowsClock() {
+        // 5h resets within 24 h by definition → the "Nh at hh:mm" clock band.
         let p = layout(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30, fiveHourResetsIn: 4 * 3600))
-        #expect(p.rows[0].resetRelative != nil)
-        #expect(p.rows[0].resetAbsolute != nil)
-        #expect(p.rows[0].resetWeekday == nil)
+        let line = p.rows[0].resetLine
+        #expect(line != nil)
+        #expect(line?.contains(" at ") == true)
+        #expect(line?.contains(" on ") == false)
     }
 
-    @Test func sevenDayFarOffOmitsAbsoluteAndShowsWeekday() {
-        // 7d resets 3 days out → relative only, no clock time, but the landing weekday instead.
+    @Test func sevenDayFarOffShowsWeekday() {
+        // 7d resets 3 days out → the "Nd on <weekday>" band (no clock).
         let p = layout(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30, sevenDayResetsIn: 3 * 24 * 3600))
-        #expect(p.rows[1].resetRelative != nil)
-        #expect(p.rows[1].resetAbsolute == nil)
-        #expect(p.rows[1].resetWeekday != nil)
+        let line = p.rows[1].resetLine
+        #expect(line?.contains(" on ") == true)
+        #expect(line?.contains(" at ") == false)
     }
 
-    @Test func sevenDayWithinDayShowsAbsoluteNotWeekday() {
-        // 7d in its final hours (< 24 h) → clock time appears, weekday suppressed (exactly one of the two).
+    @Test func sevenDayWithinDayShowsClockNotWeekday() {
+        // 7d in its final hours (< 24 h) → clock time appears, no weekday.
         let p = layout(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30, sevenDayResetsIn: 5 * 3600))
-        #expect(p.rows[1].resetAbsolute != nil)
-        #expect(p.rows[1].resetWeekday == nil)
+        let line = p.rows[1].resetLine
+        #expect(line?.contains(" at ") == true)
+        #expect(line?.contains(" on ") == false)
     }
 
-    @Test func relativeMatchesResetClock() {
+    @Test func lineMatchesResetClock() {
+        // The row carries exactly what the pure formatter produces (same `now`/defaults) — the layout
+        // adds no arithmetic of its own.
         let snap = snapshot(fiveHourUtil: 50, sevenDayUtil: 30, sevenDayResetsIn: 3 * 24 * 3600)
         let p = layout(from: snap)
-        let expected = ResetClock.relativeRounded(resetsAt: ResetClock.parse(snap.sevenDay.resetsAt)!, now: now)
-        #expect(p.rows[1].resetRelative == expected)
+        let expected = ResetClock.resetLine(resetsAt: ResetClock.parse(snap.sevenDay.resetsAt)!, now: now)
+        #expect(p.rows[1].resetLine == expected)
     }
 
-    @Test func unparseableResetGivesNilStrings() {
+    @Test func unparseableResetGivesNilLine() {
         let snap = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 50, resetsAt: "garbage"),
             sevenDay: UsageWindow(utilization: 30, resetsAt: "null")
         )
         let p = layout(from: snap)
-        #expect(p.rows[0].resetRelative == nil && p.rows[0].resetAbsolute == nil && p.rows[0].resetWeekday == nil)
-        #expect(p.rows[1].resetRelative == nil && p.rows[1].resetAbsolute == nil && p.rows[1].resetWeekday == nil)
+        #expect(p.rows[0].resetLine == nil)
+        #expect(p.rows[1].resetLine == nil)
     }
 }
 
@@ -352,6 +356,47 @@ struct PopupLayoutHealthTests {
         #expect(p.warning == .authHTTP(status: 401, body: "Bad token"))
     }
 
+    @Test func brokenActiveResetSurfacesServerProblemWarningAndNoRows() {
+        // A healthy poll whose active window has a non-empty, unparseable `resets_at` is a malformed
+        // 200 body → the popup shows **only** the red warning banner (`.serverProblem`) with **no** rows
+        // or credits — the current snapshot is corrupt, so nothing is rendered (like a cold-start
+        // failure), symmetric with the menu bar's ⚠️ error state (#167, ADR-0043).
+        let broken = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 100, resetsAt: "not-a-date"),
+            sevenDay: UsageWindow(utilization: 20, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600)),
+            spend: SpendInfo(enabled: true, spendLimitReached: false))
+        let p = PopupLayout.make(from: broken, health: health(failingFor: nil), now: now,
+                                 interval: PollingBackoff.defaultInterval)
+        #expect(p.warning == .serverProblem)
+        #expect(p.rows.isEmpty)         // corrupt data → render nothing but the banner
+        #expect(p.credits == nil)
+        #expect(p.blockingReset == nil)
+    }
+
+    @Test func blankOrValidResetHasNoServerProblemWarning() {
+        // A blank date (boundary/synthesis) or a valid date is not a malformed value → no warning.
+        let valid = PopupLayout.make(from: snap, health: health(failingFor: nil), now: now,
+                                     interval: PollingBackoff.defaultInterval)
+        #expect(valid.warning == nil)
+        let blank = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
+            sevenDay: UsageWindow(utilization: 20, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600)),
+            sessionIdle: true)
+        let p = PopupLayout.make(from: blank, health: health(failingFor: nil), now: now,
+                                 interval: PollingBackoff.defaultInterval)
+        #expect(p.warning == nil)
+    }
+
+    @Test func realFailureReasonWinsOverBrokenReset() {
+        // When the poll is genuinely failing, its own reason wins over the broken-reset .serverProblem.
+        let broken = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 100, resetsAt: "not-a-date"),
+            sevenDay: UsageWindow(utilization: 20, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600)))
+        let p = PopupLayout.make(from: broken, health: health(failingFor: 5, reason: .tokenExpired),
+                                 now: now, interval: PollingBackoff.defaultInterval)
+        #expect(p.warning == .tokenExpired)
+    }
+
     @Test func staleRowsComeFromLastSnapshot() {
         // While failing, the last known snapshot still populates the sections (stale display).
         let p = PopupLayout.make(from: snap, health: health(failingFor: 10 * 60), now: now,
@@ -419,14 +464,12 @@ struct PopupLayoutServiceStatusTests {
 @Suite("PopupLayout session-idle row")
 struct PopupLayoutIdleTests {
 
-    @Test func idleFiveHourRowHasNoResetFields() {
+    @Test func idleFiveHourRowHasNoResetLine() {
         let p = layout(from: idleSnapshot())
         let five = p.rows[0]
         #expect(five.title == "5-hour")
         #expect(five.sessionIdle)
-        #expect(five.resetRelative == nil)
-        #expect(five.resetAbsolute == nil)
-        #expect(five.resetWeekday == nil)
+        #expect(five.resetLine == nil)
         #expect(five.subdivisions == LimitWindow.fiveHour.subdivisions)   // ruler stays in family
     }
 
@@ -438,7 +481,7 @@ struct PopupLayoutIdleTests {
         #expect(seven.title == "7-day")
         #expect(!seven.sessionIdle)
         #expect(seven.utilization == 31)
-        #expect(seven.resetRelative != nil)
+        #expect(seven.resetLine != nil)
 
         let fable = p.rows.first { $0.title == "Fable" }
         #expect(fable != nil)
@@ -564,9 +607,10 @@ struct PopupLayoutCreditsTests {
         #expect(credits.limit == eur(1500))
         #expect(credits.bar == CreditsPacing.barLayout(for: spend, now: now))
         #expect(credits.bar != nil)
-        // Reset string matches the shared formatter fed the month-end instant.
+        // Reset line matches the unified formatter fed the month-end instant — the same "Nd on <weekday>"
+        // shape every other row uses (#167), no longer a bare relative "6d".
         let monthEnd = CreditsPacing.monthEnd(now: now)!
-        #expect(credits.resetRelative == ResetClock.relativeRounded(resetsAt: monthEnd, now: now))
+        #expect(credits.resetLine == ResetClock.resetLine(resetsAt: monthEnd, now: now))
     }
 
     /// Cap reached: `spend_limit_reached` forces a full bar (red rung) even below the raw fraction.
@@ -586,7 +630,7 @@ struct PopupLayoutCreditsTests {
         #expect(credits.spent == eur(1077))
         #expect(credits.limit == nil)
         #expect(credits.bar == nil)
-        #expect(credits.resetRelative == nil)
+        #expect(credits.resetLine == nil)
     }
 
     /// When `spend.used` is absent, the amount is reconstructed from the `used_credits` scalar +

@@ -116,6 +116,19 @@ struct OptimisticResetTests {
         let out = ResetClock.optimisticReset(snapshot, now: now)
         #expect(out.limits == [limit])
     }
+
+    @Test func spendPreservedAcrossRoll() {
+        // The money-credits (`spend`) block is orthogonal to the token windows the overlay rolls — it
+        // must survive untouched, even when a window rolls forward. Regression guard: dropping it made
+        // the popup "Extra usage" section vanish once the overlay ran on every render (#167).
+        let spend = SpendInfo(enabled: true, spendLimitReached: false)
+        let snapshot = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 60, resetsAt: iso(-1)),   // past → rolls forward
+            sevenDay: UsageWindow(utilization: 40, resetsAt: iso(3600)),
+            spend: spend)
+        let out = ResetClock.optimisticReset(snapshot, now: now)
+        #expect(out.spend == spend)
+    }
 }
 
 // MARK: - nextResetInstant

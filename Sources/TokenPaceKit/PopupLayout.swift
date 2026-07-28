@@ -28,17 +28,11 @@ public struct LimitRow: Sendable, Equatable {
     /// (`LimitWindow.subdivisions`): `5` for the 5-hour window, `7` for the 7-day and per-model
     /// windows. The view draws `subdivisions - 1` interior ticks (issue #38).
     public let subdivisions: Int
-    /// Always-shown relative countdown — `"20m"`, `"3d"`, `"1h30m"` — or `nil` when the reset is
-    /// now/past or `resets_at` was unparseable (the view shows a stale signal).
-    public let resetRelative: String?
-    /// Absolute wall-clock `"10:30"` — present **only when the reset is < 24 h away** (the view
-    /// appends "at 10:30"); `nil` for far-off resets where a clock time is noise.
-    public let resetAbsolute: String?
-    /// Local weekday name `"Monday"` — the far-reset counterpart of ``resetAbsolute``: present **only
-    /// for 7-day windows whose reset is ≥ 24 h away** (the view appends "on Monday"), so a reset days
-    /// out names the day it lands on. `nil` for 5-hour windows and for any reset < 24 h away (which
-    /// carries ``resetAbsolute`` instead). At most one of the two is ever non-`nil`.
-    public let resetWeekday: String?
+    /// The complete, unified reset line for this window (`ResetClock.resetLine`): `"15d"`,
+    /// `"7d next Monday"`, `"5d on Friday"`, `"20h at 03:00"`, `"45m at 03:00"` — the same format
+    /// every limit uses (#167). `nil` when the reset is now/past or `resets_at` was unparseable
+    /// (the view shows its "resetting…" fallback).
+    public let resetLine: String?
     /// Whether this is the **idle** 5-hour row — the 5h window does not exist server-side (no active
     /// session, ``UsageSnapshot/sessionIdle``, #100). When `true` the view renders a solid-blue knobless
     /// bar, the status word "ready to start", and **no second (utilization + reset) line at all**; the
@@ -58,9 +52,7 @@ public struct LimitRow: Sendable, Equatable {
         indicator: LimitIndicator,
         bar: BarLayout,
         subdivisions: Int,
-        resetRelative: String?,
-        resetAbsolute: String?,
-        resetWeekday: String? = nil,
+        resetLine: String?,
         sessionIdle: Bool = false,
         sessionBlocked: Bool = false
     ) {
@@ -70,9 +62,7 @@ public struct LimitRow: Sendable, Equatable {
         self.indicator = indicator
         self.bar = bar
         self.subdivisions = subdivisions
-        self.resetRelative = resetRelative
-        self.resetAbsolute = resetAbsolute
-        self.resetWeekday = resetWeekday
+        self.resetLine = resetLine
         self.sessionIdle = sessionIdle
         self.sessionBlocked = sessionBlocked
     }
@@ -84,7 +74,7 @@ public struct LimitRow: Sendable, Equatable {
 /// ``LimitRow`` for the paid overspend that covers you past the plan limits (#143/#145).
 ///
 /// Like ``LimitRow`` it carries **raw** values only — money objects, a drawable ``BarLayout``, and a
-/// pre-formatted relative reset string (`ResetClock`, the one prose exception) — and **no**
+/// pre-formatted reset line (`ResetClock`, the one prose exception) — and **no**
 /// human-readable sentences: the view (`PopupViewController`) assembles "on pace / ahead / limit
 /// reached" and "€spent / €limit" from these (ADR-0009). It is a **separate** field on
 /// ``PopupLayout`` (not one of ``PopupLayout/rows``) because a credits section is not a limit window:
@@ -92,9 +82,9 @@ public struct LimitRow: Sendable, Equatable {
 ///
 /// ## Two shapes, keyed by ``bar``
 /// - **Limit set** (`bar != nil`): a full section — status word (from `bar.pacing` / cap-reached),
-///   `spent / limit`, a pacing bar, and a "resets in Nd/Nh" line (``resetRelative``).
+///   `spent / limit`, a pacing bar, and the unified reset line (``resetLine``).
 /// - **Unlimited** (`bar == nil`, ``limit`` is `nil`): a bare "Extra usage … €spent spent" line —
-///   no cap to pace against, so no bar, no status word, no reset (``resetRelative`` is `nil`).
+///   no cap to pace against, so no bar, no status word, no reset (``resetLine`` is `nil`).
 public struct CreditsRow: Sendable, Equatable {
     /// The exact amount spent this money window (`spend.used`, e.g. €10.77) — always present. The view
     /// formats the label from the integer minor units + exponent + currency, never a rounded `Double`.
@@ -106,11 +96,12 @@ public struct CreditsRow: Sendable, Equatable {
     /// elapsed), or `nil` for an **unlimited** limit — then the view draws no bar and no status word.
     /// The view colours it with the **same** `PopupBarView.aheadColor(usage:time:)` the token bars use.
     public let bar: BarLayout?
-    /// The rounded relative countdown to the end of the money window — the next `00:00` UTC on the 1st
-    /// (`CreditsPacing.monthEnd` → `ResetClock.relativeRounded`), e.g. `"6d"` / `"3h"`. `nil` when the
-    /// limit is unlimited (no reset line) or the boundary was unresolvable. Unlike ``LimitRow`` the
-    /// money window is always days-to-weeks out, so there is no absolute-clock/weekday counterpart.
-    public let resetRelative: String?
+    /// The unified reset line to the end of the money window — the next `00:00` UTC on the 1st
+    /// (`CreditsPacing.monthEnd` → `ResetClock.resetLine`), in the **same** format every limit uses
+    /// (#167): `"15d"`, `"5d on Friday"`, `"20h at 03:00"`. The `00:00` UTC boundary reads as the
+    /// user's **local** day/time. `nil` when the limit is unlimited (no reset line) or the boundary
+    /// was unresolvable.
+    public let resetLine: String?
     /// Whether paid credits are **actually being spent right now** — `enabled` **and** at least one base
     /// limit is exhausted (`CreditsPacing.shouldShowIcon`, the same gate as the menu-bar icon). Drives
     /// the blue **"in use"** badge next to the heading: the section itself shows whenever credits are
@@ -118,11 +109,11 @@ public struct CreditsRow: Sendable, Equatable {
     /// overflowing into credits.
     public let inUse: Bool
 
-    public init(spent: Money, limit: Money?, bar: BarLayout?, resetRelative: String?, inUse: Bool = false) {
+    public init(spent: Money, limit: Money?, bar: BarLayout?, resetLine: String?, inUse: Bool = false) {
         self.spent = spent
         self.limit = limit
         self.bar = bar
-        self.resetRelative = resetRelative
+        self.resetLine = resetLine
         self.inUse = inUse
     }
 }
@@ -248,9 +239,23 @@ public struct PopupLayout: Sendable, Equatable {
         interval: TimeInterval,
         serviceStatus: StatusHealth? = nil
     ) -> PopupLayout {
-        let rows = snapshot.map { self.rows(from: $0, now: now) } ?? []
         let lastUpdateAge = health.lastSuccess.map { max(0, now.timeIntervalSince($0)) } ?? 0
-        let warning = health.isFailing ? health.reason : nil
+
+        // A malformed **current** 200 body — an active window with a non-empty, unparseable `resets_at`
+        // (`hasBrokenActiveReset`, #167/ADR-0043). Unlike a *health* failure (where the last **good**
+        // snapshot's stale rows are still worth showing), here the current snapshot itself is corrupt, so
+        // there is nothing trustworthy to render: show **only** the red warning banner (`.serverProblem`),
+        // with no limit rows / credits / blocking-reset — the same shape as a cold-start failure.
+        let brokenData = !health.isFailing && (snapshot?.hasBrokenActiveReset == true)
+        if brokenData {
+            return PopupLayout(
+                lastUpdateAge: lastUpdateAge, intervalSeconds: interval, rows: [],
+                warning: .serverProblem, serviceStatus: serviceStatus)
+        }
+
+        let rows = snapshot.map { self.rows(from: $0, now: now) } ?? []
+        // A failing poll surfaces its own reason (with the last known — possibly stale — rows above).
+        let warning: FailureReason? = health.isFailing ? health.reason : nil
         let credits = snapshot.flatMap { self.creditsRow(from: $0, now: now) }
         let blockingReset = snapshot.flatMap { self.blockingReset(from: $0, now: now) }
         return PopupLayout(
@@ -310,16 +315,16 @@ public struct PopupLayout: Sendable, Equatable {
     /// - `spent` is `spend.used` (exact ``Money``); when absent, it is reconstructed from the
     ///   `used_credits` scalar + `currency` / `decimal_places` so the line always has an amount.
     /// - `bar` is `CreditsPacing.barLayout` — `nil` for an unlimited limit (view shows spent-only).
-    /// - `resetRelative` is the rounded countdown to `CreditsPacing.monthEnd` (next `00:00` UTC on the
+    /// - `resetLine` is the unified reset line to `CreditsPacing.monthEnd` (next `00:00` UTC on the
     ///   1st), and is `nil` when the limit is unlimited (no cap ⇒ no reset line).
     private static func creditsRow(from snapshot: UsageSnapshot, now: Date) -> CreditsRow? {
         guard let spend = snapshot.spend, CreditsPacing.isActive(spend) else { return nil }
         let spent = spentMoney(from: spend)
         let bar = CreditsPacing.barLayout(for: spend, now: now)
         // A reset line only makes sense when there is a cap to reset against (bar != nil ⇔ limited).
-        let resetRelative = bar == nil
+        let resetLine = bar == nil
             ? nil
-            : CreditsPacing.monthEnd(now: now).flatMap { ResetClock.relativeRounded(resetsAt: $0, now: now) }
+            : CreditsPacing.monthEnd(now: now).flatMap { ResetClock.resetLine(resetsAt: $0, now: now) }
         // "active" badge = credits are actually being spent right now — `isSpending` (enabled AND not
         // capped AND a base limit exhausted). Deliberately stricter than the icon's `shouldShowIcon`:
         // once the money cap is reached the server disables credits (Claude is blocked), so the badge
@@ -327,7 +332,7 @@ public struct PopupLayout: Sendable, Equatable {
         let inUse = CreditsPacing.isSpending(
             spend, baseLimitExhausted: CreditsPacing.anyBaseLimitExhausted(in: snapshot))
         return CreditsRow(
-            spent: spent, limit: spend.limit, bar: bar, resetRelative: resetRelative, inUse: inUse)
+            spent: spent, limit: spend.limit, bar: bar, resetLine: resetLine, inUse: inUse)
     }
 
     /// The amount spent as a ``Money``, preferring the exact `spend.used` object and falling back to a
@@ -342,8 +347,8 @@ public struct PopupLayout: Sendable, Equatable {
         return Money(amountMinor: minor, currency: currency, exponent: exponent)
     }
 
-    /// The idle 5-hour placeholder row (#100, ADR-0027): title `"5-hour"`, `sessionIdle: true`, all
-    /// reset strings `nil`, and an inert zeroed bar (the view fills it solid blue and skips the second
+    /// The idle 5-hour placeholder row (#100, ADR-0027): title `"5-hour"`, `sessionIdle: true`, the
+    /// reset line `nil`, and an inert zeroed bar (the view fills it solid blue and skips the second
     /// line). `subdivisions` stays the 5-hour value so the under-bar tick ruler keeps the row's anatomy
     /// in family with the active rows; the numeric fields are placeholders the idle render path ignores.
     private static func idleFiveHourRow(blocked: Bool = false) -> LimitRow {
@@ -354,9 +359,7 @@ public struct PopupLayout: Sendable, Equatable {
             indicator: .neutral,
             bar: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind),
             subdivisions: LimitWindow.fiveHour.subdivisions,
-            resetRelative: nil,
-            resetAbsolute: nil,
-            resetWeekday: nil,
+            resetLine: nil,
             sessionIdle: true,
             sessionBlocked: blocked)
     }
@@ -387,14 +390,7 @@ public struct PopupLayout: Sendable, Equatable {
             utilization: window.utilization,
             timePercent: bar.timeFraction * 100
         )
-        let relative = parsed.flatMap { ResetClock.relativeRounded(resetsAt: $0, now: now) }
-        let absolute = parsed.flatMap { ResetClock.absoluteWithin(resetsAt: $0, now: now) }
-        // 7-day windows whose reset is a day or more out name the weekday they land on ("on Monday")
-        // in place of the omitted clock time; 5-hour windows always reset within 24 h, so they only
-        // ever carry the clock time (weekdayBeyond returns nil for them anyway, but scope it explicitly).
-        let weekday = (kind == .sevenDay)
-            ? parsed.flatMap { ResetClock.weekdayBeyond(resetsAt: $0, now: now) }
-            : nil
+        let resetLine = parsed.flatMap { ResetClock.resetLine(resetsAt: $0, now: now) }
         return LimitRow(
             title: title,
             utilization: window.utilization,
@@ -402,9 +398,7 @@ public struct PopupLayout: Sendable, Equatable {
             indicator: indicator,
             bar: bar,
             subdivisions: kind.subdivisions,
-            resetRelative: relative,
-            resetAbsolute: absolute,
-            resetWeekday: weekday
+            resetLine: resetLine
         )
     }
 }
