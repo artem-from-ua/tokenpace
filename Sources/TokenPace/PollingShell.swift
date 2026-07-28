@@ -302,13 +302,15 @@ actor StubUsageTransport: UsageTransport {
         /// overlay, no ⏰), then the forced refresh lands: from the second poll on the stub returns a
         /// freshly-reset window (0 %, `now + 5h`), mirroring what the real API would report post-reset.
         case optimisticReset
-        /// The reset-boundary idle-grace frame (ADR-0041): the first two polls return an **active** 5h
-        /// window (mid-window, 40 %), then two polls return the post-reset **empty** body
+        /// The reset-boundary idle-grace frame (ADR-0041, ADR-0045): the first two polls return an
+        /// **active** 5h window (mid-window, 40 %), then two polls return the post-reset **empty** body
         /// (`five_hour.resets_at: null`, no `session` limit → the decoder would report
         /// `sessionIdle == true`), then the window is **active again** (a fresh ~5 h window). The grace
-        /// gate must keep the 5h bar **non-idle** ("ready", solid, 0 %) across the two empty polls
-        /// instead of flipping to the grey/blue idle bar — the bug this verifies. Watch the menu bar:
-        /// it must **not** blink to "waiting for limit reset" between the active windows.
+        /// gate keeps the 5h bar **non-idle** across the two empty polls, and (ADR-0045) that held bar
+        /// reads a calm 0 % "on pace" with a rolled-forward countdown — **never** "resetting…" or a
+        /// full-width green bar. Watch the menu bar: it must not blink to "waiting for limit reset"
+        /// between the active windows. Arming requires a live `claude` process (`claudeActive`); with
+        /// none, the fix surfaces idle ("ready to start") immediately instead.
         case resetGrace
         /// The "Back to work!" edge frame (#160): the first poll returns a **blocked** body (7-day
         /// window at 100 %, no credits → `canWork == false`), so the persisted "was blocked" flag is
@@ -617,11 +619,16 @@ actor StubUsageTransport: UsageTransport {
             return (body, response)
         }
 
-        // Reset-boundary idle-grace frame (ADR-0041): active window (polls 0–1) → post-reset **empty**
-        // body (polls 2–3, `five_hour.resets_at: null`, no `session` limit → would decode
-        // `sessionIdle == true`) → active again (polls 4+). The grace gate must hold the 5h bar
-        // non-idle across the two empty polls, so the menu bar must NOT blink to "waiting for limit
-        // reset" between the active windows — that flicker is exactly the bug this stub verifies.
+        // Reset-boundary idle-grace frame (ADR-0041, ADR-0045): active window (polls 0–1) → post-reset
+        // **empty** body (polls 2–3, `five_hour.resets_at: null`, no `session` limit → would decode
+        // `sessionIdle == true`) → active again (polls 4+). The grace gate holds the 5h bar non-idle
+        // across the two empty polls, so the menu bar must NOT blink to "waiting for limit reset"
+        // between the active windows. Per ADR-0045 the held bar must read a calm 0% "on pace" with a
+        // rolled-forward countdown (`Nh at …`) — NEVER "resetting…" or a full-width green bar. Note
+        // the grace only arms when `claudeActive` is true (a live `claude` process) AND utilization
+        // rose recently; the active polls 0–1 (util 40) satisfy the freshness clock, so with `claude`
+        // running the grace holds. With no `claude` process the fix instead surfaces idle immediately
+        // ("ready to start") — the genuine-pause path.
         if mode == .resetGrace {
             let n = calls
             calls += 1

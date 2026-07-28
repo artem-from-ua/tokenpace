@@ -1,9 +1,16 @@
 ---
 status: accepted
+superseded_by: [0045]
 date: 2026-07-27
 ---
 
 # ADR-0041: Грейс на reset-boundary — придушити хибний 5h-idle одразу після ресету
+
+> **Частково витіснено [ADR-0045](0045-honest-reset-boundary-grace.md).** Механізм грейсу (гейт у
+> `PollingEngine.advance`, чиста `applyIdleGrace`, `idleGraceWindow=300 с`) чинний. Але **D3**
+> (придушення через `sessionIdle:false` з `resets_at:""`) і **D5** (озброєння лише за
+> `previous active`) переглянуто: D3 давав регресію «resetting…» + фальшивий 100%-бар, D5 тримав
+> грейс і на справжніх паузах та переозброювався на мерехтінні. Актуальні — D3′/D5′/D-rearm у 0045.
 
 > Доповнює [ADR-0027](0027-session-idle-no-phantom-reset.md) (чесний детект idle) і
 > [ADR-0030](0030-optimistic-reset-and-exact-timer.md) (оптимістичний ресет). Детект idle

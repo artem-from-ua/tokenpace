@@ -296,7 +296,7 @@ One log line per interval change. The format is built by
 | 514 | `lifecycle` | `.notice` | `interval <from>→<to>: <phrase>` | the polling interval moved; emitted once per change |
 | 520 | `network` | `.notice` | `five_hour idle — no active session (resets_at absent)` | the 5h window flipped to session-idle (`sessionIdleTransition`); emitted **once per transition**, not every poll (#100, ADR-0027) |
 | 520 | `network` | `.notice` | `five_hour window active again` | the 5h window came back (idle → active); same call site, once per transition (#100, ADR-0027) |
-| 526 | `network` | `.notice` | `five_hour idle suppressed — within reset grace` | the reset-boundary idle grace armed (`applyIdleGrace`, `idleSuppressedUntil` nil → non-nil); emitted **once per transition**, not every poll (ADR-0041) |
+| 526 | `network` | `.notice` | `five_hour idle suppressed — within reset grace` | the reset-boundary idle grace armed (`applyIdleGrace`, `idleSuppressedUntil` nil → non-nil); emitted **once per transition**, not every poll. Now arms only when the previous window was active **and** the user was recently working (`claudeActive && utilFresh`, ADR-0045) — a genuine pause no longer arms it |
 | 614 | `keychain` | `.notice` | `token expired, len=<count>` | `pollOnce` — the read credentials are expired (`isExpired` true); moved here from `TokenProvider` with the expiry decision (ADR-0020) |
 
 `<from>`/`<to>` render as whole minutes (`3m`) or fall back to seconds (`90s`).
