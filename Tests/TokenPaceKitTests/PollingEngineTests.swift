@@ -967,13 +967,25 @@ struct ApplyIdleGraceTests {
 
     private let window = PollingEngine.idleGraceWindow  // 300 s
 
+    /// A util-freshness stamp that is fresh at `t0` (a spend happened 1 min ago). The arming path
+    /// (ADR-0045) requires this alongside `claudeActive`.
+    private var freshUtil: Date { t0.addingTimeInterval(-60) }
+    /// A stale util-freshness stamp (>15 min old at `t0`) — a genuine pause with no recent spend.
+    private var staleUtil: Date { t0.addingTimeInterval(-PollingEngine.utilFreshnessWindow - 60) }
+
     @Test func activeToIdleArmsGraceAndSuppresses() {
-        // Previous poll held an active window; the new poll is idle and no grace is armed yet →
-        // arm the grace and render a non-idle bar.
+        // Previous active window, no grace yet, process alive AND a fresh spend → arm the grace and
+        // render a non-idle bar with a rolled-forward reset (not "resetting…").
         let out = PollingEngine.applyIdleGrace(
-            decoded: idle(), previous: active(), activeUntil: nil, now: t0)
+            decoded: idle(), previous: active(), activeUntil: nil, now: t0,
+            claudeActive: true, lastUtilizationChange: freshUtil)
         #expect(out.snapshot.sessionIdle == false)
         #expect(out.suppressedUntil == t0.addingTimeInterval(window))
+        // The suppressed 5h window carries a future reset — never an empty resets_at that would
+        // render "resetting…". It is non-empty and parses to a strictly-positive remaining.
+        #expect(!out.snapshot.fiveHour.resetsAt.isEmpty)
+        let reset = ResetClock.parse(out.snapshot.fiveHour.resetsAt)
+        #expect((reset ?? t0).timeIntervalSince(t0) > 0)
     }
 
     @Test func heldWhileGraceActive() {
@@ -981,7 +993,7 @@ struct ApplyIdleGraceTests {
         let deadline = t0.addingTimeInterval(window)
         let out = PollingEngine.applyIdleGrace(
             decoded: idle(), previous: idle(), activeUntil: deadline,
-            now: t0.addingTimeInterval(120))
+            now: t0.addingTimeInterval(120), claudeActive: true, lastUtilizationChange: freshUtil)
         #expect(out.snapshot.sessionIdle == false)
         #expect(out.suppressedUntil == deadline)
     }
@@ -991,7 +1003,7 @@ struct ApplyIdleGraceTests {
         let deadline = t0.addingTimeInterval(window)
         let out = PollingEngine.applyIdleGrace(
             decoded: idle(), previous: idle(), activeUntil: deadline,
-            now: deadline.addingTimeInterval(1))
+            now: deadline.addingTimeInterval(1), claudeActive: true, lastUtilizationChange: freshUtil)
         #expect(out.snapshot.sessionIdle == true)
         #expect(out.suppressedUntil == nil)
     }
@@ -999,7 +1011,8 @@ struct ApplyIdleGraceTests {
     @Test func genuineIdleFromNilPreviousNotSuppressed() {
         // Cold start (no previous snapshot) → a genuine idle from the first poll is never suppressed.
         let out = PollingEngine.applyIdleGrace(
-            decoded: idle(), previous: nil, activeUntil: nil, now: t0)
+            decoded: idle(), previous: nil, activeUntil: nil, now: t0,
+            claudeActive: true, lastUtilizationChange: freshUtil)
         #expect(out.snapshot.sessionIdle == true)
         #expect(out.suppressedUntil == nil)
     }
@@ -1007,18 +1020,33 @@ struct ApplyIdleGraceTests {
     @Test func genuineIdleFromIdlePreviousNotSuppressed() {
         // Previous poll was already idle (a settled idle session) → no arming, stays idle.
         let out = PollingEngine.applyIdleGrace(
-            decoded: idle(), previous: idle(), activeUntil: nil, now: t0)
+            decoded: idle(), previous: idle(), activeUntil: nil, now: t0,
+            claudeActive: true, lastUtilizationChange: freshUtil)
         #expect(out.snapshot.sessionIdle == true)
         #expect(out.suppressedUntil == nil)
     }
 
-    @Test func activeDecodedClearsGrace() {
-        // The window reappeared while a grace was armed → pass the active snapshot through and drop
-        // the grace.
+    @Test func activeAfterGraceElapsedClearsGrace() {
+        // The window reappeared AFTER the deadline elapsed → pass the active snapshot through and
+        // drop the grace (steady state resumes).
+        let deadline = t0.addingTimeInterval(window)
         let out = PollingEngine.applyIdleGrace(
-            decoded: active(), previous: idle(), activeUntil: t0.addingTimeInterval(window), now: t0)
+            decoded: active(), previous: idle(), activeUntil: deadline,
+            now: deadline.addingTimeInterval(1), claudeActive: true, lastUtilizationChange: freshUtil)
         #expect(out.snapshot.sessionIdle == false)
         #expect(out.suppressedUntil == nil)
+    }
+
+    @Test func activeBlipWithinGraceKeepsDeadline() {
+        // The window blips active WHILE the grace is still within its deadline → render the active
+        // snapshot but CARRY the same deadline forward, so a later idle cannot re-arm a fresh window
+        // (ADR-0045, re-arm guard). Render is active; the grace is preserved, not cleared.
+        let deadline = t0.addingTimeInterval(window)
+        let out = PollingEngine.applyIdleGrace(
+            decoded: active(), previous: idle(), activeUntil: deadline,
+            now: t0.addingTimeInterval(120), claudeActive: true, lastUtilizationChange: freshUtil)
+        #expect(out.snapshot.sessionIdle == false)
+        #expect(out.suppressedUntil == deadline)
     }
 
     @Test func previousNonIdleWithoutResetsAtNotArmed() {
@@ -1029,16 +1057,94 @@ struct ApplyIdleGraceTests {
             sevenDay: UsageWindow(utilization: 84, resetsAt: "2026-06-28T00:00:00+00:00"),
             sessionIdle: false)
         let out = PollingEngine.applyIdleGrace(
-            decoded: idle(), previous: prev, activeUntil: nil, now: t0)
+            decoded: idle(), previous: prev, activeUntil: nil, now: t0,
+            claudeActive: true, lastUtilizationChange: freshUtil)
         #expect(out.snapshot.sessionIdle == true)
         #expect(out.suppressedUntil == nil)
+    }
+
+    // MARK: activity gate (ADR-0045) — grace arms only on recent real work
+
+    @Test func notArmedWhenProcessInactive() {
+        // Previous active + fresh spend, BUT the claude process is gone → a genuine pause, idle now.
+        let out = PollingEngine.applyIdleGrace(
+            decoded: idle(), previous: active(), activeUntil: nil, now: t0,
+            claudeActive: false, lastUtilizationChange: freshUtil)
+        #expect(out.snapshot.sessionIdle == true)
+        #expect(out.suppressedUntil == nil)
+    }
+
+    @Test func notArmedWhenUtilStale() {
+        // Process alive, previous active, BUT no spend for >15 min → parked session, idle now.
+        let out = PollingEngine.applyIdleGrace(
+            decoded: idle(), previous: active(), activeUntil: nil, now: t0,
+            claudeActive: true, lastUtilizationChange: staleUtil)
+        #expect(out.snapshot.sessionIdle == true)
+        #expect(out.suppressedUntil == nil)
+    }
+
+    @Test func notArmedWhenNoUtilStampYet() {
+        // No utilization ever observed to rise (nil stamp) → cannot claim recent work, idle now.
+        let out = PollingEngine.applyIdleGrace(
+            decoded: idle(), previous: active(), activeUntil: nil, now: t0,
+            claudeActive: true, lastUtilizationChange: nil)
+        #expect(out.snapshot.sessionIdle == true)
+        #expect(out.suppressedUntil == nil)
+    }
+
+    @Test func armsOnlyWhenBothProcessAndUtilFresh() {
+        // Sanity: the conjunction — only (alive AND fresh) arms; the three other combinations don't.
+        func arms(_ alive: Bool, _ util: Date?) -> Bool {
+            PollingEngine.applyIdleGrace(
+                decoded: idle(), previous: active(), activeUntil: nil, now: t0,
+                claudeActive: alive, lastUtilizationChange: util).suppressedUntil != nil
+        }
+        #expect(arms(true, freshUtil) == true)
+        #expect(arms(true, staleUtil) == false)
+        #expect(arms(false, freshUtil) == false)
+        #expect(arms(false, staleUtil) == false)
+    }
+
+    // MARK: re-arm guard (ADR-0045) — a mid-grace active blip must not extend the deadline
+
+    @Test func midGraceActiveBlipDoesNotReArm() {
+        // Armed grace, an active poll blips in mid-window, then idle again — the deadline must be the
+        // ORIGINAL one, not a fresh 5 min from the blip. Driven through `advance` so the state (the
+        // suppressed lastSnapshot) is threaded exactly as production does it.
+        let s0 = PollingEngine.advance(
+            previous: PollState(), outcome: .success(active()), claudeActive: true, now: t0)
+        // Bump util so the freshness stamp is set (active() → active2 with higher util).
+        let active2 = snap(five: 55, seven: 84)
+        let s1 = PollingEngine.advance(
+            previous: s0, outcome: .success(active2), claudeActive: true,
+            now: t0.addingTimeInterval(60))
+        // Reset boundary: idle → arm grace at t0+120, deadline t0+120+window.
+        let armedAt = t0.addingTimeInterval(120)
+        let s2 = PollingEngine.advance(
+            previous: s1, outcome: .success(idle()), claudeActive: true, now: armedAt)
+        let originalDeadline = armedAt.addingTimeInterval(window)
+        #expect(s2.idleSuppressedUntil == originalDeadline)
+        // Active blip mid-grace (t0+180) → grace cleared by the active poll...
+        let s3 = PollingEngine.advance(
+            previous: s2, outcome: .success(active2), claudeActive: true,
+            now: t0.addingTimeInterval(180))
+        // ...then idle again at t0+240. Without a guard this re-arms a NEW window ending at
+        // t0+240+window (>originalDeadline), holding "resetting"/ready well past 5 min. The genuine
+        // idle must instead surface once the original grace would have elapsed. We assert the deadline
+        // never extends beyond the original.
+        let s4 = PollingEngine.advance(
+            previous: s3, outcome: .success(idle()), claudeActive: true,
+            now: t0.addingTimeInterval(240))
+        if let deadline = s4.idleSuppressedUntil {
+            #expect(deadline <= originalDeadline)
+        }
     }
 
     // MARK: integration through advance
 
     @Test func advanceSuppressesBoundaryIdle() {
         // Two successive successes: active → idle. The second must land a non-idle lastSnapshot with
-        // an armed grace deadline.
+        // an armed grace deadline. The first active poll (from empty state) sets the util stamp.
         let afterActive = PollingEngine.advance(
             previous: PollState(), outcome: .success(active()), claudeActive: true, now: t0)
         let afterIdle = PollingEngine.advance(
@@ -1060,5 +1166,23 @@ struct ApplyIdleGraceTests {
             now: t0.addingTimeInterval(180 + window + 1))
         #expect(afterExpiry.lastSnapshot?.sessionIdle == true)
         #expect(afterExpiry.idleSuppressedUntil == nil)
+    }
+
+    @Test func advanceStampsUtilizationRise() {
+        // The util-freshness clock is set only when 5h utilization rises vs the previous poll.
+        let s1 = PollingEngine.advance(
+            previous: PollState(), outcome: .success(snap(five: 10, seven: 84)),
+            claudeActive: true, now: t0)
+        #expect(s1.lastUtilizationChange == t0)   // 0 → 10 is a rise from the cold nil snapshot
+        // A flat poll (same util) does not move the stamp.
+        let s2 = PollingEngine.advance(
+            previous: s1, outcome: .success(snap(five: 10, seven: 84)),
+            claudeActive: true, now: t0.addingTimeInterval(180))
+        #expect(s2.lastUtilizationChange == t0)
+        // A rise moves it to the new now.
+        let s3 = PollingEngine.advance(
+            previous: s2, outcome: .success(snap(five: 12, seven: 84)),
+            claudeActive: true, now: t0.addingTimeInterval(360))
+        #expect(s3.lastUtilizationChange == t0.addingTimeInterval(360))
     }
 }

@@ -128,8 +128,13 @@ public struct PollState: Sendable, Equatable {
     public var refreshGate: RefreshGate
     /// Deadline until which a spurious 5h session-idle is suppressed on a reset boundary
     /// (ADR-0041). Non-nil only while an active 5h window has just flipped to idle and we are still
-    /// within the grace window; `nil` in the steady state. See ``applyIdleGrace(decoded:previous:activeUntil:now:)``.
+    /// within the grace window; `nil` in the steady state. See ``applyIdleGrace(decoded:previous:activeUntil:now:claudeActive:)``.
     public var idleSuppressedUntil: Date?
+    /// The `now` of the last poll whose 5h `utilization` **rose** vs the previous poll — the
+    /// freshness clock for "real token spend happened recently" (ADR-0045). In-memory only (dies on
+    /// relaunch): it gates the reset-boundary grace, and after a relaunch the grace has no prior
+    /// window to protect anyway. `nil` until the first observed rise. Read by ``applyIdleGrace``.
+    public var lastUtilizationChange: Date?
 
     /// Cold start: healthy backoff (no hold), no data yet. `claudeActive` defaults to `true` so the
     /// very first interval is the responsive 3-min base until the first probe.
@@ -141,7 +146,8 @@ public struct PollState: Sendable, Equatable {
         lastSnapshot: UsageSnapshot? = nil,
         reason: FailureReason? = nil,
         refreshGate: RefreshGate = RefreshGate(),
-        idleSuppressedUntil: Date? = nil
+        idleSuppressedUntil: Date? = nil,
+        lastUtilizationChange: Date? = nil
     ) {
         self.backoff = backoff
         self.claudeActive = claudeActive
@@ -151,6 +157,7 @@ public struct PollState: Sendable, Equatable {
         self.reason = reason
         self.refreshGate = refreshGate
         self.idleSuppressedUntil = idleSuppressedUntil
+        self.lastUtilizationChange = lastUtilizationChange
     }
 
     /// The `UsageHealth` view-model input derived from this state.
@@ -262,6 +269,12 @@ public struct PollingEngine: Sendable {
     /// with margin while keeping a true idle from hiding for long.
     public static let idleGraceWindow: TimeInterval = 5 * 60
 
+    /// How recently 5h utilization must have risen for the reset-boundary grace to arm (ADR-0045). A
+    /// rise means real token spend; if none happened within this window the pause is genuine and idle
+    /// surfaces immediately. 15 min ≈ several base-cadence polls — long enough to bridge a short lull
+    /// between prompts, short enough that a truly-parked session is not held warm across a reset.
+    public static let utilFreshnessWindow: TimeInterval = 15 * 60
+
     let transport: UsageTransport
     let tokenProvider: TokenProviding
     let refresher: DelegatedRefresher?
@@ -325,11 +338,23 @@ public struct PollingEngine: Sendable {
             next.lastSuccess = now
             next.failingSince = nil
             next.reason = nil
-            // Suppress a spurious session-idle in the seconds after a 5h reset (ADR-0041). The
+            // Stamp the util-freshness clock (ADR-0045): a *rise* in 5h utilization means real token
+            // spend just happened. This gates the reset-boundary grace so a genuine pause (no recent
+            // spend) surfaces idle immediately instead of holding a bar. A reset drops utilization to
+            // 0 — not a rise — so the boundary itself never disturbs the stamp; it keeps the pre-reset
+            // spend time until the *next* real spend. On the first poll (no previous snapshot) any
+            // non-zero utilization counts as a rise from the implicit zero baseline.
+            let previousUtil = previous.lastSnapshot?.fiveHour.utilization ?? 0
+            if snapshot.fiveHour.utilization > previousUtil {
+                next.lastUtilizationChange = now
+            }
+            // Suppress a spurious session-idle in the seconds after a 5h reset (ADR-0041/0045). The
             // rebuilt snapshot (idle held off, or a genuine idle passed through) becomes lastSnapshot.
             let (rendered, until) = Self.applyIdleGrace(
                 decoded: snapshot, previous: previous.lastSnapshot,
-                activeUntil: previous.idleSuppressedUntil, now: now)
+                activeUntil: previous.idleSuppressedUntil, now: now,
+                claudeActive: claudeActive,
+                lastUtilizationChange: previous.lastUtilizationChange)
             next.idleSuppressedUntil = until
             next.lastSnapshot = rendered
 
@@ -435,17 +460,22 @@ public struct PollingEngine: Sendable {
         }
     }
 
-    // MARK: Session-idle grace on reset boundary (ADR-0041)
+    // MARK: Session-idle grace on reset boundary (ADR-0041, refined ADR-0045)
 
-    /// Suppress a spurious 5h session-idle that appears in the seconds after a reset (ADR-0041).
+    /// Suppress a spurious 5h session-idle that appears in the seconds after a reset (ADR-0041/0045).
     ///
     /// A 5h reset destroys the window; the next one is created only by the first token spend. In the
     /// gap the server returns `five_hour` with no `resets_at`, so the stateless decoder honestly
-    /// reports ``UsageSnapshot/sessionIdle`` `= true`. But when the **previous** poll held a genuinely
-    /// active 5h window (not idle, with a present `resets_at`), that flip is almost certainly a
-    /// boundary blip — the window merely reset — not the user going idle. We keep the "ready" bar for
-    /// ``idleGraceWindow`` and only surface a real idle once the grace elapses without the window
-    /// reappearing.
+    /// reports ``UsageSnapshot/sessionIdle`` `= true`. When the **previous** poll held a genuinely
+    /// active 5h window (not idle, with a present `resets_at`) **and** the user was recently working,
+    /// that flip is a boundary blip — the window merely reset — not the user going idle. We hold a
+    /// calm "ready" bar for ``idleGraceWindow`` and surface a real idle only once the grace elapses
+    /// without the window reappearing.
+    ///
+    /// Activity gate (ADR-0045, D5): the grace arms **only** when `claudeActive` (the `claude` CLI is
+    /// running) **and** utilization rose within the last ``utilFreshnessWindow`` — a real recent spend.
+    /// A genuine pause (process gone, or no spend for 15 min) surfaces idle immediately, no hold. Both
+    /// conditions are required: an open-but-idle `claude` session must not keep the bar warm.
     ///
     /// The gate lives here, not in the decoder, because the decoder is stateless (it sees only the
     /// current body plus an injected `now`); this is the one seam that has the previous snapshot in
@@ -453,44 +483,69 @@ public struct PollingEngine: Sendable {
     ///
     /// Returns the snapshot to render and the new suppression deadline (`nil` = not suppressing):
     /// - `decoded` not idle → `(decoded, nil)`: steady state, clear any armed grace.
-    /// - `decoded` idle, grace already armed and `now` before the deadline → `(suppress(decoded),
-    ///   deadline)`: keep holding the ready bar with the unchanged deadline.
+    /// - `decoded` idle, grace already armed and `now` before the deadline → `(suppress, deadline)`:
+    ///   keep holding the ready bar with the **unchanged** deadline. Checked *before* the arming gate,
+    ///   so a mid-grace active↔idle flicker cannot re-arm a fresh window (ADR-0045, D-rearm).
     /// - `decoded` idle, grace elapsed (`now` at/after the deadline) → `(decoded, nil)`: the window
     ///   never came back — surface the genuine idle.
-    /// - `decoded` idle, no grace yet, previous poll was an **active** 5h window → `(suppress(decoded),
+    /// - `decoded` idle, no grace yet, previous active **and** recently working → `(suppress,
     ///   now + idleGraceWindow)`: arm the grace, this is a reset blip.
-    /// - `decoded` idle, no grace yet, previous absent/idle → `(decoded, nil)`: a genuine idle from a
-    ///   cold start or a still-idle session is never suppressed.
+    /// - `decoded` idle, no grace yet, previous absent/idle or no recent activity → `(decoded, nil)`:
+    ///   a genuine idle (cold start, still-idle session, or a real pause) is never suppressed.
     ///
-    /// `suppress(_:)` rebuilds the snapshot with `sessionIdle: false`, leaving every other field as
-    /// decoded. The 5h window there is already `utilization: 0, resets_at: ""`, which renders as a
-    /// calm 0% "ready" bar (an empty `resets_at` parses to `nil`, so the reset countdown falls back to
-    /// the 7-day one — no phantom `resetNow`).
+    /// `suppress(_:now:)` rebuilds the snapshot with `sessionIdle: false` **and** a rolled-forward 5h
+    /// `resets_at` (`now + 5h`, the same value `ResetClock.optimisticReset` synthesizes), so the bar
+    /// reads a calm 0% "on pace" with an honest countdown to the next reset — never the "resetting…"
+    /// fallback an empty `resets_at` produced.
     static func applyIdleGrace(
         decoded: UsageSnapshot,
         previous: UsageSnapshot?,
         activeUntil: Date?,
-        now: Date
+        now: Date,
+        claudeActive: Bool,
+        lastUtilizationChange: Date?
     ) -> (snapshot: UsageSnapshot, suppressedUntil: Date?) {
-        guard decoded.sessionIdle else { return (decoded, nil) }   // active → clear any grace
+        guard decoded.sessionIdle else {
+            // The window is active. Render it as-is — but if a grace is still within its deadline,
+            // carry that SAME deadline forward instead of clearing it (ADR-0045, re-arm guard). A
+            // boundary that flickers active↔idle would otherwise clear the grace on the active blip
+            // and re-arm a fresh 5 min on the next idle, holding the ready bar indefinitely. Keeping
+            // the original deadline means an active blip cannot extend the window; once it elapses,
+            // the next idle surfaces genuinely.
+            if let deadline = activeUntil, now < deadline {
+                return (decoded, deadline)
+            }
+            return (decoded, nil)                                  // no grace, or elapsed → clear
+        }
 
         if let deadline = activeUntil {                            // grace already armed
-            return now < deadline ? (suppress(decoded), deadline)  // hold the ready bar
+            return now < deadline ? (suppress(decoded, now: now), deadline)  // hold the ready bar
                                   : (decoded, nil)                 // elapsed → surface real idle
         }
 
-        // No grace yet — arm only if the previous poll was a genuinely active 5h window.
+        // No grace yet — arm only if the previous poll was a genuinely active 5h window AND the user
+        // was recently working (process alive AND a token spend within the freshness window).
         let prevActive = (previous?.sessionIdle == false) && (previous?.fiveHour.hasResetsAt == true)
-        guard prevActive else { return (decoded, nil) }            // cold/idle previous → real idle
-        return (suppress(decoded), now.addingTimeInterval(idleGraceWindow))
+        let utilFresh = lastUtilizationChange.map {
+            now.timeIntervalSince($0) < utilFreshnessWindow
+        } ?? false
+        guard prevActive && claudeActive && utilFresh else {
+            return (decoded, nil)                                  // pause / cold / idle → real idle
+        }
+        return (suppress(decoded, now: now), now.addingTimeInterval(idleGraceWindow))
     }
 
-    /// Rebuild a snapshot with ``UsageSnapshot/sessionIdle`` forced to `false`, preserving all other
-    /// fields. Used by ``applyIdleGrace(decoded:previous:activeUntil:now:)`` to render the idle 5h
-    /// window as an ordinary "ready" bar during the reset-boundary grace.
-    private static func suppress(_ s: UsageSnapshot) -> UsageSnapshot {
-        UsageSnapshot(
-            fiveHour: s.fiveHour, sevenDay: s.sevenDay, sevenDayOpus: s.sevenDayOpus,
+    /// Rebuild a snapshot with ``UsageSnapshot/sessionIdle`` forced to `false` and the 5h window
+    /// rolled forward to a fresh `now + 5h` reset — the same value ``ResetClock/optimisticReset(_:now:)``
+    /// synthesizes for the shell overlay (`ResetClock.nextReset`). Used by ``applyIdleGrace`` so the
+    /// reset-boundary grace renders an honest "ready" bar (0% + real countdown) instead of the
+    /// "resetting…" a bare `resets_at: ""` produced through the pacing path.
+    private static func suppress(_ s: UsageSnapshot, now: Date) -> UsageSnapshot {
+        let rolledForward = UsageWindow(
+            utilization: s.fiveHour.utilization,
+            resetsAt: ResetClock.isoString(from: ResetClock.nextReset(now: now, window: .fiveHour)))
+        return UsageSnapshot(
+            fiveHour: rolledForward, sevenDay: s.sevenDay, sevenDayOpus: s.sevenDayOpus,
             sevenDaySonnet: s.sevenDaySonnet, limits: s.limits, sessionIdle: false, spend: s.spend)
     }
 

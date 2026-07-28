@@ -550,9 +550,10 @@ public enum ResetClock {
 
     /// Render a `Date` as an ISO-8601 string (`.withInternetDateTime`, UTC, no fractional seconds) so a
     /// synthesized `resets_at` round-trips through ``parse(_:)`` identically to a real API one. Mirrors
-    /// the decode layer's private helper of the same name — kept local to `ResetClock` so the optimistic
-    /// path does not widen ``UsageSnapshot``'s private decode surface (ADR-0030).
-    private static func isoString(from date: Date) -> String {
+    /// the decode layer's private helper of the same name. `internal` (module-only): the optimistic path
+    /// (ADR-0030) and the reset-boundary grace suppress (ADR-0045) both synthesize a rolled-forward
+    /// `resets_at` from ``nextReset(now:window:)`` and must serialize it the same way.
+    static func isoString(from date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.formatOptions = [.withInternetDateTime]
