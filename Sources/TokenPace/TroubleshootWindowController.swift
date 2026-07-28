@@ -26,7 +26,7 @@ final class TroubleshootWindowController: NSWindowController {
 
     private enum Metrics {
         static let minSize = NSSize(width: 480, height: 360)
-        static let startSize = NSSize(width: 640, height: 560)
+        static let startSize = NSSize(width: 840, height: 720)
         static let padding: CGFloat = 20
         static let rowSpacing: CGFloat = 4
         /// Gap between a section header and its first info row — wider than `rowSpacing` so the
@@ -66,7 +66,10 @@ final class TroubleshootWindowController: NSWindowController {
         window.collectionBehavior = [.fullScreenPrimary]
         window.contentMinSize = Metrics.minSize
         window.isReleasedWhenClosed = false     // keep the controller alive so re-opening reuses it
-        window.setFrameAutosaveName("TokenPaceTroubleshoot")   // remember size/position across opens
+        // No `setFrameAutosaveName`: the window opens at `startSize`, centred, every time (see `show()`)
+        // rather than restoring a saved frame. A restored frame can outlive its display layout
+        // (disconnected monitor, changed resolution/scale) and reopen off-screen; centring is always
+        // on-screen. The window stays user-resizable within the session.
         self.init(window: window)
         buildContent()
     }
@@ -76,7 +79,12 @@ final class TroubleshootWindowController: NSWindowController {
     func show(_ output: PollOutput?) {
         render(output)
         NSApp.activate(ignoringOtherApps: true)
-        if !(window?.isVisible ?? false) { window?.center() }
+        // Each fresh open resets to the default size and re-centres — the frame isn't persisted, so a
+        // previous in-session resize doesn't carry over, and the window is always fully on-screen.
+        if !(window?.isVisible ?? false) {
+            window?.setContentSize(Metrics.startSize)
+            window?.center()
+        }
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
     }
