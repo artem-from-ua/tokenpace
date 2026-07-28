@@ -56,24 +56,26 @@ struct WorkAvailabilityTests {
         #expect(WorkAvailability.canWork(snap) == true)
     }
 
-    @Test func perModelWeeklyExhaustedIsBlocked() {
-        // A per-model sub-window at 100% counts via anyBaseLimitExhausted even when 5h/7d are low.
+    @Test func perModelWeeklyExhaustedIsWorkable() {
+        // A per-model sub-window (Opus) at 100% does NOT gate work — Claude blocks only on the two main
+        // 5h / 7d windows, then credits (#177). Both main windows low → workable, no "Back to work!" edge.
         let snap = UsageSnapshot(
             fiveHour: lowWindow(),
             sevenDay: lowWindow(),
             sevenDayOpus: fullWindow(),
             spend: nil
         )
-        #expect(WorkAvailability.canWork(snap) == false)
+        #expect(WorkAvailability.canWork(snap) == true)
     }
 
-    @Test func sonnetWeeklyExhaustedIsBlocked() {
+    @Test func sonnetWeeklyExhaustedIsWorkable() {
+        // Same as above for the Sonnet sub-window: a scoped model at 100% is not a work gate (#177).
         let snap = UsageSnapshot(
             fiveHour: lowWindow(),
             sevenDay: lowWindow(),
             sevenDaySonnet: fullWindow(),
             spend: nil
         )
-        #expect(WorkAvailability.canWork(snap) == false)
+        #expect(WorkAvailability.canWork(snap) == true)
     }
 }

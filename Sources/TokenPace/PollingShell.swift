@@ -282,6 +282,11 @@ actor StubUsageTransport: UsageTransport {
     ///    → `sessionIdle && idleBlocked`. The idle bar renders **grey** (menu bar + popup, both colour
     ///    modes), the popup status word is "waiting for limit reset", and the 7-day reset (the sole
     ///    exhausted candidate, ~4 days out) is drawn **red** as the blocking reset.
+    ///  • `.activeBlocked` (`=active-blocked`) — the **active** blocked frame (#177): a live 5h window
+    ///    with quota (48 %) while `seven_day` is exhausted (100 %, `weekly_all` critical) and there is
+    ///    **no** `spend` block, so the weekly cap blocks despite 5h quota. Not idle → the 5h row is a
+    ///    normal (non-grey) "on pace" row, but the popup's 7-day reset gets the **red** blocking-reset
+    ///    badge. This is Артем's real bug: before the fix `isBlocked` was false and no badge showed.
     ///  • `.optimisticReset` (`=optimistic-reset`) — the reset-boundary frame (#36): the first poll's 5h
     ///    window resets in ~20 s at 60 % util, so the coordinator's one-shot timer fires shortly after
     ///    launch — the 5h bar flips 60 % → 0 % with a fresh ~5 h countdown (no ⏰) and a forced refresh
@@ -290,7 +295,7 @@ actor StubUsageTransport: UsageTransport {
     /// (#65) — Fable / Mythos — so the scoped-model popup rows are exercised end-to-end, and their
     /// utilisations (plus the 7-day window) show a couple of the ahead-of-pace gap colours.
     enum Mode: Equatable {
-        case climbing, screenshot, authError, idle, idleBlocked
+        case climbing, screenshot, authError, idle, idleBlocked, activeBlocked
         /// The optimistic-reset frame (#36): the first poll returns an **active** 5h window whose reset
         /// is only ~20 s out (utilisation 60 %), so the coordinator's one-shot timer fires shortly after
         /// launch. On fire the 5h bar flips 60 % → 0 % with a fresh ~5 h countdown (the optimistic
@@ -522,6 +527,29 @@ actor StubUsageTransport: UsageTransport {
             {"five_hour":{"utilization":0.0,"resets_at":null},\
             "seven_day":{"utilization":100.0,"resets_at":"\(sevenReset)"},\
             "limits":[]}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
+        // Active-blocked frame (#177): a live 5h window (48 %) while `seven_day` is exhausted (100 %) and
+        // there is no `spend` block, so the weekly cap blocks despite 5h quota. The `limits[]` carries the
+        // server's real shape — a `weekly_all` entry at 100 % / critical / is_active — mirroring Артем's
+        // captured payload. Not idle → the 5h row stays a normal "on pace" row, but the popup's 7-day
+        // reset (the sole exhausted candidate, ~4 days out) is drawn **red** as the blocking reset. Before
+        // the fix `isBlocked` returned false (it required 5h exhausted too) → no badge.
+        if mode == .activeBlocked {
+            let fiveReset = Self.resetsAt(inSeconds: 2 * 3600)          // active 5h, resets in ~2 h
+            let sevenReset = Self.resetsAt(inSeconds: 4.2 * 24 * 3600)  // ≥ 24 h → "4d"
+            let body = """
+            {"five_hour":{"utilization":48.0,"resets_at":"\(fiveReset)"},\
+            "seven_day":{"utilization":100.0,"resets_at":"\(sevenReset)"},\
+            "limits":[\
+            {"kind":"session","group":"session","percent":48,"severity":"normal",\
+            "resets_at":"\(fiveReset)","is_active":false},\
+            {"kind":"weekly_all","group":"weekly","percent":100,"severity":"critical",\
+            "resets_at":"\(sevenReset)","is_active":true}]}
             """.data(using: .utf8)!
             let response = HTTPURLResponse(
                 url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!

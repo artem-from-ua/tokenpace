@@ -111,30 +111,44 @@ public enum CreditsPacing {
         return windows.contains { $0 >= 100 }
     }
 
-    /// Whether the user is **blocked** — no path left to do work right now (#158). Blocked means every
-    /// way to start/continue is closed:
+    /// Whether one of the **two main windows that actually gate work** — `five_hour` or `seven_day` — is
+    /// exhausted (`utilization >= 100`). This is the exhaustion notion for **blocking**, deliberately
+    /// narrower than ``anyBaseLimitExhausted(in:)``:
+    ///
+    /// - **Per-model sub-windows do NOT gate work.** A model at 100 % (`sevenDayOpus` / `sevenDaySonnet`
+    ///   / a `weekly_scoped` entry) does not block — Claude gates only on `five_hour` / `seven_day`, then
+    ///   extra-usage credits. `anyBaseLimitExhausted` counts sub-windows because it drives the credits
+    ///   **icon**'s show gate (overflow into credits is worth surfacing there); blocking must not.
+    /// - **Either main window blocks on its own.** `five_hour` at 100 % blocks even with `seven_day`
+    ///   quota (you wait for the 5-hour reset), and vice-versa — hence `OR`, not `AND`.
+    /// - **An idle 5h window is "ready to start", not exhausted.** When ``UsageSnapshot/sessionIdle`` the
+    ///   5h window carries `utilization: 0` and no window exists yet; starting one is allowed, so only
+    ///   `seven_day` can block in that state.
+    public static func mainWindowExhausted(in snapshot: UsageSnapshot) -> Bool {
+        let fiveHourExhausted = !snapshot.sessionIdle && snapshot.fiveHour.utilization >= 100
+        return fiveHourExhausted || snapshot.sevenDay.utilization >= 100
+    }
+
+    /// Whether the user is **blocked** — no path left to do work right now (#158, #177). Blocked means
+    /// every way to start/continue is closed:
     ///
     /// ```
-    /// blocked = noFiveHourQuota  AND  seven_day exhausted (>= 100)  AND NOT creditsCanCover(spend)
-    /// noFiveHourQuota = sessionIdle  OR  five_hour exhausted (>= 100)
+    /// blocked = mainWindowExhausted  AND NOT creditsCanCover(spend)
     /// ```
     ///
-    /// The 5-hour window is the near-term gate: you can work if it has quota — either an **idle** 5h
-    /// (no window yet, but starting one is allowed *unless* the 7-day cap blocks it) or an active 5h
-    /// below 100 %. So `noFiveHourQuota` holds when the 5h window is idle **or** itself exhausted. On top
-    /// of that the 7-day cap must be exhausted **and** paid credits unable to cover (`enabled` & not
-    /// capped) — a 7-day at 100 % with credits still covering is **not** blocked (work continues on the
-    /// paid tier). Only when all three hold is the user genuinely waiting for a reset.
+    /// A main window (5h **or** 7d) is exhausted (see ``mainWindowExhausted(in:)`` — either one blocks on
+    /// its own; per-model sub-windows do not block; an idle 5h is "ready to start") **and** paid credits
+    /// cannot cover (`enabled` & not capped). A main window at 100 % with credits still covering is
+    /// **not** blocked — work continues on the paid tier.
     ///
     /// This is the general predicate behind both the idle-blocked grey bar (`sessionIdle` case) and the
-    /// red blocking-reset badge on a fully-exhausted active state (both `five_hour` and `seven_day` at
-    /// 100 %). Per-model sub-windows with spare quota (e.g. a model at 60 %) do **not** unblock: the main
-    /// 5h/7d windows gate all work.
+    /// red blocking-reset badge on an active exhausted state. The `sessionIdle` gate lives in the
+    /// **consumers** (`PopupLayout` / `MenuBarLayout`), not here — this predicate is `true` for an active
+    /// exhausted state too, which is exactly what the popup's red badge needs. It is the inverse of
+    /// ``WorkAvailability/canWork(_:)``: both share ``mainWindowExhausted(in:)`` so the red badge and the
+    /// "Back to work!" notification stay in lock-step.
     public static func isBlocked(in snapshot: UsageSnapshot) -> Bool {
-        let noFiveHourQuota = snapshot.sessionIdle || snapshot.fiveHour.utilization >= 100
-        return noFiveHourQuota
-            && snapshot.sevenDay.utilization >= 100
-            && !creditsCanCover(snapshot.spend)
+        mainWindowExhausted(in: snapshot) && !creditsCanCover(snapshot.spend)
     }
 
     // MARK: - Pacing (usage vs. time — same as the token bars)
