@@ -588,6 +588,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //                    no credits → the idle bar goes **grey** (menu bar + popup, both colour
         //                    modes), the popup status reads "waiting for limit reset", and the 7-day
         //                    reset time is painted **red** (the blocking reset). Compare against `=idle`.
+        //  • `=active-blocked` → the **active** blocked state (#177): a live 5h window (48 %) while 7-day
+        //                    is exhausted (100 %, `weekly_all` critical) and no credits. Not idle → the 5h
+        //                    row is a normal "on pace" row, but the popup's 7-day reset gets the **red**
+        //                    blocking-reset badge. Before the fix no badge showed (Артем's bug).
         //  • `=optimistic-reset` → the reset-boundary flow (#36): the 5h window resets ~20 s after
         //                    launch, so the bar flips 60 % → 0 % (no ⏰) and a forced refresh follows.
         //  • `=broken-reset` → a noisy 5h (100 %) with `resets_at: null` (#167): an API data error on
@@ -618,6 +622,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "error":      StubUsageTransport(mode: .authError)
         case "idle":       StubUsageTransport(mode: .idle)
         case "idle-blocked": StubUsageTransport(mode: .idleBlocked)
+        case "active-blocked": StubUsageTransport(mode: .activeBlocked)
         case "optimistic-reset": StubUsageTransport(mode: .optimisticReset)
         // Broken-`resets_at` (#167): noisy 5h with `resets_at: null` → ⚠️ error state, not a fake "<1m".
         case "broken-reset": StubUsageTransport(mode: .brokenReset)

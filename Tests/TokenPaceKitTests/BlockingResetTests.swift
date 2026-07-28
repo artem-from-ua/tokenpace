@@ -73,14 +73,26 @@ struct IsBlockedTests {
         #expect(CreditsPacing.isBlocked(in: active(fiveDayUtil: 100, sevenDayUtil: 100)))
     }
 
-    @Test func activeFiveExhaustedButSevenHasQuotaNotBlocked() {
-        // 5h spent but 7d still has room → the 5h window will reset soon and unblock; not blocked.
-        #expect(!CreditsPacing.isBlocked(in: active(fiveDayUtil: 100, sevenDayUtil: 40)))
+    @Test func activeFiveExhaustedBlocksEvenWhenSevenHasQuota() {
+        // 5h spent while 7d still has room → you must wait for the 5h reset before working; blocked.
+        // Either main window blocks on its own (#177).
+        #expect(CreditsPacing.isBlocked(in: active(fiveDayUtil: 100, sevenDayUtil: 40)))
     }
 
-    @Test func activeSevenExhaustedButFiveHasQuotaNotBlocked() {
-        // 7d at 100 but the active 5h still has quota → you can keep working now; not blocked.
-        #expect(!CreditsPacing.isBlocked(in: active(fiveDayUtil: 30, sevenDayUtil: 100)))
+    @Test func activeSevenExhaustedBlocksEvenWhenFiveHasQuota() {
+        // 7d at 100 with the active 5h still below → the weekly cap blocks despite 5h quota (#177).
+        // This is Артем's real bug: 7d exhausted, 5h at 48 %, no red blocking badge before the fix.
+        #expect(CreditsPacing.isBlocked(in: active(fiveDayUtil: 30, sevenDayUtil: 100)))
+    }
+
+    @Test func activePerModelExhaustedMainWindowsHaveQuotaNotBlocked() {
+        // A per-model sub-window (Opus) at 100 % does NOT gate work — Claude blocks only on the two main
+        // 5h / 7d windows, then credits (#177). Both main windows below 100 % → not blocked.
+        let snapshot = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 30, resetsAt: iso(2 * 3600)),
+            sevenDay: UsageWindow(utilization: 40, resetsAt: iso(4 * 24 * 3600)),
+            sevenDayOpus: UsageWindow(utilization: 100, resetsAt: iso(4 * 24 * 3600)))
+        #expect(!CreditsPacing.isBlocked(in: snapshot))
     }
 
     @Test func activeBothExhaustedButCreditsCoverNotBlocked() {

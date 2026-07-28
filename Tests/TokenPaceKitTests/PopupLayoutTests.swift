@@ -562,11 +562,36 @@ struct PopupLayoutIdleTests {
         #expect(id == 1)   // 7-day, the later reset
     }
 
-    @Test func activeFiveExhaustedSevenHasQuotaNoBadge() {
-        // 5h spent but 7d still has room → not blocked, no badge.
+    @Test func activeFiveExhaustedBadgesFiveDayNotIdle() {
+        // 5h at 100 %, 7d still has room → the 5h window blocks on its own (#177). Not idle → the 5h row
+        // is a normal "limit reached" row (NOT sessionBlocked); only 5h is a candidate (≥100), so the
+        // red badge points at the 5-hour row (index 0).
         let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 40)
         let p = layout(from: snap)
-        #expect(p.blockingReset == nil)
+        #expect(!p.rows[0].sessionIdle)
+        #expect(!p.rows[0].sessionBlocked)
+        guard case let .token(id, _)? = p.blockingReset else {
+            Issue.record("expected a token blocking reset, got \(String(describing: p.blockingReset))")
+            return
+        }
+        #expect(id == 0)   // 5-hour, the only exhausted window
+        #expect(p.rows[id].title == "5-hour")
+    }
+
+    @Test func activeSevenExhaustedFiveHasQuotaBadgesSevenDay() {
+        // Артем's #177 bug: active session, 7d at 100 % but 5h still below (48 %), no credits. Before the
+        // fix isBlocked was false → no red badge. Now the weekly cap blocks: only 7d is a candidate, so
+        // the badge points at the 7-day row (index 1). The 5h row stays a normal (non-blocked) row.
+        let snap = snapshot(fiveHourUtil: 48, sevenDayUtil: 100)
+        let p = layout(from: snap)
+        #expect(!p.rows[0].sessionIdle)
+        #expect(!p.rows[0].sessionBlocked)
+        guard case let .token(id, _)? = p.blockingReset else {
+            Issue.record("expected a token blocking reset, got \(String(describing: p.blockingReset))")
+            return
+        }
+        #expect(id == 1)   // the 7-day row
+        #expect(p.rows[id].title == "7-day")
     }
 }
 
