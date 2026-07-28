@@ -210,6 +210,17 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_STUB=screenshot swift run
 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=4 swift run   # відкриє одразу на Notifications
 ```
 
+### Авто-відкриття вікна Troubleshoot при запуску
+
+`TOKENPACE_OPEN_TROUBLESHOOT=1 swift run` — так само відкриває вікно **Troubleshoot** одразу після
+старту (~0.6 с). У нормальному потоці воно ховається за ⌥-розкритим пунктом меню, який ще незручніше
+клікати через AX (модифікатор треба тримати під час трекінгу меню), тож стуб потрібен для скриншотів.
+Комбінується зі стубом даних:
+
+```sh
+TOKENPACE_OPEN_TROUBLESHOOT=1 TOKENPACE_STUB=screenshot swift run
+```
+
 Джерело істини цього порядку/індексів — `enum SettingsSection: Int` (ADR-0042); змінюючи секції, онови
 його і цей рядок разом. Detail-панелі тепер SwiftUI `Form.formStyle(.grouped)` (ADR-0042), тож паритет
 grouped-inset карток доводиться скриншотами light+dark так само, як раніше для AppKit-версії.

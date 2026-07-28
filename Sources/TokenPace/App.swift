@@ -299,6 +299,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["TOKENPACE_OPEN_SETTINGS"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.openSettings() }
         }
+        // Same for the Troubleshoot window, normally reached only via the ⌥-revealed menu item — an even
+        // more awkward AX interaction to script (it needs the modifier held during menu tracking).
+        if ProcessInfo.processInfo.environment["TOKENPACE_OPEN_TROUBLESHOOT"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.openTroubleshoot() }
+        }
     }
 
     // MARK: - Menu actions (#14)

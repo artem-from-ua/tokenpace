@@ -93,8 +93,8 @@ final class SettingsWindowController: NSWindowController {
         get { model.archiveSummaryProvider } set { model.archiveSummaryProvider = newValue }
     }
 
-    /// Whether the window has been positioned yet — so the first `show()` centres it (unless an
-    /// autosaved frame already placed it), and later shows leave the user's position alone (#131).
+    /// Whether the window has been positioned yet — so the first `show()` of a session centres it, and
+    /// later shows leave the user's position alone (#131).
     private var hasBeenPositioned = false
 
     convenience init() {
@@ -110,7 +110,9 @@ final class SettingsWindowController: NSWindowController {
         window.title = "TokenPace Settings"
         window.level = .floating               // float above other apps from a menu-bar app (ADR-0012 §6)
         window.isReleasedWhenClosed = false    // keep the controller alive so re-opening reuses it
-        window.setFrameAutosaveName("TokenPaceSettings")   // remember position across opens (size is fixed)
+        // No `setFrameAutosaveName`: the window opens centred every launch rather than restoring a saved
+        // frame. A restored frame can outlive its display layout (disconnected monitor, changed
+        // resolution/scale) and reopen off-screen; centring is always on-screen (see `show()`).
         window.standardWindowButton(.zoomButton)?.isHidden = true
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         // Fixed content size (857×480), like System Settings — a non-resizable single-pane form. Pin
@@ -127,24 +129,28 @@ final class SettingsWindowController: NSWindowController {
     }
 
     /// Show or re-focus the window. Re-syncs every field from `PersistedConfig`/the system into the
-    /// model, brings the app forward, and centres on first display (unless an autosaved frame restored
-    /// a position). Calling this while the window is already on screen just focuses it.
+    /// model, brings the app forward, and centres it on the first display of a session. Calling this
+    /// while the window is already on screen just focuses it.
     func show() {
         model.syncFromConfig()
         // Reflect the latest known update state whenever the window opens (#37) is already carried by
         // `updateAvailability`, called by `AppDelegate.openSettings` before `show()`.
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
+        // Fix the content size to the full 857×480 *before* centring. The `NSHostingController` content
+        // has no intrinsic size, so at first show the window is still a zero-width title-bar sliver;
+        // centring it while zero-width lands the left edge near the screen centre, and growing to 857
+        // afterwards pushes the right half off-screen. Sizing first makes `center()` centre correctly.
+        window?.setContentSize(NSSize(width: Metrics.contentWidth, height: Metrics.contentHeight))
+        // Always open centred on the first show of a session (later shows leave the user's position
+        // alone, #131). We deliberately don't persist/restore the frame across launches: a saved
+        // position can outlive the display layout it was valid for (a monitor was disconnected, the
+        // resolution or scale changed) and reopen the window off-screen. Centring is always on-screen
+        // and needs no per-launch validation.
         if !hasBeenPositioned {
             hasBeenPositioned = true
-            let restored = window?.setFrameUsingName("TokenPaceSettings") ?? false
-            if !restored { window?.center() }
+            window?.center()
         }
-        // The window is a fixed-size single-pane form (857×480). An autosaved frame restores the last
-        // *position* but may carry a stale size, and the SwiftUI hosting view has no intrinsic size —
-        // so force the full content size every show, not just the width. Otherwise the window can open
-        // as a title-bar-only sliver.
-        window?.setContentSize(NSSize(width: Metrics.contentWidth, height: Metrics.contentHeight))
         window?.makeKeyAndOrderFront(nil)
         // Dev helper: `TOKENPACE_SETTINGS_SECTION=<index>` opens straight to a given pane (0-based).
         if let raw = ProcessInfo.processInfo.environment["TOKENPACE_SETTINGS_SECTION"],
