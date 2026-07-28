@@ -13,7 +13,7 @@ import Foundation
 public struct BarView: Sendable, Equatable {
     /// Continuous zone geometry + pacing colour semantics for this window (`PacingModel.barLayout`).
     public let layout: BarLayout
-    /// Severity tier (`.critical`/`.warning`/`.neutral`) from `PacingModel.limitIndicator`.
+    /// Exhausted flag (`.critical`/`.neutral`) from `PacingModel.limitIndicator`.
     public let indicator: LimitIndicator
     /// Which rolling window this bar represents (5h on top, 7d below — see ``MenuBarMode``).
     public let window: LimitWindow
@@ -273,7 +273,9 @@ public struct MenuBarLayout: Sendable, Equatable {
             // with the plain 7-day countdown.
             let blocked = CreditsPacing.isBlocked(in: snapshot)
             let five = BarView(
-                layout: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind),
+                // Inert placeholder: `.onPaceOrBehind` → `severity` is `.calm` before `remainingSeconds`
+                // is ever read, so the value here is immaterial (0).
+                layout: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0),
                 indicator: .neutral, window: .fiveHour, idle: true, blocked: blocked)
             // In the idle state the 5h window is legitimately date-less (ADR-0027, not an error), but the
             // 7-day window is real: if it reports usage yet its `resets_at` is unparseable, that is the
@@ -448,10 +450,8 @@ public struct MenuBarLayout: Sendable, Equatable {
 
     // MARK: - Private
 
-    /// One `BarView` for a window, combining its bar geometry and severity tier. The `timePercent`
-    /// fed to `limitIndicator` is `barLayout.timeFraction * 100`, keeping the integer-percent
-    /// indicator math consistent with the continuous bar geometry (`PacingModel`'s intentional
-    /// unit split).
+    /// One `BarView` for a window, combining its bar geometry and its exhausted flag
+    /// (`limitIndicator`, `.critical` when usage truncates to 100).
     private static func bar(for window: UsageWindow, window kind: LimitWindow, now: Date) -> BarView {
         let resetsAt = ResetClock.parse(window.resetsAt) ?? now  // unparseable → elapsedFraction = 1.0
         let layout = PacingModel.barLayout(
@@ -460,10 +460,7 @@ public struct MenuBarLayout: Sendable, Equatable {
             now: now,
             window: kind
         )
-        let indicator = PacingModel.limitIndicator(
-            utilization: window.utilization,
-            timePercent: layout.timeFraction * 100
-        )
+        let indicator = PacingModel.limitIndicator(utilization: window.utilization)
         return BarView(layout: layout, indicator: indicator, window: kind)
     }
 

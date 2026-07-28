@@ -530,6 +530,8 @@ struct MenuBarLayoutShowResetTests {
 
     // In the 5h window (18000 s) a `fiveHourResetsIn: 4*3600` reset → timeFraction 0.2; in the 7d
     // window a `3*24*3600` reset → timeFraction ≈ 0.571. Utilisations below those are green (calm).
+    // The yellow→orange split is now the dynamic threshold `0.16·(1−timeFraction)`: 0.128 at t=0.20
+    // (5h), ≈0.0686 at t=0.571 (7d). Both resets are days/hours away, so the 20-min override is off.
 
     @Test func bothGreenHidesReset() {
         // 5h usage 0.10 < time 0.20 (green); 7d usage 0.30 < time 0.571 (green) → both calm → hidden.
@@ -538,19 +540,20 @@ struct MenuBarLayoutShowResetTests {
     }
 
     @Test func greenPlusYellowHidesReset() {
-        // 5h green (usage 0.10); 7d yellow — usage 0.65 vs time 0.571, ahead by ~0.08 (< 0.15) → calm.
-        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 65), now: now)
+        // 5h green (usage 0.10); 7d yellow — usage 0.62 vs time 0.571, ahead ≈0.049 (< thr 0.0686) → calm.
+        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 62), now: now)
         #expect(showReset(layout) == false)
     }
 
     @Test func bothYellowHidesReset() {
-        // 5h yellow — usage 0.30 vs time 0.20, ahead 0.10 (< 0.15); 7d yellow — usage 0.65 vs 0.571.
-        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 30, sevenDayUtil: 65), now: now)
+        // 5h yellow — usage 0.30 vs time 0.20, ahead 0.10 (< thr 0.128); 7d yellow — usage 0.62 vs 0.571
+        // ahead ≈0.049 (< thr 0.0686) → both calm → hidden.
+        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 30, sevenDayUtil: 62), now: now)
         #expect(showReset(layout) == false)
     }
 
     @Test func oneOrangeShowsReset() {
-        // 5h orange — usage 0.50 vs time 0.20, ahead 0.30 (>= 0.15) → noisy; 7d green → label returns.
+        // 5h orange — usage 0.50 vs time 0.20, ahead 0.30 (>= thr 0.128) → noisy; 7d green → label returns.
         let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), now: now)
         #expect(showReset(layout) == true)
     }
@@ -558,6 +561,14 @@ struct MenuBarLayoutShowResetTests {
     @Test func oneExhaustedShowsReset() {
         // 7d usage == 100 → red → noisy, even though 5h is green.
         let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 100), now: now)
+        #expect(showReset(layout) == true)
+    }
+
+    @Test func nearResetOverrideShowsReset() {
+        // 5h reset in 10 min (t ≈ 0.967) with only a 1-point lead (usage 0.98): far below any dynamic
+        // threshold, yet the ≤20-min override makes it orange → the countdown returns. 7d green.
+        let snap = snapshot(fiveHourUtil: 98, sevenDayUtil: 30, fiveHourResetsIn: 10 * 60)
+        let layout = MenuBarLayout.make(from: snap, now: now)
         #expect(showReset(layout) == true)
     }
 
@@ -697,10 +708,11 @@ struct MenuBarLayoutSelectResetTests {
 ///
 /// Fixture arithmetic (against the 7d window = 604 800 s, `snapshot()`'s reset defaults):
 /// - 7d **green**: `sevenDayUtil: 30`, default reset 3 d out → elapsed ≈ 0.571 → usage < time → calm.
-/// - 7d **orange**: `sevenDayUtil: 55, sevenDayResetsIn: 6 d` → elapsed ≈ 0.143 → ahead ≈ 0.41 ≥ 0.15.
+/// - 7d **orange**: `sevenDayUtil: 55, sevenDayResetsIn: 6 d` → elapsed ≈ 0.143 → ahead ≈ 0.41,
+///   past the dynamic threshold `0.16·(1−0.143) ≈ 0.137` → noisy.
 /// - 7d **red**: `sevenDayUtil: 100` → usageFraction ≥ 1 → exhausted.
-/// The 5h side uses `fiveHourUtil: 50` (default 4 h reset → elapsed 0.2 → ahead 0.30 → noisy) so the
-/// 5h bar is present and drives the countdown in the mixed cases.
+/// The 5h side uses `fiveHourUtil: 50` (default 4 h reset → elapsed 0.2 → ahead 0.30, past threshold
+/// 0.128 → noisy) so the 5h bar is present and drives the countdown in the mixed cases.
 @Suite("MenuBarLayout hide calm 7d (#94)")
 struct MenuBarLayoutHideCalmSevenDayTests {
 

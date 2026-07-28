@@ -290,10 +290,10 @@ struct CreditsBarLayoutTests {
 
     private static let utc = TimeZone(identifier: "UTC")!
 
-    private func utcDate(_ y: Int, _ mo: Int, _ d: Int) -> Date {
+    private func utcDate(_ y: Int, _ mo: Int, _ d: Int, _ h: Int = 0, _ mi: Int = 0) -> Date {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = Self.utc
-        return cal.date(from: DateComponents(year: y, month: mo, day: d))!
+        return cal.date(from: DateComponents(year: y, month: mo, day: d, hour: h, minute: mi))!
     }
 
     @Test func noLimitProducesNoBar() throws {
@@ -341,5 +341,33 @@ struct CreditsBarLayoutTests {
             spendLimitReached: false)
         let bar = CreditsPacing.barLayout(for: spend, now: utcDate(2026, 7, 16), timeZone: Self.utc)
         #expect(bar?.usageFraction == 1)
+    }
+
+    @Test func remainingSecondsCountsToMonthEnd() {
+        // On the 16th of July, the money window resets at 00:00 UTC on Aug 1 — 16 days out.
+        let spend = SpendInfo(
+            used: Money(amountMinor: 200, currency: "EUR", exponent: 2),
+            limit: Money(amountMinor: 1000, currency: "EUR", exponent: 2),
+            enabled: true)
+        let now16 = utcDate(2026, 7, 16)
+        let bar = CreditsPacing.barLayout(for: spend, now: now16, timeZone: Self.utc)
+        let expected = CreditsPacing.monthEnd(now: now16, timeZone: Self.utc)!.timeIntervalSince(now16)
+        #expect(abs((bar?.remainingSeconds ?? -1) - expected) < 1e-6)
+        #expect(abs((bar?.remainingSeconds ?? -1) - 16 * 24 * 3600) < 1e-6)
+    }
+
+    @Test func nearMonthEndForcesOrange() {
+        // 10 min before the month resets (elapsed ≈ 0.99978), spent a hair further ahead
+        // (99.998 %): the lead is far below any dynamic threshold, yet the ≤20-min override forces
+        // `.ahead`. usage < 1 keeps it out of the exhausted rung, so the bar is orange, not red.
+        let spend = SpendInfo(
+            used: Money(amountMinor: 99_998, currency: "EUR", exponent: 2),
+            limit: Money(amountMinor: 100_000, currency: "EUR", exponent: 2),
+            enabled: true)
+        let near = utcDate(2026, 7, 31, 23, 50)   // 10 min to 00:00 UTC Aug 1
+        let bar = CreditsPacing.barLayout(for: spend, now: near, timeZone: Self.utc)
+        #expect((bar?.remainingSeconds ?? .infinity) <= PacingModel.pacingOrangeOverrideSeconds)
+        #expect(bar?.pacing == .ahead)          // usage 0.99998 > time ≈ 0.99978
+        #expect(bar?.severity == .ahead)        // override active (usage < 1, remaining ≤ 1200)
     }
 }

@@ -59,8 +59,9 @@ AppKit не дає доступу до того, що система компо�
    `Palette.monochromeGrey`), суцільний непрозорий фон **усього** дропдауна (`SolidBackdropView` +
    overlay нативних пунктів), без контраст-ефектів.
 3. **Пейсинг-кольори — системні** (`.systemGreen/.systemRed/.systemYellow/.systemOrange`), ті самі,
-   що в статус-крапках сервісів. Ahead-of-pace градуюється за випередженням: `< 15` пунктів —
-   жовтий, `≥ 15` — помаранчовий, вичерпано — червоний (`PopupBarView.aheadColor`).
+   що в статус-крапках сервісів. Ahead-of-pace градуюється за випередженням: нижче динамічного порога
+   `0.16·(1−timeFraction)` — жовтий, на/вище (або ресет `≤ 20 хв`) — помаранчовий, вичерпано —
+   червоний (`PopupBarView.aheadColor`; поріг — ADR-0044, історично статичні `15` пунктів).
 4. **`dimmedLabelColor` — dynamic** `NSColor(name:)` (блендинг у цільовому appearance), а не
    `static let .blended(...)`, який запікав appearance першого доступу й виходив near-black у dark.
 
