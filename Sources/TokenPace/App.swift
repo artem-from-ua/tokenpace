@@ -633,6 +633,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "red-orange":  StubUsageTransport(mode: .pacing(.redOrange))
         case "red-green":   StubUsageTransport(mode: .pacing(.redGreen))
         case "calm5-orange7": StubUsageTransport(mode: .pacing(.calmFiveOrangeSeven))
+        // 20-min override (ADR-0044): 5h ahead only ~2 pts but resets in 12 min → forced orange.
+        case "near-reset":  StubUsageTransport(mode: .pacing(.nearResetFiveHour))
         // Both-calm frame (#94): exercises the "Hide 7-day bar when calm" opt-out (lone centred 5h).
         case "calm-both":  StubUsageTransport(mode: .pacing(.calmBoth))
         // Calm bars + degraded (yellow) service dot: verifies calm colours muting the dot (#…).

@@ -20,7 +20,7 @@ public struct LimitRow: Sendable, Equatable {
     public let utilization: Double
     /// Pacing relative to the elapsed window (`PacingModel.barLayout(...).pacing`).
     public let pacing: PacingState
-    /// Severity tier (`PacingModel.limitIndicator`).
+    /// Exhausted flag (`PacingModel.limitIndicator`: `.critical` when the window is at 100 %).
     public let indicator: LimitIndicator
     /// Continuous bar geometry for drawing the pacing bar (same `BarLayout` the menu bar draws).
     public let bar: BarLayout
@@ -357,7 +357,9 @@ public struct PopupLayout: Sendable, Equatable {
             utilization: 0,
             pacing: .onPaceOrBehind,
             indicator: .neutral,
-            bar: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind),
+            // Inert placeholder: `.onPaceOrBehind` → `severity` is `.calm` before `remainingSeconds`
+            // is ever read, so the value here is immaterial (0).
+            bar: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0),
             subdivisions: LimitWindow.fiveHour.subdivisions,
             resetLine: nil,
             sessionIdle: true,
@@ -386,10 +388,7 @@ public struct PopupLayout: Sendable, Equatable {
             now: now,
             window: kind
         )
-        let indicator = PacingModel.limitIndicator(
-            utilization: window.utilization,
-            timePercent: bar.timeFraction * 100
-        )
+        let indicator = PacingModel.limitIndicator(utilization: window.utilization)
         let resetLine = parsed.flatMap { ResetClock.resetLine(resetsAt: $0, now: now) }
         return LimitRow(
             title: title,

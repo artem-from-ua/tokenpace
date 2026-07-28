@@ -88,7 +88,6 @@ struct ElapsedFractionTests {
 
 struct IndicatorCase: Sendable {
     let util: Double
-    let time: Double
     let want: LimitIndicator
 }
 
@@ -96,39 +95,29 @@ struct IndicatorCase: Sendable {
 struct LimitIndicatorTests {
 
     private static let cases: [IndicatorCase] = [
-        // critical
-        IndicatorCase(util: 100,    time: 50,  want: .critical),
-        IndicatorCase(util: 100,    time: 95,  want: .critical), // crit ignores time
+        // critical — usage truncates to exactly 100
+        IndicatorCase(util: 100,     want: .critical),
+        IndicatorCase(util: 100.4,   want: .critical), // truncate→100
         // near-100 but truncation keeps it out of critical
-        IndicatorCase(util: 99.9999, time: 95,  want: .neutral), // truncate→99, time>90
-        IndicatorCase(util: 99.9999, time: 50,  want: .warning), // truncate→99 (>90), 50≤90
-        // warning boundary
-        IndicatorCase(util: 91,     time: 90,  want: .warning), // exactly at both thresholds
-        IndicatorCase(util: 91,     time: 91,  want: .neutral), // time just above 90
-        IndicatorCase(util: 95,     time: 90,  want: .warning),
-        IndicatorCase(util: 95,     time: 0,   want: .warning),
-        IndicatorCase(util: 95,     time: 100, want: .neutral), // late in window, high but ok
-        // usage boundary: 90 is NOT > 90
-        IndicatorCase(util: 90,     time: 50,  want: .neutral),
-        IndicatorCase(util: 90.9,   time: 50,  want: .neutral), // truncate→90, not >90
+        IndicatorCase(util: 99.9999, want: .neutral),  // truncate→99, not exhausted
+        IndicatorCase(util: 95,      want: .neutral),  // high but not at the cap → no glyph now
+        IndicatorCase(util: 91,      want: .neutral),
+        IndicatorCase(util: 90,      want: .neutral),
         // neutral — normal
-        IndicatorCase(util: 13,     time: 5,   want: .neutral),
-        IndicatorCase(util: 0,      time: 0,   want: .neutral),
+        IndicatorCase(util: 13,      want: .neutral),
+        IndicatorCase(util: 0,       want: .neutral),
     ]
 
     @Test(arguments: LimitIndicatorTests.cases)
     func indicator(_ c: IndicatorCase) {
-        let got = PacingModel.limitIndicator(utilization: c.util, timePercent: c.time)
+        let got = PacingModel.limitIndicator(utilization: c.util)
         #expect(got == c.want,
-            "limitIndicator(util: \(c.util), time: \(c.time)) expected \(c.want), got \(got)")
+            "limitIndicator(util: \(c.util)) expected \(c.want), got \(got)")
     }
 
     @Test func doubleJustBelow100IsNotCritical() {
-        // Precision contract: 99.9999... must NOT become critical.
-        // With time > 90: neutral (not warning either).
-        #expect(PacingModel.limitIndicator(utilization: 99.9999, timePercent: 91) == .neutral)
-        // With time ≤ 90: warning (not critical).
-        #expect(PacingModel.limitIndicator(utilization: 99.9999, timePercent: 90) == .warning)
+        // Precision contract: 99.9999... truncates to 99 and must NOT become critical.
+        #expect(PacingModel.limitIndicator(utilization: 99.9999) == .neutral)
     }
 }
 
@@ -207,6 +196,21 @@ struct BarLayoutTests {
         // The time-indicator tick sits exactly at timeFraction.
         #expect(abs(l.timeFraction - 0.77) < 1e-9)
     }
+
+    @Test func remainingSecondsIsResetMinusNow() {
+        // 50 % of the 5h window elapsed → 9000 s (half of 18000) left until reset.
+        let l = BarLayoutTests.layout(util: 20, timePct: 50)
+        #expect(abs(l.remainingSeconds - 9000) < 1e-9)
+    }
+
+    @Test func nearResetForcesOrangeEndToEnd() {
+        // Reset in 10 min with only a 1-point lead: below any dynamic threshold, yet the ≤20-min
+        // override makes it orange (`.ahead`) — proves `remainingSeconds` is wired through `severity`.
+        let l = PacingModel.barLayout(utilization: 99, resetsAt: now + 600, now: now, window: .fiveHour)
+        #expect(abs(l.remainingSeconds - 600) < 1e-9)
+        #expect(l.pacing == .ahead)          // usage 0.99 > time ≈ 0.967
+        #expect(l.severity == .ahead)        // override active (usage < 1, remaining ≤ 1200)
+    }
 }
 
 // MARK: - blockIndex
@@ -262,10 +266,13 @@ struct BlockIndexTests {
 struct BarLayoutIsCalmTests {
 
     /// A layout with explicit fractions; `pacing` derived exactly as `barLayout` would
-    /// (`time >= usage → onPaceOrBehind`), so `isCalm` is exercised on realistic inputs.
-    private static func layout(usage: Double, time: Double) -> BarLayout {
+    /// (`time >= usage → onPaceOrBehind`), so `isCalm` is exercised on realistic inputs. `remaining`
+    /// defaults to a full week so the 20-minute orange override is inactive and only the dynamic
+    /// threshold decides — pass a small value to exercise the override.
+    private static func layout(usage: Double, time: Double,
+                               remaining: TimeInterval = 7 * 24 * 3600) -> BarLayout {
         BarLayout(usageFraction: usage, timeFraction: time,
-                  pacing: time >= usage ? .onPaceOrBehind : .ahead)
+                  pacing: time >= usage ? .onPaceOrBehind : .ahead, remainingSeconds: remaining)
     }
 
     @Test func onPaceIsCalm() {   // green — usage below time
@@ -276,16 +283,20 @@ struct BarLayoutIsCalmTests {
         #expect(BarLayoutIsCalmTests.layout(usage: 0.5, time: 0.5).isCalm)
     }
 
-    @Test func slightlyAheadIsCalm() {   // yellow — 10 points ahead (< 0.15)
-        #expect(BarLayoutIsCalmTests.layout(usage: 0.5, time: 0.4).isCalm)
+    @Test func mildlyAheadIsCalm() {   // yellow — 5 pts ahead at t=0.4 (< threshold 0.16·0.6 = 0.096)
+        #expect(BarLayoutIsCalmTests.layout(usage: 0.45, time: 0.4).isCalm)
     }
 
-    @Test func exactlyFifteenPointsAheadIsNoisy() {  // boundary is strict (< 0.15): 0.15 → orange
+    @Test func aheadPastDynamicThresholdIsNoisy() {  // orange — 15 pts ahead at t=0.4 (≥ 0.096)
         #expect(!BarLayoutIsCalmTests.layout(usage: 0.55, time: 0.4).isCalm)
     }
 
-    @Test func farAheadIsNoisy() {   // orange — 20 points ahead
+    @Test func farAheadIsNoisy() {   // orange — 20 points ahead at t=0.5 (≥ threshold 0.08)
         #expect(!BarLayoutIsCalmTests.layout(usage: 0.7, time: 0.5).isCalm)
+    }
+
+    @Test func nearResetOverrideIsNoisy() {  // orange — tiny lead but window resets in ≤ 20 min
+        #expect(!BarLayoutIsCalmTests.layout(usage: 0.51, time: 0.5, remaining: 1200).isCalm)
     }
 
     @Test func exhaustedIsNoisyEvenWhenNearlyOnPace() {  // red — usage == 1 overrides the yellow window
@@ -298,9 +309,10 @@ struct BarLayoutIsCalmTests {
 @Suite("BarLayout.severity")
 struct BarLayoutSeverityTests {
 
-    private static func layout(usage: Double, time: Double) -> BarLayout {
+    private static func layout(usage: Double, time: Double,
+                               remaining: TimeInterval = 7 * 24 * 3600) -> BarLayout {
         BarLayout(usageFraction: usage, timeFraction: time,
-                  pacing: time >= usage ? .onPaceOrBehind : .ahead)
+                  pacing: time >= usage ? .onPaceOrBehind : .ahead, remainingSeconds: remaining)
     }
 
     @Test func greenIsCalm() {   // usage below time
@@ -311,15 +323,15 @@ struct BarLayoutSeverityTests {
         #expect(BarLayoutSeverityTests.layout(usage: 0.5, time: 0.5).severity == .calm)
     }
 
-    @Test func yellowIsCalm() {  // 10 points ahead (< 0.15) → still calm
-        #expect(BarLayoutSeverityTests.layout(usage: 0.5, time: 0.4).severity == .calm)
+    @Test func yellowIsCalm() {  // 5 pts ahead at t=0.4 (< threshold 0.096) → still calm
+        #expect(BarLayoutSeverityTests.layout(usage: 0.45, time: 0.4).severity == .calm)
     }
 
-    @Test func exactlyFifteenPointsAheadIsAhead() {  // strict boundary: 0.15 → orange
+    @Test func aheadPastDynamicThresholdIsAhead() {  // 15 pts ahead at t=0.4 (≥ 0.096) → orange
         #expect(BarLayoutSeverityTests.layout(usage: 0.55, time: 0.4).severity == .ahead)
     }
 
-    @Test func farAheadIsAhead() {   // 20 points ahead, usage < 1 → orange
+    @Test func farAheadIsAhead() {   // 20 points ahead at t=0.5, usage < 1 → orange
         #expect(BarLayoutSeverityTests.layout(usage: 0.7, time: 0.5).severity == .ahead)
     }
 
@@ -329,5 +341,57 @@ struct BarLayoutSeverityTests {
 
     @Test func exhaustedOverridesNearlyOnPace() {  // usage == 1 with time just behind → red, not calm
         #expect(BarLayoutSeverityTests.layout(usage: 1.0, time: 0.95).severity == .exhausted)
+    }
+
+    // MARK: dynamic threshold — the boundary moves with elapsed time
+
+    /// The same 10-point lead is calm early in a window but noisy past half-way, because the
+    /// threshold shrinks (`0.16·(1−t)`): 0.16 at t=0 vs 0.08 at t=0.5.
+    @Test func sameLeadFlipsWithElapsedTime() {
+        #expect(BarLayoutSeverityTests.layout(usage: 0.10, time: 0.0).severity == .calm)   // thr 0.16
+        #expect(BarLayoutSeverityTests.layout(usage: 0.60, time: 0.5).severity == .ahead)  // thr 0.08
+    }
+
+    /// Strict `<` at t=0 (threshold exactly 0.16): 0.15 lead is yellow, 0.16 lead is orange.
+    @Test func thresholdBoundaryIsStrictAtStart() {
+        #expect(BarLayoutSeverityTests.layout(usage: 0.15, time: 0.0).severity == .calm)   // 0.15 < 0.16
+        #expect(BarLayoutSeverityTests.layout(usage: 0.16, time: 0.0).severity == .ahead)  // 0.16 ≮ 0.16
+    }
+
+    // MARK: 20-minute orange override
+
+    /// A lead below the dynamic threshold is forced orange when the window resets in ≤ 20 min.
+    @Test func nearResetForcesOrange() {  // delta 0.01 ≪ thr 0.08, but remaining == 1200 → orange
+        #expect(BarLayoutSeverityTests.layout(usage: 0.51, time: 0.5, remaining: 1200).severity == .ahead)
+    }
+
+    /// Just outside the override window (1201 s), the same fractions fall back to the formula → calm.
+    @Test func justOutsideOverrideStaysCalm() {
+        #expect(BarLayoutSeverityTests.layout(usage: 0.51, time: 0.5, remaining: 1201).severity == .calm)
+    }
+
+    /// The override does not outrank the earlier rungs: behind pace stays calm, exhausted stays red,
+    /// even with a near reset.
+    @Test func overrideDoesNotOutrankPaceOrExhaustion() {
+        #expect(BarLayoutSeverityTests.layout(usage: 0.5, time: 0.6, remaining: 60).severity == .calm)
+        #expect(BarLayoutSeverityTests.layout(usage: 1.0, time: 0.5, remaining: 60).severity == .exhausted)
+    }
+}
+
+// MARK: - PacingModel.aheadThreshold
+
+@Suite("PacingModel.aheadThreshold")
+struct AheadThresholdTests {
+
+    @Test func curveHitsExpectedNodes() {
+        #expect(abs(PacingModel.aheadThreshold(timeFraction: 0.0)  - 0.16) < 1e-9)
+        #expect(abs(PacingModel.aheadThreshold(timeFraction: 0.5)  - 0.08) < 1e-9)
+        #expect(abs(PacingModel.aheadThreshold(timeFraction: 0.75) - 0.04) < 1e-9)
+        #expect(abs(PacingModel.aheadThreshold(timeFraction: 1.0)  - 0.00) < 1e-9)
+    }
+
+    @Test func clampsOutOfRangeInput() {
+        #expect(abs(PacingModel.aheadThreshold(timeFraction: -0.5) - 0.16) < 1e-9)   // t < 0 → 0.16
+        #expect(abs(PacingModel.aheadThreshold(timeFraction:  1.5) - 0.00) < 1e-9)   // t > 1 → 0
     }
 }

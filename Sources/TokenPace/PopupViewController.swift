@@ -198,7 +198,7 @@ final class PopupBarView: NSView {
         path.addClip()
         fillZone(from: 0, to: l.usageFraction, in: rect, width: w, color: Self.monochromeGrey)
         let gapColor = l.pacing == .ahead
-            ? Self.aheadColor(usage: l.usageFraction, time: l.timeFraction)
+            ? Self.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
             : Palette.gapGreen
         fillZone(from: l.gapStart, to: l.gapEnd, in: rect, width: w, color: gapColor)
         NSGraphicsContext.restoreGraphicsState()
@@ -216,7 +216,7 @@ final class PopupBarView: NSView {
         let markerRect = NSRect(x: cx - mw / 2, y: cy - mh / 2, width: mw, height: mh)
         let marker = NSBezierPath(
             roundedRect: markerRect, xRadius: Metrics.indicatorCorner, yRadius: Metrics.indicatorCorner)
-        indicatorColor(usage: l.usageFraction, time: l.timeFraction).setFill()
+        indicatorColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds).setFill()
         marker.fill()
         Palette.indicatorStroke.setStroke()
         marker.lineWidth = Metrics.indicatorStroke
@@ -239,21 +239,31 @@ final class PopupBarView: NSView {
         }
     }
 
-    private func indicatorColor(usage: Double, time: Double) -> NSColor {
+    private func indicatorColor(usage: Double, time: Double, remainingSeconds: TimeInterval) -> NSColor {
         // The dot uses the exact pacing-bar colours so it reads as the same colour as the gap zone it
         // sits over, not a separate shade. A tie (usage == time) is still on pace → green.
-        usage > time ? Self.aheadColor(usage: usage, time: time) : Palette.gapGreen
+        usage > time
+            ? Self.aheadColor(usage: usage, time: time, remainingSeconds: remainingSeconds)
+            : Palette.gapGreen
     }
 
     /// The gap/dot colour when **ahead of pace** (`usage > time`), graded by how far ahead — the same
     /// system colours the Claude status dots use:
     /// - limit exhausted (`usage >= 1`) → red (the worst; also where the bar is full)
-    /// - ahead by < 15 percentage points → yellow (mild)
-    /// - ahead by ≥ 15 points → orange (worse)
-    /// `usage`/`time` are fractions in [0, 1], so the 15% threshold is `0.15`.
-    static func aheadColor(usage: Double, time: Double) -> NSColor {
+    /// - window resets in `≤ 20 min` (`PacingModel.pacingOrangeOverrideSeconds`) → orange (no time left
+    ///   to coast back onto pace, so any lead is worth flagging)
+    /// - ahead by less than the dynamic threshold → yellow (mild)
+    /// - ahead by `≥` the dynamic threshold → orange (worse)
+    ///
+    /// The threshold is `PacingModel.aheadThreshold(timeFraction:)` = `0.16 · (1 − time)` — 16 pts of
+    /// slack early in a window, shrinking to 0 at the end. Shared with `BarLayout.severity` (Kit) so
+    /// colour and severity never drift; the `< threshold` comparison is strict (a lead exactly at the
+    /// threshold is orange).
+    static func aheadColor(usage: Double, time: Double, remainingSeconds: TimeInterval) -> NSColor {
         if usage >= 1 { return Palette.gapRed }
-        return (usage - time) < 0.15 ? Palette.gapYellow : Palette.gapOrange
+        if remainingSeconds <= PacingModel.pacingOrangeOverrideSeconds { return Palette.gapOrange }
+        return (usage - time) < PacingModel.aheadThreshold(timeFraction: time)
+            ? Palette.gapYellow : Palette.gapOrange
     }
 
     private func fillZone(from: Double, to: Double, in rect: NSRect, width: CGFloat, color: NSColor) {
@@ -1065,26 +1075,38 @@ final class PopupViewController: NSViewController {
     private static func percent(_ value: Double) -> String { "\(Int(value.rounded()))%" }
 
     /// Pacing/severity in words. Severity (critical/warning) wins over the plain pacing direction. When
-    /// ahead of pace, the wording grades with the gap colour (see ``PopupBarView/aheadColor``): a large
-    /// lead (≥ 15 points, the orange gap) reads "well ahead of pace"; a small one (yellow) stays "ahead
-    /// of pace".
+    /// ahead of pace, the wording grades with the gap colour (see ``PopupBarView/aheadColor``): a lead
+    /// that reads orange (`≥` the dynamic threshold, or `≤ 20 min` to reset) is "well ahead of pace"; a
+    /// smaller one (yellow) stays "ahead of pace".
+    ///
+    /// The pacing colour (green→yellow→orange→red) now carries the "how far ahead" signal on its own,
+    /// so we no longer append a `⚠` glyph in the `.warning` band (usage > 90 % before 90 % of the
+    /// window elapsed) — that was a statusline carry-over, and our bar has outgrown it. `.warning` and
+    /// `.neutral` now read the same "(well) ahead of pace" wording; only the exhausted rung (`.critical`,
+    /// `usage == 100`) still gets its own "limit reached".
     private static func statusText(_ row: LimitRow) -> String {
         // Idle 5-hour row (#100): "ready to start" instead of a pacing phrase — there is no active
         // window to pace. When that idle state is also blocked (#158 — 7d exhausted, credits cannot
         // cover) it becomes "waiting for limit reset". Guarded first so the inert placeholder
         // indicator/pacing are never consulted.
         if row.sessionIdle { return row.sessionBlocked ? blockedStatusText : idleStatusText }
-        switch row.indicator {
-        case .critical: return "limit reached"
-        case .warning:  return aheadPhrase(row) + " ⚠"
-        case .neutral:  return row.pacing == .ahead ? aheadPhrase(row) : "on pace"
-        }
+        if row.indicator == .critical { return "limit reached" }
+        return row.pacing == .ahead ? aheadPhrase(row) : "on pace"
     }
 
-    /// "well ahead of pace" when the token usage leads elapsed time by ≥ 15 points (the orange gap),
-    /// else "ahead of pace" (yellow). Same threshold as the gap colour, so word and colour agree.
+    /// "well ahead of pace" when the bar reads orange (the ``isWellAhead(_:)`` condition), else "ahead
+    /// of pace" (yellow). Same threshold as the gap colour, so word and colour agree.
     private static func aheadPhrase(_ row: LimitRow) -> String {
-        (row.bar.usageFraction - row.bar.timeFraction) >= 0.15 ? "well ahead of pace" : "ahead of pace"
+        isWellAhead(row.bar) ? "well ahead of pace" : "ahead of pace"
+    }
+
+    /// Whether this bar reads **orange** (well ahead of pace) — the exact complement of the `<` yellow
+    /// test in ``PopupBarView/aheadColor``, so the wording and the gap colour always agree: orange when
+    /// the window resets in `≤ 20 min` (``PacingModel/pacingOrangeOverrideSeconds``), or when the lead
+    /// is `≥` the dynamic threshold (``PacingModel/aheadThreshold(timeFraction:)``).
+    private static func isWellAhead(_ bar: BarLayout) -> Bool {
+        if bar.remainingSeconds <= PacingModel.pacingOrangeOverrideSeconds { return true }
+        return (bar.usageFraction - bar.timeFraction) >= PacingModel.aheadThreshold(timeFraction: bar.timeFraction)
     }
 
     // MARK: Extra usage (money-credits) formatters (#145)
@@ -1093,13 +1115,13 @@ final class PopupViewController: NSViewController {
     /// ``statusText(_:)``. Uses the **same** thresholds/wording family as the token bars so the two
     /// agree at a glance:
     /// - cap reached (`usageFraction >= 1`) → "limit reached" (the red rung of `aheadColor`);
-    /// - ahead of pace (`usage > time`) → "ahead of pace" / "well ahead of pace" by the 15-point gap
-    ///   (the yellow→orange split, matching ``aheadPhrase(_:)``);
+    /// - ahead of pace (`usage > time`) → "ahead of pace" / "well ahead of pace" by the ``isWellAhead(_:)``
+    ///   condition (the yellow→orange split, matching ``aheadPhrase(_:)``);
     /// - otherwise (`.onPaceOrBehind`, incl. the tie) → "on pace".
     static func creditsStatusText(_ bar: BarLayout) -> String {
         if bar.usageFraction >= 1 { return "limit reached" }
         guard bar.pacing == .ahead else { return "on pace" }
-        return (bar.usageFraction - bar.timeFraction) >= 0.15 ? "well ahead of pace" : "ahead of pace"
+        return isWellAhead(bar) ? "well ahead of pace" : "ahead of pace"
     }
 
     /// The detail line's **left** half when a cap is set: `"€10.77 / €15.00"` — spent over limit, both

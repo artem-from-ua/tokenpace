@@ -290,7 +290,7 @@ final class StatusItemView: NSView {
         if calmColors && credits.isCalm { return Palette.calmWhite }
         guard let l = credits.bar else { return Palette.foreground }   // unlimited → neutral
         return l.timeFraction < l.usageFraction
-            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction)
+            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
             : Palette.dotGreen
     }
 
@@ -505,7 +505,7 @@ final class StatusItemView: NSView {
     private func indicatorColor(_ l: BarLayout) -> NSColor {
         if calmColors && l.isCalm { return Palette.calmWhite }
         let base = l.timeFraction < l.usageFraction
-            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction)
+            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
             : Palette.dotGreen
         return Palette.lightened(base)   // menu-bar strokes sit a touch lighter over the grey strip
     }
@@ -517,7 +517,7 @@ final class StatusItemView: NSView {
     private func calmedGapColor(_ l: BarLayout) -> NSColor {
         if calmColors && l.isCalm { return Palette.calmWhite }
         let base = l.pacing == .ahead
-            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction)
+            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
             : Palette.gapGreen
         return Palette.lightened(base)   // menu-bar strokes sit a touch lighter over the grey strip
     }

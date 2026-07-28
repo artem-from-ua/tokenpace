@@ -412,6 +412,12 @@ actor StubUsageTransport: UsageTransport {
         /// dropped and a lone green 5h bar sits centred; both calm → no reset countdown either.
         case calmBoth
 
+        /// **20-min override** frame (ADR-0044): 5h ahead by only ~2 pts (usage 98 vs elapsed ~96 %)
+        /// but the 5h window resets in **12 min**. Under a static/dynamic threshold a 2-pt lead is
+        /// yellow (calm); the ≤ 20-min override forces it **orange**, so the countdown appears. 7d
+        /// stays green. Use this to see the override flip a would-be-calm bar to noisy.
+        case nearResetFiveHour
+
         /// (fiveUtil, sevenUtil, fiveResetSeconds, sevenResetSeconds).
         var values: (five: Double, seven: Double, fiveIn: TimeInterval, sevenIn: TimeInterval) {
             switch self {
@@ -422,6 +428,7 @@ actor StubUsageTransport: UsageTransport {
             case .redGreen:           return (100, 20, 2 * 3600, 5 * 24 * 3600)
             case .calmFiveOrangeSeven: return (10, 55, 4 * 3600, 5 * 24 * 3600)
             case .calmBoth:           return (10, 20, 4 * 3600, 5 * 24 * 3600)
+            case .nearResetFiveHour:  return (98, 20, 12 * 60, 5 * 24 * 3600)
             }
         }
     }
@@ -688,7 +695,8 @@ actor StubUsageTransport: UsageTransport {
         // Two weekly_scoped per-model rows, chosen to show a couple of the ahead-of-pace gap colours
         // against the 7-day windows' shared ≈29 % elapsed (their **time** use is unchanged; only the
         // **token** utilisation moves): Fable ahead ~31 pts → ORANGE, Mythos exhausted → RED.
-        // `PopupBarView.aheadColor` grades by `usage − time` (15-pt threshold).
+        // `PopupBarView.aheadColor` grades by `usage − time` against a dynamic threshold that shrinks
+        // as the window drains (`0.16·(1−timeFraction)`), plus a ≤20-min-to-reset orange override.
         let fable: Double
         let mythos: Double
         let fiveReset: String

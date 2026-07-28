@@ -180,8 +180,14 @@ public enum CreditsPacing {
         // At the cap, force a full bar so `aheadColor` shows red (`usage >= 1`) regardless of rounding.
         let usageFraction = spend.spendLimitReached ? 1 : min(1, max(0, rawUsage))
         let timeFraction = monthElapsedFraction(now: now, timeZone: timeZone)
+        // Seconds until the month resets, for the 20-minute orange override (a month-end can be
+        // < 20 min away). `monthEnd` returns nil only if the calendar can't resolve the boundary
+        // (never in practice) — then leave the window "far" so only the dynamic threshold applies.
+        let remaining = monthEnd(now: now, timeZone: timeZone)?.timeIntervalSince(now)
+            ?? Double(LimitWindow.sevenDay.durationSeconds)
         let pacing: PacingState = timeFraction >= usageFraction ? .onPaceOrBehind : .ahead
-        return BarLayout(usageFraction: usageFraction, timeFraction: timeFraction, pacing: pacing)
+        return BarLayout(usageFraction: usageFraction, timeFraction: timeFraction,
+                         pacing: pacing, remainingSeconds: remaining)
     }
 
     /// The time zone the monthly spend limit resets in — **UTC**.

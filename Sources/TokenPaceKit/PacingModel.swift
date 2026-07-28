@@ -53,21 +53,17 @@ public enum PacingState: Sendable, Equatable {
 
 // MARK: - LimitIndicator
 
-/// Severity tier derived from usage vs. elapsed-time pacing.
+/// Whether a limit's usage window is **exhausted** — the one distinction the UI still draws from the
+/// integer usage percent (the popup's "limit reached" wording).
 ///
-/// Direct port of `get_limit_indicator` in `statusline.sh` (lines 74–87):
-/// - `critical` when usage integer == 100 (❌)
-/// - `warning` when usage integer > 90 **and** time integer ≤ 90 (⚠️)
-/// - `neutral` otherwise
-///
-/// Both values are truncated to integers before comparison, matching bash's
-/// `${x%.*}` strip-decimal-suffix behaviour.
+/// Originally a three-tier port of `get_limit_indicator` from `statusline.sh`, but the middle
+/// `.warning` band (a `⚠` glyph for "> 90 % used before 90 % of the window elapsed") was dropped: the
+/// dynamic pacing colour (green→yellow→orange→red, ADR-0044) now carries the "how far ahead" signal on
+/// its own, and TokenPace has outgrown statusline parity. What remains is a two-state exhausted flag.
 public enum LimitIndicator: Sendable, Equatable {
-    /// Usage limit is exhausted (`utilization` truncated to 100). Shows ❌.
+    /// Usage limit is exhausted (`utilization` truncated to 100). The popup reads "limit reached".
     case critical
-    /// Usage is ahead of pace near the cap — truncated usage > 90 and time ≤ 90. Shows ⚠️.
-    case warning
-    /// Normal pacing state.
+    /// Not exhausted — normal state (pacing is conveyed by the bar colour, not a glyph).
     case neutral
 }
 
@@ -94,6 +90,11 @@ public struct BarLayout: Sendable, Equatable {
     public let timeFraction: Double
     /// Color/semantic meaning of the gap between the usage and time edges.
     public let pacing: PacingState
+    /// Absolute seconds until this limit's window resets (`resetsAt - now`), for the 20-minute
+    /// orange override (``PacingModel/pacingOrangeOverrideSeconds``) that ``timeFraction`` alone
+    /// cannot express — 20 min is 6.7 % of the 5h window but 0.2 % of the 7d window. May be ≤ 0
+    /// (reset now/past) or the full window length; only the `≤ 1200 s` case changes the colour.
+    public let remainingSeconds: TimeInterval
 
     /// Left edge of the gap zone = `min(usageFraction, timeFraction)`.
     public var gapStart: Double { min(usageFraction, timeFraction) }
@@ -105,18 +106,24 @@ public struct BarLayout: Sendable, Equatable {
     /// "calm" muting (#105) and the reset-countdown selection (#103, ADR-0028/0029) read.
     ///
     /// Mirrors the colour grading in `PopupBarView.aheadColor` (which lives in the AppKit layer and
-    /// cannot be imported here), so the thresholds are duplicated deliberately:
-    /// - `.calm` — **green** (`usage <= time`, i.e. `.onPaceOrBehind`) or **yellow** (ahead by
-    ///   `< 15` points): not yet worth flagging.
-    /// - `.ahead` — **orange**: ahead by `>= 15` points but not yet exhausted (`usage < 1`).
+    /// cannot be imported here). The **formula** is shared via ``PacingModel/aheadThreshold(timeFraction:)``
+    /// so the two never drift; only the comparison and the 20-minute override are restated here:
+    /// - `.calm` — **green** (`usage <= time`, i.e. `.onPaceOrBehind`) or **yellow** (ahead by less
+    ///   than the dynamic threshold): not yet worth flagging.
+    /// - `.ahead` — **orange**: ahead by `≥` the dynamic threshold, or the window resets in
+    ///   `≤ 20 min` (``PacingModel/pacingOrangeOverrideSeconds``), but not yet exhausted (`usage < 1`).
     /// - `.exhausted` — **red**: `usageFraction >= 1` (limit hit, service blocked).
     ///
-    /// The `< 0.15` boundary is strict (no epsilon), matching the integer-percent contract of
-    /// `limitIndicator`: exactly 15 points ahead is orange, not yellow.
+    /// The dynamic threshold is `0.16 · (1 − timeFraction)`: a lead that reads calm early in a window
+    /// (16 pts of slack) becomes noisy as the window drains (4 pts at 75 %, 0 at the end), because
+    /// there is less time left to catch up. The comparison is strict (`<`, no epsilon): a lead
+    /// exactly at the threshold is orange, not yellow.
     public var severity: PacingSeverity {
         if pacing == .onPaceOrBehind { return .calm }              // green
         if usageFraction >= 1 { return .exhausted }                // red (limit hit)
-        return (usageFraction - timeFraction) < 0.15 ? .calm : .ahead   // yellow : orange
+        if remainingSeconds <= PacingModel.pacingOrangeOverrideSeconds { return .ahead }  // orange (≤ 20 min)
+        return (usageFraction - timeFraction) < PacingModel.aheadThreshold(timeFraction: timeFraction)
+            ? .calm : .ahead                                       // yellow : orange
     }
 
     /// Whether this bar is "calm" — its rendered gap colour is **green or yellow**, i.e. pacing is
@@ -131,9 +138,9 @@ public struct BarLayout: Sendable, Equatable {
 /// Three-way pacing grade of a bar, mirroring the menu-bar/popup colour tiers. AppKit-free so the
 /// pure model layer can decide reset-countdown behaviour (#103) without importing the view palette.
 public enum PacingSeverity: Sendable, Equatable {
-    /// Green (on pace / behind) or yellow (mildly ahead, `< 15` pts) — not worth flagging.
+    /// Green (on pace / behind) or yellow (mildly ahead, below the dynamic threshold) — not worth flagging.
     case calm
-    /// Orange — ahead by `>= 15` pts, not yet exhausted (`usage < 1`).
+    /// Orange — ahead by `≥` the dynamic threshold (or `≤ 20 min` to reset), not yet exhausted (`usage < 1`).
     case ahead
     /// Red — the limit is exhausted (`usage >= 1`); the service is blocked until this window resets.
     case exhausted
@@ -191,29 +198,44 @@ public enum PacingModel {
 
     // MARK: limitIndicator
 
-    /// Severity tier from usage vs. elapsed-time pacing.
+    /// Whether a limit's usage window is **exhausted** (`.critical`) or not (`.neutral`).
     ///
-    /// **Port of `get_limit_indicator`** (lines 74–87 of `statusline.sh`). Both inputs
-    /// are truncated to integers before comparison, matching bash's `${x%.*}` string-strip
-    /// of the decimal suffix:
-    /// - `Int(max(0, utilization))  == 100` → `.critical`
-    /// - `Int(max(0, utilization))   > 90` **and** `Int(max(0, timePercent)) ≤ 90` → `.warning`
-    /// - otherwise → `.neutral`
+    /// The usage percent is truncated to an integer before the `== 100` test (`${x%.*}` in the
+    /// original bash), so **precision contract:** `99.9999` truncates to `99` and is NOT `.critical`.
+    /// Do not add an epsilon tolerance. The former `.warning` band (`> 90 %` before `90 %` of the
+    /// window elapsed) was removed with the statusline parity it came from — the pacing colour now
+    /// carries that signal (ADR-0044).
     ///
-    /// **Precision contract:** `99.9999` truncates to `99`, so it is NOT `.critical`.
-    /// Do not add an epsilon tolerance — that would diverge from bash's behaviour.
+    /// - Parameter utilization: API `utilization` field, a percent in [0, 100] (e.g. `13.0`).
+    ///   Must be finite and ≥ 0.
+    public static func limitIndicator(utilization: Double) -> LimitIndicator {
+        Int(max(0, utilization)) == 100 ? .critical : .neutral   // truncation toward zero == floor for x ≥ 0
+    }
+
+    // MARK: ahead-of-pace threshold
+
+    /// Seconds-until-reset at or below which the ahead-of-pace gap is forced to orange (`.ahead`),
+    /// regardless of the dynamic threshold: the window is about to reset, so any lead is worth
+    /// flagging. 20 minutes. Kept as **absolute seconds** (not a time fraction) because 20 min is
+    /// 6.7 % of the 5h window but only 0.2 % of the 7d window — it cannot come from `timeFraction`.
+    public static let pacingOrangeOverrideSeconds: TimeInterval = 1200
+
+    /// The yellow→orange boundary for the ahead-of-pace gap, as a function of how far the window
+    /// has elapsed: `0.16 · (1 − timeFraction)`, clamped to `[0, 0.16]`.
     ///
-    /// - Parameters:
-    ///   - utilization: API `utilization` field, a percent in [0, 100] (e.g. `13.0`).
-    ///     Must be finite and ≥ 0.
-    ///   - timePercent: Elapsed-time percent in [0, 100] (e.g. `elapsedFraction * 100`).
-    ///     Must be finite and ≥ 0.
-    public static func limitIndicator(utilization: Double, timePercent: Double) -> LimitIndicator {
-        let usageInt = Int(max(0, utilization))   // truncation toward zero == floor for x ≥ 0
-        let timeInt  = Int(max(0, timePercent))
-        if usageInt == 100 { return .critical }
-        if usageInt > 90 && timeInt <= 90 { return .warning }
-        return .neutral
+    /// 16 pts of slack at the start of a window (`t = 0`), 8 at the half-way point, 4 at 75 %, 0 at
+    /// the end. Rationale: a modest lead is harmless early (plenty of time to coast back onto pace)
+    /// but the same lead late in a window is not, because the window resets before you can catch up.
+    ///
+    /// A lead below this stays yellow (`.calm`); at or above it is orange (`.ahead`). Shared by
+    /// ``BarLayout/severity`` (Kit) and `PopupBarView.aheadColor` (AppKit) so the colour and the
+    /// severity never drift. The comparison side uses a strict `<` (a lead exactly at the threshold
+    /// is orange).
+    ///
+    /// - Parameter timeFraction: Fraction of the window elapsed, in `[0, 1]` (already clamped by
+    ///   ``elapsedFraction(resetsAt:now:window:)``; the extra clamp here is defence in depth).
+    public static func aheadThreshold(timeFraction: Double) -> Double {
+        min(0.16, max(0, 0.16 * (1 - timeFraction)))
     }
 
     // MARK: barLayout
@@ -240,9 +262,11 @@ public enum PacingModel {
         window: LimitWindow
     ) -> BarLayout {
         let usageFraction = min(1, max(0, utilization / 100))
+        let remaining     = resetsAt.timeIntervalSince(now)   // seconds until reset (may be ≤ 0)
         let timeFraction  = elapsedFraction(resetsAt: resetsAt, now: now, window: window)
         let pacing: PacingState = timeFraction >= usageFraction ? .onPaceOrBehind : .ahead
-        return BarLayout(usageFraction: usageFraction, timeFraction: timeFraction, pacing: pacing)
+        return BarLayout(usageFraction: usageFraction, timeFraction: timeFraction,
+                         pacing: pacing, remainingSeconds: remaining)
     }
 
     // MARK: blockIndex (popup-only derivative)

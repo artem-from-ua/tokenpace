@@ -2,10 +2,15 @@
 status: accepted
 date: 2026-07-24
 supersedes: [0028]
-superseded_by: [0042, 0043]
+superseded_by: [0042, 0043, 0044]
 ---
 
 # ADR-0029: Вибір reset-часу в menu bar за станами 5h × 7d + режим-радіогрупа
+
+> **Поріг yellow→orange частково суперсіднуто [ADR-0044](0044-dynamic-pacing-threshold.md).** Легенда
+> severity нижче («ahead `< 15` пт» / «ahead `>= 15` пт») описувала статичний поріг `0.15`; тепер це
+> **динамічний** `0.16·(1−timeFraction)` + override «≤ 20 хв до ресету → orange». Таблиця вибору
+> reset-часу за severity лишається чинною — змінилося лише, за яким відривом бар стає orange.
 
 > **Частково переглянуто [ADR-0042](0042-settings-swiftui-form.md) (#168):** режим `hideDistant7d`
 > прибрано разом із чекбоксом «Include distant 7-day limit reset». `ResetCountdownMode` тепер має три

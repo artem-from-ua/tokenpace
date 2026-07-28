@@ -1,13 +1,17 @@
 ---
 status: superseded
 date: 2026-07-24
-superseded_by: [0029]
+superseded_by: [0029, 0044]
 ---
 
 > **Суперсіднуто [ADR-0029](0029-reset-countdown-selection-by-severity.md).** Бінарне `showReset:Bool`
 > («ховати, коли обидва спокійні, показувати найближчий, коли шумно») замінено вибором *якого* вікна
-> час показати за таблицею 5h × 7d + режимом-радіогрупою. Класифікація severity й пороги нижче
-> лишаються чинними (тепер у `BarLayout.severity`). Запис збережено як історичний.
+> час показати за таблицею 5h × 7d + режимом-радіогрупою. Запис збережено як історичний.
+>
+> **Поріг yellow→orange частково суперсіднуто [ADR-0044](0044-dynamic-pacing-threshold.md).** Статичну
+> межу `(usage − time) < 0.15` у таблиці кольорів нижче замінено **динамічним** порогом
+> `0.16·(1−timeFraction)` + override «≤ 20 хв до ресету → orange». Класифікація severity
+> (green/yellow/orange/red) лишається чинною; змінилося лише *число*, за яким проходить yellow→orange.
 
 # ADR-0028: Приховування reset-тексту в menu bar, коли пейсинг спокійний
 
@@ -25,9 +29,12 @@ Menu-bar віджет завжди малював текст «час до ре�
 | Колір | Умова (fractions [0, 1]) | «спокійний»? |
 |---|---|---|
 | green | `pacing == .onPaceOrBehind` (`usage <= time`) | так |
-| yellow | ahead && `usage < 1` && `(usage − time) < 0.15` | так |
-| orange | ahead && `usage < 1` && `(usage − time) >= 0.15` | ні |
+| yellow | ahead && `usage < 1` && `(usage − time) < threshold` | так |
+| orange | ahead && `usage < 1` && (`(usage − time) >= threshold` **або** ресет `≤ 20 хв`) | ні |
 | red | `usage >= 1` | ні |
+
+> `threshold = 0.16·(1 − timeFraction)` — динамічний поріг (ADR-0044). Історично тут стояло статичне
+> `0.15`.
 
 ## Рішення
 

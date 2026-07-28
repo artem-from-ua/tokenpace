@@ -16,6 +16,19 @@
 > зупинка за власним PID, чому не broad-kill) — у [agent-workflow.md](agent-workflow.md) розділ «Запуск
 > застосунку для перевірки UI».
 
+> 📸 **Скриншотити конкретне вікно, а не весь екран.** Popup-дропдаун і вікно Settings — це справжні
+> `NSWindow`, тож їх знімають **за window-id**, а не регіоном:
+>
+> ```sh
+> # знайти CG window-id вікна TokenPace (popup — більше вікно під menu bar, layer 101):
+> #   swift-однорядник через CGWindowListCopyWindowInfo, фільтр owner == "TokenPace"
+> screencapture -x -o -l<windowID> popup.png   # захоплює саме це вікно
+> ```
+>
+> Знімок **усього екрана** (`screencapture -R<x,y,w,h>` / без прапорців) роблять **лише коли інакше
+> не можна** — насамперед для самого menu-bar-віджета: `NSStatusItem` **не є вікном** (немає
+> window-id), тож його захоплюють регіоном верхньої смуги. Для всього, що має власне вікно, — `-l`.
+
 ## Стуби `TOKENPACE_STUB`
 
 Запуск: `TOKENPACE_STUB=<name> swift run`. Стуб підміняє транспорт usage- та status-запитів
@@ -105,8 +118,9 @@
 | `red-orange` | red | orange | red-бар (5h) керує countdown |
 | `calm5-orange7` | calm | orange (days away) | кейс, де режим reset-countdown (smart vs never) дає видиму різницю |
 | `calm-both` | green | green | обидва calm; за default-ON #94 7d ховається → **одинока центрована зелена 5h** без reset-тексту (зніми чекбокс — знову дві смужки) |
+| `near-reset` | orange (override) | green | ADR-0044: 5h попереду лише ~2 пт (usage 98 vs elapsed ~96 %), але ресет за **12 хв** → override робить бар **помаранчевим** (без override був би жовтий/calm), countdown зʼявляється. Перевірка динамічного порога + 20-хв override |
 
-> Додаючи нову фічу зі своїм станом — **додай стуб і онови цю таблицю** (як зробили для #103, #94).
+> Додаючи нову фічу зі своїм станом — **додай стуб і онови цю таблицю** (як зробили для #103, #94, ADR-0044).
 
 ## Сценарії без стубу
 

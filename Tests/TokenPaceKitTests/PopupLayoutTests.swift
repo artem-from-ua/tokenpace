@@ -89,9 +89,7 @@ struct PopupLayoutRowsTests {
         )
         #expect(p.rows[0].pacing == expected.pacing)
         #expect(p.rows[0].bar == expected)
-        #expect(p.rows[0].indicator == PacingModel.limitIndicator(
-            utilization: 42.5, timePercent: expected.timeFraction * 100
-        ))
+        #expect(p.rows[0].indicator == PacingModel.limitIndicator(utilization: 42.5))
     }
 
     @Test func criticalUtilizationSurfacesIndicator() {
