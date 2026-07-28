@@ -33,7 +33,9 @@ final class SidebarIconMetrics {
     /// these are the *frame* values tuned to render to the measured visible widths.
     private(set) var sidebarWidth: CGFloat = 288
 
-    nonisolated(unsafe) private var observer: NSObjectProtocol?
+    // Not UI state, so keep it out of `@Observable` tracking; `nonisolated(unsafe)` lets `deinit`
+    // (a nonisolated context) read it to unregister the observer.
+    @ObservationIgnored nonisolated(unsafe) private var observer: NSObjectProtocol?
 
     init() {
         apply()
