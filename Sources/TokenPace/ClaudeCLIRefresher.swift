@@ -13,7 +13,12 @@ import TokenPaceKit
 /// subscription usage is consumed (confirmed both by an isolated before/after utilization
 /// measurement and by the session transcript containing zero assistant/API entries);
 /// `--model haiku` is a guard in case a future CLI ever forwards the prompt after all.
-/// `--bare` must NOT be used: it disables OAuth/Keychain entirely, so no refresh would happen.
+/// `--safe-mode` disables the user's customizations — hooks, plugins, MCP servers, CLAUDE.md — but
+/// keeps auth, Keychain, built-in tools and permissions, so the refresh still works. It is required
+/// because the spawned `claude` runs under this GUI app's TCC responsibility: without it, a user's
+/// SessionStart hook that touches a File Provider domain (iCloud, Dropbox, …) triggers a system
+/// permission prompt attributed to *TokenPace* (issue #183). `--bare` must NOT be used: it disables
+/// OAuth/Keychain entirely, so no refresh would happen.
 ///
 /// This is the codebase's only `claude` spawn — a shell-side platform seam like
 /// `ProcessClaudeActivityProbe`, injected into `PollingEngine` behind the kit protocol. (The
@@ -32,7 +37,10 @@ struct ClaudeCLIRefresher: DelegatedRefresher {
     ]
 
     /// Arguments for the refresh run — see the type doc for why exactly these.
-    static let arguments = ["--model", "haiku", "-p", "/usage"]
+    /// `--safe-mode` is first: it disables the user's global customizations (hooks, plugins, MCP
+    /// servers, CLAUDE.md) while keeping auth/Keychain, so the spawn can't run arbitrary user code
+    /// under this app's TCC responsibility (issue #183).
+    static let arguments = ["--safe-mode", "--model", "haiku", "-p", "/usage"]
 
     /// Hard cap on the CLI run, after which it is terminated (SIGTERM, then SIGKILL after
     /// ``killGrace``). The spike measured ~1.5 s normally; 30 s leaves room for a cold start.
@@ -105,9 +113,11 @@ struct ClaudeCLIRefresher: DelegatedRefresher {
     ///
     /// stdin/stdout/stderr all go to `/dev/null`: stdin so the CLI skips its "waiting for piped
     /// input" grace period, the outputs because only the Keychain side-effect matters (and the
-    /// report could mention account details). The working directory is a fresh empty scratch dir
-    /// so the CLI picks up no project context (CLAUDE.md, hooks) from wherever the app started.
-    /// The token itself never appears in arguments, environment, or logs.
+    /// report could mention account details). The working directory is a fresh empty scratch dir so
+    /// the CLI picks up no *project-local* context (a stray CLAUDE.md) from wherever the app started;
+    /// note cwd does NOT suppress the user's *global* hooks/plugins from `~/.claude` — those are
+    /// disabled by `--safe-mode` (see `arguments`, issue #183). The token itself never appears in
+    /// arguments, environment, or logs.
     private static func run(binary: String) async -> RunResult {
         let box = ProcessBox()
         let scratch = FileManager.default.temporaryDirectory

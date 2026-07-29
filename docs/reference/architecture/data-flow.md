@@ -90,7 +90,7 @@ else expired
   E -> RG : may refresh now?
   alt cooldown elapsed
     RG --> E : allow
-    E -> CLI : claude --model haiku -p '/usage'
+    E -> CLI : claude --safe-mode --model haiku -p '/usage'
     CLI -> KC : rotate credentials
     E -> KC : re-read (same cycle)
     KC --> E : fresh token
@@ -102,7 +102,7 @@ end
 @enduml
 ```
 
-![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/LPDBZjim38RtEWKnNOo3Gcq6nNJHnJng646HB88Wosu4YN64o9GhoUFc0Zr0ZzYJb59UOnYsOV4Z-VEN_1AJ2cded4WsEOIjFo11G6NWtv-_OD1Xgn8QNje5Z7keF27qtZdGH-rm9kB1Kg-2wY3Yhm59usi8VjpkhJuGnWWFdnxVGIkxmvKb_Ew3mL1xvmDygEVv4eAHPBNj5IMuMtCJIsr3BUDte28qKw1eNGV_PhbI0RRhAR74ezuhIp-fYgY7ODCHwjMFMO6NzHJMJWq6Sxo4-JsDRquEBDYE0cmMGZGWdxWhV0Ek7f1I7T3mooeNA_BZJ72GaMNDo5N2pfAHBH86gsMlOXpP392ZO4nU2gQo4ny1V_UM-xwcKegZJUvsQoEKIsUOV3hZHa3-Gl1l64h64F5CvNrTD5jUKIqAT1ou9PM1DWjEwDJnkkayoJC7SoVjlJD-942d-bXo82TSb2dd_5WMIobsCSizMIjbv_b40M_9OG3Pm_td8kA-y1czM1LyOfidOrvBdW2KvP1MKNLuEOePELkOfPoqbw5lsMKsFoJjEIzRmH3UncAmE6Bf_T9aGZxBFLGOjN9PumCNUUJxovmVN-VGMSfAa8p8zmi_-FVw3m00)
+![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/LPDBRjim48RtFCKWNKH6mTP1aIwwoAE2O1JsmZ2yx8OWnp9XQgYIL5HVe0Ve4NkI3kbN14EYpVd-UVoaNs9I8GsT4yacXx3r1oG8g0py-_CN33fiLKB3Mxk0SG-L9uJUEmVwg1tEH3nOwbLG7KJyDI1fV0t1ZzkzrGV26E7Xq-CxQ6LtkBA4ttqm66hlV80FzJn_X60aMMrxHGdkrbp4KjjGo_WTg0ZD52YzheD_ivof0Dlrb5ZYKU-LfPzKHTH3iEa8zUh7hC3BUWfhfmQ3ELx2l4xZcvC32xQZ09k540t89wuAtu2p1wHK1pIyMELYHNwS2GuoigmPkRQmisHaYuJ1Qjch64Ss0-Ge69ENXAcSn4V0txtbkg-ffE9eawlToWZbqXacdywu4P1_8VWt34KnH3nJ-LmNpPPtL8i27GTkeZBGPi62JXslXywJF7CmLzBUE-D70dIgZqK3MN3fJ3ddnx9PKh6BkTsJjL96jKFP-V8zBmxuU0u3o1xkFvU6xeisoows1P_Oyid8r_Gd06Mvi5LK7LwkPKRETkQsJdCK0sxgCgSValQioxOmXBSH6IpkM7g_DPcMxtKF5KQjNExnWPCyylDbpg-lS-WivKwGZCZF2x_uh_OV)
 
 ## Оптимістичний ресет (#36, ADR-0030)
 
@@ -202,4 +202,4 @@ GlyphOnly : ⚠️ only
 | **PopupViewController** | Тонкий AppKit-shell: малює `PopupLayout` у стилі рідних віджетів — болд-заголовок «Claude» (ADR-0021), рядки статусу сервісів, банер помилки, секції лімітів двоколонковим split-layout. `PopupBarView` — ті ж зони, що menu bar, appearance-aware палітрою + шкала-засічки. **Секція «Extra usage»** (#145, `addCreditsSection`) під лімітами: якщо ліміт встановлений — рядок «Extra usage [active] ⟷ статус-слово» (`creditsStatusText` із `bar`), «€spent / €limit ⟷ `resetLine`» (той самий уніфікований формат, що й токен-рядки — `5d on Friday`/`20h at 03:00`, без префікса; ADR-0043), і бар (той самий `PopupBarView`, `subdivisions: 0`); якщо unlimited — лише «Extra usage ⟷ €spent spent». За `credits.inUse` (#146) біля заголовка — синя плашка **«active»** (`PillView` — layer-backed капсула в `controlAccentColor`, radius = ½ висоти, CGColor у `updateLayer()`), показується лише коли кредити реально витрачаються. Форматер грошей `moneyText` — major-unit з цілого + `exponent`; для **відомих** валют `NumberFormatter(.currency)` ставить символ у **стандартну для валюти позицію** (`€10.77`/`$10.77` перед, `10,77 kr` після), для **невідомих** — `сума КОД` (`12.00 UAH`). Набір відомих валют дзеркалить `StatusItemView.creditsSymbolName`. НЕ хардкод $. Форматування рядків — тут (точка локалізації). ADR-0009, ADR-0010, ADR-0021 |
 | **PollingEngine** | Живий async-цикл (`TokenPaceKit`): pure ядро (`advance`/`effectiveInterval`/`intervalDecision`/`wakeRearmInterval`) + seam'и. `run() -> AsyncStream<PollOutput>`. Інтервал (ADR-0032) — `429-hold > claude-idle 15 хв > база 3 хв`, ніколи нижче `minInterval` = 60 с. Park на sleep; wake → опит лише якщо кеш застарів; `.manualRefresh` → завжди негайний опит + скид 429-hold. Рішення про expiry — тут (ADR-0020); делегований refresh + перечит токена в тому ж циклі (ADR-0017). Кожна зміна інтервалу й idle↔active-флип логуються раз. ADR-0032 (superseded ADR-0011) |
 | **LivePollScheduler / PollingShell** | Виробничий scheduler (`AsyncStream`+`Task.sleep`) і платформенні seam'и: `WorkspaceSleepWake`, `ScreenLockObserver` (#114, gated `pausePollingWhenScreenLocked`), `NetworkMonitor` (`NWPathMonitor`), `ProcessClaudeActivityProbe` (`sysctl`, точне ім'я `claude`), `SignalHub`. Оптимістичний-ресет таймер — тут (ADR-0030). ADR-0011, ADR-0032 |
-| **ClaudeCLIRefresher** | Виробничий `DelegatedRefresher` (ADR-0017) — спавн `claude --model haiku -p '/usage'` у порожній tmp-теці, таймаут 30 с. Критерій успіху — `expiresAt` посунувся вперед. Токен ніколи не в аргументах/env/логах |
+| **ClaudeCLIRefresher** | Виробничий `DelegatedRefresher` (ADR-0017) — спавн `claude --safe-mode --model haiku -p '/usage'` у порожній tmp-теці, таймаут 30 с. `--safe-mode` вимикає користувацькі hooks/plugins/MCP/CLAUDE.md (лишає auth+Keychain), щоб чужий хук не спричинив TCC-промпт від імені TokenPace (#183). Критерій успіху — `expiresAt` посунувся вперед. Токен ніколи не в аргументах/env/логах |
