@@ -792,3 +792,18 @@ struct StubTokenProvider: TokenProviding {
         TokenCredentials(accessToken: "stub-token", expiresAt: now.addingTimeInterval(8 * 3600))
     }
 }
+
+// MARK: - ExpiredStubTokenProvider (verification only — paired with TOKENPACE_FORCE_REFRESH)
+
+/// A `TokenProviding` that always reports an *expired* token, so the polling engine takes its
+/// `.expired` branch and triggers the delegated refresh. Used only under `TOKENPACE_FORCE_REFRESH=1`
+/// (with no `TOKENPACE_STUB`), which keeps the *real* `ClaudeCLIRefresher` wired in — the point is to
+/// exercise the on-demand `claude --safe-mode …` spawn (and verify no TCC prompt is attributed to
+/// TokenPace, #183) without waiting for a natural token expiry. The engine still re-reads the real
+/// Keychain after the spawn to judge success, so a real refresh can genuinely succeed.
+struct ExpiredStubTokenProvider: TokenProviding {
+    func currentCredentials(now: Date) throws -> TokenCredentials {
+        // One second in the past → `isExpired(now:)` (expiresAt <= now) is true every poll.
+        TokenCredentials(accessToken: "expired-stub-token", expiresAt: now.addingTimeInterval(-1))
+    }
+}

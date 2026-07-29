@@ -666,8 +666,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Under the stub the bearer token is never validated (canned responses), so skip the
         // Keychain entirely — reading it would only pop the system access prompt on a dev build.
         // The refresher is live-only for the same reason: a stub run must never spawn the CLI.
-        let tokenProvider: TokenProviding = stubMode == nil ? KeychainTokenProvider() : StubTokenProvider()
-        let refresher: DelegatedRefresher? = stubMode == nil ? ClaudeCLIRefresher() : nil
+        //
+        // Exception — `TOKENPACE_FORCE_REFRESH=1` (verification only, #183): hand the engine an
+        // *already-expired* stub token together with the *real* `ClaudeCLIRefresher`, so the poll
+        // takes the `.expired` branch and spawns `claude --safe-mode …` on demand. This is the only
+        // way to exercise the delegated-refresh spawn (and its TCC behaviour) without waiting for a
+        // natural token expiry. Ignored unless no `TOKENPACE_STUB` is set (the two are independent).
+        let forceRefresh = ProcessInfo.processInfo.environment["TOKENPACE_FORCE_REFRESH"] == "1" && stubMode == nil
+        let tokenProvider: TokenProviding = switch (stubMode, forceRefresh) {
+        case (nil, true):  ExpiredStubTokenProvider()
+        case (nil, false): KeychainTokenProvider()
+        default:           StubTokenProvider()
+        }
+        let refresher: DelegatedRefresher? = (stubMode == nil) ? ClaudeCLIRefresher() : nil
         let engine = PollingEngine(
             transport: transport,
             tokenProvider: tokenProvider,

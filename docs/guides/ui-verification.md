@@ -130,6 +130,34 @@
 
 ## Сценарії без стубу
 
+### Форсований delegated refresh (#183)
+
+Мета — вручну запустити **справжній** спаун `claude --safe-mode --model haiku -p '/usage'`
+(delegated refresh, ADR-0017), не чекаючи природної експірації токена, щоб перевірити його поведінку —
+зокрема відсутність TCC-промпту від імені TokenPace, коли в користувача є SessionStart-хук, що читає
+файл із File Provider domain (iCloud/Dropbox/GDrive).
+
+Стуб **`TOKENPACE_FORCE_REFRESH=1`** підміняє лише токен-провайдер на такий, що завжди повертає
+*протухлий* токен → рушій щополінгу бере гілку `.expired` і кличе **реальний** `ClaudeCLIRefresher`.
+На відміну від `TOKENPACE_STUB`, транспорт і рушій лишаються справжніми (тому працює тільки **без**
+`TOKENPACE_STUB`). Anti-flap гейт стримує повторні спроби (cooldown `1→5→30→60 хв`), тож перший спаун
+стається одразу на старті.
+
+Перевірка (підніми стріми **першими**, тоді запускай):
+
+```sh
+log stream --predicate 'subsystem == "com.artem-n.tokenpace"' --level debug &
+log stream --predicate 'process == "tccd"' --info --debug | grep -i tokenpace &
+tccutil reset FileProviderDomain com.artem-n.tokenpace   # скинути грант для чистоти
+TOKENPACE_FORCE_REFRESH=1 /Applications/TokenPace.app/Contents/MacOS/TokenPace
+```
+
+→ у логах `keychain` мають бути `delegated refresh: launching cli, path=…` і далі `expiresAt advanced`
+(якщо реальний токен у Keychain справді протух і CC його оновив) або `cli exited 0 but keychain
+unchanged` (якщо токен ще свіжий — спаун усе одно відбувся). **Не має бути** рядка `tccd` `Prompting
+for access … by TokenPace`. Оскільки спаун чіпає **реальний** Keychain, запускай на власному Mac із
+робочим Claude Code.
+
 ### Пауза опитування на екрані (#114)
 
 Немає окремого стубу — перевіряється будь-яким стубом + реальним блокуванням екрана. Запусти
