@@ -116,6 +116,21 @@ public enum BlockingReset: Sendable, Equatable {
     ///
     /// Returns `nil` when nothing blocks (no exhausted token parsed **and** credits inactive).
     public static func forBlocked(snapshot: UsageSnapshot, now: Date) -> Choice? {
+        let creditsReset: Date? = {
+            guard let spend = snapshot.spend, CreditsPacing.isActive(spend) else { return nil }
+            return CreditsPacing.monthEnd(now: now)
+        }()
+
+        return select(tokenWindows: exhaustedTokenCandidates(in: snapshot), creditsReset: creditsReset)
+    }
+
+    /// Every exhausted **token** window (`utilization >= 100`) with a parseable `resets_at`, keyed by its
+    /// **popup row index** — `0` = 5h, `1` = 7d, then `sevenDayOpus`, `sevenDaySonnet`, and the
+    /// `scopedModelWindows` in order (the exact order `PopupLayout.rows` builds). A window whose
+    /// `resets_at` does not parse is dropped (it cannot anchor a countdown). Shared by
+    /// ``forBlocked(snapshot:now:)`` and ``forSubscriptionExhausted(snapshot:now:)`` so both surfaces key
+    /// the same row.
+    private static func exhaustedTokenCandidates(in snapshot: UsageSnapshot) -> [TokenCandidate] {
         var tokens: [TokenCandidate] = []
         func consider(_ index: Int, _ window: UsageWindow) {
             guard window.utilization >= 100, let at = ResetClock.parse(window.resetsAt) else { return }
@@ -127,12 +142,27 @@ public enum BlockingReset: Sendable, Equatable {
         if let opus = snapshot.sevenDayOpus { consider(index, opus); index += 1 }
         if let sonnet = snapshot.sevenDaySonnet { consider(index, sonnet); index += 1 }
         for scoped in snapshot.scopedModelWindows { consider(index, scoped.window); index += 1 }
+        return tokens
+    }
 
-        let creditsReset: Date? = {
-            guard let spend = snapshot.spend, CreditsPacing.isActive(spend) else { return nil }
-            return CreditsPacing.monthEnd(now: now)
-        }()
+    // MARK: - Subscription-exhausted-while-covered bridge
 
-        return select(tokenWindows: tokens, creditsReset: creditsReset)
+    /// The blocking reset for a snapshot where a **subscription** limit is exhausted but paid credits are
+    /// still covering the work (``CreditsPacing/subscriptionExhaustedWhileCovered(in:)``, #193) — the
+    /// single reset the popup paints **red**: the latest exhausted **token** window, i.e. the moment the
+    /// plan quota returns and credits stop being spent.
+    ///
+    /// Unlike ``forBlocked(snapshot:now:)``, the credits window is **never** a candidate here: credits are
+    /// what's covering right now, so their (far-off, month-end) reset is not the thing the user is waiting
+    /// on — the subscription limit's reset is. So this passes `creditsReset: nil`, collapsing
+    /// ``select(tokenWindows:creditsReset:)`` to "the latest exhausted token reset" (the same window the
+    /// idle/blocked path picks when credits are out of the running).
+    ///
+    /// The token candidate set is built exactly as in ``forBlocked(snapshot:now:)`` — every base/per-model
+    /// window with `utilization >= 100`, keyed by its popup row index (`0` = 5h, `1` = 7d, then the
+    /// per-model rows). Returns `nil` only if no exhausted token window has a parseable `resets_at` (there
+    /// is then nothing to anchor a countdown on).
+    public static func forSubscriptionExhausted(snapshot: UsageSnapshot, now: Date) -> Choice? {
+        select(tokenWindows: exhaustedTokenCandidates(in: snapshot), creditsReset: nil)
     }
 }
