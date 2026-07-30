@@ -625,6 +625,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "1":          StubUsageTransport(mode: .climbing)
         case "screenshot": StubUsageTransport(mode: .screenshot)
         case "error":      StubUsageTransport(mode: .authError)
+        // Stale-while-erroring (spacing bug): first poll valid (full bars + Extra usage), then every
+        // later poll times out → ⚠️ "connectivity issue" banner **above** the held bars. Verifies the
+        // error block's trailing gap so it doesn't sit glued to the "5-hour" row.
+        case "stale-error": StubUsageTransport(mode: .staleError)
         case "idle":       StubUsageTransport(mode: .idle)
         case "idle-blocked": StubUsageTransport(mode: .idleBlocked)
         case "active-blocked": StubUsageTransport(mode: .activeBlocked)

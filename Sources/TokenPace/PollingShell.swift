@@ -296,6 +296,15 @@ actor StubUsageTransport: UsageTransport {
     /// utilisations (plus the 7-day window) show a couple of the ahead-of-pace gap colours.
     enum Mode: Equatable {
         case climbing, screenshot, authError, idle, idleBlocked, activeBlocked
+        /// The **stale-while-erroring** frame (spacing bug): the first usage poll returns a full, valid
+        /// snapshot (5h idle "ready to start", a 18 % 7-day window, a Fable per-model row, an on-pace
+        /// "Extra usage" credits section), then **every later poll throws** `URLError(.timedOut)`. The
+        /// coordinator keeps showing the last good snapshot's bars while the poll is failing, so the popup
+        /// renders the ⚠️ error banner ("Claude API connectivity issue" / "Authentication API timeout")
+        /// **above** the full set of limit rows — the exact state where the error block needs its
+        /// trailing `sectionSpacing` gap so it doesn't sit glued to the "5-hour" row. The status endpoint
+        /// reports API + Code as **major outage** (mirroring the reported screenshot).
+        case staleError
         /// The optimistic-reset frame (#36): the first poll returns an **active** 5h window whose reset
         /// is only ~20 s out (utilisation 60 %), so the coordinator's one-shot timer fires shortly after
         /// launch. On fire the 5h bar flips 60 % → 0 % with a fresh ~5 h countdown (the optimistic
@@ -486,8 +495,13 @@ actor StubUsageTransport: UsageTransport {
             // rest operational — so `worstProblem` is `.degraded` and the menu bar draws a **yellow**
             // service dot, which calm colours then mute to white.
             let calmDegraded = mode == .calmDegraded
-            let codeStatus = (failing || calmDegraded) ? "degraded_performance" : "operational"
-            let apiStatus = calmDegraded ? "operational" : "degraded_performance"
+            // Stale-error frame (spacing bug): API + Code both **major outage** (the red dots from the
+            // reported screenshot), everything else operational.
+            let staleError = mode == .staleError
+            let codeStatus = staleError ? "major_outage"
+                : (failing || calmDegraded) ? "degraded_performance" : "operational"
+            let apiStatus = staleError ? "major_outage"
+                : calmDegraded ? "operational" : "degraded_performance"
             let webStatus = failing ? "partial_outage" : "operational"
             let coworkStatus = failing ? "degraded_performance" : "operational"
             let body = """
@@ -580,6 +594,39 @@ actor StubUsageTransport: UsageTransport {
             {"five_hour":{"utilization":100.0,"resets_at":"not-a-date"},\
             "seven_day":{"utilization":20.0,"resets_at":"\(sevenReset)"},\
             "limits":[]}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
+        // Stale-while-erroring frame (spacing bug): the first usage poll returns a full valid snapshot,
+        // then every later poll **throws** `URLError(.timedOut)`. The coordinator holds the last good
+        // snapshot's bars while the poll fails, so the popup shows the ⚠️ "connectivity issue" /
+        // "Authentication API timeout" banner **above** the full limit rows — the state where the error
+        // block needs its trailing `sectionSpacing` gap. Body mirrors the reported screenshot: 5h idle
+        // ("ready to start"), a 18 % 7-day window, a 0 % Fable per-model row, and an on-pace "Extra usage"
+        // credits section (€11.68 / €15.00).
+        if mode == .staleError {
+            let first = calls == 0
+            calls += 1
+            guard first else { throw URLError(.timedOut) }
+            let sevenReset = Self.resetsAt(inSeconds: 4.2 * 24 * 3600)   // ≥ 24 h → "5d"
+            let body = """
+            {"five_hour":{"utilization":0.0,"resets_at":null},\
+            "seven_day":{"utilization":18.0,"resets_at":"\(sevenReset)"},\
+            "limits":[\
+            {"kind":"weekly_scoped","group":"weekly","percent":0,"severity":"normal",\
+            "resets_at":"\(sevenReset)","scope":{"model":{"id":null,"display_name":"Fable"},\
+            "surface":null},"is_active":false}],\
+            "extra_usage":{"is_enabled":true,"monthly_limit":1500,"used_credits":1168.0,\
+            "utilization":77.9,"currency":"EUR","decimal_places":2,"disabled_reason":null,\
+            "user_disabled":false,"spend_limit_reached":false,"credits_ever_enabled":true,\
+            "daily":null,"weekly":null},\
+            "spend":{"used":{"amount_minor":1168,"currency":"EUR","exponent":2},\
+            "limit":{"amount_minor":1500,"currency":"EUR","exponent":2},"percent":78,\
+            "severity":"normal","enabled":true,"disabled_reason":null,"balance":null,\
+            "auto_reload":null}}
             """.data(using: .utf8)!
             let response = HTTPURLResponse(
                 url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
