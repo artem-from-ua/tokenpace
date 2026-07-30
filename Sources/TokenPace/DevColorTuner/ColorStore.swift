@@ -17,7 +17,7 @@ final class ColorStore {
 
     static let shared = ColorStore()
 
-    /// True when `TOKENPACE_DEVTOOLS` is set to a non-empty value. Mirrors how `AppDelegate.stubName`
+    /// True when `TOKENPACE_DEVTOOLS` is set to a non-empty value. Mirrors how `AppDelegate.launchScenario`
     /// reads its env var (one source of truth, read once at process start).
     static let devToolsEnabled: Bool = {
         !(ProcessInfo.processInfo.environment["TOKENPACE_DEVTOOLS"] ?? "").isEmpty

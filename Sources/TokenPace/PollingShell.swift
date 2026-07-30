@@ -13,17 +13,35 @@ import Network
 /// Bounded buffer (`bufferingPolicy: .bufferingNewest(1)`): a burst of path/power notifications
 /// collapses to the most recent signal instead of queueing dozens that would each cut a wait short.
 /// Only the latest matters — the loop reacts to "we are awake / online now", not to history.
-final class SignalHub: Sendable {
-    let stream: AsyncStream<PollSignal>
-    private let continuation: AsyncStream<PollSignal>.Continuation
+///
+/// A single `AsyncStream` is **single-consumer**: once one `PollingEngine` iterates it, a second
+/// engine subscribing to the same stream would not receive signals. The live stub selector (#187)
+/// rebuilds the engine at runtime, so the hub vends a **fresh** stream per engine via ``newStream()``,
+/// finishing the previous one and routing subsequent `send`s to the new continuation under a lock.
+/// The observers (`WorkspaceSleepWake`, `ScreenLockObserver`, `NetworkMonitor`) call `send` without
+/// caring which engine is current — they always reach the active continuation.
+final class SignalHub: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: AsyncStream<PollSignal>.Continuation?
 
-    init() {
-        (stream, continuation) = AsyncStream.makeStream(
+    /// Create a fresh stream, finish any previous one, and make its continuation the active target for
+    /// `send`. Called once per engine build (launch + every live scenario swap). The old engine's
+    /// iteration ends when its stream finishes.
+    func newStream() -> AsyncStream<PollSignal> {
+        let (stream, continuation) = AsyncStream.makeStream(
             of: PollSignal.self, bufferingPolicy: .bufferingNewest(1))
+        lock.lock()
+        self.continuation?.finish()
+        self.continuation = continuation
+        lock.unlock()
+        return stream
     }
 
     func send(_ signal: PollSignal) {
-        continuation.yield(signal)
+        lock.lock()
+        let continuation = self.continuation
+        lock.unlock()
+        continuation?.yield(signal)
     }
 }
 

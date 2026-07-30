@@ -87,6 +87,7 @@ In the tables below, `<…>` marks an interpolated value.
 |------|----------|-------|---------|------|
 | 261 | `lifecycle` | `.info` | `TokenPace status item attached (<version>); live polling started` | `applicationDidFinishLaunching` — after the status item is attached and polling starts |
 | 313 | `lifecycle` | `.notice` | `manual refresh requested (Troubleshoot)` | `forceRefresh()` — the user clicked "Refresh now" in the Troubleshoot window; a `.manualRefresh` signal is sent and the status poll is marked due (ADR-0020) |
+| — | `lifecycle` | `.notice` | `dev: stub scenario → <id>` | `switchScenario(_:)` — the dev-tools live stub selector picked a new data source (`<id>` = the `TOKENPACE_STUB` value, or empty for real network); the polling engine is rebuilt and an immediate poll forced (#187). Dev-only (`TOKENPACE_DEVTOOLS`) |
 | 358 | `lifecycle` | `.notice` | `optimistic reset applied, forcing refresh` | `fireOptimisticReset()` — a window's reset boundary passed; the retained snapshot is rolled forward locally (zero usage + next `resets_at`) and rendered immediately (no ⏰), then `.manualRefresh` forces the authoritative poll (#36, ADR-0030) |
 | 421 | `lifecycle` | `.notice` | `config: first run, no prior version (<version>)` | `runConfigMigrationsIfNeeded()` — no `lastRunVersion` stored (fresh install or a pre-persistence build); records the version, no migrations (#71, ADR-0023) |
 | 423 | `lifecycle` | `.notice` | `config: version unchanged (<version>)` | stored `lastRunVersion` equals the running version — nothing to migrate |

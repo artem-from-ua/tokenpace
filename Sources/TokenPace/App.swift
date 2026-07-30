@@ -156,10 +156,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// in-the-past reset. Unlike `ageTimer` this is non-repeating and fires at a variable instant.
     private var resetTimer: Timer?
 
-    /// The active `TOKENPACE_STUB` mode name (`"1"`/`"screenshot"`/`"error"`), or `nil` for a normal
-    /// run against the real network. One source of truth read from the environment, so the Quit
-    /// item's dev-build tag and `startPolling`'s transport wiring agree on which mode is live.
-    private static let stubName = ProcessInfo.processInfo.environment["TOKENPACE_STUB"]
+    /// The `TOKENPACE_STUB` scenario the app launched with, or `.realNetwork` for a normal run. Read
+    /// once from the environment and mapped through the shared ``StubScenario`` registry (unknown /
+    /// absent value → `.realNetwork`). Seeds ``currentScenario`` and the dropdown's initial selection.
+    private static let launchScenario =
+        StubScenario(rawValue: ProcessInfo.processInfo.environment["TOKENPACE_STUB"] ?? "") ?? .realNetwork
+
+    /// The scenario currently driving the data source. Starts at ``launchScenario`` and changes only
+    /// via the dev-tools live selector (#187), which tears down and rebuilds the polling engine. Read
+    /// by the Quit dev-build tag and the dropdown preselection so both agree on what's live.
+    private var currentScenario: StubScenario = AppDelegate.launchScenario
 
     /// A forced update menu-item state from `TOKENPACE_UPDATE_STATE` (#130), or `nil` for the real,
     /// version-derived state. Lets a maintainer verify each of the four dropdown states on a dev build
@@ -290,7 +296,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // reads a plain "Quit TokenPace" by default and grows the "(dev build …)" suffix under Option.
         menu.addItem(.separator())
         if !LaunchAtLoginController.isAppBundle {
-            quitDevTitle = Self.stubName.map { "Quit TokenPace (dev build – \($0))" } ?? "Quit TokenPace (dev build)"
+            quitDevTitle = currentScenario != .realNetwork
+                ? "Quit TokenPace (dev build – \(currentScenario.id))"
+                : "Quit TokenPace (dev build)"
         }
         let quitItem = NSMenuItem(title: "", action: #selector(quit), keyEquivalent: "")
         quitItem.attributedTitle = Self.dropdownMenuItemText("Quit TokenPace")
@@ -415,7 +423,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if devToolsWC == nil {
             devToolsWC = DevToolsWindowController()
             ColorStore.shared.onChange = { [weak self] in self?.reRenderForCurrentTime() }
+            // Live stub selector (#187): the dropdown reports its pick back here to swap the data source
+            // without a restart. Mirrors the ColorStore.onChange bridge — the window holds no model ref.
+            devToolsWC?.onStubChange = { [weak self] in self?.switchScenario($0) }
         }
+        devToolsWC?.setCurrentScenario(currentScenario)   // preselect the active stub (incl. env-set)
         devToolsWC?.show()
         reRenderForCurrentTime()   // seed the tuner's popup preview with the current layout right away
     }
@@ -636,123 +648,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         network.start { [signals] in signals.send(.networkRestored) }
 
-        // TOKENPACE_STUB swaps the live URLSession for a canned-response transport so the app can be
-        // driven end-to-end (popup text, interval logs) without touching the usage API. Verification
-        // aid only — never set in normal use; the default path is the real network.
-        //  • `=1`          → climbing utilisation (exercises adaptive cadence on screen).
-        //  • `=screenshot` → frozen, hand-picked values (a stable frame for the README).
-        //  • `=error`      → 401 auth failure + both Claude services degraded (the warning block).
-        //  • `=idle`       → the honest "no active 5h session" state (#100): solid-blue 5h bar, no
-        //                    phantom reset, menu-bar time falls back to the 7-day reset ("4d").
-        //  • `=idle-blocked` → the **blocked** idle state (#158): idle 5h + 7-day exhausted (100 %) and
-        //                    no credits → the idle bar goes **grey** (menu bar + popup, both colour
-        //                    modes), the popup status reads "waiting for limit reset", and the 7-day
-        //                    reset time is painted **red** (the blocking reset). Compare against `=idle`.
-        //  • `=active-blocked` → the **active** blocked state (#177): a live 5h window (48 %) while 7-day
-        //                    is exhausted (100 %, `weekly_all` critical) and no credits. Not idle → the 5h
-        //                    row is a normal "on pace" row, but the popup's 7-day reset gets the **red**
-        //                    blocking-reset badge. Before the fix no badge showed (Артем's bug).
-        //  • `=optimistic-reset` → the reset-boundary flow (#36): the 5h window resets ~20 s after
-        //                    launch, so the bar flips 60 % → 0 % (no ⏰) and a forced refresh follows.
-        //  • `=broken-reset` → a noisy 5h (100 %) with `resets_at: null` (#167): an API data error on
-        //                    the chosen window → the menu bar shows the ⚠️ error state (glyph + bars),
-        //                    not a fabricated "<1m". The 7-day window is calm with a valid reset.
-        //  • `=5h-orange` / `both-orange` / `both-red` / `red-orange` / `calm5-orange7`
-        //                  → fixed 5h×7d severity frames for the reset-countdown table (#103).
-        //                    `calm5-orange7` is the lone days-away 7d-orange cell where the reset-
-        //                    countdown mode (smart vs never) changes what's shown.
-        //  • `=calm-both`  → both bars calm (5h green + 7d green): with the default "Hide 7-day bar
-        //                    when calm" (#94) on, the 7-day bar is dropped and a lone green 5h bar
-        //                    sits centred (no reset text — both calm). Turn the toggle off to see
-        //                    both bars again.
-        //  • `=calm-degraded` → calm bars + a **degraded (yellow)** service dot: with "Calm colours"
-        //                    (#105) off the dot is yellow; turn Calm on (Settings → General) and it
-        //                    mutes to white alongside the bars. The frame that verifies #… .
-        //  • `=credits-active` / `credits-limit-reached` / `credits-no-limit` (#144)
-        //                  → the trailing money-credits ¤ icon. All three pin the 7-day window at
-        //                    100 % (a base limit exhausted → the icon shows) and vary `spend`:
-        //                    `credits-active` = enabled €15 limit, €10.77 spent (paced colour);
-        //                    `credits-limit-reached` = spend_limit_reached (RED icon);
-        //                    `credits-no-limit` = unlimited limit (NEUTRAL icon). Toggle "Calm
-        //                    colours" to see the calm frames (active/no-limit) mute to white.
-        let stubMode = Self.stubName
-        let transport: UsageTransport = switch stubMode {
-        case "1":          StubUsageTransport(mode: .climbing)
-        case "screenshot": StubUsageTransport(mode: .screenshot)
-        case "error":      StubUsageTransport(mode: .authError)
-        // Stale-while-erroring (spacing bug): first poll valid (full bars + Extra usage), then every
-        // later poll times out → ⚠️ "connectivity issue" banner **above** the held bars. Verifies the
-        // error block's trailing gap so it doesn't sit glued to the "5-hour" row.
-        case "stale-error": StubUsageTransport(mode: .staleError)
-        case "idle":       StubUsageTransport(mode: .idle)
-        case "idle-blocked": StubUsageTransport(mode: .idleBlocked)
-        case "active-blocked": StubUsageTransport(mode: .activeBlocked)
-        case "optimistic-reset": StubUsageTransport(mode: .optimisticReset)
-        // Broken-`resets_at` (#167): noisy 5h with `resets_at: null` → ⚠️ error state, not a fake "<1m".
-        case "broken-reset": StubUsageTransport(mode: .brokenReset)
-        // Reset-countdown (#103) verification frames: fixed 5h×7d severities to exercise the table.
-        case "5h-orange":   StubUsageTransport(mode: .pacing(.fiveOrange))
-        case "both-orange": StubUsageTransport(mode: .pacing(.bothOrange))
-        case "both-red":    StubUsageTransport(mode: .pacing(.bothRed))
-        case "red-orange":  StubUsageTransport(mode: .pacing(.redOrange))
-        case "red-green":   StubUsageTransport(mode: .pacing(.redGreen))
-        case "calm5-orange7": StubUsageTransport(mode: .pacing(.calmFiveOrangeSeven))
-        // 20-min override (ADR-0044): 5h ahead only ~2 pts but resets in 12 min → forced orange.
-        case "near-reset":  StubUsageTransport(mode: .pacing(.nearResetFiveHour))
-        // Both-calm frame (#94): exercises the "Hide 7-day bar when calm" opt-out (lone centred 5h).
-        case "calm-both":  StubUsageTransport(mode: .pacing(.calmBoth))
-        // Calm bars + degraded (yellow) service dot: verifies calm colours muting the dot (#…).
-        case "calm-degraded": StubUsageTransport(mode: .calmDegraded)
-        // Money-credits icon (#144): three frames for the trailing ¤ icon. Each pins the 7-day window
-        // at 100 % (a base limit exhausted, so the icon's show-trigger fires) and differs in `spend`:
-        //  • `credits-active`        → enabled, €15 limit, €10.77 spent (~72 %) → paced icon colour.
-        //  • `credits-limit-reached` → spend_limit_reached (€5 limit below €10.77 spent) → RED icon.
-        //  • `credits-no-limit`      → enabled, unlimited (limit: null) → NEUTRAL (foreground) icon.
-        case "credits-active":        StubUsageTransport(mode: .credits(.active))
-        case "credits-limit-reached": StubUsageTransport(mode: .credits(.limitReached))
-        case "credits-no-limit":      StubUsageTransport(mode: .credits(.noLimit))
-        // Back-to-work edge (#160): first poll blocked (7d 100 %), then workable → fires the
-        // "Back to work!" notification once, subject to quiet hours + authorization.
-        case "just-unblocked":        StubUsageTransport(mode: .justUnblocked)
-        // Reset-boundary idle grace (ADR-0041): active → post-reset empty five_hour → active again.
-        // The 5h bar must stay "ready" (non-idle) across the empty polls — no "waiting for limit
-        // reset" flicker between the active windows.
-        case "reset-grace":           StubUsageTransport(mode: .resetGrace)
-        default:           URLSession.shared
-        }
-        // The status poll uses the same transport seam (the stub answers the status endpoint too).
-        statusTransport = transport
-        // Under the stub the bearer token is never validated (canned responses), so skip the
-        // Keychain entirely — reading it would only pop the system access prompt on a dev build.
-        // The refresher is live-only for the same reason: a stub run must never spawn the CLI.
-        //
-        // Exception — `TOKENPACE_FORCE_REFRESH=1` (verification only, #183): hand the engine an
-        // *already-expired* stub token together with the *real* `ClaudeCLIRefresher`, so the poll
-        // takes the `.expired` branch and spawns `claude --safe-mode …` on demand. This is the only
-        // way to exercise the delegated-refresh spawn (and its TCC behaviour) without waiting for a
-        // natural token expiry. Ignored unless no `TOKENPACE_STUB` is set (the two are independent).
-        let forceRefresh = ProcessInfo.processInfo.environment["TOKENPACE_FORCE_REFRESH"] == "1" && stubMode == nil
-        let tokenProvider: TokenProviding = switch (stubMode, forceRefresh) {
-        case (nil, true):  ExpiredStubTokenProvider()
-        case (nil, false): KeychainTokenProvider()
-        default:           StubTokenProvider()
-        }
-        let refresher: DelegatedRefresher? = (stubMode == nil) ? ClaudeCLIRefresher() : nil
-        let engine = PollingEngine(
-            transport: transport,
-            tokenProvider: tokenProvider,
-            refresher: refresher,
-            scheduler: LivePollScheduler(signals: signals.stream),
-            probe: ProcessClaudeActivityProbe(),
-            now: { Date() })
-
-        // Consume on the main actor — every PollOutput drives the menu bar + popup.
-        pollTask = Task { [weak self] in
-            for await output in engine.run() {
-                guard let self else { break }
-                self.apply(output)
-            }
-        }
+        // Build and run the polling engine for the launch scenario (`TOKENPACE_STUB`, or the real
+        // network). The dev-tools live selector (#187) re-runs `buildAndRunEngine(for:)` to switch the
+        // data source without a restart, so the observers + age timer above stay put and only the
+        // engine is rebuilt.
+        buildAndRunEngine(for: currentScenario)
 
         // Re-render on a fixed cadence so time-derived text ages without waiting for the next poll:
         // the popup's "Last update" line ("just now" → "1m ago") and the menu bar's stale ⚠️
@@ -764,6 +664,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         RunLoop.main.add(timer, forMode: .common)
         ageTimer = timer
     }
+
+    /// Construct the polling engine (transport, token provider, refresher) for `scenario` and start its
+    /// consumer task, tearing down any previous engine first. Shared by launch and the dev-tools live
+    /// selector (#187). The scenario→transport mapping and the stub-vs-real token/refresher choice come
+    /// from the shared ``StubScenario`` registry, so the env path and the dropdown never diverge.
+    ///
+    /// Each call takes a **fresh** signal stream from the hub (``SignalHub/newStream()``) — an
+    /// `AsyncStream` is single-consumer, so a rebuilt engine must not reuse the old (finished) stream.
+    private func buildAndRunEngine(for scenario: StubScenario) {
+        pollTask?.cancel()
+
+        let transport = scenario.makeTransport()
+        // The status poll uses the same transport seam (the stub answers the status endpoint too).
+        statusTransport = transport
+        // Under a stub the bearer token is never validated (canned responses), so skip the Keychain
+        // entirely — reading it would only pop the system access prompt on a dev build. The refresher
+        // is live-only for the same reason: a stub run must never spawn the CLI.
+        //
+        // Exception — `TOKENPACE_FORCE_REFRESH=1` (verification only, #183), real network only: hand
+        // the engine an *already-expired* stub token together with the *real* `ClaudeCLIRefresher`, so
+        // the poll takes the `.expired` branch and spawns `claude --safe-mode …` on demand. The two
+        // env vars are independent (force-refresh is ignored under a stub).
+        let forceRefresh =
+            ProcessInfo.processInfo.environment["TOKENPACE_FORCE_REFRESH"] == "1" && !scenario.usesStubToken
+        let tokenProvider: TokenProviding = switch (scenario.usesStubToken, forceRefresh) {
+        case (true, _):      StubTokenProvider()
+        case (false, true):  ExpiredStubTokenProvider()
+        case (false, false): KeychainTokenProvider()
+        }
+        let refresher: DelegatedRefresher? = scenario.usesStubToken ? nil : ClaudeCLIRefresher()
+        let engine = PollingEngine(
+            transport: transport,
+            tokenProvider: tokenProvider,
+            refresher: refresher,
+            scheduler: LivePollScheduler(signals: signals.newStream()),
+            probe: ProcessClaudeActivityProbe(),
+            now: { Date() })
+
+        // Consume on the main actor — every PollOutput drives the menu bar + popup.
+        pollTask = Task { [weak self] in
+            for await output in engine.run() {
+                guard let self else { break }
+                self.apply(output)
+            }
+        }
+    }
+
+    /// Switch the live data source to `scenario` (dev-tools selector, #187): rebuild the engine and
+    /// force an immediate poll so the menu bar + popup reflect the new state within one cycle. No-op if
+    /// the scenario is already active. Dev-only — reached only from the Development-tools dropdown.
+    private func switchScenario(_ scenario: StubScenario) {
+        guard scenario != currentScenario else { return }
+        AppLogger.lifecycle.notice("dev: stub scenario → \(scenario.id, privacy: .public)")
+        currentScenario = scenario
+        buildAndRunEngine(for: scenario)
+        lastStatusSuccess = nil          // make the status poll due on the next (immediate) tick
+        signals.send(.manualRefresh)     // wake the freshly-built usage loop now
+    }
+
 
     /// Map one poll result into the menu-bar image and the popup model, and retain it so the age
     /// timer can re-render it against a later `now`. Also rides this heartbeat to poll the Claude

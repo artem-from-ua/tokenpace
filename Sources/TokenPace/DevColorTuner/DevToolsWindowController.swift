@@ -66,6 +66,17 @@ final class DevToolsWindowController: NSWindowController {
     private var lockHueSat = false
     private var lockedH: CGFloat = 0, lockedS: CGFloat = 0
 
+    // Live stub selector (#187) — a dropdown at the top of the left column that swaps the data source
+    // without a restart. The pick is reported to the app via `onStubChange`; `summary` of the current
+    // pick is shown in `stubSummaryLabel` below the popup.
+    private let stubTitleLabel = NSTextField(labelWithString: "Data source (stub)")
+    private let stubPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let stubSummaryLabel = NSTextField(wrappingLabelWithString: "")
+    /// Menu order — every scenario, so `indexOfSelectedItem` maps back to a `StubScenario`.
+    private let stubScenarios = StubScenario.allCases
+    /// Reported when the dropdown selection changes, so the app rebuilds the polling engine (#187).
+    var onStubChange: ((StubScenario) -> Void)?
+
     private let tableView = NSTableView()
     private let sortControl = NSSegmentedControl(labels: ["By group", "A–Z"],
                                                  trackingMode: .selectOne, target: nil, action: nil)
@@ -278,6 +289,24 @@ final class DevToolsWindowController: NSWindowController {
         guard let window else { return }
         let content = NSView()
 
+        stubTitleLabel.font = .preferredFont(forTextStyle: .subheadline)
+        stubTitleLabel.textColor = .secondaryLabelColor
+        stubTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        stubPopUp.target = self
+        stubPopUp.action = #selector(stubScenarioChanged)
+        stubPopUp.translatesAutoresizingMaskIntoConstraints = false
+        stubPopUp.removeAllItems()
+        for scenario in stubScenarios {
+            stubPopUp.addItem(withTitle: scenario.displayName)
+            stubPopUp.lastItem?.representedObject = scenario
+        }
+
+        stubSummaryLabel.font = .preferredFont(forTextStyle: .caption1)
+        stubSummaryLabel.textColor = .secondaryLabelColor
+        stubSummaryLabel.translatesAutoresizingMaskIntoConstraints = false
+        stubSummaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
         sortControl.selectedSegment = sort.rawValue
         sortControl.target = self
         sortControl.action = #selector(sortChanged)
@@ -305,10 +334,24 @@ final class DevToolsWindowController: NSWindowController {
         resetAllButton.action = #selector(resetAll)
         resetAllButton.translatesAutoresizingMaskIntoConstraints = false
 
-        for view in [sortControl, scroll, detail, resetAllButton] { content.addSubview(view) }
+        for view in [stubTitleLabel, stubPopUp, stubSummaryLabel, sortControl, scroll, detail, resetAllButton] {
+            content.addSubview(view)
+        }
 
         NSLayoutConstraint.activate([
-            sortControl.topAnchor.constraint(equalTo: content.topAnchor, constant: Metrics.padding),
+            stubTitleLabel.topAnchor.constraint(equalTo: content.topAnchor, constant: Metrics.padding),
+            stubTitleLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: Metrics.padding),
+            stubTitleLabel.widthAnchor.constraint(equalToConstant: Metrics.listWidth),
+
+            stubPopUp.topAnchor.constraint(equalTo: stubTitleLabel.bottomAnchor, constant: 4),
+            stubPopUp.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: Metrics.padding),
+            stubPopUp.widthAnchor.constraint(equalToConstant: Metrics.listWidth),
+
+            stubSummaryLabel.topAnchor.constraint(equalTo: stubPopUp.bottomAnchor, constant: 4),
+            stubSummaryLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: Metrics.padding),
+            stubSummaryLabel.widthAnchor.constraint(equalToConstant: Metrics.listWidth),
+
+            sortControl.topAnchor.constraint(equalTo: stubSummaryLabel.bottomAnchor, constant: 12),
             sortControl.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: Metrics.padding),
             sortControl.widthAnchor.constraint(equalToConstant: Metrics.listWidth),
 
@@ -708,6 +751,22 @@ final class DevToolsWindowController: NSWindowController {
         } else {
             selectFirstRole()
         }
+    }
+
+    // MARK: - Live stub selector (#187)
+
+    /// Preselect the dropdown to the scenario currently driving the app (including one set via
+    /// `TOKENPACE_STUB` at launch) and sync the description. Called by the app when the window opens.
+    func setCurrentScenario(_ scenario: StubScenario) {
+        guard let idx = stubScenarios.firstIndex(of: scenario) else { return }
+        stubPopUp.selectItem(at: idx)
+        stubSummaryLabel.stringValue = scenario.summary
+    }
+
+    @objc private func stubScenarioChanged() {
+        guard let scenario = stubPopUp.selectedItem?.representedObject as? StubScenario else { return }
+        stubSummaryLabel.stringValue = scenario.summary
+        onStubChange?(scenario)
     }
 
     @objc private func sliderMoved(_ sender: NSSlider) {
