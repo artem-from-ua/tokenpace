@@ -254,6 +254,32 @@ TOKENPACE_OPEN_TROUBLESHOOT=1 TOKENPACE_STUB=screenshot swift run
 його і цей рядок разом. Detail-панелі тепер SwiftUI `Form.formStyle(.grouped)` (ADR-0042), тож паритет
 grouped-inset карток доводиться скриншотами light+dark так само, як раніше для AppKit-версії.
 
+### Development tools — колор-тюнер (#185)
+
+Dev-інструмент підбору кольорів: вікно з дропдауном усіх ~35 іменованих кольорових ролей (menu-bar і
+popup pacing **розділені**; є popup service-доти, warning red, «in use» pill, link, label) + **вбудований
+inline-пікер** у правій панелі — усі 6 каналів (RGB **і** HSB) разом, над кожним повзунком динамічна
+градієнт-стрічка, редаговані 16-бітні поля 0–65535 + alpha, живі копійовані RGB(0–255)+HEX readout-и.
+Перемальовує menu-bar іконку й popup-preview **наживо**. У preview-вікні під popup — два mock-рядки
+(синя «New update available» / червона «Automatic update failed») для підбору відповідних кольорів.
+Гейт — **`TOKENPACE_DEVTOOLS`**
+(непорожнє значення) **плюс** затиснутий ⌥ Option на пункті меню «Development tools…». Незалежить від
+типу білда (dev / notarized / release): гейт — env-var, не `#if DEBUG`. Override-и **ephemeral** (не
+персистяться); без env-var шар кольорів інертний (завжди дефолти).
+
+Запуск для перевірки (auto-open обходить незручний ⌥-клік по menu-bar, як для Troubleshoot):
+
+```sh
+TOKENPACE_DEVTOOLS=1 TOKENPACE_OPEN_DEVTOOLS=1 TOKENPACE_STUB=both-orange swift run
+```
+
+→ вікно тюнера (always-on-top) відкриється саме, поруч — окреме always-on-top вікно **«Popup preview»**
+з живим рендером дропдауна. Обери роль (напр. «Popup · gap orange»), посунь повзунок каналу (або
+впиши 16-бітне значення) — і preview-вікно, і menu-bar іконка міняються негайно. Закриття вікна тюнера
+закриває й preview. **Reset** / **Reset all** повертають дефолти,
+**Copy sRGB** кладе значення в буфер, ● позначає недефолтні ролі. Без `TOKENPACE_DEVTOOLS` пункт меню
+не з'являється навіть під ⌥, а `TOKENPACE_OPEN_DEVTOOLS` ігнорується.
+
 ## Що НЕ рахується за верифікацію
 
 - **Скриншоти з тимчасового dev-only коду.** Синтетичний рендер `StatusItemView` / PNG-матриці

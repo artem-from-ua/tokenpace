@@ -34,6 +34,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// swap does not work in a status-item menu. "Settings…" is a plain, always-shown item beside it.
     private var troubleshootItem: NSMenuItem?
 
+    /// The dev-only colour tuner window (#185). Lazily created and kept alive.
+    private var devToolsWC: DevToolsWindowController?
+
+    /// The optional "Development tools…" item (#185), shown just below "Troubleshoot…" but **only**
+    /// when `TOKENPACE_DEVTOOLS` is set (`ColorStore.devToolsEnabled`) **and** ⌥ Option is held — so it
+    /// stays invisible on a normal run regardless of build type. Visibility is flipped alongside
+    /// `troubleshootItem` in `updateTroubleshootVisibility(_:)`.
+    private var devToolsItem: NSMenuItem?
+
     /// The opaque overlay inserted into the menu window's background view to make the *whole* dropdown
     /// solid (issue #86). Weak: the menu window owns it, and it is torn down when the menu closes. Held
     /// only so a re-open can clear a stale one defensively.
@@ -232,6 +241,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(troubleshootItem)
         self.troubleshootItem = troubleshootItem
 
+        // "Development tools…" (#185): the dev colour tuner, sitting just below "Troubleshoot…". Only
+        // ever visible when `TOKENPACE_DEVTOOLS` is set AND ⌥ Option is held (both gates applied in
+        // `updateTroubleshootVisibility`), so a normal run never shows it — regardless of build type.
+        if ColorStore.devToolsEnabled {
+            let devItem = NSMenuItem(title: "", action: #selector(openDevTools), keyEquivalent: "")
+            devItem.attributedTitle = Self.dropdownMenuItemText("Development tools…")
+            devItem.target = self
+            devItem.isHidden = true
+            menu.addItem(devItem)
+            self.devToolsItem = devItem
+        }
+
         // "New version available" (#37): sits just above Quit, behind its own separator, with a blue
         // The single update item (#130): one dropdown line carrying every non-critical update signal,
         // sitting just above Quit behind its own separator, with a status-coloured dot (same tinted
@@ -304,6 +325,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["TOKENPACE_OPEN_TROUBLESHOOT"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.openTroubleshoot() }
         }
+        // Same for the dev colour tuner (#185), normally reached only via ⌥ on the (env-gated)
+        // "Development tools…" item — doubly awkward to script. Requires `TOKENPACE_DEVTOOLS` set too.
+        if ColorStore.devToolsEnabled,
+           ProcessInfo.processInfo.environment["TOKENPACE_OPEN_DEVTOOLS"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.openDevTools() }
+        }
     }
 
     // MARK: - Menu actions (#14)
@@ -370,6 +397,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             troubleshootWC = wc
         }
         troubleshootWC?.show(lastOutput)
+    }
+
+    /// Open (or focus) the dev colour tuner (#185). Lazily creates the single instance and wires its
+    /// change callback to re-render both surfaces, so a colour edit repaints the menu-bar icon and the
+    /// popup live. Reachable only when `TOKENPACE_DEVTOOLS` is set (the item is gated in the menu).
+    @objc private func openDevTools() {
+        if devToolsWC == nil {
+            devToolsWC = DevToolsWindowController()
+            ColorStore.shared.onChange = { [weak self] in self?.reRenderForCurrentTime() }
+        }
+        devToolsWC?.show()
+        reRenderForCurrentTime()   // seed the tuner's popup preview with the current layout right away
     }
 
     /// Force an immediate refresh of both data streams (the Troubleshoot window's button, ADR-0020):
@@ -473,6 +512,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let troubleshootItem, optionHeld != lastOptionHeld else { return }
         lastOptionHeld = optionHeld
         troubleshootItem.isHidden = !optionHeld
+        // "Development tools…" needs both gates: the env var (item only exists when set) and ⌥ Option.
+        devToolsItem?.isHidden = !optionHeld
         popupVC.optionHeld = optionHeld
         // The service-status rows appearing/disappearing changes the popup's fitting size; `NSMenu`
         // does not re-measure a hosted item view on its own (see `setPopupLayout`'s note), so the
@@ -1204,6 +1245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setPopupLayout(_ layout: PopupLayout) {
         popupVC.layout = layout
         popupVC.view.frame = NSRect(origin: .zero, size: popupVC.view.fittingSize)
+        devToolsWC?.updatePreview(layout)   // mirror into the dev colour tuner's live popup preview (#185)
     }
 
     // MARK: - Menu-bar image
