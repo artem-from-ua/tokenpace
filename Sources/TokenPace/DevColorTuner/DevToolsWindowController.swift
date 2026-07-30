@@ -47,6 +47,12 @@ final class DevToolsWindowController: NSWindowController {
     /// Guard against feedback loops while programmatically syncing controls to a colour.
     private var isSyncing = false
 
+    /// The working colour is held as HSBA (not RGB) so that hue and saturation **survive** a brightness
+    /// of 0 — otherwise dragging brightness to black would discard hue/sat (black has none) and the
+    /// colour couldn't be recovered. RGB shown in the read-outs/store is derived from this. Each of H, S,
+    /// B, A is an independent slider: brightness moves brightness only, saturation stays put.
+    private var workH: CGFloat = 0, workS: CGFloat = 0, workB: CGFloat = 0, workA: CGFloat = 1
+
     private let tableView = NSTableView()
     private let sortControl = NSSegmentedControl(labels: ["By group", "A–Z"],
                                                  trackingMode: .selectOne, target: nil, action: nil)
@@ -129,10 +135,19 @@ final class DevToolsWindowController: NSWindowController {
             previewWindow = win
         }
         if let main = window, let preview = previewWindow {
-            let f = main.frame
-            preview.setFrameOrigin(NSPoint(x: f.maxX + 12, y: f.maxY - preview.frame.height))
+            // Position at the tuner's top-right, then attach as a child so it follows the tuner when the
+            // tuner is dragged (top edges aligned). Re-align after any content resize via `positionPreview`.
+            positionPreview()
+            if preview.parent == nil { main.addChildWindow(preview, ordered: .above) }
         }
         previewWindow?.orderFront(nil)
+    }
+
+    /// Park the preview at the tuner window's top-right, top edges aligned.
+    private func positionPreview() {
+        guard let main = window, let preview = previewWindow else { return }
+        let f = main.frame
+        preview.setFrameOrigin(NSPoint(x: f.maxX + 12, y: f.maxY - preview.frame.height))
     }
 
     /// Preview content = the live popup view, a divider, and two mock update-notification rows (#185
@@ -148,14 +163,33 @@ final class DevToolsWindowController: NSWindowController {
         let updateRow = makeUpdateRow(dot: .popupServiceBlue, text: "New update available")
         let failRow = makeUpdateRow(dot: .popupWarningRed, text: "Automatic update failed")
 
-        let stack = NSStackView(views: [previewVC.view, divider, updateRow, failRow])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 12, right: 12)
-        stack.setCustomSpacing(10, after: previewVC.view)
-        divider.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
-        return stack
+        // The update rows carry their own left inset; the popup view spans the full width flush to the
+        // edges (it draws its own backdrop), so there is no pale margin beside it. The whole content view
+        // shares the popup's window-background colour so the popup card and the footer strip read as one.
+        let footer = NSStackView(views: [divider, updateRow, failRow])
+        footer.orientation = .vertical
+        footer.alignment = .leading
+        footer.spacing = 8
+        footer.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 12, right: 14)
+        footer.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        container.addSubview(previewVC.view)
+        container.addSubview(footer)
+        NSLayoutConstraint.activate([
+            previewVC.view.topAnchor.constraint(equalTo: container.topAnchor),
+            previewVC.view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            previewVC.view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+
+            footer.topAnchor.constraint(equalTo: previewVC.view.bottomAnchor, constant: 8),
+            footer.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            divider.widthAnchor.constraint(equalTo: footer.widthAnchor, constant: -28),
+        ])
+        return container
     }
 
     /// One update-notification row: a coloured `circle.fill` dot (tinted from a `ColorRole` so it tracks
@@ -182,9 +216,13 @@ final class DevToolsWindowController: NSWindowController {
     func updatePreview(_ layout: PopupLayout) {
         guard let preview = previewWindow, preview.isVisible else { return }
         previewVC.layout = layout
-        previewVC.view.frame = NSRect(origin: .zero, size: previewVC.view.fittingSize)
         for (dot, role) in previewUpdateDots { dot.contentTintColor = ColorStore.shared.color(role) }
+        // The container is Auto Layout; size the window to its fitting size (popup width + footer height).
+        if let container = preview.contentView {
+            preview.setContentSize(container.fittingSize)
+        }
         preview.layoutIfNeeded()
+        positionPreview()   // keep the top edge aligned to the tuner after a height change
     }
 
     // MARK: - Layout
@@ -427,25 +465,40 @@ final class DevToolsWindowController: NSWindowController {
         return resolved
     }
 
-    /// Push a colour into the swatch, all six sliders + fields, their gradient ribbons, and the RGB/HEX
-    /// read-outs (without triggering edit callbacks).
+    /// The current working colour, built from the retained HSBA state.
+    private var workingColor: NSColor {
+        NSColor(hue: workH, saturation: workS, brightness: workB, alpha: workA)
+    }
+
+    /// Load a colour into the retained HSBA state, then refresh every control from that state.
     private func syncControls(to color: NSColor) {
+        let c = color.usingColorSpace(.sRGB) ?? color
+        workH = c.hueComponent; workS = c.saturationComponent
+        workB = c.brightnessComponent; workA = c.alphaComponent
+        refreshControlsFromState()
+    }
+
+    /// Push the retained HSBA state into the swatch, all seven sliders + fields, gradient ribbons, and
+    /// the RGB/HEX read-outs — without triggering edit callbacks. Driven off H/S/B/A so hue and
+    /// saturation are preserved even at brightness 0 (a black RGB colour has no hue to read back).
+    private func refreshControlsFromState() {
         isSyncing = true
         defer { isSyncing = false }
-        let c = color.usingColorSpace(.sRGB) ?? color
-        swatch.layer?.backgroundColor = c.cgColor
+        let c = (workingColor.usingColorSpace(.sRGB) ?? workingColor)
+
+        swatch.layer?.backgroundColor = NSColor(srgbRed: c.redComponent, green: c.greenComponent,
+                                                blue: c.blueComponent, alpha: 1).cgColor
 
         let value: [Channel: CGFloat] = [
             .r: c.redComponent, .g: c.greenComponent, .b: c.blueComponent,
-            .h: c.hueComponent, .s: c.saturationComponent, .brightness: c.brightnessComponent,
-            .alpha: c.alphaComponent,
+            .h: workH, .s: workS, .brightness: workB, .alpha: workA,
         ]
         for channel in Channel.allCases {
             guard let row = channelRows[channel], let v = value[channel] else { continue }
             let scaled = Double(v) * Self.bit16
             row.slider.doubleValue = scaled
             row.field.integerValue = Int(scaled.rounded())
-            row.slider.gradientColors = gradientStops(for: channel, base: c)
+            row.slider.gradientColors = gradientStops(for: channel)
         }
 
         let (r, g, b) = (Int((c.redComponent * 255).rounded()),
@@ -456,47 +509,48 @@ final class DevToolsWindowController: NSWindowController {
     }
 
     /// The gradient ribbon for one channel: the colour swept across that channel's full range while the
-    /// other channels stay at `base`. Rebuilt on every sync so each ribbon reflects the current colour.
-    private func gradientStops(for channel: Channel, base: NSColor) -> [NSColor] {
+    /// other channels stay at the retained state. HSB ribbons use the retained H/S/B directly so hue is
+    /// shown even when brightness is 0.
+    private func gradientStops(for channel: Channel) -> [NSColor] {
         let steps = 8
-        let r = base.redComponent, g = base.greenComponent, b = base.blueComponent, a = base.alphaComponent
-        let h = base.hueComponent, s = base.saturationComponent, br = base.brightnessComponent
+        let base = workingColor.usingColorSpace(.sRGB) ?? workingColor
+        let r = base.redComponent, g = base.greenComponent, b = base.blueComponent
         return (0...steps).map { i in
             let t = CGFloat(i) / CGFloat(steps)
             switch channel {
             case .r: return NSColor(srgbRed: t, green: g, blue: b, alpha: 1)
             case .g: return NSColor(srgbRed: r, green: t, blue: b, alpha: 1)
             case .b: return NSColor(srgbRed: r, green: g, blue: t, alpha: 1)
-            case .h: return NSColor(hue: t, saturation: max(s, 0.01), brightness: max(br, 0.2), alpha: 1)
-            case .s: return NSColor(hue: h, saturation: t, brightness: max(br, 0.2), alpha: 1)
-            case .brightness: return NSColor(hue: h, saturation: s, brightness: t, alpha: 1)
+            case .h: return NSColor(hue: t, saturation: max(workS, 0.5), brightness: max(workB, 0.5), alpha: 1)
+            case .s: return NSColor(hue: workH, saturation: t, brightness: max(workB, 0.3), alpha: 1)
+            case .brightness: return NSColor(hue: workH, saturation: workS, brightness: t, alpha: 1)
             case .alpha: return NSColor(srgbRed: r, green: g, blue: b, alpha: t)
             }
         }
     }
 
-    /// Build the edited colour. RGB is the single source of truth: when an HSB channel is moved we take
-    /// the whole colour from the three HSB sliders (so hue/sat/brightness compose correctly); otherwise
-    /// from the three RGB sliders. Alpha always comes from its own slider — moving alpha never touches
-    /// the colour channels, so it can't collapse the colour to black.
-    private func colorFromControls(edited: Channel) -> NSColor {
-        func norm(_ ch: Channel) -> CGFloat {
-            CGFloat((channelRows[ch]?.slider.doubleValue ?? 0) / Self.bit16)
+    /// Update the retained HSBA state from the edited channel only, so each slider is independent:
+    /// brightness moves brightness (saturation/hue stay), an RGB channel re-derives H/S/B from the new
+    /// RGB triple, alpha moves alpha alone.
+    private func updateState(from edited: Channel) {
+        func norm(_ ch: Channel) -> CGFloat { CGFloat((channelRows[ch]?.slider.doubleValue ?? 0) / Self.bit16) }
+        switch edited {
+        case .h: workH = norm(.h)
+        case .s: workS = norm(.s)
+        case .brightness: workB = norm(.brightness)
+        case .alpha: workA = norm(.alpha)
+        case .r, .g, .b:
+            let rgb = NSColor(srgbRed: norm(.r), green: norm(.g), blue: norm(.b), alpha: workA)
+            workH = rgb.hueComponent; workS = rgb.saturationComponent; workB = rgb.brightnessComponent
         }
-        let a = norm(.alpha)
-        if edited.isHSB {
-            return NSColor(hue: norm(.h), saturation: norm(.s), brightness: norm(.brightness), alpha: a)
-        }
-        return NSColor(srgbRed: norm(.r), green: norm(.g), blue: norm(.b), alpha: a)
     }
 
     private func applyEdit(edited: Channel) {
         guard !isSyncing, let role = selectedRole else { return }
-        let color = colorFromControls(edited: edited)
+        updateState(from: edited)                 // update only the edited channel in the HSBA state
+        let color = workingColor                  // build the colour from the retained state
         ColorStore.shared.set(color, for: role)   // fires onChange → live repaint
-        // Re-sync from the colour we just set (not a re-resolve of the store, which for an alpha-carrying
-        // colour is fine) so every representation — RGB, HSB, fields, ribbons, swatch — stays consistent.
-        syncControls(to: color)
+        refreshControlsFromState()                // reflect the state everywhere (keeps hue at brightness 0)
         titleLabel.stringValue = role.displayName + "  ●"
         resetButton.isEnabled = true
         resetAllButton.isEnabled = true
