@@ -43,6 +43,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `troubleshootItem` in `updateTroubleshootVisibility(_:)`.
     private var devToolsItem: NSMenuItem?
 
+    /// The "Quit TokenPace" item. On a dev build (`swift run`, not an installed `.app`) its title carries
+    /// the build/stub tag — "Quit TokenPace (dev build)" / "…(dev build – error)" — but **only** while ⌥
+    /// Option is held; the plain "Quit TokenPace" shows otherwise. Held so `updateTroubleshootVisibility`
+    /// can swap the two in lockstep with the other ⌥-driven items. On an app bundle the title is fixed and
+    /// this stays a plain "Quit TokenPace" regardless of Option.
+    private var quitItem: NSMenuItem?
+
+    /// The dev-build title shown on `quitItem` while ⌥ Option is held (nil on an app bundle, where the
+    /// title never changes). Precomputed at menu-build time so the ⌥ swap is a cheap string assignment.
+    private var quitDevTitle: String?
+
     /// The opaque overlay inserted into the menu window's background view to make the *whole* dropdown
     /// solid (issue #86). Weak: the menu window owns it, and it is torn down when the menu closes. Held
     /// only so a re-open can clear a stale one defensively.
@@ -274,20 +285,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // macOS menu grouping). A bare `swift run` binary is tagged "(dev build)" (#69) so quitting
         // the right process is unambiguous when a dev build and the installed `.app` run side by
         // side; under a stub the mode is named too — "(dev build – error)" — so a stubbed run reads
-        // apart from a plain dev build at a glance.
+        // apart from a plain dev build at a glance. That tag is noise on an ordinary open, so it is
+        // revealed only while ⌥ Option is held (swapped in `updateTroubleshootVisibility`): the item
+        // reads a plain "Quit TokenPace" by default and grows the "(dev build …)" suffix under Option.
         menu.addItem(.separator())
-        let quitTitle: String
-        if LaunchAtLoginController.isAppBundle {
-            quitTitle = "Quit TokenPace"
-        } else if let stub = Self.stubName {
-            quitTitle = "Quit TokenPace (dev build – \(stub))"
-        } else {
-            quitTitle = "Quit TokenPace (dev build)"
+        if !LaunchAtLoginController.isAppBundle {
+            quitDevTitle = Self.stubName.map { "Quit TokenPace (dev build – \($0))" } ?? "Quit TokenPace (dev build)"
         }
         let quitItem = NSMenuItem(title: "", action: #selector(quit), keyEquivalent: "")
-        quitItem.attributedTitle = Self.dropdownMenuItemText(quitTitle)
+        quitItem.attributedTitle = Self.dropdownMenuItemText("Quit TokenPace")
         quitItem.target = self
         menu.addItem(quitItem)
+        self.quitItem = quitItem
 
         item.menu = menu
 
@@ -514,6 +523,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         troubleshootItem.isHidden = !optionHeld
         // "Development tools…" needs both gates: the env var (item only exists when set) and ⌥ Option.
         devToolsItem?.isHidden = !optionHeld
+        // On a dev build, reveal the "(dev build …)" tag on Quit only while ⌥ is held (`quitDevTitle`
+        // is nil on an app bundle, so the title stays a plain "Quit TokenPace" there).
+        if let quitItem, let quitDevTitle {
+            quitItem.attributedTitle = Self.dropdownMenuItemText(optionHeld ? quitDevTitle : "Quit TokenPace")
+        }
         popupVC.optionHeld = optionHeld
         // The service-status rows appearing/disappearing changes the popup's fitting size; `NSMenu`
         // does not re-measure a hosted item view on its own (see `setPopupLayout`'s note), so the
