@@ -91,6 +91,7 @@ final class PopupBarView: NSView {
     //
     // NSColor(name:dynamicProvider:) resolves per-appearance and AppKit re-draws on theme change
     // automatically (PopupBarView draws in its real appearance — no manual observation needed).
+    @MainActor
     private enum Palette {
         /// Pacing gap colours. Green (on pace) is the **system** colour, matching the Claude
         /// service-status dots. The ahead-of-pace grade — amber (< 15 pts ahead) → orange (≥ 15) → red
@@ -98,7 +99,7 @@ final class PopupBarView: NSView {
         /// **amber** (not a pale yellow — a pure light yellow washed out against the light-grey bar, so
         /// the mildest step is a darker golden tone instead), an orange nudged toward red, and a pure
         /// saturated red (no blue tint unlike `systemRed`).
-        static let gapGreen = NSColor.systemGreen
+        static var gapGreen: NSColor { ColorStore.shared.color(.popupGapGreen) }
         /// The **idle** 5-hour bar's solid fill (#100, ADR-0027): the 5h window has no active session, so
         /// the bar is a knobless solid track meaning "ready to start, full quota available" — a neutral
         /// blue, not a pacing colour (green is reserved for an active window's pacing status). Built on
@@ -109,48 +110,63 @@ final class PopupBarView: NSView {
         /// Both blends are computed **inside** the provider, in the target appearance, so `systemBlue`
         /// resolves to its real per-theme RGB before mixing (a `static let … .blended(...)` would bake in
         /// whatever appearance was current at first access — the same trap `dimmedLabelColor` documents).
-        static let idleBlue = NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            var result: NSColor = .systemBlue
-            appearance.performAsCurrentDrawingAppearance {
-                // Desaturate slightly (toward a mid grey — lowers saturation, keeps brightness).
-                let muted = NSColor.systemBlue.blended(withFraction: 0.15, of: .gray) ?? .systemBlue
-                // On light, also lighten toward white so it isn't heavy on the pale panel.
-                result = isDark ? muted : (muted.blended(withFraction: 0.22, of: .white) ?? muted)
-            }
-            return result
-        }
-        static let gapRed = NSColor(srgbRed: 225/255, green: 45/255, blue: 35/255, alpha: 1)
-        static let gapYellow = NSColor(srgbRed: 230/255, green: 180/255, blue: 25/255, alpha: 1)
-        static let gapOrange = NSColor(srgbRed: 248/255, green: 118/255, blue: 15/255, alpha: 1)
+        static var idleBlue: NSColor { ColorStore.shared.color(.popupIdleBlue) }
+        static var gapRed: NSColor { ColorStore.shared.color(.popupGapRed) }
+        static var gapYellow: NSColor { ColorStore.shared.color(.popupGapYellow) }
+        static var gapOrange: NSColor { ColorStore.shared.color(.popupGapOrange) }
 
         /// Indicator-dot ring: a soft separation between the dot and the bar beneath it. On **light** a
         /// near-white translucent ring (the earlier `windowBackgroundColor·0.4` read too dark against the
         /// light-grey bar); on **dark** the panel background at reduced opacity, which already reads as a
         /// soft dark ring there.
-        static let indicatorStroke = dynamic(
-            dark: NSColor.windowBackgroundColor.withAlphaComponent(0.4),
-            light: NSColor(white: 1, alpha: 0.65)
-        )
+        static var indicatorStroke: NSColor { ColorStore.shared.color(.popupIndicatorStroke) }
 
         /// Tick-ruler marks below the bar: a muted neutral **solid** grey (opaque, not translucent) so
         /// it renders the same regardless of what's behind — a translucent tick composited against the
         /// opaque backdrop read far too dark on dark. Weaker than the indicator dot.
-        static let tick = dynamic(dark: gray(120), light: gray(150))
+        static var tick: NSColor { ColorStore.shared.color(.popupTick) }
 
         /// The monochrome base-zone grey (the bar's `used` + future/unused zones): a **solid** light grey
         /// on light, a darker solid grey on dark, so the bar's base recedes while the pacing gap and dot
         /// stay the clear foreground — and it never depends on alpha compositing against the backdrop.
-        static let monochromeGrey = dynamic(dark: gray(78), light: gray(210))
+        static var monochromeGrey: NSColor { ColorStore.shared.color(.popupMonochromeGrey) }
+    }
 
-        private static func gray(_ v: CGFloat) -> NSColor {
-            NSColor(srgbRed: v/255, green: v/255, blue: v/255, alpha: 1)
-        }
+    // MARK: - Shipped colour defaults (appearance-aware / system)
 
-        /// Resolves to `dark` under a dark appearance, `light` otherwise; AppKit swaps on theme change.
-        private static func dynamic(dark: NSColor, light: NSColor) -> NSColor {
-            NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light }
+    // These reproduce the original `Palette` provider literals and are the single source of truth for
+    // `ColorRole.defaultColor` (the dev color tuner reads them, and the store falls back to them when a
+    // role is not overridden). Kept here — not inlined in `ColorRole` — so the per-appearance logic
+    // lives in one place next to the draw code.
+
+    static let defaultIdleBlue = NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        var result: NSColor = .systemBlue
+        appearance.performAsCurrentDrawingAppearance {
+            // Desaturate slightly (toward a mid grey — lowers saturation, keeps brightness).
+            let muted = NSColor.systemBlue.blended(withFraction: 0.15, of: .gray) ?? .systemBlue
+            // On light, also lighten toward white so it isn't heavy on the pale panel.
+            result = isDark ? muted : (muted.blended(withFraction: 0.22, of: .white) ?? muted)
         }
+        return result
+    }
+
+    static let defaultIndicatorStroke = paletteDynamic(
+        dark: NSColor.windowBackgroundColor.withAlphaComponent(0.4),
+        light: NSColor(white: 1, alpha: 0.65)
+    )
+
+    static let defaultTick = paletteDynamic(dark: paletteGray(120), light: paletteGray(150))
+
+    static let defaultMonochromeGrey = paletteDynamic(dark: paletteGray(78), light: paletteGray(210))
+
+    private static func paletteGray(_ v: CGFloat) -> NSColor {
+        NSColor(srgbRed: v/255, green: v/255, blue: v/255, alpha: 1)
+    }
+
+    /// Resolves to `dark` under a dark appearance, `light` otherwise; AppKit swaps on theme change.
+    private static func paletteDynamic(dark: NSColor, light: NSColor) -> NSColor {
+        NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light }
     }
 
     /// The solid grey both bar base zones (`used` + future/unused tail) render in — a monochrome,
@@ -453,7 +469,7 @@ final class PopupViewController: NSViewController {
     /// against `anthropics/skills`' `brand-guidelines/SKILL.md` on GitHub, the same value the local
     /// Claude Code "claude" theme slot resolves to. Used only for the "Claude Code" section header,
     /// so the popup echoes the CLI's own brand mark rather than a generic label colour.
-    private static let claudeBrandColor = NSColor(srgbRed: 0xd9 / 255, green: 0x77 / 255, blue: 0x57 / 255, alpha: 1)
+    private static var claudeBrandColor: NSColor { ColorStore.shared.color(.popupClaudeBrand) }
 
     /// `Metrics.textSize`, bold — the "Claude Code" section header and the two native menu items
     /// below it (via `App.swift`'s `attributedTitle`) all resolve to this exact font, so there is no
@@ -469,7 +485,11 @@ final class PopupViewController: NSViewController {
     /// appearance, so it re-resolves per view and adapts to light/dark. A plain `static let ...
     /// .blended(...)` bakes in whatever appearance was current at first access — which made it render
     /// near-black under the dark system theme.
-    static let dimmedLabelColor = NSColor(name: nil) { appearance in
+    static var dimmedLabelColor: NSColor { ColorStore.shared.color(.popupDimmedLabel) }
+
+    /// The shipped default for ``dimmedLabelColor`` — a **dynamic** `NSColor(name:)` whose blend is
+    /// computed inside the provider (see the note above). Source of truth for `ColorRole.defaultColor`.
+    static let defaultDimmedLabel = NSColor(name: nil) { appearance in
         var mixed: NSColor = .secondaryLabelColor
         appearance.performAsCurrentDrawingAppearance {
             mixed = NSColor.tertiaryLabelColor.blended(withFraction: 0.5, of: .secondaryLabelColor)
