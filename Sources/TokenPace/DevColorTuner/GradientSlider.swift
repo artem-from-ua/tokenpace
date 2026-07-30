@@ -68,9 +68,12 @@ private final class GradientSliderCell: NSSliderCell {
             return
         }
         // A circular knob filled with the current-position colour, with a white ring + subtle border so
-        // it stays visible over any ribbon colour (including near-white / near-background values).
-        let d = min(knobRect.width, knobRect.height) - 2
-        let r = NSRect(x: knobRect.midX - d / 2, y: knobRect.midY - d / 2, width: d, height: d)
+        // it stays visible over any ribbon colour. Centre it vertically on the control (i.e. on the
+        // gradient track, which we draw at the control's midY) rather than on `knobRect.midY`, whose
+        // vertical placement doesn't line up with our custom bar.
+        let d: CGFloat = 16
+        let cy = slider.bounds.midY
+        let r = NSRect(x: knobRect.midX - d / 2, y: cy - d / 2, width: d, height: d)
         let ring = NSBezierPath(ovalIn: r)
         NSColor.white.setFill(); ring.fill()
 

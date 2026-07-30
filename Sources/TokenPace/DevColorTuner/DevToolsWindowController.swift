@@ -134,6 +134,10 @@ final class DevToolsWindowController: NSWindowController {
             win.isReleasedWhenClosed = false
             win.level = .floating
             win.hasShadow = true
+            // Transparent window so the rounded content corners show (an opaque window frame would sit
+            // behind them as square corners). The rounded, filled container provides the visible surface.
+            win.isOpaque = false
+            win.backgroundColor = .clear
             win.contentView = buildPreviewContent()
             previewWindow = win
         }
@@ -176,10 +180,11 @@ final class DevToolsWindowController: NSWindowController {
         footer.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 12, right: 14)
         footer.translatesAutoresizingMaskIntoConstraints = false
 
-        // Own heading (the window is borderless, so there is no macOS title bar).
+        // Own heading, styled like a native window title bar (the window is borderless, so there is no
+        // real title bar): the system title-bar font at its standard size and `labelColor`, centred.
         let heading = NSTextField(labelWithString: "Popup Preview")
-        heading.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
-        heading.textColor = .secondaryLabelColor
+        heading.font = NSFont.titleBarFont(ofSize: NSFont.systemFontSize)
+        heading.textColor = .labelColor
         heading.alignment = .center
         heading.translatesAutoresizingMaskIntoConstraints = false
 
@@ -356,14 +361,17 @@ final class DevToolsWindowController: NSWindowController {
         let hsbGroup = NSStackView(views: hsbRows)
         hsbGroup.orientation = .vertical; hsbGroup.spacing = 6; hsbGroup.alignment = .leading
 
-        // Read-outs: RGB and HEX, selectable + copy buttons.
+        // Editable RGB and HEX fields: show the live value and accept typed input ("r, g, b" / "#RRGGBB").
         for f in [rgbField, hexField] {
             f.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
             f.isSelectable = true
             f.isBezeled = true
-            f.isEditable = false
+            f.isEditable = true
             f.drawsBackground = true
+            f.target = self
         }
+        rgbField.action = #selector(rgbFieldEdited)
+        hexField.action = #selector(hexFieldEdited)
         for button in [copyRGBButton, copyHexButton, resetButton] {
             button.bezelStyle = .rounded
             button.target = self
@@ -612,6 +620,41 @@ final class DevToolsWindowController: NSWindowController {
 
     @objc private func copyRGB() { copyToPasteboard(rgbField.stringValue) }
     @objc private func copyHex() { copyToPasteboard(hexField.stringValue) }
+
+    /// Parse "r, g, b" (0–255 each; commas/spaces/slashes tolerated) and apply it. Malformed → revert.
+    @objc private func rgbFieldEdited(_ sender: NSTextField) {
+        let parts = sender.stringValue
+            .components(separatedBy: CharacterSet(charactersIn: ", /"))
+            .filter { !$0.isEmpty }
+            .compactMap { Int($0) }
+        guard parts.count == 3, parts.allSatisfy({ (0...255).contains($0) }) else {
+            refreshDetail(); return   // reject: restore the shown value
+        }
+        applyExternalColor(NSColor(srgbRed: CGFloat(parts[0]) / 255, green: CGFloat(parts[1]) / 255,
+                                   blue: CGFloat(parts[2]) / 255, alpha: 1))
+    }
+
+    /// Parse "#RRGGBB" / "RRGGBB" (also 3-digit shorthand) and apply it. Malformed → revert.
+    @objc private func hexFieldEdited(_ sender: NSTextField) {
+        var hex = sender.stringValue.trimmingCharacters(in: .whitespaces)
+        if hex.hasPrefix("#") { hex.removeFirst() }
+        if hex.count == 3 { hex = hex.map { "\($0)\($0)" }.joined() }   // #abc → #aabbcc
+        guard hex.count == 6, let v = Int(hex, radix: 16) else { refreshDetail(); return }
+        applyExternalColor(NSColor(srgbRed: CGFloat((v >> 16) & 0xFF) / 255,
+                                   green: CGFloat((v >> 8) & 0xFF) / 255,
+                                   blue: CGFloat(v & 0xFF) / 255, alpha: 1))
+    }
+
+    /// Apply a colour that came from the RGB/HEX fields: store it, load it into the HSB state, refresh.
+    private func applyExternalColor(_ color: NSColor) {
+        guard let role = selectedRole else { return }
+        ColorStore.shared.set(color, for: role)
+        syncControls(to: color)
+        titleLabel.stringValue = role.displayName + "  ●"
+        resetButton.isEnabled = true
+        resetAllButton.isEnabled = true
+        tableView.reloadData()
+    }
 
     private func copyToPasteboard(_ text: String) {
         guard !text.isEmpty else { return }
