@@ -2,41 +2,49 @@ import AppKit
 import TokenPaceKit
 
 /// The dev-only "Development tools" window (#185): a live colour tuner. Pick a named UI colour role
-/// from the list, adjust it with the **embedded** picker in the right pane — RGB / HSB sliders plus
-/// editable 16-bit fields (0–65535 per channel) — and the menu-bar icon and popup repaint immediately
-/// via ``ColorStore``'s `onChange`.
+/// from the list, adjust it with the embedded picker in the right pane, and the menu-bar icon and the
+/// popup-preview window repaint immediately via ``ColorStore``'s `onChange`.
 ///
-/// The picker is inline (no floating `NSColorPanel`): AppKit ships no single "wheel + sliders + fields"
-/// view, so the pane composes a swatch, an RGB/HSB mode toggle, three channel sliders, an alpha slider,
-/// and 16-bit numeric fields, all kept in two-way sync.
+/// The picker is inline (no floating `NSColorPanel`). It shows **all six channels at once** — R, G, B
+/// and H, S, B — each with a live gradient ribbon (``GradientSlider``) over its slider and an editable
+/// 16-bit field (0–65535), plus alpha. Live RGB (0–255) and HEX read-outs sit below, selectable and
+/// copyable. Editing any channel updates every other representation and repaints the UI live.
 ///
 /// Gated the same way as its menu item: only reachable when `TOKENPACE_DEVTOOLS` is set and ⌥ Option is
 /// held to reveal the entry. Overrides are ephemeral — nothing is persisted; quitting restores defaults.
 ///
-/// Modelled on ``TroubleshootWindowController``: programmatic AppKit + Auto Layout, normal window level,
+/// Modelled on ``TroubleshootWindowController``: programmatic AppKit + Auto Layout, `.floating` level,
 /// `isReleasedWhenClosed = false` so re-opening reuses the instance.
 @MainActor
 final class DevToolsWindowController: NSWindowController {
 
     private enum Metrics {
-        static let startSize = NSSize(width: 760, height: 560)
-        static let minSize = NSSize(width: 700, height: 480)
+        static let startSize = NSSize(width: 820, height: 640)
+        static let minSize = NSSize(width: 760, height: 560)
         static let padding: CGFloat = 16
         static let listWidth: CGFloat = 260
     }
 
     private enum Sort: Int { case byGroup = 0, alphabetical = 1 }
-    /// Channel model the sliders/fields edit. 16-bit range 0–65535 per the issue.
-    private enum Channels: Int { case rgb = 0, hsb = 1 }
-
     private static let bit16 = 65535.0
 
+    /// The six channels shown together, in draw order. R/G/B are sRGB components; H/S/B are HSB.
+    private enum Channel: Int, CaseIterable {
+        case r, g, b, h, s, brightness, alpha
+        var caption: String {
+            switch self {
+            case .r: return "R"; case .g: return "G"; case .b: return "B"
+            case .h: return "H"; case .s: return "S"; case .brightness: return "B "
+            case .alpha: return "A"
+            }
+        }
+        var isHSB: Bool { self == .h || self == .s || self == .brightness }
+    }
+
     private var sort: Sort = .byGroup
-    /// Flattened table rows; `nil` entries are group headers.
     private var rows: [ColorRole?] = []
     private var selectedRole: ColorRole?
-    private var channels: Channels = .rgb
-    /// Guard against feedback loops while programmatically syncing sliders/fields to a colour.
+    /// Guard against feedback loops while programmatically syncing controls to a colour.
     private var isSyncing = false
 
     private let tableView = NSTableView()
@@ -48,31 +56,33 @@ final class DevToolsWindowController: NSWindowController {
     private let usageLabel = NSTextField(wrappingLabelWithString: "")
     private let distortionLabel = NSTextField(wrappingLabelWithString: "")
     private let swatch = NSView()
-    private let modeControl = NSSegmentedControl(labels: ["RGB", "HSB"],
-                                                 trackingMode: .selectOne, target: nil, action: nil)
 
-    /// Three colour channels + alpha, each a labelled slider paired with a 16-bit numeric field.
+    /// One row per channel: caption | gradient slider | 16-bit field.
     @MainActor
-    private struct ChannelControl {
+    private struct ChannelRow {
         let caption = NSTextField(labelWithString: "")
-        let slider = NSSlider()
+        let slider = GradientSlider()
         let field = NSTextField()
     }
-    private let ch = [ChannelControl(), ChannelControl(), ChannelControl()]
-    private let alpha = ChannelControl()
+    private var channelRows: [Channel: ChannelRow] = [:]
 
-    private let copyButton = NSButton(title: "Copy sRGB", target: nil, action: nil)
+    // Live read-outs (selectable so the value can be copied directly).
+    private let rgbField = NSTextField(labelWithString: "")
+    private let hexField = NSTextField(labelWithString: "")
+
+    private let copyRGBButton = NSButton(title: "Copy RGB", target: nil, action: nil)
+    private let copyHexButton = NSButton(title: "Copy HEX", target: nil, action: nil)
     private let resetButton = NSButton(title: "Reset", target: nil, action: nil)
     private let resetAllButton = NSButton(title: "Reset all", target: nil, action: nil)
     private var editorControls: [NSControl] = []
 
-    /// A live preview of the menu-bar dropdown, shown in a **separate always-on-top window** that opens
-    /// with the tuner and closes with it. It renders the same `PopupViewController` view the real popup
-    /// uses — but in an ordinary window, not the modal `NSMenu` (which can't stay open while another
-    /// window takes input). Fed the same `PopupLayout` as the real popup via ``updatePreview(_:)``, so a
-    /// colour edit repaints it live alongside the menu-bar icon.
+    /// A live preview of the menu-bar dropdown, shown in a separate always-on-top window that opens with
+    /// the tuner and closes with it. Renders the same `PopupViewController` view the real popup uses —
+    /// in an ordinary window, not the modal `NSMenu`. Fed the same `PopupLayout` via ``updatePreview(_:)``.
     private let previewVC = PopupViewController()
     private var previewWindow: NSWindow?
+    /// The mock update-notification dots in the preview window, re-tinted on every colour edit.
+    private var previewUpdateDots: [(NSImageView, ColorRole)] = []
 
     convenience init() {
         let window = NSWindow(
@@ -84,7 +94,7 @@ final class DevToolsWindowController: NSWindowController {
         window.isReleasedWhenClosed = false
         window.level = .floating   // always-on-top so colour picking never loses the window (ADR-0012 §6)
         self.init(window: window)
-        window.delegate = self   // so windowWillClose can tear down the preview window
+        window.delegate = self
         buildContent()
         rebuildRows()
         selectFirstRole()
@@ -105,23 +115,19 @@ final class DevToolsWindowController: NSWindowController {
 
     // MARK: - Preview window
 
-    /// Create (once) and show the separate always-on-top popup-preview window, positioned just right of
-    /// the tuner. Hosts `previewVC.view`; it is fed layouts by `AppDelegate` via ``updatePreview(_:)``.
     private func showPreviewWindow() {
         if previewWindow == nil {
             previewVC.loadView()
-            previewVC.view.autoresizingMask = [.width, .height]
             let win = NSWindow(
-                contentRect: NSRect(origin: .zero, size: NSSize(width: 340, height: 220)),
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 340, height: 320)),
                 styleMask: [.titled, .closable],
                 backing: .buffered, defer: false)
             win.title = "Popup preview"
             win.isReleasedWhenClosed = false
             win.level = .floating
-            win.contentView = previewVC.view
+            win.contentView = buildPreviewContent()
             previewWindow = win
         }
-        // Park it to the right of the tuner, top-aligned.
         if let main = window, let preview = previewWindow {
             let f = main.frame
             preview.setFrameOrigin(NSPoint(x: f.maxX + 12, y: f.maxY - preview.frame.height))
@@ -129,17 +135,56 @@ final class DevToolsWindowController: NSWindowController {
         previewWindow?.orderFront(nil)
     }
 
+    /// Preview content = the live popup view, a divider, and two mock update-notification rows (#185
+    /// request): a blue dot "new update available" and a red dot "auto-update failed" — mirroring the
+    /// real menu update item so those colours (popupServiceBlue / popupWarningRed) are visible for tuning.
+    private func buildPreviewContent() -> NSView {
+        previewVC.view.translatesAutoresizingMaskIntoConstraints = false
+
+        let divider = NSBox()
+        divider.boxType = .separator
+        divider.translatesAutoresizingMaskIntoConstraints = false
+
+        let updateRow = makeUpdateRow(dot: .popupServiceBlue, text: "New update available")
+        let failRow = makeUpdateRow(dot: .popupWarningRed, text: "Automatic update failed")
+
+        let stack = NSStackView(views: [previewVC.view, divider, updateRow, failRow])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 12, right: 12)
+        stack.setCustomSpacing(10, after: previewVC.view)
+        divider.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
+        return stack
+    }
+
+    /// One update-notification row: a coloured `circle.fill` dot (tinted from a `ColorRole` so it tracks
+    /// tuning) + label — the same look the real menu update item uses.
+    private func makeUpdateRow(dot role: ColorRole, text: String) -> NSView {
+        let dot = NSImageView()
+        dot.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 9, weight: .regular))
+        dot.contentTintColor = ColorStore.shared.color(role)
+        dot.tag = role.rawValue == ColorRole.popupServiceBlue.rawValue ? 1 : 2
+        dot.identifier = .init(role == .popupServiceBlue ? "updateDot" : "failDot")
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: NSFont.systemFontSize)
+        let row = NSStackView(views: [dot, label])
+        row.orientation = .horizontal
+        row.spacing = 6
+        previewUpdateDots.append((dot, role))
+        return row
+    }
+
     /// Feed the preview the same `PopupLayout` the real popup gets; called from `AppDelegate` on every
-    /// re-render (which fires on each colour edit), so the preview repaints live. No-op if not open.
-    /// Sizes the window to the popup's fitting size (the popup uses intrinsic-width text rows, so the
-    /// content size is only known once a layout lands — hence the resize here, not at window creation).
+    /// re-render (which fires on each colour edit), so the preview repaints live. Also re-tints the mock
+    /// update dots so their `ColorRole`s track edits. No-op if not open.
     func updatePreview(_ layout: PopupLayout) {
         guard let preview = previewWindow, preview.isVisible else { return }
         previewVC.layout = layout
-        let size = previewVC.view.fittingSize
-        guard size.width > 1, size.height > 1 else { return }
-        preview.setContentSize(size)
-        previewVC.view.frame = NSRect(origin: .zero, size: size)
+        previewVC.view.frame = NSRect(origin: .zero, size: previewVC.view.fittingSize)
+        for (dot, role) in previewUpdateDots { dot.contentTintColor = ColorStore.shared.color(role) }
+        preview.layoutIfNeeded()
     }
 
     // MARK: - Layout
@@ -216,69 +261,89 @@ final class DevToolsWindowController: NSWindowController {
         swatch.translatesAutoresizingMaskIntoConstraints = false
         swatch.heightAnchor.constraint(equalToConstant: 40).isActive = true
 
-        modeControl.selectedSegment = channels.rawValue
-        modeControl.target = self
-        modeControl.action = #selector(modeChanged)
+        // Build the seven channel rows (R,G,B,H,S,B,alpha).
+        var rowViews: [NSView] = []
+        for channel in Channel.allCases {
+            let row = ChannelRow()
+            channelRows[channel] = row
 
-        // Build the four channel rows (3 colour + alpha). Each: caption | slider | 16-bit field.
-        let channelRows: [NSView] = (Array(ch) + [alpha]).enumerated().map { index, control in
-            control.caption.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
-            control.caption.alignment = .right
-            control.caption.widthAnchor.constraint(equalToConstant: 24).isActive = true
+            row.caption.stringValue = channel.caption
+            row.caption.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+            row.caption.alignment = .right
+            row.caption.widthAnchor.constraint(equalToConstant: 20).isActive = true
 
-            control.slider.minValue = 0
-            control.slider.maxValue = Self.bit16
-            control.slider.target = self
-            control.slider.action = #selector(sliderMoved(_:))
-            control.slider.tag = index
-            control.slider.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            row.slider.minValue = 0
+            row.slider.maxValue = Self.bit16
+            row.slider.target = self
+            row.slider.action = #selector(sliderMoved(_:))
+            row.slider.tag = channel.rawValue
+            row.slider.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-            control.field.formatter = Self.makeIntFormatter()
-            control.field.alignment = .right
-            control.field.target = self
-            control.field.action = #selector(fieldEdited(_:))
-            control.field.tag = index
-            control.field.widthAnchor.constraint(equalToConstant: 64).isActive = true
+            row.field.formatter = Self.makeIntFormatter()
+            row.field.alignment = .right
+            row.field.target = self
+            row.field.action = #selector(fieldEdited(_:))
+            row.field.tag = channel.rawValue
+            row.field.widthAnchor.constraint(equalToConstant: 60).isActive = true
 
-            let row = NSStackView(views: [control.caption, control.slider, control.field])
-            row.orientation = .horizontal
-            row.spacing = 8
-            row.distribution = .fill
-            return row
+            let hRow = NSStackView(views: [row.caption, row.slider, row.field])
+            hRow.orientation = .horizontal
+            hRow.spacing = 8
+            rowViews.append(hRow)
         }
 
-        let sliderStack = NSStackView(views: channelRows)
-        sliderStack.orientation = .vertical
-        sliderStack.spacing = 8
-        sliderStack.alignment = .leading
-        // Make each channel row span the full pane width so sliders stretch.
-        channelRows.forEach { $0.widthAnchor.constraint(equalTo: sliderStack.widthAnchor).isActive = true }
+        // Insert a small gap between the RGB group and the HSB group.
+        let rgbGroup = NSStackView(views: Array(rowViews[0...2]))
+        rgbGroup.orientation = .vertical; rgbGroup.spacing = 6; rgbGroup.alignment = .leading
+        let hsbGroup = NSStackView(views: Array(rowViews[3...5]))
+        hsbGroup.orientation = .vertical; hsbGroup.spacing = 6; hsbGroup.alignment = .leading
+        let alphaGroup = NSStackView(views: [rowViews[6]])
+        alphaGroup.orientation = .vertical; alphaGroup.alignment = .leading
 
-        for button in [copyButton, resetButton] {
+        // Read-outs: RGB and HEX, selectable + copy buttons.
+        for f in [rgbField, hexField] {
+            f.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            f.isSelectable = true
+            f.isBezeled = true
+            f.isEditable = false
+            f.drawsBackground = true
+        }
+        for button in [copyRGBButton, copyHexButton, resetButton] {
             button.bezelStyle = .rounded
             button.target = self
         }
-        copyButton.action = #selector(copySRGB)
+        copyRGBButton.action = #selector(copyRGB)
+        copyHexButton.action = #selector(copyHex)
         resetButton.action = #selector(resetCurrent)
-        let buttonRow = NSStackView(views: [copyButton, resetButton])
-        buttonRow.spacing = 8
 
-        editorControls = [modeControl, copyButton, resetButton]
-            + (Array(ch) + [alpha]).flatMap { [$0.slider, $0.field] as [NSControl] }
+        let rgbReadout = NSStackView(views: [NSTextField(labelWithString: "RGB"), rgbField, copyRGBButton])
+        rgbReadout.spacing = 8
+        let hexReadout = NSStackView(views: [NSTextField(labelWithString: "HEX"), hexField, copyHexButton])
+        hexReadout.spacing = 8
 
         let stack = NSStackView(views: [
-            titleLabel, usageLabel, distortionLabel, swatch, modeControl, sliderStack, buttonRow,
+            titleLabel, usageLabel, distortionLabel, swatch,
+            rgbGroup, hsbGroup, alphaGroup,
+            rgbReadout, hexReadout, resetButton,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
-        stack.setCustomSpacing(16, after: distortionLabel)
-        stack.setCustomSpacing(16, after: swatch)
+        stack.setCustomSpacing(14, after: distortionLabel)
+        stack.setCustomSpacing(14, after: swatch)
+        stack.setCustomSpacing(12, after: rgbGroup)
+        stack.setCustomSpacing(12, after: alphaGroup)
 
-        // Full-width children.
-        [usageLabel, distortionLabel, swatch, sliderStack].forEach {
+        for group in [rgbGroup, hsbGroup, alphaGroup, rgbReadout, hexReadout] {
+            group.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        [usageLabel, distortionLabel, swatch].forEach {
             $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
+        rowViews.forEach { $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+
+        editorControls = [copyRGBButton, copyHexButton, resetButton]
+            + Channel.allCases.compactMap { channelRows[$0] }.flatMap { [$0.slider, $0.field] as [NSControl] }
         return stack
     }
 
@@ -333,6 +398,7 @@ final class DevToolsWindowController: NSWindowController {
             distortionLabel.isHidden = true
             swatch.layer?.backgroundColor = NSColor.clear.cgColor
             editorControls.forEach { $0.isEnabled = false }
+            rgbField.stringValue = ""; hexField.stringValue = ""
             resetAllButton.isEnabled = ColorStore.shared.hasAnyOverride
             return
         }
@@ -361,52 +427,80 @@ final class DevToolsWindowController: NSWindowController {
         return resolved
     }
 
-    /// Push a colour into the swatch, sliders, and 16-bit fields (without triggering edit callbacks).
+    /// Push a colour into the swatch, all six sliders + fields, their gradient ribbons, and the RGB/HEX
+    /// read-outs (without triggering edit callbacks).
     private func syncControls(to color: NSColor) {
         isSyncing = true
         defer { isSyncing = false }
-        swatch.layer?.backgroundColor = color.cgColor
+        let c = color.usingColorSpace(.sRGB) ?? color
+        swatch.layer?.backgroundColor = c.cgColor
 
-        let values: [CGFloat]
-        switch channels {
-        case .rgb:
-            ch[0].caption.stringValue = "R"; ch[1].caption.stringValue = "G"; ch[2].caption.stringValue = "B"
-            values = [color.redComponent, color.greenComponent, color.blueComponent]
-        case .hsb:
-            ch[0].caption.stringValue = "H"; ch[1].caption.stringValue = "S"; ch[2].caption.stringValue = "B"
-            values = [color.hueComponent, color.saturationComponent, color.brightnessComponent]
-        }
-        alpha.caption.stringValue = "A"
-        for (i, v) in (values + [color.alphaComponent]).enumerated() {
-            let control = i < 3 ? ch[i] : alpha
+        let value: [Channel: CGFloat] = [
+            .r: c.redComponent, .g: c.greenComponent, .b: c.blueComponent,
+            .h: c.hueComponent, .s: c.saturationComponent, .brightness: c.brightnessComponent,
+            .alpha: c.alphaComponent,
+        ]
+        for channel in Channel.allCases {
+            guard let row = channelRows[channel], let v = value[channel] else { continue }
             let scaled = Double(v) * Self.bit16
-            control.slider.doubleValue = scaled
-            control.field.integerValue = Int(scaled.rounded())
+            row.slider.doubleValue = scaled
+            row.field.integerValue = Int(scaled.rounded())
+            row.slider.gradientColors = gradientStops(for: channel, base: c)
+        }
+
+        let (r, g, b) = (Int((c.redComponent * 255).rounded()),
+                         Int((c.greenComponent * 255).rounded()),
+                         Int((c.blueComponent * 255).rounded()))
+        rgbField.stringValue = "\(r), \(g), \(b)"
+        hexField.stringValue = String(format: "#%02X%02X%02X", r, g, b)
+    }
+
+    /// The gradient ribbon for one channel: the colour swept across that channel's full range while the
+    /// other channels stay at `base`. Rebuilt on every sync so each ribbon reflects the current colour.
+    private func gradientStops(for channel: Channel, base: NSColor) -> [NSColor] {
+        let steps = 8
+        let r = base.redComponent, g = base.greenComponent, b = base.blueComponent, a = base.alphaComponent
+        let h = base.hueComponent, s = base.saturationComponent, br = base.brightnessComponent
+        return (0...steps).map { i in
+            let t = CGFloat(i) / CGFloat(steps)
+            switch channel {
+            case .r: return NSColor(srgbRed: t, green: g, blue: b, alpha: 1)
+            case .g: return NSColor(srgbRed: r, green: t, blue: b, alpha: 1)
+            case .b: return NSColor(srgbRed: r, green: g, blue: t, alpha: 1)
+            case .h: return NSColor(hue: t, saturation: max(s, 0.01), brightness: max(br, 0.2), alpha: 1)
+            case .s: return NSColor(hue: h, saturation: t, brightness: max(br, 0.2), alpha: 1)
+            case .brightness: return NSColor(hue: h, saturation: s, brightness: t, alpha: 1)
+            case .alpha: return NSColor(srgbRed: r, green: g, blue: b, alpha: t)
+            }
         }
     }
 
-    /// Read the four controls back into a colour in the current channel model.
-    private func colorFromControls() -> NSColor {
-        let c = ch.map { CGFloat($0.slider.doubleValue / Self.bit16) }
-        let a = CGFloat(alpha.slider.doubleValue / Self.bit16)
-        switch channels {
-        case .rgb:
-            return NSColor(srgbRed: c[0], green: c[1], blue: c[2], alpha: a)
-        case .hsb:
-            return NSColor(hue: c[0], saturation: c[1], brightness: c[2], alpha: a)
+    /// Build the edited colour. RGB is the single source of truth: when an HSB channel is moved we take
+    /// the whole colour from the three HSB sliders (so hue/sat/brightness compose correctly); otherwise
+    /// from the three RGB sliders. Alpha always comes from its own slider — moving alpha never touches
+    /// the colour channels, so it can't collapse the colour to black.
+    private func colorFromControls(edited: Channel) -> NSColor {
+        func norm(_ ch: Channel) -> CGFloat {
+            CGFloat((channelRows[ch]?.slider.doubleValue ?? 0) / Self.bit16)
         }
+        let a = norm(.alpha)
+        if edited.isHSB {
+            return NSColor(hue: norm(.h), saturation: norm(.s), brightness: norm(.brightness), alpha: a)
+        }
+        return NSColor(srgbRed: norm(.r), green: norm(.g), blue: norm(.b), alpha: a)
     }
 
-    private func applyEdit() {
+    private func applyEdit(edited: Channel) {
         guard !isSyncing, let role = selectedRole else { return }
-        let color = colorFromControls()
+        let color = colorFromControls(edited: edited)
         ColorStore.shared.set(color, for: role)   // fires onChange → live repaint
-        // Re-sync so the sibling representation (slider ↔ field, or the swatch) stays consistent.
-        syncControls(to: resolvedColor(role))
+        // Re-sync from the colour we just set (not a re-resolve of the store, which for an alpha-carrying
+        // colour is fine) so every representation — RGB, HSB, fields, ribbons, swatch — stays consistent.
+        syncControls(to: color)
         titleLabel.stringValue = role.displayName + "  ●"
         resetButton.isEnabled = true
         resetAllButton.isEnabled = true
-        tableView.reloadData()   // ● marker in the list
+        tableView.reloadData()
     }
 
     // MARK: - Actions
@@ -421,27 +515,22 @@ final class DevToolsWindowController: NSWindowController {
         }
     }
 
-    @objc private func modeChanged() {
-        channels = Channels(rawValue: modeControl.selectedSegment) ?? .rgb
-        if let role = selectedRole { syncControls(to: resolvedColor(role)) }
+    @objc private func sliderMoved(_ sender: NSSlider) {
+        guard let channel = Channel(rawValue: sender.tag) else { return }
+        applyEdit(edited: channel)
     }
-
-    @objc private func sliderMoved(_ sender: NSSlider) { applyEdit() }
 
     @objc private func fieldEdited(_ sender: NSTextField) {
-        // Mirror the typed value onto the matching slider, then apply.
-        let control = sender.tag < 3 ? ch[sender.tag] : alpha
-        control.slider.doubleValue = min(Self.bit16, max(0, Double(sender.integerValue)))
-        applyEdit()
+        guard let channel = Channel(rawValue: sender.tag) else { return }
+        channelRows[channel]?.slider.doubleValue = min(Self.bit16, max(0, Double(sender.integerValue)))
+        applyEdit(edited: channel)
     }
 
-    @objc private func copySRGB() {
-        guard let role = selectedRole else { return }
-        let color = resolvedColor(role)
-        let r = Int((color.redComponent * 255).rounded())
-        let g = Int((color.greenComponent * 255).rounded())
-        let b = Int((color.blueComponent * 255).rounded())
-        let text = "NSColor(srgbRed: \(r)/255, green: \(g)/255, blue: \(b)/255, alpha: \(String(format: "%.2f", color.alphaComponent)))"
+    @objc private func copyRGB() { copyToPasteboard(rgbField.stringValue) }
+    @objc private func copyHex() { copyToPasteboard(hexField.stringValue) }
+
+    private func copyToPasteboard(_ text: String) {
+        guard !text.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
@@ -510,8 +599,8 @@ extension DevToolsWindowController: NSTableViewDataSource, NSTableViewDelegate {
 // MARK: - NSWindowDelegate
 
 extension DevToolsWindowController: NSWindowDelegate {
-    /// Close the popup-preview window automatically when the tuner window closes, and only for the
-    /// tuner's own close (not the preview's — the preview has no delegate).
+    /// Close the popup-preview window automatically when the tuner window closes (only for the tuner's
+    /// own close — the preview has no delegate).
     func windowWillClose(_ notification: Notification) {
         guard (notification.object as? NSWindow) === window else { return }
         previewWindow?.orderOut(nil)

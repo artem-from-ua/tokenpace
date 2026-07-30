@@ -275,11 +275,19 @@ final class PopupBarView: NSView {
     /// slack early in a window, shrinking to 0 at the end. Shared with `BarLayout.severity` (Kit) so
     /// colour and severity never drift; the `< threshold` comparison is strict (a lead exactly at the
     /// threshold is orange).
-    static func aheadColor(usage: Double, time: Double, remainingSeconds: TimeInterval) -> NSColor {
-        if usage >= 1 { return Palette.gapRed }
-        if remainingSeconds <= PacingModel.pacingOrangeOverrideSeconds { return Palette.gapOrange }
-        return (usage - time) < PacingModel.aheadThreshold(timeFraction: time)
-            ? Palette.gapYellow : Palette.gapOrange
+    /// Which surface's pacing palette to resolve. The menu-bar and popup ahead-of-pace colours are
+    /// independently tunable (dev color tuner #185), so the same rung maps to a different `ColorRole`
+    /// depending on the caller. Menu-bar callers additionally lighten the result ~10 % at the draw site.
+    enum PacingSurface { case popup, menuBar }
+
+    static func aheadColor(usage: Double, time: Double, remainingSeconds: TimeInterval,
+                           surface: PacingSurface = .popup) -> NSColor {
+        let red: NSColor = surface == .popup ? Palette.gapRed : ColorStore.shared.color(.menuGapRed)
+        let yellow: NSColor = surface == .popup ? Palette.gapYellow : ColorStore.shared.color(.menuGapYellow)
+        let orange: NSColor = surface == .popup ? Palette.gapOrange : ColorStore.shared.color(.menuGapOrange)
+        if usage >= 1 { return red }
+        if remainingSeconds <= PacingModel.pacingOrangeOverrideSeconds { return orange }
+        return (usage - time) < PacingModel.aheadThreshold(timeFraction: time) ? yellow : orange
     }
 
     private func fillZone(from: Double, to: Double, in rect: NSRect, width: CGFloat, color: NSColor) {
@@ -685,10 +693,10 @@ final class PopupViewController: NSViewController {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = font
-        titleLabel.textColor = .labelColor
+        titleLabel.textColor = ColorStore.shared.color(.popupLabel)
         let statusLabel = NSTextField(labelWithString: status)
         statusLabel.font = font
-        statusLabel.textColor = .labelColor
+        statusLabel.textColor = ColorStore.shared.color(.popupLabel)
         guard let badge else {
             return addSplitRow(leftLabel: titleLabel, rightLabel: statusLabel)
         }
@@ -706,7 +714,7 @@ final class PopupViewController: NSViewController {
     /// Claude web UI puts on usage credits. Sizing comes from the text + insets; the capsule radius is
     /// half the height, so it reads as a pill at any font size.
     private static func makeInUsePill() -> NSView {
-        makePill(text: inUseBadgeText, fill: { .controlAccentColor })
+        makePill(text: inUseBadgeText, fill: { ColorStore.shared.color(.popupInUsePill) })
     }
 
     /// The blocking-reset badge (#158): a red capsule carrying the reset countdown (e.g. "4d"), shown
@@ -852,7 +860,7 @@ final class PopupViewController: NSViewController {
     @discardableResult
     private func addWarningTitle(_ text: String) -> NSView {
         let font = NSFont.boldSystemFont(ofSize: Metrics.textSize)
-        let color = NSColor.systemRed
+        let color = ColorStore.shared.color(.popupWarningRed)
         let attributed = NSMutableAttributedString()
 
         let symbolConfig = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
@@ -932,7 +940,7 @@ final class PopupViewController: NSViewController {
         let isLink = status != .operational
         let wordStart = attributed.length
         attributed.append(NSAttributedString(string: word, attributes: isLink
-            ? [.font: font, .foregroundColor: NSColor.linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
+            ? [.font: font, .foregroundColor: ColorStore.shared.color(.popupLink), .underlineStyle: NSUnderlineStyle.single.rawValue]
             : [.font: font, .foregroundColor: Self.dimmedLabelColor]))
 
         let field = StatusLineLabel(labelWithAttributedString: attributed)
@@ -949,12 +957,12 @@ final class PopupViewController: NSViewController {
     /// dark panels, exactly like the warning triangle's `.systemRed`. Exhaustive, no `default`.
     static func dotColor(_ status: ServiceStatus) -> NSColor {
         switch status {
-        case .operational:      return .systemGreen
-        case .degraded:         return .systemYellow
-        case .partialOutage:    return .systemOrange
-        case .majorOutage:      return .systemRed
-        case .underMaintenance: return .systemBlue
-        case .unknown:          return .systemGray
+        case .operational:      return ColorStore.shared.color(.popupServiceGreen)
+        case .degraded:         return ColorStore.shared.color(.popupServiceYellow)
+        case .partialOutage:    return ColorStore.shared.color(.popupServiceOrange)
+        case .majorOutage:      return ColorStore.shared.color(.popupServiceRed)
+        case .underMaintenance: return ColorStore.shared.color(.popupServiceBlue)
+        case .unknown:          return ColorStore.shared.color(.popupServiceGray)
         }
     }
 

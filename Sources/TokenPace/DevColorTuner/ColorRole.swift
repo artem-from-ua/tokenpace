@@ -29,6 +29,10 @@ enum ColorRole: String, CaseIterable {
     case menuStatusRed
     case menuStatusBlue
     case menuStatusGray
+    // Menu-bar ahead-of-pace pacing (previously shared with the popup via aheadColor; now independent).
+    case menuGapRed
+    case menuGapYellow
+    case menuGapOrange
 
     // MARK: Popup palette (PopupBarView) — appearance-aware / system, except the three ahead sRGB
 
@@ -45,6 +49,17 @@ enum ColorRole: String, CaseIterable {
 
     case popupClaudeBrand
     case popupDimmedLabel
+    case popupWarningRed
+    case popupInUsePill
+    case popupLink
+    case popupLabel
+    // Popup service-status dots — appearance-aware `.system*`, distinct from the fixed-sRGB menu dots.
+    case popupServiceGreen
+    case popupServiceYellow
+    case popupServiceOrange
+    case popupServiceRed
+    case popupServiceBlue
+    case popupServiceGray
 
     // MARK: - Grouping
 
@@ -59,15 +74,18 @@ enum ColorRole: String, CaseIterable {
 
     var group: Group {
         switch self {
-        case .menuGapGreen, .menuDotGreen, .popupGapGreen,
-             .popupGapRed, .popupGapYellow, .popupGapOrange:
+        case .menuGapGreen, .menuDotGreen, .menuGapRed, .menuGapYellow, .menuGapOrange,
+             .popupGapGreen, .popupGapRed, .popupGapYellow, .popupGapOrange:
             return .pacing
-        case .menuStatusYellow, .menuStatusOrange, .menuStatusRed, .menuStatusBlue, .menuStatusGray:
+        case .menuStatusYellow, .menuStatusOrange, .menuStatusRed, .menuStatusBlue, .menuStatusGray,
+             .popupServiceGreen, .popupServiceYellow, .popupServiceOrange,
+             .popupServiceRed, .popupServiceBlue, .popupServiceGray,
+             .popupWarningRed:
             return .service
         case .menuIndicatorStroke, .menuIdleBlue, .popupIdleBlue,
-             .popupIndicatorStroke, .popupTick, .popupMonochromeGrey:
+             .popupIndicatorStroke, .popupTick, .popupMonochromeGrey, .popupInUsePill:
             return .chrome
-        case .menuForeground, .popupDimmedLabel:
+        case .menuForeground, .popupDimmedLabel, .popupLink, .popupLabel:
             return .text
         case .menuIdleCalmGrey, .menuCalmWhite:
             return .calm
@@ -103,6 +121,19 @@ enum ColorRole: String, CaseIterable {
         case .popupMonochromeGrey: return "Popup · base grey"
         case .popupClaudeBrand:    return "Popup · Claude brand"
         case .popupDimmedLabel:    return "Popup · dimmed label"
+        case .menuGapRed:          return "Menu-bar · gap red"
+        case .menuGapYellow:       return "Menu-bar · gap yellow (amber)"
+        case .menuGapOrange:       return "Menu-bar · gap orange"
+        case .popupWarningRed:     return "Popup · warning red (⚠️)"
+        case .popupInUsePill:      return "Popup · \"in use\" pill"
+        case .popupLink:           return "Popup · link"
+        case .popupLabel:          return "Popup · label"
+        case .popupServiceGreen:   return "Popup · service green (operational)"
+        case .popupServiceYellow:  return "Popup · service yellow (degraded)"
+        case .popupServiceOrange:  return "Popup · service orange (partial outage)"
+        case .popupServiceRed:     return "Popup · service red (major outage)"
+        case .popupServiceBlue:    return "Popup · service blue (maintenance)"
+        case .popupServiceGray:    return "Popup · service grey (unknown)"
         }
     }
 
@@ -111,7 +142,7 @@ enum ColorRole: String, CaseIterable {
         switch self {
         case .menuGapGreen:
             return "Menu-bar pacing gap when on pace or behind (via calmedGapColor). Ahead-of-pace "
-                 + "colours come from the popup palette through PopupBarView.aheadColor, not here."
+                 + "colours are the separate Menu-bar gap red/yellow/orange roles."
         case .menuDotGreen:
             return "Menu-bar time-indicator dot when on pace; also the credits ¤ icon when on pace / behind."
         case .menuIndicatorStroke:
@@ -139,12 +170,11 @@ enum ColorRole: String, CaseIterable {
         case .popupIdleBlue:
             return "Popup idle 5-hour bar fill (ready-to-start). Blocked idle uses the base grey instead."
         case .popupGapRed:
-            return "Popup pacing gap when the limit is exhausted; also the blocking reset-time pill (#158). "
-                 + "Shared with the menu bar via PopupBarView.aheadColor."
+            return "Popup pacing gap when the limit is exhausted; also the blocking reset-time pill (#158)."
         case .popupGapYellow:
-            return "Popup pacing gap for a mild ahead-of-pace lead (< threshold). Shared with the menu bar."
+            return "Popup pacing gap for a mild ahead-of-pace lead (< threshold)."
         case .popupGapOrange:
-            return "Popup pacing gap for a strong ahead-of-pace lead / little time to reset. Shared with the menu bar."
+            return "Popup pacing gap for a strong ahead-of-pace lead / little time to reset."
         case .popupIndicatorStroke:
             return "Soft ring stroked around the popup indicator dot."
         case .popupTick:
@@ -155,6 +185,33 @@ enum ColorRole: String, CaseIterable {
             return "Popup \"Claude Code\" header accent (#d97757)."
         case .popupDimmedLabel:
             return "Popup secondary / dimmed labels."
+        case .menuGapRed:
+            return "Menu-bar pacing gap / indicator when the limit is exhausted (ahead-of-pace red)."
+        case .menuGapYellow:
+            return "Menu-bar pacing gap / indicator for a mild ahead-of-pace lead (< threshold)."
+        case .menuGapOrange:
+            return "Menu-bar pacing gap / indicator for a strong ahead-of-pace lead / little time to reset."
+        case .popupWarningRed:
+            return "Popup error banner: the ⚠️ title and message text when a poll is failing. Default systemRed."
+        case .popupInUsePill:
+            return "Popup \"in use\" pill fill beside the header when credits are actively spending (#146). "
+                 + "Default controlAccentColor."
+        case .popupLink:
+            return "Popup service-status word rendered as a link to the status page. Default linkColor."
+        case .popupLabel:
+            return "Popup primary titles and value text. Default labelColor."
+        case .popupServiceGreen:
+            return "Popup service-status dot: operational. Default systemGreen."
+        case .popupServiceYellow:
+            return "Popup service-status dot: degraded. Default systemYellow."
+        case .popupServiceOrange:
+            return "Popup service-status dot: partial outage. Default systemOrange."
+        case .popupServiceRed:
+            return "Popup service-status dot: major outage. Default systemRed."
+        case .popupServiceBlue:
+            return "Popup service-status dot: under maintenance. Default systemBlue."
+        case .popupServiceGray:
+            return "Popup service-status dot: unknown. Default systemGray."
         }
     }
 
@@ -172,8 +229,8 @@ enum ColorRole: String, CaseIterable {
         case .popupIdleBlue:
             return "Default is systemBlue desaturated ~15% toward grey, and additionally ~22% toward white "
                  + "on the light theme (computed per-appearance). A picked colour replaces this provider flat."
-        case .popupGapRed, .popupGapYellow, .popupGapOrange:
-            return "Drawn as-is in the popup; lightened ~10% when it reaches the menu bar via aheadColor."
+        case .menuGapRed, .menuGapYellow, .menuGapOrange:
+            return "Lightened ~10% toward white at the menu-bar draw site (aheadColor → lightened)."
         case .popupIndicatorStroke:
             return "Default carries alpha (0.4 dark / 0.65 light) and is appearance-aware; a picked colour "
                  + "replaces the provider flat."
@@ -183,6 +240,10 @@ enum ColorRole: String, CaseIterable {
             return "Default is tertiaryLabelColor blended 50% toward secondaryLabelColor (per-appearance)."
         case .menuForeground:
             return "Default is the dynamic labelColor; a picked colour replaces it flat."
+        case .popupLink, .popupLabel, .popupInUsePill, .popupWarningRed,
+             .popupServiceGreen, .popupServiceYellow, .popupServiceOrange,
+             .popupServiceRed, .popupServiceBlue, .popupServiceGray:
+            return "Default is a dynamic system colour; a picked colour replaces it flat."
         default:
             return nil
         }
@@ -217,6 +278,22 @@ enum ColorRole: String, CaseIterable {
         case .popupMonochromeGrey: return PopupBarView.defaultMonochromeGrey
         case .popupClaudeBrand:    return NSColor(srgbRed: 0xd9/255, green: 0x77/255, blue: 0x57/255, alpha: 1)
         case .popupDimmedLabel:    return PopupViewController.defaultDimmedLabel
+        // Menu-bar ahead-of-pace pacing — start from the same values the popup uses (they were shared
+        // until now); tune independently from here. Fixed sRGB (non-template menu-bar image).
+        case .menuGapRed:          return NSColor(srgbRed: 225/255, green: 45/255, blue: 35/255, alpha: 1)
+        case .menuGapYellow:       return NSColor(srgbRed: 230/255, green: 180/255, blue: 25/255, alpha: 1)
+        case .menuGapOrange:       return NSColor(srgbRed: 248/255, green: 118/255, blue: 15/255, alpha: 1)
+        // Popup extras / system colours.
+        case .popupWarningRed:     return .systemRed
+        case .popupInUsePill:      return .controlAccentColor
+        case .popupLink:           return .linkColor
+        case .popupLabel:          return .labelColor
+        case .popupServiceGreen:   return .systemGreen
+        case .popupServiceYellow:  return .systemYellow
+        case .popupServiceOrange:  return .systemOrange
+        case .popupServiceRed:     return .systemRed
+        case .popupServiceBlue:    return .systemBlue
+        case .popupServiceGray:    return .systemGray
         }
     }
 }

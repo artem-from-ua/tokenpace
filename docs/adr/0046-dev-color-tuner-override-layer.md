@@ -50,6 +50,17 @@ Override-и **ephemeral**: тримаються в памʼяті, не перс
 кольору смикає `onChange` → `AppDelegate.reRenderForCurrentTime()`, що ре-снапшотить menu-bar і
 перебудовує popup за один прохід (той самий шлях, що вже використовує toggle «Calm colors»).
 
+## Уточнення D2: розділення menu-bar / popup pacing
+
+Спершу ahead-of-pace кольори (yellow/orange/red) були single-source у `PopupBarView.aheadColor`, і
+menu-bar тягнув їх крос-файлово. Для тюнера це означало, що один повзунок керує обома поверхнями —
+джерело плутанини («де окремий menu-bar червоний?»). **Рішення:** розділити — додати окремі
+`menuGapRed/Yellow/Orange` і параметризувати `aheadColor` за `PacingSurface { popup, menuBar }`.
+Menu-bar-виклики передають `.menuBar` (і додатково лайтенять ~10%), popup — `.popup`. Дефолти
+menu-констант стартують з тих самих значень, що popup (щоб вигляд не змінився), далі тюняться
+незалежно. Каталог також розширено до ~35 ролей — додано popup service-доти (окремі appearance-aware
+`.system*`, на відміну від fixed-sRGB menu-дотів), popup warning red, «in use» pill, link, label.
+
 ## Наслідки
 
 - **+** Живий підбір будь-якого з ~20 кольорів без перезбірки; єдиний каталог ролей із назвами,

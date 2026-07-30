@@ -256,9 +256,13 @@ grouped-inset карток доводиться скриншотами light+dar
 
 ### Development tools — колор-тюнер (#185)
 
-Dev-інструмент підбору кольорів: вікно з дропдауном усіх іменованих кольорових ролей + **вбудований
-inline-пікер** у правій панелі (swatch + RGB/HSB-повзунки + редаговані 16-бітні поля 0–65535 + alpha),
-що **наживо** перемальовує menu-bar іконку й popup. Гейт — **`TOKENPACE_DEVTOOLS`**
+Dev-інструмент підбору кольорів: вікно з дропдауном усіх ~35 іменованих кольорових ролей (menu-bar і
+popup pacing **розділені**; є popup service-доти, warning red, «in use» pill, link, label) + **вбудований
+inline-пікер** у правій панелі — усі 6 каналів (RGB **і** HSB) разом, над кожним повзунком динамічна
+градієнт-стрічка, редаговані 16-бітні поля 0–65535 + alpha, живі копійовані RGB(0–255)+HEX readout-и.
+Перемальовує menu-bar іконку й popup-preview **наживо**. У preview-вікні під popup — два mock-рядки
+(синя «New update available» / червона «Automatic update failed») для підбору відповідних кольорів.
+Гейт — **`TOKENPACE_DEVTOOLS`**
 (непорожнє значення) **плюс** затиснутий ⌥ Option на пункті меню «Development tools…». Незалежить від
 типу білда (dev / notarized / release): гейт — env-var, не `#if DEBUG`. Override-и **ephemeral** (не
 персистяться); без env-var шар кольорів інертний (завжди дефолти).
