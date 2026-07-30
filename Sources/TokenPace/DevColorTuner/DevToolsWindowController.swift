@@ -5,10 +5,12 @@ import TokenPaceKit
 /// from the list, adjust it with the embedded picker in the right pane, and the menu-bar icon and the
 /// popup-preview window repaint immediately via ``ColorStore``'s `onChange`.
 ///
-/// The picker is inline (no floating `NSColorPanel`). It shows **all six channels at once** — R, G, B
-/// and H, S, B — each with a live gradient ribbon (``GradientSlider``) over its slider and an editable
-/// 16-bit field (0–65535), plus alpha. Live RGB (0–255) and HEX read-outs sit below, selectable and
-/// copyable. Editing any channel updates every other representation and repaints the UI live.
+/// The picker is inline (no floating `NSColorPanel`). It shows the channels grouped as RGB, HSB, and
+/// perceptual (LAB **L\*** lightness / LCH **C** chroma), each with a live gradient ribbon
+/// (``GradientSlider``) over its slider and an editable 16-bit field (0–65535). A "Lock hue + saturation"
+/// switch pins the colour identity so only tone changes. Editable RGB (0–255) and HEX read-outs sit
+/// below, plus WCAG contrast against light/dark menu bars and the popup background. Editing any channel
+/// updates every other representation and repaints the UI live.
 ///
 /// Gated the same way as its menu item: only reachable when `TOKENPACE_DEVTOOLS` is set and ⌥ Option is
 /// held to reveal the entry. Overrides are ephemeral — nothing is persisted; quitting restores defaults.
@@ -19,26 +21,32 @@ import TokenPaceKit
 final class DevToolsWindowController: NSWindowController {
 
     private enum Metrics {
-        static let startSize = NSSize(width: 820, height: 640)
-        static let minSize = NSSize(width: 760, height: 560)
+        static let startSize = NSSize(width: 820, height: 780)
+        static let minSize = NSSize(width: 760, height: 680)
         static let padding: CGFloat = 16
         static let listWidth: CGFloat = 260
     }
 
     private enum Sort: Int { case byGroup = 0, alphabetical = 1 }
     private static let bit16 = 65535.0
+    /// Nominal ranges of the perceptual channels (mapped onto the shared 0–65535 slider/field scale).
+    private static let lStarMax = 100.0    // LAB L* 0–100
+    private static let chromaMax = 132.0   // LCH chroma 0–~132 (sRGB gamut)
 
-    /// The six channels shown together, in draw order. R/G/B are sRGB components; H/S/B are HSB. Colour
-    /// roles here are always opaque (alpha 1), so there is no alpha channel.
+    /// The channels shown together, in draw order. R/G/B are sRGB components; H/S/B are HSB; L*/C are
+    /// perceptual (LAB lightness / LCH chroma). Colour roles here are always opaque (alpha 1).
     private enum Channel: Int, CaseIterable {
-        case r, g, b, h, s, brightness
+        case r, g, b, h, s, brightness, lStar, chroma
         var caption: String {
             switch self {
             case .r: return "R"; case .g: return "G"; case .b: return "B"
             case .h: return "H"; case .s: return "S"; case .brightness: return "B "
+            case .lStar: return "L*"; case .chroma: return "C"
             }
         }
         var isHSB: Bool { self == .h || self == .s || self == .brightness }
+        var isPerceptual: Bool { self == .lStar || self == .chroma }
+        var isRGB: Bool { self == .r || self == .g || self == .b }
     }
 
     private var sort: Sort = .byGroup
@@ -52,6 +60,11 @@ final class DevToolsWindowController: NSWindowController {
     /// colour couldn't be recovered. RGB shown in the read-outs/store is derived from this. Each of H, S,
     /// B, A is an independent slider: brightness moves brightness only, saturation stays put.
     private var workH: CGFloat = 0, workS: CGFloat = 0, workB: CGFloat = 0
+
+    /// When on, every edit pins hue and saturation to `lockedH`/`lockedS`, so only brightness/lightness
+    /// changes — for tuning tone while keeping the colour identity. Captured when the lock is switched on.
+    private var lockHueSat = false
+    private var lockedH: CGFloat = 0, lockedS: CGFloat = 0
 
     private let tableView = NSTableView()
     private let sortControl = NSSegmentedControl(labels: ["By group", "A–Z"],
@@ -75,6 +88,14 @@ final class DevToolsWindowController: NSWindowController {
     // Live read-outs (selectable so the value can be copied directly).
     private let rgbField = NSTextField(labelWithString: "")
     private let hexField = NSTextField(labelWithString: "")
+
+    /// "Lock hue + saturation" — pins H/S so only tone changes.
+    private let lockButton = NSButton(checkboxWithTitle: "Lock hue + saturation", target: nil, action: nil)
+
+    /// WCAG contrast read-outs of the current colour against three reference backdrops.
+    private let contrastLightLabel = NSTextField(labelWithString: "")
+    private let contrastDarkLabel = NSTextField(labelWithString: "")
+    private let contrastPopupLabel = NSTextField(labelWithString: "")
 
     private let copyRGBButton = NSButton(title: "Copy RGB", target: nil, action: nil)
     private let copyHexButton = NSButton(title: "Copy HEX", target: nil, action: nil)
@@ -180,28 +201,32 @@ final class DevToolsWindowController: NSWindowController {
         footer.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 12, right: 14)
         footer.translatesAutoresizingMaskIntoConstraints = false
 
-        // Own heading, styled like a native window title bar (the window is borderless, so there is no
-        // real title bar): the system title-bar font at its standard size and `labelColor`, centred.
-        let heading = NSTextField(labelWithString: "Popup Preview")
-        heading.font = NSFont.titleBarFont(ofSize: NSFont.systemFontSize)
-        heading.textColor = .labelColor
-        heading.alignment = .center
-        heading.translatesAutoresizingMaskIntoConstraints = false
+        // Title-bar plaque across the top (the window is borderless — no real title bar). Both the plaque
+        // and the container background are theme-adaptive (layer-backed, re-resolved in updateLayer), so
+        // the preview follows light ↔ dark instead of freezing at the launch appearance.
+        let plaque = TitlePlaqueView(title: "Popup Preview")
+        plaque.translatesAutoresizingMaskIntoConstraints = false
+        let plaqueDivider = NSBox()
+        plaqueDivider.boxType = .separator
+        plaqueDivider.translatesAutoresizingMaskIntoConstraints = false
 
-        let container = NSView()
-        container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        container.layer?.cornerRadius = Self.menuPopupCornerRadius(for: window)
-        container.layer?.masksToBounds = true
-        container.addSubview(heading)
+        let container = ThemedFillView()
+        container.fillColor = .windowBackgroundColor
+        container.cornerRadius = Self.menuPopupCornerRadius(for: window)
+        container.addSubview(plaque)
+        container.addSubview(plaqueDivider)
         container.addSubview(previewVC.view)
         container.addSubview(footer)
         NSLayoutConstraint.activate([
-            heading.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
-            heading.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            heading.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            plaque.topAnchor.constraint(equalTo: container.topAnchor),
+            plaque.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            plaque.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
-            previewVC.view.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: 8),
+            plaqueDivider.topAnchor.constraint(equalTo: plaque.bottomAnchor),
+            plaqueDivider.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            plaqueDivider.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+
+            previewVC.view.topAnchor.constraint(equalTo: plaqueDivider.bottomAnchor, constant: 6),
             previewVC.view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             previewVC.view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
@@ -321,8 +346,8 @@ final class DevToolsWindowController: NSWindowController {
         swatch.translatesAutoresizingMaskIntoConstraints = false
         swatch.heightAnchor.constraint(equalToConstant: 40).isActive = true
 
-        // Build the seven channel rows (R,G,B,H,S,B,alpha).
-        var rowViews: [NSView] = []
+        // Build one row (caption | gradient slider | 16-bit field) per channel.
+        var rowViews: [Channel: NSView] = [:]
         for channel in Channel.allCases {
             let row = ChannelRow()
             channelRows[channel] = row
@@ -330,7 +355,7 @@ final class DevToolsWindowController: NSWindowController {
             row.caption.stringValue = channel.caption
             row.caption.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
             row.caption.alignment = .right
-            row.caption.widthAnchor.constraint(equalToConstant: 20).isActive = true
+            row.caption.widthAnchor.constraint(equalToConstant: 24).isActive = true
 
             row.slider.minValue = 0
             row.slider.maxValue = Self.bit16
@@ -349,17 +374,32 @@ final class DevToolsWindowController: NSWindowController {
             let hRow = NSStackView(views: [row.caption, row.slider, row.field])
             hRow.orientation = .horizontal
             hRow.spacing = 8
-            rowViews.append(hRow)
+            rowViews[channel] = hRow
         }
 
-        // Split into the RGB group and the HSB group, with a gap between them. `rowViews` is in
-        // `Channel.allCases` order, so partition by `isHSB` rather than hardcoded indices.
-        let rgbRows = zip(Channel.allCases, rowViews).filter { !$0.0.isHSB }.map { $0.1 }
-        let hsbRows = zip(Channel.allCases, rowViews).filter { $0.0.isHSB }.map { $0.1 }
-        let rgbGroup = NSStackView(views: rgbRows)
-        rgbGroup.orientation = .vertical; rgbGroup.spacing = 6; rgbGroup.alignment = .leading
-        let hsbGroup = NSStackView(views: hsbRows)
-        hsbGroup.orientation = .vertical; hsbGroup.spacing = 6; hsbGroup.alignment = .leading
+        // Three channel groups: RGB, HSB, and perceptual (L*/C). Partition by the `Channel` flags so the
+        // rows never depend on hardcoded indices.
+        func group(_ filter: (Channel) -> Bool) -> NSStackView {
+            let g = NSStackView(views: Channel.allCases.filter(filter).compactMap { rowViews[$0] })
+            g.orientation = .vertical; g.spacing = 6; g.alignment = .leading
+            return g
+        }
+        func sectionHeader(_ text: String) -> NSTextField {
+            let h = NSTextField(labelWithString: text)
+            h.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+            h.textColor = .secondaryLabelColor
+            return h
+        }
+        let rgbGroup = group { $0.isRGB }
+        let hsbGroup = group { $0.isHSB }
+        let perceptualGroup = group { $0.isPerceptual }
+        let rgbHeader = sectionHeader("RGB")
+        let hsbHeader = sectionHeader("HSB")
+        let perceptualHeader = sectionHeader("Perceptual (LAB L* · LCH C)")
+
+        // Lock hue + saturation.
+        lockButton.target = self
+        lockButton.action = #selector(lockToggled)
 
         // Editable RGB and HEX fields: show the live value and accept typed input ("r, g, b" / "#RRGGBB").
         for f in [rgbField, hexField] {
@@ -385,28 +425,45 @@ final class DevToolsWindowController: NSWindowController {
         let hexReadout = NSStackView(views: [NSTextField(labelWithString: "HEX"), hexField, copyHexButton])
         hexReadout.spacing = 8
 
+        // WCAG contrast block.
+        for l in [contrastLightLabel, contrastDarkLabel, contrastPopupLabel] {
+            l.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        }
+        let contrastHeader = NSTextField(labelWithString: "WCAG contrast")
+        contrastHeader.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+        contrastHeader.textColor = .secondaryLabelColor
+        let contrastGroup = NSStackView(views: [contrastHeader, contrastLightLabel, contrastDarkLabel, contrastPopupLabel])
+        contrastGroup.orientation = .vertical
+        contrastGroup.spacing = 3
+        contrastGroup.alignment = .leading
+
         let stack = NSStackView(views: [
             titleLabel, usageLabel, distortionLabel, swatch,
-            rgbGroup, hsbGroup,
-            rgbReadout, hexReadout, resetButton,
+            rgbHeader, rgbGroup, hsbHeader, hsbGroup, perceptualHeader, perceptualGroup, lockButton,
+            rgbReadout, hexReadout, contrastGroup, resetButton,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
         stack.setCustomSpacing(14, after: distortionLabel)
         stack.setCustomSpacing(14, after: swatch)
+        stack.setCustomSpacing(4, after: rgbHeader)
         stack.setCustomSpacing(12, after: rgbGroup)
+        stack.setCustomSpacing(4, after: hsbHeader)
         stack.setCustomSpacing(12, after: hsbGroup)
+        stack.setCustomSpacing(4, after: perceptualHeader)
+        stack.setCustomSpacing(12, after: perceptualGroup)
+        stack.setCustomSpacing(14, after: hexReadout)
 
-        for group in [rgbGroup, hsbGroup, rgbReadout, hexReadout] {
+        for group in [rgbGroup, hsbGroup, perceptualGroup, rgbReadout, hexReadout, contrastGroup] {
             group.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         [usageLabel, distortionLabel, swatch].forEach {
             $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
-        rowViews.forEach { $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        rowViews.values.forEach { $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
 
-        editorControls = [copyRGBButton, copyHexButton, resetButton]
+        editorControls = [copyRGBButton, copyHexButton, resetButton, lockButton]
             + Channel.allCases.compactMap { channelRows[$0] }.flatMap { [$0.slider, $0.field] as [NSControl] }
         return stack
     }
@@ -513,8 +570,8 @@ final class DevToolsWindowController: NSWindowController {
         refreshControlsFromState()
     }
 
-    /// Push the retained HSBA state into the swatch, all seven sliders + fields, gradient ribbons, and
-    /// the RGB/HEX read-outs — without triggering edit callbacks. Driven off H/S/B/A so hue and
+    /// Push the retained HSB state into the swatch, all sliders + fields, gradient ribbons, the RGB/HEX
+    /// read-outs, and the contrast block — without triggering edit callbacks. Driven off H/S/B so hue and
     /// saturation are preserved even at brightness 0 (a black RGB colour has no hue to read back).
     private func refreshControlsFromState() {
         isSyncing = true
@@ -524,17 +581,26 @@ final class DevToolsWindowController: NSWindowController {
         swatch.layer?.backgroundColor = NSColor(srgbRed: c.redComponent, green: c.greenComponent,
                                                 blue: c.blueComponent, alpha: 1).cgColor
 
-        let value: [Channel: CGFloat] = [
+        // Each channel's value as a 0–1 fraction of its own range (perceptual channels are normalised).
+        let lch = ColorSpaces.lch(of: c)
+        let fraction: [Channel: CGFloat] = [
             .r: c.redComponent, .g: c.greenComponent, .b: c.blueComponent,
             .h: workH, .s: workS, .brightness: workB,
+            .lStar: lch.l / CGFloat(Self.lStarMax),
+            .chroma: min(1, lch.c / CGFloat(Self.chromaMax)),
         ]
         for channel in Channel.allCases {
-            guard let row = channelRows[channel], let v = value[channel] else { continue }
-            let scaled = Double(v) * Self.bit16
+            guard let row = channelRows[channel], let f = fraction[channel] else { continue }
+            let scaled = Double(f) * Self.bit16
             row.slider.doubleValue = scaled
             row.field.integerValue = Int(scaled.rounded())
             row.slider.gradientColors = gradientStops(for: channel)
-            row.slider.knobColor = colorAtPosition(channel, t: v)   // knob = colour at current value
+            row.slider.knobColor = colorAtPosition(channel, t: f)   // knob = colour at current value
+            // H/S are disabled while locked (they can't change independently).
+            if channel == .h || channel == .s {
+                row.slider.isEnabled = !lockHueSat && selectedRole != nil
+                row.field.isEnabled = !lockHueSat && selectedRole != nil
+            }
         }
 
         let (r, g, b) = (Int((c.redComponent * 255).rounded()),
@@ -542,6 +608,28 @@ final class DevToolsWindowController: NSWindowController {
                          Int((c.blueComponent * 255).rounded()))
         rgbField.stringValue = "\(r), \(g), \(b)"
         hexField.stringValue = String(format: "#%02X%02X%02X", r, g, b)
+        updateContrastReadouts(for: c)
+    }
+
+    /// Refresh the three WCAG contrast read-outs (vs light menu-bar, dark menu-bar, popup background).
+    private func updateContrastReadouts(for color: NSColor) {
+        let popupBG = (NSColor.windowBackgroundColor.usingColorSpace(.sRGB)) ?? .white
+        set(contrastLightLabel, label: "vs light menu-bar", ratio: ColorSpaces.contrastRatio(color, .white))
+        set(contrastDarkLabel, label: "vs dark menu-bar", ratio: ColorSpaces.contrastRatio(color, .black))
+        set(contrastPopupLabel, label: "vs popup bg", ratio: ColorSpaces.contrastRatio(color, popupBG))
+    }
+
+    private func set(_ field: NSTextField, label: String, ratio: CGFloat) {
+        let grade: String
+        let color: NSColor
+        switch ratio {
+        case 7...:   grade = "AAA"; color = .systemGreen
+        case 4.5...: grade = "AA";  color = .systemGreen
+        case 3...:   grade = "AA large"; color = .systemYellow
+        default:     grade = "fail"; color = .systemRed
+        }
+        field.stringValue = String(format: "%@: %.2f:1  %@", label, ratio, grade)
+        field.textColor = color
     }
 
     /// The gradient ribbon for one channel: the colour swept across that channel's full range while the
@@ -565,27 +653,42 @@ final class DevToolsWindowController: NSWindowController {
         case .h: return NSColor(hue: t, saturation: max(workS, 0.5), brightness: max(workB, 0.5), alpha: 1)
         case .s: return NSColor(hue: workH, saturation: t, brightness: max(workB, 0.3), alpha: 1)
         case .brightness: return NSColor(hue: workH, saturation: workS, brightness: t, alpha: 1)
+        // Perceptual: sweep L* 0–100 at the current a,b; sweep chroma 0–max at the current l,h.
+        case .lStar:
+            return ColorSpaces.withLightness(t * CGFloat(Self.lStarMax), of: base)
+        case .chroma:
+            let lch = ColorSpaces.lch(of: base)
+            return ColorSpaces.color(l: lch.l, c: t * CGFloat(Self.chromaMax), h: lch.h)
         }
     }
 
-    /// Update the retained HSB state from the edited channel only, so each slider is independent:
-    /// brightness moves brightness (saturation/hue stay), an RGB channel re-derives H/S/B from the new
-    /// RGB triple.
+    /// Update the retained HSB state from the edited channel only. H/S/B move their own component; an
+    /// RGB channel and the perceptual channels (L*/C) build a new colour and re-derive H/S/B from it.
     private func updateState(from edited: Channel) {
         func norm(_ ch: Channel) -> CGFloat { CGFloat((channelRows[ch]?.slider.doubleValue ?? 0) / Self.bit16) }
+        func adopt(_ color: NSColor) {
+            let c = color.usingColorSpace(.sRGB) ?? color
+            workH = c.hueComponent; workS = c.saturationComponent; workB = c.brightnessComponent
+        }
         switch edited {
         case .h: workH = norm(.h)
         case .s: workS = norm(.s)
         case .brightness: workB = norm(.brightness)
         case .r, .g, .b:
-            let rgb = NSColor(srgbRed: norm(.r), green: norm(.g), blue: norm(.b), alpha: 1)
-            workH = rgb.hueComponent; workS = rgb.saturationComponent; workB = rgb.brightnessComponent
+            adopt(NSColor(srgbRed: norm(.r), green: norm(.g), blue: norm(.b), alpha: 1))
+        case .lStar:
+            adopt(ColorSpaces.withLightness(norm(.lStar) * CGFloat(Self.lStarMax), of: workingColor))
+        case .chroma:
+            let lch = ColorSpaces.lch(of: workingColor)
+            adopt(ColorSpaces.color(l: lch.l, c: norm(.chroma) * CGFloat(Self.chromaMax), h: lch.h))
         }
+        // When hue+sat are locked, only tone may change: pin H/S back to the captured values.
+        if lockHueSat { workH = lockedH; workS = lockedS }
     }
 
     private func applyEdit(edited: Channel) {
         guard !isSyncing, let role = selectedRole else { return }
-        updateState(from: edited)                 // update only the edited channel in the HSBA state
+        updateState(from: edited)                 // update only the edited channel in the HSB state
         let color = workingColor                  // build the colour from the retained state
         ColorStore.shared.set(color, for: role)   // fires onChange → live repaint
         refreshControlsFromState()                // reflect the state everywhere (keeps hue at brightness 0)
@@ -610,6 +713,12 @@ final class DevToolsWindowController: NSWindowController {
     @objc private func sliderMoved(_ sender: NSSlider) {
         guard let channel = Channel(rawValue: sender.tag) else { return }
         applyEdit(edited: channel)
+    }
+
+    @objc private func lockToggled(_ sender: NSButton) {
+        lockHueSat = sender.state == .on
+        if lockHueSat { lockedH = workH; lockedS = workS }   // capture the identity to hold
+        refreshControlsFromState()                           // enable/disable H/S rows
     }
 
     @objc private func fieldEdited(_ sender: NSTextField) {
