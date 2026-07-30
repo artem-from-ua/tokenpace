@@ -28,14 +28,14 @@ final class DevToolsWindowController: NSWindowController {
     private enum Sort: Int { case byGroup = 0, alphabetical = 1 }
     private static let bit16 = 65535.0
 
-    /// The six channels shown together, in draw order. R/G/B are sRGB components; H/S/B are HSB.
+    /// The six channels shown together, in draw order. R/G/B are sRGB components; H/S/B are HSB. Colour
+    /// roles here are always opaque (alpha 1), so there is no alpha channel.
     private enum Channel: Int, CaseIterable {
-        case r, g, b, h, s, brightness, alpha
+        case r, g, b, h, s, brightness
         var caption: String {
             switch self {
             case .r: return "R"; case .g: return "G"; case .b: return "B"
             case .h: return "H"; case .s: return "S"; case .brightness: return "B "
-            case .alpha: return "A"
             }
         }
         var isHSB: Bool { self == .h || self == .s || self == .brightness }
@@ -51,7 +51,7 @@ final class DevToolsWindowController: NSWindowController {
     /// of 0 — otherwise dragging brightness to black would discard hue/sat (black has none) and the
     /// colour couldn't be recovered. RGB shown in the read-outs/store is derived from this. Each of H, S,
     /// B, A is an independent slider: brightness moves brightness only, saturation stays put.
-    private var workH: CGFloat = 0, workS: CGFloat = 0, workB: CGFloat = 0, workA: CGFloat = 1
+    private var workH: CGFloat = 0, workS: CGFloat = 0, workB: CGFloat = 0
 
     private let tableView = NSTableView()
     private let sortControl = NSSegmentedControl(labels: ["By group", "A–Z"],
@@ -186,7 +186,7 @@ final class DevToolsWindowController: NSWindowController {
         let container = NSView()
         container.wantsLayer = true
         container.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        container.layer?.cornerRadius = 8
+        container.layer?.cornerRadius = Self.menuPopupCornerRadius(for: window)
         container.layer?.masksToBounds = true
         container.addSubview(heading)
         container.addSubview(previewVC.view)
@@ -347,13 +347,14 @@ final class DevToolsWindowController: NSWindowController {
             rowViews.append(hRow)
         }
 
-        // Insert a small gap between the RGB group and the HSB group.
-        let rgbGroup = NSStackView(views: Array(rowViews[0...2]))
+        // Split into the RGB group and the HSB group, with a gap between them. `rowViews` is in
+        // `Channel.allCases` order, so partition by `isHSB` rather than hardcoded indices.
+        let rgbRows = zip(Channel.allCases, rowViews).filter { !$0.0.isHSB }.map { $0.1 }
+        let hsbRows = zip(Channel.allCases, rowViews).filter { $0.0.isHSB }.map { $0.1 }
+        let rgbGroup = NSStackView(views: rgbRows)
         rgbGroup.orientation = .vertical; rgbGroup.spacing = 6; rgbGroup.alignment = .leading
-        let hsbGroup = NSStackView(views: Array(rowViews[3...5]))
+        let hsbGroup = NSStackView(views: hsbRows)
         hsbGroup.orientation = .vertical; hsbGroup.spacing = 6; hsbGroup.alignment = .leading
-        let alphaGroup = NSStackView(views: [rowViews[6]])
-        alphaGroup.orientation = .vertical; alphaGroup.alignment = .leading
 
         // Read-outs: RGB and HEX, selectable + copy buttons.
         for f in [rgbField, hexField] {
@@ -378,7 +379,7 @@ final class DevToolsWindowController: NSWindowController {
 
         let stack = NSStackView(views: [
             titleLabel, usageLabel, distortionLabel, swatch,
-            rgbGroup, hsbGroup, alphaGroup,
+            rgbGroup, hsbGroup,
             rgbReadout, hexReadout, resetButton,
         ])
         stack.orientation = .vertical
@@ -387,9 +388,9 @@ final class DevToolsWindowController: NSWindowController {
         stack.setCustomSpacing(14, after: distortionLabel)
         stack.setCustomSpacing(14, after: swatch)
         stack.setCustomSpacing(12, after: rgbGroup)
-        stack.setCustomSpacing(12, after: alphaGroup)
+        stack.setCustomSpacing(12, after: hsbGroup)
 
-        for group in [rgbGroup, hsbGroup, alphaGroup, rgbReadout, hexReadout] {
+        for group in [rgbGroup, hsbGroup, rgbReadout, hexReadout] {
             group.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         [usageLabel, distortionLabel, swatch].forEach {
@@ -400,6 +401,15 @@ final class DevToolsWindowController: NSWindowController {
         editorControls = [copyRGBButton, copyHexButton, resetButton]
             + Channel.allCases.compactMap { channelRows[$0] }.flatMap { [$0.slider, $0.field] as [NSControl] }
         return stack
+    }
+
+    /// The corner radius of a **menu-bar pop-up** on the running macOS version, so the borderless preview
+    /// reads as the real popup rather than a plain window. The menu window class (`_NSMenuWindow`) is
+    /// private with no public metric, so this is keyed off the OS version — matched visually against a
+    /// real TokenPace menu: macOS 15 Sequoia menus use ~10 pt; macOS 26 Tahoe rounds them more (~14 pt).
+    private static func menuPopupCornerRadius(for referenceWindow: NSWindow?) -> CGFloat {
+        if #available(macOS 26.0, *) { return 14 }
+        return 10   // macOS 11–15
     }
 
     private static func makeIntFormatter() -> NumberFormatter {
@@ -484,14 +494,14 @@ final class DevToolsWindowController: NSWindowController {
 
     /// The current working colour, built from the retained HSBA state.
     private var workingColor: NSColor {
-        NSColor(hue: workH, saturation: workS, brightness: workB, alpha: workA)
+        NSColor(hue: workH, saturation: workS, brightness: workB, alpha: 1)
     }
 
     /// Load a colour into the retained HSBA state, then refresh every control from that state.
     private func syncControls(to color: NSColor) {
         let c = color.usingColorSpace(.sRGB) ?? color
         workH = c.hueComponent; workS = c.saturationComponent
-        workB = c.brightnessComponent; workA = c.alphaComponent
+        workB = c.brightnessComponent
         refreshControlsFromState()
     }
 
@@ -508,7 +518,7 @@ final class DevToolsWindowController: NSWindowController {
 
         let value: [Channel: CGFloat] = [
             .r: c.redComponent, .g: c.greenComponent, .b: c.blueComponent,
-            .h: workH, .s: workS, .brightness: workB, .alpha: workA,
+            .h: workH, .s: workS, .brightness: workB,
         ]
         for channel in Channel.allCases {
             guard let row = channelRows[channel], let v = value[channel] else { continue }
@@ -516,6 +526,7 @@ final class DevToolsWindowController: NSWindowController {
             row.slider.doubleValue = scaled
             row.field.integerValue = Int(scaled.rounded())
             row.slider.gradientColors = gradientStops(for: channel)
+            row.slider.knobColor = colorAtPosition(channel, t: v)   // knob = colour at current value
         }
 
         let (r, g, b) = (Int((c.redComponent * 255).rounded()),
@@ -530,34 +541,36 @@ final class DevToolsWindowController: NSWindowController {
     /// shown even when brightness is 0.
     private func gradientStops(for channel: Channel) -> [NSColor] {
         let steps = 8
+        return (0...steps).map { colorAtPosition(channel, t: CGFloat($0) / CGFloat(steps)) }
+    }
+
+    /// The colour a channel produces at fraction `t` of its range, other channels held at the retained
+    /// state — used for both the ribbon stops and the knob fill (so knob and ribbon always agree).
+    private func colorAtPosition(_ channel: Channel, t: CGFloat) -> NSColor {
         let base = workingColor.usingColorSpace(.sRGB) ?? workingColor
         let r = base.redComponent, g = base.greenComponent, b = base.blueComponent
-        return (0...steps).map { i in
-            let t = CGFloat(i) / CGFloat(steps)
-            switch channel {
-            case .r: return NSColor(srgbRed: t, green: g, blue: b, alpha: 1)
-            case .g: return NSColor(srgbRed: r, green: t, blue: b, alpha: 1)
-            case .b: return NSColor(srgbRed: r, green: g, blue: t, alpha: 1)
-            case .h: return NSColor(hue: t, saturation: max(workS, 0.5), brightness: max(workB, 0.5), alpha: 1)
-            case .s: return NSColor(hue: workH, saturation: t, brightness: max(workB, 0.3), alpha: 1)
-            case .brightness: return NSColor(hue: workH, saturation: workS, brightness: t, alpha: 1)
-            case .alpha: return NSColor(srgbRed: r, green: g, blue: b, alpha: t)
-            }
+        switch channel {
+        case .r: return NSColor(srgbRed: t, green: g, blue: b, alpha: 1)
+        case .g: return NSColor(srgbRed: r, green: t, blue: b, alpha: 1)
+        case .b: return NSColor(srgbRed: r, green: g, blue: t, alpha: 1)
+        // Knob/ribbon for H/S use eased minimums so a colour is visible; the brightness ramp is literal.
+        case .h: return NSColor(hue: t, saturation: max(workS, 0.5), brightness: max(workB, 0.5), alpha: 1)
+        case .s: return NSColor(hue: workH, saturation: t, brightness: max(workB, 0.3), alpha: 1)
+        case .brightness: return NSColor(hue: workH, saturation: workS, brightness: t, alpha: 1)
         }
     }
 
-    /// Update the retained HSBA state from the edited channel only, so each slider is independent:
+    /// Update the retained HSB state from the edited channel only, so each slider is independent:
     /// brightness moves brightness (saturation/hue stay), an RGB channel re-derives H/S/B from the new
-    /// RGB triple, alpha moves alpha alone.
+    /// RGB triple.
     private func updateState(from edited: Channel) {
         func norm(_ ch: Channel) -> CGFloat { CGFloat((channelRows[ch]?.slider.doubleValue ?? 0) / Self.bit16) }
         switch edited {
         case .h: workH = norm(.h)
         case .s: workS = norm(.s)
         case .brightness: workB = norm(.brightness)
-        case .alpha: workA = norm(.alpha)
         case .r, .g, .b:
-            let rgb = NSColor(srgbRed: norm(.r), green: norm(.g), blue: norm(.b), alpha: workA)
+            let rgb = NSColor(srgbRed: norm(.r), green: norm(.g), blue: norm(.b), alpha: 1)
             workH = rgb.hueComponent; workS = rgb.saturationComponent; workB = rgb.brightnessComponent
         }
     }
