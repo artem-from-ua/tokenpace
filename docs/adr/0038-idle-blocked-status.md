@@ -7,6 +7,10 @@ date: 2026-07-26
 
 > Частково заміщає [ADR-0027](0027-session-idle-no-phantom-reset.md) (idle як завжди-синій «ready to
 > start»). Реалізовано в [#158](https://github.com/artem-from-ua/tokenpace/issues/158).
+>
+> **Уточнення:** [ADR-0048](0048-red-reset-badge-while-credits-cover.md) розширює §D3 — червоний бейдж
+> ресету з'являється тепер не лише коли `isBlocked`, а й коли підписковий ліміт вичерпано, а кредити
+> його покривають (#193).
 
 ## Контекст
 

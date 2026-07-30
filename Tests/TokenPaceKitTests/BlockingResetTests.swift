@@ -101,6 +101,98 @@ struct IsBlockedTests {
     }
 }
 
+// MARK: - CreditsPacing.subscriptionExhaustedWhileCovered (#193)
+
+@Suite("CreditsPacing.subscriptionExhaustedWhileCovered")
+struct SubscriptionExhaustedWhileCoveredTests {
+    private let now = Date(timeIntervalSince1970: 1_000_000)
+    private func iso(_ seconds: TimeInterval) -> String {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]
+        return f.string(from: now.addingTimeInterval(seconds))
+    }
+    private func active(fiveDayUtil: Double, sevenDayUtil: Double, spend: SpendInfo?) -> UsageSnapshot {
+        UsageSnapshot(
+            fiveHour: UsageWindow(utilization: fiveDayUtil, resetsAt: iso(2 * 3600)),
+            sevenDay: UsageWindow(utilization: sevenDayUtil, resetsAt: iso(4 * 24 * 3600)),
+            spend: spend)
+    }
+    private let cover = SpendInfo(enabled: true, spendLimitReached: false)
+
+    @Test func mainExhaustedAndCreditsCoverIsTrue() {
+        #expect(CreditsPacing.subscriptionExhaustedWhileCovered(
+            in: active(fiveDayUtil: 100, sevenDayUtil: 40, spend: cover)))
+    }
+
+    @Test func mainWithQuotaIsFalseEvenWithCredits() {
+        // No subscription limit exhausted → nothing to badge, even though credits are enabled.
+        #expect(!CreditsPacing.subscriptionExhaustedWhileCovered(
+            in: active(fiveDayUtil: 30, sevenDayUtil: 40, spend: cover)))
+    }
+
+    @Test func exhaustedWithoutCoverIsFalse() {
+        // Exhausted but credits cannot cover → this is the *blocked* half (`isBlocked`), not this one.
+        #expect(!CreditsPacing.subscriptionExhaustedWhileCovered(
+            in: active(fiveDayUtil: 100, sevenDayUtil: 40, spend: nil)))
+    }
+
+    @Test func mutuallyExclusiveWithIsBlocked() {
+        // The two predicates split `mainWindowExhausted` on cover, so they never both hold.
+        let covered = active(fiveDayUtil: 100, sevenDayUtil: 100, spend: cover)
+        let capped = active(fiveDayUtil: 100, sevenDayUtil: 100,
+                            spend: SpendInfo(enabled: false, spendLimitReached: true))
+        #expect(CreditsPacing.subscriptionExhaustedWhileCovered(in: covered)
+                && !CreditsPacing.isBlocked(in: covered))
+        #expect(!CreditsPacing.subscriptionExhaustedWhileCovered(in: capped)
+                && CreditsPacing.isBlocked(in: capped))
+    }
+}
+
+// MARK: - BlockingReset.forSubscriptionExhausted (#193)
+
+@Suite("BlockingReset.forSubscriptionExhausted")
+struct ForSubscriptionExhaustedTests {
+    private let now = Date(timeIntervalSince1970: 1_000_000)
+    private func iso(_ seconds: TimeInterval) -> String {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]
+        return f.string(from: now.addingTimeInterval(seconds))
+    }
+    private let cover = SpendInfo(enabled: true, spendLimitReached: false)
+
+    @Test func picksLatestExhaustedToken() {
+        // Both 5h and 7d exhausted; the 7-day reset (4d) is later than the 5-hour reset (2h), so the
+        // latest-token rule badges the 7-day row (index 1) — never the far-off credits reset.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 100, resetsAt: iso(2 * 3600)),
+            sevenDay: UsageWindow(utilization: 100, resetsAt: iso(4 * 24 * 3600)),
+            spend: cover)
+        #expect(BlockingReset.forSubscriptionExhausted(snapshot: snap, now: now)
+                == .token(id: 1, resetsAt: now.addingTimeInterval(4 * 24 * 3600)))
+    }
+
+    @Test func onlyFiveHourExhaustedPicksFiveHour() {
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 100, resetsAt: iso(2 * 3600)),
+            sevenDay: UsageWindow(utilization: 40, resetsAt: iso(4 * 24 * 3600)),
+            spend: cover)
+        #expect(BlockingReset.forSubscriptionExhausted(snapshot: snap, now: now)
+                == .token(id: 0, resetsAt: now.addingTimeInterval(2 * 3600)))
+    }
+
+    @Test func neverPicksCreditsReset() {
+        // Even when the only exhausted token has a *later* reset than the month-end would be, the credits
+        // reset is off the table here — credits are the cover, not the blocker.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 40, resetsAt: iso(2 * 3600)),
+            sevenDay: UsageWindow(utilization: 100, resetsAt: iso(6 * 24 * 3600)),
+            spend: cover)
+        let choice = BlockingReset.forSubscriptionExhausted(snapshot: snap, now: now)
+        guard case .token = choice else {
+            Issue.record("expected a token choice, got \(String(describing: choice))")
+            return
+        }
+    }
+}
+
 // MARK: - BlockingReset.select — the "last stand" (credits-priority) rule
 
 @Suite("BlockingReset.select")
