@@ -124,13 +124,16 @@ final class DevToolsWindowController: NSWindowController {
     private func showPreviewWindow() {
         if previewWindow == nil {
             previewVC.loadView()
+            // Borderless: attached as a child of the tuner, it has no title bar / close button — it can't
+            // be closed on its own and always travels with the tuner. Its own "Popup Preview" heading is
+            // drawn inside the content instead.
             let win = NSWindow(
                 contentRect: NSRect(origin: .zero, size: NSSize(width: 340, height: 320)),
-                styleMask: [.titled, .closable],
+                styleMask: [.borderless],
                 backing: .buffered, defer: false)
-            win.title = "Popup preview"
             win.isReleasedWhenClosed = false
             win.level = .floating
+            win.hasShadow = true
             win.contentView = buildPreviewContent()
             previewWindow = win
         }
@@ -173,13 +176,27 @@ final class DevToolsWindowController: NSWindowController {
         footer.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 12, right: 14)
         footer.translatesAutoresizingMaskIntoConstraints = false
 
+        // Own heading (the window is borderless, so there is no macOS title bar).
+        let heading = NSTextField(labelWithString: "Popup Preview")
+        heading.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        heading.textColor = .secondaryLabelColor
+        heading.alignment = .center
+        heading.translatesAutoresizingMaskIntoConstraints = false
+
         let container = NSView()
         container.wantsLayer = true
         container.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        container.layer?.cornerRadius = 8
+        container.layer?.masksToBounds = true
+        container.addSubview(heading)
         container.addSubview(previewVC.view)
         container.addSubview(footer)
         NSLayoutConstraint.activate([
-            previewVC.view.topAnchor.constraint(equalTo: container.topAnchor),
+            heading.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            heading.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            heading.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+
+            previewVC.view.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: 8),
             previewVC.view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             previewVC.view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
