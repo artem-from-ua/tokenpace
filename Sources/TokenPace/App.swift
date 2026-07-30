@@ -408,6 +408,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ColorStore.shared.onChange = { [weak self] in self?.reRenderForCurrentTime() }
         }
         devToolsWC?.show()
+        reRenderForCurrentTime()   // seed the tuner's popup preview with the current layout right away
     }
 
     /// Force an immediate refresh of both data streams (the Troubleshoot window's button, ADR-0020):
@@ -1244,6 +1245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setPopupLayout(_ layout: PopupLayout) {
         popupVC.layout = layout
         popupVC.view.frame = NSRect(origin: .zero, size: popupVC.view.fittingSize)
+        devToolsWC?.updatePreview(layout)   // mirror into the dev colour tuner's live popup preview (#185)
     }
 
     // MARK: - Menu-bar image

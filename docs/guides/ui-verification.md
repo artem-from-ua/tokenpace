@@ -269,9 +269,10 @@ inline-пікер** у правій панелі (swatch + RGB/HSB-повзун�
 TOKENPACE_DEVTOOLS=1 TOKENPACE_OPEN_DEVTOOLS=1 TOKENPACE_STUB=both-orange swift run
 ```
 
-→ вікно тюнера відкриється саме; обери роль (напр. «Popup · gap orange»), посунь повзунок каналу (або
-впиши 16-бітне значення) — бар у popup і menu-bar іконка міняються негайно. **Reset** / **Reset all**
-повертають дефолти,
+→ вікно тюнера (always-on-top) відкриється саме, поруч — окреме always-on-top вікно **«Popup preview»**
+з живим рендером дропдауна. Обери роль (напр. «Popup · gap orange»), посунь повзунок каналу (або
+впиши 16-бітне значення) — і preview-вікно, і menu-bar іконка міняються негайно. Закриття вікна тюнера
+закриває й preview. **Reset** / **Reset all** повертають дефолти,
 **Copy sRGB** кладе значення в буфер, ● позначає недефолтні ролі. Без `TOKENPACE_DEVTOOLS` пункт меню
 не з'являється навіть під ⌥, а `TOKENPACE_OPEN_DEVTOOLS` ігнорується.
 

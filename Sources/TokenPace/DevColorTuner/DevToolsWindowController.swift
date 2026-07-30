@@ -1,4 +1,5 @@
 import AppKit
+import TokenPaceKit
 
 /// The dev-only "Development tools" window (#185): a live colour tuner. Pick a named UI colour role
 /// from the list, adjust it with the **embedded** picker in the right pane — RGB / HSB sliders plus
@@ -65,6 +66,14 @@ final class DevToolsWindowController: NSWindowController {
     private let resetAllButton = NSButton(title: "Reset all", target: nil, action: nil)
     private var editorControls: [NSControl] = []
 
+    /// A live preview of the menu-bar dropdown, shown in a **separate always-on-top window** that opens
+    /// with the tuner and closes with it. It renders the same `PopupViewController` view the real popup
+    /// uses — but in an ordinary window, not the modal `NSMenu` (which can't stay open while another
+    /// window takes input). Fed the same `PopupLayout` as the real popup via ``updatePreview(_:)``, so a
+    /// colour edit repaints it live alongside the menu-bar icon.
+    private let previewVC = PopupViewController()
+    private var previewWindow: NSWindow?
+
     convenience init() {
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Metrics.startSize),
@@ -73,7 +82,9 @@ final class DevToolsWindowController: NSWindowController {
         window.title = "TokenPace — Development tools"
         window.contentMinSize = Metrics.minSize
         window.isReleasedWhenClosed = false
+        window.level = .floating   // always-on-top so colour picking never loses the window (ADR-0012 §6)
         self.init(window: window)
+        window.delegate = self   // so windowWillClose can tear down the preview window
         buildContent()
         rebuildRows()
         selectFirstRole()
@@ -89,6 +100,46 @@ final class DevToolsWindowController: NSWindowController {
         refreshDetail()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        showPreviewWindow()
+    }
+
+    // MARK: - Preview window
+
+    /// Create (once) and show the separate always-on-top popup-preview window, positioned just right of
+    /// the tuner. Hosts `previewVC.view`; it is fed layouts by `AppDelegate` via ``updatePreview(_:)``.
+    private func showPreviewWindow() {
+        if previewWindow == nil {
+            previewVC.loadView()
+            previewVC.view.autoresizingMask = [.width, .height]
+            let win = NSWindow(
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 340, height: 220)),
+                styleMask: [.titled, .closable],
+                backing: .buffered, defer: false)
+            win.title = "Popup preview"
+            win.isReleasedWhenClosed = false
+            win.level = .floating
+            win.contentView = previewVC.view
+            previewWindow = win
+        }
+        // Park it to the right of the tuner, top-aligned.
+        if let main = window, let preview = previewWindow {
+            let f = main.frame
+            preview.setFrameOrigin(NSPoint(x: f.maxX + 12, y: f.maxY - preview.frame.height))
+        }
+        previewWindow?.orderFront(nil)
+    }
+
+    /// Feed the preview the same `PopupLayout` the real popup gets; called from `AppDelegate` on every
+    /// re-render (which fires on each colour edit), so the preview repaints live. No-op if not open.
+    /// Sizes the window to the popup's fitting size (the popup uses intrinsic-width text rows, so the
+    /// content size is only known once a layout lands — hence the resize here, not at window creation).
+    func updatePreview(_ layout: PopupLayout) {
+        guard let preview = previewWindow, preview.isVisible else { return }
+        previewVC.layout = layout
+        let size = previewVC.view.fittingSize
+        guard size.width > 1, size.height > 1 else { return }
+        preview.setContentSize(size)
+        previewVC.view.frame = NSRect(origin: .zero, size: size)
     }
 
     // MARK: - Layout
@@ -453,5 +504,16 @@ extension DevToolsWindowController: NSTableViewDataSource, NSTableViewDelegate {
         let row = tableView.selectedRow
         selectedRole = (row >= 0 && row < rows.count) ? rows[row] : nil
         refreshDetail()
+    }
+}
+
+// MARK: - NSWindowDelegate
+
+extension DevToolsWindowController: NSWindowDelegate {
+    /// Close the popup-preview window automatically when the tuner window closes, and only for the
+    /// tuner's own close (not the preview's — the preview has no delegate).
+    func windowWillClose(_ notification: Notification) {
+        guard (notification.object as? NSWindow) === window else { return }
+        previewWindow?.orderOut(nil)
     }
 }
