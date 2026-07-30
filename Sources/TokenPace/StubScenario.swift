@@ -136,7 +136,8 @@ enum StubScenario: String, CaseIterable {
                  + "dot is yellow; turn Calm on and it mutes to white."
         case .creditsActive:
             return "Credits ¤ icon (#144): enabled €15 limit, €10.77 spent (~72 %) → paced icon "
-                 + "colour. 7-day pinned at 100 % so the icon shows."
+                 + "colour. 7-day pinned at 100 % so the icon shows — and since credits cover the "
+                 + "exhausted 7-day limit, the popup badges the 7-day reset RED (#193)."
         case .creditsLimitReached:
             return "Credits ¤ icon (#144): spend_limit_reached (€5 limit below €10.77 spent) → RED "
                  + "icon."
