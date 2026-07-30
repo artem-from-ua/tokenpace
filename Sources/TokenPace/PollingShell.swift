@@ -779,10 +779,12 @@ actor StubUsageTransport: UsageTransport {
             // Hand-picked, frozen frame for the README screenshot. Pacing states on screen:
             //  • 5h: 10 % used vs ≈65 % elapsed (resets ~35 % of the window out, now + 1.75 h, snapped
             //    to a 10-minute mark) → wide GREEN gap, well behind pace.
-            //  • 7d: 40 % used vs ≈29 % elapsed (resets ~5 d out on the hour) → ahead ~11 pts → AMBER.
+            //  • 7d: 36 % used vs ≈29 % elapsed (resets ~5 d out on the hour) → ahead ~7 pts, which is
+            //    comfortably below the ≈11-pt yellow→orange threshold (0.16·(1−time)) → YELLOW, not on
+            //    the amber/orange edge the old 40 % sat on.
             //  • Fable 70 % / Mythos 100 % (same ≈29 % elapsed) → ORANGE / RED.
             five = 10.0
-            seven = 40.0
+            seven = 36.0
             fable = 70.0
             mythos = 100.0
             // 5h window = 18000 s; reset at ≈ now + 6300 s ⇒ elapsed ≈ 65 %, snapped to :x0.

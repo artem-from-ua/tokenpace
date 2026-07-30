@@ -58,9 +58,10 @@ final class StatusItemView: NSView {
         static let hPadding: CGFloat = 2
         /// Gap between the bars block and the reset-time label.
         static let labelGap: CGFloat = 5
-        /// Width of the time-indicator marker — a slim vertical bar (#…), narrower than the diameter
-        /// of the old dot so it reads as a crisp position tick rather than a blob.
-        static let tickWidth: CGFloat = 3.5
+        /// Width of the time-indicator marker — a vertical bar (#…) drawn centred on the current
+        /// time position. Widened from the old slim 3.5 pt tick so the "you are here" marker reads
+        /// more boldly at a glance while still staying narrower than a blob-like dot.
+        static let tickWidth: CGFloat = 5
         /// Height of the time-indicator marker — taller than the bar so it stands proud above and
         /// below the pacing zone.
         static let tickHeight: CGFloat = 9
