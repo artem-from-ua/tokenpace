@@ -557,7 +557,13 @@ final class PopupViewController: NSViewController {
         // sections. No trailing rule (see above).
         if let reason = layout.warning {
             addWarningTitle(Self.warningTitle(reason))
-            addWrappingLabel(Self.warningDetail(reason), font: .systemFont(ofSize: Metrics.textSize), secondary: true)
+            let detail = addWrappingLabel(
+                Self.warningDetail(reason), font: .systemFont(ofSize: Metrics.textSize), secondary: true)
+            // The error block ends a section (like the header and the service-status rows above it), so
+            // the first limit row below it needs the full `sectionSpacing` gap — not the default
+            // `rowSpacing`, which left the error detail visually glued to the "5-hour" row (issue: the
+            // error block had no trailing custom spacing while every other section boundary set one).
+            stack.setCustomSpacing(Metrics.sectionSpacing, after: detail)
         }
 
         // One section per limit row: "title · status" line + "reset · %" line + bar. No rule
