@@ -27,6 +27,14 @@ struct AppearancePane: View {
                         + "when it turns orange or red.")
                 }
 
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Hide pacing bars when blocked", isOn: Binding(
+                        get: { model.hideBarsWhenBlocked }, set: { model.setHideBarsWhenBlocked($0) }))
+                    SettingsHint(text: "When a limit is exhausted, a full red bar shows nothing you "
+                        + "can act on. Hides both bars in that state and keeps just the countdown to "
+                        + "the reset. The popup still shows the full bars.")
+                }
+
                 // Reset-countdown mode: a menu picker (like System Settings' few-option choices).
                 Picker("Show reset countdown", selection: Binding(
                     get: { model.resetRadio },

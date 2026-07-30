@@ -54,6 +54,9 @@ enum PersistedConfig {
         /// Whether the menu-bar widget hides the 7-day bar while it is calm (green/yellow),
         /// centring the 5h bar alone (#94). Default-on (opt-out) — see the property.
         static let hideCalmSevenDayBar = "hideCalmSevenDayBar"
+        /// Whether the menu-bar widget hides *both* pacing bars while a main window is exhausted
+        /// (blocked), leaving only the reset countdown (#194). Default-on (opt-out) — see the property.
+        static let hideBarsWhenBlocked = "hideBarsWhenBlocked"
         /// Whether the menu-bar widget draws the money-credits ("extra usage") icon when credits are
         /// active and a base limit is exhausted (#144). Default-on (opt-out) — see the property.
         static let showExtraUsage = "showExtraUsage"
@@ -211,6 +214,18 @@ enum PersistedConfig {
     static var hideCalmSevenDayBar: Bool {
         get { defaults.object(forKey: Key.hideCalmSevenDayBar) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.hideCalmSevenDayBar) }
+    }
+
+    /// Whether the **menu-bar** widget hides **both** pacing bars while the user is *blocked* — a main
+    /// window (5h or 7d) is exhausted (`CreditsPacing.mainWindowExhausted`, credits coverage ignored) —
+    /// leaving only the reset countdown (#194, `MenuBarMode.blockedReset`). **Default-on** (opt-out): an
+    /// absent key reads as `true`, because a red 100 % bar carries no pacing information — the actionable
+    /// signal is the time until the block clears. `object(forKey:) as? Bool ?? true` distinguishes
+    /// "unset" (→ true) from an explicit `false` the user chose — `bool(forKey:)` would collapse both to
+    /// `false` and silently defeat the opt-out default. Menu-bar only: the popup keeps its full bars.
+    static var hideBarsWhenBlocked: Bool {
+        get { defaults.object(forKey: Key.hideBarsWhenBlocked) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.hideBarsWhenBlocked) }
     }
 
     /// Whether the **menu-bar** widget draws the money-credits ("extra usage") icon — the trailing

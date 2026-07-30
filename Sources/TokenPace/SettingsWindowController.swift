@@ -72,6 +72,11 @@ final class SettingsWindowController: NSWindowController {
         get { model.onHideCalmSevenDayChange } set { model.onHideCalmSevenDayChange = newValue }
     }
 
+    /// Called when the user toggles "Hide pacing bars when blocked" (#194), with the new state.
+    var onHideBarsWhenBlockedChange: ((Bool) -> Void)? {
+        get { model.onHideBarsWhenBlockedChange } set { model.onHideBarsWhenBlockedChange = newValue }
+    }
+
     /// Called when the user toggles "Pause polling while the screen is locked" (#114).
     var onPausePollingChange: ((Bool) -> Void)? {
         get { model.onPausePollingChange } set { model.onPausePollingChange = newValue }
