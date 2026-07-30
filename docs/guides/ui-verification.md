@@ -43,7 +43,7 @@
 | Стуб | Що показує |
 |---|---|
 | `1` | climbing — usage повзе вгору |
-| `screenshot` | стабільний кадр для скриншотів |
+| `screenshot` | стабільний кадр для скриншотів: 5h **зелений** (10 % vs ≈65 % — well behind), 7d **жовтий** (36 % vs ≈29 % — mild ahead, під динамічним порогом `0.16·(1−time)`, навмисно не на amber/orange-межі, де сиділо старе 40 %), Fable **оранжевий** / Mythos **червоний** |
 | `error` | auth-помилка (401) → ⚠️ (лише банер, без ліміт-рядків — cold-start) |
 | `stale-error` | **stale-while-erroring** (баг відступу): перший полл валідний (повні бари: idle 5h «ready to start», 18 % 7d, Fable-рядок, «Extra usage» €11.68/€15.00), далі кожен полл — timeout → ⚠️ банер «Claude API connectivity issue» / «Authentication API timeout» **над** усіма барами. Перевіряй **горизонтальний відступ між текстом помилки і рядком «5-hour»** (той самий `sectionSpacing`, що після хедера) — без нього блок помилки злипався з «5-hour». API + Code — major outage (червоні крапки) |
 | `idle` | «немає активної 5h-сесії» (#100): суцільний синій 5h-бар, без phantom-ресету, час падає на 7d-ресет («4d»). За default-ON «Hide 7-day bar when calm» (#94) 7d calm → **одинокий центрований idle-бар** |
