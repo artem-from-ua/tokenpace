@@ -36,9 +36,19 @@ struct NotificationsPane: View {
                     SettingsHint(text: model.backToWorkHint, warning: !model.backToWorkHint.isEmpty)
                 }
 
-                // The allowed-hours window and weekend-suppress only matter when the feature is on —
-                // hidden (not just disabled) otherwise.
-                if model.backToWorkEnabled {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Extra Usage Credit", isOn: Binding(
+                        get: { model.extraUsageNotifyEnabled },
+                        set: { model.setExtraUsageNotify($0) }))
+                    .disabled(!model.backToWorkMasterEnabled)
+                    SettingsHint(
+                        text: "Notifies you the moment work starts running on paid Extra Usage Credit "
+                            + "— with the amount spent and your limit, if set.")
+                }
+
+                // The allowed-hours window and weekend-suppress apply to every notification — shown when
+                // any is on, hidden (not just disabled) otherwise.
+                if model.anyNotificationEnabled {
                     LabeledContent("Allowed hours") {
                         HStack(spacing: 8) {
                             Text(model.notifyWindowLengthText).foregroundStyle(.secondary)
@@ -65,6 +75,6 @@ struct NotificationsPane: View {
         }
         .formStyle(.grouped)
         // Show/hide dependent rows without an insertion animation (avoids neighbour-height flicker).
-        .animation(nil, value: model.backToWorkEnabled)
+        .animation(nil, value: model.anyNotificationEnabled)
     }
 }

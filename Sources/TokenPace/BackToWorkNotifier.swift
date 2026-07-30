@@ -4,10 +4,12 @@ import TokenPaceKit
 
 // MARK: - BackToWorkNotifier
 
-/// Thin `UserNotifications` glue for the "Back to work!" notification (#160) — the side-effecting half
-/// of the feature whose pure decisions live in `WorkAvailability` + `NotificationSchedule`
-/// (`TokenPaceKit`). `UNUserNotificationCenter.current()` is a system singleton, not injectable, so
-/// this stays in the executable target and is verified manually (ADR-0009/0023).
+/// Thin `UserNotifications` glue for the local notifications — the "Back to work!" banner (#160) and
+/// the "Now using Extra Usage Credit" banner — the side-effecting half of features whose pure decisions
+/// live in `WorkAvailability` / `ExtraUsageOnset` + `NotificationSchedule` (`TokenPaceKit`).
+/// `UNUserNotificationCenter.current()` is a system singleton, not injectable, so this stays in the
+/// executable target and is verified manually (ADR-0009/0023). Both notifications share one
+/// authorization grant (`[.alert, .sound]`) — the first feature the user enables requests it.
 ///
 /// The edge detection (blocked→unblocked) and the quiet-hours evaluation happen in the caller
 /// (`AppDelegate`) using the pure Kit types; this type only *requests authorization* and *posts*, so
@@ -84,28 +86,44 @@ enum BackToWorkNotifier {
     /// delivers. No-op (logged) on a dev build or when not authorized. All work runs on UN's own
     /// queue — nothing here touches `@MainActor` state.
     static func postBackToWork() {
+        post(kind: "back-to-work", idPrefix: "backToWork",
+             title: "Back to work!",
+             body: "Your Claude usage limit has reset — you're good to go.")
+    }
+
+    /// Post the "Now using Extra Usage Credit" banner immediately. The caller has already confirmed the
+    /// not-spending→spending edge and passed the quiet-hours gate; this only checks authorization and
+    /// delivers. The `body` (which carries the spent amount and, if set, the limit) is built by the pure
+    /// `ExtraUsageOnset.bannerBody(for:)`. No-op (logged) on a dev build or when not authorized.
+    static func postExtraUsage(body: String) {
+        post(kind: "extra-usage", idPrefix: "extraUsage",
+             title: "Now using Extra Usage Credit", body: body)
+    }
+
+    /// Shared authorization-gated post. Runs entirely on UN's own queue (nothing here touches
+    /// `@MainActor` state); a fresh identifier per call so successive edges each surface their own banner.
+    private static func post(kind: String, idPrefix: String, title: String, body: String) {
         guard isSupported else { return }
         center.getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized
                     || settings.authorizationStatus == .provisional else {
-                AppLogger.lifecycle.info("back-to-work: not authorized, skipping")
+                AppLogger.lifecycle.info("\(kind, privacy: .public): not authorized, skipping")
                 return
             }
             let content = UNMutableNotificationContent()
-            content.title = "Back to work!"
-            content.body = "Your Claude usage limit has reset — you're good to go."
+            content.title = title
+            content.body = body
             content.sound = .default
-            // Fresh identifier so successive unblock edges each surface their own banner.
             let request = UNNotificationRequest(
-                identifier: "backToWork-\(UUID().uuidString)",
+                identifier: "\(idPrefix)-\(UUID().uuidString)",
                 content: content,
                 trigger: nil   // deliver now
             )
             center.add(request) { error in
                 if let error {
-                    AppLogger.lifecycle.error("back-to-work: post failed \(error.localizedDescription, privacy: .public)")
+                    AppLogger.lifecycle.error("\(kind, privacy: .public): post failed \(error.localizedDescription, privacy: .public)")
                 } else {
-                    AppLogger.lifecycle.info("back-to-work: edge detected, posting notification")
+                    AppLogger.lifecycle.info("\(kind, privacy: .public): edge detected, posting notification")
                 }
             }
         }

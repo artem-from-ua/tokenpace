@@ -132,6 +132,7 @@ In the tables below, `<…>` marks an interpolated value.
 | — | `archive` | `.notice` | `archive: sync ok — <n> updated, <bytes> bytes, <total> files / <totalBytes> bytes in archive` | `performArchiveSync` — the sync finished; the `lastArchiveSync` marker is advanced (#110). `<total>`/`<totalBytes>` count the whole archive incl. source-pruned files |
 | — | `archive` | `.error` | `archive: sync failed — <error>` | `performArchiveSync` — the sync threw (e.g. destination unwritable); marker not advanced, retried next heartbeat (#110) |
 | — | `lifecycle` | `.info` | `back-to-work: suppressed by quiet hours` | `maybePostBackToWork` — a blocked→unblocked edge fired but the current time is outside the allowed-hours window or on a suppressed weekday, so nothing is posted (#160, ADR-0039) |
+| — | `lifecycle` | `.info` | `extra-usage: suppressed by quiet hours` | `maybePostExtraUsage` — a not-spending→spending-on-credits edge fired but the current time is outside the shared allowed-hours window or on a suppressed weekday, so nothing is posted |
 
 ## `Sources/TokenPace/LogArchiver.swift`
 
@@ -185,20 +186,23 @@ token itself never is.
 | — | `lifecycle` | `.notice` | `back-to-work: time window set <start>–<end>` | user changed the allowed-hours pickers; `<start>`/`<end>` are minute-of-day (#160) |
 | — | `lifecycle` | `.notice` | `back-to-work: suppress set <raw>` | user picked a "Suppress notifications on" radio; `<raw>` is the raw `SuppressDays` (#160) |
 | — | `lifecycle` | `.notice` | `back-to-work: try (forced) notification` | user pressed the Settings "Try" button, forcing a `postBackToWork` that bypasses edge-detection and quiet hours (#193) |
+| — | `lifecycle` | `.notice` | `extra-usage: notify enabled set <bool>` | user toggled the "Extra Usage Credit" notification switch |
 
 ## `Sources/TokenPace/BackToWorkNotifier.swift`
 
-Thin `UserNotifications` glue for the "Back to work!" notification (#160, ADR-0039). No token/limit
-values are ever logged.
+Thin `UserNotifications` glue for the local notifications — "Back to work!" (#160, ADR-0039) and
+"Now using Extra Usage Credit". No token/limit values and no money amounts are ever logged (the amount
+lives only in the delivered banner body). The `<kind>` in the shared post path is `back-to-work` or
+`extra-usage`.
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
 | — | `lifecycle` | `.info` | `back-to-work: authorization dev (no bundle)` | `requestAuthorizationIfNeeded` — running as a bare `swift run` binary; authorization is impossible, so it is skipped |
 | — | `lifecycle` | `.info` | `back-to-work: authorization <granted/denied>` | `requestAuthorizationIfNeeded` — the system authorization prompt resolved |
 | — | `lifecycle` | `.error` | `back-to-work: authorization error <error>` | `requestAuthorizationIfNeeded` — `requestAuthorization` returned an error |
-| — | `lifecycle` | `.info` | `back-to-work: edge detected, posting notification` | `postBackToWork` — the request was added to `UNUserNotificationCenter` (the banner is delivered) |
-| — | `lifecycle` | `.info` | `back-to-work: not authorized, skipping` | `postBackToWork` — the feature is on but notification authorization is not granted, so nothing is posted |
-| — | `lifecycle` | `.error` | `back-to-work: post failed <error>` | `postBackToWork` — `UNUserNotificationCenter.add` returned an error |
+| — | `lifecycle` | `.info` | `<kind>: edge detected, posting notification` | `post` — the request was added to `UNUserNotificationCenter` (the banner is delivered); `<kind>` is `back-to-work` or `extra-usage` |
+| — | `lifecycle` | `.info` | `<kind>: not authorized, skipping` | `post` — the feature is on but notification authorization is not granted, so nothing is posted |
+| — | `lifecycle` | `.error` | `<kind>: post failed <error>` | `post` — `UNUserNotificationCenter.add` returned an error |
 
 ## `Sources/TokenPace/GHReleaseFetcher.swift`
 

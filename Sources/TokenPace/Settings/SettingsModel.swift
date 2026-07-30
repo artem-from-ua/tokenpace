@@ -77,6 +77,7 @@ final class SettingsModel {
     // MARK: Notifications (#160)
 
     var backToWorkEnabled = false
+    var extraUsageNotifyEnabled = false
     var notifyStartMinute = 0
     var notifyEndMinute = 0
     var suppressDays: SuppressDays = .never
@@ -192,6 +193,7 @@ final class SettingsModel {
         webDesktopMode = ms.webDesktopMode
 
         backToWorkEnabled = PersistedConfig.backToWorkEnabled
+        extraUsageNotifyEnabled = PersistedConfig.extraUsageNotifyEnabled
         notifyStartMinute = PersistedConfig.notifyWindowStartMinute
         notifyEndMinute = PersistedConfig.notifyWindowEndMinute
         suppressDays = PersistedConfig.notifySuppressDays
@@ -305,6 +307,19 @@ final class SettingsModel {
         onTryBackToWork?()
     }
 
+    func setExtraUsageNotify(_ on: Bool) {
+        extraUsageNotifyEnabled = on
+        PersistedConfig.extraUsageNotifyEnabled = on
+        AppLogger.lifecycle.notice("extra-usage: notify enabled set \(on, privacy: .public)")
+        if on {
+            // Shares one authorization grant with "Back to work" — request lazily on first enable of
+            // either feature, then refresh the hint with the result.
+            onBackToWorkEnabled?({ [weak self] state in self?.applyAuthState(state) })
+        } else {
+            refreshAuthState()
+        }
+    }
+
     func setNotifyWindow(start: Int, end: Int) {
         notifyStartMinute = start
         notifyEndMinute = end
@@ -399,11 +414,18 @@ final class SettingsModel {
 
     private func applyAuthState(_ state: BackToWorkNotifier.AuthState) {
         authState = state
-        // On a dev build authorization is impossible, so the master switch is disabled and forced off
-        // (the computed `backToWorkMasterEnabled` disables it; force the stored value + store to off).
-        if state == .dev, backToWorkEnabled {
-            backToWorkEnabled = false
-            PersistedConfig.backToWorkEnabled = false
+        // On a dev build authorization is impossible, so the master switch is disabled and both
+        // notification toggles are forced off (the computed `backToWorkMasterEnabled` disables them;
+        // force the stored values + store to off).
+        if state == .dev {
+            if backToWorkEnabled {
+                backToWorkEnabled = false
+                PersistedConfig.backToWorkEnabled = false
+            }
+            if extraUsageNotifyEnabled {
+                extraUsageNotifyEnabled = false
+                PersistedConfig.extraUsageNotifyEnabled = false
+            }
         }
     }
 }

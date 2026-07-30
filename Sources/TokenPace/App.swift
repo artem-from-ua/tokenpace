@@ -737,6 +737,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// status page when due (#31) — no separate timer.
     private func apply(_ output: PollOutput) {
         detectBackToWorkEdge(output)
+        detectExtraUsageEdge(output)
         lastOutput = output
         render(output, at: Date())
         // Re-arm the optimistic-reset timer against this poll's `resets_at` (#36). A successful poll
@@ -779,20 +780,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// evaluation (`NotificationSchedule`) runs against the user's window/suppress choice in a
     /// device-zone gregorian calendar; the impure post lives in `BackToWorkNotifier`.
     private func maybePostBackToWork() {
+        guard notificationsAllowedNow() else {
+            AppLogger.lifecycle.info("back-to-work: suppressed by quiet hours")
+            return
+        }
+        BackToWorkNotifier.postBackToWork()
+    }
+
+    /// Detect the not-spending→spending-on-credits edge for the "Now using Extra Usage Credit"
+    /// notification and post when it fires. Called from `apply`, alongside `detectBackToWorkEdge` and
+    /// with the identical tracking/posting split: the "was on credits" state is **persisted**
+    /// (`PersistedConfig.extraUsageWasOnCredits`) and updated on **every** successful poll regardless of
+    /// the toggle (so an off→on flip never forgets or replays an edge); posting is gated on the toggle,
+    /// the previous reading being *not* on credits, and the current one being on credits.
+    ///
+    /// This is a distinct edge from "Back to work!": that fires on blocked→workable, this on the switch
+    /// onto paid credit (a state that is already workable), so the two never collide.
+    private func detectExtraUsageEdge(_ output: PollOutput) {
+        guard output.health.failingSince == nil, let snapshot = output.snapshot else { return }
+        let nowOnCredits = ExtraUsageOnset.isOnCredits(snapshot)
+        if PersistedConfig.extraUsageNotifyEnabled,
+           !PersistedConfig.extraUsageWasOnCredits,
+           nowOnCredits,
+           let spend = snapshot.spend {
+            maybePostExtraUsage(for: spend)
+        }
+        PersistedConfig.extraUsageWasOnCredits = nowOnCredits
+    }
+
+    /// Apply the quiet-hours gate and post the "Now using Extra Usage Credit" banner if allowed. The
+    /// body (spent amount + limit) is built by the pure `ExtraUsageOnset.bannerBody(for:)`.
+    private func maybePostExtraUsage(for spend: SpendInfo) {
+        guard notificationsAllowedNow() else {
+            AppLogger.lifecycle.info("extra-usage: suppressed by quiet hours")
+            return
+        }
+        BackToWorkNotifier.postExtraUsage(body: ExtraUsageOnset.bannerBody(for: spend))
+    }
+
+    /// Whether the shared quiet-hours window / weekend-suppress currently allows a notification. Both
+    /// local notifications ("Back to work!", "Extra Usage Credit") gate on the **same** user schedule
+    /// (`notifyWindow*` + `notifySuppressDays`), evaluated in a device-zone gregorian calendar.
+    private func notificationsAllowedNow() -> Bool {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
         calendar.locale = .current
-        let allowed = NotificationSchedule.isAllowed(
+        return NotificationSchedule.isAllowed(
             at: Date(),
             window: (PersistedConfig.notifyWindowStartMinute, PersistedConfig.notifyWindowEndMinute),
             suppress: PersistedConfig.notifySuppressDays,
             calendar: calendar
         )
-        guard allowed else {
-            AppLogger.lifecycle.info("back-to-work: suppressed by quiet hours")
-            return
-        }
-        BackToWorkNotifier.postBackToWork()
     }
 
     /// Fetch the Claude status page when `StatusCadence` says it is due — riding the usage poll's

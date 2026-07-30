@@ -42,6 +42,7 @@ enum StubScenario: String, CaseIterable {
     case creditsLimitReached = "credits-limit-reached"
     case creditsNoLimit = "credits-no-limit"
     case justUnblocked = "just-unblocked"
+    case creditsOnset = "credits-onset"
     case resetGrace = "reset-grace"
 
     /// The env id (`TOKENPACE_STUB` value). `realNetwork` maps to the empty string / absent env.
@@ -75,6 +76,7 @@ enum StubScenario: String, CaseIterable {
         case .creditsLimitReached: return "Credits · limit reached (red)"
         case .creditsNoLimit:      return "Credits · no limit (neutral)"
         case .justUnblocked:       return "Back to work! edge"
+        case .creditsOnset:        return "Extra Usage Credit onset"
         case .resetGrace:          return "Reset-boundary idle grace"
         }
     }
@@ -146,6 +148,10 @@ enum StubScenario: String, CaseIterable {
         case .justUnblocked:
             return "Back-to-work edge (#160): first poll blocked (7d 100 %), then workable → fires the "
                  + "\"Back to work!\" notification once (quiet hours + authorization permitting)."
+        case .creditsOnset:
+            return "Extra-usage onset: first poll not on credits (7d 40 %), then 7d 100 % with credits "
+                 + "enabled → work overflows onto paid credit, firing the \"Now using Extra Usage "
+                 + "Credit\" notification once (€10.77 of €15.00; quiet hours + authorization permitting)."
         case .resetGrace:
             return "Reset-boundary idle grace (ADR-0041): active → post-reset empty five_hour → active "
                  + "again. The 5h bar stays \"ready\" across the empty polls — no flicker."
@@ -183,6 +189,7 @@ enum StubScenario: String, CaseIterable {
         case .creditsLimitReached: return StubUsageTransport(mode: .credits(.limitReached))
         case .creditsNoLimit:      return StubUsageTransport(mode: .credits(.noLimit))
         case .justUnblocked:       return StubUsageTransport(mode: .justUnblocked)
+        case .creditsOnset:        return StubUsageTransport(mode: .creditsOnset)
         case .resetGrace:          return StubUsageTransport(mode: .resetGrace)
         }
     }
