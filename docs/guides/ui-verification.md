@@ -38,7 +38,18 @@
 ## Стуби `TOKENPACE_STUB`
 
 Запуск: `TOKENPACE_STUB=<name> swift run`. Стуб підміняє транспорт usage- та status-запитів
-(`StubUsageTransport` у `Sources/TokenPace/PollingShell.swift`; диспетч у `App.swift`).
+(`StubUsageTransport` у `Sources/TokenPace/PollingShell.swift`). Джерело істини сценаріїв —
+`StubScenario` (`Sources/TokenPace/StubScenario.swift`): `rawValue` кожного кейса = ім'я стуба з
+таблиці нижче, `summary` — опис.
+
+> **Живе перемикання без рестарту (#187, ADR-0047).** У dev-збірці (`TOKENPACE_DEVTOOLS=1`) відкрий
+> ⌥ Option → меню → **Development tools…** і вибери сценарій у випадайці **Data source (stub)** угорі
+> лівої колонки — джерело даних перемкнеться наживо (menu-bar іконка й popup оновляться протягом одного
+> циклу полу), під випадайкою показано опис поточного сценарію. `TOKENPACE_STUB=…` при старті досі
+> працює і **задає початковий вибір** випадайки; «Real network (no stub)» повертає застосунок на живий
+> API. Для скриптингу: `TOKENPACE_DEVTOOLS=1 TOKENPACE_OPEN_DEVTOOLS=1 swift run` авто-відкриває вікно.
+> Послідовнісні стуби (`stale-error`, `reset-grace`, `optimistic-reset`, `just-unblocked`)
+> відтворюються з полу №1 при повторному виборі (свіжий `StubUsageTransport` скидає лічильник полів).
 
 | Стуб | Що показує |
 |---|---|
