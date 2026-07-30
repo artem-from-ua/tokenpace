@@ -396,6 +396,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // feature (#160) — never at launch, since this is opt-in.
                 BackToWorkNotifier.requestAuthorizationIfNeeded(completion: completion)
             }
+            // The Settings "Try" button (#193): fire the banner on demand, bypassing edge-detection
+            // and quiet hours (postBackToWork itself only checks support + authorization).
+            wc.onTryBackToWork = { BackToWorkNotifier.postBackToWork() }
             settingsWC = wc
         }
         // Reflect the latest known update state whenever the window opens (#37).
