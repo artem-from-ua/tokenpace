@@ -302,9 +302,13 @@ final class PopupBarView: NSView {
 // MARK: - SolidBackdropView
 
 /// A plain opaque fill for the popup's solid backdrop. Layer-backed and drawn via `updateLayer`, so
-/// AppKit re-runs it on theme change and the `windowBackgroundColor` CGColor re-resolves (a raw
-/// `layer.backgroundColor` set once would not track light/dark).
+/// AppKit re-runs it on theme change and the fill CGColor re-resolves (a raw `layer.backgroundColor`
+/// set once would not track light/dark).
 final class SolidBackdropView: NSView {
+    /// Preview-only: fill with ``NSColor/popupMenuMatchedBackground`` (dark #212121) instead of
+    /// `windowBackgroundColor`. See ``PopupViewController/matchesMenuBackground``.
+    var matchesMenuBackground = false { didSet { needsDisplay = true } }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
@@ -314,7 +318,38 @@ final class SolidBackdropView: NSView {
     override func updateLayer() {
         // The system panel background, resolved in this view's own appearance so it tracks light/dark
         // and matches the surrounding menu chrome.
-        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        let fill: NSColor = matchesMenuBackground ? .popupMenuMatchedBackground : .windowBackgroundColor
+        layer?.backgroundColor = fill.cgColor
+    }
+}
+
+extension NSColor {
+    /// The popup card's background **as the real `NSMenu` renders it on screen**, for surfaces outside a
+    /// menu (the dev colour-tuner's "Popup Preview" window, #185). Inside the real menu the vibrancy
+    /// material yields **#2C2C2C** in dark; the preview is a plain borderless window, where a
+    /// `windowBackgroundColor` fill renders a visibly lighter **#414141**. In **light** the two already
+    /// match exactly (#EFEFEF), so only the **dark** branch is overridden; light falls through to
+    /// `windowBackgroundColor`.
+    ///
+    /// The dark value is sRGB **#212121** — the colour the real `NSMenu` popup shows, verified live with
+    /// Digital Color Meter in **sRGB** mode (popup `0x212121`, this fill `0x212121`). It is darker than
+    /// `windowBackgroundColor`, whose fill reads noticeably lighter here. Screenshots are not a reliable
+    /// reference for this — `screencapture` colour-management shifts both surfaces so they look equal in
+    /// the file while differing on the live display; the value was matched against the live sRGB meter, not
+    /// a captured image. Dynamic (`NSColor(name:)`) so it re-resolves on a theme flip.
+    static let popupMenuMatchedBackground = NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark ? NSColor(srgbRed: 0x21/255, green: 0x21/255, blue: 0x21/255, alpha: 1)
+                      : .windowBackgroundColor
+    }
+
+    /// The thin light hairline a real `NSMenu` popup draws around its rounded edge, for the dev-tuner
+    /// preview window which — being a plain borderless window — has no such system chrome. A subtle grey,
+    /// darker than the card so it reads as an edge; dynamic so it tracks the theme.
+    static let popupMenuBorder = NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark ? NSColor(srgbRed: 0x4D/255, green: 0x4D/255, blue: 0x4D/255, alpha: 1)
+                      : NSColor(srgbRed: 0xC4/255, green: 0xC4/255, blue: 0xC4/255, alpha: 1)
     }
 }
 
@@ -453,6 +488,16 @@ final class PopupViewController: NSViewController {
     /// Built once by ``rebuildBackdrop()`` on load; it re-resolves its own fill on theme change.
     private var backdropView: NSView?
 
+    /// Preview-only (#185 colour tuner): when `true`, the opaque backdrop fills with
+    /// ``NSColor/popupMenuMatchedBackground`` instead of `windowBackgroundColor`. The real popup lives
+    /// inside an `NSMenu`, whose vibrancy material paints the visible surface (#212121 in dark) — the
+    /// opaque `windowBackgroundColor` backdrop sits underneath and is never seen. The preview window has
+    /// no such material, so it would show the raw `windowBackgroundColor`, which renders visibly lighter.
+    /// Matching the menu colour here brings the preview backdrop to #212121. Light is already an exact
+    /// match, so ``NSColor/popupMenuMatchedBackground`` only overrides the dark branch. Default `false`
+    /// keeps the real popup untouched.
+    var matchesMenuBackground = false
+
     /// The bold header of the popup's first section — "Claude" covers the update-cadence line and the
     /// per-component service status rows beneath it (see `rebuild`).
     private static let claudeCodeSectionTitle = "Claude"
@@ -535,6 +580,7 @@ final class PopupViewController: NSViewController {
         backdropView = nil
 
         let new = SolidBackdropView()   // self-updates its fill on theme change (see updateLayer)
+        new.matchesMenuBackground = matchesMenuBackground   // preview-only #2C2C2C match (see the flag)
         new.translatesAutoresizingMaskIntoConstraints = false
         // Bottom-most so the stack (and its bars/labels) draw on top of it.
         view.addSubview(new, positioned: .below, relativeTo: stack)

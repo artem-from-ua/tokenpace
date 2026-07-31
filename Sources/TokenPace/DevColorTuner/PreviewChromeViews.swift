@@ -8,6 +8,9 @@ import AppKit
 final class ThemedFillView: NSView {
     var fillColor: NSColor = .windowBackgroundColor { didSet { needsDisplay = true } }
     var cornerRadius: CGFloat = 0 { didSet { needsDisplay = true } }
+    /// A hairline border around the rounded card, mimicking the thin light edge a real `NSMenu` popup
+    /// draws (see ``NSColor/popupMenuBorder``). `nil` = no border. Preview only (#185).
+    var borderColor: NSColor? { didSet { needsDisplay = true } }
 
     override var wantsUpdateLayer: Bool { true }
     override init(frame frameRect: NSRect) { super.init(frame: frameRect); wantsLayer = true }
@@ -17,6 +20,9 @@ final class ThemedFillView: NSView {
         layer?.backgroundColor = fillColor.cgColor   // re-resolves in the current appearance
         layer?.cornerRadius = cornerRadius
         layer?.masksToBounds = cornerRadius > 0
+        // The 1 pt hairline is drawn inside masksToBounds, so it stays clipped to the rounded corners.
+        layer?.borderWidth = borderColor == nil ? 0 : 1
+        layer?.borderColor = borderColor?.cgColor
     }
 }
 
@@ -47,8 +53,10 @@ final class TitlePlaqueView: NSView {
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 28) }
 
     override func updateLayer() {
-        // A hair darker than the window background — the standard title-bar look — and theme-adaptive.
-        let base = NSColor.windowBackgroundColor
+        // A hair darker than the card background — the standard title-bar look — and theme-adaptive.
+        // Base off the menu-matched colour (dark #2C2C2C) so the plaque tracks the card, not the lighter
+        // raw `windowBackgroundColor`.
+        let base = NSColor.popupMenuMatchedBackground
         layer?.backgroundColor = (base.blended(withFraction: 0.04, of: .labelColor) ?? base).cgColor
         titleLabel.textColor = .labelColor   // NSTextField re-resolves labelColor per appearance anyway
     }

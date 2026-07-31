@@ -69,7 +69,7 @@ final class DevToolsWindowController: NSWindowController {
     // Live stub selector (#187) — a dropdown at the top of the left column that swaps the data source
     // without a restart. The pick is reported to the app via `onStubChange`; `summary` of the current
     // pick is shown in `stubSummaryLabel` below the popup.
-    private let stubTitleLabel = NSTextField(labelWithString: "Data source (stub)")
+    private let stubTitleLabel = NSTextField(labelWithString: "Preview data source (stub)")
     private let stubPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
     private let stubSummaryLabel = NSTextField(wrappingLabelWithString: "")
     /// Menu order — every scenario, so `indexOfSelectedItem` maps back to a `StubScenario`.
@@ -155,6 +155,9 @@ final class DevToolsWindowController: NSWindowController {
 
     private func showPreviewWindow() {
         if previewWindow == nil {
+            // The preview is a plain window, not an NSMenu, so its popup backdrop must match the menu's
+            // on-screen colour itself (dark #212121) rather than the lighter `windowBackgroundColor` fill.
+            previewVC.matchesMenuBackground = true
             previewVC.loadView()
             // Borderless: attached as a child of the tuner, it has no title bar / close button — it can't
             // be closed on its own and always travels with the tuner. Its own "Popup Preview" heading is
@@ -222,7 +225,11 @@ final class DevToolsWindowController: NSWindowController {
         plaqueDivider.translatesAutoresizingMaskIntoConstraints = false
 
         let container = ThemedFillView()
-        container.fillColor = .windowBackgroundColor
+        // Match the real NSMenu popup's on-screen colour (dark #212121), not the lighter fill a plain
+        // `windowBackgroundColor` renders here. Light already matches, so the dynamic colour only
+        // overrides dark. The hosted popup view uses the same colour via `matchesMenuBackground`.
+        container.fillColor = .popupMenuMatchedBackground
+        container.borderColor = .popupMenuBorder   // hairline edge, like a real system menu window
         container.cornerRadius = Self.menuPopupCornerRadius(for: window)
         container.addSubview(plaque)
         container.addSubview(plaqueDivider)
