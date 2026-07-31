@@ -97,7 +97,7 @@ In the tables below, `<…>` marks an interpolated value.
 | 456 | `lifecycle` | `.notice` | `launch-at-login: auto-registered (opt-out)` | successful auto-registration (`.notRegistered`, or recovery from `.notFound` after an update — #69) |
 | 461 | `lifecycle` | `.error` | `launch-at-login: auto-register failed: <error>` | `LaunchAtLoginController.enable()` threw on an installed `.app` bundle — an unexpected, registerable-but-refused case |
 | 640 | `network` | `.notice` | `update: checking (userInitiated=<bool>)` | `performUpdateCheck` — an update check begins (launch, 12 h heartbeat, or "Check now"); #37 |
-| 684 | `lifecycle` | `.notice` | `update: TOKENPACE_GH_AUTH found in login shell env` | `resolveGHAuth` — the gh-auth flag was absent from `ProcessInfo` but found in the login shell's rc files via `ShellEnvironment` (#37) |
+| — | `lifecycle` | `.notice` | `env: <TOKENPACE_VAR> found in login shell env` | `ProdEnvFlag.warmUp` — a prod-visible flag (`TOKENPACE_GH_AUTH`, `TOKENPACE_DEVTOOLS`) was absent from `ProcessInfo` but found in the login shell's rc files via `ShellEnvironment` (#37, #185) |
 | — | `lifecycle` | `.notice` | `update: new version available tag=<tag> firstSeen=<bool>` | `handleUpdateFound` — a newer release was found; `firstSeen` = first time this tag is surfaced (`lastSeenLatestVersion`), #37 |
 | — | `lifecycle` | `.notice` | `update: cleared pending what's new (superseded by newer release)` | `handleUpdateFound` — a release newer than the installed build pre-empts an unseen "what's new" (#130, ADR-0036) |
 | — | `lifecycle` | `.notice` | `update: menu item = <hidden\|updateFailed\|updateAvailable\|updatePending\|whatsNew>` | `refreshUpdateMenuItem` — the single update dropdown item's resolved state (#130, ADR-0036) |

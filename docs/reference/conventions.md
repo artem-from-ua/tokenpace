@@ -115,10 +115,17 @@ git config core.hooksPath .githooks
   [ui-verification.md](../guides/ui-verification.md).
 - **`TOKENPACE_GH_AUTH`** (прапорець присутності, будь-яке непорожнє значення) — вмикає `gh`-шлях
   update-чеку (`GHReleaseFetcher`): `gh api …/releases/latest` як subprocess, `gh` бере токен із
-  keyring. Для мейнтейнерів, поки репо приватне; без змінної — анонімний HTTPS (ADR-0025).
-  Резолвиться з `ProcessInfo`, а якщо там немає (застосунок стартував через launchd при логіні) —
-  з `~/.zshrc`/`~/.zprofile` через `ShellEnvironment`. Тож достатньо `export TOKENPACE_GH_AUTH=1` у
-  `~/.zshrc` — жодних `launchctl setenv`/LaunchAgent не потрібно.
+  keyring. Для мейнтейнерів, поки репо приватне; без змінної — анонімний HTTPS (ADR-0025). Резолвиться
+  спільним `ProdEnvFlag` (див. нижче), тож достатньо `export TOKENPACE_GH_AUTH=1` у `~/.zshrc`.
+- **`TOKENPACE_DEVTOOLS`** (прапорець присутності) — розблоковує ⌥-пункт «Development tools…» і
+  live-колор-тюнер (#185, ADR-0046). Резолвиться тим самим `ProdEnvFlag`, тож `export TOKENPACE_DEVTOOLS=1`
+  у `~/.zshrc` вмикає його і в нотаризованому `.app`, запущеному з Finder/при логіні (ADR-0052).
+- **`ProdEnvFlag`-резолв** (для обох прапорців вище): застосунок часто стартує через launchd (login /
+  Finder / Dock) **без шелла**, тож `export …` у `~/.zshrc` невидимий через `ProcessInfo`. Тому кожен
+  prod-visible прапорець резолвиться спершу з `ProcessInfo` (термінал / `launchctl setenv`), а якщо там
+  немає — з `~/.zshrc`/`~/.zprofile` через `ShellEnvironment` (`zsh -l -i`), прогрітий **раз, off-main**
+  на старті. Жодних `launchctl setenv`/LaunchAgent не потрібно. Майбутній prod-visible прапорець
+  додається одним case у `ProdEnvFlag` (ADR-0052).
 - **`TOKENPACE_FAKE_LATEST`** = `vX.Y.Z` — форсує канований «останній реліз» (`StubUpdateFetcher`)
   без мережі, щоб перевірити гілки «доступне оновлення» / «up to date». Пріоритетніший за
   `TOKENPACE_GH_AUTH` (ADR-0025).
