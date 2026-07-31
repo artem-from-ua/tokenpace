@@ -17,6 +17,16 @@ struct AppearancePane: View {
                         + "colored; on-pace and mild states stay a neutral white.")
                 }
 
+                // #199 — placed second by request. Independent of the pacing-bars toggle below: the
+                // glyph shows whenever fully blocked, before the bars or before the countdown.
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Show pause icon when fully blocked", isOn: Binding(
+                        get: { model.showBlockedPause }, set: { model.setShowBlockedPause($0) }))
+                    SettingsHint(text: "When every limit is exhausted and extra-usage credits can't "
+                        + "cover, an orange pause icon appears at the left of the menu-bar widget — "
+                        + "before the pacing bars, or before the reset countdown when the bars are hidden.")
+                }
+
                 // Shown to the user as "Show 7-day bar when calm" — the inverse of the stored
                 // `hideCalmSevenDay` flag (off by default = the calm 7-day bar is hidden by default).
                 VStack(alignment: .leading, spacing: 4) {
@@ -27,12 +37,15 @@ struct AppearancePane: View {
                         + "when it turns orange or red.")
                 }
 
+                // Shown to the user as "Show pacing bars when 5h/7d limits reached" — the inverse of
+                // the stored `hideBarsWhenBlocked` flag (off by default = bars hidden when blocked,
+                // #194 behaviour preserved).
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Hide pacing bars when blocked", isOn: Binding(
-                        get: { model.hideBarsWhenBlocked }, set: { model.setHideBarsWhenBlocked($0) }))
-                    SettingsHint(text: "When a limit is exhausted, a full red bar shows nothing you "
-                        + "can act on. Hides both bars in that state and keeps just the countdown to "
-                        + "the reset. The popup still shows the full bars.")
+                    Toggle("Show pacing bars when 5h/7d limits reached", isOn: Binding(
+                        get: { !model.hideBarsWhenBlocked }, set: { model.setHideBarsWhenBlocked(!$0) }))
+                    SettingsHint(text: "When a 5-hour or 7-day limit is exhausted, keep both full (red) "
+                        + "bars visible. Off collapses to just the countdown to the reset, since a full "
+                        + "red bar shows nothing you can act on. The popup always shows the full bars.")
                 }
 
                 // Reset-countdown mode: a menu picker (like System Settings' few-option choices).

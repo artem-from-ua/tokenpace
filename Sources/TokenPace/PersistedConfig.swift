@@ -57,6 +57,10 @@ enum PersistedConfig {
         /// Whether the menu-bar widget hides *both* pacing bars while a main window is exhausted
         /// (blocked), leaving only the reset countdown (#194). Default-on (opt-out) — see the property.
         static let hideBarsWhenBlocked = "hideBarsWhenBlocked"
+        /// Whether the menu-bar widget draws the orange "pause" glyph to the left of the bars when the
+        /// user is fully blocked (`CreditsPacing.isBlocked`) and the bars are kept visible (#199).
+        /// Default-on (opt-out) — see the property.
+        static let showBlockedPause = "showBlockedPause"
         /// Whether the menu-bar widget draws the money-credits ("extra usage") icon when credits are
         /// active and a base limit is exhausted (#144). Default-on (opt-out) — see the property.
         static let showExtraUsage = "showExtraUsage"
@@ -232,6 +236,18 @@ enum PersistedConfig {
     static var hideBarsWhenBlocked: Bool {
         get { defaults.object(forKey: Key.hideBarsWhenBlocked) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.hideBarsWhenBlocked) }
+    }
+
+    /// Whether the **menu-bar** widget draws the orange "pause" glyph as the **leading** element while
+    /// the user is *fully blocked* — every limit exhausted **and** paid credits can't cover
+    /// (`CreditsPacing.isBlocked`), so there is no path to work (#199). **Default-on** (opt-out): an
+    /// absent key reads as `true`. **Independent** of the "Show pacing bars when 5h/7d limits reached"
+    /// toggle: the glyph is drawn left of the bars when they are kept, and left of the countdown in the
+    /// bars-less `.blockedReset` mode. `object(forKey:) as? Bool ?? true` distinguishes "unset" (→ true)
+    /// from an explicit `false` the user chose. Menu-bar only.
+    static var showBlockedPause: Bool {
+        get { defaults.object(forKey: Key.showBlockedPause) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.showBlockedPause) }
     }
 
     /// Whether the **menu-bar** widget draws the money-credits ("extra usage") icon — the trailing

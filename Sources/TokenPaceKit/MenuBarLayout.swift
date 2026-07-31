@@ -230,10 +230,22 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// is reserved for it, exactly as before this feature.
     public let credits: CreditsMarker?
 
-    public init(mode: MenuBarMode, serviceProblem: ServiceStatus? = nil, credits: CreditsMarker? = nil) {
+    /// Whether to draw the orange "pause" glyph as the **leading** element (#199). Set `true` whenever
+    /// the snapshot is `CreditsPacing.isBlocked` (every limit exhausted **and** paid credits can't cover
+    /// — no path to work) and the user opted in (`PersistedConfig.showBlockedPause`) — **independent**
+    /// of the bars toggle. The view draws it left of the bars in ``MenuBarMode/expanded`` and left of
+    /// the countdown in the bars-less ``MenuBarMode/blockedReset`` (#194). Never `true` for the
+    /// diagnostic ``MenuBarMode/error`` state. Orthogonal to `mode` — a leading decoration, computed at
+    /// the health-aware `make` seam like `credits`. When `false`, no glyph is drawn and no width is
+    /// reserved, exactly as before this feature.
+    public let blockedPause: Bool
+
+    public init(mode: MenuBarMode, serviceProblem: ServiceStatus? = nil, credits: CreditsMarker? = nil,
+                blockedPause: Bool = false) {
         self.mode = mode
         self.serviceProblem = serviceProblem
         self.credits = credits
+        self.blockedPause = blockedPause
     }
 
     // MARK: make
@@ -416,16 +428,33 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///     **healthy/stale** path when a main window is exhausted (#194) — see the plain
     ///     ``make(from:now:resetMode:hideCalmSevenDay:hideBarsWhenBlocked:)``. The error state (⚠️ +
     ///     stale bars) ignores it: the bars are diagnostic there and always kept. Default `false`.
+    ///   - showBlockedPause: Whether to draw the orange leading "pause" glyph when the user is fully
+    ///     blocked (#199), gated by `PersistedConfig.showBlockedPause`. The glyph is set on the result
+    ///     (`MenuBarLayout.blockedPause`) whenever this is `true` and the snapshot is
+    ///     `CreditsPacing.isBlocked` (no path to work) — **independent** of the bars toggle: it is drawn
+    ///     to the left of the bars in `.expanded`, and to the left of the countdown in the bars-less
+    ///     `.blockedReset` (#194). Never set for the diagnostic `.error` state. Default `false`.
     public static func make(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
         serviceProblem: ServiceStatus? = nil, resetMode: ResetCountdownMode = .smart,
-        hideCalmSevenDay: Bool = false, showCredits: Bool = false, hideBarsWhenBlocked: Bool = false
+        hideCalmSevenDay: Bool = false, showCredits: Bool = false, hideBarsWhenBlocked: Bool = false,
+        showBlockedPause: Bool = false
     ) -> MenuBarLayout {
         let credits = showCredits ? snapshot.flatMap { creditsMarker(for: $0, now: now) } : nil
-        return usageMode(from: snapshot, health: health, now: now,
-                         resetMode: resetMode, hideCalmSevenDay: hideCalmSevenDay,
-                         hideBarsWhenBlocked: hideBarsWhenBlocked)
-            .with(serviceProblem: serviceProblem, credits: credits)
+        let layout = usageMode(from: snapshot, health: health, now: now,
+                               resetMode: resetMode, hideCalmSevenDay: hideCalmSevenDay,
+                               hideBarsWhenBlocked: hideBarsWhenBlocked)
+        // Pause glyph: whenever opted in and fully blocked, independent of the bars toggle — drawn left
+        // of the bars (`.expanded`) or left of the countdown (`.blockedReset`, #194). The diagnostic
+        // `.error` state never carries it (stale bars / cold start are not a "fully blocked" signal).
+        let blockedPause: Bool = {
+            guard showBlockedPause, let snapshot, CreditsPacing.isBlocked(in: snapshot) else { return false }
+            switch layout.mode {
+            case .expanded, .blockedReset: return true
+            case .error: return false
+            }
+        }()
+        return layout.with(serviceProblem: serviceProblem, credits: credits, blockedPause: blockedPause)
     }
 
     /// The money-credits icon marker for a snapshot at `now`, or `nil` when no credits icon should
@@ -490,10 +519,11 @@ public struct MenuBarLayout: Sendable, Equatable {
             fiveHour: five, sevenDay: seven, reset: resolved?.display, which: resolved?.which))
     }
 
-    /// A copy of this layout carrying `serviceProblem` and `credits` (the `mode` is unchanged) — the
-    /// two trailing decorations grafted onto the usage `mode` computed by ``usageMode(from:health:now:resetMode:hideCalmSevenDay:)``.
-    func with(serviceProblem: ServiceStatus?, credits: CreditsMarker?) -> MenuBarLayout {
-        MenuBarLayout(mode: mode, serviceProblem: serviceProblem, credits: credits)
+    /// A copy of this layout carrying `serviceProblem`, `credits`, and `blockedPause` (the `mode` is
+    /// unchanged) — the decorations grafted onto the usage `mode` computed by
+    /// ``usageMode(from:health:now:resetMode:hideCalmSevenDay:hideBarsWhenBlocked:)``.
+    func with(serviceProblem: ServiceStatus?, credits: CreditsMarker?, blockedPause: Bool) -> MenuBarLayout {
+        MenuBarLayout(mode: mode, serviceProblem: serviceProblem, credits: credits, blockedPause: blockedPause)
     }
 
     // MARK: - Private

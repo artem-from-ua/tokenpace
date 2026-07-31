@@ -29,6 +29,8 @@ enum ColorRole: String, CaseIterable {
     case menuStatusRed
     case menuStatusBlue
     case menuStatusGray
+    // Orange "pause" glyph drawn left of the bars when fully blocked and the bars are kept visible.
+    case menuPauseOrange
     // Menu-bar ahead-of-pace pacing (previously shared with the popup via aheadColor; now independent).
     case menuGapRed
     case menuGapYellow
@@ -78,6 +80,7 @@ enum ColorRole: String, CaseIterable {
              .popupGapGreen, .popupGapRed, .popupGapYellow, .popupGapOrange:
             return .pacing
         case .menuStatusYellow, .menuStatusOrange, .menuStatusRed, .menuStatusBlue, .menuStatusGray,
+             .menuPauseOrange,
              .popupServiceGreen, .popupServiceYellow, .popupServiceOrange,
              .popupServiceRed, .popupServiceBlue, .popupServiceGray,
              .popupWarningRed:
@@ -111,6 +114,7 @@ enum ColorRole: String, CaseIterable {
         case .menuStatusRed:       return "Menu-bar · status red (major outage)"
         case .menuStatusBlue:      return "Menu-bar · status blue (maintenance)"
         case .menuStatusGray:      return "Menu-bar · status grey (unknown / operational)"
+        case .menuPauseOrange:     return "Menu-bar · blocked pause"
         case .popupGapGreen:       return "Popup · gap green"
         case .popupIdleBlue:       return "Popup · idle blue"
         case .popupGapRed:         return "Popup · gap red"
@@ -165,6 +169,9 @@ enum ColorRole: String, CaseIterable {
             return "Menu-bar service-status dot: under maintenance."
         case .menuStatusGray:
             return "Menu-bar service-status dot: unknown / operational."
+        case .menuPauseOrange:
+            return "Menu-bar orange pause glyph drawn left of the bars when all limits are gone "
+                 + "(CreditsPacing.isBlocked) and the bars are kept visible in that state (#199)."
         case .popupGapGreen:
             return "Popup bar pacing gap and indicator when on pace. Default is systemGreen."
         case .popupIdleBlue:
@@ -267,6 +274,7 @@ enum ColorRole: String, CaseIterable {
         case .menuStatusRed:       return NSColor(srgbRed: 225/255, green: 70/255, blue: 70/255, alpha: 1)
         case .menuStatusBlue:      return NSColor(srgbRed: 70/255, green: 140/255, blue: 230/255, alpha: 1)
         case .menuStatusGray:      return NSColor(srgbRed: 150/255, green: 150/255, blue: 150/255, alpha: 1)
+        case .menuPauseOrange:     return NSColor(srgbRed: 240/255, green: 140/255, blue: 40/255, alpha: 1)
         // Popup palette (PopupViewController.swift) — system / appearance-aware defaults.
         case .popupGapGreen:       return .systemGreen
         case .popupIdleBlue:       return PopupBarView.defaultIdleBlue

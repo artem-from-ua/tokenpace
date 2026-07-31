@@ -28,7 +28,9 @@ final class SettingsWindowController: NSWindowController {
         /// Fixed window content width, matching System Settings exactly (measured 857 pt, #156). The
         /// window never resizes; the sidebar/detail split moves inside it (sidebar 258, detail 599).
         static let contentWidth: CGFloat = 857
-        static let contentHeight: CGFloat = 480
+        /// Fixed window content height. Bumped 480 → 520 (#199) so the taller Appearance pane (extra
+        /// menu-bar toggle) and the other panes breathe without inner scrolling.
+        static let contentHeight: CGFloat = 520
     }
 
     /// The single observable state object, alive for the controller's lifetime (so background
@@ -72,9 +74,15 @@ final class SettingsWindowController: NSWindowController {
         get { model.onHideCalmSevenDayChange } set { model.onHideCalmSevenDayChange = newValue }
     }
 
-    /// Called when the user toggles "Hide pacing bars when blocked" (#194), with the new state.
+    /// Called when the user toggles "Show pacing bars when 5h/7d limits reached" (#194), with the new
+    /// state (stored inverted as `hideBarsWhenBlocked`).
     var onHideBarsWhenBlockedChange: ((Bool) -> Void)? {
         get { model.onHideBarsWhenBlockedChange } set { model.onHideBarsWhenBlockedChange = newValue }
+    }
+
+    /// Called when the user toggles "Show pause icon when fully blocked" (#199), with the new state.
+    var onShowBlockedPauseChange: ((Bool) -> Void)? {
+        get { model.onShowBlockedPauseChange } set { model.onShowBlockedPauseChange = newValue }
     }
 
     /// Called when the user toggles "Pause polling while the screen is locked" (#114).
@@ -130,7 +138,7 @@ final class SettingsWindowController: NSWindowController {
         // resolution/scale) and reopen off-screen; centring is always on-screen (see `show()`).
         window.standardWindowButton(.zoomButton)?.isHidden = true
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        // Fixed content size (857×480), like System Settings — a non-resizable single-pane form. Pin
+        // Fixed content size (857×520), like System Settings — a non-resizable single-pane form. Pin
         // min == max so the window never resizes by pane or by the hosting view's ideal size, and the
         // sidebar/detail split moves inside it.
         window.contentMinSize = NSSize(width: Metrics.contentWidth, height: Metrics.contentHeight)
@@ -152,7 +160,7 @@ final class SettingsWindowController: NSWindowController {
         // `updateAvailability`, called by `AppDelegate.openSettings` before `show()`.
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
-        // Fix the content size to the full 857×480 *before* centring. The `NSHostingController` content
+        // Fix the content size to the full 857×520 *before* centring. The `NSHostingController` content
         // has no intrinsic size, so at first show the window is still a zero-width title-bar sliver;
         // centring it while zero-width lands the left edge near the screen centre, and growing to 857
         // afterwards pushes the right half off-screen. Sizing first makes `center()` centre correctly.
