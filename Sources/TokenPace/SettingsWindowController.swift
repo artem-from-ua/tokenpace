@@ -69,6 +69,11 @@ final class SettingsWindowController: NSWindowController {
         get { model.onExtraUsageChange } set { model.onExtraUsageChange = newValue }
     }
 
+    /// Called when the user toggles "Show model-specific limits" (#211), with the new state.
+    var onShowModelSpecificLimitsChange: ((Bool) -> Void)? {
+        get { model.onShowModelSpecificLimitsChange } set { model.onShowModelSpecificLimitsChange = newValue }
+    }
+
     /// Called when the user toggles "Hide 7-day bar when calm" (#94), with the new state.
     var onHideCalmSevenDayChange: ((Bool) -> Void)? {
         get { model.onHideCalmSevenDayChange } set { model.onHideCalmSevenDayChange = newValue }

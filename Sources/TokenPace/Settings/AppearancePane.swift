@@ -3,7 +3,8 @@ import TokenPaceKit
 
 // MARK: - AppearancePane (#168, ADR-0042)
 
-/// Settings → Appearance: the menu-bar widget options, in one "Menu Bar" section.
+/// Settings → Appearance: the menu-bar widget options in a "Menu Bar Widget" section, plus a
+/// "Dropdown" section for popup-only options (the per-model limits toggle, #211).
 struct AppearancePane: View {
     @Bindable var model: SettingsModel
 
@@ -61,6 +62,19 @@ struct AppearancePane: View {
                     get: { model.showExtraUsage }, set: { model.setShowExtraUsage($0) }))
                 Toggle("Show service status dot on issues", isOn: Binding(
                     get: { model.showServiceDot }, set: { model.setShowServiceDot($0) }))
+            }
+
+            // #211 — a popup-only option, so it lives in its own "Dropdown" section rather than in
+            // "Menu Bar Widget" above (whose toggles all govern the menu-bar widget).
+            Section("Dropdown") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Show model-specific limits", isOn: Binding(
+                        get: { model.showModelSpecificLimits },
+                        set: { model.setShowModelSpecificLimits($0) }))
+                    SettingsHint(text: "Shows separate 7-day limit rows per model (Opus, Sonnet, "
+                        + "Fable…) in the dropdown, below the 5-hour and 7-day rows. Off keeps only "
+                        + "the 5-hour and 7-day limits.")
+                }
             }
         }
         .formStyle(.grouped)

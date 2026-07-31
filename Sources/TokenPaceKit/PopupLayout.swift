@@ -202,13 +202,16 @@ public struct PopupLayout: Sendable, Equatable {
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
     ///   - lastUpdate: Instant of the last successful 200 (→ `lastUpdateAge`). Mock today; real with #13.
     ///   - interval: Current polling interval in seconds (`PollingBackoff.interval`). Mock today.
+    ///   - showModelSpecificLimits: When `false`, omit the per-model rows (`Opus`/`Sonnet`/scoped),
+    ///     keeping only `5h` and `7d` (#211). Defaults to `true`.
     public static func make(
         from snapshot: UsageSnapshot,
         now: Date,
         lastUpdate: Date,
-        interval: TimeInterval
+        interval: TimeInterval,
+        showModelSpecificLimits: Bool = true
     ) -> PopupLayout {
-        let rows = self.rows(from: snapshot, now: now)
+        let rows = self.rows(from: snapshot, now: now, showModelSpecificLimits: showModelSpecificLimits)
         return PopupLayout(
             lastUpdateAge: max(0, now.timeIntervalSince(lastUpdate)),
             intervalSeconds: interval,
@@ -239,12 +242,15 @@ public struct PopupLayout: Sendable, Equatable {
     ///   - serviceStatus: The latest Claude service status (issue #31), or `nil` until the first
     ///     status poll has succeeded (the status loop is independent of the usage poll). Threaded
     ///     through unchanged — the view renders it.
+    ///   - showModelSpecificLimits: When `false`, omit the per-model rows (`Opus`/`Sonnet`/scoped),
+    ///     keeping only `5h` and `7d` (#211). Defaults to `true`.
     public static func make(
         from snapshot: UsageSnapshot?,
         health: UsageHealth,
         now: Date,
         interval: TimeInterval,
-        serviceStatus: StatusHealth? = nil
+        serviceStatus: StatusHealth? = nil,
+        showModelSpecificLimits: Bool = true
     ) -> PopupLayout {
         let lastUpdateAge = health.lastSuccess.map { max(0, now.timeIntervalSince($0)) } ?? 0
 
@@ -260,7 +266,9 @@ public struct PopupLayout: Sendable, Equatable {
                 warning: .serverProblem, serviceStatus: serviceStatus)
         }
 
-        let rows = snapshot.map { self.rows(from: $0, now: now) } ?? []
+        let rows = snapshot.map {
+            self.rows(from: $0, now: now, showModelSpecificLimits: showModelSpecificLimits)
+        } ?? []
         // A failing poll surfaces its own reason (with the last known — possibly stale — rows above).
         let warning: FailureReason? = health.isFailing ? health.reason : nil
         let credits = snapshot.flatMap { self.creditsRow(from: $0, now: now) }
@@ -278,12 +286,20 @@ public struct PopupLayout: Sendable, Equatable {
 
     // MARK: - Private
 
-    /// The ordered limit sections for a snapshot: `5h`, `7d`, then any present per-model rows —
-    /// the legacy top-level sub-windows (`Opus`/`Sonnet`, null-safe) followed by the
-    /// `weekly_scoped` models from `limits[]` (e.g. `Fable`, #65; already deduped against the
-    /// legacy rows by ``UsageSnapshot/scopedModelWindows``). All per-model rows are paced as
-    /// `.sevenDay`. Shared by both ``make`` overloads.
-    private static func rows(from snapshot: UsageSnapshot, now: Date) -> [LimitRow] {
+    /// The ordered limit sections for a snapshot: `5h`, `7d`, then — when
+    /// `showModelSpecificLimits` is `true` — any present per-model rows: the legacy top-level
+    /// sub-windows (`Opus`/`Sonnet`, null-safe) followed by the `weekly_scoped` models from
+    /// `limits[]` (e.g. `Fable`, #65; already deduped against the legacy rows by
+    /// ``UsageSnapshot/scopedModelWindows``). All per-model rows are paced as `.sevenDay`.
+    ///
+    /// - Parameter showModelSpecificLimits: When `false`, the per-model rows are omitted and only
+    ///   the `5h` and `7d` rows remain (the "Show model-specific limits" opt-out, #211). Defaults to
+    ///   `true` so callers that don't care keep the full set.
+    ///
+    /// Shared by both ``make`` overloads.
+    private static func rows(
+        from snapshot: UsageSnapshot, now: Date, showModelSpecificLimits: Bool = true
+    ) -> [LimitRow] {
         // The 5-hour row is the idle placeholder when the window has no active session (#100); every
         // other row is built normally, including the 7-day one (which always exists). When idle is also
         // **blocked** (#158) the placeholder carries `sessionBlocked` so the view greys it and swaps the
@@ -295,14 +311,16 @@ public struct PopupLayout: Sendable, Equatable {
             snapshot.sessionIdle ? idleFiveHourRow(blocked: idleBlocked) : row(title: "5-hour", window: snapshot.fiveHour, as: .fiveHour, now: now),
             row(title: "7-day", window: snapshot.sevenDay, as: .sevenDay, now: now),
         ]
-        if let opus = snapshot.sevenDayOpus {
-            rows.append(row(title: "Opus", window: opus, as: .sevenDay, now: now))
-        }
-        if let sonnet = snapshot.sevenDaySonnet {
-            rows.append(row(title: "Sonnet", window: sonnet, as: .sevenDay, now: now))
-        }
-        for scoped in snapshot.scopedModelWindows {
-            rows.append(row(title: scoped.name, window: scoped.window, as: .sevenDay, now: now))
+        if showModelSpecificLimits {
+            if let opus = snapshot.sevenDayOpus {
+                rows.append(row(title: "Opus", window: opus, as: .sevenDay, now: now))
+            }
+            if let sonnet = snapshot.sevenDaySonnet {
+                rows.append(row(title: "Sonnet", window: sonnet, as: .sevenDay, now: now))
+            }
+            for scoped in snapshot.scopedModelWindows {
+                rows.append(row(title: scoped.name, window: scoped.window, as: .sevenDay, now: now))
+            }
         }
         return rows
     }
