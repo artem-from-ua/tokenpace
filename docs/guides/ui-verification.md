@@ -42,12 +42,15 @@
 `StubScenario` (`Sources/TokenPace/StubScenario.swift`): `rawValue` кожного кейса = ім'я стуба з
 таблиці нижче, `summary` — опис.
 
-> **Живе перемикання без рестарту (#187, ADR-0047).** У dev-збірці (`TOKENPACE_DEVTOOLS=1`) відкрий
+> **Живе перемикання без рестарту (#187, ADR-0047).** Коли dev-tools увімкнено
+> (`defaults write com.artem-n.tokenpace devToolsEnabled -bool true` на **встановленому `.app`** — ADR-0053;
+> у `swift run` ключ не діє, бо бінарник без bundle id → інший домен `UserDefaults`), відкрий
 > ⌥ Option → меню → **Development tools…** і вибери сценарій у випадайці **Data source (stub)** угорі
 > лівої колонки — джерело даних перемкнеться наживо (menu-bar іконка й popup оновляться протягом одного
 > циклу полу), під випадайкою показано опис поточного сценарію. `TOKENPACE_STUB=…` при старті досі
 > працює і **задає початковий вибір** випадайки; «Real network (no stub)» повертає застосунок на живий
-> API. Для скриптингу: `TOKENPACE_DEVTOOLS=1 TOKENPACE_OPEN_DEVTOOLS=1 swift run` авто-відкриває вікно.
+> API. Для скриптингу авто-відкриття вікна лишається `TOKENPACE_OPEN_DEVTOOLS=1` (сам гейт dev-tools —
+> вже `devToolsEnabled`, тож лише на `.app`).
 > Послідовнісні стуби (`stale-error`, `reset-grace`, `optimistic-reset`, `just-unblocked`)
 > відтворюються з полу №1 при повторному виборі (свіжий `StubUsageTransport` скидає лічильник полів).
 >
@@ -322,22 +325,28 @@ inline-пікер** у правій панелі — усі 6 каналів (RG
 градієнт-стрічка, редаговані 16-бітні поля 0–65535 + alpha, живі копійовані RGB(0–255)+HEX readout-и.
 Перемальовує menu-bar іконку й popup-preview **наживо**. У preview-вікні під popup — два mock-рядки
 (синя «New update available» / червона «Automatic update failed») для підбору відповідних кольорів.
-Гейт — **`TOKENPACE_DEVTOOLS`**
-(непорожнє значення) **плюс** затиснутий ⌥ Option на пункті меню «Development tools…». Незалежить від
-типу білда (dev / notarized / release): гейт — env-var, не `#if DEBUG`. Override-и **ephemeral** (не
-персистяться); без env-var шар кольорів інертний (завжди дефолти).
+Гейт — **`defaults`-ключ `devToolsEnabled`** (`defaults write com.artem-n.tokenpace devToolsEnabled -bool true`,
+ADR-0053) **плюс** затиснутий ⌥ Option на пункті меню «Development tools…». Незалежить від
+типу білда (dev / notarized / release): гейт — `UserDefaults`-ключ, не `#if DEBUG`. Override-и
+**ephemeral** (не персистяться); без ключа шар кольорів інертний (завжди дефолти).
+
+> **Лише на встановленому `.app`.** Ключ читається з домену bundle id, тож діє тільки коли ключ
+> виставлено на нотаризованому `.app` і його ж запущено. У `swift run` бінарник **без bundle id** →
+> інший домен `UserDefaults`, тож `defaults write com.artem-n.tokenpace …` на нього не впливає —
+> тюнер тепер можна ганяти **лише на зібраному `.app`**, не в `swift run` (ADR-0053).
 
 Запуск для перевірки (auto-open обходить незручний ⌥-клік по menu-bar, як для Troubleshoot):
 
 ```sh
-TOKENPACE_DEVTOOLS=1 TOKENPACE_OPEN_DEVTOOLS=1 TOKENPACE_STUB=both-orange swift run
+defaults write com.artem-n.tokenpace devToolsEnabled -bool true
+TOKENPACE_OPEN_DEVTOOLS=1 TOKENPACE_STUB=both-orange open -n /Applications/TokenPace.app
 ```
 
 → вікно тюнера (always-on-top) відкриється саме, поруч — окреме always-on-top вікно **«Popup preview»**
 з живим рендером дропдауна. Обери роль (напр. «Popup · gap orange»), посунь повзунок каналу (або
 впиши 16-бітне значення) — і preview-вікно, і menu-bar іконка міняються негайно. Закриття вікна тюнера
 закриває й preview. **Reset** / **Reset all** повертають дефолти,
-**Copy sRGB** кладе значення в буфер, ● позначає недефолтні ролі. Без `TOKENPACE_DEVTOOLS` пункт меню
+**Copy sRGB** кладе значення в буфер, ● позначає недефолтні ролі. Без `devToolsEnabled` пункт меню
 не з'являється навіть під ⌥, а `TOKENPACE_OPEN_DEVTOOLS` ігнорується.
 
 ## Що НЕ рахується за верифікацію

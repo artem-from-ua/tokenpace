@@ -38,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var devToolsWC: DevToolsWindowController?
 
     /// The optional "Development tools…" item (#185), shown just below "Troubleshoot…" but **only**
-    /// when `TOKENPACE_DEVTOOLS` is set (`ColorStore.devToolsEnabled`) **and** ⌥ Option is held — so it
+    /// when the `devToolsEnabled` defaults key is set (`ColorStore.devToolsEnabled`) **and** ⌥ Option is held — so it
     /// stays invisible on a normal run regardless of build type. Visibility is flipped alongside
     /// `troubleshootItem` in `updateTroubleshootVisibility(_:)`.
     private var devToolsItem: NSMenuItem?
@@ -134,11 +134,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The result of the last archive sync, retained so the Settings status line can show
     /// "Last archived: … · N files" between runs (#110). `nil` until the first sync completes.
     private(set) var lastArchiveSummary: LogArchiver.Summary?
-    /// Whether the `gh` path is enabled, resolved from `TOKENPACE_GH_AUTH` through the shared
-    /// ``ProdEnvFlag`` resolver: `ProcessInfo` first (terminal / `launchctl setenv`), then the login
-    /// shell's rc files (a login-launched app sees no shell env). Non-blocking — the shell probe is
-    /// warmed up once, off-main, by `ProdEnvFlag.warmUp` at startup.
-    private var ghAuthEnabled: Bool { ProdEnvFlag.isEnabled(.ghAuth) }
+    /// Whether the `gh` path is enabled, resolved once (lazily) from `TOKENPACE_GH_AUTH`. Checked in
+    /// `ProcessInfo` first (terminal / `launchctl setenv` launches), then — since a login-launched app
+    /// sees no shell env — from the login shell's `~/.zshrc`/`~/.zprofile` via `ShellEnvironment`. The
+    /// shell probe is memoised so it runs at most once, not on every heartbeat.
+    private lazy var ghAuthEnabled: Bool = Self.resolveGHAuth()
 
     /// Which logical services to monitor on the status page (#89) — loaded from `PersistedConfig`
     /// on launch, updated live when the user changes it in Settings (`monitoredServicesChanged`).
@@ -201,13 +201,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // only records the running version.
         runConfigMigrationsIfNeeded()
 
-        // Warm up the shared prod-visible env flags (`TOKENPACE_GH_AUTH`, `TOKENPACE_DEVTOOLS`) as early
-        // as possible: a login/GUI launch (SMAppService, Finder) gets no shell env, so these are read
-        // from the login shell's rc files via a subprocess. Doing it here, off-main, keeps launch un-
-        // blocked; the completion re-renders so an override-driven dev-tools repaint lands once the probe
-        // resolves the flag (the "Development tools…" menu item re-checks the gate on each open itself).
-        ProdEnvFlag.warmUp { [weak self] in self?.reRenderForCurrentTime() }
-
         // Load the persisted monitored-services choice (#89) before the first status poll, so it
         // resolves the right logical services from the start. Falls back to `.default` when absent.
         monitoredServices = PersistedConfig.monitoredServices
@@ -269,11 +262,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.troubleshootItem = troubleshootItem
 
         // "Development tools…" (#185): the dev colour tuner, sitting just below "Troubleshoot…". Only
-        // ever visible when `TOKENPACE_DEVTOOLS` is set AND ⌥ Option is held (both gates applied in
-        // `updateTroubleshootVisibility`), so a normal run never shows it — regardless of build type.
-        // The item is created unconditionally but starts hidden: the env-var gate is re-checked on every
-        // menu open, so a login-launched app whose flag only resolves after the async `ProdEnvFlag`
-        // warm-up (below) still reveals it — no menu rebuild needed.
+        // ever visible when the `devToolsEnabled` defaults key is set AND ⌥ Option is held (both gates
+        // applied in `updateTroubleshootVisibility`), so a normal run never shows it — regardless of
+        // build type. The item is created unconditionally but starts hidden: the gate is re-checked on
+        // every menu open, so toggling the defaults key takes effect on the next open — no menu rebuild.
         let devItem = NSMenuItem(title: "", action: #selector(openDevTools), keyEquivalent: "")
         devItem.attributedTitle = Self.dropdownMenuItemText("Development tools…")
         devItem.target = self
@@ -353,8 +345,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["TOKENPACE_OPEN_TROUBLESHOOT"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.openTroubleshoot() }
         }
-        // Same for the dev colour tuner (#185), normally reached only via ⌥ on the (env-gated)
-        // "Development tools…" item — doubly awkward to script. Requires `TOKENPACE_DEVTOOLS` set too.
+        // Same for the dev colour tuner (#185), normally reached only via ⌥ on the (flag-gated)
+        // "Development tools…" item — doubly awkward to script. Requires the `devToolsEnabled`
+        // defaults key set too (`ColorStore.devToolsEnabled`).
         if ColorStore.devToolsEnabled,
            ProcessInfo.processInfo.environment["TOKENPACE_OPEN_DEVTOOLS"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.openDevTools() }
@@ -449,7 +442,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Open (or focus) the dev colour tuner (#185). Lazily creates the single instance and wires its
     /// change callback to re-render both surfaces, so a colour edit repaints the menu-bar icon and the
-    /// popup live. Reachable only when `TOKENPACE_DEVTOOLS` is set (the item is gated in the menu).
+    /// popup live. Reachable only when the `devToolsEnabled` defaults key is set (the item is gated in the menu).
     @objc private func openDevTools() {
         if devToolsWC == nil {
             devToolsWC = DevToolsWindowController()
@@ -564,9 +557,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let troubleshootItem, optionHeld != lastOptionHeld else { return }
         lastOptionHeld = optionHeld
         troubleshootItem.isHidden = !optionHeld
-        // "Development tools…" needs both gates: ⌥ Option AND the `TOKENPACE_DEVTOOLS` flag. The item
-        // always exists now, so the env gate is applied here (re-checked each open, so it appears once
-        // the async `ProdEnvFlag` warm-up resolves the flag for a login/GUI launch).
+        // "Development tools…" needs both gates: ⌥ Option AND the `devToolsEnabled` defaults key. The
+        // item always exists now, so the flag gate is applied here (re-checked each open, so toggling
+        // the defaults key takes effect on the next menu open).
         devToolsItem?.isHidden = !(optionHeld && ColorStore.devToolsEnabled)
         // Reveal the Quit tag ("(dev build …)" / "(stub …)") only while ⌥ is held (`quitDevTitle` is nil
         // for a plain `.app` on the real network, so the title stays a plain "Quit TokenPace" there).
@@ -1024,6 +1017,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return GHReleaseFetcher()
         }
         return HTTPUpdateFetcher()
+    }
+
+    /// Resolve whether `TOKENPACE_GH_AUTH` is set. The app is usually launched at login by launchd,
+    /// which passes no shell environment, so a plain `export TOKENPACE_GH_AUTH=1` in `~/.zshrc` would
+    /// be invisible via `ProcessInfo`. So check `ProcessInfo` first (terminal / `launchctl setenv`
+    /// launches), then fall back to the login shell's rc files via `ShellEnvironment`. Run once and
+    /// memoised in `ghAuthEnabled` — the shell probe is a subprocess, not something to repeat per poll.
+    private static func resolveGHAuth() -> Bool {
+        if let flag = ProcessInfo.processInfo.environment["TOKENPACE_GH_AUTH"], !flag.isEmpty {
+            return true
+        }
+        if let flag = ShellEnvironment.value(for: "TOKENPACE_GH_AUTH"), !flag.isEmpty {
+            AppLogger.lifecycle.notice("update: TOKENPACE_GH_AUTH found in login shell env")
+            return true
+        }
+        return false
     }
 
     /// Surface a newly-found newer release: retain it (drives the menu click + Settings line), update

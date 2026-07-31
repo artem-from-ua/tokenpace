@@ -8,7 +8,7 @@ import AppKit
 ///
 /// The tuner reads this catalogue for its dropdown, its captions, and its reset-to-default action; the
 /// two `Palette` enums read the *live* value for each role through ``ColorStore``. Outside a dev-tools
-/// run (`TOKENPACE_DEVTOOLS` unset) the store always returns ``defaultColor``, so this type is inert on
+/// run (`devToolsEnabled` defaults key unset) the store always returns ``defaultColor``, so this type is inert on
 /// a normal launch — it is purely a registry, it draws nothing itself.
 ///
 /// Keep the raw values here in exact sync with the draw sites. When a `Palette` colour changes, change

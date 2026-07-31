@@ -95,6 +95,9 @@ enum PersistedConfig {
         /// Persisted "was on credits" edge state for the Extra Usage notification. Survives app restart
         /// and toggle off→on so the not-spending→spending edge is never missed — see the property.
         static let extraUsageWasOnCredits = "extraUsageWasOnCredits"
+        /// Whether the ⌥-revealed "Development tools…" menu / live colour tuner is unlocked (#185).
+        /// Default-off (opt-in) — see the property.
+        static let devToolsEnabled = "devToolsEnabled"
     }
 
     /// The marketing version the config was last written under, or `nil` if none has been recorded
@@ -373,5 +376,16 @@ enum PersistedConfig {
     static var extraUsageWasOnCredits: Bool {
         get { defaults.object(forKey: Key.extraUsageWasOnCredits) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.extraUsageWasOnCredits) }
+    }
+
+    /// Whether the ⌥-revealed "Development tools…" menu item and its live colour tuner (#185) are
+    /// unlocked. **Default-off** (opt-in): an absent key reads as `false`, so a normal launch never
+    /// exposes the dev tools. `object(forKey:) as? Bool ?? false` distinguishes "unset" from an
+    /// explicit `false`, consistent with the other opt-in toggles. Set it on the installed `.app` with
+    /// `defaults write com.artem-n.tokenpace devToolsEnabled -bool true` — this is a maintainer/dev
+    /// switch with no Settings UI (the menu item stays ⌥-gated on top of this flag).
+    static var devToolsEnabled: Bool {
+        get { defaults.object(forKey: Key.devToolsEnabled) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.devToolsEnabled) }
     }
 }

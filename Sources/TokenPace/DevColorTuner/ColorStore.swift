@@ -4,18 +4,17 @@ import Foundation
 /// The single source the two `Palette` enums read every colour through, so the dev color tuner (#185)
 /// can override any role live and see the menu-bar icon and popup repaint immediately.
 ///
-/// **Gated by `TOKENPACE_DEVTOOLS`.** When the env var is empty/unset, ``devToolsEnabled`` is false and
-/// ``color(_:)`` returns the role's shipped ``ColorRole/defaultColor`` unconditionally — the override
-/// dictionary is never consulted, so a normal launch pays nothing on the draw hot path and cannot be
-/// perturbed. The tuner window and its menu item are gated on the same flag, so overrides can only ever
-/// be set when the flag is on. Independent of build type (dev / notarized / release): the gate is the
-/// env var, not `#if DEBUG` or the bundle kind.
+/// **Gated by the `devToolsEnabled` defaults key.** When it is unset/false, ``devToolsEnabled`` is
+/// false and ``color(_:)`` returns the role's shipped ``ColorRole/defaultColor`` unconditionally — the
+/// override dictionary is never consulted, so a normal launch pays nothing on the draw hot path and
+/// cannot be perturbed. The tuner window and its menu item are gated on the same flag, so overrides can
+/// only ever be set when the flag is on. Independent of build type (dev / notarized / release): the
+/// gate is the defaults key, not `#if DEBUG` or the bundle kind.
 ///
-/// The flag is resolved the same way as `TOKENPACE_GH_AUTH` (`AppDelegate.resolveGHAuth`): `ProcessInfo`
-/// first (terminal / `launchctl setenv` launches), then a login-shell fallback via ``ShellEnvironment``.
-/// A GUI/login launch (`SMAppService`, Finder, Dock) gets no shell environment, so a plain
-/// `export TOKENPACE_DEVTOOLS=1` in `~/.zshrc` is invisible via `ProcessInfo` alone — the fallback makes
-/// that export unlock the dev tools in an installed `.app` too, without needing `launchctl setenv`.
+/// The flag lives in `UserDefaults` (`PersistedConfig.devToolsEnabled`), so a GUI/login launch
+/// (`SMAppService`, Finder, Dock) — which gets no shell environment — reads it just the same as a
+/// terminal launch. Enable it on the installed `.app` with
+/// `defaults write com.artem-n.tokenpace devToolsEnabled -bool true`.
 ///
 /// Overrides are **ephemeral** — held in memory only, never persisted. Quitting resets everything.
 @MainActor
@@ -23,13 +22,11 @@ final class ColorStore {
 
     static let shared = ColorStore()
 
-    /// True when `TOKENPACE_DEVTOOLS` is set (non-empty). Resolved through the shared ``ProdEnvFlag``
-    /// resolver: `ProcessInfo` first (terminal / `launchctl setenv`), then the login shell's rc files —
-    /// so a plain `export TOKENPACE_DEVTOOLS=1` in `~/.zshrc` unlocks the dev tools in a login/GUI-
-    /// launched `.app` too. Non-blocking: safe to read on the draw hot path. The login-shell probe runs
-    /// off-main via `ProdEnvFlag.warmUp` at startup, so a GUI launch may read `false` for the first
-    /// fraction of a second until the probe lands (then the app re-renders / rebuilds the menu).
-    static var devToolsEnabled: Bool { ProdEnvFlag.isEnabled(.devTools) }
+    /// True when the `devToolsEnabled` defaults key is set to `true` (`PersistedConfig.devToolsEnabled`).
+    /// Read straight from `UserDefaults`, so a login/GUI launch honours it exactly like a terminal
+    /// launch — no shell probe, no warm-up delay. Non-blocking: safe to read on the draw hot path.
+    /// Enable with `defaults write com.artem-n.tokenpace devToolsEnabled -bool true`.
+    static var devToolsEnabled: Bool { PersistedConfig.devToolsEnabled }
 
     private var overrides: [ColorRole: NSColor] = [:]
 
