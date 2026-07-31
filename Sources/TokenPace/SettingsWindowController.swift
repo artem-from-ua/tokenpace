@@ -28,9 +28,10 @@ final class SettingsWindowController: NSWindowController {
         /// Fixed window content width, matching System Settings exactly (measured 857 pt, #156). The
         /// window never resizes; the sidebar/detail split moves inside it (sidebar 258, detail 599).
         static let contentWidth: CGFloat = 857
-        /// Fixed window content height. Bumped 480 → 520 (#199) so the taller Appearance pane (extra
-        /// menu-bar toggle) and the other panes breathe without inner scrolling.
-        static let contentHeight: CGFloat = 520
+        /// Fixed window content height. Bumped 480 → 520 (#199), then 520 → 560 (#211) so the taller
+        /// Appearance pane (the new "Dropdown" section) and the other panes breathe without inner
+        /// scrolling.
+        static let contentHeight: CGFloat = 560
     }
 
     /// The single observable state object, alive for the controller's lifetime (so background

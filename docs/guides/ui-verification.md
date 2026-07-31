@@ -110,10 +110,11 @@
 > секції — той самий `PopupBarView`, що бари токенів, але **без** засічок-ticks (кредити пейсяться на
 > весь місяць, без під-вікон).
 
-### Тумблер «Show model-specific limits» (#211)
+### Тумблер «Show model & service limits» (#211)
 
-Settings → Appearance → секція **Dropdown** → «Show model-specific limits» (default-**on**). Гейтить
-per-model рядки попапа (`Opus`/`Sonnet` із legacy-полів + `weekly_scoped`-моделі як `Fable`/`Mythos`).
+Settings → Appearance → секція **Dropdown** → «Show model & service limits» (default-**on**). Гейтить
+per-model/per-service рядки попапа (`Opus`/`Sonnet` із legacy-полів + `weekly_scoped`-записи як
+`Fable`/`Mythos`).
 Перевіряй на стубі з per-model лімітами — напр. `screenshot` (має Fable + Mythos):
 
 ```sh

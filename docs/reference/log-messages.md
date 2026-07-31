@@ -180,7 +180,7 @@ token itself never is.
 | — | `lifecycle` | `.notice` | `hide-calm-7d: menu-bar set <bool>` | user toggled the "Hide 7-day bar when calm" checkbox (#94, ADR-0034) |
 | — | `lifecycle` | `.notice` | `hide-bars-when-blocked: menu-bar set <bool>` | user toggled the "Show pacing bars when 5h/7d limits reached" checkbox (stored inverted as `hideBarsWhenBlocked`; #194, ADR-0049) |
 | — | `lifecycle` | `.notice` | `show-blocked-pause: menu-bar set <bool>` | user toggled the "Show pause icon when fully blocked" checkbox (#199, ADR-0051) |
-| — | `lifecycle` | `.notice` | `model-specific-limits: popup set <bool>` | user toggled the "Show model-specific limits" checkbox — gates the popup's per-model rows (Opus/Sonnet/scoped) (#211) |
+| — | `lifecycle` | `.notice` | `model-specific-limits: popup set <bool>` | user toggled the "Show model & service limits" checkbox — gates the popup's per-model/per-service rows (Opus/Sonnet/scoped) (#211) |
 | — | `lifecycle` | `.notice` | `screen-lock-pause: setting set <bool>` | user toggled the "Pause polling while the screen is locked" checkbox (#114, ADR-0032) |
 | 439 | `lifecycle` | `.notice` | `update: automatic checks set <bool>` | user toggled the "Check for updates automatically" checkbox (#37) |
 | — | `lifecycle` | `.notice` | `archive: enabled set <bool>` | user toggled the "Archive session logs to a folder" checkbox (#110) |
