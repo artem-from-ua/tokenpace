@@ -111,6 +111,13 @@ git diff "${LAST}..HEAD" -- \
 VERSION="$(tr -d ' \t\n\r' < VERSION)"   # напр. 0.9.0
 ```
 
+**Звір обидва джерела ПЕРЕД тегом** — розбіжність означає, що бамп зачепив лише одне місце:
+
+```sh
+grep -q "\"${VERSION}\"" Sources/TokenPaceKit/TokenPaceKit.swift \
+  || echo "MISMATCH: VERSION=${VERSION} != TokenPaceKit.version — онови обидва в окремому PR"
+```
+
 ### 2. Зібрати, підписати, нотаризувати
 
 ```sh
@@ -125,6 +132,16 @@ staple`). Нотаризація може зайняти кілька хвили
 
 Очікувати в логах: `lipo archs: x86_64 arm64`, `status: Accepted` і
 `The staple and validate action worked!`.
+
+**Агент/фонова сесія:** харнес блокує голий `sleep`, тож не чекай нотаризацію через `sleep N` —
+підніми білд у фоні й опитуй лог until-циклом (нотаризація може зайняти кілька хвилин):
+
+```sh
+( ./scripts/build-app.sh 2>&1 | tee "$CLAUDE_JOB_DIR/tmp/build.log" ) &
+until grep -qE 'notarization complete|done:|error|Invalid' "$CLAUDE_JOB_DIR/tmp/build.log"; do
+  sleep 2
+done
+```
 
 ### 3. Перевірити нотаризацію
 
@@ -151,6 +168,17 @@ ditto -c -k --keepParent ./build/TokenPace.app "./build/TokenPace-${VERSION}.zip
 extended attributes.
 
 ### 5. Створити тег і GitHub Release
+
+**Перед тегуванням переконайся, що стоїш на чистому `main`** — тег на випадковій feature-гілці
+(або коміт прямо в `main`) уже колись ламав реліз, коли `checkout -b` тихо не спрацював через
+git-lock:
+
+```sh
+[ "$(git branch --show-current)" = main ] && git diff --quiet && git diff --cached --quiet \
+  || echo "STOP: не на чистому main — не тегуй звідси (див. agent-workflow.md § Гілки)"
+```
+
+Деталі git-дисципліни — [agent-workflow.md § Гілки, PR і синхронізація main](agent-workflow.md#гілки-pr-і-синхронізація-main).
 
 ```sh
 git tag "v${VERSION}"
@@ -181,6 +209,61 @@ xattr -w com.apple.quarantine "0081;0;Safari;" /tmp/TokenPace-test.app
 spctl -a -vvv -t exec /tmp/TokenPace-test.app   # має бути accepted
 rm -rf /tmp/TokenPace-test.app
 ```
+
+## Якщо реліз обірвався посередині — як продовжити
+
+Реліз — це ланцюг кроків, і сесія може обірватися (перервали, впала мережа GitHub, `--wait`
+завис) посеред нього. **Не перезапускай із нуля** — спершу перевір, що вже зроблено, і продовжуй
+з місця зупинки. Кожна перевірка нижче — недеструктивна (читає стан, не змінює його).
+
+### `.app` уже зібраний і застейплений
+
+```sh
+spctl -a -t exec ./build/TokenPace.app   # accepted → build+notarize+staple вже позаду
+```
+
+Якщо `accepted` — пропусти кроки 2–3, йди прямо до пакування (крок 4). Перебудовувати не треба:
+`.app` у `build/` уже нотаризований і з квитком.
+
+### Нотаризація: `--wait` завис на `In Progress`
+
+Це не збій — `submit --wait` іноді не відпускає, хоча Apple уже завершила. **Не перезбирай.**
+Дізнайся фінальний статус окремо від `--wait`:
+
+```sh
+xcrun notarytool history --keychain-profile tokenpace-notary        # знайди свій submission-id
+xcrun notarytool log <submission-id> --keychain-profile tokenpace-notary
+```
+
+Якщо статус `Accepted` — одразу застейпли й перевір, минаючи повторний `submit`:
+
+```sh
+xcrun stapler staple ./build/TokenPace.app
+spctl -a -t exec ./build/TokenPace.app   # → accepted
+```
+
+### Тег `v${VERSION}` уже існує
+
+```sh
+git rev-parse "v${VERSION}" 2>/dev/null   # існує → звір, куди вказує
+```
+
+- Вказує на потрібний HEAD (актуальний `main`) → пропусти `git tag`, йди до `git push` / релізу.
+- Вказує на інший коміт (залишок обірваної спроби) → `git tag -d "v${VERSION}"` і перестворити
+  на правильному коміті.
+
+### Реліз для цієї версії частково існує
+
+```sh
+gh release view "v${VERSION}"   # існує? з яким асетом?
+```
+
+- Реліз є, але **без ZIP-асета** → долий асет:
+  `gh release upload "v${VERSION}" "./build/TokenPace-${VERSION}.zip"`.
+- Лишився **конфліктний старіший реліз**, що заважає (напр. попередній `latest`, чий бінар не
+  відповідає новому тегу) → видали його перед публікацією нового:
+  `gh release delete "v${VERSION_OLD}"` (з підтвердженням мейнтейнера).
+- Тег є, релізу нема → просто виконай `gh release create` (крок 5), тег повторно не створюй.
 
 ## Зміст і стиль release notes
 
