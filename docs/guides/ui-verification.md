@@ -250,8 +250,40 @@ locked».
 
 Перевірка: `TOKENPACE_UPDATE_STATE=whatsnew TOKENPACE_STUB=1 swift run` → відкрий меню, глянь
 колір/текст пункта (над Quit) й **вирівнювання крапки** з текстом (має збігатися з крапками статусів
-сервісів у popup). Клік завжди → сторінка релізів; `whatsnew` після кліку зникає (крім форсованого
-стуба — той тримає стан). У логах: `update: menu item = <state>`.
+сервісів у popup). Клік завжди → **Settings → About** (не браузер, з #210); `whatsnew` після кліку
+зникає (крім форсованого стуба — той тримає стан). У логах: `update: menu item = <state>` і
+`update: user opened About from update item`.
+
+### About: деталі зафейленого апдейту + клікабельні версії (#210)
+
+На панелі **About** оновлено кілька елементів:
+
+Панель має дві секції:
+
+- **Секція 1 (identity):** `Source code` · `Version` (просто номер, без лінка) · *(опційно)* рядок
+  🔵 **New version available: X.Y.Z** з **Release notes** (лінк на `…/releases/tag/vX.Y.Z`) ліворуч
+  біля тексту й **Download** (веб-реліз) праворуч.
+- **Секція 2 (behaviour):** `Check for updates periodically` (+ Check Now) · `Install updates
+  automatically` · *(опційно)* рядок 🔴 **Update to version X.Y.Z failed during `<стадія>`.** +
+  `Reason: <причина>` (selectable, переноситься).
+
+Крапки беруть ті самі `ColorStore`-кольори, що й дропдаун (синя `popupServiceBlue`, червона
+`popupServiceRed`). Усі версії показуються **без `v`**; release-notes URL усе одно бʼє в `vX.Y.Z`.
+
+Стуб **`TOKENPACE_FAKE_FAILURE=<stage>:<reason>`** форсує failure-рядок у About (пише лише в пам'ять,
+**не** в `UserDefaults`); `<stage>` ∈ `download|unzip|verify|replace`; тег береться з
+`TOKENPACE_FAKE_LATEST` або дефолтний `vX.Y.Z`. Разом із `TOKENPACE_SETTINGS_SECTION=0` відкриває
+одразу About. Приклад:
+
+```sh
+TOKENPACE_STUB=1 TOKENPACE_DEVTOOLS=1 TOKENPACE_SETTINGS_SECTION=0 \
+TOKENPACE_UPDATE_STATE=failed TOKENPACE_FAKE_LATEST=v0.55.0 \
+TOKENPACE_FAKE_FAILURE='verify:team id mismatch (expected S5A4U9798Y, got ABCDE12345)' \
+swift run
+```
+
+→ відкрий Settings (меню) → About: перевір обидві крапки, клік по Version і по «Update available»
+(відкривають release notes у браузері), довгу причину (не обрізається, selectable).
 
 ### Авто-встановлення оновлень (#122–#125, ADR-0033; сигнали ADR-0036)
 

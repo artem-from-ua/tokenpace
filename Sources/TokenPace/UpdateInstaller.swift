@@ -28,6 +28,27 @@ enum UpdateInstallOutcome: Sendable, Equatable {
     case installedRelaunching(tag: String)
 }
 
+extension UpdateInstallOutcome {
+    /// The failure record for a failing outcome (#210) — the pipeline stage it broke at plus the raw
+    /// reason string it carried — or `nil` for the non-failing cases (`notApplicable` dev-build,
+    /// `dryRunVerified`, `installedRelaunching`). Used by `AppDelegate.startInstall` to persist the
+    /// stage + reason for the About pane. `notApplicable` deliberately maps to `nil`: a dev build that
+    /// can't install is not a failure to report.
+    ///
+    /// - Parameter tag: The release tag this attempt targeted — combined with the mapped stage/reason
+    ///   into a `LastUpdateFailure`.
+    func failure(tag: String) -> LastUpdateFailure? {
+        switch self {
+        case let .downloadFailed(reason): return LastUpdateFailure(tag: tag, stage: .download, reason: reason)
+        case let .unzipFailed(reason):    return LastUpdateFailure(tag: tag, stage: .unzip, reason: reason)
+        case let .verifyFailed(reason):   return LastUpdateFailure(tag: tag, stage: .verify, reason: reason)
+        case let .replaceFailed(reason):  return LastUpdateFailure(tag: tag, stage: .replace, reason: reason)
+        case .notApplicable, .dryRunVerified, .installedRelaunching:
+            return nil
+        }
+    }
+}
+
 // MARK: - AppUpdateInstalling
 
 /// The seam the app calls to install a downloaded release (#123) — a protocol so a stub can drive the

@@ -249,7 +249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `isAlternate` mechanism does NOT work in a status-item menu, so the reveal is driven by a
         // modifier-polling timer set in `menuWillOpen` — see `updateTroubleshootVisibility(_:)`. Each
         // item carries its own fixed selector; empty keyEquivalent keeps the menu glyph-free.
-        let settingsItem = NSMenuItem(title: "", action: #selector(openSettings), keyEquivalent: "")
+        let settingsItem = NSMenuItem(title: "", action: #selector(openSettings as () -> Void), keyEquivalent: "")
         settingsItem.attributedTitle = Self.dropdownMenuItemText("Settings…")
         settingsItem.target = self
         menu.addItem(settingsItem)
@@ -356,9 +356,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Menu actions (#14)
 
-    /// Open (or focus) the Settings… window. Lazily creates the single instance and wires the
-    /// monitored-services change callback (#89) so a toggle there re-polls the status immediately.
+    /// Open (or focus) the Settings… window from the "Settings…" menu item. Leaves the section alone —
+    /// a fresh window lands on About (the model's default); a reused one keeps its last-viewed pane.
     @objc private func openSettings() {
+        openSettings(section: nil)
+    }
+
+    /// Open (or focus) the Settings… window, optionally forcing a specific `section` (#210 — the update
+    /// menu item opens straight to About). Lazily creates the single instance and wires the
+    /// monitored-services change callback (#89) so a toggle there re-polls the status immediately.
+    private func openSettings(section: SettingsSection?) {
         if settingsWC == nil {
             let wc = SettingsWindowController()
             wc.onMonitoredServicesChange = { [weak self] config in self?.monitoredServicesChanged(config) }
@@ -424,7 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Reflect the latest known update state whenever the window opens (#37).
         settingsWC?.updateAvailability(lastKnownRelease)
-        settingsWC?.show()
+        settingsWC?.show(section: section)
     }
 
     /// Open (or focus) the hidden Troubleshoot window (ADR-0020), seeded with the latest poll
@@ -1054,6 +1061,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppLogger.lifecycle.notice("update: cleared pending what's new (superseded by newer release)")
         }
 
+        // Drop a stored install-failure record once it no longer denotes the newest known release
+        // (#210) — a newer tag has appeared, so the About pane must not keep showing the old failure.
+        // `lastFailedInstallVersion` is the source of truth the menu state reads; clearing the whole
+        // `lastUpdateFailure` keeps the stage/reason in lockstep with it.
+        if let failedTag = PersistedConfig.lastFailedInstallVersion,
+           LastUpdateFailure.shouldClear(failedTag: failedTag, latestKnownTag: release.tagName) {
+            PersistedConfig.lastUpdateFailure = nil
+            AppLogger.lifecycle.notice("update: cleared stale install-failure record (superseded by newer release)")
+        }
+
         let firstTimeSeen = PersistedConfig.lastSeenLatestVersion != release.tagName
         PersistedConfig.lastSeenLatestVersion = release.tagName
         AppLogger.lifecycle.notice(
@@ -1162,12 +1179,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     "update-install: dry-run complete, verified bundle at \(bundlePath, privacy: .public)")
             case .notApplicable, .downloadFailed, .verifyFailed, .unzipFailed, .replaceFailed:
                 // Nothing was installed — undo the speculative "what's new", and (except for the inert
-                // `notApplicable` dev-build case) mark this tag failed so it is not retried.
+                // `notApplicable` dev-build case) record this failure so the tag is not retried and the
+                // About pane can show *why* it failed (#210: tag + stage + reason).
                 PersistedConfig.pendingWhatsNewVersion = nil
-                if outcome != .notApplicable {
-                    PersistedConfig.lastFailedInstallVersion = tag
+                if let failure = outcome.failure(tag: tag) {
+                    PersistedConfig.lastUpdateFailure = failure
                     AppLogger.lifecycle.notice(
-                        "update-install: last failed install version set tag=\(tag, privacy: .public)")
+                        "update-install: last failed install set tag=\(tag, privacy: .public) stage=\(failure.stage.rawValue, privacy: .public)")
                 }
                 AppLogger.lifecycle.error(
                     "update-install: did not complete (\(String(describing: outcome), privacy: .public)) — signal item remains")
@@ -1211,13 +1229,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppLogger.lifecycle.notice("update: menu item = \(String(describing: item), privacy: .public)")
     }
 
-    /// Open the releases page from the update menu item (#130) — the click target is **always** the
-    /// releases index (there is no in-app release-notes render). If the item was the `whatsNew` state,
-    /// opening it acknowledges the update: clear `pendingWhatsNewVersion` and recompute the item so it
-    /// disappears.
+    /// Handle a click on the update menu item (#130, #210) — the click target is now **Settings →
+    /// About**, not the GitHub releases page in a browser. About surfaces the update state (available /
+    /// failed with stage + reason) and keeps the "Download" / release-notes links in-pane, so a single
+    /// destination carries every signal. If the item was the `whatsNew` state, opening it acknowledges
+    /// the update: clear `pendingWhatsNewVersion` and recompute the item so it disappears.
     @objc private func openReleasesPage() {
-        AppLogger.lifecycle.notice("update: user opened releases page (item=\(String(describing: self.currentUpdateItem), privacy: .public))")
-        NSWorkspace.shared.open(GitHubReleaseClient.releasesPageURL)
+        AppLogger.lifecycle.notice("update: user opened About from update item (item=\(String(describing: self.currentUpdateItem), privacy: .public))")
+        openSettings(section: .about)
         if currentUpdateItem == .whatsNew {
             PersistedConfig.pendingWhatsNewVersion = nil
             AppLogger.lifecycle.notice("update: cleared pending what's new (user opened it)")

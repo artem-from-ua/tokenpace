@@ -66,6 +66,17 @@ public enum GitHubReleaseClient {
     public static let releasesPageURL = URL(
         string: "https://github.com/\(owner)/\(repo)/releases")!
 
+    /// The release-notes page for a **specific** tag — `…/releases/tag/<tag>` (#210). Used by the
+    /// About pane's clickable "Version" row to open the notes for the installed build. The tag is
+    /// percent-encoded for the path segment (a plain `vX.Y.Z` needs none, but a stray character must
+    /// not break the URL); an encoding failure falls back to the general ``releasesPageURL`` rather
+    /// than crashing.
+    public static func releaseNotesURL(tag: String) -> URL {
+        let encoded = tag.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? tag
+        return URL(string: "https://github.com/\(owner)/\(repo)/releases/tag/\(encoded)")
+            ?? releasesPageURL
+    }
+
     /// `TokenPace/<version>` — GitHub's REST API **requires** a `User-Agent` header and 403s without
     /// one. Distinct from the usage/status clients' `claude-code/…` UA: this request is TokenPace's
     /// own, not a Claude Code call.

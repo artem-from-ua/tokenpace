@@ -43,16 +43,35 @@ struct AboutPane: View {
                 .padding(.vertical, 4)
             }
 
+            // Identity: source, installed version, and (when newer exists) the availability row (#210).
             Section {
-                LabeledContent("Version") {
-                    Text(model.versionText).foregroundStyle(.secondary)
-                }
                 LabeledContent("Source code") {
                     Button(SettingsLinks.repoDisplay) { model.openRepo() }
                         .buttonStyle(.link)
                 }
+                LabeledContent("Version") {
+                    Text(model.versionText).foregroundStyle(.secondary)
+                }
+
+                if let release = model.latestRelease {
+                    // "Release notes" sits by the label on the left; "Download" (the web release) is the
+                    // trailing link on the right (#210). A blue status dot matches the dropdown's "new
+                    // version available" item.
+                    LabeledContent {
+                        Button("Download") { model.openDownload() }
+                            .buttonStyle(.link)
+                    } label: {
+                        HStack(spacing: 6) {
+                            UpdateStatusDot(role: .popupServiceBlue)
+                            Text("New version available: \(SettingsModel.displayTag(release.tagName))")
+                            Button("Release notes") { model.openReleaseNotes(tag: release.tagName) }
+                                .buttonStyle(.link)
+                        }
+                    }
+                }
             }
 
+            // Update behaviour: the check/install toggles, and (when it happened) the last failure.
             Section {
                 // The periodic-check switch, with "Check Now" as a trailing button on the same row.
                 LabeledContent {
@@ -86,14 +105,24 @@ struct AboutPane: View {
                     }
                 }
 
-                if let release = model.latestRelease {
-                    LabeledContent {
-                        Button("Download") { model.openDownload() }
-                            .buttonStyle(.link)
-                    } label: {
-                        Text("Update available: \(release.tagName)")
+                // The previous auto-update failed (#210): a red status dot (matching the dropdown's
+                // "update failed" item), the version + stage, and the raw reason — so the user knows
+                // *why* the background update didn't land. The reason is technical and can be long, so
+                // it is selectable and allowed to wrap.
+                if let failure = model.lastUpdateFailure {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            UpdateStatusDot(role: .popupServiceRed)
+                            Text("Update to version \(SettingsModel.displayTag(failure.tag)) failed during \(failure.stage.displayName).")
+                        }
+                        .font(.callout)
+                        Text("Reason: \(failure.reason)")
+                            .font(.callout)
                             .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -101,5 +130,20 @@ struct AboutPane: View {
         // Show/hide the dependent row without an insertion animation — otherwise the neighbouring row
         // visibly changes height during the transition (SwiftUI Form quirk).
         .animation(nil, value: model.automaticUpdateChecks)
+    }
+}
+
+// MARK: - UpdateStatusDot
+
+/// A small filled status dot for an About-pane update row (#210), tinted from the **same**
+/// `ColorStore` roles the dropdown's update item uses (`popupServiceBlue` for "available",
+/// `popupServiceRed` for "failed") — so the two surfaces read as one signal.
+private struct UpdateStatusDot: View {
+    let role: ColorRole
+
+    var body: some View {
+        Circle()
+            .fill(Color(nsColor: ColorStore.shared.color(role)))
+            .frame(width: 8, height: 8)
     }
 }

@@ -154,8 +154,14 @@ final class SettingsWindowController: NSWindowController {
     /// Show or re-focus the window. Re-syncs every field from `PersistedConfig`/the system into the
     /// model, brings the app forward, and centres it on the first display of a session. Calling this
     /// while the window is already on screen just focuses it.
-    func show() {
+    ///
+    /// Pass a non-nil `section` to force the window onto that pane (#210 — the update menu item opens
+    /// straight to About). `nil` leaves the current selection alone: a fresh window is on About (the
+    /// model default), a reused one keeps its last-viewed pane. The `TOKENPACE_SETTINGS_SECTION` dev
+    /// hook is applied *after* this, so it still wins during verification.
+    func show(section: SettingsSection? = nil) {
         model.syncFromConfig()
+        if let section { model.selection = section }
         // Reflect the latest known update state whenever the window opens (#37) is already carried by
         // `updateAvailability`, called by `AppDelegate.openSettings` before `show()`.
         NSApp.activate(ignoringOtherApps: true)
