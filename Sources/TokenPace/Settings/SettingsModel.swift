@@ -32,6 +32,7 @@ final class SettingsModel {
     var onServiceDotChange: ((Bool) -> Void)?
     var onExtraUsageChange: ((Bool) -> Void)?
     var onHideCalmSevenDayChange: ((Bool) -> Void)?
+    var onHideBarsWhenBlockedChange: ((Bool) -> Void)?
     var onPausePollingChange: ((Bool) -> Void)?
     var onArchiveNow: (() -> Void)?
     var onBackToWorkEnabled: ((@escaping @MainActor (BackToWorkNotifier.AuthState) -> Void) -> Void)?
@@ -61,6 +62,7 @@ final class SettingsModel {
 
     var calmColors = false
     var hideCalmSevenDay = false
+    var hideBarsWhenBlocked = false
     var showExtraUsage = false
     var showServiceDot = false
     /// The reset-countdown choice (always / smart / never), shown as a menu picker.
@@ -179,6 +181,7 @@ final class SettingsModel {
 
         calmColors = PersistedConfig.calmMenuBarColors
         hideCalmSevenDay = PersistedConfig.hideCalmSevenDayBar
+        hideBarsWhenBlocked = PersistedConfig.hideBarsWhenBlocked
         showExtraUsage = PersistedConfig.showExtraUsage
         showServiceDot = PersistedConfig.showServiceStatusDot
         resetRadio = PersistedConfig.resetCountdownModeMenuBar.radio
@@ -222,6 +225,13 @@ final class SettingsModel {
         PersistedConfig.hideCalmSevenDayBar = on
         AppLogger.lifecycle.notice("hide-calm-7d: menu-bar set \(on, privacy: .public)")
         onHideCalmSevenDayChange?(on)
+    }
+
+    func setHideBarsWhenBlocked(_ on: Bool) {
+        hideBarsWhenBlocked = on
+        PersistedConfig.hideBarsWhenBlocked = on
+        AppLogger.lifecycle.notice("hide-bars-when-blocked: menu-bar set \(on, privacy: .public)")
+        onHideBarsWhenBlockedChange?(on)
     }
 
     func setShowExtraUsage(_ on: Bool) {

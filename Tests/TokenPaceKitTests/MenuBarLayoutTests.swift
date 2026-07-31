@@ -907,3 +907,113 @@ struct MenuBarLayoutCreditsTests {
         #expect(layout.serviceProblem == .majorOutage)
     }
 }
+
+// MARK: - Hide pacing bars when blocked (#194)
+
+@Suite("MenuBarLayout hideBarsWhenBlocked")
+struct MenuBarLayoutHideBarsWhenBlockedTests {
+
+    /// Pull the associated values out of a `.blockedReset` mode, or fail the test.
+    private func blocked(_ layout: MenuBarLayout) -> (reset: TimeToReset, which: LimitWindow)? {
+        guard case let .blockedReset(reset, which) = layout.mode else {
+            Issue.record("expected .blockedReset, got \(layout.mode)")
+            return nil
+        }
+        return (reset, which)
+    }
+
+    @Test func activeBlockedHidesBarsWhenOn() {
+        // Both main windows exhausted + opted in → no bars, just the blocking-reset countdown. With both
+        // exhausted the later token reset wins (last-stand): the 7d (3d out) over the 5h (4h out).
+        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
+        let layout = MenuBarLayout.make(from: snap, now: now, hideBarsWhenBlocked: true)
+        guard let b = blocked(layout) else { return }
+        #expect(b.which == .sevenDay)
+        #expect(b.reset == .relative("3d"))   // 7d reset 3 days out, compact-days
+    }
+
+    @Test func fiveHourExhaustedAloneUsesFiveHourReset() {
+        // Only the 5h window is exhausted (7d has quota) → the 5h reset drives the countdown, formatted
+        // as a live H:MM countdown rather than compact-days.
+        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 40, fiveHourResetsIn: 2 * 3600)
+        let layout = MenuBarLayout.make(from: snap, now: now, hideBarsWhenBlocked: true)
+        guard let b = blocked(layout) else { return }
+        #expect(b.which == .fiveHour)
+        // A 2-hour-out reset formats as an absolute wall-clock time, not a "Nd" relative string.
+        if case .relative = b.reset { Issue.record("expected an absolute 5h countdown, got \(b.reset)") }
+    }
+
+    @Test func sevenDayExhaustedAloneUsesSevenDayReset() {
+        // Only the 7d window is exhausted (5h has quota) → the 7d reset drives the countdown.
+        let snap = snapshot(fiveHourUtil: 30, sevenDayUtil: 100, sevenDayResetsIn: 2 * 24 * 3600)
+        let layout = MenuBarLayout.make(from: snap, now: now, hideBarsWhenBlocked: true)
+        guard let b = blocked(layout) else { return }
+        #expect(b.which == .sevenDay)
+        #expect(b.reset == .relative("2d"))
+    }
+
+    @Test func keepsBarsWhenOff() {
+        // Same blocked snapshot, opted out (default) → the normal expanded bars, unchanged.
+        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
+        let layout = MenuBarLayout.make(from: snap, now: now, hideBarsWhenBlocked: false)
+        guard case .expanded = layout.mode else {
+            Issue.record("expected .expanded when opted out, got \(layout.mode)")
+            return
+        }
+    }
+
+    @Test func notBlockedStaysExpandedEvenWhenOn() {
+        // Neither window exhausted (both < 100) → not blocked, so the toggle is inert: full bars.
+        let snap = snapshot(fiveHourUtil: 80, sevenDayUtil: 90)
+        let layout = MenuBarLayout.make(from: snap, now: now, hideBarsWhenBlocked: true)
+        guard case .expanded = layout.mode else {
+            Issue.record("expected .expanded when not blocked, got \(layout.mode)")
+            return
+        }
+    }
+
+    @Test func forcesResetEvenInNeverMode() {
+        // `resetMode: .never` normally hides every countdown, but a bars-less blocked widget would then
+        // show nothing at all — so the blocking reset is forced regardless of the mode.
+        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
+        let layout = MenuBarLayout.make(
+            from: snap, now: now, resetMode: .never, hideBarsWhenBlocked: true)
+        guard let b = blocked(layout) else { return }
+        #expect(b.reset == .relative("3d"))
+    }
+
+    @Test func hidesBarsEvenWhenCreditsCover() {
+        // The key semantic difference from `isBlocked`: "blocked" here is `mainWindowExhausted` (credits
+        // coverage ignored), so a 7d at 100 % with active, uncapped credits STILL hides the bars — even
+        // though work technically continues on the paid tier.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 20, resetsAt: resetsAt(inSeconds: 4 * 3600)),
+            sevenDay: UsageWindow(utilization: 100, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600)),
+            spend: SpendInfo(enabled: true, spendLimitReached: false))
+        let layout = MenuBarLayout.make(from: snap, now: now, hideBarsWhenBlocked: true)
+        guard let b = blocked(layout) else { return }
+        #expect(b.which == .sevenDay)
+    }
+
+    @Test func idleBlockedHidesBarsWhenOn() {
+        // The idle-blocked state (7d exhausted, no credits, no active 5h) also drops its grey idle bar
+        // for the countdown-only widget when opted in.
+        let snap = idleSnapshot(sevenDayUtil: 100)
+        let layout = MenuBarLayout.make(from: snap, now: now, hideBarsWhenBlocked: true)
+        guard let b = blocked(layout) else { return }
+        #expect(b.which == .sevenDay)
+        #expect(b.reset == .relative("4d"))   // idle 7d reset 4 days out
+    }
+
+    @Test func brokenResetFallsBackToNormalPath() {
+        // Exhausted but the only exhausted window's `resets_at` is unparseable → `forBlocked` yields nil,
+        // so we do NOT enter `.blockedReset`; the normal path surfaces the data error as ⚠️ instead.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 30, resetsAt: resetsAt(inSeconds: 4 * 3600)),
+            sevenDay: UsageWindow(utilization: 100, resetsAt: "not-a-date"))
+        let layout = MenuBarLayout.make(from: snap, now: now, hideBarsWhenBlocked: true)
+        if case .blockedReset = layout.mode {
+            Issue.record("expected a fallback away from .blockedReset for a broken reset, got \(layout.mode)")
+        }
+    }
+}

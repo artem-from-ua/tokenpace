@@ -216,6 +216,8 @@ final class StatusItemView: NSView {
         switch layout.mode {
         case let .expanded(fiveHour, sevenDay, resetToShow):
             drawExpanded(fiveHour: fiveHour, sevenDay: sevenDay, reset: resetToShow?.display, in: contentRect)
+        case let .blockedReset(reset, _):
+            drawBlockedReset(reset, in: contentRect)
         case let .error(fiveHour, sevenDay, reset, _):
             drawError(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: contentRect)
         }
@@ -545,6 +547,16 @@ final class StatusItemView: NSView {
         label.draw(at: NSPoint(x: x, y: rect.minY + (rect.height - size.height) / 2))
     }
 
+    /// Draw the blocked-state countdown **alone** (#194) — no bars, just the reset label at the left
+    /// inset, vertically centred. Reuses the same monospaced-digit font and foreground colour as
+    /// ``drawResetLabel(_:leftOf:in:)`` so the countdown looks identical whether or not the bars are
+    /// hidden; `itemWidth` reserves exactly this label's width (via ``resetLabelWidth(_:)``) so the item
+    /// hugs the text. The blocked mode carries no pacing colour to mute, so `calmColors` is irrelevant
+    /// here — the label is always the neutral foreground.
+    private func drawBlockedReset(_ reset: TimeToReset, in rect: NSRect) {
+        drawResetLabel(reset, leftOf: rect.minX + Metrics.hPadding, in: rect)
+    }
+
     // MARK: Helpers
 
     /// Map the reset countdown to its display string. Both cases already carry a ready-to-draw string
@@ -572,6 +584,9 @@ final class StatusItemView: NSView {
             return Metrics.height + trailingInset       // square-ish compact item (no layout yet)
         case let .expanded(_, _, resetToShow):
             return trailingInset + Metrics.hPadding + barsBlockWidth(reset: resetToShow?.display) + Metrics.hPadding
+        case let .blockedReset(reset, _):
+            // No bars (#194): the item hugs just the countdown label between the two paddings.
+            return trailingInset + Metrics.hPadding + resetLabelWidth(reset) + Metrics.hPadding
         case let .error(five, _, reset, _):
             // ⚠️ alone (cold start / >60 min) → compact; ⚠️ + stale bars (30–60 min) → glyph + bars.
             guard five != nil, let reset else { return Metrics.height + trailingInset }
@@ -586,10 +601,18 @@ final class StatusItemView: NSView {
     /// leading gap), so the item hugs just the bars (ADR-0029); the error path always passes non-nil.
     private func barsBlockWidth(reset: TimeToReset?) -> CGFloat {
         guard let reset else { return Metrics.barWidth }
+        return Metrics.barWidth + Metrics.labelGap + resetLabelWidth(reset)
+    }
+
+    /// Rendered width of a reset label, measured with the exact font ``drawResetLabel`` /
+    /// ``drawBlockedReset`` draw it in — so both the bars-plus-label width and the bars-less blocked
+    /// width (#194) reserve precisely the drawn text. Rounded up so sub-pixel widths never clip the last
+    /// glyph.
+    private func resetLabelWidth(_ reset: TimeToReset) -> CGFloat {
         let labelWidth = (resetText(reset) as NSString).size(withAttributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         ]).width
-        return Metrics.barWidth + Metrics.labelGap + ceil(labelWidth)
+        return ceil(labelWidth)
     }
 
     /// Rendered width of the ⚠️ glyph at ``Metrics/errorGlyphSize`` — measured the same way it is

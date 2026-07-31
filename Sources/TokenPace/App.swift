@@ -383,6 +383,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // not just a colour — rebuild from the last poll (render reads PersistedConfig).
                 self?.reRenderForCurrentTime()
             }
+            wc.onHideBarsWhenBlockedChange = { [weak self] _ in
+                // Toggling this swaps the whole mode (bars vs. countdown-only) when blocked, not just a
+                // colour — rebuild from the last poll (render reads PersistedConfig.hideBarsWhenBlocked).
+                self?.reRenderForCurrentTime()
+            }
             wc.onPausePollingChange = { [weak self] on in
                 // Turning the pause OFF must un-stick a loop already parked by a screen lock: send a
                 // `.wake` so it resumes immediately. Turning it ON changes nothing now — the next lock
@@ -1205,7 +1210,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hideCalmSevenDay: PersistedConfig.hideCalmSevenDayBar,
             // #144: honour the "Show extra-usage credits" toggle — draws the trailing ¤ icon when
             // credits are active and a base limit is exhausted; false hides it and reclaims its width.
-            showCredits: PersistedConfig.showExtraUsage)
+            showCredits: PersistedConfig.showExtraUsage,
+            // #194: honour the "Hide pacing bars when blocked" toggle — drops both bars for a
+            // countdown-only widget when a main window is exhausted; false keeps the (red) bars.
+            hideBarsWhenBlocked: PersistedConfig.hideBarsWhenBlocked)
         refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
         setPopupLayout(PopupLayout.make(
             from: snapshot, health: output.health, now: now, interval: output.interval,

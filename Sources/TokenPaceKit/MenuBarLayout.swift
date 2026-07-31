@@ -82,6 +82,23 @@ public enum MenuBarMode: Sendable, Equatable {
     ///     countdown. Computed by `MenuBarLayout.selectReset` from the 5h×7d severity table and the
     ///     user's `ResetCountdownMode` (#103, ADR-0029) — the view just draws what it is given.
     case expanded(fiveHour: BarView, sevenDay: BarView?, resetToShow: ResetToShow?)
+    /// Blocked state with **no bars** — just the reset countdown (#194). Shown only when the user has
+    /// opted into "Hide pacing bars when blocked" (`hideBarsWhenBlocked`, default-on) **and** a main
+    /// window (5h or 7d) is exhausted (`CreditsPacing.mainWindowExhausted` — credits coverage does not
+    /// matter here). A red "100 %" bar carries no pacing information, so it is dropped and only the
+    /// actionable countdown to the blocking reset remains (`BlockingReset.forBlocked`, formatted like
+    /// the chosen window's `ResetToShow`). The view draws a single centred label, no bar column, and
+    /// `itemWidth` reserves only the label's width.
+    ///
+    /// Entered from both the active-exhausted path and the idle-blocked path of ``make(from:now:)``.
+    /// The error/stale path never produces it (its `make` call passes `hideBarsWhenBlocked: false`), so
+    /// diagnostic stale bars are always kept alongside the ⚠️ glyph.
+    ///
+    /// - Parameters:
+    ///   - reset: The formatted countdown to the blocking reset.
+    ///   - which: Which window drives it (`.fiveHour` for a 5h-cadence reset, `.sevenDay` for a
+    ///     7-day-cadence or credits/monthly reset) — decides the label format and mirrors `ResetToShow`.
+    case blockedReset(reset: TimeToReset, which: LimitWindow)
     /// Error state: a ⚠️ glyph, optionally with the last known bars beside it.
     ///
     /// All associated values are `nil` together (⚠️ only) or all non-`nil` together (⚠️ + bars) —
@@ -255,15 +272,36 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///     tests are unaffected. This only elides the *bar*; `selectReset` still runs on the true
     ///     severities, so the reset countdown is unchanged (a hidden calm 7-day never drove it anyway).
     ///     In the session-idle state a calm 7-day is likewise dropped, leaving only the idle 5h bar.
+    ///   - hideBarsWhenBlocked: When `true` **and** a main window (5h or 7d) is exhausted
+    ///     (`CreditsPacing.mainWindowExhausted` — credits coverage does not matter), drop *both* bars
+    ///     and return ``MenuBarMode/blockedReset(reset:which:)`` — just the blocking-reset countdown
+    ///     (`BlockingReset.forBlocked`), since a red 100 % bar carries no pacing information (#194,
+    ///     opt-out `PersistedConfig.hideBarsWhenBlocked`). The blocking reset is **forced** regardless
+    ///     of `resetMode` (the countdown is the only useful signal once the bars are gone). Falls back
+    ///     to the normal bars path when `forBlocked` yields `nil` (an unparseable `resets_at` — let the
+    ///     data-error path handle it). Default `false` so existing callers and tests are unaffected.
+    ///     The error/stale path deliberately passes `false` (see ``usageMode``) so diagnostic stale
+    ///     bars are never dropped.
     public static func make(
         from snapshot: UsageSnapshot, now: Date, resetMode: ResetCountdownMode = .smart,
-        hideCalmSevenDay: Bool = false
+        hideCalmSevenDay: Bool = false, hideBarsWhenBlocked: Bool = false
     ) -> MenuBarLayout {
         let seven = bar(for: snapshot.sevenDay, window: .sevenDay, now: now)
         let sevenResetsAt = ResetClock.parse(snapshot.sevenDay.resetsAt)
         // Elide the 7-day bar when it is calm and the user opted in (#94). `selectReset` below still
         // sees the real `seven.severity`, so the reset-countdown logic is untouched.
         let sevenToShow: BarView? = (hideCalmSevenDay && seven.isCalm) ? nil : seven
+
+        // Blocked → no bars, just the countdown (#194). Checked before the idle/active bar-building
+        // branches below so it short-circuits both. `mainWindowExhausted` is the broad "any main window
+        // at 100 %" notion (credits coverage ignored — the maintainer's choice); `forBlocked` picks the
+        // single reset that unblocks work (shared with the popup's red badge and the idle-blocked bar).
+        // A `nil` from `forBlocked` (broken `resets_at`) falls through to the normal path, where
+        // `hasBrokenActiveReset`/`selectReset` surface the data error instead of a fabricated countdown.
+        if hideBarsWhenBlocked, CreditsPacing.mainWindowExhausted(in: snapshot),
+           let blockedMode = blockedResetMode(for: snapshot, now: now) {
+            return MenuBarLayout(mode: blockedMode)
+        }
 
         if snapshot.sessionIdle {
             // No active 5h window: an inert, knobless placeholder bar (the idle draw path ignores its
@@ -374,14 +412,19 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///     credits show-trigger fires. Independent of `mode`: even the error/cold-start states can
     ///     carry a credits icon (the money state is orthogonal to polling health). Default `false` so
     ///     existing callers and tests are unaffected.
+    ///   - hideBarsWhenBlocked: Drop the bars and show only the blocking-reset countdown on the
+    ///     **healthy/stale** path when a main window is exhausted (#194) — see the plain
+    ///     ``make(from:now:resetMode:hideCalmSevenDay:hideBarsWhenBlocked:)``. The error state (⚠️ +
+    ///     stale bars) ignores it: the bars are diagnostic there and always kept. Default `false`.
     public static func make(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
         serviceProblem: ServiceStatus? = nil, resetMode: ResetCountdownMode = .smart,
-        hideCalmSevenDay: Bool = false, showCredits: Bool = false
+        hideCalmSevenDay: Bool = false, showCredits: Bool = false, hideBarsWhenBlocked: Bool = false
     ) -> MenuBarLayout {
         let credits = showCredits ? snapshot.flatMap { creditsMarker(for: $0, now: now) } : nil
         return usageMode(from: snapshot, health: health, now: now,
-                         resetMode: resetMode, hideCalmSevenDay: hideCalmSevenDay)
+                         resetMode: resetMode, hideCalmSevenDay: hideCalmSevenDay,
+                         hideBarsWhenBlocked: hideBarsWhenBlocked)
             .with(serviceProblem: serviceProblem, credits: credits)
     }
 
@@ -410,17 +453,19 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// so ``make(from:health:now:serviceProblem:resetMode:)`` can graft the service dot onto its result.
     private static func usageMode(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
-        resetMode: ResetCountdownMode, hideCalmSevenDay: Bool
+        resetMode: ResetCountdownMode, hideCalmSevenDay: Bool, hideBarsWhenBlocked: Bool
     ) -> MenuBarLayout {
         // Healthy, or stale within the grace window: show the (possibly stale) bars unchanged.
         // A healthy state with no snapshot only happens at the very first tick before the first
         // poll resolves; with no data to draw, fall back to the bare ⚠️ error glyph.
         guard let age = health.failureAge(now: now) else {
-            return snapshot.map { make(from: $0, now: now, resetMode: resetMode, hideCalmSevenDay: hideCalmSevenDay) }
+            return snapshot.map { make(from: $0, now: now, resetMode: resetMode,
+                                       hideCalmSevenDay: hideCalmSevenDay, hideBarsWhenBlocked: hideBarsWhenBlocked) }
                 ?? MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
         }
         if let snapshot, age <= UsageHealth.glyphAfter {
-            return make(from: snapshot, now: now, resetMode: resetMode, hideCalmSevenDay: hideCalmSevenDay)
+            return make(from: snapshot, now: now, resetMode: resetMode,
+                        hideCalmSevenDay: hideCalmSevenDay, hideBarsWhenBlocked: hideBarsWhenBlocked)
         }
 
         // Failing past the glyph threshold. Keep the bars only in the 30–60 min stale window and
@@ -428,6 +473,9 @@ public struct MenuBarLayout: Sendable, Equatable {
         // **diagnostic** ("data is stale, last reset was …"), so it always shows the nearest reset,
         // independent of `resetMode`'s selection table (ADR-0029). The 7-day bar is diagnostic too —
         // rebuild with `hideCalmSevenDay: false` so a calm 7-day is never elided in the error state.
+        // `hideBarsWhenBlocked` is likewise **not** forwarded (defaults to `false`): an exhausted-yet-
+        // stale state must keep its diagnostic bars, and this `case let .expanded` destructuring relies
+        // on `make` never returning `.blockedReset` here (#194).
         let keepBars = snapshot != nil && age <= UsageHealth.hideBarsAfter
         guard keepBars, let snapshot,
               case let .expanded(five, seven, _) = make(from: snapshot, now: now, resetMode: resetMode).mode else {
@@ -449,6 +497,28 @@ public struct MenuBarLayout: Sendable, Equatable {
     }
 
     // MARK: - Private
+
+    /// The bars-less blocked mode (#194) for a snapshot whose main window is exhausted, or `nil` when
+    /// no blocking reset can be resolved (every exhausted window has an unparseable `resets_at`) — the
+    /// caller then falls back to the normal bars path so the data error surfaces as ⚠️ rather than a
+    /// fabricated countdown.
+    ///
+    /// Delegates the *which reset* decision to ``BlockingReset/forBlocked(snapshot:now:)`` (shared with
+    /// the popup's red badge and the idle-blocked bar, so all three agree), then formats it exactly like
+    /// ``selectReset``'s chosen window: a **5h** reset (`.token(id: 0, …)` — index `0` is the 5h row) as
+    /// a live `H:MM` countdown, every longer window (7d, per-model, or credits/monthly) as the
+    /// compact-days variant. `which` mirrors that split so the view knows the label format.
+    private static func blockedResetMode(for snapshot: UsageSnapshot, now: Date) -> MenuBarMode? {
+        guard let choice = BlockingReset.forBlocked(snapshot: snapshot, now: now) else { return nil }
+        // Only the 5h window (popup row index 0) resets on the 5-hour cadence; 7d / per-model / credits
+        // are all long windows formatted in compact days.
+        let isFiveHour: Bool = { if case .token(0, _) = choice { return true } else { return false } }()
+        let which: LimitWindow = isFiveHour ? .fiveHour : .sevenDay
+        let text = isFiveHour
+            ? ResetClock.timeToReset(resetsAt: choice.resetsAt, now: now)
+            : ResetClock.timeToResetCompactDays(resetsAt: choice.resetsAt, now: now)
+        return .blockedReset(reset: text, which: which)
+    }
 
     /// One `BarView` for a window, combining its bar geometry and its exhausted flag
     /// (`limitIndicator`, `.critical` when usage truncates to 100).

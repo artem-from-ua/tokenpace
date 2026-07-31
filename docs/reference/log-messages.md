@@ -176,6 +176,7 @@ token itself never is.
 | 442 | `lifecycle` | `.notice` | `service-status-dot: menu-bar set <bool>` | user toggled the "Show service status dot on issues" checkbox (#31) |
 | — | `lifecycle` | `.notice` | `extra-usage-icon: menu-bar set <bool>` | user toggled the "Show extra-usage credits icon" checkbox (#146) |
 | — | `lifecycle` | `.notice` | `hide-calm-7d: menu-bar set <bool>` | user toggled the "Hide 7-day bar when calm" checkbox (#94, ADR-0034) |
+| — | `lifecycle` | `.notice` | `hide-bars-when-blocked: menu-bar set <bool>` | user toggled the "Hide pacing bars when blocked" checkbox (#194, ADR-0049) |
 | — | `lifecycle` | `.notice` | `screen-lock-pause: setting set <bool>` | user toggled the "Pause polling while the screen is locked" checkbox (#114, ADR-0032) |
 | 439 | `lifecycle` | `.notice` | `update: automatic checks set <bool>` | user toggled the "Check for updates automatically" checkbox (#37) |
 | — | `lifecycle` | `.notice` | `archive: enabled set <bool>` | user toggled the "Archive session logs to a folder" checkbox (#110) |
