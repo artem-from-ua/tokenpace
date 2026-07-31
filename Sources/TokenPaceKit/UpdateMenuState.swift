@@ -96,7 +96,7 @@ public enum UpdateMenuState {
     /// Whether two version tags denote the same release, compared on their parsed `MAJOR.MINOR.PATCH`
     /// so a `v`-prefixed tag and a bare one line up (`"v0.35.0"` == `"0.35.0"`). Falls back to a raw
     /// string compare when either side does not parse — an unparsable pair is only "same" if identical.
-    static func sameVersion(_ a: String, _ b: String) -> Bool {
+    public static func sameVersion(_ a: String, _ b: String) -> Bool {
         if let va = SemanticVersion(a), let vb = SemanticVersion(b) { return va == vb }
         return a == b
     }

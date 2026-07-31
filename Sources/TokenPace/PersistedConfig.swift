@@ -37,6 +37,12 @@ enum PersistedConfig {
         /// The tag whose automatic install failed (#130) — gates a retry of exactly that tag; a newer
         /// tag is still attempted. See the property.
         static let lastFailedInstallVersion = "lastFailedInstallVersion"
+        /// The pipeline **stage** the last failed auto-install broke at (#210), stored as the raw
+        /// `LastUpdateFailure.Stage` string — surfaced on the About pane. See `lastUpdateFailure`.
+        static let lastFailedInstallStage = "lastFailedInstallStage"
+        /// The raw **reason** string of the last failed auto-install (#210) — surfaced on the About
+        /// pane alongside the stage. See `lastUpdateFailure`.
+        static let lastFailedInstallReason = "lastFailedInstallReason"
         /// Instant of the last update-check **attempt** (#37), gating the 12 h cadence.
         static let lastUpdateCheck = "lastUpdateCheck"
         /// The latest release tag last surfaced to the user (#37), so the same version is not
@@ -166,6 +172,46 @@ enum PersistedConfig {
     static var lastFailedInstallVersion: String? {
         get { defaults.string(forKey: Key.lastFailedInstallVersion) }
         set { defaults.set(newValue, forKey: Key.lastFailedInstallVersion) }
+    }
+
+    /// The pipeline stage the last failed auto-install broke at (#210), as the raw
+    /// `LastUpdateFailure.Stage` string, or `nil`. Written together with ``lastFailedInstallVersion``
+    /// and ``lastFailedInstallReason`` in `AppDelegate.startInstall`; prefer the ``lastUpdateFailure``
+    /// accessor, which reads all three atomically.
+    static var lastFailedInstallStage: String? {
+        get { defaults.string(forKey: Key.lastFailedInstallStage) }
+        set { defaults.set(newValue, forKey: Key.lastFailedInstallStage) }
+    }
+
+    /// The raw reason string of the last failed auto-install (#210), or `nil`. See
+    /// ``lastFailedInstallStage`` / ``lastUpdateFailure``.
+    static var lastFailedInstallReason: String? {
+        get { defaults.string(forKey: Key.lastFailedInstallReason) }
+        set { defaults.set(newValue, forKey: Key.lastFailedInstallReason) }
+    }
+
+    /// The last failed auto-install as a single value (#210), assembled from the three persisted
+    /// fields (tag + stage + reason). Returns `nil` unless **all three** are present and the stage
+    /// parses — a partial/legacy write (e.g. a pre-#210 `lastFailedInstallVersion` with no stage)
+    /// reads as "no detailed failure to show", so the About pane simply omits the row.
+    ///
+    /// The setter is a convenience for clearing (`= nil` wipes all three keys); a non-nil set writes
+    /// the three fields together. `lastFailedInstallVersion` stays the source of truth the menu-item
+    /// state machine reads, so it is written/cleared in lockstep here.
+    static var lastUpdateFailure: LastUpdateFailure? {
+        get {
+            guard let tag = lastFailedInstallVersion,
+                  let rawStage = lastFailedInstallStage,
+                  let stage = LastUpdateFailure.Stage(rawValue: rawStage),
+                  let reason = lastFailedInstallReason
+            else { return nil }
+            return LastUpdateFailure(tag: tag, stage: stage, reason: reason)
+        }
+        set {
+            lastFailedInstallVersion = newValue?.tag
+            lastFailedInstallStage = newValue?.stage.rawValue
+            lastFailedInstallReason = newValue?.reason
+        }
     }
 
     /// Instant of the last update-check **attempt** (success or graceful failure), or `nil` if none

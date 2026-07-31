@@ -183,3 +183,24 @@ struct GitHubReleaseClientRequestTests {
         #expect(GitHubReleaseClient.buildRequest().value(forHTTPHeaderField: "Authorization") == nil)
     }
 }
+
+@Suite("GitHubReleaseClient.releaseNotesURL")
+struct GitHubReleaseNotesURLTests {
+
+    @Test func targetsTheTagReleasePage() {
+        #expect(GitHubReleaseClient.releaseNotesURL(tag: "v0.54.0").absoluteString
+            == "https://github.com/artem-from-ua/tokenpace/releases/tag/v0.54.0")
+    }
+
+    @Test func aBareVersionIsUsedVerbatim() {
+        // The client does not add a `v`; the caller normalizes. A bare tag still forms a valid URL.
+        #expect(GitHubReleaseClient.releaseNotesURL(tag: "0.54.0").absoluteString
+            == "https://github.com/artem-from-ua/tokenpace/releases/tag/0.54.0")
+    }
+
+    @Test func aTagWithSpecialCharactersIsPercentEncoded() {
+        // A space must be encoded so the URL is valid; a normal `vX.Y.Z` never triggers this path.
+        #expect(GitHubReleaseClient.releaseNotesURL(tag: "v1 0").absoluteString
+            == "https://github.com/artem-from-ua/tokenpace/releases/tag/v1%200")
+    }
+}

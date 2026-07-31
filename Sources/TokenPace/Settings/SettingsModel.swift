@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 import TokenPaceKit
 
@@ -101,6 +102,10 @@ final class SettingsModel {
     var automaticUpdateChecks = false
     var installAutomatically = false
     private(set) var latestRelease: GitHubRelease?
+    /// The most recent failed auto-install (#210) — tag + stage + reason — or `nil`. Read from
+    /// `PersistedConfig` in `syncFromConfig()` (so it refreshes each time the window opens); a past
+    /// event, so no live update is needed. Drives the ⚠️ "Update … failed" row on the About pane.
+    private(set) var lastUpdateFailure: LastUpdateFailure?
 
     // MARK: Static build facts
 
@@ -108,6 +113,22 @@ final class SettingsModel {
     /// "Back to work" master switch (ADR-0012 §4, ADR-0018).
     let inAppBundle = LaunchAtLoginController.isAppBundle
     let versionText = SettingsModel.makeVersionText()
+
+    /// A forced install-failure for live verification of the About pane (#210), from
+    /// `TOKENPACE_FAKE_FAILURE=<stage>:<reason>` (e.g. `verify:team id mismatch (expected …)`); the
+    /// tag comes from `TOKENPACE_FAKE_LATEST` or a placeholder. A maintainer aid like
+    /// `TOKENPACE_UPDATE_STATE` — it never writes UserDefaults; `nil` for a normal run or an
+    /// unparsable value (unknown stage / missing reason).
+    static let forcedUpdateFailure: LastUpdateFailure? = {
+        let env = ProcessInfo.processInfo.environment
+        guard let raw = env["TOKENPACE_FAKE_FAILURE"], !raw.isEmpty,
+              let sep = raw.firstIndex(of: ":") else { return nil }
+        let stageRaw = String(raw[raw.startIndex..<sep])
+        let reason = String(raw[raw.index(after: sep)...])
+        guard let stage = LastUpdateFailure.Stage(rawValue: stageRaw), !reason.isEmpty else { return nil }
+        let tag = env["TOKENPACE_FAKE_LATEST"].flatMap { $0.isEmpty ? nil : $0 } ?? "v\(TokenPaceKit.version)"
+        return LastUpdateFailure(tag: tag, stage: stage, reason: reason)
+    }()
 
     // MARK: Computed enablement (was the scattered imperative `updateX Availability()` methods)
 
@@ -204,6 +225,9 @@ final class SettingsModel {
 
         automaticUpdateChecks = PersistedConfig.automaticUpdateChecks
         installAutomatically = PersistedConfig.installUpdatesAutomatically
+        // Real store, unless a verification stub forces a failure (see `forcedUpdateFailure`) — the
+        // stub never writes UserDefaults, mirroring `TOKENPACE_UPDATE_STATE`.
+        lastUpdateFailure = Self.forcedUpdateFailure ?? PersistedConfig.lastUpdateFailure
 
         archiveEnabled = PersistedConfig.archiveEnabled
         refreshArchiveStatus()
@@ -400,6 +424,19 @@ final class SettingsModel {
     func archiveNow() { onArchiveNow?() }
 
     func openRepo() { NSWorkspaceOpener.open(SettingsLinks.repoURL) }
+
+    /// A release tag stripped of a leading `v`/`V` for display (`"v0.55.0"` → `"0.55.0"`) — the About
+    /// pane shows bare `X.Y.Z` (#210), while URLs still use the real `vX.Y.Z` tag.
+    static func displayTag(_ tag: String) -> String {
+        guard let first = tag.first, first == "v" || first == "V" else { return tag }
+        return String(tag.dropFirst())
+    }
+
+    /// Open the release-notes page for a specific tag (#210) — used by the "New version available"
+    /// row's "Release notes" link, which carries that release's own tag.
+    func openReleaseNotes(tag: String) {
+        NSWorkspaceOpener.open(GitHubReleaseClient.releaseNotesURL(tag: tag).absoluteString)
+    }
 
     func openDownload() {
         guard let release = latestRelease else { return }
