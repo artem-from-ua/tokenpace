@@ -93,6 +93,11 @@ final class SettingsWindowController: NSWindowController {
         get { model.onBackToWorkEnabled } set { model.onBackToWorkEnabled = newValue }
     }
 
+    /// Fires the "Back to work!" notification on demand from the Settings "Try" button (#193).
+    var onTryBackToWork: (() -> Void)? {
+        get { model.onTryBackToWork } set { model.onTryBackToWork = newValue }
+    }
+
     /// Provides the last archive summary for the status line (#110).
     var archiveSummaryProvider: (() -> LogArchiver.Summary?)? {
         get { model.archiveSummaryProvider } set { model.archiveSummaryProvider = newValue }

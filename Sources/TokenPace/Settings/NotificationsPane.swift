@@ -16,10 +16,20 @@ struct NotificationsPane: View {
         Form {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Back to work", isOn: Binding(
-                        get: { model.backToWorkEnabled },
-                        set: { model.setBackToWork($0) }))
-                    .disabled(!model.backToWorkMasterEnabled)
+                    HStack {
+                        Text("Back to work")
+                        Spacer()
+                        // "Try" fires the notification on demand for verification (#193). It sits
+                        // before the on/off switch and is enabled only while the feature is on and a
+                        // banner could actually be delivered (see `tryBackToWorkEnabled`).
+                        Button("Try") { model.tryBackToWork() }
+                            .disabled(!model.tryBackToWorkEnabled)
+                        Toggle("Back to work", isOn: Binding(
+                            get: { model.backToWorkEnabled },
+                            set: { model.setBackToWork($0) }))
+                        .labelsHidden()
+                        .disabled(!model.backToWorkMasterEnabled)
+                    }
                     SettingsHint(
                         text: "If you hit a Claude usage limit, notifies you when it resets so you "
                             + "can get back to work.")

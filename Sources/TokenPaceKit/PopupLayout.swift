@@ -159,8 +159,15 @@ public struct PopupLayout: Sendable, Equatable {
     /// its own "Extra usage" block below the limit rows.
     public let credits: CreditsRow?
     /// Which one reset the view should highlight in **red** as the **blocking** reset — the reset that
-    /// actually unblocks work in the idle-blocked state (#158, the "last stand" rule in
-    /// ``BlockingReset``). `nil` unless the snapshot is idle **and** blocked. When non-`nil`:
+    /// actually unblocks work. Set in two cases (#158, #193):
+    /// - **Blocked** (no path to work: idle-blocked, or active with a main window exhausted and credits not
+    ///   covering) — the "last stand" pick (`BlockingReset.forBlocked`), which may be the credits reset.
+    /// - **Subscription-exhausted while credits cover** (`CreditsPacing.subscriptionExhaustedWhileCovered`,
+    ///   #193) — the latest exhausted **token** reset (`BlockingReset.forSubscriptionExhausted`); never the
+    ///   credits reset, since credits are the cover, not the blocker. Not blocked (work continues on the
+    ///   paid tier), but the red badge marks when the plan quota returns and credits stop being spent.
+    ///
+    /// `nil` in every other state. When non-`nil`:
     /// - ``BlockingReset/Choice/token(id:resetsAt:)`` — `id` is the index into ``rows`` whose reset
     ///   line the view paints red;
     /// - ``BlockingReset/Choice/credits(resetsAt:)`` — the "Extra usage" section's reset line is painted
@@ -373,8 +380,19 @@ public struct PopupLayout: Sendable, Equatable {
     /// ``BlockingReset/Choice`` carries a popup **row index** (`token(id:)`) or the credits section
     /// (`credits`) — the view maps it to the one reset line it paints as a red badge.
     private static func blockingReset(from snapshot: UsageSnapshot, now: Date) -> BlockingReset.Choice? {
-        guard CreditsPacing.isBlocked(in: snapshot) else { return nil }
-        return BlockingReset.forBlocked(snapshot: snapshot, now: now)
+        // Blocked (no path to work: idle-blocked, or active with a main window exhausted and credits not
+        // covering) → the "last stand" pick, which may be the credits reset (#158).
+        if CreditsPacing.isBlocked(in: snapshot) {
+            return BlockingReset.forBlocked(snapshot: snapshot, now: now)
+        }
+        // Not blocked, but a subscription limit is exhausted **and** paid credits are covering the work
+        // (#193): still surface a red badge on the blocking subscription limit's reset — the moment the
+        // plan quota returns and credits stop being spent. Never the credits reset here (credits are the
+        // *cover*, not the blocker), so this uses the token-only `forSubscriptionExhausted`.
+        if CreditsPacing.subscriptionExhaustedWhileCovered(in: snapshot) {
+            return BlockingReset.forSubscriptionExhausted(snapshot: snapshot, now: now)
+        }
+        return nil
     }
 
     /// Build one `LimitRow`, delegating all arithmetic to tested pure logic. An unparseable

@@ -3,7 +3,7 @@ status: accepted
 date: 2026-07-31
 ---
 
-# ADR-0048: Окремий `MenuBarMode.blockedReset` для віджета «лише countdown»
+# ADR-0049: Окремий `MenuBarMode.blockedReset` для віджета «лише countdown»
 
 ## Контекст
 

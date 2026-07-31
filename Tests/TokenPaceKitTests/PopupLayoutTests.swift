@@ -524,11 +524,19 @@ struct PopupLayoutIdleTests {
         #expect(p.rows[id].title == "7-day")
     }
 
-    @Test func idleWithCreditsCoverIsNotBlocked() {
+    @Test func idleWithCreditsCoverIsNotBlockedButBadgesSubscriptionReset() {
+        // Idle 5h + 7d@100 with credits actively covering: NOT blocked (work continues on the paid tier,
+        // so the idle row is not greyed), but the 7-day reset — the moment the plan quota returns and
+        // credits stop being spent — is still badged red (#193). Never the credits reset here.
         let cover = SpendInfo(enabled: true, spendLimitReached: false)
         let p = layout(from: idleBlockedSnapshot(sevenDayUtil: 100, spend: cover))
         #expect(!p.rows[0].sessionBlocked)
-        #expect(p.blockingReset == nil)
+        guard case let .token(id, _)? = p.blockingReset else {
+            Issue.record("expected a token blocking reset, got \(String(describing: p.blockingReset))")
+            return
+        }
+        #expect(id == 1)   // the 7-day row
+        #expect(p.rows[id].title == "7-day")
     }
 
     @Test func idleWithCappedCreditsPointsAtSevenDay() {
@@ -574,6 +582,36 @@ struct PopupLayoutIdleTests {
         }
         #expect(id == 0)   // 5-hour, the only exhausted window
         #expect(p.rows[id].title == "5-hour")
+    }
+
+    @Test func activeExhaustedWithCreditsCoverBadgesSubscriptionReset() {
+        // #193: active session, 5h at 100 % but credits actively covering. Not blocked (work continues on
+        // the paid tier — the 5h row is a normal "limit reached" row, not sessionBlocked), yet the 5-hour
+        // reset — when the plan quota returns and credits stop being spent — is badged red.
+        let cover = SpendInfo(enabled: true, spendLimitReached: false)
+        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 40, spend: cover)
+        let p = layout(from: snap)
+        #expect(!p.rows[0].sessionBlocked)
+        guard case let .token(id, _)? = p.blockingReset else {
+            Issue.record("expected a token blocking reset, got \(String(describing: p.blockingReset))")
+            return
+        }
+        #expect(id == 0)   // the 5-hour row
+        #expect(p.rows[id].title == "5-hour")
+    }
+
+    @Test func activeBothExhaustedWithCreditsCoverBadgesLaterTokenNotCredits() {
+        // Both 5h and 7d exhausted with credits covering: the badge is on the *later* token reset (7-day),
+        // never the credits section — credits are the cover here, not the blocker (#193).
+        let cover = SpendInfo(used: eur(320), limit: eur(5000), enabled: true, spendLimitReached: false)
+        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100,
+                            fiveHourResetsIn: 2 * 3600, sevenDayResetsIn: 4 * 24 * 3600, spend: cover)
+        let p = layout(from: snap)
+        guard case let .token(id, _)? = p.blockingReset else {
+            Issue.record("expected a token blocking reset, got \(String(describing: p.blockingReset))")
+            return
+        }
+        #expect(id == 1)   // 7-day, the later reset — not the credits section
     }
 
     @Test func activeSevenExhaustedFiveHasQuotaBadgesSevenDay() {

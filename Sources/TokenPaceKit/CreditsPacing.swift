@@ -151,6 +151,26 @@ public enum CreditsPacing {
         mainWindowExhausted(in: snapshot) && !creditsCanCover(snapshot.spend)
     }
 
+    /// Whether a **subscription** limit (5h **or** 7d) is exhausted **while paid credits are still
+    /// covering** the work — the "you can keep going, but only because you're paying for it" state (#193).
+    ///
+    /// ```
+    /// subscriptionExhaustedWhileCovered = mainWindowExhausted  AND  creditsCanCover(spend)
+    /// ```
+    ///
+    /// This is the deliberate **complement** of ``isBlocked(in:)`` on an exhausted main window: both start
+    /// from ``mainWindowExhausted(in:)``, then split on whether credits can cover — `isBlocked` is the
+    /// *cannot-cover* half (no path to work), this is the *can-cover* half (work continues, on the paid
+    /// tier). The two are mutually exclusive and never both `true`.
+    ///
+    /// The popup surfaces this as a **red** countdown to the blocking subscription limit's reset — the
+    /// moment the plan quota returns and credits stop being spent (#193). It is **not** blocked
+    /// (``WorkAvailability/canWork(_:)`` is `true` here), so it drives no "Back to work!" edge and no idle
+    /// grey bar — only the red reset badge on the exhausted token row.
+    public static func subscriptionExhaustedWhileCovered(in snapshot: UsageSnapshot) -> Bool {
+        mainWindowExhausted(in: snapshot) && creditsCanCover(snapshot.spend)
+    }
+
     // MARK: - Pacing (usage vs. time — same as the token bars)
 
     /// The pacing bar for the credits icon, graded **exactly like a token limit** (usage vs. time), or
