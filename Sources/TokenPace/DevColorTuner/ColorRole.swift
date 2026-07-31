@@ -53,6 +53,8 @@ enum ColorRole: String, CaseIterable {
     case popupDimmedLabel
     case popupWarningRed
     case popupInUsePill
+    // White text drawn on the popup pills (both the "in use" and blocking-reset badge fills).
+    case popupPillText
     case popupLink
     case popupLabel
     // Popup service-status dots — appearance-aware `.system*`, distinct from the fixed-sRGB menu dots.
@@ -88,7 +90,7 @@ enum ColorRole: String, CaseIterable {
         case .menuIndicatorStroke, .menuIdleBlue, .popupIdleBlue,
              .popupIndicatorStroke, .popupTick, .popupMonochromeGrey, .popupInUsePill:
             return .chrome
-        case .menuForeground, .popupDimmedLabel, .popupLink, .popupLabel:
+        case .menuForeground, .popupDimmedLabel, .popupLink, .popupLabel, .popupPillText:
             return .text
         case .menuIdleCalmGrey, .menuCalmWhite:
             return .calm
@@ -130,6 +132,7 @@ enum ColorRole: String, CaseIterable {
         case .menuGapOrange:       return "Menu-bar · gap orange"
         case .popupWarningRed:     return "Popup · warning red (⚠️)"
         case .popupInUsePill:      return "Popup · \"in use\" pill"
+        case .popupPillText:       return "Popup · pill text"
         case .popupLink:           return "Popup · link"
         case .popupLabel:          return "Popup · label"
         case .popupServiceGreen:   return "Popup · service green (operational)"
@@ -203,6 +206,9 @@ enum ColorRole: String, CaseIterable {
         case .popupInUsePill:
             return "Popup \"in use\" pill fill beside the header when credits are actively spending (#146). "
                  + "Default controlAccentColor."
+        case .popupPillText:
+            return "White text on the popup pills — the \"active\" in-use badge (#146) and the blocking "
+                 + "reset-time badge (#158). Drawn on both the blue and red pill fills. Default white."
         case .popupLink:
             return "Popup service-status word rendered as a link to the status page. Default linkColor."
         case .popupLabel:
@@ -214,9 +220,11 @@ enum ColorRole: String, CaseIterable {
         case .popupServiceOrange:
             return "Popup service-status dot: partial outage. Default systemOrange."
         case .popupServiceRed:
-            return "Popup service-status dot: major outage. Default systemRed."
+            return "Popup service-status dot: major outage. Also the update-menu \"automatic update "
+                 + "failed\" dot (#130), via PopupViewController.dotColor(.majorOutage). Default systemRed."
         case .popupServiceBlue:
-            return "Popup service-status dot: under maintenance. Default systemBlue."
+            return "Popup service-status dot: under maintenance. Also the update-menu \"new version "
+                 + "available\" dot (#130), via PopupViewController.dotColor(.underMaintenance). Default systemBlue."
         case .popupServiceGray:
             return "Popup service-status dot: unknown. Default systemGray."
         }
@@ -294,6 +302,7 @@ enum ColorRole: String, CaseIterable {
         // Popup extras / system colours.
         case .popupWarningRed:     return .systemRed
         case .popupInUsePill:      return .controlAccentColor
+        case .popupPillText:       return .white
         case .popupLink:           return .linkColor
         case .popupLabel:          return .labelColor
         case .popupServiceGreen:   return .systemGreen
