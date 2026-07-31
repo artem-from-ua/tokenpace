@@ -1,7 +1,12 @@
 ---
-status: accepted
+status: superseded
 date: 2026-07-31
+superseded_by: [0053]
 ---
+
+> **Скасовано [ADR-0053](0053-devtools-flag-via-defaults.md).** `ProdEnvFlag` видалено: гейт dev-tools
+> переїхав з env-var на `UserDefaults`-ключ `devToolsEnabled` (`defaults`), а `TOKENPACE_GH_AUTH`
+> повернувся до самостійного `resolveGHAuth` (ADR-0025). Текст нижче — історичний запис.
 
 # ADR-0052: Спільний резолвер prod-visible env-прапорців (`ProdEnvFlag`)
 

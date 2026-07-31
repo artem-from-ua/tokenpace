@@ -12,7 +12,7 @@ import TokenPaceKit
 /// below, plus WCAG contrast against light/dark menu bars and the popup background. Editing any channel
 /// updates every other representation and repaints the UI live.
 ///
-/// Gated the same way as its menu item: only reachable when `TOKENPACE_DEVTOOLS` is set and ⌥ Option is
+/// Gated the same way as its menu item: only reachable when the `devToolsEnabled` defaults key is set and ⌥ Option is
 /// held to reveal the entry. Overrides are ephemeral — nothing is persisted; quitting restores defaults.
 ///
 /// Modelled on ``TroubleshootWindowController``: programmatic AppKit + Auto Layout, `.floating` level,
