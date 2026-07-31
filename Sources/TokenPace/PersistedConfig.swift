@@ -85,6 +85,12 @@ enum PersistedConfig {
         /// app restart and toggle off→on so the blocked→unblocked edge is never missed — see the
         /// property.
         static let backToWorkWasBlocked = "backToWorkWasBlocked"
+        /// Whether the "Now using Extra Usage Credit" notification fires when work starts overflowing
+        /// onto paid credit. Default-off (opt-in) — see the property.
+        static let extraUsageNotifyEnabled = "extraUsageNotifyEnabled"
+        /// Persisted "was on credits" edge state for the Extra Usage notification. Survives app restart
+        /// and toggle off→on so the not-spending→spending edge is never missed — see the property.
+        static let extraUsageWasOnCredits = "extraUsageWasOnCredits"
     }
 
     /// The marketing version the config was last written under, or `nil` if none has been recorded
@@ -327,5 +333,29 @@ enum PersistedConfig {
     static var backToWorkWasBlocked: Bool {
         get { defaults.object(forKey: Key.backToWorkWasBlocked) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.backToWorkWasBlocked) }
+    }
+
+    // MARK: - Extra Usage Credit notification
+
+    /// Whether the "Now using Extra Usage Credit" notification fires when work starts overflowing onto
+    /// paid credit (a plan limit is spent and credits begin covering). **Default-off** (opt-in): an
+    /// absent key reads as `false`, so nothing is ever posted until the user turns it on (and grants
+    /// notification authorization), consistent with ``backToWorkEnabled``. Gated by the same
+    /// authorization + quiet-hours machinery.
+    static var extraUsageNotifyEnabled: Bool {
+        get { defaults.object(forKey: Key.extraUsageNotifyEnabled) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.extraUsageNotifyEnabled) }
+    }
+
+    /// Persisted "was on credits" edge state for the Extra Usage notification. **Default false.**
+    /// **Internal state, not a user setting** — mirrors ``backToWorkWasBlocked``.
+    ///
+    /// Persisted (not in-memory) so the not-spending→spending edge survives an app restart or a Mac
+    /// sleep between polls, and updated on **every** successful poll regardless of
+    /// ``extraUsageNotifyEnabled`` (so toggling off→on never forgets a pending edge, and never fires a
+    /// stale one for a switch that happened while the feature was off); the toggle gates only the posting.
+    static var extraUsageWasOnCredits: Bool {
+        get { defaults.object(forKey: Key.extraUsageWasOnCredits) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.extraUsageWasOnCredits) }
     }
 }

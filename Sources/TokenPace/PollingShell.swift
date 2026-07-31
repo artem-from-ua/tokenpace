@@ -344,6 +344,14 @@ actor StubUsageTransport: UsageTransport {
         /// set; every later poll returns a **workable** body (7-day back to 40 %), which is a genuine
         /// blocked→unblocked edge that fires the notification (subject to quiet hours + authorization).
         case justUnblocked
+        /// The "Now using Extra Usage Credit" edge frame: the first poll returns a **not-on-credits**
+        /// body (7-day at 40 %, so no main window is exhausted even though credits are enabled →
+        /// `ExtraUsageOnset.isOnCredits == false`); every later poll pins the 7-day window at 100 % with
+        /// the same enabled `spend`/`extra_usage` blocks, so work now overflows onto paid credit
+        /// (`isOnCredits == true`). The not-spending→spending edge fires once, posting the banner with
+        /// the spent amount + limit (subject to quiet hours + authorization). Reuses the `.active`
+        /// credits blocks (€10.77 of €15.00).
+        case creditsOnset
         /// A fixed 5h×7d severity frame for verifying the reset-countdown selection table (#103).
         case pacing(PacingFrame)
         /// The broken-`resets_at` frame (#167, ADR-0043): a healthy poll whose 5h window is **noisy**
@@ -733,6 +741,31 @@ actor StubUsageTransport: UsageTransport {
             {"five_hour":{"utilization":18.0,"resets_at":"\(fiveReset)"},\
             "seven_day":{"utilization":\(sevenUtil),"resets_at":"\(sevenReset)"},\
             "limits":[]}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
+        // Extra-usage onset frame: first poll = not on credits (7-day 40 %, so no main window is
+        // exhausted → `isOnCredits` false even with credits enabled), every later poll = 7-day at 100 %
+        // with the same enabled credits blocks (`isOnCredits` true). The not-spending→spending edge
+        // fires once, posting the "Now using Extra Usage Credit" banner with the spent amount + limit.
+        if mode == .creditsOnset {
+            let onCredits = calls > 0
+            calls += 1
+            let sevenUtil = onCredits ? 100.0 : 40.0
+            let fiveReset = Self.resetsAt(inSeconds: 3 * 3600)
+            let sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
+            // A `weekly_all` critical limit only once the 7-day window is actually exhausted.
+            let weeklyLimit = onCredits
+                ? #""limits":[{"kind":"weekly_all","group":"weekly","percent":100,"severity":"critical","resets_at":"\#(sevenReset)","scope":null,"is_active":true}],"#
+                : #""limits":[],"#
+            let body = """
+            {"five_hour":{"utilization":18.0,"resets_at":"\(fiveReset)"},\
+            "seven_day":{"utilization":\(sevenUtil),"resets_at":"\(sevenReset)"},\
+            \(weeklyLimit)\
+            \(CreditsFrame.active.blocks)}
             """.data(using: .utf8)!
             let response = HTTPURLResponse(
                 url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!

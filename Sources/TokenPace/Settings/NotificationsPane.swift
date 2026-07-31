@@ -3,8 +3,9 @@ import TokenPaceKit
 
 // MARK: - NotificationsPane (#168, ADR-0042)
 
-/// Settings → Notifications: the "Back to work!" notification (#160, ADR-0039) — a master switch, the
-/// allowed-hours window with a live duration, and a weekend-suppress picker.
+/// Settings → Notifications: the "Back to work!" (#160, ADR-0039) and "Extra Usage Credit" (ADR-0050)
+/// notification switches in one section, and a **separate "Schedule" section** — the allowed-hours
+/// window with a live duration and a weekend-suppress picker — that gates both notifications alike.
 struct NotificationsPane: View {
     @Bindable var model: SettingsModel
 
@@ -20,10 +21,9 @@ struct NotificationsPane: View {
                         Text("Back to work")
                         Spacer()
                         // "Try" fires the notification on demand for verification (#193). It sits
-                        // before the on/off switch and is enabled only while the feature is on and a
-                        // banner could actually be delivered (see `tryBackToWorkEnabled`).
+                        // before the on/off switch and is always enabled — even with the feature off:
+                        // the post checks support + authorization itself (a silent no-op if not granted).
                         Button("Try") { model.tryBackToWork() }
-                            .disabled(!model.tryBackToWorkEnabled)
                         Toggle("Back to work", isOn: Binding(
                             get: { model.backToWorkEnabled },
                             set: { model.setBackToWork($0) }))
@@ -36,35 +36,53 @@ struct NotificationsPane: View {
                     SettingsHint(text: model.backToWorkHint, warning: !model.backToWorkHint.isEmpty)
                 }
 
-                // The allowed-hours window and weekend-suppress only matter when the feature is on —
-                // hidden (not just disabled) otherwise.
-                if model.backToWorkEnabled {
-                    LabeledContent("Allowed hours") {
-                        HStack(spacing: 8) {
-                            Text(model.notifyWindowLengthText).foregroundStyle(.secondary)
-                            DatePicker("", selection: model.notifyStartBinding(anchor: anchor),
-                                       displayedComponents: .hourAndMinute)
-                                .labelsHidden()
-                            Text("–").foregroundStyle(.secondary)
-                            DatePicker("", selection: model.notifyEndBinding(anchor: anchor),
-                                       displayedComponents: .hourAndMinute)
-                                .labelsHidden()
-                        }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Switching to Extra Usage")
+                        Spacer()
+                        // "Try" fires the banner on demand for verification, mirroring "Back to work" —
+                        // always enabled (the post gates on support + authorization itself).
+                        Button("Try") { model.tryExtraUsage() }
+                        Toggle("Switching to Extra Usage", isOn: Binding(
+                            get: { model.extraUsageNotifyEnabled },
+                            set: { model.setExtraUsageNotify($0) }))
+                        .labelsHidden()
+                        .disabled(!model.backToWorkMasterEnabled)
                     }
-
-                    Picker("Suppress on weekends", selection: Binding(
-                        get: { model.suppressDays },
-                        set: { model.setSuppressDays($0) })) {
-                        ForEach(SuppressDays.allCases, id: \.self) { day in
-                            Text(day.displayName).tag(day)
-                        }
-                    }
-                    .pickerStyle(.menu)
+                    SettingsHint(
+                        text: "Notifies you the moment work starts running on paid Extra Usage Credit "
+                            + "— with the amount spent and your limit, if set.")
                 }
+
+            }
+
+            // The allowed-hours window and weekend-suppress apply to every notification — a separate
+            // "Schedule" section that is **always visible and enabled**, even when no notification is on
+            // (so the user can set their quiet hours up front). It gates both notifications alike.
+            Section("Schedule") {
+                LabeledContent("Allowed hours") {
+                    HStack(spacing: 8) {
+                        Text(model.notifyWindowLengthText).foregroundStyle(.secondary)
+                        DatePicker("", selection: model.notifyStartBinding(anchor: anchor),
+                                   displayedComponents: .hourAndMinute)
+                            .labelsHidden()
+                        Text("–").foregroundStyle(.secondary)
+                        DatePicker("", selection: model.notifyEndBinding(anchor: anchor),
+                                   displayedComponents: .hourAndMinute)
+                            .labelsHidden()
+                    }
+                }
+
+                Picker("Suppress on weekends", selection: Binding(
+                    get: { model.suppressDays },
+                    set: { model.setSuppressDays($0) })) {
+                    ForEach(SuppressDays.allCases, id: \.self) { day in
+                        Text(day.displayName).tag(day)
+                    }
+                }
+                .pickerStyle(.menu)
             }
         }
         .formStyle(.grouped)
-        // Show/hide dependent rows without an insertion animation (avoids neighbour-height flicker).
-        .animation(nil, value: model.backToWorkEnabled)
     }
 }

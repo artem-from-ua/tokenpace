@@ -98,6 +98,11 @@ final class SettingsWindowController: NSWindowController {
         get { model.onTryBackToWork } set { model.onTryBackToWork = newValue }
     }
 
+    /// Fires the "Switching to Extra Usage" notification on demand from its Settings "Try" button.
+    var onTryExtraUsage: (() -> Void)? {
+        get { model.onTryExtraUsage } set { model.onTryExtraUsage = newValue }
+    }
+
     /// Provides the last archive summary for the status line (#110).
     var archiveSummaryProvider: (() -> LogArchiver.Summary?)? {
         get { model.archiveSummaryProvider } set { model.archiveSummaryProvider = newValue }

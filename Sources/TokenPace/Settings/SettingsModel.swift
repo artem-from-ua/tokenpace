@@ -39,6 +39,9 @@ final class SettingsModel {
     /// Fire the "Back to work!" notification immediately, bypassing the edge-detection and quiet-hours
     /// gates (those live in `AppDelegate`, not the notifier) — the Settings "Try" button (#193).
     var onTryBackToWork: (() -> Void)?
+    /// Fire the "Switching to Extra Usage" notification immediately from its Settings "Try" button —
+    /// the shell reads the latest snapshot's spend for the amount/limit body (ADR-0050).
+    var onTryExtraUsage: (() -> Void)?
     var archiveSummaryProvider: (() -> LogArchiver.Summary?)?
 
     // MARK: Selection (dev hook)
@@ -77,6 +80,7 @@ final class SettingsModel {
     // MARK: Notifications (#160)
 
     var backToWorkEnabled = false
+    var extraUsageNotifyEnabled = false
     var notifyStartMinute = 0
     var notifyEndMinute = 0
     var suppressDays: SuppressDays = .never
@@ -128,12 +132,6 @@ final class SettingsModel {
     /// so the feature can never work — like launch-at-login / auto-install).
     var backToWorkMasterEnabled: Bool { authState != .dev }
     var notifyDependentsEnabled: Bool { backToWorkMasterEnabled && backToWorkEnabled }
-    /// Whether the "Try" button can fire (#193): only when the feature is on and a notification could
-    /// actually be delivered — so off on a dev build (`.dev`) or when the user denied notifications
-    /// (`.denied`), where `postBackToWork()` would silently no-op.
-    var tryBackToWorkEnabled: Bool {
-        backToWorkEnabled && authState != .dev && authState != .denied
-    }
     /// The auth/dev hint under the master switch; empty in the authorized / not-yet-decided case.
     var backToWorkHint: String {
         switch authState {
@@ -192,6 +190,7 @@ final class SettingsModel {
         webDesktopMode = ms.webDesktopMode
 
         backToWorkEnabled = PersistedConfig.backToWorkEnabled
+        extraUsageNotifyEnabled = PersistedConfig.extraUsageNotifyEnabled
         notifyStartMinute = PersistedConfig.notifyWindowStartMinute
         notifyEndMinute = PersistedConfig.notifyWindowEndMinute
         suppressDays = PersistedConfig.notifySuppressDays
@@ -305,6 +304,26 @@ final class SettingsModel {
         onTryBackToWork?()
     }
 
+    /// Fire the "Switching to Extra Usage" notification on demand from its Settings "Try" button.
+    /// Forces a post through the normal delivery channel, bypassing edge-detection and quiet hours.
+    func tryExtraUsage() {
+        AppLogger.lifecycle.notice("extra-usage: try (forced) notification")
+        onTryExtraUsage?()
+    }
+
+    func setExtraUsageNotify(_ on: Bool) {
+        extraUsageNotifyEnabled = on
+        PersistedConfig.extraUsageNotifyEnabled = on
+        AppLogger.lifecycle.notice("extra-usage: notify enabled set \(on, privacy: .public)")
+        if on {
+            // Shares one authorization grant with "Back to work" — request lazily on first enable of
+            // either feature, then refresh the hint with the result.
+            onBackToWorkEnabled?({ [weak self] state in self?.applyAuthState(state) })
+        } else {
+            refreshAuthState()
+        }
+    }
+
     func setNotifyWindow(start: Int, end: Int) {
         notifyStartMinute = start
         notifyEndMinute = end
@@ -399,11 +418,18 @@ final class SettingsModel {
 
     private func applyAuthState(_ state: BackToWorkNotifier.AuthState) {
         authState = state
-        // On a dev build authorization is impossible, so the master switch is disabled and forced off
-        // (the computed `backToWorkMasterEnabled` disables it; force the stored value + store to off).
-        if state == .dev, backToWorkEnabled {
-            backToWorkEnabled = false
-            PersistedConfig.backToWorkEnabled = false
+        // On a dev build authorization is impossible, so the master switch is disabled and both
+        // notification toggles are forced off (the computed `backToWorkMasterEnabled` disables them;
+        // force the stored values + store to off).
+        if state == .dev {
+            if backToWorkEnabled {
+                backToWorkEnabled = false
+                PersistedConfig.backToWorkEnabled = false
+            }
+            if extraUsageNotifyEnabled {
+                extraUsageNotifyEnabled = false
+                PersistedConfig.extraUsageNotifyEnabled = false
+            }
         }
     }
 }
