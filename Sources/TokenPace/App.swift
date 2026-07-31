@@ -43,15 +43,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `troubleshootItem` in `updateTroubleshootVisibility(_:)`.
     private var devToolsItem: NSMenuItem?
 
-    /// The "Quit TokenPace" item. On a dev build (`swift run`, not an installed `.app`) its title carries
-    /// the build/stub tag — "Quit TokenPace (dev build)" / "…(dev build – error)" — but **only** while ⌥
-    /// Option is held; the plain "Quit TokenPace" shows otherwise. Held so `updateTroubleshootVisibility`
-    /// can swap the two in lockstep with the other ⌥-driven items. On an app bundle the title is fixed and
-    /// this stays a plain "Quit TokenPace" regardless of Option.
+    /// The "Quit TokenPace" item. Its title carries a build/stub tag — "(dev build)", "(dev build – error)",
+    /// or "(stub – error)" — but **only** while ⌥ Option is held; the plain "Quit TokenPace" shows otherwise.
+    /// Held so `updateTroubleshootVisibility` can swap the two in lockstep with the other ⌥-driven items.
+    /// The tag appears whenever this is a dev build **or** a stub is active — including a **signed `.app`**
+    /// running a stub (a real notification build must be an `.app`); a plain `.app` on the real network has
+    /// no tag and stays "Quit TokenPace" regardless of Option.
     private var quitItem: NSMenuItem?
 
-    /// The dev-build title shown on `quitItem` while ⌥ Option is held (nil on an app bundle, where the
-    /// title never changes). Precomputed at menu-build time so the ⌥ swap is a cheap string assignment.
+    /// The tag title shown on `quitItem` while ⌥ Option is held, or nil when there is none (a plain `.app`
+    /// on the real network). Computed by ``updateQuitDevTitle()`` at menu-build time and re-computed on
+    /// every live stub switch (#187), so the ⌥ swap is a cheap string assignment that always names the
+    /// stub actually running.
     private var quitDevTitle: String?
 
     /// The opaque overlay inserted into the menu window's background view to make the *whole* dropdown
@@ -288,18 +291,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.updateAvailableItem = updateItem
 
         // Separate Quit from the items above so the terminating action sits in its own group (standard
-        // macOS menu grouping). A bare `swift run` binary is tagged "(dev build)" (#69) so quitting
-        // the right process is unambiguous when a dev build and the installed `.app` run side by
-        // side; under a stub the mode is named too — "(dev build – error)" — so a stubbed run reads
-        // apart from a plain dev build at a glance. That tag is noise on an ordinary open, so it is
-        // revealed only while ⌥ Option is held (swapped in `updateTroubleshootVisibility`): the item
-        // reads a plain "Quit TokenPace" by default and grows the "(dev build …)" suffix under Option.
+        // macOS menu grouping). The Quit item grows a tag under ⌥ Option so the running process reads
+        // apart at a glance (#69):
+        //   • a bare `swift run` binary is tagged "(dev build)" — quitting the right process is
+        //     unambiguous when a dev build and the installed `.app` run side by side;
+        //   • whenever a **stub** is active the scenario is named too — so a stubbed run is identifiable
+        //     even in a **signed `.app`** (which a real notification build must be): "(stub – credits-onset)"
+        //     on an `.app`, "(dev build – credits-onset)" on a dev binary.
+        // A plain `.app` on the real network shows no tag. The tag is noise on an ordinary open, so it
+        // is revealed only while ⌥ Option is held (swapped in `updateTroubleshootVisibility`): the item
+        // reads a plain "Quit TokenPace" by default and grows the suffix under Option.
         menu.addItem(.separator())
-        if !LaunchAtLoginController.isAppBundle {
-            quitDevTitle = currentScenario != .realNetwork
-                ? "Quit TokenPace (dev build – \(currentScenario.id))"
-                : "Quit TokenPace (dev build)"
-        }
+        updateQuitDevTitle()
         let quitItem = NSMenuItem(title: "", action: #selector(quit), keyEquivalent: "")
         quitItem.attributedTitle = Self.dropdownMenuItemText("Quit TokenPace")
         quitItem.target = self
@@ -550,8 +553,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         troubleshootItem.isHidden = !optionHeld
         // "Development tools…" needs both gates: the env var (item only exists when set) and ⌥ Option.
         devToolsItem?.isHidden = !optionHeld
-        // On a dev build, reveal the "(dev build …)" tag on Quit only while ⌥ is held (`quitDevTitle`
-        // is nil on an app bundle, so the title stays a plain "Quit TokenPace" there).
+        // Reveal the Quit tag ("(dev build …)" / "(stub …)") only while ⌥ is held (`quitDevTitle` is nil
+        // for a plain `.app` on the real network, so the title stays a plain "Quit TokenPace" there).
         if let quitItem, let quitDevTitle {
             quitItem.attributedTitle = Self.dropdownMenuItemText(optionHeld ? quitDevTitle : "Quit TokenPace")
         }
@@ -733,9 +736,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard scenario != currentScenario else { return }
         AppLogger.lifecycle.notice("dev: stub scenario → \(scenario.id, privacy: .public)")
         currentScenario = scenario
+        updateQuitDevTitle()             // keep the ⌥-Option Quit tag in sync with the live stub
         buildAndRunEngine(for: scenario)
         lastStatusSuccess = nil          // make the status poll due on the next (immediate) tick
         signals.send(.manualRefresh)     // wake the freshly-built usage loop now
+    }
+
+    /// Recompute the ⌥-Option "Quit TokenPace (…)" tag for the current build + stub. Called at menu-build
+    /// time and again whenever the live stub selector (#187) switches scenarios, so the tag always names
+    /// the stub actually running — including in a **signed `.app`** (which a real notification build must
+    /// be). A plain `.app` on the real network gets no tag (`nil`). The suffix is shown only while ⌥ is
+    /// held (see `updateTroubleshootVisibility`).
+    private func updateQuitDevTitle() {
+        let isDevBuild = !LaunchAtLoginController.isAppBundle
+        let hasStub = currentScenario != .realNetwork
+        if isDevBuild, hasStub {
+            quitDevTitle = "Quit TokenPace (dev build – \(currentScenario.id))"
+        } else if isDevBuild {
+            quitDevTitle = "Quit TokenPace (dev build)"
+        } else if hasStub {
+            quitDevTitle = "Quit TokenPace (stub – \(currentScenario.id))"
+        } else {
+            quitDevTitle = nil
+        }
+        // If Option is currently held and the dropdown is open, reflect the new tag immediately.
+        if lastOptionHeld, let quitItem, let quitDevTitle {
+            quitItem.attributedTitle = Self.dropdownMenuItemText(quitDevTitle)
+        }
     }
 
 
