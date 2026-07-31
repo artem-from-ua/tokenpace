@@ -318,6 +318,13 @@ final class SolidBackdropView: NSView {
     override func updateLayer() {
         // The system panel background, resolved in this view's own appearance so it tracks light/dark
         // and matches the surrounding menu chrome.
+        //
+        // Deliberately **not** a `ColorRole` (audit #206): in the shipped popup the visible card surface
+        // is painted by the `NSMenu`'s own vibrancy material (dark ≈ #212121), and this opaque backdrop
+        // sits *underneath* it purely to keep the panel from showing through — it is never the pixel the
+        // eye sees. The real background is system-owned and cannot be re-tinted from our side, so exposing
+        // a tuner slider for it would move nothing in the live menu. `popupMenuMatchedBackground` exists
+        // only to reproduce that #212121 in the tuner's borderless *preview* window (`matchesMenuBackground`).
         let fill: NSColor = matchesMenuBackground ? .popupMenuMatchedBackground : .windowBackgroundColor
         layer?.backgroundColor = fill.cgColor
     }
@@ -346,6 +353,11 @@ extension NSColor {
     /// The thin light hairline a real `NSMenu` popup draws around its rounded edge, for the dev-tuner
     /// preview window which — being a plain borderless window — has no such system chrome. A subtle grey,
     /// darker than the card so it reads as an edge; dynamic so it tracks the theme.
+    ///
+    /// Deliberately **not** a `ColorRole` (audit #206): this hairline is **preview-only** chrome. The
+    /// shipped popup lives inside an `NSMenu`, which draws its own edge — this border is never rendered
+    /// in the real UI, so a tuner slider for it would only affect the preview window. Left as a fixed
+    /// pair verified against dark/light: #4D4D4D dark, #C4C4C4 light.
     static let popupMenuBorder = NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         return isDark ? NSColor(srgbRed: 0x4D/255, green: 0x4D/255, blue: 0x4D/255, alpha: 1)
@@ -782,7 +794,7 @@ final class PopupViewController: NSViewController {
     private static func makePill(text: String, fill: @escaping () -> NSColor) -> NSView {
         let label = NSTextField(labelWithString: text)
         label.font = .systemFont(ofSize: Metrics.textSize - 2, weight: .medium)
-        label.textColor = .white
+        label.textColor = ColorStore.shared.color(.popupPillText)
         label.translatesAutoresizingMaskIntoConstraints = false
 
         let pill = PillView()
@@ -807,7 +819,7 @@ final class PopupViewController: NSViewController {
     private func addLabel(_ text: String, font: NSFont, secondary: Bool = false, color: NSColor? = nil) -> NSView {
         let label = NSTextField(labelWithString: text)
         label.font = font
-        label.textColor = color ?? (secondary ? Self.dimmedLabelColor : .labelColor)
+        label.textColor = color ?? (secondary ? Self.dimmedLabelColor : ColorStore.shared.color(.popupLabel))
         stack.addArrangedSubview(label)
         return label
     }
@@ -889,7 +901,7 @@ final class PopupViewController: NSViewController {
     private func addWrappingLabel(_ text: String, font: NSFont, secondary: Bool = false) -> NSView {
         let label = NSTextField(wrappingLabelWithString: text)
         label.font = font
-        label.textColor = secondary ? Self.dimmedLabelColor : .labelColor
+        label.textColor = secondary ? Self.dimmedLabelColor : ColorStore.shared.color(.popupLabel)
         label.lineBreakMode = .byWordWrapping
         label.translatesAutoresizingMaskIntoConstraints = false
         let contentWidth = Metrics.width - 2 * Metrics.hPadding
@@ -977,7 +989,7 @@ final class PopupViewController: NSViewController {
 
         // Prefix the component's display label (e.g. "API: ") in the normal label colour.
         attributed.append(NSAttributedString(string: "\(label): ", attributes: [
-            .font: font, .foregroundColor: NSColor.labelColor,
+            .font: font, .foregroundColor: ColorStore.shared.color(.popupLabel),
         ]))
 
         // Status word. Operational → plain dimmed text (no link). Otherwise → underlined link
