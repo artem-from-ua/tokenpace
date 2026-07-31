@@ -3,8 +3,9 @@ import TokenPaceKit
 
 // MARK: - NotificationsPane (#168, ADR-0042)
 
-/// Settings → Notifications: the "Back to work!" notification (#160, ADR-0039) — a master switch, the
-/// allowed-hours window with a live duration, and a weekend-suppress picker.
+/// Settings → Notifications: the "Back to work!" (#160, ADR-0039) and "Extra Usage Credit" (ADR-0050)
+/// notification switches in one section, and a **separate "Schedule" section** — the allowed-hours
+/// window with a live duration and a weekend-suppress picker — that gates both notifications alike.
 struct NotificationsPane: View {
     @Bindable var model: SettingsModel
 
@@ -46,35 +47,35 @@ struct NotificationsPane: View {
                             + "— with the amount spent and your limit, if set.")
                 }
 
-                // The allowed-hours window and weekend-suppress apply to every notification — shown when
-                // any is on, hidden (not just disabled) otherwise.
-                if model.anyNotificationEnabled {
-                    LabeledContent("Allowed hours") {
-                        HStack(spacing: 8) {
-                            Text(model.notifyWindowLengthText).foregroundStyle(.secondary)
-                            DatePicker("", selection: model.notifyStartBinding(anchor: anchor),
-                                       displayedComponents: .hourAndMinute)
-                                .labelsHidden()
-                            Text("–").foregroundStyle(.secondary)
-                            DatePicker("", selection: model.notifyEndBinding(anchor: anchor),
-                                       displayedComponents: .hourAndMinute)
-                                .labelsHidden()
-                        }
-                    }
+            }
 
-                    Picker("Suppress on weekends", selection: Binding(
-                        get: { model.suppressDays },
-                        set: { model.setSuppressDays($0) })) {
-                        ForEach(SuppressDays.allCases, id: \.self) { day in
-                            Text(day.displayName).tag(day)
-                        }
+            // The allowed-hours window and weekend-suppress apply to every notification — a separate
+            // "Schedule" section that is **always visible and enabled**, even when no notification is on
+            // (so the user can set their quiet hours up front). It gates both notifications alike.
+            Section("Schedule") {
+                LabeledContent("Allowed hours") {
+                    HStack(spacing: 8) {
+                        Text(model.notifyWindowLengthText).foregroundStyle(.secondary)
+                        DatePicker("", selection: model.notifyStartBinding(anchor: anchor),
+                                   displayedComponents: .hourAndMinute)
+                            .labelsHidden()
+                        Text("–").foregroundStyle(.secondary)
+                        DatePicker("", selection: model.notifyEndBinding(anchor: anchor),
+                                   displayedComponents: .hourAndMinute)
+                            .labelsHidden()
                     }
-                    .pickerStyle(.menu)
                 }
+
+                Picker("Suppress on weekends", selection: Binding(
+                    get: { model.suppressDays },
+                    set: { model.setSuppressDays($0) })) {
+                    ForEach(SuppressDays.allCases, id: \.self) { day in
+                        Text(day.displayName).tag(day)
+                    }
+                }
+                .pickerStyle(.menu)
             }
         }
         .formStyle(.grouped)
-        // Show/hide dependent rows without an insertion animation (avoids neighbour-height flicker).
-        .animation(nil, value: model.anyNotificationEnabled)
     }
 }

@@ -47,7 +47,8 @@ isOnCredits = spend != nil
   запитується лениво при першому вмиканні **будь-якої** з них (спільний `onBackToWorkEnabled` callback).
 - **Quiet-hours** — той самий `NotificationSchedule.isAllowed` (вікно годин + suppress-дні), винесений у
   спільний `AppDelegate.notificationsAllowedNow()`. Рядки Settings «Allowed hours» / «Suppress on
-  weekends» показуються, коли ввімкнена **будь-яка** нотифікація (`anyNotificationEnabled`).
+  weekends» винесено в **окрему секцію «Schedule»**, яка **завжди видима й активна** (навіть коли обидві
+  нотифікації вимкнені) — розклад можна налаштувати наперед; він гейтить обидві нотифікації однаково.
 - **Постинг** — узагальнений `BackToWorkNotifier.post(kind:idPrefix:title:body:)`; `postBackToWork()` і
   новий `postExtraUsage(body:)` — тонкі обгортки. Тіло extra-usage несе суму+ліміт, тож постинг
   приймає динамічний `body` (на відміну від фіксованого back-to-work).
