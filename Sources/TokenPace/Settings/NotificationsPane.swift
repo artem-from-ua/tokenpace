@@ -15,6 +15,15 @@ struct NotificationsPane: View {
 
     var body: some View {
         Form {
+            // On a `swift run` dev build every notification is unavailable (authorization can't be
+            // granted), so the warning belongs to the whole section, not to a single switch — a banner
+            // above the toggles (#156 treatment) instead of a per-switch hint.
+            if model.notificationsDevBuild {
+                Section {
+                    SettingsHint(text: "Unavailable in development builds.", warning: true)
+                }
+            }
+
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
