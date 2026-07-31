@@ -132,15 +132,18 @@ final class SettingsModel {
     /// so the feature can never work — like launch-at-login / auto-install).
     var backToWorkMasterEnabled: Bool { authState != .dev }
     var notifyDependentsEnabled: Bool { backToWorkMasterEnabled && backToWorkEnabled }
-    /// The auth/dev hint under the master switch; empty in the authorized / not-yet-decided case.
+    /// True on a `swift run` dev build, where no notification can ever be delivered (authorization is
+    /// impossible). The Notifications pane surfaces this once as a banner above the whole section — not
+    /// per-switch — since it gates every notification alike (both toggles are disabled).
+    var notificationsDevBuild: Bool { authState == .dev }
+    /// The auth hint under the master switch; empty in the authorized / not-yet-decided case. The
+    /// dev-build case is handled by the pane-level banner (`notificationsDevBuild`), not here.
     var backToWorkHint: String {
         switch authState {
-        case .dev:
-            return "Unavailable in development builds."
         case .denied:
             return "Notifications are turned off for TokenPace. Enable them in System Settings → "
                  + "Notifications → TokenPace."
-        case .authorized, .notDetermined:
+        case .dev, .authorized, .notDetermined:
             return ""
         }
     }
