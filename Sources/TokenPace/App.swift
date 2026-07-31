@@ -134,11 +134,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The result of the last archive sync, retained so the Settings status line can show
     /// "Last archived: … · N files" between runs (#110). `nil` until the first sync completes.
     private(set) var lastArchiveSummary: LogArchiver.Summary?
-    /// Whether the `gh` path is enabled, resolved once (lazily) from `TOKENPACE_GH_AUTH`. Checked in
-    /// `ProcessInfo` first (terminal / `launchctl setenv` launches), then — since a login-launched app
-    /// sees no shell env — from the login shell's `~/.zshrc`/`~/.zprofile` via `ShellEnvironment`. The
-    /// shell probe is memoised so it runs at most once, not on every heartbeat.
-    private lazy var ghAuthEnabled: Bool = Self.resolveGHAuth()
+    /// Whether the `gh` path is enabled, resolved from `TOKENPACE_GH_AUTH` through the shared
+    /// ``ProdEnvFlag`` resolver: `ProcessInfo` first (terminal / `launchctl setenv`), then the login
+    /// shell's rc files (a login-launched app sees no shell env). Non-blocking — the shell probe is
+    /// warmed up once, off-main, by `ProdEnvFlag.warmUp` at startup.
+    private var ghAuthEnabled: Bool { ProdEnvFlag.isEnabled(.ghAuth) }
 
     /// Which logical services to monitor on the status page (#89) — loaded from `PersistedConfig`
     /// on launch, updated live when the user changes it in Settings (`monitoredServicesChanged`).
@@ -200,6 +200,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // before the rest of launch depends on it (#71, ADR-0023). Phase 1 is a no-op scaffold that
         // only records the running version.
         runConfigMigrationsIfNeeded()
+
+        // Warm up the shared prod-visible env flags (`TOKENPACE_GH_AUTH`, `TOKENPACE_DEVTOOLS`) as early
+        // as possible: a login/GUI launch (SMAppService, Finder) gets no shell env, so these are read
+        // from the login shell's rc files via a subprocess. Doing it here, off-main, keeps launch un-
+        // blocked; the completion re-renders so an override-driven dev-tools repaint lands once the probe
+        // resolves the flag (the "Development tools…" menu item re-checks the gate on each open itself).
+        ProdEnvFlag.warmUp { [weak self] in self?.reRenderForCurrentTime() }
 
         // Load the persisted monitored-services choice (#89) before the first status poll, so it
         // resolves the right logical services from the start. Falls back to `.default` when absent.
@@ -264,14 +271,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // "Development tools…" (#185): the dev colour tuner, sitting just below "Troubleshoot…". Only
         // ever visible when `TOKENPACE_DEVTOOLS` is set AND ⌥ Option is held (both gates applied in
         // `updateTroubleshootVisibility`), so a normal run never shows it — regardless of build type.
-        if ColorStore.devToolsEnabled {
-            let devItem = NSMenuItem(title: "", action: #selector(openDevTools), keyEquivalent: "")
-            devItem.attributedTitle = Self.dropdownMenuItemText("Development tools…")
-            devItem.target = self
-            devItem.isHidden = true
-            menu.addItem(devItem)
-            self.devToolsItem = devItem
-        }
+        // The item is created unconditionally but starts hidden: the env-var gate is re-checked on every
+        // menu open, so a login-launched app whose flag only resolves after the async `ProdEnvFlag`
+        // warm-up (below) still reveals it — no menu rebuild needed.
+        let devItem = NSMenuItem(title: "", action: #selector(openDevTools), keyEquivalent: "")
+        devItem.attributedTitle = Self.dropdownMenuItemText("Development tools…")
+        devItem.target = self
+        devItem.isHidden = true
+        menu.addItem(devItem)
+        self.devToolsItem = devItem
 
         // "New version available" (#37): sits just above Quit, behind its own separator, with a blue
         // The single update item (#130): one dropdown line carrying every non-critical update signal,
@@ -556,8 +564,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let troubleshootItem, optionHeld != lastOptionHeld else { return }
         lastOptionHeld = optionHeld
         troubleshootItem.isHidden = !optionHeld
-        // "Development tools…" needs both gates: the env var (item only exists when set) and ⌥ Option.
-        devToolsItem?.isHidden = !optionHeld
+        // "Development tools…" needs both gates: ⌥ Option AND the `TOKENPACE_DEVTOOLS` flag. The item
+        // always exists now, so the env gate is applied here (re-checked each open, so it appears once
+        // the async `ProdEnvFlag` warm-up resolves the flag for a login/GUI launch).
+        devToolsItem?.isHidden = !(optionHeld && ColorStore.devToolsEnabled)
         // Reveal the Quit tag ("(dev build …)" / "(stub …)") only while ⌥ is held (`quitDevTitle` is nil
         // for a plain `.app` on the real network, so the title stays a plain "Quit TokenPace" there).
         if let quitItem, let quitDevTitle {
@@ -1014,22 +1024,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return GHReleaseFetcher()
         }
         return HTTPUpdateFetcher()
-    }
-
-    /// Resolve whether `TOKENPACE_GH_AUTH` is set. The app is usually launched at login by launchd,
-    /// which passes no shell environment, so a plain `export TOKENPACE_GH_AUTH=1` in `~/.zshrc` would
-    /// be invisible via `ProcessInfo`. So check `ProcessInfo` first (terminal / `launchctl setenv`
-    /// launches), then fall back to the login shell's rc files via `ShellEnvironment`. Run once and
-    /// memoised in `ghAuthEnabled` — the shell probe is a subprocess, not something to repeat per poll.
-    private static func resolveGHAuth() -> Bool {
-        if let flag = ProcessInfo.processInfo.environment["TOKENPACE_GH_AUTH"], !flag.isEmpty {
-            return true
-        }
-        if let flag = ShellEnvironment.value(for: "TOKENPACE_GH_AUTH"), !flag.isEmpty {
-            AppLogger.lifecycle.notice("update: TOKENPACE_GH_AUTH found in login shell env")
-            return true
-        }
-        return false
     }
 
     /// Surface a newly-found newer release: retain it (drives the menu click + Settings line), update

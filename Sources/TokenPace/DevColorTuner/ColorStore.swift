@@ -11,17 +11,25 @@ import Foundation
 /// be set when the flag is on. Independent of build type (dev / notarized / release): the gate is the
 /// env var, not `#if DEBUG` or the bundle kind.
 ///
+/// The flag is resolved the same way as `TOKENPACE_GH_AUTH` (`AppDelegate.resolveGHAuth`): `ProcessInfo`
+/// first (terminal / `launchctl setenv` launches), then a login-shell fallback via ``ShellEnvironment``.
+/// A GUI/login launch (`SMAppService`, Finder, Dock) gets no shell environment, so a plain
+/// `export TOKENPACE_DEVTOOLS=1` in `~/.zshrc` is invisible via `ProcessInfo` alone — the fallback makes
+/// that export unlock the dev tools in an installed `.app` too, without needing `launchctl setenv`.
+///
 /// Overrides are **ephemeral** — held in memory only, never persisted. Quitting resets everything.
 @MainActor
 final class ColorStore {
 
     static let shared = ColorStore()
 
-    /// True when `TOKENPACE_DEVTOOLS` is set to a non-empty value. Mirrors how `AppDelegate.launchScenario`
-    /// reads its env var (one source of truth, read once at process start).
-    static let devToolsEnabled: Bool = {
-        !(ProcessInfo.processInfo.environment["TOKENPACE_DEVTOOLS"] ?? "").isEmpty
-    }()
+    /// True when `TOKENPACE_DEVTOOLS` is set (non-empty). Resolved through the shared ``ProdEnvFlag``
+    /// resolver: `ProcessInfo` first (terminal / `launchctl setenv`), then the login shell's rc files —
+    /// so a plain `export TOKENPACE_DEVTOOLS=1` in `~/.zshrc` unlocks the dev tools in a login/GUI-
+    /// launched `.app` too. Non-blocking: safe to read on the draw hot path. The login-shell probe runs
+    /// off-main via `ProdEnvFlag.warmUp` at startup, so a GUI launch may read `false` for the first
+    /// fraction of a second until the probe lands (then the app re-renders / rebuilds the menu).
+    static var devToolsEnabled: Bool { ProdEnvFlag.isEnabled(.devTools) }
 
     private var overrides: [ColorRole: NSColor] = [:]
 
