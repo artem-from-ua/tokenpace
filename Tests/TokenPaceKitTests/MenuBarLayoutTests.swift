@@ -1017,3 +1017,106 @@ struct MenuBarLayoutHideBarsWhenBlockedTests {
         }
     }
 }
+
+// MARK: - Blocked pause glyph (#199)
+
+@Suite("MenuBarLayout blockedPause")
+struct MenuBarLayoutBlockedPauseTests {
+
+    /// A `UsageHealth` for the healthy path — the only path that carries `blockedPause`.
+    private let healthy = UsageHealth.healthy(lastSuccess: now)
+
+    /// A failing health `age` seconds old, for the ⚠️ error state.
+    private func failing(for age: TimeInterval) -> UsageHealth {
+        UsageHealth(lastSuccess: now.addingTimeInterval(-age),
+                    failingSince: now.addingTimeInterval(-age), reason: .timeout)
+    }
+
+    @Test func pauseWhenBlockedAndBarsKept() {
+        // Fully blocked (both windows 100 %, no credits), bars kept visible (hideBarsWhenBlocked off),
+        // and opted in → the mode stays `.expanded` (red bars) AND the pause glyph is set.
+        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
+        let layout = MenuBarLayout.make(
+            from: snap, health: healthy, now: now,
+            hideBarsWhenBlocked: false, showBlockedPause: true)
+        guard case .expanded = layout.mode else {
+            Issue.record("expected .expanded (bars kept), got \(layout.mode)")
+            return
+        }
+        #expect(layout.blockedPause == true)
+    }
+
+    @Test func pauseWhenBlockedAndBarsHidden() {
+        // Same blocked snapshot but bars hidden (#194 countdown-only) → the pause glyph is INDEPENDENT
+        // of the bars toggle (#199): it is still set, drawn to the left of the countdown.
+        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
+        let layout = MenuBarLayout.make(
+            from: snap, health: healthy, now: now,
+            hideBarsWhenBlocked: true, showBlockedPause: true)
+        guard case .blockedReset = layout.mode else {
+            Issue.record("expected .blockedReset when bars hidden, got \(layout.mode)")
+            return
+        }
+        #expect(layout.blockedPause == true)
+    }
+
+    @Test func noPauseWhenNotBlocked() {
+        // Neither window exhausted → not blocked, so even with bars present the glyph stays off.
+        let snap = snapshot(fiveHourUtil: 80, sevenDayUtil: 90)
+        let layout = MenuBarLayout.make(
+            from: snap, health: healthy, now: now,
+            hideBarsWhenBlocked: false, showBlockedPause: true)
+        #expect(layout.blockedPause == false)
+    }
+
+    @Test func noPauseWhenCreditsCover() {
+        // The key distinction from the #194 hide-bars predicate: a 7d at 100 % with active, uncapped
+        // credits is `mainWindowExhausted` but NOT `isBlocked` (work continues on the paid tier), so the
+        // pause glyph — which keys off `isBlocked` — stays off even with bars kept and the toggle on.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 20, resetsAt: resetsAt(inSeconds: 4 * 3600)),
+            sevenDay: UsageWindow(utilization: 100, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600)),
+            spend: SpendInfo(enabled: true, spendLimitReached: false))
+        let layout = MenuBarLayout.make(
+            from: snap, health: healthy, now: now,
+            hideBarsWhenBlocked: false, showBlockedPause: true)
+        #expect(layout.blockedPause == false)
+    }
+
+    @Test func noPauseWhenToggleOff() {
+        // Fully blocked, bars kept, but the pause toggle is off → the bars show without the glyph.
+        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
+        let layout = MenuBarLayout.make(
+            from: snap, health: healthy, now: now,
+            hideBarsWhenBlocked: false, showBlockedPause: false)
+        #expect(layout.blockedPause == false)
+    }
+
+    @Test func noPauseInErrorState() {
+        // Polling failing past the bars-drop threshold → `.error`, never `.expanded`, so no glyph even
+        // though the last snapshot was blocked and the toggle is on.
+        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
+        let layout = MenuBarLayout.make(
+            from: snap, health: failing(for: UsageHealth.hideBarsAfter + 1), now: now,
+            hideBarsWhenBlocked: false, showBlockedPause: true)
+        guard case .error = layout.mode else {
+            Issue.record("expected .error past the stale threshold, got \(layout.mode)")
+            return
+        }
+        #expect(layout.blockedPause == false)
+    }
+
+    @Test func idleBlockedPauseWhenBarsKept() {
+        // The idle-blocked state (7d exhausted, no credits, no active 5h) is also `isBlocked`; with bars
+        // kept it stays `.expanded` (grey idle bar) and the glyph precedes it.
+        let snap = idleSnapshot(sevenDayUtil: 100)
+        let layout = MenuBarLayout.make(
+            from: snap, health: healthy, now: now,
+            hideBarsWhenBlocked: false, showBlockedPause: true)
+        guard case .expanded = layout.mode else {
+            Issue.record("expected .expanded (idle bar kept), got \(layout.mode)")
+            return
+        }
+        #expect(layout.blockedPause == true)
+    }
+}

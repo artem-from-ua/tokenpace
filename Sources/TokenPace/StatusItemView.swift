@@ -88,6 +88,12 @@ final class StatusItemView: NSView {
         /// Gap between the money-credits icon and the content to its **left** (bars / glyph). The icon
         /// sits between the bars block and the service dot, so this is its leading separation.
         static let creditsIconGap: CGFloat = 4
+        /// Point size of the orange "pause" glyph (`pause.fill`, #199) drawn to the **left** of the
+        /// bars when fully blocked with bars kept visible. A touch smaller than the ⚠️ so it reads at
+        /// about the same weight as the two-bar block it precedes.
+        static let pauseGlyphSize: CGFloat = 11
+        /// Gap between the pause glyph and the bars block to its right.
+        static let pauseGlyphGap: CGFloat = 3
     }
 
     // MARK: Colour mapping (exact statusline 256-colour palette → NSColor)
@@ -154,6 +160,11 @@ final class StatusItemView: NSView {
         static var statusRed:    NSColor { ColorStore.shared.color(.menuStatusRed) }
         static var statusBlue:   NSColor { ColorStore.shared.color(.menuStatusBlue) }
         static var statusGray:   NSColor { ColorStore.shared.color(.menuStatusGray) }
+
+        /// The orange "pause" glyph drawn to the left of the bars when the user is fully blocked
+        /// (`CreditsPacing.isBlocked`) and kept the bars visible in that state (#199). Fixed sRGB
+        /// (non-template menu-bar image), tunable independently of the service-status orange dot.
+        static var pauseOrange: NSColor { ColorStore.shared.color(.menuPauseOrange) }
     }
 
     /// The dot colour for a non-operational service state. `operational` should never reach here
@@ -342,8 +353,38 @@ final class StatusItemView: NSView {
     // MARK: Expanded
 
     private func drawExpanded(fiveHour: BarView, sevenDay: BarView?, reset: TimeToReset?, in rect: NSRect) {
-        drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset,
-                 originX: rect.minX + Metrics.hPadding, in: rect)
+        // Fully blocked with bars kept visible (#199): draw the orange pause glyph first and shift the
+        // bars right past it — same leading-glyph pattern as the ⚠️ error state (`drawError`).
+        var originX = rect.minX + Metrics.hPadding
+        if layout?.blockedPause == true {
+            originX = drawPauseGlyph(in: rect) + Metrics.pauseGlyphGap
+        }
+        drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, originX: originX, in: rect)
+    }
+
+    /// Draw the orange "pause" glyph at the left of `rect`, vertically centred on the bars block, and
+    /// return its right-edge x so ``drawExpanded`` can place the bars beside it (#199). A non-template
+    /// palette image in ``Palette/pauseOrange``, drawn with `respectFlipped: true` (this view is
+    /// `isFlipped`). Only reached when `layout.blockedPause` is set (fully blocked, bars kept visible).
+    /// If `pause.fill` is unavailable the bars fall back to the normal leading origin (glyph omitted).
+    @discardableResult
+    private func drawPauseGlyph(in rect: NSRect) -> CGFloat {
+        let originX = rect.minX + Metrics.hPadding
+        let config = NSImage.SymbolConfiguration(pointSize: Metrics.pauseGlyphSize, weight: .semibold)
+            .applying(.init(paletteColors: [Palette.pauseOrange]))
+        guard let symbol = NSImage(systemSymbolName: "pause.fill", accessibilityDescription: "all limits reached")?
+            .withSymbolConfiguration(config) else {
+            return originX
+        }
+        let size = symbol.size
+        let drawRect = NSRect(
+            x: originX,
+            y: rect.midY - size.height / 2,
+            width: size.width, height: size.height
+        )
+        symbol.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1,
+                    respectFlipped: true, hints: nil)
+        return originX + ceil(size.width)
     }
 
     /// Draw the pacing bars starting at `originX`; the reset label is drawn to their right only when
@@ -553,8 +594,16 @@ final class StatusItemView: NSView {
     /// hidden; `itemWidth` reserves exactly this label's width (via ``resetLabelWidth(_:)``) so the item
     /// hugs the text. The blocked mode carries no pacing colour to mute, so `calmColors` is irrelevant
     /// here — the label is always the neutral foreground.
+    ///
+    /// When `layout.blockedPause` is set (fully blocked, glyph opted in), the orange pause glyph is
+    /// drawn first and the countdown shifts right past it — the same leading-glyph pattern the bars use
+    /// in ``drawExpanded``, so the glyph appears whether or not the bars are hidden (#199).
     private func drawBlockedReset(_ reset: TimeToReset, in rect: NSRect) {
-        drawResetLabel(reset, leftOf: rect.minX + Metrics.hPadding, in: rect)
+        var originX = rect.minX + Metrics.hPadding
+        if layout?.blockedPause == true {
+            originX = drawPauseGlyph(in: rect) + Metrics.pauseGlyphGap
+        }
+        drawResetLabel(reset, leftOf: originX, in: rect)
     }
 
     // MARK: Helpers
@@ -579,14 +628,19 @@ final class StatusItemView: NSView {
         let dotInset = layout?.serviceProblem != nil ? Metrics.statusDotDiameter + Metrics.statusDotGap : 0
         let creditsInset = layout?.credits.map { creditsIconWidth(for: $0.currency) + Metrics.creditsIconGap } ?? 0
         let trailingInset = dotInset + creditsInset
+        // Leading orange pause glyph (#199) reserves its width + gap in both the bars (`.expanded`) and
+        // the bars-less countdown (`.blockedReset`) modes, mirroring the origin shift in `drawExpanded`
+        // / `drawBlockedReset`; zero when not fully blocked so the layout is unchanged otherwise.
+        let pauseInset = (layout?.blockedPause == true) ? pauseGlyphWidth() + Metrics.pauseGlyphGap : 0
         switch layout?.mode {
         case .none:
             return Metrics.height + trailingInset       // square-ish compact item (no layout yet)
         case let .expanded(_, _, resetToShow):
-            return trailingInset + Metrics.hPadding + barsBlockWidth(reset: resetToShow?.display) + Metrics.hPadding
+            return trailingInset + Metrics.hPadding + pauseInset
+                + barsBlockWidth(reset: resetToShow?.display) + Metrics.hPadding
         case let .blockedReset(reset, _):
-            // No bars (#194): the item hugs just the countdown label between the two paddings.
-            return trailingInset + Metrics.hPadding + resetLabelWidth(reset) + Metrics.hPadding
+            // No bars (#194): the item hugs the countdown label (plus the leading pause glyph, #199).
+            return trailingInset + Metrics.hPadding + pauseInset + resetLabelWidth(reset) + Metrics.hPadding
         case let .error(five, _, reset, _):
             // ⚠️ alone (cold start / >60 min) → compact; ⚠️ + stale bars (30–60 min) → glyph + bars.
             guard five != nil, let reset else { return Metrics.height + trailingInset }
@@ -623,5 +677,16 @@ final class StatusItemView: NSView {
         let symbol = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)?
             .withSymbolConfiguration(config)
         return ceil(symbol?.size.width ?? Metrics.errorGlyphSize)
+    }
+
+    /// Rendered width of the orange pause glyph at ``Metrics/pauseGlyphSize`` — measured the same way
+    /// it is drawn so the reserved width in ``itemWidth(for:)`` matches ``drawPauseGlyph(in:)`` exactly.
+    /// Falls back to the glyph point size if the symbol is unavailable (a tiny over-reservation, never
+    /// a clip — consistent with `drawPauseGlyph` omitting the glyph in that case).
+    private func pauseGlyphWidth() -> CGFloat {
+        let config = NSImage.SymbolConfiguration(pointSize: Metrics.pauseGlyphSize, weight: .semibold)
+        let symbol = NSImage(systemSymbolName: "pause.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+        return ceil(symbol?.size.width ?? Metrics.pauseGlyphSize)
     }
 }
