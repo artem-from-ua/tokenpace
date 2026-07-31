@@ -21,10 +21,9 @@ struct NotificationsPane: View {
                         Text("Back to work")
                         Spacer()
                         // "Try" fires the notification on demand for verification (#193). It sits
-                        // before the on/off switch and is enabled only while the feature is on and a
-                        // banner could actually be delivered (see `tryBackToWorkEnabled`).
+                        // before the on/off switch and is always enabled — even with the feature off:
+                        // the post checks support + authorization itself (a silent no-op if not granted).
                         Button("Try") { model.tryBackToWork() }
-                            .disabled(!model.tryBackToWorkEnabled)
                         Toggle("Back to work", isOn: Binding(
                             get: { model.backToWorkEnabled },
                             set: { model.setBackToWork($0) }))
@@ -38,10 +37,18 @@ struct NotificationsPane: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Extra Usage Credit", isOn: Binding(
-                        get: { model.extraUsageNotifyEnabled },
-                        set: { model.setExtraUsageNotify($0) }))
-                    .disabled(!model.backToWorkMasterEnabled)
+                    HStack {
+                        Text("Switching to Extra Usage")
+                        Spacer()
+                        // "Try" fires the banner on demand for verification, mirroring "Back to work" —
+                        // always enabled (the post gates on support + authorization itself).
+                        Button("Try") { model.tryExtraUsage() }
+                        Toggle("Switching to Extra Usage", isOn: Binding(
+                            get: { model.extraUsageNotifyEnabled },
+                            set: { model.setExtraUsageNotify($0) }))
+                        .labelsHidden()
+                        .disabled(!model.backToWorkMasterEnabled)
+                    }
                     SettingsHint(
                         text: "Notifies you the moment work starts running on paid Extra Usage Credit "
                             + "— with the amount spent and your limit, if set.")

@@ -404,6 +404,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // The Settings "Try" button (#193): fire the banner on demand, bypassing edge-detection
             // and quiet hours (postBackToWork itself only checks support + authorization).
             wc.onTryBackToWork = { BackToWorkNotifier.postBackToWork() }
+            // "Try" for the Extra-Usage banner: build the body from the latest snapshot's spend so the
+            // preview shows real amount/limit when available; an empty SpendInfo degrades to the generic
+            // line. Bypasses edge-detection and quiet hours, same as back-to-work's Try.
+            wc.onTryExtraUsage = { [weak self] in
+                let spend = self?.lastOutput?.snapshot?.spend ?? SpendInfo()
+                BackToWorkNotifier.postExtraUsage(body: ExtraUsageOnset.bannerBody(for: spend))
+            }
             settingsWC = wc
         }
         // Reflect the latest known update state whenever the window opens (#37).

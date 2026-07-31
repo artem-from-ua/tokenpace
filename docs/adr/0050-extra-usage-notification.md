@@ -52,6 +52,11 @@ isOnCredits = spend != nil
 - **Постинг** — узагальнений `BackToWorkNotifier.post(kind:idPrefix:title:body:)`; `postBackToWork()` і
   новий `postExtraUsage(body:)` — тонкі обгортки. Тіло extra-usage несе суму+ліміт, тож постинг
   приймає динамічний `body` (на відміну від фіксованого back-to-work).
+- **Кнопка «Try»** (як у back-to-work, #193) — біля перемикача, **завжди активна** (навіть коли фіча
+  вимкнена): форсує банер негайно, оминаючи edge-детект і quiet-hours; тіло бере суму/ліміт з останнього
+  снапшоту (`onTryExtraUsage` у shell читає `lastOutput.spend`), або generic-рядок, якщо `spend` немає.
+  Пост сам гейтить на support+authorization, тож без дозволу це тихий no-op. Перемикач у Settings
+  зветься **«Switching to Extra Usage»**; заголовок банера — **«Now using Extra Usage Credit»**.
 - **Edge-state** — **окремий** persisted ключ `PersistedConfig.extraUsageWasOnCredits` (не ділиться з
   `backToWorkWasBlocked`, бо це різні стани). Як і там: оновлюється щополу незалежно від тумблера
   (off→on не забуває pending-edge і не вистрілює stale), постинг гейтиться `extraUsageNotifyEnabled`.

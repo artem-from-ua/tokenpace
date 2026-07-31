@@ -39,6 +39,9 @@ final class SettingsModel {
     /// Fire the "Back to work!" notification immediately, bypassing the edge-detection and quiet-hours
     /// gates (those live in `AppDelegate`, not the notifier) — the Settings "Try" button (#193).
     var onTryBackToWork: (() -> Void)?
+    /// Fire the "Switching to Extra Usage" notification immediately from its Settings "Try" button —
+    /// the shell reads the latest snapshot's spend for the amount/limit body (ADR-0050).
+    var onTryExtraUsage: (() -> Void)?
     var archiveSummaryProvider: (() -> LogArchiver.Summary?)?
 
     // MARK: Selection (dev hook)
@@ -129,12 +132,6 @@ final class SettingsModel {
     /// so the feature can never work — like launch-at-login / auto-install).
     var backToWorkMasterEnabled: Bool { authState != .dev }
     var notifyDependentsEnabled: Bool { backToWorkMasterEnabled && backToWorkEnabled }
-    /// Whether the "Try" button can fire (#193): only when the feature is on and a notification could
-    /// actually be delivered — so off on a dev build (`.dev`) or when the user denied notifications
-    /// (`.denied`), where `postBackToWork()` would silently no-op.
-    var tryBackToWorkEnabled: Bool {
-        backToWorkEnabled && authState != .dev && authState != .denied
-    }
     /// The auth/dev hint under the master switch; empty in the authorized / not-yet-decided case.
     var backToWorkHint: String {
         switch authState {
@@ -305,6 +302,13 @@ final class SettingsModel {
     func tryBackToWork() {
         AppLogger.lifecycle.notice("back-to-work: try (forced) notification")
         onTryBackToWork?()
+    }
+
+    /// Fire the "Switching to Extra Usage" notification on demand from its Settings "Try" button.
+    /// Forces a post through the normal delivery channel, bypassing edge-detection and quiet hours.
+    func tryExtraUsage() {
+        AppLogger.lifecycle.notice("extra-usage: try (forced) notification")
+        onTryExtraUsage?()
     }
 
     func setExtraUsageNotify(_ on: Bool) {
