@@ -70,6 +70,9 @@ enum PersistedConfig {
         /// Whether the menu-bar widget draws the money-credits ("extra usage") icon when credits are
         /// active and a base limit is exhausted (#144). Default-on (opt-out) — see the property.
         static let showExtraUsage = "showExtraUsage"
+        /// Whether the popup shows the per-model 7-day limit rows (`Opus`/`Sonnet`/`weekly_scoped`,
+        /// e.g. `Fable`) below the `5h`/`7d` rows (#211). Default-on (opt-out) — see the property.
+        static let showModelSpecificLimits = "showModelSpecificLimits"
         /// Whether polling pauses while the screen is locked / off / running a screensaver (#114).
         /// Default-on (opt-out) — see the property.
         static let pausePollingWhenScreenLocked = "pausePollingWhenScreenLocked"
@@ -311,6 +314,18 @@ enum PersistedConfig {
     static var showExtraUsage: Bool {
         get { defaults.object(forKey: Key.showExtraUsage) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.showExtraUsage) }
+    }
+
+    /// Whether the **popup** lists the per-model 7-day limit rows — the legacy `Opus`/`Sonnet`
+    /// sub-windows and the `weekly_scoped` models from `limits[]` (e.g. `Fable`, #65) — below the
+    /// `5h`/`7d` rows (#211). Gates ``PopupLayout`` only; the menu-bar widget is unaffected.
+    /// **Default-on** (opt-out): an absent key reads as `true`, so the per-model rows appear out of
+    /// the box. `object(forKey:) as? Bool ?? true` distinguishes "unset" (→ true) from an explicit
+    /// `false` the user chose — `bool(forKey:)` would collapse both to `false` and silently defeat
+    /// the opt-out default.
+    static var showModelSpecificLimits: Bool {
+        get { defaults.object(forKey: Key.showModelSpecificLimits) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.showModelSpecificLimits) }
     }
 
     /// Whether polling pauses while the screen is **locked, off, or running a screensaver** (#114,

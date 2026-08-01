@@ -32,6 +32,7 @@ final class SettingsModel {
     var onResetCountdownModeMenuBarChange: ((ResetCountdownMode) -> Void)?
     var onServiceDotChange: ((Bool) -> Void)?
     var onExtraUsageChange: ((Bool) -> Void)?
+    var onShowModelSpecificLimitsChange: ((Bool) -> Void)?
     var onHideCalmSevenDayChange: ((Bool) -> Void)?
     var onHideBarsWhenBlockedChange: ((Bool) -> Void)?
     var onShowBlockedPauseChange: ((Bool) -> Void)?
@@ -70,6 +71,9 @@ final class SettingsModel {
     var hideBarsWhenBlocked = false
     var showBlockedPause = false
     var showExtraUsage = false
+    /// Whether the popup lists the per-model 7-day limit rows (Opus/Sonnet/scoped, #211). A popup
+    /// concern, not a menu-bar one — shown under the separate "Dropdown" section of the pane.
+    var showModelSpecificLimits = false
     var showServiceDot = false
     /// The reset-countdown choice (always / smart / never), shown as a menu picker.
     var resetRadio: ResetRadio = .smart
@@ -208,6 +212,7 @@ final class SettingsModel {
         hideBarsWhenBlocked = PersistedConfig.hideBarsWhenBlocked
         showBlockedPause = PersistedConfig.showBlockedPause
         showExtraUsage = PersistedConfig.showExtraUsage
+        showModelSpecificLimits = PersistedConfig.showModelSpecificLimits
         showServiceDot = PersistedConfig.showServiceStatusDot
         resetRadio = PersistedConfig.resetCountdownModeMenuBar.radio
 
@@ -275,6 +280,13 @@ final class SettingsModel {
         PersistedConfig.showExtraUsage = on
         AppLogger.lifecycle.notice("extra-usage-icon: menu-bar set \(on, privacy: .public)")
         onExtraUsageChange?(on)
+    }
+
+    func setShowModelSpecificLimits(_ on: Bool) {
+        showModelSpecificLimits = on
+        PersistedConfig.showModelSpecificLimits = on
+        AppLogger.lifecycle.notice("model-specific-limits: popup set \(on, privacy: .public)")
+        onShowModelSpecificLimitsChange?(on)
     }
 
     func setShowServiceDot(_ on: Bool) {

@@ -753,3 +753,56 @@ struct CreditsPacingMonthEndTests {
         #expect(end > mid)
     }
 }
+
+// MARK: - "Show model-specific limits" gate (#211)
+
+@Suite("PopupLayout showModelSpecificLimits gate")
+struct PopupLayoutModelLimitsGateTests {
+
+    /// A snapshot carrying all three per-model shapes: legacy Opus + Sonnet windows and a
+    /// `weekly_scoped` Fable row — so a full render is 5 rows (5h, 7d, Opus, Sonnet, Fable).
+    private func allModelsSnapshot() -> UsageSnapshot {
+        snapshot(
+            fiveHourUtil: 50, sevenDayUtil: 30,
+            opus: (util: 5, resetsIn: 3 * 24 * 3600),
+            sonnet: (util: 2, resetsIn: 3 * 24 * 3600),
+            limits: [scopedLimit(name: "Fable", percent: 12, resetsIn: 3 * 24 * 3600)]
+        )
+    }
+
+    @Test func offDropsAllPerModelRows() {
+        let p = PopupLayout.make(
+            from: allModelsSnapshot(), now: now, lastUpdate: now,
+            interval: PollingBackoff.defaultInterval, showModelSpecificLimits: false)
+        #expect(p.rows.count == 2)
+        #expect(p.rows[0].title == "5-hour")
+        #expect(p.rows[1].title == "7-day")
+    }
+
+    @Test func onKeepsAllPerModelRows() {
+        let p = PopupLayout.make(
+            from: allModelsSnapshot(), now: now, lastUpdate: now,
+            interval: PollingBackoff.defaultInterval, showModelSpecificLimits: true)
+        #expect(p.rows.count == 5)
+        #expect(p.rows.map(\.title) == ["5-hour", "7-day", "Opus", "Sonnet", "Fable"])
+    }
+
+    @Test func defaultsToOn() {
+        // The parameter defaults to `true`, so callers that don't pass it keep the full set.
+        let p = layout(from: allModelsSnapshot())
+        #expect(p.rows.count == 5)
+    }
+
+    @Test func healthAwareOverloadHonoursGate() {
+        let health = UsageHealth.healthy(lastSuccess: now)
+        let off = PopupLayout.make(
+            from: allModelsSnapshot(), health: health, now: now,
+            interval: PollingBackoff.defaultInterval, showModelSpecificLimits: false)
+        #expect(off.rows.count == 2)
+
+        let on = PopupLayout.make(
+            from: allModelsSnapshot(), health: health, now: now,
+            interval: PollingBackoff.defaultInterval, showModelSpecificLimits: true)
+        #expect(on.rows.count == 5)
+    }
+}

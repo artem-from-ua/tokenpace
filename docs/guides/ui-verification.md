@@ -110,6 +110,22 @@
 > секції — той самий `PopupBarView`, що бари токенів, але **без** засічок-ticks (кредити пейсяться на
 > весь місяць, без під-вікон).
 
+### Тумблер «Show model & service limits» (#211)
+
+Settings → Appearance → секція **Dropdown** → «Show model & service limits» (default-**on**). Гейтить
+per-model/per-service рядки попапа (`Opus`/`Sonnet` із legacy-полів + `weekly_scoped`-записи як
+`Fable`/`Mythos`).
+Перевіряй на стубі з per-model лімітами — напр. `screenshot` (має Fable + Mythos):
+
+```sh
+TOKENPACE_STUB=screenshot TOKENPACE_DEVTOOLS=1 swift run
+```
+
+- **On** (дефолт): дропдаун показує рядки `Opus`/`Sonnet`/`Fable`/`Mythos` під `5-hour`/`7-day`.
+- Зняти тумблер → дропдаун **одразу** (live callback, без реполу) згортається до лише `5-hour` +
+  `7-day`; повернути → per-model рядки з'являються знову.
+- Стан персиститься: перезапуск застосунку зберігає вибір.
+
 ### Нотифікація «Back to work!» (#160, ADR-0039)
 
 Системна нотифікація, що спрацьовує на фронті `blocked → unblocked` (ліміт знову дозволяє роботу).

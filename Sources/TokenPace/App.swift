@@ -389,6 +389,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // from the last poll (render reads PersistedConfig.showExtraUsage for the gate).
                 self?.reRenderForCurrentTime()
             }
+            wc.onShowModelSpecificLimitsChange = { [weak self] _ in
+                // Toggling this adds/removes the popup's per-model rows — rebuild from the last poll
+                // (render reads PersistedConfig.showModelSpecificLimits for the gate). #211.
+                self?.reRenderForCurrentTime()
+            }
             wc.onHideCalmSevenDayChange = { [weak self] _ in
                 // Toggling this changes the layout (7-day bar drawn or not, 5h vertical centring),
                 // not just a colour — rebuild from the last poll (render reads PersistedConfig).
@@ -1320,7 +1325,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
         setPopupLayout(PopupLayout.make(
             from: snapshot, health: output.health, now: now, interval: output.interval,
-            serviceStatus: lastStatusHealth))
+            serviceStatus: lastStatusHealth,
+            // #211: honour the "Show model-specific limits" toggle — false drops the per-model rows
+            // (Opus/Sonnet/scoped), leaving only 5h/7d in the popup.
+            showModelSpecificLimits: PersistedConfig.showModelSpecificLimits))
     }
 
     /// Set the popup model **and** resize the hosted view to fit. A menu item's hosted view must
