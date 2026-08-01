@@ -29,6 +29,9 @@ enum ColorRole: String, CaseIterable {
     case menuStatusRed
     case menuStatusBlue
     case menuStatusGray
+    // The neutral grey track of a menu-bar pacing bar — the whole background under the coloured gap,
+    // i.e. both the `used` head and the future/unused tail, one flat tone so both flanks read identical.
+    case menuUnusedGrey
     // Orange "pause" glyph drawn left of the bars when fully blocked and the bars are kept visible.
     case menuPauseOrange
     // Menu-bar ahead-of-pace pacing (previously shared with the popup via aheadColor; now independent).
@@ -87,7 +90,7 @@ enum ColorRole: String, CaseIterable {
              .popupServiceRed, .popupServiceBlue, .popupServiceGray,
              .popupWarningRed:
             return .service
-        case .menuIndicatorStroke, .menuIdleBlue, .popupIdleBlue,
+        case .menuIndicatorStroke, .menuIdleBlue, .menuUnusedGrey, .popupIdleBlue,
              .popupIndicatorStroke, .popupTick, .popupMonochromeGrey, .popupInUsePill:
             return .chrome
         case .menuForeground, .popupDimmedLabel, .popupLink, .popupLabel, .popupPillText:
@@ -110,12 +113,13 @@ enum ColorRole: String, CaseIterable {
         case .menuIdleBlue:        return "Menu-bar · idle blue"
         case .menuIdleCalmGrey:    return "Menu-bar · idle calm grey"
         case .menuForeground:      return "Menu-bar · foreground"
-        case .menuCalmWhite:       return "Menu-bar · calm white"
+        case .menuCalmWhite:       return "Menu-bar · calm neutral"
         case .menuStatusYellow:    return "Menu-bar · status yellow (degraded)"
         case .menuStatusOrange:    return "Menu-bar · status orange (partial outage)"
         case .menuStatusRed:       return "Menu-bar · status red (major outage)"
         case .menuStatusBlue:      return "Menu-bar · status blue (maintenance)"
         case .menuStatusGray:      return "Menu-bar · status grey (unknown / operational)"
+        case .menuUnusedGrey:      return "Menu-bar · bar track grey"
         case .menuPauseOrange:     return "Menu-bar · blocked pause"
         case .popupGapGreen:       return "Popup · gap green"
         case .popupIdleBlue:       return "Popup · idle blue"
@@ -148,12 +152,14 @@ enum ColorRole: String, CaseIterable {
     var usageDescription: String {
         switch self {
         case .menuGapGreen:
-            return "Menu-bar pacing gap when on pace or behind (via calmedGapColor). Ahead-of-pace "
-                 + "colours are the separate Menu-bar gap red/yellow/orange roles."
+            return "Menu-bar pacing gap when on pace or behind (via calmedGapColor) — AND the "
+                 + "time-indicator marker in that same state, which now shares the gap's exact colour. "
+                 + "Ahead-of-pace colours are the separate Menu-bar gap red/yellow/orange roles."
         case .menuDotGreen:
-            return "Menu-bar time-indicator dot when on pace; also the credits ¤ icon when on pace / behind."
+            return "Credits ¤ icon when on pace / behind. (No longer the time-indicator marker — the "
+                 + "marker now takes its pacing gap's colour, i.e. the Menu-bar gap green/red/yellow/orange roles.)"
         case .menuIndicatorStroke:
-            return "Dark ring stroked around the menu-bar time-indicator dot."
+            return "Dark ring stroked around the menu-bar time-indicator marker."
         case .menuIdleBlue:
             return "Solid fill of the idle 5-hour menu-bar bar (ready-to-start, full quota)."
         case .menuIdleCalmGrey:
@@ -161,7 +167,9 @@ enum ColorRole: String, CaseIterable {
         case .menuForeground:
             return "Menu-bar idle glyph, reset label, and the ⚠️ palette glyph. Follows labelColor by default."
         case .menuCalmWhite:
-            return "Calm-mode colour for on-pace dot / gap / credits / degraded status dot in the menu bar."
+            return "Calm-mode neutral for on-pace marker / gap / credits / degraded status dot in the "
+                 + "menu bar. A system-matched light grey (#E5E5E5), not a pure white — pure white read "
+                 + "too bright next to the OS menu-bar controls."
         case .menuStatusYellow:
             return "Menu-bar service-status dot: degraded (non-calm)."
         case .menuStatusOrange:
@@ -172,6 +180,10 @@ enum ColorRole: String, CaseIterable {
             return "Menu-bar service-status dot: under maintenance."
         case .menuStatusGray:
             return "Menu-bar service-status dot: unknown / operational."
+        case .menuUnusedGrey:
+            return "The neutral grey track of a menu-bar pacing bar — the whole-bar background under "
+                 + "the coloured gap, i.e. both the `used` head and the future/unused tail. One flat "
+                 + "tone so the strips left and right of the gap read identical. #393939 sRGB."
         case .menuPauseOrange:
             return "Menu-bar orange pause glyph drawn left of the bars when all limits are gone "
                  + "(CreditsPacing.isBlocked) and the bars are kept visible in that state (#199)."
@@ -190,7 +202,8 @@ enum ColorRole: String, CaseIterable {
         case .popupTick:
             return "Tick-ruler marks below the popup bar."
         case .popupMonochromeGrey:
-            return "Popup + menu-bar bar base zones (used + future/unused). Also blocked idle fill."
+            return "Popup bar base zones (used + future/unused), plus the popup's blocked idle fill. "
+                 + "(The menu bar has its own track grey — see Menu-bar · bar track grey.)"
         case .popupClaudeBrand:
             return "Popup \"Claude Code\" header accent (#d97757)."
         case .popupDimmedLabel:
@@ -276,12 +289,15 @@ enum ColorRole: String, CaseIterable {
         case .menuIdleBlue:        return NSColor(srgbRed: 85/255, green: 130/255, blue: 180/255, alpha: 1)
         case .menuIdleCalmGrey:    return NSColor(srgbRed: 150/255, green: 150/255, blue: 150/255, alpha: 1)
         case .menuForeground:      return .labelColor
-        case .menuCalmWhite:       return NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
+        // Calm-mode tone — the neutral the system menu-bar widgets use, not a pure #ffffff (which
+        // read too bright next to the OS controls). #E5E5E5 sRGB = 229/255.
+        case .menuCalmWhite:       return NSColor(srgbRed: 229/255, green: 229/255, blue: 229/255, alpha: 1)
         case .menuStatusYellow:    return NSColor(srgbRed: 240/255, green: 190/255, blue: 50/255, alpha: 1)
         case .menuStatusOrange:    return NSColor(srgbRed: 240/255, green: 140/255, blue: 40/255, alpha: 1)
         case .menuStatusRed:       return NSColor(srgbRed: 225/255, green: 70/255, blue: 70/255, alpha: 1)
         case .menuStatusBlue:      return NSColor(srgbRed: 70/255, green: 140/255, blue: 230/255, alpha: 1)
         case .menuStatusGray:      return NSColor(srgbRed: 150/255, green: 150/255, blue: 150/255, alpha: 1)
+        case .menuUnusedGrey:      return NSColor(srgbRed: 0x39/255, green: 0x39/255, blue: 0x39/255, alpha: 1)
         case .menuPauseOrange:     return NSColor(srgbRed: 240/255, green: 140/255, blue: 40/255, alpha: 1)
         // Popup palette (PopupViewController.swift) — system / appearance-aware defaults.
         case .popupGapGreen:       return .systemGreen
