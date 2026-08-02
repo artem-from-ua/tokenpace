@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-07-24
-superseded_by: [0038, 0059]
+superseded_by: [0038, 0059, 0060]
 ---
 
 # ADR-0027: Чесний стан «немає активної 5h-сесії» замість фантомного ресету
@@ -15,6 +15,11 @@ superseded_by: [0038, 0059]
 > **Частково superseded [ADR-0059](0059-menu-bar-native-semantic-colours.md):** D7 у частині «menu-bar
 > idle-бар = фіксований sRGB `Palette.statusBlue` (70/140/230)» скасовано — menu-bar тепер малює
 > `.systemBlue` (як і попап), що фліпає тему й несе Increase-Contrast. Логіка idle-стану лишається чинною.
+>
+> **Частково superseded [ADR-0060](0060-popup-native-semantic-colours.md):** popup idle-бар більше **не
+> десатурується** — раніше він брав `.systemBlue` приглушений ~15% до сірого (+~22% до білого на світлій
+> темі); тепер це **чистий** `.systemBlue`, той самий уніфікований `blue`, що й menu-bar. Логіка
+> idle-стану лишається чинною.
 
 ## Контекст
 

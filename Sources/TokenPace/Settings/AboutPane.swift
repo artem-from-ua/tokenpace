@@ -62,7 +62,7 @@ struct AboutPane: View {
                             .buttonStyle(.link)
                     } label: {
                         HStack(spacing: 6) {
-                            UpdateStatusDot(role: .popupServiceBlue)
+                            UpdateStatusDot(role: .blue)
                             Text("New version available: \(SettingsModel.displayTag(release.tagName))")
                             Button("Release notes") { model.openReleaseNotes(tag: release.tagName) }
                                 .buttonStyle(.link)
@@ -112,7 +112,7 @@ struct AboutPane: View {
                 if let failure = model.lastUpdateFailure {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            UpdateStatusDot(role: .popupServiceRed)
+                            UpdateStatusDot(role: .red)
                             Text("Update to version \(SettingsModel.displayTag(failure.tag)) failed during \(failure.stage.displayName).")
                         }
                         .font(.callout)
@@ -136,8 +136,8 @@ struct AboutPane: View {
 // MARK: - UpdateStatusDot
 
 /// A small filled status dot for an About-pane update row (#210), tinted from the **same**
-/// `ColorStore` roles the dropdown's update item uses (`popupServiceBlue` for "available",
-/// `popupServiceRed` for "failed") — so the two surfaces read as one signal.
+/// `ColorStore` roles the dropdown's update item uses (`blue` for "available",
+/// `red` for "failed") — so the two surfaces read as one signal.
 private struct UpdateStatusDot: View {
     let role: ColorRole
 

@@ -66,8 +66,9 @@ macOS AppKit не має iOS-подібних grouped-примітивів. Ра
 
 Menu-bar-віджет (`StatusItemView`) тепер малює **системними semantic-кольорами** (`labelColor`-родина +
 `.system*`, ADR-0059), не фіксованим sRGB — вони й дають нативний вигляд/дихання. Pacing-бари **попапа**
-(ADR-0022) зберігають свідому фіксовану палітру — це **не** System Settings-елементи, і SwiftUI Form їх
-не стосується.
+теж перейшли на системні semantic-кольори (ADR-0060; трійка `.systemRed/Yellow/Orange`, track
+`labelColor@0.22`, крім Claude-бренду) — це **не** System Settings-елементи, і SwiftUI Form їх не
+стосується.
 
 ## Мої (агента) помилки в цьому проході — і як їх уникати
 
