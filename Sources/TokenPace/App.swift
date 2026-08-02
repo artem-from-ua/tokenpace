@@ -215,8 +215,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let coldHealth = UsageHealth(lastSuccess: nil, failingSince: nil, reason: nil)
         let view = StatusItemView(frame: NSRect(origin: .zero, size: NSSize(width: 0, height: 22)))
         view.layout = MenuBarLayout.make(from: nil, health: coldHealth, now: now)
-        view.calmColors = PersistedConfig.calmMenuBarColors   // apply the saved choice from launch (#105)
-        view.workHarder = PersistedConfig.workHarderColors     // apply the saved "Work harder" choice from launch
+        view.calmColorMode = PersistedConfig.calmColorMode     // apply the saved calm-colours mode from launch (#105, #224)
+        view.barStyle = PersistedConfig.barStyle               // apply the saved bar style from launch (#224)
         self.statusView = view
         self.statusItem = item
 
@@ -229,6 +229,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         popupVC.loadView()   // realise the view so it can be sized before the menu measures it
+        popupVC.barStyle = PersistedConfig.barStyle   // apply the saved bar style from launch (#224)
+        popupVC.showTicks = PersistedConfig.showTicks   // apply the saved tick-ruler choice from launch (#224)
         setPopupLayout(PopupLayout.make(
             from: nil, health: coldHealth, now: now, interval: PollingBackoff.defaultInterval))
 
@@ -370,17 +372,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let wc = SettingsWindowController()
             wc.onMonitoredServicesChange = { [weak self] config in self?.monitoredServicesChanged(config) }
             wc.onCheckForUpdatesNow = { [weak self] in self?.performUpdateCheck(userInitiated: true) }
-            wc.onCalmColorsChange = { [weak self] on in
-                self?.statusView?.calmColors = on
-                self?.refreshStatusImage()   // menu-bar image is snapshotted, not auto-rendered
-            }
-            wc.onWorkHarderColorsChange = { [weak self] on in
-                self?.statusView?.workHarder = on
+            wc.onCalmColorModeChange = { [weak self] mode in
+                self?.statusView?.calmColorMode = mode
                 self?.refreshStatusImage()   // pure colour change — no layout/width rebuild needed
             }
             wc.onResetCountdownModeMenuBarChange = { [weak self] _ in
                 // The mode changes the layout (which countdown to draw), not just a colour — rebuild
                 // the menu-bar layout from the last poll (render reads PersistedConfig for the mode).
+                self?.reRenderForCurrentTime()
+            }
+            wc.onBarStyleChange = { [weak self] style in
+                // Render-only, both surfaces (#224). The menu-bar bar occupies the same rect (no width
+                // rebuild), so a re-snapshot suffices; the popup rebuilds its child bars via its own
+                // `barStyle` didSet so the new style reaches each `PopupBarView`.
+                self?.statusView?.barStyle = style
+                self?.popupVC.barStyle = style
+                self?.refreshStatusImage()
+            }
+            wc.onShowTicksChange = { [weak self] on in
+                // Popup-only (#224): the tick ruler lives in `PopupBarView`; the VC's `showTicks` didSet
+                // rebuilds so each child bar picks up the new value. No menu-bar change.
+                self?.popupVC.showTicks = on
+            }
+            wc.onFarBehindIntervalChange = { [weak self] _ in
+                // The green→blue threshold changes each bar's `behindMultiplier` (#224), which is baked
+                // into the layout — rebuild both surfaces from the last poll (render reads
+                // PersistedConfig.farBehindInterval for the multiplier).
                 self?.reRenderForCurrentTime()
             }
             wc.onServiceDotChange = { [weak self] _ in
@@ -1325,14 +1342,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hideBarsWhenBlocked: PersistedConfig.hideBarsWhenBlocked,
             // #199: honour the "Show pause icon when fully blocked" toggle — draws the leading orange
             // pause glyph when isBlocked and the bars are kept visible; false omits it.
-            showBlockedPause: PersistedConfig.showBlockedPause)
+            showBlockedPause: PersistedConfig.showBlockedPause,
+            // "Far behind" interval: the user's green→blue crossover scale (off→0/no-blue, short→1,
+            // medium→2, long→3). `nil` (off) maps to 0.
+            behindMultiplier: PersistedConfig.farBehindInterval.multiplier ?? 0)
         refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
         setPopupLayout(PopupLayout.make(
             from: snapshot, health: output.health, now: now, interval: output.interval,
             serviceStatus: lastStatusHealth,
             // #211: honour the "Show model-specific limits" toggle — false drops the per-model rows
             // (Opus/Sonnet/scoped), leaving only 5h/7d in the popup.
-            showModelSpecificLimits: PersistedConfig.showModelSpecificLimits))
+            showModelSpecificLimits: PersistedConfig.showModelSpecificLimits,
+            // "Far behind" interval: the user's green→blue crossover scale (off→0/no-blue, short→1,
+            // medium→2, long→3). `nil` (off) maps to 0.
+            behindMultiplier: PersistedConfig.farBehindInterval.multiplier ?? 0))
     }
 
     /// Set the popup model **and** resize the hosted view to fit. A menu item's hosted view must

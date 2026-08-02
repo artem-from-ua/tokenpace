@@ -273,10 +273,11 @@ struct BarLayoutIsCalmTests {
     /// blue, so the exact behind-threshold here doesn't change these outcomes.)
     private static func layout(usage: Double, time: Double,
                                remaining: TimeInterval = 7 * 24 * 3600,
-                               duration: Int = 14 * 24 * 3600) -> BarLayout {
+                               duration: Int = 14 * 24 * 3600,
+                               behindMultiplier: Int = 2) -> BarLayout {
         BarLayout(usageFraction: usage, timeFraction: time,
                   pacing: time >= usage ? .onPaceOrBehind : .ahead, remainingSeconds: remaining,
-                  windowDurationSeconds: duration)
+                  windowDurationSeconds: duration, behindMultiplier: behindMultiplier)
     }
 
     @Test func onPaceIsCalm() {   // blue (farBehind, big surplus) — still counts as calm
@@ -284,8 +285,9 @@ struct BarLayoutIsCalmTests {
     }
 
     @Test func farBehindIsCalm() {  // blue is calmer than green, so isCalm is true
-        #expect(BarLayoutIsCalmTests.layout(usage: 0.2, time: 0.6).isCalm)
-        #expect(BarLayoutIsCalmTests.layout(usage: 0.2, time: 0.6).severity == .farBehind)
+        // multiplier 1 → threshold 0.20 for this synthetic duration; surplus 0.4 > 0.20 → blue.
+        #expect(BarLayoutIsCalmTests.layout(usage: 0.2, time: 0.6, behindMultiplier: 1).isCalm)
+        #expect(BarLayoutIsCalmTests.layout(usage: 0.2, time: 0.6, behindMultiplier: 1).severity == .farBehind)
     }
 
     @Test func exactTieIsCalm() { // green — the equality tie folds into on-pace
@@ -324,10 +326,11 @@ struct BarLayoutSeverityTests {
     /// window.
     private static func layout(usage: Double, time: Double,
                                remaining: TimeInterval = 9000,
-                               duration: Int = 18_000) -> BarLayout {
+                               duration: Int = 18_000,
+                               behindMultiplier: Int = 2) -> BarLayout {
         BarLayout(usageFraction: usage, timeFraction: time,
                   pacing: time >= usage ? .onPaceOrBehind : .ahead, remainingSeconds: remaining,
-                  windowDurationSeconds: duration)
+                  windowDurationSeconds: duration, behindMultiplier: behindMultiplier)
     }
 
     @Test func mildlyBehindIsCalm() {   // surplus 0.15 ≤ thr 0.20 (5h) → green
@@ -340,26 +343,40 @@ struct BarLayoutSeverityTests {
 
     // MARK: blue (farBehind) — the fixed-width split of green
 
-    @Test func deepBehindIsFarBehind() {   // surplus 0.3 > thr 0.20 (5h) → blue
-        #expect(BarLayoutSeverityTests.layout(usage: 0.2, time: 0.5).severity == .farBehind)
+    @Test func deepBehindIsFarBehind() {   // surplus 0.3 > thr 0.20 (5h, ×1) → blue
+        #expect(BarLayoutSeverityTests.layout(usage: 0.2, time: 0.5, behindMultiplier: 1).severity == .farBehind)
     }
 
-    /// The fixed 5h boundary is 0.20 (60 min / 5 h): a surplus just below is green, just above blue.
+    /// The fixed 5h boundary at ×1 is 0.20 (60 min / 5 h): a surplus just below is green, just above blue.
     /// Values kept a hair off exact 0.20 to avoid float-equality noise; the strict-`>` convention is
     /// asserted in the Kit source.
     @Test func behindThresholdBoundaryIsStrict() {
-        #expect(BarLayoutSeverityTests.layout(usage: 0.32, time: 0.50).severity == .calm)      // 0.18 < 0.20 → green
-        #expect(BarLayoutSeverityTests.layout(usage: 0.28, time: 0.50).severity == .farBehind) // 0.22 > 0.20 → blue
+        #expect(BarLayoutSeverityTests.layout(usage: 0.32, time: 0.50, behindMultiplier: 1).severity == .calm)      // 0.18 < 0.20 → green
+        #expect(BarLayoutSeverityTests.layout(usage: 0.28, time: 0.50, behindMultiplier: 1).severity == .farBehind) // 0.22 > 0.20 → blue
     }
 
-    /// The 7-day window has a different fixed width (24 h / 7 d ≈ 0.143), so the same surplus that is
-    /// green on the 5h window (0.20 threshold) is blue on the 7d window.
+    /// The 7-day window has a different fixed width (24 h / 7 d ≈ 0.143 at ×1), so the same surplus that
+    /// is green on the 5h window (0.20 threshold) is blue on the 7d window.
     @Test func thresholdDiffersPerWindow() {
-        // surplus 0.17: green on 5h (thr 0.20), blue on 7d (thr ≈0.143).
-        #expect(BarLayoutSeverityTests.layout(usage: 0.33, time: 0.50).severity == .calm)      // 5h defaults
+        // surplus 0.17: green on 5h (thr 0.20), blue on 7d (thr ≈0.143) — both at ×1.
+        #expect(BarLayoutSeverityTests.layout(usage: 0.33, time: 0.50, behindMultiplier: 1).severity == .calm)      // 5h defaults
         let sevenD = BarLayoutSeverityTests.layout(usage: 0.33, time: 0.50,
-                                                   remaining: 302_400, duration: 604_800)
+                                                   remaining: 302_400, duration: 604_800, behindMultiplier: 1)
         #expect(sevenD.severity == .farBehind)   // surplus 0.17 > 0.143
+    }
+
+    /// The **default** multiplier is 2 (`FarBehindInterval.medium`) → the 5h threshold is 0.40 (2 h / 5 h),
+    /// so a surplus that was blue at ×1 (0.3 > 0.20) is now green, and only a wider surplus turns blue.
+    @Test func mediumMultiplierWidensBlue() {
+        #expect(BarLayoutSeverityTests.layout(usage: 0.2, time: 0.5).severity == .calm)      // surplus 0.3 ≤ 0.40 → green
+        #expect(BarLayoutSeverityTests.layout(usage: 0.05, time: 0.5).severity == .farBehind) // surplus 0.45 > 0.40 → blue
+    }
+
+    /// `behindMultiplier == 0` (`FarBehindInterval.off`) disables blue entirely: even a huge surplus
+    /// stays `.calm` (green), never `.farBehind`.
+    @Test func offMultiplierNeverFarBehind() {
+        #expect(BarLayoutSeverityTests.layout(usage: 0.0, time: 0.9, behindMultiplier: 0).severity == .calm)
+        #expect(BarLayoutSeverityTests.layout(usage: 0.0, time: 0.9, behindMultiplier: 0).severity != .farBehind)
     }
 
     // MARK: 20-minute blue start override
@@ -438,7 +455,7 @@ struct BarLayoutSeverityTests {
     /// (= 18000 − 60) is past the 20-min start override, so the deep surplus grades to blue by the
     /// fixed-width behind-threshold (0.20 for 5h; surplus 0.3 > 0.20).
     @Test func overrideDoesNotOutrankPaceOrExhaustion() {
-        #expect(BarLayoutSeverityTests.layout(usage: 0.3, time: 0.6, remaining: 60).severity == .farBehind)
+        #expect(BarLayoutSeverityTests.layout(usage: 0.3, time: 0.6, remaining: 60, behindMultiplier: 1).severity == .farBehind)
         #expect(BarLayoutSeverityTests.layout(usage: 1.0, time: 0.5, remaining: 60).severity == .exhausted)
     }
 }
@@ -466,25 +483,47 @@ struct AheadThresholdTests {
 @Suite("PacingModel.behindThreshold")
 struct BehindThresholdTests {
 
-    /// A fixed span of real time as a fraction of the window: 60 min / 5 h = 0.20, 24 h / 7 d ≈ 0.1429.
+    /// At ×1 (the base span): 60 min / 5 h = 0.20, 24 h / 7 d ≈ 0.1429.
     @Test func fixedWidthPerWindow() {
-        #expect(abs(PacingModel.behindThreshold(windowDurationSeconds: 18_000) - 0.20) < 1e-9)          // 3600/18000
-        #expect(abs(PacingModel.behindThreshold(windowDurationSeconds: 604_800) - (86_400.0 / 604_800.0)) < 1e-9)
+        #expect(abs(PacingModel.behindThreshold(windowDurationSeconds: 18_000, multiplier: 1) - 0.20) < 1e-9)          // 3600/18000
+        #expect(abs(PacingModel.behindThreshold(windowDurationSeconds: 604_800, multiplier: 1) - (86_400.0 / 604_800.0)) < 1e-9)
+    }
+
+    /// The multiplier scales the base width linearly: ×2 (the default `medium`) doubles both windows'
+    /// thresholds — 5h: 0.40, 7d ≈ 0.2857 — and is what `behindThreshold(windowDurationSeconds:)` returns
+    /// without an explicit multiplier.
+    @Test func multiplierScalesWidth() {
+        #expect(abs(PacingModel.behindThreshold(windowDurationSeconds: 18_000, multiplier: 2) - 0.40) < 1e-9)     // 2·3600/18000
+        #expect(abs(PacingModel.behindThreshold(windowDurationSeconds: 604_800, multiplier: 2) - (172_800.0 / 604_800.0)) < 1e-9)
+        #expect(abs(PacingModel.behindThreshold(windowDurationSeconds: 18_000, multiplier: 3) - 0.60) < 1e-9)     // 3·3600/18000
+        // Default parameter is 2 (medium), matching the explicit ×2 above.
+        #expect(PacingModel.behindThreshold(windowDurationSeconds: 18_000)
+                == PacingModel.behindThreshold(windowDurationSeconds: 18_000, multiplier: 2))
+    }
+
+    /// `multiplier: 0` (`FarBehindInterval.off`) returns `+∞` so the caller's strict `surplus >` test is
+    /// always false — blue never appears, no matter how large the surplus.
+    @Test func offMultiplierIsInfinite() {
+        #expect(PacingModel.behindThreshold(windowDurationSeconds: 18_000, multiplier: 0) == .greatestFiniteMagnitude)
+        #expect(PacingModel.behindThreshold(windowDurationSeconds: 604_800, multiplier: 0) == .greatestFiniteMagnitude)
+        // No finite surplus (max possible is 1.0) can exceed it → never blue.
+        #expect(!(1.0 > PacingModel.behindThreshold(windowDurationSeconds: 18_000, multiplier: 0)))
     }
 
     /// Unlike `aheadThreshold`, it does NOT depend on how far the window has elapsed — same value
     /// regardless of timeFraction (the input is the window length, not the elapsed fraction).
     @Test func independentOfElapsedTime() {
         // Both computed from the 5-hour duration → identical, no timeFraction term.
-        let a = PacingModel.behindThreshold(windowDurationSeconds: 18_000)
-        let b = PacingModel.behindThreshold(windowDurationSeconds: 18_000)
+        let a = PacingModel.behindThreshold(windowDurationSeconds: 18_000, multiplier: 1)
+        let b = PacingModel.behindThreshold(windowDurationSeconds: 18_000, multiplier: 1)
         #expect(a == b)
         #expect(abs(a - 0.20) < 1e-9)
     }
 
     /// Non-positive duration (inert placeholder bars) returns 0 — any surplus reads as the calmer green.
+    /// (Only reached when the multiplier is > 0; the off case short-circuits to `+∞` first.)
     @Test func nonPositiveDurationIsZero() {
-        #expect(PacingModel.behindThreshold(windowDurationSeconds: 0) == 0)
-        #expect(PacingModel.behindThreshold(windowDurationSeconds: -1) == 0)
+        #expect(PacingModel.behindThreshold(windowDurationSeconds: 0, multiplier: 1) == 0)
+        #expect(PacingModel.behindThreshold(windowDurationSeconds: -1, multiplier: 1) == 0)
     }
 }

@@ -10,43 +10,106 @@ struct AppearancePane: View {
 
     var body: some View {
         Form {
-            // First section: one-click Appearance presets (#215) — a single parameter row
-            // ("Restore appearance from preset" is the row label, not a section header). The preset
-            // buttons sit in a row, trailing (right of the label). Each button sets every option below
-            // at once: "Chill" restores the shipped defaults (what the old single Reset did); "Control
-            // freak" turns everything on. Plain action buttons, no selection state (the config isn't
-            // compared back to a preset).
+            // First section: one-click Appearance presets (#215, #224) — a "Change UI preset" segmented
+            // control. Selecting Chill / Work harder! / Control freak applies that preset (sets every
+            // option below at once). The trailing "Custom" segment is an **indicator**, not a choice:
+            // its selection is ignored, and it lights up only when the live config matches no preset —
+            // i.e. after any manual toggle. `model.activePreset` is nil in that Custom state.
             Section {
                 VStack(alignment: .leading, spacing: 4) {
+                    // Label + control on ONE row (label leading, control trailing — the pane's rhythm),
+                    // then the two hints below (leading). A custom SegmentedControl (not the native
+                    // Picker) so the trailing "Custom" segment can be an indicator that lights up but is
+                    // not selectable; clicking it opens a popover explaining how to reach it.
                     HStack {
-                        Text("Restore appearance from preset")
+                        Text("Change UI preset")
                         Spacer()
-                        ForEach(AppearancePreset.allCases, id: \.self) { preset in
-                            Button(preset.displayName) { model.apply(preset) }
-                        }
+                        SegmentedControl(
+                            segments: AppearancePreset.allCases.map {
+                                .init(value: AppearancePreset?.some($0), title: $0.displayName)
+                            } + [.init(value: AppearancePreset?.none, title: "Custom", selectable: false,
+                                       inactiveHelp: "Change any option below to craft your own custom setup.")],
+                            active: model.activePreset,
+                            onSelect: { picked in if let preset = picked { model.apply(preset) } })
                     }
+                    SettingsHint(text: "Sets all the options below at once. Pick one of three, from "
+                        + "calmest to loudest: *highlight only critical states* → *also nudge you "
+                        + "when you're underpacing* → *show every indicator*.")
                     SettingsHint(text: "This overwrites your current choices.", warning: true)
                 }
             }
 
-            Section("Menu Bar Widget") {
+            // Bar presentation style (#224) — a segmented control governing BOTH the menu-bar widget and
+            // the dropdown popup. Its own section (no header) because it spans both surfaces. Both modes
+            // show pacing by colour; "Pace & Time" additionally marks where you are in the window.
+            Section {
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Calm non-critical colors", isOn: Binding(
-                        get: { model.calmColors }, set: { model.setCalmColors($0) }))
-                    SettingsHint(text: "Keeps the menu bar quiet — only orange/red warnings are "
-                        + "colored; on-pace and mild states stay a neutral white.")
-                }
-
-                // Second by request. Only meaningful while "Calm non-critical colors" above is on
-                // (with Calm off the far-behind blue is already coloured), so the toggle is hidden
-                // entirely when Calm is off rather than shown as a no-op.
-                if model.calmColors {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Toggle("Work harder", isOn: Binding(
-                            get: { model.workHarderColors }, set: { model.setWorkHarderColors($0) }))
-                        SettingsHint(text: "Keeps the deep-behind blue colored under Calm colors — a nudge "
-                            + "that you're well under pace and have room to push.")
+                    HStack {
+                        Text("Bar style")
+                        Spacer()
+                        SegmentedControl(
+                            segments: [
+                                .init(value: BarStyle.simple, title: "Pace"),
+                                .init(value: BarStyle.mixed, title: "Mixed"),
+                                .init(value: BarStyle.pacing, title: "Pace & Time"),
+                            ],
+                            active: model.barStyle,
+                            onSelect: { model.setBarStyle($0) })
                     }
+                    SettingsHint(text: "Pace shows a colour ribbon from the left; Pace & Time adds the "
+                        + "time marker. Both use the same state color and ribbon size.")
+                    SettingsHint(text: "Mixed keeps the compact menu-bar bar as Pace and shows Pace & "
+                        + "Time in the dropdown.")
+                }
+            }
+
+            // Far-behind (green→blue) threshold (#224) — how big a surplus turns the behind side blue.
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Far behind pace interval")
+                        Spacer()
+                        Picker("", selection: Binding(
+                            get: { model.farBehindInterval },
+                            set: { model.setFarBehindInterval($0) })) {
+                            Text("1h on the 5-hour bar; 1d on the 7-day bar").tag(FarBehindInterval.short)
+                            Text("2h on the 5-hour bar; 2d on the 7-day bar").tag(FarBehindInterval.medium)
+                            Text("3h on the 5-hour bar; 3d on the 7-day bar").tag(FarBehindInterval.long)
+                            Text("Less blue, please!").tag(FarBehindInterval.off)
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                    SettingsHint(text: "How much of a surplus tells apart \"on-pace\" green from "
+                        + "\"far-behind\" blue. Larger needs a bigger surplus before a bar turns blue.")
+                }
+            }
+
+            Section("Menu Bar Widget") {
+                // Calm non-critical colors (#224) — a three-way choice (merged the old Calm + Work
+                // harder toggles): which calm colours mute to white. "Yellow + Green + Blue" is
+                // disabled when there is no blue to mute (Far behind = "Less blue, please!"), with a
+                // popover explaining why — mirroring the preset "Custom" indicator.
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Calm non-critical colors")
+                        Spacer()
+                        SegmentedControl(
+                            segments: [
+                                .init(value: CalmColorMode.off, title: "Off"),
+                                .init(value: CalmColorMode.yellowGreen, title: "Yellow + Green"),
+                                .init(value: CalmColorMode.yellowGreenBlue, title: "+ Blue",
+                                      selectable: model.farBehindInterval != .off,
+                                      inactiveHelp: model.farBehindInterval == .off
+                                        ? "There's no blue to mute while Far behind pace interval is "
+                                          + "\"Less blue, please!\". Pick an interval first."
+                                        : nil),
+                            ],
+                            active: model.calmColorMode,
+                            onSelect: { model.setCalmColorMode($0) })
+                    }
+                    SettingsHint(text: "Which calm colours mute to a neutral white. Orange/red warnings "
+                        + "always stay coloured.")
                 }
 
                 // #199 — placed third by request. Independent of the pacing-bars toggle below: the
@@ -77,13 +140,23 @@ struct AppearancePane: View {
                         + "limit is exhausted.")
                 }
 
-                // Reset-countdown mode: a menu picker (like System Settings' few-option choices).
-                Picker("Show reset countdown", selection: Binding(
-                    get: { model.resetRadio },
-                    set: { model.resetRadio = $0; model.commitResetCountdownMode() })) {
-                    Text("Always").tag(ResetRadio.always)
-                    Text("When pacing well ahead or limit reached").tag(ResetRadio.smart)
-                    Text("Never").tag(ResetRadio.never)
+                // Reset-countdown mode: a segmented control matching the pane's other three-way rows,
+                // with the "Smart" behaviour explained on the line below.
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Show reset countdown")
+                        Spacer()
+                        SegmentedControl(
+                            segments: [
+                                .init(value: ResetRadio.always, title: "Always"),
+                                .init(value: ResetRadio.smart, title: "Smart"),
+                                .init(value: ResetRadio.never, title: "Never"),
+                            ],
+                            active: model.resetRadio,
+                            onSelect: { model.resetRadio = $0; model.commitResetCountdownMode() })
+                    }
+                    SettingsHint(text: "Smart shows the countdown only when you're pacing well ahead or "
+                        + "a limit is reached.")
                 }
 
                 Toggle("Show extra-usage credits icon", isOn: Binding(
@@ -92,9 +165,9 @@ struct AppearancePane: View {
                     get: { model.showServiceDot }, set: { model.setShowServiceDot($0) }))
             }
 
-            // #211 — a popup-only option, so it lives in its own "Dropdown" section rather than in
-            // "Menu Bar Widget" above (whose toggles all govern the menu-bar widget).
-            Section("Dropdown") {
+            // #211 — a popup-only option, so it lives in its own "Dropdown Widget" section rather than
+            // in "Menu Bar Widget" above (whose toggles all govern the menu-bar widget).
+            Section("Dropdown Widget") {
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Show model & service limits", isOn: Binding(
                         get: { model.showModelSpecificLimits },
@@ -102,6 +175,9 @@ struct AppearancePane: View {
                     SettingsHint(text: "Adds per-model or per-service 7-day rows. Off keeps only "
                         + "5-hour and 7-day base limits.")
                 }
+
+                Toggle("Show ticks on bars", isOn: Binding(
+                    get: { model.showTicks }, set: { model.setShowTicks($0) }))
             }
         }
         .formStyle(.grouped)

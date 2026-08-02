@@ -43,7 +43,9 @@ struct SettingsHint: View {
     var body: some View {
         if !text.isEmpty {
             Label {
-                Text(text)
+                // `.init(text)` forces the LocalizedStringKey initializer, so inline markdown
+                // (`**bold**` / `*italic*`) in a hint renders; plain hints are unaffected.
+                Text(.init(text))
             } icon: {
                 if warning {
                     Image(systemName: "exclamationmark.triangle")

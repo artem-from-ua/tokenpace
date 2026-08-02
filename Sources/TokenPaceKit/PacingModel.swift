@@ -113,6 +113,13 @@ public struct BarLayout: Sendable, Equatable {
     /// the *end*-of-window orange override, which needs only `remainingSeconds`. See
     /// ``PacingModel/pacingBlueStartOverrideSeconds``.
     public let windowDurationSeconds: Int
+    /// The user's ``FarBehindInterval`` multiplier, mirrored onto the layout so ``severity`` (and the
+    /// AppKit `behindColor`/`isFarBehind`, which read it off this struct) can scale the green→blue
+    /// crossover width without re-reading config. **`0` means "off"** — the blue (`farBehind`) zone is
+    /// disabled and the behind side stays green at any surplus; `1`/`2`/`3` scale the base 1h(5h)/1d(7d)
+    /// width (see ``FarBehindInterval/multiplier``, whose `nil` maps to `0` here). Kept as a plain `Int`
+    /// (not `Int?`) so the struct stays value-flat; the nil→0 mapping is `interval.multiplier ?? 0`.
+    public let behindMultiplier: Int
 
     /// Left edge of the gap zone = `min(usageFraction, timeFraction)`.
     public var gapStart: Double { min(usageFraction, timeFraction) }
@@ -143,11 +150,15 @@ public struct BarLayout: Sendable, Equatable {
     /// blue never flickers at window start (symmetric to the end-of-window orange override).
     public var severity: PacingSeverity {
         if pacing == .onPaceOrBehind {
+            // `behindMultiplier == 0` (FarBehindInterval.off): blue is disabled — the behind side is
+            // always plain green, regardless of surplus. behindThreshold returns +∞ for it, so the
+            // strict `>` below can never fire, but short-circuit here for clarity.
+            if behindMultiplier == 0 { return .calm }                                   // green (blue off)
             // 20-min start-of-window override: always plain green early on (blue must not flicker at
             // start). elapsed < 0 under clock skew (remaining > duration) also folds to green here.
             let elapsed = Double(windowDurationSeconds) - remainingSeconds
             if elapsed <= PacingModel.pacingBlueStartOverrideSeconds { return .calm }   // green
-            return (timeFraction - usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: windowDurationSeconds)
+            return (timeFraction - usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: windowDurationSeconds, multiplier: behindMultiplier)
                 ? .farBehind : .calm                              // blue : green
         }
         if usageFraction >= 1 { return .exhausted }                // red (limit hit)
@@ -291,8 +302,10 @@ public enum PacingModel {
     /// The green→blue (`.farBehind`) boundary for the on-pace/behind gap, as a **fixed span of real
     /// time** rather than a fraction of the window (unlike ``aheadThreshold(timeFraction:)``, which is
     /// dynamic). Returned as the fraction the pacing math compares against:
-    /// `LimitWindow.blueBehindWidthSeconds / windowDurationSeconds` —
-    /// **60 min / 5 h = 0.20** for the 5-hour window, **24 h / 7 d ≈ 0.1429** for the 7-day window.
+    /// `LimitWindow.blueBehindWidthSeconds × multiplier / windowDurationSeconds`. With the base 1h(5h)/
+    /// 1d(7d) width, the default `multiplier = 2` (``FarBehindInterval/medium``) gives **2 h / 5 h = 0.40**
+    /// (5h) and **2 d / 7 d ≈ 0.2857** (7d); `multiplier = 1` reproduces the old 0.20 / 0.1429 split, and
+    /// `multiplier = 0` (``FarBehindInterval/off``) returns `+∞` so blue never appears.
     ///
     /// A surplus (`timeFraction − usageFraction`) at or below this stays green (`.calm`); a surplus
     /// strictly above it is blue (`.farBehind`). Being behind by more than an hour (5h) / a day (7d)
@@ -304,12 +317,18 @@ public enum PacingModel {
     /// of the two calm tones). A separate 20-min *start* override (``pacingBlueStartOverrideSeconds``)
     /// keeps the first 20 minutes green regardless of this.
     ///
-    /// - Parameter windowDurationSeconds: The window length (``LimitWindow/durationSeconds``: 18 000 for
-    ///   5h, 604 800 for 7d), carried on ``BarLayout``. A non-positive value (inert placeholder bars)
-    ///   returns `0` — any surplus reads as the calmer green, matching those bars' forced-calm intent.
-    public static func behindThreshold(windowDurationSeconds: Int) -> Double {
+    /// - Parameters:
+    ///   - windowDurationSeconds: The window length (``LimitWindow/durationSeconds``: 18 000 for 5h,
+    ///     604 800 for 7d), carried on ``BarLayout``. A non-positive value (inert placeholder bars)
+    ///     returns `0` — any surplus reads as the calmer green, matching those bars' forced-calm intent.
+    ///   - multiplier: The user's ``FarBehindInterval`` scale on the base 1h(5h)/1d(7d) width
+    ///     (``BarLayout/behindMultiplier``): `1`/`2`/`3` widen the blue zone (base × multiplier), and
+    ///     **`0` disables blue** by returning `.greatestFiniteMagnitude`, so the caller's strict `>`
+    ///     comparison is always false (never blue). Defaults to `2` (the shipped ``FarBehindInterval/medium``).
+    public static func behindThreshold(windowDurationSeconds: Int, multiplier: Int = 2) -> Double {
+        guard multiplier > 0 else { return .greatestFiniteMagnitude }   // off → never blue
         guard windowDurationSeconds > 0 else { return 0 }
-        let width = blueBehindWidthSeconds(forWindowDurationSeconds: windowDurationSeconds)
+        let width = blueBehindWidthSeconds(forWindowDurationSeconds: windowDurationSeconds) * multiplier
         return Double(width) / Double(windowDurationSeconds)
     }
 
@@ -343,11 +362,16 @@ public enum PacingModel {
     ///   - resetsAt: Parsed `resets_at` date from the API response.
     ///   - now: Current instant (inject for deterministic tests; do **not** call `Date()` here).
     ///   - window: The rolling window this limit belongs to.
+    ///   - behindMultiplier: The user's ``FarBehindInterval`` scale for the green→blue crossover, stored
+    ///     onto ``BarLayout/behindMultiplier`` (`0` = off/no-blue; `1`/`2`/`3` = ×base). Defaults to `2`
+    ///     (``FarBehindInterval/medium``) so existing/synthetic callers keep the shipped look; the AppKit
+    ///     layer must pass the **real** configured value (`interval.multiplier ?? 0`).
     public static func barLayout(
         utilization: Double,
         resetsAt: Date,
         now: Date,
-        window: LimitWindow
+        window: LimitWindow,
+        behindMultiplier: Int = 2
     ) -> BarLayout {
         let usageFraction = min(1, max(0, utilization / 100))
         let remaining     = resetsAt.timeIntervalSince(now)   // seconds until reset (may be ≤ 0)
@@ -355,7 +379,8 @@ public enum PacingModel {
         let pacing: PacingState = timeFraction >= usageFraction ? .onPaceOrBehind : .ahead
         return BarLayout(usageFraction: usageFraction, timeFraction: timeFraction,
                          pacing: pacing, remainingSeconds: remaining,
-                         windowDurationSeconds: window.durationSeconds)
+                         windowDurationSeconds: window.durationSeconds,
+                         behindMultiplier: behindMultiplier)
     }
 
     // MARK: blockIndex (popup-only derivative)

@@ -32,28 +32,36 @@ final class StatusItemView: NSView {
         }
     }
 
-    /// "Calm colours" (#105): when `true`, the widget's **soft** signals mute to a calm neutral (a
-    /// system-matched light grey, `calmWhite`) — the idle
-    /// blue track, the on-pace green gap, the mild ahead-of-pace yellow, and the **degraded (yellow)
-    /// service dot**; the strong warnings (orange/red), the stronger service states
-    /// (orange/red/blue/grey), and the ⚠️ glyph keep their colour. The time-indicator marker now
-    /// shares its pacing gap's colour, so it follows the gap into white in the calm states too. Set by `AppDelegate`
-    /// from `PersistedConfig.calmMenuBarColors`; the view stays a thin shell and does not read the
-    /// config itself. Changing it requests a redraw (no size change).
-    var calmColors: Bool = false {
+    /// How much of the **non-critical** pacing palette the widget mutes to a calm neutral (#105, #224,
+    /// ADR-0061) — the single three-way ``CalmColorMode`` that replaces the old `calmMenuBarColors` +
+    /// `workHarderColors` pair. The view reads its two derived flags:
+    /// - ``CalmColorMode/mutesCalm`` — when true, the widget's **soft** signals mute to a calm neutral
+    ///   (a system-matched light grey, `calmWhite`): the idle blue track, the on-pace green gap, the
+    ///   mild ahead-of-pace yellow, and the **degraded (yellow) service dot**; the strong warnings
+    ///   (orange/red), the stronger service states (orange/red/blue/grey), and the ⚠️ glyph keep their
+    ///   colour. The time-indicator marker shares its pacing gap's colour, so it follows the gap into
+    ///   white in the calm states too.
+    /// - ``CalmColorMode/mutesBlue`` — when true, the far-behind **blue** (`.farBehind`) zone mutes
+    ///   with the rest; when false (the old "Work harder" behaviour) it is treated as **non-calm** and
+    ///   stays coloured, so a big surplus reads as a nudge that there's headroom to push. Only visible
+    ///   when `mutesCalm` is on.
+    ///
+    /// Set by `AppDelegate` from `PersistedConfig.calmColorMode`; the view stays a thin shell and does
+    /// not read the config itself. Changing it requests a redraw (no size change).
+    var calmColorMode: CalmColorMode = .yellowGreenBlue {
         didSet {
-            guard calmColors != oldValue else { return }
+            guard calmColorMode != oldValue else { return }
             needsDisplay = true
         }
     }
 
-    /// "Work harder" (#…): when on, the far-behind **blue** (`.farBehind`) zone is treated as
-    /// **non-calm** — it is NOT muted to white under ``calmColors``, so a big surplus stays coloured
-    /// (a nudge that there's headroom to push). Only has a visible effect when `calmColors` is on;
-    /// with calm off, blue is already coloured. Off by default. Redraw on change.
-    var workHarder: Bool = false {
+    /// Bar presentation style (#224). ``BarStyle/pacing`` draws the current gap + time-indicator
+    /// marker; ``BarStyle/simple`` draws a left-anchored ribbon coloured by the pacing state, with no
+    /// marker. Render-only (the bar occupies the same rect either way), so a redraw is all that's
+    /// needed. Kept in sync with the popup's own `barStyle` — see `PopupBarView`. Default `.pacing`.
+    var barStyle: BarStyle = .pacing {
         didSet {
-            guard workHarder != oldValue else { return }
+            guard barStyle != oldValue else { return }
             needsDisplay = true
         }
     }
@@ -255,7 +263,7 @@ final class StatusItemView: NSView {
     /// keeps orange/red under calm.
     private func statusDotColor(_ status: ServiceStatus) -> NSColor {
         switch status {
-        case .degraded:         return calmColors ? bright(Palette.calmWhite) : accent(Palette.statusYellow)
+        case .degraded:         return calmColorMode.mutesCalm ? bright(Palette.calmWhite) : accent(Palette.statusYellow)
         case .partialOutage:    return accent(Palette.statusOrange)
         case .majorOutage:      return accent(Palette.statusRed)
         case .underMaintenance: return accent(Palette.statusBlue)
@@ -406,7 +414,7 @@ final class StatusItemView: NSView {
     /// the strong warnings (orange/red). `CreditsMarker.isCalm` is the one predicate that decides this,
     /// so the icon and the bars always agree.
     private func creditsIconColor(_ credits: CreditsMarker) -> NSColor {
-        if calmColors && credits.isCalm { return bright(Palette.calmWhite) }
+        if calmColorMode.mutesCalm && credits.isCalm { return bright(Palette.calmWhite) }
         guard let l = credits.bar else { return bright(Palette.foreground) }   // unlimited → neutral
         return accent(l.timeFraction < l.usageFraction
             ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
@@ -592,7 +600,7 @@ final class StatusItemView: NSView {
             let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
             let fill: NSColor = bar.blocked
                 ? Palette.unusedGrey
-                : (calmColors ? Palette.idleCalmGrey : accent(Palette.idleBlue))
+                : (calmColorMode.mutesCalm ? Palette.idleCalmGrey : accent(Palette.idleBlue))
             fill.setFill()
             path.fill()
             return
@@ -607,9 +615,21 @@ final class StatusItemView: NSView {
         Palette.unusedGrey.setFill()   // the dimmed "moon" base
         path.fill()
 
-        // Clip the gap fill to the rounded shape so corners stay clean.
+        // Clip the coloured fill to the rounded shape so corners stay clean.
         NSGraphicsContext.saveGraphicsState()
         path.addClip()
+
+        // Simple style (#224): a left-anchored ribbon coloured by the SAME pacing state colour a
+        // `.pacing` gap would use (`calmedGapColor` — carries calm-muting / work-harder too), with no
+        // time-indicator marker. The ribbon's LENGTH equals the pacing gap's width (`gapEnd - gapStart`)
+        // but is always anchored at the left edge, so the same amount of colour appears as in
+        // Pace & Time, just without a time position. Mirror of `PopupBarView.draw`'s simple branch.
+        if !barStyle.menuBarShowsTimeMarker {
+            let ribbon = l.gapEnd - l.gapStart
+            fillZone(from: 0, to: ribbon, in: rect, width: w, color: calmedGapColor(l))
+            NSGraphicsContext.restoreGraphicsState()
+            return
+        }
 
         // Pacing gap: [gapStart, gapEnd). Ahead-of-pace uses the SAME graded colour as the popup
         // (`PopupBarView.aheadColor`: amber → orange → red by how far ahead), so the menu-bar bar and
@@ -654,14 +674,15 @@ final class StatusItemView: NSView {
     }
 
     /// The pacing-gap fill colour, with calm mode (#105) applied. Normally this is the on-pace green
-    /// or the graded ahead colour (`PopupBarView.aheadColor`). When `calmColors` is on, the **calm**
+    /// or the graded ahead colour (`PopupBarView.aheadColor`). When `calmColorMode.mutesCalm` is on, the **calm**
     /// states (`BarLayout.isCalm`: on-pace green + mild-ahead yellow) mute to white; the strong warnings
     /// (orange/red) stay coloured.
     private func calmedGapColor(_ l: BarLayout) -> NSColor {
         // Calm neutral is a bright tone (labelColor at the text opacity, via `bright`); the coloured
         // pacing gap is an accent (scaled by accentSaturation). Neither is the dimmed bar track.
-        // "Work harder" exempts the far-behind blue from muting so a big surplus stays coloured.
-        if calmColors && l.isCalm && !(workHarder && l.severity == .farBehind) {
+        // When `mutesBlue` is off (the old "Work harder") the far-behind blue is exempt from muting so
+        // a big surplus stays coloured.
+        if calmColorMode.mutesCalm && l.isCalm && !(l.severity == .farBehind && !calmColorMode.mutesBlue) {
             return bright(Palette.calmWhite)
         }
         if l.pacing == .ahead {
@@ -697,7 +718,7 @@ final class StatusItemView: NSView {
     /// inset, vertically centred. Reuses the same monospaced-digit font and foreground colour as
     /// ``drawResetLabel(_:leftOf:in:)`` so the countdown looks identical whether or not the bars are
     /// hidden; `itemWidth` reserves exactly this label's width (via ``resetLabelWidth(_:)``) so the item
-    /// hugs the text. The blocked mode carries no pacing colour to mute, so `calmColors` is irrelevant
+    /// hugs the text. The blocked mode carries no pacing colour to mute, so `calmColorMode` is irrelevant
     /// here — the label is always the neutral foreground.
     ///
     /// When `layout.blockedPause` is set (fully blocked, glyph opted in), the orange pause glyph is
