@@ -73,7 +73,9 @@ struct SegmentedControl<Value: Hashable>: View {
                     get: { helpShownFor == segment.value },
                     set: { if !$0 { helpShownFor = nil } })) {
                     if let help = segment.inactiveHelp {
-                        Text(help)
+                        // `.init(help)` forces the LocalizedStringKey initializer so inline markdown
+                        // (`*italic*`) renders — used to italicise option-name/value references.
+                        Text(.init(help))
                             .font(.callout)
                             .fixedSize(horizontal: false, vertical: true)   // wrap, grow down
                             .multilineTextAlignment(.leading)

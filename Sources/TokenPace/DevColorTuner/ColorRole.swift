@@ -117,11 +117,11 @@ enum ColorRole: String, CaseIterable {
                  + "surfaces, and the degraded service-status dot."
         case .orange:
             return "Strong ahead-of-pace pacing gap / marker (lead at/above threshold, or little time to "
-                 + "reset) on both surfaces; the partial-outage service dot; and the menu-bar blocked pause glyph."
+                 + "reset) on both surfaces; and the partial-outage service dot."
         case .red:
             return "Exhausted-limit pacing gap / marker on both surfaces; the major-outage service dot "
-                 + "(and the update-menu \"update failed\" dot); the blocking reset-time pill; and the "
-                 + "popup ⚠️ error banner text."
+                 + "(and the update-menu \"update failed\" dot); the blocking reset-time pill; the popup ⚠️ "
+                 + "error banner text; and the menu-bar blocked pause glyph."
         case .blue:
             return "Idle 5-hour bar fill (ready to start) on both surfaces; the maintenance service dot "
                  + "(and the update-menu \"new version available\" dot)."

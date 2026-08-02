@@ -100,15 +100,10 @@ final class SettingsWindowController: NSWindowController {
         get { model.onHideCalmSevenDayChange } set { model.onHideCalmSevenDayChange = newValue }
     }
 
-    /// Called when the user toggles "Show pacing bars when 5h/7d limits reached" (#194), with the new
-    /// state (stored inverted as `hideBarsWhenBlocked`).
-    var onHideBarsWhenBlockedChange: ((Bool) -> Void)? {
-        get { model.onHideBarsWhenBlockedChange } set { model.onHideBarsWhenBlockedChange = newValue }
-    }
-
-    /// Called when the user toggles "Show pause icon when fully blocked" (#199), with the new state.
-    var onShowBlockedPauseChange: ((Bool) -> Void)? {
-        get { model.onShowBlockedPauseChange } set { model.onShowBlockedPauseChange = newValue }
+    /// Called when the user toggles "Pause icon hides bars" (#194, #227), with the new state — `true`
+    /// hides the bars when fully blocked (pause icon only), `false` keeps them beside the icon.
+    var onPauseHidesBarsChange: ((Bool) -> Void)? {
+        get { model.onPauseHidesBarsChange } set { model.onPauseHidesBarsChange = newValue }
     }
 
     /// Called when the user toggles "Pause polling while the screen is locked" (#114).

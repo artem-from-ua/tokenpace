@@ -420,14 +420,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // not just a colour — rebuild from the last poll (render reads PersistedConfig).
                 self?.reRenderForCurrentTime()
             }
-            wc.onHideBarsWhenBlockedChange = { [weak self] _ in
-                // Toggling this swaps the whole mode (bars vs. countdown-only) when blocked, not just a
-                // colour — rebuild from the last poll (render reads PersistedConfig.hideBarsWhenBlocked).
-                self?.reRenderForCurrentTime()
-            }
-            wc.onShowBlockedPauseChange = { [weak self] _ in
-                // Adds/removes the leading pause glyph (drawn + item width), not just a colour — rebuild
-                // from the last poll (render reads PersistedConfig.showBlockedPause).
+            wc.onPauseHidesBarsChange = { [weak self] _ in
+                // Toggling this swaps the whole mode when blocked (pause icon alone vs. pause icon + bars),
+                // not just a colour — rebuild from the last poll (render reads PersistedConfig.pauseHidesBars).
                 self?.reRenderForCurrentTime()
             }
             wc.onPausePollingChange = { [weak self] on in
@@ -636,6 +631,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 "config: version \(from, privacy: .public) → \(to, privacy: .public), running migrations")
             // Future from→to migrations run here. Empty scaffold for now (#71).
         }
+        // Idempotent per-key migrations that must catch an upgrade from *any* prior version (not gated
+        // on the version diff above): merge the pre-#227 pause settings into the unified key.
+        PersistedConfig.migratePauseKeysIfNeeded()
         // Record the running version so the next launch compares against it.
         PersistedConfig.lastRunVersion = current
     }
@@ -1333,16 +1331,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             resetMode: PersistedConfig.resetCountdownModeMenuBar,   // #103: which reset countdown to show
             // #94: honour the "Hide 7-day bar when calm" toggle — drops a calm 7-day bar, centring 5h.
             hideCalmSevenDay: PersistedConfig.hideCalmSevenDayBar,
-            // #144: honour the "Show extra-usage credits" toggle — draws the trailing ¤ icon when
-            // credits are active and a base limit is exhausted; false hides it and reclaims its width.
+            // #144: honour the "Show extra-usage credits" toggle — draws the ¤ icon when credits are
+            // active and a base limit is exhausted; false hides it and reclaims its width.
             showCredits: PersistedConfig.showExtraUsage,
-            // #194: honour the "Show pacing bars when 5h/7d limits reached" toggle (stored inverted as
-            // hideBarsWhenBlocked) — drops both bars for a countdown-only widget when a main window is
-            // exhausted; false keeps the (red) bars.
-            hideBarsWhenBlocked: PersistedConfig.hideBarsWhenBlocked,
-            // #199: honour the "Show pause icon when fully blocked" toggle — draws the leading orange
-            // pause glyph when isBlocked and the bars are kept visible; false omits it.
-            showBlockedPause: PersistedConfig.showBlockedPause,
+            // #194, #227: honour the "Pause icon hides bars" toggle — when fully blocked (isBlocked), true
+            // drops both bars for a countdown-only widget beside the red pause icon; false keeps the (red)
+            // bars beside it. The pause icon itself is drawn whenever blocked, independent of this flag.
+            pauseHidesBars: PersistedConfig.pauseHidesBars,
             // "Far behind" interval: the user's green→blue crossover scale (off→0/no-blue, short→1,
             // medium→2, long→3). `nil` (off) maps to 0.
             behindMultiplier: PersistedConfig.farBehindInterval.multiplier ?? 0)

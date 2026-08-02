@@ -64,13 +64,15 @@ enum PersistedConfig {
         /// Whether the menu-bar widget hides the 7-day bar while it is calm (green/yellow),
         /// centring the 5h bar alone (#94). Default-on (opt-out) — see the property.
         static let hideCalmSevenDayBar = "hideCalmSevenDayBar"
-        /// Whether the menu-bar widget hides *both* pacing bars while a main window is exhausted
-        /// (blocked), leaving only the reset countdown (#194). Default-on (opt-out) — see the property.
-        static let hideBarsWhenBlocked = "hideBarsWhenBlocked"
-        /// Whether the menu-bar widget draws the orange "pause" glyph to the left of the bars when the
-        /// user is fully blocked (`CreditsPacing.isBlocked`) and the bars are kept visible (#199).
-        /// Default-on (opt-out) — see the property.
-        static let showBlockedPause = "showBlockedPause"
+        /// Whether the red "pause" icon **hides** the pacing bars while the user is fully blocked
+        /// (`CreditsPacing.isBlocked`), leaving only the reset countdown beside the icon (#194, #227).
+        /// `true` → icon only; `false` → icon + bars. The pause icon itself is always drawn when blocked.
+        /// See the property. Replaces the pre-#227 `hideBarsWhenBlocked` + `showBlockedPause` pair.
+        static let pauseHidesBars = "pauseHidesBars"
+        /// Legacy pre-#227 keys, read once by ``PersistedConfig/migratePauseKeysIfNeeded()`` to seed
+        /// ``pauseHidesBars`` for existing users, then cleared. Do not read elsewhere.
+        static let legacyHideBarsWhenBlocked = "hideBarsWhenBlocked"
+        static let legacyShowBlockedPause = "showBlockedPause"
         /// Whether the menu-bar widget draws the money-credits ("extra usage") icon when credits are
         /// active and a base limit is exhausted (#144). Default-on (opt-out) — see the property.
         static let showExtraUsage = "showExtraUsage"
@@ -300,28 +302,18 @@ enum PersistedConfig {
         set { defaults.set(newValue, forKey: Key.hideCalmSevenDayBar) }
     }
 
-    /// Whether the **menu-bar** widget hides **both** pacing bars while the user is *blocked* — a main
-    /// window (5h or 7d) is exhausted (`CreditsPacing.mainWindowExhausted`, credits coverage ignored) —
-    /// leaving only the reset countdown (#194, `MenuBarMode.blockedReset`). **Default-on** (opt-out): an
-    /// absent key reads as `true`, because a red 100 % bar carries no pacing information — the actionable
-    /// signal is the time until the block clears. `object(forKey:) as? Bool ?? true` distinguishes
-    /// "unset" (→ true) from an explicit `false` the user chose — `bool(forKey:)` would collapse both to
-    /// `false` and silently defeat the opt-out default. Menu-bar only: the popup keeps its full bars.
-    static var hideBarsWhenBlocked: Bool {
-        get { defaults.object(forKey: Key.hideBarsWhenBlocked) as? Bool ?? AppearancePreset.defaultValues.hideBarsWhenBlocked }
-        set { defaults.set(newValue, forKey: Key.hideBarsWhenBlocked) }
-    }
-
-    /// Whether the **menu-bar** widget draws the orange "pause" glyph as the **leading** element while
-    /// the user is *fully blocked* — every limit exhausted **and** paid credits can't cover
-    /// (`CreditsPacing.isBlocked`), so there is no path to work (#199). **Default-on** (opt-out): an
-    /// absent key reads as `true`. **Independent** of the "Show pacing bars when 5h/7d limits reached"
-    /// toggle: the glyph is drawn left of the bars when they are kept, and left of the countdown in the
-    /// bars-less `.blockedReset` mode. `object(forKey:) as? Bool ?? true` distinguishes "unset" (→ true)
-    /// from an explicit `false` the user chose. Menu-bar only.
-    static var showBlockedPause: Bool {
-        get { defaults.object(forKey: Key.showBlockedPause) as? Bool ?? AppearancePreset.defaultValues.showBlockedPause }
-        set { defaults.set(newValue, forKey: Key.showBlockedPause) }
+    /// Whether the red "pause" icon **hides** the **menu-bar** pacing bars while the user is *fully
+    /// blocked* — every main window (5h or 7d) exhausted **and** paid credits can't cover
+    /// (`CreditsPacing.isBlocked`), so there is no path to work (#194, #227, `MenuBarMode.blockedReset`).
+    /// `true` → only the red pause icon + reset countdown; `false` → pause icon + the (red 100 %) bars.
+    /// The pause icon itself is drawn whenever blocked, independent of this flag. While credits still
+    /// cover an exhausted window it is not a block: the bars stay regardless. **Default follows the
+    /// factory preset** (`.workHarder` → `false`, i.e. keep the bars). `object(forKey:) as? Bool`
+    /// distinguishes "unset" (→ preset default) from an explicit value the user chose. Menu-bar only:
+    /// the popup keeps its full bars. See ``migratePauseKeysIfNeeded()`` for the pre-#227 upgrade path.
+    static var pauseHidesBars: Bool {
+        get { defaults.object(forKey: Key.pauseHidesBars) as? Bool ?? AppearancePreset.defaultValues.pauseHidesBars }
+        set { defaults.set(newValue, forKey: Key.pauseHidesBars) }
     }
 
     /// Whether the **menu-bar** widget draws the money-credits ("extra usage") icon — the trailing
@@ -380,8 +372,7 @@ enum PersistedConfig {
             Key.resetCountdownModeMenuBar,
             Key.showServiceStatusDot,
             Key.hideCalmSevenDayBar,
-            Key.hideBarsWhenBlocked,
-            Key.showBlockedPause,
+            Key.pauseHidesBars,
             Key.showExtraUsage,
             Key.showModelSpecificLimits,
             Key.barStyle,
@@ -390,6 +381,34 @@ enum PersistedConfig {
         ] {
             defaults.removeObject(forKey: key)
         }
+    }
+
+    /// One-time upgrade of the pre-#227 pause settings to the unified ``pauseHidesBars`` key. Before #227
+    /// two independent keys existed: `hideBarsWhenBlocked` (hide the bars when blocked) and
+    /// `showBlockedPause` (draw the pause glyph). #227 merged them into a single "Pause icon hides bars"
+    /// toggle where the icon is always shown and the flag only controls the bars — so the new key inherits
+    /// the old **hide-bars** choice. Runs on every launch and is idempotent: it does nothing once the new
+    /// key exists (or once both legacy keys are gone). `showBlockedPause` has no successor and is simply
+    /// cleared.
+    ///
+    /// Only migrates an **explicit** legacy value: if `hideBarsWhenBlocked` was never set (the user kept
+    /// the default), nothing is written and `pauseHidesBars` falls back to the factory-preset default via
+    /// its getter — the correct behaviour for someone who never touched the old toggle.
+    static func migratePauseKeysIfNeeded() {
+        // Already migrated (or new key explicitly set) → nothing to do.
+        guard defaults.object(forKey: Key.pauseHidesBars) == nil else {
+            clearLegacyPauseKeys()
+            return
+        }
+        if let legacyHide = defaults.object(forKey: Key.legacyHideBarsWhenBlocked) as? Bool {
+            defaults.set(legacyHide, forKey: Key.pauseHidesBars)
+        }
+        clearLegacyPauseKeys()
+    }
+
+    private static func clearLegacyPauseKeys() {
+        defaults.removeObject(forKey: Key.legacyHideBarsWhenBlocked)
+        defaults.removeObject(forKey: Key.legacyShowBlockedPause)
     }
 
     /// Write every **Appearance**-pane key from a named preset's fixed value set (#215, #224) — the
@@ -402,8 +421,7 @@ enum PersistedConfig {
         let v = preset.values
         calmColorMode = v.calmColorMode
         hideCalmSevenDayBar = v.hideCalmSevenDayBar
-        hideBarsWhenBlocked = v.hideBarsWhenBlocked
-        showBlockedPause = v.showBlockedPause
+        pauseHidesBars = v.pauseHidesBars
         showExtraUsage = v.showExtraUsage
         showServiceStatusDot = v.showServiceStatusDot
         showModelSpecificLimits = v.showModelSpecificLimits
@@ -421,8 +439,7 @@ enum PersistedConfig {
         AppearancePresetValues(
             calmColorMode: calmColorMode,
             hideCalmSevenDayBar: hideCalmSevenDayBar,
-            hideBarsWhenBlocked: hideBarsWhenBlocked,
-            showBlockedPause: showBlockedPause,
+            pauseHidesBars: pauseHidesBars,
             showExtraUsage: showExtraUsage,
             showServiceStatusDot: showServiceStatusDot,
             showModelSpecificLimits: showModelSpecificLimits,

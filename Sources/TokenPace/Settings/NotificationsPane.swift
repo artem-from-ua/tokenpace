@@ -42,6 +42,9 @@ struct NotificationsPane: View {
                     SettingsHint(
                         text: "If you hit a Claude usage limit, notifies you when it resets so you "
                             + "can get back to work.")
+                    SettingsHint(
+                        text: "It best suits the *Work harder!* and *Control freak* UI presets on the "
+                            + "*Appearance* tab.")
                     SettingsHint(text: model.backToWorkHint, warning: !model.backToWorkHint.isEmpty)
                 }
 

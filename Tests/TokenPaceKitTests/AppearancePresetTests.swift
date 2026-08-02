@@ -13,8 +13,7 @@ struct AppearancePresetTests {
         let v = AppearancePreset.chill.values
         #expect(v.calmColorMode == .yellowGreenBlue)   // greens/yellows AND far-behind blue all mute
         #expect(v.hideCalmSevenDayBar)
-        #expect(v.hideBarsWhenBlocked)
-        #expect(v.showBlockedPause)
+        #expect(v.pauseHidesBars)   // Chill: when blocked, show only the pause icon (bars hidden)
         #expect(v.showExtraUsage)
         #expect(v.showServiceStatusDot)
         #expect(v.showModelSpecificLimits)
@@ -35,10 +34,10 @@ struct AppearancePresetTests {
         #expect(!chill.showTicks)
         #expect(wh.barStyle == .mixed) // difference 3 — mixed bars (Chill is .simple)
         #expect(chill.barStyle == .simple)
+        #expect(!wh.pauseHidesBars)    // difference 5 — Work harder keeps the bars beside the pause icon
+        #expect(chill.pauseHidesBars)  // …Chill hides them (icon only)
         // The rest matches Chill.
         #expect(wh.hideCalmSevenDayBar == chill.hideCalmSevenDayBar)
-        #expect(wh.hideBarsWhenBlocked == chill.hideBarsWhenBlocked)
-        #expect(wh.showBlockedPause == chill.showBlockedPause)
         #expect(wh.showExtraUsage == chill.showExtraUsage)
         #expect(wh.showServiceStatusDot == chill.showServiceStatusDot)
         #expect(wh.showModelSpecificLimits == chill.showModelSpecificLimits)
@@ -53,8 +52,7 @@ struct AppearancePresetTests {
         let v = AppearancePreset.controlFreak.values
         #expect(v.calmColorMode == .off)   // nothing muted — every state loud
         #expect(!v.hideCalmSevenDayBar)
-        #expect(!v.hideBarsWhenBlocked)
-        #expect(v.showBlockedPause)
+        #expect(!v.pauseHidesBars)   // Control freak: when blocked, keep the bars beside the pause icon
         #expect(v.showExtraUsage)
         #expect(v.showServiceStatusDot)
         #expect(v.showModelSpecificLimits)
@@ -98,8 +96,7 @@ struct AppearancePresetTests {
         let custom = AppearancePresetValues(
             calmColorMode: chill.calmColorMode,
             hideCalmSevenDayBar: chill.hideCalmSevenDayBar,
-            hideBarsWhenBlocked: chill.hideBarsWhenBlocked,
-            showBlockedPause: chill.showBlockedPause,
+            pauseHidesBars: chill.pauseHidesBars,
             showExtraUsage: chill.showExtraUsage,
             showServiceStatusDot: chill.showServiceStatusDot,
             showModelSpecificLimits: chill.showModelSpecificLimits,
