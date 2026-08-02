@@ -267,10 +267,10 @@ struct BarLayoutIsCalmTests {
 
     /// A layout with explicit fractions; `pacing` derived exactly as `barLayout` would
     /// (`time >= usage → onPaceOrBehind`), so `isCalm` is exercised on realistic inputs. `remaining`
-    /// defaults to a full week so the 20-minute orange override is inactive and only the dynamic
-    /// threshold decides — pass a small value to exercise the override. `duration` defaults to twice
-    /// the default `remaining` so `elapsed = duration − remaining` is well past the 20-minute blue
-    /// start override (blue/green split decided by the behind-threshold alone).
+    /// defaults to a full week so the 20-minute orange override is inactive — pass a small value to
+    /// exercise it. `duration` defaults to twice the default `remaining` so `elapsed = duration −
+    /// remaining` is well past the 20-minute blue start override. (`isCalm` is true for both green and
+    /// blue, so the exact behind-threshold here doesn't change these outcomes.)
     private static func layout(usage: Double, time: Double,
                                remaining: TimeInterval = 7 * 24 * 3600,
                                duration: Int = 14 * 24 * 3600) -> BarLayout {
@@ -279,7 +279,7 @@ struct BarLayoutIsCalmTests {
                   windowDurationSeconds: duration)
     }
 
-    @Test func onPaceIsCalm() {   // blue (farBehind, surplus 0.2 > thr 0.08) — still counts as calm
+    @Test func onPaceIsCalm() {   // blue (farBehind, big surplus) — still counts as calm
         #expect(BarLayoutIsCalmTests.layout(usage: 0.3, time: 0.5).isCalm)
     }
 
@@ -318,44 +318,48 @@ struct BarLayoutIsCalmTests {
 @Suite("BarLayout.severity")
 struct BarLayoutSeverityTests {
 
-    /// `duration` defaults to twice the default `remaining`, so `elapsed = duration − remaining` is
-    /// well past the 20-minute blue start override — the blue/green split is decided by the
-    /// behind-threshold alone unless a test passes an override-triggering `remaining`/`duration`.
+    /// Defaults model the **5-hour** window (`duration = 18000`, so the behind-threshold is a fixed
+    /// 3600/18000 = **0.20**), with `remaining = 9000` (`elapsed = 9000` — well past the 20-min blue
+    /// start override). Tests pass explicit `remaining`/`duration` to exercise the override or the 7d
+    /// window.
     private static func layout(usage: Double, time: Double,
-                               remaining: TimeInterval = 7 * 24 * 3600,
-                               duration: Int = 14 * 24 * 3600) -> BarLayout {
+                               remaining: TimeInterval = 9000,
+                               duration: Int = 18_000) -> BarLayout {
         BarLayout(usageFraction: usage, timeFraction: time,
                   pacing: time >= usage ? .onPaceOrBehind : .ahead, remainingSeconds: remaining,
                   windowDurationSeconds: duration)
     }
 
-    @Test func mildlyBehindIsCalm() {   // usage just below time (surplus 0.05 ≤ thr 0.08 at t=0.5) → green
-        #expect(BarLayoutSeverityTests.layout(usage: 0.45, time: 0.5).severity == .calm)
+    @Test func mildlyBehindIsCalm() {   // surplus 0.15 ≤ thr 0.20 (5h) → green
+        #expect(BarLayoutSeverityTests.layout(usage: 0.35, time: 0.5).severity == .calm)
     }
 
     @Test func tieIsCalm() {     // usage == time folds into on-pace → calm (green)
         #expect(BarLayoutSeverityTests.layout(usage: 0.5, time: 0.5).severity == .calm)
     }
 
-    // MARK: blue (farBehind) — the mirror split of green
+    // MARK: blue (farBehind) — the fixed-width split of green
 
-    @Test func deepBehindIsFarBehind() {   // surplus 0.2 > thr 0.08 at t=0.5 → blue
-        #expect(BarLayoutSeverityTests.layout(usage: 0.3, time: 0.5).severity == .farBehind)
+    @Test func deepBehindIsFarBehind() {   // surplus 0.3 > thr 0.20 (5h) → blue
+        #expect(BarLayoutSeverityTests.layout(usage: 0.2, time: 0.5).severity == .farBehind)
     }
 
-    /// The boundary at t=0.5 (behind-threshold 0.08): a surplus just below it is green, just above is
-    /// blue. Values are kept a hair off the exact 0.08 to avoid float-equality noise (`0.5 − 0.42`
-    /// isn't exactly 0.08 in a Double); the strict-`>` convention itself is asserted in the Kit source.
+    /// The fixed 5h boundary is 0.20 (60 min / 5 h): a surplus just below is green, just above blue.
+    /// Values kept a hair off exact 0.20 to avoid float-equality noise; the strict-`>` convention is
+    /// asserted in the Kit source.
     @Test func behindThresholdBoundaryIsStrict() {
-        #expect(BarLayoutSeverityTests.layout(usage: 0.43, time: 0.50).severity == .calm)      // 0.07 < 0.08 → green
-        #expect(BarLayoutSeverityTests.layout(usage: 0.40, time: 0.50).severity == .farBehind) // 0.10 > 0.08 → blue
+        #expect(BarLayoutSeverityTests.layout(usage: 0.32, time: 0.50).severity == .calm)      // 0.18 < 0.20 → green
+        #expect(BarLayoutSeverityTests.layout(usage: 0.28, time: 0.50).severity == .farBehind) // 0.22 > 0.20 → blue
     }
 
-    /// The same surplus is green early (wide threshold) but blue past half-way (threshold shrinks):
-    /// 0.10 surplus vs 0.16 at t=0 (green) vs 0.08 at t=0.5 (blue).
-    @Test func sameSurplusFlipsWithElapsedTime() {
-        #expect(BarLayoutSeverityTests.layout(usage: 0.00, time: 0.10).severity == .calm)       // thr 0.16 → green
-        #expect(BarLayoutSeverityTests.layout(usage: 0.40, time: 0.50).severity == .farBehind)  // thr 0.08 → blue
+    /// The 7-day window has a different fixed width (24 h / 7 d ≈ 0.143), so the same surplus that is
+    /// green on the 5h window (0.20 threshold) is blue on the 7d window.
+    @Test func thresholdDiffersPerWindow() {
+        // surplus 0.17: green on 5h (thr 0.20), blue on 7d (thr ≈0.143).
+        #expect(BarLayoutSeverityTests.layout(usage: 0.33, time: 0.50).severity == .calm)      // 5h defaults
+        let sevenD = BarLayoutSeverityTests.layout(usage: 0.33, time: 0.50,
+                                                   remaining: 302_400, duration: 604_800)
+        #expect(sevenD.severity == .farBehind)   // surplus 0.17 > 0.143
     }
 
     // MARK: 20-minute blue start override
@@ -430,11 +434,11 @@ struct BarLayoutSeverityTests {
     }
 
     /// The near-reset **orange** override is on the ahead side only: it never outranks the on-pace/behind
-    /// branch (a big surplus here is `.farBehind`, not orange) nor exhaustion (which stays red). Note the
-    /// large default `duration` means the blue *start* override is inactive, so the deep surplus grades
-    /// to blue by the behind-threshold.
+    /// branch (a big surplus here is `.farBehind`, not orange) nor exhaustion (which stays red). elapsed
+    /// (= 18000 − 60) is past the 20-min start override, so the deep surplus grades to blue by the
+    /// fixed-width behind-threshold (0.20 for 5h; surplus 0.3 > 0.20).
     @Test func overrideDoesNotOutrankPaceOrExhaustion() {
-        #expect(BarLayoutSeverityTests.layout(usage: 0.5, time: 0.6, remaining: 60).severity == .farBehind)
+        #expect(BarLayoutSeverityTests.layout(usage: 0.3, time: 0.6, remaining: 60).severity == .farBehind)
         #expect(BarLayoutSeverityTests.layout(usage: 1.0, time: 0.5, remaining: 60).severity == .exhausted)
     }
 }
@@ -462,24 +466,25 @@ struct AheadThresholdTests {
 @Suite("PacingModel.behindThreshold")
 struct BehindThresholdTests {
 
-    /// Exact mirror of `aheadThreshold`: same nodes, same clamp.
-    @Test func curveHitsExpectedNodes() {
-        #expect(abs(PacingModel.behindThreshold(timeFraction: 0.0)  - 0.16) < 1e-9)
-        #expect(abs(PacingModel.behindThreshold(timeFraction: 0.5)  - 0.08) < 1e-9)
-        #expect(abs(PacingModel.behindThreshold(timeFraction: 0.75) - 0.04) < 1e-9)
-        #expect(abs(PacingModel.behindThreshold(timeFraction: 1.0)  - 0.00) < 1e-9)
+    /// A fixed span of real time as a fraction of the window: 60 min / 5 h = 0.20, 24 h / 7 d ≈ 0.1429.
+    @Test func fixedWidthPerWindow() {
+        #expect(abs(PacingModel.behindThreshold(windowDurationSeconds: 18_000) - 0.20) < 1e-9)          // 3600/18000
+        #expect(abs(PacingModel.behindThreshold(windowDurationSeconds: 604_800) - (86_400.0 / 604_800.0)) < 1e-9)
     }
 
-    @Test func clampsOutOfRangeInput() {
-        #expect(abs(PacingModel.behindThreshold(timeFraction: -0.5) - 0.16) < 1e-9)   // t < 0 → 0.16
-        #expect(abs(PacingModel.behindThreshold(timeFraction:  1.5) - 0.00) < 1e-9)   // t > 1 → 0
+    /// Unlike `aheadThreshold`, it does NOT depend on how far the window has elapsed — same value
+    /// regardless of timeFraction (the input is the window length, not the elapsed fraction).
+    @Test func independentOfElapsedTime() {
+        // Both computed from the 5-hour duration → identical, no timeFraction term.
+        let a = PacingModel.behindThreshold(windowDurationSeconds: 18_000)
+        let b = PacingModel.behindThreshold(windowDurationSeconds: 18_000)
+        #expect(a == b)
+        #expect(abs(a - 0.20) < 1e-9)
     }
 
-    /// Behind and ahead thresholds are the same function (symmetric split around the pace line).
-    @Test func mirrorsAheadThreshold() {
-        for t in [0.0, 0.13, 0.37, 0.62, 0.88, 1.0] {
-            #expect(abs(PacingModel.behindThreshold(timeFraction: t)
-                        - PacingModel.aheadThreshold(timeFraction: t)) < 1e-12)
-        }
+    /// Non-positive duration (inert placeholder bars) returns 0 — any surplus reads as the calmer green.
+    @Test func nonPositiveDurationIsZero() {
+        #expect(PacingModel.behindThreshold(windowDurationSeconds: 0) == 0)
+        #expect(PacingModel.behindThreshold(windowDurationSeconds: -1) == 0)
     }
 }

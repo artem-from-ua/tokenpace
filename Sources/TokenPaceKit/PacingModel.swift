@@ -32,6 +32,18 @@ public enum LimitWindow: Sendable, Equatable {
         case .sevenDay: return 7
         }
     }
+
+    /// The green→blue (`.farBehind`) crossover width, as a **fixed span of real time** rather than a
+    /// fraction of the window: the surplus (`time − usage`) must exceed this much of the window to read
+    /// blue. **60 min for the 5-hour window, 24 h for the 7-day window** — see
+    /// ``PacingModel/behindThreshold(windowDurationSeconds:)``, which divides this by
+    /// ``durationSeconds`` to get the fraction the pacing math compares against.
+    public var blueBehindWidthSeconds: Int {
+        switch self {
+        case .fiveHour: return 3_600      // 60 min
+        case .sevenDay: return 86_400     // 24 h
+        }
+    }
 }
 
 // MARK: - PacingState
@@ -115,7 +127,7 @@ public struct BarLayout: Sendable, Equatable {
     /// layer and cannot be imported here). The **formulas** are shared via
     /// ``PacingModel/aheadThreshold(timeFraction:)`` and ``PacingModel/behindThreshold(timeFraction:)``
     /// so the two never drift; only the comparison and the two overrides are restated here:
-    /// - `.farBehind` — **blue** (`.onPaceOrBehind`, behind by `>` the dynamic behind-threshold, and
+    /// - `.farBehind` — **blue** (`.onPaceOrBehind`, behind by `>` the fixed behind-threshold, and
     ///   past the 20-min start override): deep behind pace / big surplus, calmer than green.
     /// - `.calm` — **green** (`usage <= time` but behind by `≤` the behind-threshold, or within the
     ///   first 20 min) or **yellow** (ahead by less than the ahead-threshold): not yet worth flagging.
@@ -123,11 +135,11 @@ public struct BarLayout: Sendable, Equatable {
     ///   `≤ 20 min` (``PacingModel/pacingOrangeOverrideSeconds``), but not yet exhausted (`usage < 1`).
     /// - `.exhausted` — **red**: `usageFraction >= 1` (limit hit, service blocked).
     ///
-    /// The dynamic thresholds are both `0.16 · (1 − timeFraction)`: a lead/surplus that reads calm
-    /// early in a window (16 pts of slack) becomes significant as the window drains (4 pts at 75 %, 0
-    /// at the end). The ahead comparison is strict `<` (a lead exactly at the threshold is orange);
-    /// the behind comparison mirrors it as strict `>` (a surplus exactly at the threshold is green,
-    /// the louder of the two calm tones). The **start** override keeps the first 20 minutes green so
+    /// The **ahead** threshold is dynamic (`0.16 · (1 − timeFraction)` — 16 pts of slack early,
+    /// shrinking to 0 at the end); a lead exactly at it is orange (strict `<`). The **behind** threshold
+    /// is instead a *fixed span of real time* — 60 min (5h) / 24 h (7d) as a fraction of the window
+    /// (``PacingModel/behindThreshold(windowDurationSeconds:)``); a surplus exactly at it is green
+    /// (strict `>`, the louder of the two calm tones). The **start** override keeps the first 20 minutes green so
     /// blue never flickers at window start (symmetric to the end-of-window orange override).
     public var severity: PacingSeverity {
         if pacing == .onPaceOrBehind {
@@ -135,7 +147,7 @@ public struct BarLayout: Sendable, Equatable {
             // start). elapsed < 0 under clock skew (remaining > duration) also folds to green here.
             let elapsed = Double(windowDurationSeconds) - remainingSeconds
             if elapsed <= PacingModel.pacingBlueStartOverrideSeconds { return .calm }   // green
-            return (timeFraction - usageFraction) > PacingModel.behindThreshold(timeFraction: timeFraction)
+            return (timeFraction - usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: windowDurationSeconds)
                 ? .farBehind : .calm                              // blue : green
         }
         if usageFraction >= 1 { return .exhausted }                // red (limit hit)
@@ -276,25 +288,42 @@ public enum PacingModel {
         min(0.16, max(0, 0.16 * (1 - timeFraction)))
     }
 
-    /// The green→blue boundary for the on-pace/behind gap, as a function of how far the window has
-    /// elapsed: `0.16 · (1 − timeFraction)`, clamped to `[0, 0.16]` — the exact mirror of
-    /// ``aheadThreshold(timeFraction:)``.
+    /// The green→blue (`.farBehind`) boundary for the on-pace/behind gap, as a **fixed span of real
+    /// time** rather than a fraction of the window (unlike ``aheadThreshold(timeFraction:)``, which is
+    /// dynamic). Returned as the fraction the pacing math compares against:
+    /// `LimitWindow.blueBehindWidthSeconds / windowDurationSeconds` —
+    /// **60 min / 5 h = 0.20** for the 5-hour window, **24 h / 7 d ≈ 0.1429** for the 7-day window.
     ///
     /// A surplus (`timeFraction − usageFraction`) at or below this stays green (`.calm`); a surplus
-    /// strictly above it is blue (`.farBehind`). 16 pts of slack early in a window shrinking to 0 at
-    /// the end: being far behind early is unremarkable (plenty of window left), but late in a window
-    /// the same surplus means you have real headroom to push. Shared by ``BarLayout/severity`` (Kit)
-    /// and `PopupBarView.behindColor` (AppKit) so colour and severity never drift.
+    /// strictly above it is blue (`.farBehind`). Being behind by more than an hour (5h) / a day (7d)
+    /// means you have real, fixed headroom to push, independent of how far the window has elapsed.
+    /// Shared by ``BarLayout/severity`` (Kit) and `PopupBarView.behindColor` (AppKit) so colour and
+    /// severity never drift.
     ///
     /// The comparison side uses a strict `>` (a surplus exactly at the threshold is green — the louder
-    /// of the two calm tones), mirroring how ``aheadThreshold(timeFraction:)``'s boundary lands on the
-    /// louder side (orange there, green here). A separate 20-min *start* override
-    /// (``pacingBlueStartOverrideSeconds``) keeps the first 20 minutes green regardless of this.
+    /// of the two calm tones). A separate 20-min *start* override (``pacingBlueStartOverrideSeconds``)
+    /// keeps the first 20 minutes green regardless of this.
     ///
-    /// - Parameter timeFraction: Fraction of the window elapsed, in `[0, 1]` (already clamped by
-    ///   ``elapsedFraction(resetsAt:now:window:)``; the extra clamp here is defence in depth).
-    public static func behindThreshold(timeFraction: Double) -> Double {
-        min(0.16, max(0, 0.16 * (1 - timeFraction)))
+    /// - Parameter windowDurationSeconds: The window length (``LimitWindow/durationSeconds``: 18 000 for
+    ///   5h, 604 800 for 7d), carried on ``BarLayout``. A non-positive value (inert placeholder bars)
+    ///   returns `0` — any surplus reads as the calmer green, matching those bars' forced-calm intent.
+    public static func behindThreshold(windowDurationSeconds: Int) -> Double {
+        guard windowDurationSeconds > 0 else { return 0 }
+        let width = blueBehindWidthSeconds(forWindowDurationSeconds: windowDurationSeconds)
+        return Double(width) / Double(windowDurationSeconds)
+    }
+
+    /// The fixed green→blue crossover width in seconds for a window of the given length — 60 min for the
+    /// 5-hour window, 24 h for the 7-day window (``LimitWindow/blueBehindWidthSeconds``). Resolved by
+    /// duration so ``BarLayout`` (which carries only `windowDurationSeconds`, not the `LimitWindow`) can
+    /// compute the threshold. An unrecognised duration falls back to the 5-hour width proportionally
+    /// (`0.20 · duration`) — only reachable from synthetic/placeholder layouts, never the real windows.
+    static func blueBehindWidthSeconds(forWindowDurationSeconds duration: Int) -> Int {
+        switch duration {
+        case LimitWindow.fiveHour.durationSeconds: return LimitWindow.fiveHour.blueBehindWidthSeconds
+        case LimitWindow.sevenDay.durationSeconds: return LimitWindow.sevenDay.blueBehindWidthSeconds
+        default:                                   return Int(0.20 * Double(duration))
+        }
     }
 
     // MARK: barLayout

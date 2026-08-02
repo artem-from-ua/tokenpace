@@ -298,7 +298,8 @@ final class PopupBarView: NSView {
     /// on-pace/behind range into **green** (mild) and **blue** (`farBehind`, deep behind / big surplus):
     /// - within the first 20 min of the window (`pacingBlueStartOverrideSeconds`) → green (blue must
     ///   not flicker at window start)
-    /// - surplus (`time − usage`) `>` the dynamic ``PacingModel/behindThreshold(timeFraction:)`` → blue
+    /// - surplus (`time − usage`) `>` the fixed-width ``PacingModel/behindThreshold(windowDurationSeconds:)``
+    ///   (60 min / 5h, 24 h / 7d) → blue
     /// - otherwise → green
     ///
     /// Takes the whole `BarLayout` (it carries `windowDurationSeconds`, needed for the start override)
@@ -308,7 +309,7 @@ final class PopupBarView: NSView {
         let green = ColorStore.shared.color(.green)
         let elapsed = Double(l.windowDurationSeconds) - l.remainingSeconds
         if elapsed <= PacingModel.pacingBlueStartOverrideSeconds { return green }
-        return (l.timeFraction - l.usageFraction) > PacingModel.behindThreshold(timeFraction: l.timeFraction)
+        return (l.timeFraction - l.usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: l.windowDurationSeconds)
             ? ColorStore.shared.color(.paceBlue) : green
     }
 
@@ -1234,14 +1235,14 @@ final class PopupViewController: NSViewController {
 
     /// Whether this bar reads **blue** (far behind pace) — the exact match of the `>` blue test in
     /// ``PopupBarView/behindColor``, so the wording and the gap colour always agree: on the
-    /// on-pace/behind side, past the 20-min start override, with a surplus `>` the dynamic
-    /// ``PacingModel/behindThreshold(timeFraction:)``. The caller gates this on `isBaseLimit` so only
+    /// on-pace/behind side, past the 20-min start override, with a surplus `>` the fixed-width
+    /// ``PacingModel/behindThreshold(windowDurationSeconds:)``. The caller gates this on `isBaseLimit` so only
     /// the base 5h/7d rows (which render blue) get the "far behind pace" wording.
     private static func isFarBehind(_ bar: BarLayout) -> Bool {
         guard bar.pacing == .onPaceOrBehind else { return false }
         let elapsed = Double(bar.windowDurationSeconds) - bar.remainingSeconds
         if elapsed <= PacingModel.pacingBlueStartOverrideSeconds { return false }
-        return (bar.timeFraction - bar.usageFraction) > PacingModel.behindThreshold(timeFraction: bar.timeFraction)
+        return (bar.timeFraction - bar.usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: bar.windowDurationSeconds)
     }
 
     // MARK: Extra usage (money-credits) formatters (#145)
