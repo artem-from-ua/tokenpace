@@ -29,6 +29,7 @@ final class SettingsModel {
     var onMonitoredServicesChange: ((MonitoredServices) -> Void)?
     var onCheckForUpdatesNow: (() -> Void)?
     var onCalmColorsChange: ((Bool) -> Void)?
+    var onWorkHarderColorsChange: ((Bool) -> Void)?
     var onResetCountdownModeMenuBarChange: ((ResetCountdownMode) -> Void)?
     var onServiceDotChange: ((Bool) -> Void)?
     var onExtraUsageChange: ((Bool) -> Void)?
@@ -67,6 +68,7 @@ final class SettingsModel {
     // MARK: Appearance (menu-bar widget)
 
     var calmColors = false
+    var workHarderColors = false
     var hideCalmSevenDay = false
     var hideBarsWhenBlocked = false
     var showBlockedPause = false
@@ -208,6 +210,7 @@ final class SettingsModel {
         pausePolling = PersistedConfig.pausePollingWhenScreenLocked
 
         calmColors = PersistedConfig.calmMenuBarColors
+        workHarderColors = PersistedConfig.workHarderColors
         hideCalmSevenDay = PersistedConfig.hideCalmSevenDayBar
         hideBarsWhenBlocked = PersistedConfig.hideBarsWhenBlocked
         showBlockedPause = PersistedConfig.showBlockedPause
@@ -252,6 +255,13 @@ final class SettingsModel {
         PersistedConfig.calmMenuBarColors = on
         AppLogger.lifecycle.notice("calm-colors: menu-bar set \(on, privacy: .public)")
         onCalmColorsChange?(on)
+    }
+
+    func setWorkHarderColors(_ on: Bool) {
+        workHarderColors = on
+        PersistedConfig.workHarderColors = on
+        AppLogger.lifecycle.notice("work-harder-colors: menu-bar set \(on, privacy: .public)")
+        onWorkHarderColorsChange?(on)
     }
 
     func setHideCalmSevenDay(_ on: Bool) {
@@ -331,6 +341,7 @@ final class SettingsModel {
     /// reset and preset paths, which both mutate all keys at once and then re-render as a batch.
     private func fireAppearanceCallbacks() {
         onCalmColorsChange?(calmColors)
+        onWorkHarderColorsChange?(workHarderColors)
         onHideCalmSevenDayChange?(hideCalmSevenDay)
         onHideBarsWhenBlockedChange?(hideBarsWhenBlocked)
         onShowBlockedPauseChange?(showBlockedPause)

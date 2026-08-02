@@ -95,6 +95,12 @@ public struct BarLayout: Sendable, Equatable {
     /// cannot express — 20 min is 6.7 % of the 5h window but 0.2 % of the 7d window. May be ≤ 0
     /// (reset now/past) or the full window length; only the `≤ 1200 s` case changes the colour.
     public let remainingSeconds: TimeInterval
+    /// The window's full length in seconds (18 000 for 5h, 604 800 for 7d). Carried so the
+    /// **start**-of-window override for the blue (`farBehind`) zone can be expressed as
+    /// `elapsed = windowDurationSeconds − remainingSeconds ≤ 1200` — the symmetric counterpart of
+    /// the *end*-of-window orange override, which needs only `remainingSeconds`. See
+    /// ``PacingModel/pacingBlueStartOverrideSeconds``.
+    public let windowDurationSeconds: Int
 
     /// Left edge of the gap zone = `min(usageFraction, timeFraction)`.
     public var gapStart: Double { min(usageFraction, timeFraction) }
@@ -105,40 +111,65 @@ public struct BarLayout: Sendable, Equatable {
     /// AppKit-free from the raw fractions. This is the single Kit-side source that both the
     /// "calm" muting (#105) and the reset-countdown selection (#103, ADR-0028/0029) read.
     ///
-    /// Mirrors the colour grading in `PopupBarView.aheadColor` (which lives in the AppKit layer and
-    /// cannot be imported here). The **formula** is shared via ``PacingModel/aheadThreshold(timeFraction:)``
-    /// so the two never drift; only the comparison and the 20-minute override are restated here:
-    /// - `.calm` — **green** (`usage <= time`, i.e. `.onPaceOrBehind`) or **yellow** (ahead by less
-    ///   than the dynamic threshold): not yet worth flagging.
+    /// Mirrors the colour grading in `PopupBarView.aheadColor`/`behindColor` (which live in the AppKit
+    /// layer and cannot be imported here). The **formulas** are shared via
+    /// ``PacingModel/aheadThreshold(timeFraction:)`` and ``PacingModel/behindThreshold(timeFraction:)``
+    /// so the two never drift; only the comparison and the two overrides are restated here:
+    /// - `.farBehind` — **blue** (`.onPaceOrBehind`, behind by `>` the dynamic behind-threshold, and
+    ///   past the 20-min start override): deep behind pace / big surplus, calmer than green.
+    /// - `.calm` — **green** (`usage <= time` but behind by `≤` the behind-threshold, or within the
+    ///   first 20 min) or **yellow** (ahead by less than the ahead-threshold): not yet worth flagging.
     /// - `.ahead` — **orange**: ahead by `≥` the dynamic threshold, or the window resets in
     ///   `≤ 20 min` (``PacingModel/pacingOrangeOverrideSeconds``), but not yet exhausted (`usage < 1`).
     /// - `.exhausted` — **red**: `usageFraction >= 1` (limit hit, service blocked).
     ///
-    /// The dynamic threshold is `0.16 · (1 − timeFraction)`: a lead that reads calm early in a window
-    /// (16 pts of slack) becomes noisy as the window drains (4 pts at 75 %, 0 at the end), because
-    /// there is less time left to catch up. The comparison is strict (`<`, no epsilon): a lead
-    /// exactly at the threshold is orange, not yellow.
+    /// The dynamic thresholds are both `0.16 · (1 − timeFraction)`: a lead/surplus that reads calm
+    /// early in a window (16 pts of slack) becomes significant as the window drains (4 pts at 75 %, 0
+    /// at the end). The ahead comparison is strict `<` (a lead exactly at the threshold is orange);
+    /// the behind comparison mirrors it as strict `>` (a surplus exactly at the threshold is green,
+    /// the louder of the two calm tones). The **start** override keeps the first 20 minutes green so
+    /// blue never flickers at window start (symmetric to the end-of-window orange override).
     public var severity: PacingSeverity {
-        if pacing == .onPaceOrBehind { return .calm }              // green
+        if pacing == .onPaceOrBehind {
+            // 20-min start-of-window override: always plain green early on (blue must not flicker at
+            // start). elapsed < 0 under clock skew (remaining > duration) also folds to green here.
+            let elapsed = Double(windowDurationSeconds) - remainingSeconds
+            if elapsed <= PacingModel.pacingBlueStartOverrideSeconds { return .calm }   // green
+            return (timeFraction - usageFraction) > PacingModel.behindThreshold(timeFraction: timeFraction)
+                ? .farBehind : .calm                              // blue : green
+        }
         if usageFraction >= 1 { return .exhausted }                // red (limit hit)
         if remainingSeconds <= PacingModel.pacingOrangeOverrideSeconds { return .ahead }  // orange (≤ 20 min)
         return (usageFraction - timeFraction) < PacingModel.aheadThreshold(timeFraction: timeFraction)
             ? .calm : .ahead                                       // yellow : orange
     }
 
-    /// Whether this bar is "calm" — its rendered gap colour is **green or yellow**, i.e. pacing is
-    /// not yet worth flagging. Derived from ``severity`` so the thresholds live in one place. The
-    /// menu bar uses this to mute colours (#105) and to drop the reset-countdown label when both
-    /// bars are calm (#103, ADR-0028/0029).
-    public var isCalm: Bool { severity == .calm }
+    /// Whether this bar is "calm" — its rendered gap colour is **blue, green, or yellow**, i.e. pacing
+    /// is not yet worth flagging. Derived from ``severity`` so the thresholds live in one place; both
+    /// `.farBehind` (blue, deep behind) and `.calm` (green/yellow) count as calm — blue is *calmer*
+    /// than green, never noisier. The menu bar uses this to mute colours (#105) and to drop the
+    /// reset-countdown label when both bars are calm (#103, ADR-0028/0029). Note: the reset-countdown
+    /// *noisy* test keys off `.ahead`/`.exhausted` directly (not `!isCalm`), so `.farBehind` never
+    /// forces a countdown — see `MenuBarLayout.selectReset`.
+    public var isCalm: Bool { severity == .calm || severity == .farBehind }
 }
 
 // MARK: - PacingSeverity
 
-/// Three-way pacing grade of a bar, mirroring the menu-bar/popup colour tiers. AppKit-free so the
+/// Four-way pacing grade of a bar, mirroring the menu-bar/popup colour tiers. AppKit-free so the
 /// pure model layer can decide reset-countdown behaviour (#103) without importing the view palette.
+///
+/// The calm order (calmest → loudest): **blue** (`farBehind`) → **green/yellow** (`calm`) →
+/// **orange** (`ahead`) → **red** (`exhausted`). `farBehind` and `calm` are both "not worth
+/// flagging" (see ``BarLayout/isCalm``); `farBehind` is only *calmer* than green, never noisier.
 public enum PacingSeverity: Sendable, Equatable {
-    /// Green (on pace / behind) or yellow (mildly ahead, below the dynamic threshold) — not worth flagging.
+    /// Blue — deep behind pace / big surplus: usage is below the elapsed time by `≥` the dynamic
+    /// ``PacingModel/behindThreshold(timeFraction:)`` (and past the 20-min start override). Calmer
+    /// than green; never flagged, never "noisy". Restricted to the base 5h/7d bars in the render
+    /// layer (per-model and credits rows stay green).
+    case farBehind
+    /// Green (on pace / mildly behind, below the dynamic threshold) or yellow (mildly ahead, below
+    /// the dynamic threshold) — not worth flagging.
     case calm
     /// Orange — ahead by `≥` the dynamic threshold (or `≤ 20 min` to reset), not yet exhausted (`usage < 1`).
     case ahead
@@ -220,6 +251,13 @@ public enum PacingModel {
     /// 6.7 % of the 5h window but only 0.2 % of the 7d window — it cannot come from `timeFraction`.
     public static let pacingOrangeOverrideSeconds: TimeInterval = 1200
 
+    /// Seconds-since-window-**start** at or below which the on-pace/behind gap is forced to plain green
+    /// (never blue `.farBehind`), regardless of the behind-threshold: at the very start of a window
+    /// almost any usage reads as a big surplus, so blue would flicker on immediately. 20 minutes.
+    /// The symmetric counterpart of ``pacingOrangeOverrideSeconds`` (which guards the *end*): elapsed
+    /// since start is `windowDurationSeconds − remainingSeconds`, so this one needs the window length.
+    public static let pacingBlueStartOverrideSeconds: TimeInterval = 1200
+
     /// The yellow→orange boundary for the ahead-of-pace gap, as a function of how far the window
     /// has elapsed: `0.16 · (1 − timeFraction)`, clamped to `[0, 0.16]`.
     ///
@@ -235,6 +273,27 @@ public enum PacingModel {
     /// - Parameter timeFraction: Fraction of the window elapsed, in `[0, 1]` (already clamped by
     ///   ``elapsedFraction(resetsAt:now:window:)``; the extra clamp here is defence in depth).
     public static func aheadThreshold(timeFraction: Double) -> Double {
+        min(0.16, max(0, 0.16 * (1 - timeFraction)))
+    }
+
+    /// The green→blue boundary for the on-pace/behind gap, as a function of how far the window has
+    /// elapsed: `0.16 · (1 − timeFraction)`, clamped to `[0, 0.16]` — the exact mirror of
+    /// ``aheadThreshold(timeFraction:)``.
+    ///
+    /// A surplus (`timeFraction − usageFraction`) at or below this stays green (`.calm`); a surplus
+    /// strictly above it is blue (`.farBehind`). 16 pts of slack early in a window shrinking to 0 at
+    /// the end: being far behind early is unremarkable (plenty of window left), but late in a window
+    /// the same surplus means you have real headroom to push. Shared by ``BarLayout/severity`` (Kit)
+    /// and `PopupBarView.behindColor` (AppKit) so colour and severity never drift.
+    ///
+    /// The comparison side uses a strict `>` (a surplus exactly at the threshold is green — the louder
+    /// of the two calm tones), mirroring how ``aheadThreshold(timeFraction:)``'s boundary lands on the
+    /// louder side (orange there, green here). A separate 20-min *start* override
+    /// (``pacingBlueStartOverrideSeconds``) keeps the first 20 minutes green regardless of this.
+    ///
+    /// - Parameter timeFraction: Fraction of the window elapsed, in `[0, 1]` (already clamped by
+    ///   ``elapsedFraction(resetsAt:now:window:)``; the extra clamp here is defence in depth).
+    public static func behindThreshold(timeFraction: Double) -> Double {
         min(0.16, max(0, 0.16 * (1 - timeFraction)))
     }
 
@@ -266,7 +325,8 @@ public enum PacingModel {
         let timeFraction  = elapsedFraction(resetsAt: resetsAt, now: now, window: window)
         let pacing: PacingState = timeFraction >= usageFraction ? .onPaceOrBehind : .ahead
         return BarLayout(usageFraction: usageFraction, timeFraction: timeFraction,
-                         pacing: pacing, remainingSeconds: remaining)
+                         pacing: pacing, remainingSeconds: remaining,
+                         windowDurationSeconds: window.durationSeconds)
     }
 
     // MARK: blockIndex (popup-only derivative)

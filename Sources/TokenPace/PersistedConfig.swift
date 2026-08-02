@@ -51,6 +51,9 @@ enum PersistedConfig {
         /// Whether the menu-bar widget mutes its soft pacing colours to white (#105). Default-off
         /// (opt-in) — see the property.
         static let calmMenuBarColors = "calmMenuBarColors"
+        /// Whether the far-behind **blue** pacing zone stays coloured under calm colours ("Work
+        /// harder"). Default-off (opt-in) — see the property.
+        static let workHarderColors = "workHarderColors"
         /// How the menu-bar widget picks/hides the reset countdown (#103), stored as the raw
         /// `ResetCountdownMode` string. Default `.smart` — see the property.
         static let resetCountdownModeMenuBar = "resetCountdownModeMenuBar"
@@ -244,6 +247,15 @@ enum PersistedConfig {
         set { defaults.set(newValue, forKey: Key.calmMenuBarColors) }
     }
 
+    /// Whether the far-behind **blue** pacing zone (deep behind pace / big surplus) on the base 5h/7d
+    /// bars stays coloured under ``calmMenuBarColors`` instead of muting to white — "Work harder".
+    /// **Default-off** (opt-in): an absent key reads as `false`, so out of the box blue mutes with the
+    /// rest of the calm states. Only has a visible effect when `calmMenuBarColors` is on.
+    static var workHarderColors: Bool {
+        get { defaults.object(forKey: Key.workHarderColors) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.workHarderColors) }
+    }
+
     /// How the **menu-bar** widget picks or hides the reset countdown (#103, ADR-0029). Named for the
     /// menu bar specifically because the popup has its own countdown logic. Stored as the raw
     /// `ResetCountdownMode` string; an absent key or an unrecognised value (a newer build's value, or a
@@ -337,6 +349,7 @@ enum PersistedConfig {
     static func resetAppearanceToDefaults() {
         for key in [
             Key.calmMenuBarColors,
+            Key.workHarderColors,
             Key.resetCountdownModeMenuBar,
             Key.showServiceStatusDot,
             Key.hideCalmSevenDayBar,
@@ -357,6 +370,7 @@ enum PersistedConfig {
     static func apply(_ preset: AppearancePreset) {
         let v = preset.values
         calmMenuBarColors = v.calmMenuBarColors
+        workHarderColors = v.workHarderColors
         hideCalmSevenDayBar = v.hideCalmSevenDayBar
         hideBarsWhenBlocked = v.hideBarsWhenBlocked
         showBlockedPause = v.showBlockedPause

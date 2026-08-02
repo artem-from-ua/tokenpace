@@ -47,6 +47,17 @@ final class StatusItemView: NSView {
         }
     }
 
+    /// "Work harder" (#…): when on, the far-behind **blue** (`.farBehind`) zone is treated as
+    /// **non-calm** — it is NOT muted to white under ``calmColors``, so a big surplus stays coloured
+    /// (a nudge that there's headroom to push). Only has a visible effect when `calmColors` is on;
+    /// with calm off, blue is already coloured. Off by default. Redraw on change.
+    var workHarder: Bool = false {
+        didSet {
+            guard workHarder != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
     /// Saturation/vividness of the **colour accents** (pacing gap, service dot, idle blue) — a multiplier
     /// applied to the resolved `.system*` colour at the draw site. `1.0` = the raw system colour; lower
     /// values mute the accent toward grey so it sits calmer against a busy wallpaper. Kept as a hook for
@@ -139,6 +150,12 @@ final class StatusItemView: NSView {
         /// here: they come from `PopupBarView.aheadColor` (discrete yellow/orange/red buckets), shared
         /// with the popup so both bars agree.
         static var gapGreen: NSColor { ColorStore.shared.color(.green) }
+
+        /// Pacing gap / dot when **far behind** pace (deep behind / big surplus) on the base 5h/7d
+        /// bars — `.systemBlue` via the dedicated `paceBlue` role (distinct from the idle-bar blue).
+        /// Chosen by `PopupBarView.behindColor`; on the menu bar the surface only ever carries base
+        /// 5h/7d bars, so no per-row gate is needed here.
+        static var gapBlue: NSColor { ColorStore.shared.color(.paceBlue) }
 
         /// Time-indicator dot when on pace. Shares the unified green with the gap (`.systemGreen`), so the
         /// marker reads as the gap's colour with no manual lightening.
@@ -643,10 +660,16 @@ final class StatusItemView: NSView {
     private func calmedGapColor(_ l: BarLayout) -> NSColor {
         // Calm neutral is a bright tone (labelColor at the text opacity, via `bright`); the coloured
         // pacing gap is an accent (scaled by accentSaturation). Neither is the dimmed bar track.
-        if calmColors && l.isCalm { return bright(Palette.calmWhite) }
-        return accent(l.pacing == .ahead
-            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
-            : Palette.gapGreen)
+        // "Work harder" exempts the far-behind blue from muting so a big surplus stays coloured.
+        if calmColors && l.isCalm && !(workHarder && l.severity == .farBehind) {
+            return bright(Palette.calmWhite)
+        }
+        if l.pacing == .ahead {
+            return accent(PopupBarView.aheadColor(
+                usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds))
+        }
+        // Calm side: the menu bar only carries base 5h/7d bars, so split green↔blue unconditionally.
+        return accent(PopupBarView.behindColor(l))
     }
 
     /// Fill the sub-rect spanning the fraction range `[from, to)` of a bar.

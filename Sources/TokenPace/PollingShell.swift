@@ -455,6 +455,12 @@ actor StubUsageTransport: UsageTransport {
         /// stays green. Use this to see the override flip a would-be-calm bar to noisy.
         case nearResetFiveHour
 
+        /// **Far behind** frame (ADR-0061): both base bars deep behind pace with a big surplus, past the
+        /// 20-min start override — 5h (usage 5 vs elapsed ~60 % → surplus ~0.55) and 7d (usage 10 vs
+        /// elapsed ~71 % → surplus ~0.61), both far above the behind-threshold → **blue**. Use this to
+        /// see the far-behind blue zone and the "Work harder" toggle (blue stays coloured under Calm).
+        case farBehind
+
         /// (fiveUtil, sevenUtil, fiveResetSeconds, sevenResetSeconds).
         var values: (five: Double, seven: Double, fiveIn: TimeInterval, sevenIn: TimeInterval) {
             switch self {
@@ -466,6 +472,7 @@ actor StubUsageTransport: UsageTransport {
             case .calmFiveOrangeSeven: return (10, 55, 4 * 3600, 5 * 24 * 3600)
             case .calmBoth:           return (10, 20, 4 * 3600, 5 * 24 * 3600)
             case .nearResetFiveHour:  return (98, 20, 12 * 60, 5 * 24 * 3600)
+            case .farBehind:          return (5, 10, 2 * 3600, 2 * 24 * 3600)
             }
         }
     }

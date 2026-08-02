@@ -174,6 +174,7 @@ token itself never is.
 | 158 | `lifecycle` | `.notice` | `launch-at-login: user set <true/false>` | user toggled the launch-at-login checkbox successfully |
 | 164 | `lifecycle` | `.error` | `launch-at-login: toggle failed: <error>` | toggle threw (e.g. unsigned build) — a deliberate user action, so it stays `.error` |
 | 424 | `lifecycle` | `.notice` | `calm-colors: menu-bar set <bool>` | user toggled the "Calm MenuBar Widget colors" checkbox (#105) |
+| — | `lifecycle` | `.notice` | `work-harder-colors: menu-bar set <bool>` | user toggled the "Work harder" checkbox (far-behind blue stays coloured under Calm colors; ADR-0061) |
 | 434 | `lifecycle` | `.notice` | `reset-countdown: menu-bar mode set <mode>` | user picked a "Reset countdown" radio (#103); `<mode>` is the raw `ResetCountdownMode` |
 | 442 | `lifecycle` | `.notice` | `service-status-dot: menu-bar set <bool>` | user toggled the "Show service status dot on issues" checkbox (#31) |
 | — | `lifecycle` | `.notice` | `extra-usage-icon: menu-bar set <bool>` | user toggled the "Show extra-usage credits icon" checkbox (#146) |

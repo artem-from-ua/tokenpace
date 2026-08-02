@@ -641,6 +641,18 @@ struct MenuBarLayoutSelectResetTests {
         #expect(Self.shown(five: .calm, seven: .calm, mode: .always)?.which == .fiveHour)
     }
 
+    // ── farBehind (blue) is calm, never noisy — must not force a countdown ─────────────────────
+    @Test func farBehindIsNotNoisy() {
+        // Both far-behind → hidden in smart (identical to both-calm), shown only in always.
+        #expect(Self.select(five: .farBehind, seven: .farBehind, mode: .smart) == .hide)
+        #expect(Self.shown(five: .farBehind, seven: .farBehind, mode: .always)?.which == .fiveHour)
+        // A far-behind 7d beside a calm 5h stays hidden in smart (blue never surfaces a countdown).
+        #expect(Self.select(five: .calm, seven: .farBehind, mode: .smart) == .hide)
+        #expect(Self.select(five: .farBehind, seven: .calm, mode: .smart) == .hide)
+        // But a genuinely noisy window beside a far-behind one still shows that noisy window.
+        #expect(Self.shown(five: .ahead, seven: .farBehind, mode: .smart)?.which == .fiveHour)
+    }
+
     // ── One noisy: 5h ────────────────────────────────────────────────────────────────────────
     @Test func onlyFiveNoisyShowsFive() {
         for m: ResetCountdownMode in [.always, .smart] {

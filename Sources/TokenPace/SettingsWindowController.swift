@@ -28,10 +28,10 @@ final class SettingsWindowController: NSWindowController {
         /// Fixed window content width, matching System Settings exactly (measured 857 pt, #156). The
         /// window never resizes; the sidebar/detail split moves inside it (sidebar 258, detail 599).
         static let contentWidth: CGFloat = 857
-        /// Fixed window content height. Bumped 480 → 520 (#199), 520 → 560 (#211), then 560 → 600
-        /// (#215) so the taller Appearance pane (the new preset-buttons row plus its two hint lines,
-        /// on top of the "Dropdown" section) and the other panes breathe without inner scrolling.
-        static let contentHeight: CGFloat = 600
+        /// Fixed window content height. Bumped 480 → 520 (#199), 520 → 560 (#211), 560 → 600 (#215),
+        /// then 600 → 636 (the new "Work harder" toggle + two hint lines in the Appearance pane) so the
+        /// taller Appearance pane and the other panes breathe without inner scrolling.
+        static let contentHeight: CGFloat = 636
     }
 
     /// The single observable state object, alive for the controller's lifetime (so background
@@ -53,6 +53,9 @@ final class SettingsWindowController: NSWindowController {
     /// Called when the user toggles "Calm MenuBar Widget colors" (#105), with the new state.
     var onCalmColorsChange: ((Bool) -> Void)? {
         get { model.onCalmColorsChange } set { model.onCalmColorsChange = newValue }
+    }
+    var onWorkHarderColorsChange: ((Bool) -> Void)? {
+        get { model.onWorkHarderColorsChange } set { model.onWorkHarderColorsChange = newValue }
     }
 
     /// Called when the user changes the menu-bar "Reset countdown" mode (#103), with the new mode.

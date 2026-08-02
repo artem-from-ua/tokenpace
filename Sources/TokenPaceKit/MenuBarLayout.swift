@@ -48,8 +48,11 @@ public struct BarView: Sendable, Equatable {
     /// decides in the idle state.
     public var severity: PacingSeverity { idle ? .calm : layout.severity }
 
-    /// Whether this bar is "calm" (green/yellow). Derived from ``severity`` (idle → always calm).
-    public var isCalm: Bool { severity == .calm }
+    /// Whether this bar is "calm" (blue/green/yellow — not worth flagging). Derived from ``severity``
+    /// (idle → always calm); both `.calm` and the calmer-than-green `.farBehind` (blue) count, matching
+    /// ``BarLayout/isCalm``. Reset-countdown selection uses `.ahead`/`.exhausted` directly, so blue never
+    /// forces a countdown (see `selectReset`).
+    public var isCalm: Bool { severity == .calm || severity == .farBehind }
 }
 
 // MARK: - MenuBarMode
@@ -325,7 +328,7 @@ public struct MenuBarLayout: Sendable, Equatable {
             let five = BarView(
                 // Inert placeholder: `.onPaceOrBehind` → `severity` is `.calm` before `remainingSeconds`
                 // is ever read, so the value here is immaterial (0).
-                layout: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0),
+                layout: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0, windowDurationSeconds: 0),
                 indicator: .neutral, window: .fiveHour, idle: true, blocked: blocked)
             // In the idle state the 5h window is legitimately date-less (ADR-0027, not an error), but the
             // 7-day window is real: if it reports usage yet its `resets_at` is unparseable, that is the
@@ -590,8 +593,12 @@ public struct MenuBarLayout: Sendable, Equatable {
     ) -> ResetSelection {
         if mode == .never { return .hide }
 
-        let fiveNoisy = fiveSeverity != .calm
-        let sevenNoisy = sevenSeverity != .calm
+        // "Noisy" = worth forcing a countdown for: only orange (`.ahead`) and red (`.exhausted`).
+        // Tested explicitly rather than as `!= .calm` so the calmer-than-green `.farBehind` (blue,
+        // deep behind pace) is NOT treated as noisy — a deeply-behind window must never force a
+        // countdown. This keeps behaviour identical to before `.farBehind` existed.
+        let fiveNoisy = fiveSeverity == .ahead || fiveSeverity == .exhausted
+        let sevenNoisy = sevenSeverity == .ahead || sevenSeverity == .exhausted
 
         // Format a chosen window's reset (5h → live countdown; 7d → compact-days variant). A chosen
         // window with no valid instant is a data error, not a countdown.

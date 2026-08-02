@@ -384,7 +384,7 @@ public struct PopupLayout: Sendable, Equatable {
             indicator: .neutral,
             // Inert placeholder: `.onPaceOrBehind` → `severity` is `.calm` before `remainingSeconds`
             // is ever read, so the value here is immaterial (0).
-            bar: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0),
+            bar: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0, windowDurationSeconds: 0),
             subdivisions: LimitWindow.fiveHour.subdivisions,
             resetLine: nil,
             sessionIdle: true,

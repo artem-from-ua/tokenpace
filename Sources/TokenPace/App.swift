@@ -216,6 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let view = StatusItemView(frame: NSRect(origin: .zero, size: NSSize(width: 0, height: 22)))
         view.layout = MenuBarLayout.make(from: nil, health: coldHealth, now: now)
         view.calmColors = PersistedConfig.calmMenuBarColors   // apply the saved choice from launch (#105)
+        view.workHarder = PersistedConfig.workHarderColors     // apply the saved "Work harder" choice from launch
         self.statusView = view
         self.statusItem = item
 
@@ -372,6 +373,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             wc.onCalmColorsChange = { [weak self] on in
                 self?.statusView?.calmColors = on
                 self?.refreshStatusImage()   // menu-bar image is snapshotted, not auto-rendered
+            }
+            wc.onWorkHarderColorsChange = { [weak self] on in
+                self?.statusView?.workHarder = on
+                self?.refreshStatusImage()   // pure colour change — no layout/width rebuild needed
             }
             wc.onResetCountdownModeMenuBarChange = { [weak self] _ in
                 // The mode changes the layout (which countdown to draw), not just a colour — rebuild
