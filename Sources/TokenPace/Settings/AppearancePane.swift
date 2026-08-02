@@ -10,13 +10,24 @@ struct AppearancePane: View {
 
     var body: some View {
         Form {
-            // First section: a one-click revert of every Appearance setting to its factory default.
-            // The button is trailing-aligned (label left, control right — the standard Form row shape).
+            // First section: one-click Appearance presets (#215) — a single parameter row
+            // ("Restore appearance from preset" is the row label, not a section header). The preset
+            // buttons sit in a row, trailing (right of the label). Each button sets every option below
+            // at once: "Chill" restores the shipped defaults (what the old single Reset did); "Control
+            // freak" turns everything on. Plain action buttons, no selection state (the config isn't
+            // compared back to a preset).
             Section {
-                HStack {
-                    Text("Revert appearance settings to default")
-                    Spacer()
-                    Button("Reset") { model.resetAppearanceToDefaults() }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Restore appearance from preset")
+                        Spacer()
+                        ForEach(AppearancePreset.allCases, id: \.self) { preset in
+                            Button(preset.displayName) { model.apply(preset) }
+                        }
+                    }
+                    SettingsHint(text: "Sets every option below at once. Chill restores the shipped "
+                        + "defaults; Control freak turns everything on.")
+                    SettingsHint(text: "This overwrites your current choices.", warning: true)
                 }
             }
 

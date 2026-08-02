@@ -349,6 +349,23 @@ enum PersistedConfig {
         }
     }
 
+    /// Write every **Appearance**-pane key from a named preset's fixed value set (#215) — the general
+    /// form of `resetAppearanceToDefaults()`. Unlike reset (which *removes* keys so getters fall back to
+    /// their defaults), this writes explicit values, because a preset can differ from the defaults
+    /// (e.g. `.controlFreak` turns calm off). The caller re-syncs the model and re-applies the values to
+    /// the widget. `.chill` writes the same values reset restores.
+    static func apply(_ preset: AppearancePreset) {
+        let v = preset.values
+        calmMenuBarColors = v.calmMenuBarColors
+        hideCalmSevenDayBar = v.hideCalmSevenDayBar
+        hideBarsWhenBlocked = v.hideBarsWhenBlocked
+        showBlockedPause = v.showBlockedPause
+        showExtraUsage = v.showExtraUsage
+        showServiceStatusDot = v.showServiceStatusDot
+        showModelSpecificLimits = v.showModelSpecificLimits
+        resetCountdownModeMenuBar = v.resetCountdownModeMenuBar
+    }
+
     /// Whether polling pauses while the screen is **locked, off, or running a screensaver** (#114,
     /// ADR-0032). **Default-on** (opt-out): an absent key reads as `true`, so a screen-off Mac stops
     /// spending usage-API quota on refreshes nobody sees, resuming with an immediate poll on wake.

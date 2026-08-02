@@ -312,6 +312,24 @@ final class SettingsModel {
         PersistedConfig.resetAppearanceToDefaults()
         syncFromConfig()   // re-reads the (now absent) keys → default getters; refreshes the bound controls
         AppLogger.lifecycle.notice("appearance settings reset to defaults")
+        fireAppearanceCallbacks()
+    }
+
+    /// Apply a named Appearance **preset** (#215) — the general form of `resetAppearanceToDefaults()`.
+    /// Writes all eight keys from the preset's fixed value set, re-syncs the model so the controls
+    /// repaint, then fires each pane callback so the menu-bar widget rebuilds. `.chill` is equivalent
+    /// to a reset; the picker buttons in `AppearancePane` call this.
+    func apply(_ preset: AppearancePreset) {
+        PersistedConfig.apply(preset)
+        syncFromConfig()
+        AppLogger.lifecycle.notice("appearance preset applied: \(preset.rawValue, privacy: .public)")
+        fireAppearanceCallbacks()
+    }
+
+    /// Fire every Appearance-pane callback with the model's current (freshly-synced) value, so the
+    /// menu-bar widget rebuilds — the same notifications the individual setters send. Shared by the
+    /// reset and preset paths, which both mutate all keys at once and then re-render as a batch.
+    private func fireAppearanceCallbacks() {
         onCalmColorsChange?(calmColors)
         onHideCalmSevenDayChange?(hideCalmSevenDay)
         onHideBarsWhenBlockedChange?(hideBarsWhenBlocked)
