@@ -64,8 +64,10 @@ macOS AppKit не має iOS-подібних grouped-примітивів. Ра
 - **Кольоровий chip за sidebar-іконкою** → `List(.sidebar)` + `Label`/`.foregroundStyle` (раніше —
   кастомний `ChipView`, бо стандартний `.imageView` outlet накладав source-list tint/vibrancy).
 
-Свідома фіксована палітра menu-bar (`StatusItemView`, ADR-0009) і pacing-барів попапа (ADR-0022)
-лишається — це **не** System Settings-елементи, і SwiftUI Form їх не стосується.
+Menu-bar-віджет (`StatusItemView`) тепер малює **системними semantic-кольорами** (`labelColor`-родина +
+`.system*`, ADR-0059), не фіксованим sRGB — вони й дають нативний вигляд/дихання. Pacing-бари **попапа**
+(ADR-0022) зберігають свідому фіксовану палітру — це **не** System Settings-елементи, і SwiftUI Form їх
+не стосується.
 
 ## Мої (агента) помилки в цьому проході — і як їх уникати
 

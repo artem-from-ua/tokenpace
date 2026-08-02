@@ -4,9 +4,14 @@ import TokenPaceKit
 /// The menu-bar item's custom view — the thin AppKit shell of issue #10.
 ///
 /// It owns **no** business logic: it switches on a ``MenuBarLayout`` (computed in `TokenPaceKit`)
-/// and draws it. A `non-template` `NSView` is used deliberately (not a template image or plain
-/// text) so macOS does not recolour the pacing bars under Dark/Light tinting — we control the
-/// colours ourselves (SPEC "Технічні зауваги", ADR-0009).
+/// and draws it into a single non-template `NSImage` (``snapshotImage()`` → `button.image`). All colours
+/// are **system semantic** — the bar **track** is `labelColor` at 22 % alpha (a translucent silhouette
+/// that both dims *and* breathes the wallpaper like the moon); the **bright** mono tones (reset text, ⚠️,
+/// tick ring) are `labelColor` at the system menu-bar text opacity (``bright(_:)``);
+/// accents (pacing gap, service dot, idle) are `.systemGreen`/`.systemRed`/… scaled by ``accentSaturation``.
+/// No fixed sRGB, no statusline parity (the old xterm mapping was dropped). True template vibrancy is
+/// unavailable for arbitrary coloured geometry, so this custom-draw approximation is the same one every
+/// menu-bar app uses (Stats/iStat/AlDente); see ADR-0059.
 ///
 /// ## Redraw discipline
 /// Assigning ``layout`` marks the view dirty (`needsDisplay`); nothing else triggers a redraw, so
@@ -41,6 +46,26 @@ final class StatusItemView: NSView {
             needsDisplay = true
         }
     }
+
+    /// Saturation/vividness of the **colour accents** (pacing gap, service dot, idle blue) — a multiplier
+    /// applied to the resolved `.system*` colour at the draw site. `1.0` = the raw system colour; lower
+    /// values mute the accent toward grey so it sits calmer against a busy wallpaper. Kept as a hook for
+    /// the accent-tuning pass (the mono formula shipped first); at `1.0` the accents are the plain system
+    /// colours. Redraw on change.
+    var accentSaturation: CGFloat = 1.0 {
+        didSet {
+            guard accentSaturation != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
+    /// The alpha the bright mono tones (reset text, ⚠️, tick ring) are drawn at. Measured live with
+    /// Digital Color Meter (sRGB) against the system menu-bar text: a light bar wanted ~0.85 (`0x1E2423`,
+    /// the system clock's tone) and a dark bar ~0.88 (`≈0xE6` vs system `0xE7`). The two are visually
+    /// indistinguishable by eye, so a single mid value serves both — no per-theme switch. `labelColor`
+    /// flips the *colour* by itself; this only pins the opacity (its own alpha varies with the vibrant
+    /// appearance the widget image is drawn in — see ``bright(_:)``).
+    private static let brightAlpha: CGFloat = 0.865
 
     // MARK: Geometry constants
 
@@ -98,72 +123,58 @@ final class StatusItemView: NSView {
         static let pauseGlyphGap: CGFloat = 3
     }
 
-    // MARK: Colour mapping (exact statusline 256-colour palette → NSColor)
+    // MARK: Colour mapping (system semantic colours → NSColor)
     //
-    // Colours are the **exact xterm-256 RGB** of the codes the Claude Code statusline uses
-    // (ADR-0005: dark_gray 236, bright_green 71, bright_red 167, dark_blue 23), so the menu-bar
-    // bars match the terminal pacing bar one-to-one. (Code 23 is actually a dark teal, not a true
-    // blue, but it is the statusline's "future" colour, so we mirror it.) Fixed RGB rather than
-    // system semantic colours: the statusline look is the same in any appearance, and the image is
-    // non-template so macOS does not retint it.
+    // Every menu-bar colour is a **system semantic colour** resolved through `ColorStore` — the
+    // coloured accents (pacing gap/marker, service dot, idle bar) map 1:1 onto the discrete
+    // pacing/service buckets via `.systemGreen/.systemYellow/.systemOrange/.systemRed/.systemBlue`,
+    // and the neutrals use the `*labelColor` family. The image draws through a per-appearance
+    // handler (`snapshotImage`), so these flip light/dark and honour Increase Contrast automatically,
+    // like the battery/Wi-Fi icons — no fixed sRGB, no manual appearance detection, no statusline
+    // parity (the old xterm-256 mapping was dropped, ADR-0005 colour clause superseded).
 
     @MainActor
     private enum Palette {
-        /// Pacing gap / dot when on pace or behind — statusline `bright_green` 71 = #5faf5f (good). The
-        /// ahead-of-pace colours are NOT here: they come from `PopupBarView.aheadColor` (graded amber →
-        /// orange → red), shared with the popup so both bars agree.
+        /// Pacing gap / dot when on pace or behind — `.systemGreen`. The ahead-of-pace colours are NOT
+        /// here: they come from `PopupBarView.aheadColor` (discrete yellow/orange/red buckets), shared
+        /// with the popup so both bars agree.
         static var gapGreen: NSColor { ColorStore.shared.color(.menuGapGreen) }
 
-        /// Lighten a **menu-bar** pacing colour a touch (mix ~10 % toward white) so every coloured
-        /// stroke — the pacing gap and the vertical time marker, green through red — sits a shade lighter
-        /// and reads a little softer against the grey bar strip. A gentle nudge (not the earlier 18 %,
-        /// which read too washed). Menu-bar-only: applied at the draw site, so the shared `PopupBarView`
-        /// colours (and the popup) are untouched. Fixed sRGB (the menu-bar image is non-template),
-        /// resolved eagerly so no per-appearance drift.
-        static func lightened(_ color: NSColor) -> NSColor {
-            color.blended(withFraction: 0.10, of: .white) ?? color
-        }
-        /// Time-indicator dot when on pace — the gap green lightened ~30 % (white-mixed) so the dot
-        /// reads brighter than the pacing gap it sits over.
+        /// Time-indicator dot when on pace. A distinct role from the gap green so the tuner can nudge
+        /// the marker independently; both now resolve to the same system semantic green (`.systemGreen`),
+        /// so the marker reads as the gap's colour with no manual lightening.
         static var dotGreen: NSColor { ColorStore.shared.color(.menuDotGreen) }
-        /// Dark ring around the time-indicator dot so it stays distinct over any coloured zone.
+        /// Ring around the time-indicator marker so it stays distinct over any coloured zone —
+        /// `.separatorColor`, so the ring flips with the bar (dark ring on a light bar and vice versa).
         static var indicatorStroke: NSColor { ColorStore.shared.color(.menuIndicatorStroke) }
         /// The neutral grey track of a menu-bar bar — the whole-bar background, i.e. BOTH the `used`
-        /// head and the future/unused tail on either side of the coloured pacing gap. One flat tone
-        /// (#393939) so the strips left and right of the gap read identical. Menu-bar only; the popup
-        /// keeps its own `monochromeGrey`.
+        /// head and the future/unused tail on either side of the coloured pacing gap. `tertiaryLabelColor`
+        /// (the disabled/tertiary band), so both flanks read identical and the track "breathes" with the
+        /// wallpaper like a native icon. Menu-bar only; the popup keeps its own `monochromeGrey`.
         static var unusedGrey: NSColor { ColorStore.shared.color(.menuUnusedGrey) }
         /// The **idle** 5-hour bar's solid fill (#100, ADR-0027) — the 5h window has no active session,
         /// so the bar is a knobless solid track meaning "ready to start, full quota available", not a
-        /// pacing state. A **muted, slightly darker** blue (85/130/180): the R/G channels are pulled up
-        /// toward B to drop the saturation (~53 %, softer than the vivid ~70 % `statusBlue` service dot),
-        /// and the overall brightness is lowered a notch so the track reads a touch deeper — still
-        /// clearly blue, in tone with the palette (`gapGreen` #5faf5f), distinct from the pacing
-        /// greens/ambers, on both light and dark menu bars. Fixed sRGB (not `systemBlue`) because the
-        /// menu-bar image is non-template, drawn in a resolved appearance.
+        /// pacing state. `.systemBlue`, so it flips light/dark and honours Increase Contrast like the
+        /// native icons; distinct from the pacing greens/ambers.
         static var idleBlue: NSColor { ColorStore.shared.color(.menuIdleBlue) }
         /// The **calm-colours** replacement for the "ready to start" idle blue (#105/#158): under Calm
-        /// colours the idle blue mutes to this soft light grey rather than the plain `calmWhite` — pure
-        /// white read too bright for the idle track. Only the *ready* idle bar uses it; a *blocked* idle
-        /// bar is the darker base `monochromeGrey` in both colour modes (see `drawBar`). Fixed sRGB, like
-        /// the other menu-bar bar colours (non-template image).
+        /// colours the idle blue mutes to this quieter neutral rather than the plain `calmWhite`. Only the
+        /// *ready* idle bar uses it; a *blocked* idle bar is the base track grey in both colour modes (see
+        /// `drawBar`). `secondaryLabelColor` — a semantic neutral that flips with the bar.
         static var idleCalmGrey: NSColor { ColorStore.shared.color(.menuIdleCalmGrey) }
         /// Idle glyph + reset label — follow the menu-bar foreground.
         static var foreground: NSColor { ColorStore.shared.color(.menuForeground) }
 
         /// The "calm colours" replacement (#105): the soft pacing colours (idle blue, on-pace green,
         /// mild-ahead yellow) — and, since the time-indicator marker now shares its gap's colour, the
-        /// marker too — collapse to this when the user opts into a quieter menu bar. A fixed sRGB
-        /// system-matched light grey (#E5E5E5), not a pure `#ffffff` (which read too bright next to the
-        /// OS menu-bar controls) and not `labelColor`: the bars are deliberately monochrome-neutral
-        /// here, and — like the other pacing colours — the image is non-template, so a resolved value is
-        /// drawn as-is on both light and dark menu bars.
+        /// marker too — collapse to this when the user opts into a quieter menu bar. `labelColor`, the
+        /// same semantic foreground the reset label uses, so the calm signals read as the neutral
+        /// foreground and flip with the bar (a fixed light tone would vanish on a light bar).
         static var calmWhite: NSColor { ColorStore.shared.color(.menuCalmWhite) }
 
-        // Service-status dot (issue #31). Fixed sRGB (not the dynamic `system*` colours) because the
-        // status image is non-template and drawn in a resolved appearance, so a fixed, vivid value
-        // reads consistently on both light and dark menu bars. Tuned to be saturated enough to pop at
-        // 6 pt. `operational` is never drawn (the dot appears only for a problem), so it is omitted.
+        // Service-status dot (issue #31). System semantic colours (`.systemYellow/.systemOrange/…`),
+        // matching the popup's service palette, so the dot flips light/dark and honours Increase
+        // Contrast. `operational` is never drawn (the dot appears only for a problem), so it is omitted.
         static var statusYellow: NSColor { ColorStore.shared.color(.menuStatusYellow) }
         static var statusOrange: NSColor { ColorStore.shared.color(.menuStatusOrange) }
         static var statusRed:    NSColor { ColorStore.shared.color(.menuStatusRed) }
@@ -171,26 +182,54 @@ final class StatusItemView: NSView {
         static var statusGray:   NSColor { ColorStore.shared.color(.menuStatusGray) }
 
         /// The orange "pause" glyph drawn to the left of the bars when the user is fully blocked
-        /// (`CreditsPacing.isBlocked`) and kept the bars visible in that state (#199). Fixed sRGB
-        /// (non-template menu-bar image), tunable independently of the service-status orange dot.
+        /// (`CreditsPacing.isBlocked`) and kept the bars visible in that state (#199). `.systemOrange`,
+        /// tunable independently of the service-status orange dot.
         static var pauseOrange: NSColor { ColorStore.shared.color(.menuPauseOrange) }
+    }
+
+    // MARK: Colour resolution (ADR-0059)
+
+    /// Resolve a **bright mono** colour (reset text, ⚠️, tick ring) at the system menu-bar text's opacity.
+    ///
+    /// `labelColor` already flips its *colour* correctly in the draw context (near-black on a light bar,
+    /// near-white on a dark one), but its *alpha* comes out low under the vibrant menu-bar appearance the
+    /// widget image is drawn in (measured 0.698), which made our text too light. So we keep `labelColor`'s
+    /// resolved RGB and substitute a fixed alpha (``brightAlpha``) that matches the system clock on both a
+    /// light and a dark bar. The bar *track* (`unusedGrey` = `labelColor@0.22`) is deliberately left
+    /// untouched — measured there it already matches the moon, because the moon is itself a vibrant icon.
+    /// Falls back to the colour unchanged if its RGB can't be resolved.
+    private func bright(_ color: NSColor) -> NSColor {
+        guard let rgb = color.usingColorSpace(.sRGB) else { return color }
+        return rgb.withAlphaComponent(Self.brightAlpha)
+    }
+
+    /// Scale a **colour accent** (pacing gap, service dot, idle blue) by ``accentSaturation`` — blend the
+    /// resolved `.system*` colour toward its own grey (luma) so a lower value reads calmer against a busy
+    /// wallpaper. At `1.0` the colour is returned unchanged.
+    private func accent(_ color: NSColor) -> NSColor {
+        guard accentSaturation < 1.0, let c = color.usingColorSpace(.sRGB) else { return color }
+        let luma = 0.299 * c.redComponent + 0.587 * c.greenComponent + 0.114 * c.blueComponent
+        func mix(_ ch: CGFloat) -> CGFloat { luma + (ch - luma) * accentSaturation }
+        return NSColor(srgbRed: mix(c.redComponent), green: mix(c.greenComponent),
+                       blue: mix(c.blueComponent), alpha: c.alphaComponent)
     }
 
     /// The dot colour for a non-operational service state. `operational` should never reach here
     /// (the dot is drawn only for a problem) but maps to gray defensively.
     ///
     /// Calm colours (#105): `.degraded` is the **soft** service signal — the yellow counterpart of
-    /// the mild ahead-of-pace yellow — so it mutes to white alongside the pacing colours. The strong
-    /// states (partial/major outage → orange/red) and the neutral ones (maintenance blue, unknown
-    /// grey) keep their colour, matching how the pacing gap keeps orange/red under calm.
+    /// the mild ahead-of-pace yellow — so it mutes to the calm neutral (`calmWhite` = `labelColor`)
+    /// alongside the pacing colours. The strong states (partial/major outage → orange/red) and the
+    /// neutral ones (maintenance blue, unknown grey) keep their colour, matching how the pacing gap
+    /// keeps orange/red under calm.
     private func statusDotColor(_ status: ServiceStatus) -> NSColor {
         switch status {
-        case .degraded:         return calmColors ? Palette.calmWhite : Palette.statusYellow
-        case .partialOutage:    return Palette.statusOrange
-        case .majorOutage:      return Palette.statusRed
-        case .underMaintenance: return Palette.statusBlue
-        case .unknown:          return Palette.statusGray
-        case .operational:      return Palette.statusGray
+        case .degraded:         return calmColors ? bright(Palette.calmWhite) : accent(Palette.statusYellow)
+        case .partialOutage:    return accent(Palette.statusOrange)
+        case .majorOutage:      return accent(Palette.statusRed)
+        case .underMaintenance: return accent(Palette.statusBlue)
+        case .unknown:          return accent(Palette.statusGray)
+        case .operational:      return accent(Palette.statusGray)
         }
     }
 
@@ -199,18 +238,43 @@ final class StatusItemView: NSView {
     /// Top-left origin makes the bar maths read naturally (y grows downward).
     override var isFlipped: Bool { true }
 
+    /// Debug: big colour swatches instead of the widget (env `TOKENPACE_SWATCHES=1`) — draws the track
+    /// and bright-tone candidate alphas as wide fills for precise eyedropping vs the system icons on the
+    /// real bar (the only reliable way to compare RGB — a screenshot on a wide-gamut display lies). Dev-
+    /// only; kept as a colour-tuning aid (the shipped widget never enters this branch).
+    static let swatchMode = ProcessInfo.processInfo.environment["TOKENPACE_SWATCHES"] == "1"
+
     override var intrinsicContentSize: NSSize {
-        NSSize(width: itemWidth(for: layout), height: Metrics.height)
+        Self.swatchMode
+            ? NSSize(width: 120, height: Metrics.height)
+            : NSSize(width: itemWidth(for: layout), height: Metrics.height)
     }
+
+    // MARK: Rendering
 
     override func draw(_ dirtyRect: NSRect) {
         render(in: bounds)
     }
 
-    /// Render the current layout into `rect` (the view's own bounds, or an `NSImage` canvas).
-    /// Shared by ``draw(_:)`` and ``snapshotImage()`` so the menu-bar image and a hosted view
-    /// draw identically.
+    /// Render the current layout into `rect` (the view's own bounds, or an `NSImage` canvas). Shared by
+    /// ``draw(_:)`` and ``snapshotImage()`` so the menu-bar image and a hosted view draw identically.
     private func render(in rect: NSRect) {
+        if Self.swatchMode {
+            let w = rect.width / 4
+            // labelColor resolves its COLOUR correctly in the draw context (black on a light bar, white on
+            // a dark bar) — only its ALPHA is low under vibrancy (0.698). Forcing higher alpha keeps the
+            // right colour and hits the system text opacity. Do NOT branch on effectiveAppearance — it
+            // reports the system theme (Dark), not the actual bar (which can be light from the wallpaper).
+            NSColor.labelColor.withAlphaComponent(0.22).setFill()   // [1] TRACK — vs the moon
+            NSRect(x: rect.minX, y: rect.minY, width: w, height: rect.height).fill()
+            NSColor.labelColor.withAlphaComponent(0.85).setFill()   // [2] bright @0.85 — vs clock text
+            NSRect(x: rect.minX + w, y: rect.minY, width: w, height: rect.height).fill()
+            NSColor.labelColor.withAlphaComponent(0.88).setFill()   // [3] bright @0.88 (balanced) — vs clock text
+            NSRect(x: rect.minX + 2 * w, y: rect.minY, width: w, height: rect.height).fill()
+            NSColor.labelColor.withAlphaComponent(0.90).setFill()   // [4] bright @0.90 — vs clock text
+            NSRect(x: rect.minX + 3 * w, y: rect.minY, width: w, height: rect.height).fill()
+            return
+        }
         guard let layout else { return }
 
         // Trailing decorations, drawn right-to-left so each reclaims width from the right edge and the
@@ -264,9 +328,9 @@ final class StatusItemView: NSView {
     /// The glyph is **currency-specific** (``creditsSymbolName(for:)``): a known currency draws its own
     /// SF Symbol (`eurosign`/`dollarsign`/…), an unknown/empty code falls back to the generic
     /// `coloncurrencysign` (¤) — never a hard-coded `$` (the currency is dynamic; EUR observed, #142).
-    /// Rendered as a **non-template palette image** in the marker's pacing colour (``creditsIconColor(_:)``),
-    /// matching the rest of the widget (non-template so macOS does not retint it). Drawn with
-    /// `respectFlipped: true` because this view is `isFlipped` (same as the ⚠️ glyph).
+    /// Rendered as a **palette image** in the marker's pacing colour (``creditsIconColor(_:)``) — a system
+    /// semantic colour resolved in the draw handler's appearance, matching the rest of the widget. Drawn
+    /// with `respectFlipped: true` because this view is `isFlipped` (same as the ⚠️ glyph).
     private func drawCreditsIcon(_ credits: CreditsMarker, in rect: NSRect) {
         let color = creditsIconColor(credits)
         let config = NSImage.SymbolConfiguration(pointSize: Metrics.creditsIconSize, weight: .semibold)
@@ -311,11 +375,11 @@ final class StatusItemView: NSView {
     /// the strong warnings (orange/red). `CreditsMarker.isCalm` is the one predicate that decides this,
     /// so the icon and the bars always agree.
     private func creditsIconColor(_ credits: CreditsMarker) -> NSColor {
-        if calmColors && credits.isCalm { return Palette.calmWhite }
-        guard let l = credits.bar else { return Palette.foreground }   // unlimited → neutral
-        return l.timeFraction < l.usageFraction
+        if calmColors && credits.isCalm { return bright(Palette.calmWhite) }
+        guard let l = credits.bar else { return bright(Palette.foreground) }   // unlimited → neutral
+        return accent(l.timeFraction < l.usageFraction
             ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds, surface: .menuBar)
-            : Palette.dotGreen
+            : Palette.dotGreen)
     }
 
     /// Rendered width of the money-credits glyph at ``Metrics/creditsIconSize`` — measured the same way
@@ -331,28 +395,34 @@ final class StatusItemView: NSView {
 
     // MARK: NSImage snapshot
 
-    /// Render the current layout to a **non-template** `NSImage` for use as the status item's
-    /// `button.image`.
+    /// Render the current layout to a non-template `NSImage` for the status item's `button.image`.
     ///
-    /// Hosting the custom `NSView` as a button subview is unreliable (the system button owns its
-    /// layout and paints over added subviews), so the robust path for fully custom menu-bar
-    /// graphics is to hand the button a ready image. `isTemplate = false` stops macOS recolouring
-    /// the pacing colours under Dark/Light tinting (SPEC "Технічні зауваги", ADR-0009).
+    /// Hosting the custom `NSView` as a button subview is unreliable (the system button owns its layout
+    /// and paints over added subviews), so the robust path for fully custom menu-bar graphics is to hand
+    /// the button a ready image. This is the industry-standard technique for a menu-bar widget that
+    /// carries colour (Stats/iStat/AlDente all custom-draw with `NSColor.textColor`/`labelColor` for the
+    /// mono part and explicit colours for accents): true template vibrancy is unavailable for arbitrary
+    /// coloured geometry (`isTemplate` is all-or-nothing, and `wantsLayer`+overlay defeats vibrancy —
+    /// Apple forums thread/776799), so we approximate it with system semantic colours and compensate the
+    /// missing wallpaper-breathe with the mono-brightness slider / wallpaper calibration (ADR-0059).
     ///
-    /// Because the image is non-template, macOS does **not** re-tint it for the menu-bar theme, so
-    /// the semantic foreground colour (`labelColor` for the idle glyph / reset label) must be
-    /// resolved against the **menu bar's** appearance — not the ambient appearance an off-screen
-    /// `NSImage` draws in (which defaults to Aqua → dark text on a dark menu bar). The caller passes
-    /// `item.button?.effectiveAppearance` and re-snapshots when the theme changes.
+    /// `isTemplate = false`: the widget carries real colour (pacing/service/idle) a template mask would
+    /// strip.
     ///
-    /// - Parameter appearance: Appearance to resolve dynamic colours in; the view's own when `nil`.
-    func snapshotImage(appearance: NSAppearance? = nil) -> NSImage {
+    /// **Drawn EAGERLY inside the caller's `performAsCurrentDrawingAppearance` block** (`lockFocusFlipped`
+    /// + `render` + `unlockFocus`) — NOT the lazy `NSImage(size:flipped:drawingHandler:)` form. The lazy
+    /// handler runs *later*, when the status button paints, resolving dynamic colours against whatever
+    /// appearance is current then (the vibrant menu-bar appearance, where e.g. `labelColor`'s alpha drops
+    /// 0.847 → 0.698) — so the mono tones came out wrong (text too light, `tertiaryLabelColor` track
+    /// mis-resolved). Drawing eagerly bakes every semantic colour against the button's *real*
+    /// `effectiveAppearance` the caller set, giving the same values as the system clock/moon. The caller
+    /// re-snapshots on a theme flip (its `effectiveAppearance` KVO) to rebake for the new appearance.
+    /// `flipped: true` matches this view's `isFlipped` so `render(in:)`'s top-left maths is unchanged.
+    func snapshotImage() -> NSImage {
         let size = intrinsicContentSize
         let image = NSImage(size: size)
-        image.lockFocusFlipped(true)        // draw eagerly now (no lazy handler)
-        (appearance ?? effectiveAppearance).performAsCurrentDrawingAppearance {
-            render(in: NSRect(origin: .zero, size: size))
-        }
+        image.lockFocusFlipped(true)
+        render(in: NSRect(origin: .zero, size: size))
         image.unlockFocus()
         image.isTemplate = false
         return image
@@ -380,7 +450,7 @@ final class StatusItemView: NSView {
     private func drawPauseGlyph(in rect: NSRect) -> CGFloat {
         let originX = rect.minX + Metrics.hPadding
         let config = NSImage.SymbolConfiguration(pointSize: Metrics.pauseGlyphSize, weight: .semibold)
-            .applying(.init(paletteColors: [Palette.pauseOrange]))
+            .applying(.init(paletteColors: [accent(Palette.pauseOrange)]))
         guard let symbol = NSImage(systemSymbolName: "pause.fill", accessibilityDescription: "all limits reached")?
             .withSymbolConfiguration(config) else {
             return originX
@@ -461,7 +531,7 @@ final class StatusItemView: NSView {
     private func drawErrorGlyph(in rect: NSRect) -> CGFloat {
         let originX = rect.minX + Metrics.hPadding
         let config = NSImage.SymbolConfiguration(pointSize: Metrics.errorGlyphSize, weight: .semibold)
-            .applying(.init(paletteColors: [Palette.foreground]))
+            .applying(.init(paletteColors: [bright(Palette.foreground)]))   // ⚠️ — labelColor at text opacity
         guard let symbol = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "error")?
             .withSymbolConfiguration(config) else {
             return originX
@@ -486,15 +556,12 @@ final class StatusItemView: NSView {
         // "no active session, full quota available". The bar's `layout`/`indicator` are inert here.
         // In calm mode (#105) the soft idle blue mutes to white.
         if bar.idle {
+            // Idle bar fill (#100/#158): blocked → base track grey; ready+calm → quiet neutral;
+            // ready+normal → the "ready to start" blue.
             let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
-            // Idle bar fill (#100/#158):
-            //  • blocked → the bar's base pacing-track grey (`unusedGrey`, the same tone the used/future
-            //    zones use), in BOTH colour modes — an inactive track "waiting for a reset";
-            //  • ready   → the "ready to start" blue, muted under calm colours to a soft light grey
-            //    (`idleCalmGrey`, not the plain white — pure white read too bright for the idle track).
             let fill: NSColor = bar.blocked
                 ? Palette.unusedGrey
-                : (calmColors ? Palette.idleCalmGrey : Palette.idleBlue)
+                : (calmColors ? Palette.idleCalmGrey : accent(Palette.idleBlue))
             fill.setFill()
             path.fill()
             return
@@ -503,21 +570,20 @@ final class StatusItemView: NSView {
         let l = bar.layout
         let w = rect.width
 
-        // Whole-bar rounded background = the neutral grey track (drawn first, the gap paints over it).
-        // Both flanks of the gap — the `used` head and the future/unused tail — are this one tone, so
-        // the strips left and right of the coloured gap read identical; only the gap carries colour.
+        // Whole-bar rounded grey track (drawn first; the gap paints over it). Both flanks of the gap —
+        // the used head and the future/unused tail — are this one tone, so they read identical.
         let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
-        Palette.unusedGrey.setFill()
+        Palette.unusedGrey.setFill()   // the dimmed "moon" base
         path.fill()
 
-        // Clip subsequent zone fills to the rounded shape so corners stay clean.
+        // Clip the gap fill to the rounded shape so corners stay clean.
         NSGraphicsContext.saveGraphicsState()
         path.addClip()
 
         // Pacing gap: [gapStart, gapEnd). Ahead-of-pace uses the SAME graded colour as the popup
         // (`PopupBarView.aheadColor`: amber → orange → red by how far ahead), so the menu-bar bar and
         // the popup row agree — e.g. a yellow 7-day here reads yellow in the dropdown too. On pace →
-        // the statusline green (ADR-0005), kept fixed to match the terminal pacing bar.
+        // `.systemGreen`.
         let gapColor = calmedGapColor(l)
         fillZone(from: l.gapStart, to: l.gapEnd, in: rect, width: w, color: gapColor)
 
@@ -525,9 +591,8 @@ final class StatusItemView: NSView {
 
         // Time-indicator marker at timeFraction (drawn on top, unclipped so it stands proud).
         // A slim, lightly-rounded vertical bar rather than a dot — reads as a crisp position tick.
-        // Colour is this state's pacing-gap colour (see `calmedGapColor` below) — one tone per pacing
-        // status, so the marker matches the zone it sits over instead of a separately-graded shade.
-        // A dark stroke rings the marker so it separates cleanly when it sits over a coloured zone.
+        // Filled with this state's pacing-gap colour, ringed with `separatorColor` so it separates
+        // cleanly over the coloured zone on both light and dark bars.
         let cx = rect.minX + CGFloat(l.timeFraction) * w
         let cy = rect.midY
         let mw = Metrics.tickWidth
@@ -536,11 +601,10 @@ final class StatusItemView: NSView {
         let marker = NSBezierPath(
             roundedRect: markerRect, xRadius: Metrics.tickCorner, yRadius: Metrics.tickCorner)
         // The marker takes the EXACT colour of this state's pacing gap (`calmedGapColor`) — one tone
-        // per pacing status, so the "you are here" tick reads as the same colour as the zone it marks
-        // rather than a separately-graded/lightened variant.
+        // per pacing status, so the "you are here" tick reads as the same colour as the zone it marks.
         calmedGapColor(l).setFill()
         marker.fill()
-        Palette.indicatorStroke.setStroke()
+        Palette.indicatorStroke.setStroke()   // separatorColor
         marker.lineWidth = Metrics.tickStroke
         marker.stroke()
     }
@@ -550,11 +614,12 @@ final class StatusItemView: NSView {
     /// states (`BarLayout.isCalm`: on-pace green + mild-ahead yellow) mute to white; the strong warnings
     /// (orange/red) stay coloured.
     private func calmedGapColor(_ l: BarLayout) -> NSColor {
-        if calmColors && l.isCalm { return Palette.calmWhite }
-        let base = l.pacing == .ahead
+        // Calm neutral is a bright tone (labelColor at the text opacity, via `bright`); the coloured
+        // pacing gap is an accent (scaled by accentSaturation). Neither is the dimmed bar track.
+        if calmColors && l.isCalm { return bright(Palette.calmWhite) }
+        return accent(l.pacing == .ahead
             ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds, surface: .menuBar)
-            : Palette.gapGreen
-        return Palette.lightened(base)   // menu-bar strokes sit a touch lighter over the grey strip
+            : Palette.gapGreen)
     }
 
     /// Fill the sub-rect spanning the fraction range `[from, to)` of a bar.
@@ -571,7 +636,7 @@ final class StatusItemView: NSView {
         let text = resetText(reset)
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
-            .foregroundColor: Palette.foreground,
+            .foregroundColor: bright(Palette.foreground),   // labelColor at the system text opacity
         ]
         let label = NSAttributedString(string: text, attributes: attrs)
         let size = label.size()

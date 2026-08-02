@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-07-27
-superseded_by: [0042]
+superseded_by: [0042, 0059]
 ---
 
 # ADR-0040: Нативний вигляд UI через системні механізми, а не захардкоджені метрики
@@ -10,8 +10,13 @@ superseded_by: [0042]
 > grouped-inset контейнера, chip і time-picker) і §4 («поки лишаємо AppKit hand-drawing») виконано —
 > вікно Settings переписано на SwiftUI `Form.formStyle(.grouped)` + `NavigationSplitView`, тож
 > grouped-inset/chip/time-picker більше **не** ручні винятки (їх дають Form/List/DatePicker системними
-> дефолтами), а виміряні константи усунено. Принцип §1 «нуль хардкоду для системних елементів» і свідомі
-> винятки §3 (menu-bar `StatusItemView`, pacing-бари попапа) лишаються чинними.
+> дефолтами), а виміряні константи усунено. Принцип §1 «нуль хардкоду для системних елементів» лишається
+> чинним.
+>
+> **Частково переглянуто [ADR-0059](0059-menu-bar-native-semantic-colours.md):** §3-виняток «menu-bar
+> `StatusItemView` — фіксований sRGB, бо `labelColor` дає неправильний RGB» **скасовано** — бар тепер
+> підпорядковано §1 (нуль хардкоду): системні semantic-кольори (`labelColor`-родина + `.system*`).
+> Виняток pacing-барів **попапа** (ADR-0022) лишається.
 
 ## Контекст
 

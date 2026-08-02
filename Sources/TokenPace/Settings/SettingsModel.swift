@@ -304,6 +304,24 @@ final class SettingsModel {
         onResetCountdownModeMenuBarChange?(mode)
     }
 
+    /// Revert every Appearance-pane setting to its factory default (the "Reset" button). Clears the
+    /// stored keys, re-syncs the model so the controls repaint, then fires each pane callback with the
+    /// now-default value so the menu-bar widget rebuilds — the same notifications the individual setters
+    /// send, so a reset looks exactly like the user having toggled each control back by hand.
+    func resetAppearanceToDefaults() {
+        PersistedConfig.resetAppearanceToDefaults()
+        syncFromConfig()   // re-reads the (now absent) keys → default getters; refreshes the bound controls
+        AppLogger.lifecycle.notice("appearance settings reset to defaults")
+        onCalmColorsChange?(calmColors)
+        onHideCalmSevenDayChange?(hideCalmSevenDay)
+        onHideBarsWhenBlockedChange?(hideBarsWhenBlocked)
+        onShowBlockedPauseChange?(showBlockedPause)
+        onExtraUsageChange?(showExtraUsage)
+        onShowModelSpecificLimitsChange?(showModelSpecificLimits)
+        onServiceDotChange?(showServiceDot)
+        onResetCountdownModeMenuBarChange?(ResetCountdownMode.from(radio: resetRadio))
+    }
+
     /// Build `MonitoredServices` from the current toggles/radio, persist, and fire the callback.
     func commitMonitoredServices() {
         let config = MonitoredServices(
