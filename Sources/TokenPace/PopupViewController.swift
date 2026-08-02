@@ -10,6 +10,15 @@ import TokenPaceKit
 /// to *write* the same one). `NSFont.systemFontSize` (13 pt) is the documented default UI text size.
 let dropdownTextSize: CGFloat = NSFont.systemFontSize
 
+/// The alpha applied to the popup's **hue-carrying** elements (service dots, pacing gap, idle blue,
+/// time marker, pills, ⚠️ triangle, link word, brand accent) **only** when the translucent background
+/// (#188) is on, so they composite with the NSMenu vibrancy material instead of reading as dense
+/// opaque patches. On the opaque default the tint is a no-op and these stay fully opaque. The neutral
+/// greys (track, ticks, indicator ring, dimmed labels) are already semi-transparent and are left
+/// untouched. A single named constant because the exact value needs live tuning against the material
+/// in both light and dark (contrast vs. breathing).
+let translucentHueAlpha: CGFloat = 0.88
+
 // MARK: - PopupBarView
 
 /// A pacing bar drawn inside the popup, in the **same** three-zone style as the menu-bar widget:
@@ -86,6 +95,24 @@ final class PopupBarView: NSView {
         }
     }
 
+    /// Whether the popup background is translucent (#188). Pushed in from `PopupViewController.addBar`,
+    /// like `showTicks`. When `true`, the bar's hue-carrying fills (gap, idle blue, marker) are drawn at
+    /// ``translucentHueAlpha`` via ``popupTint(_:)`` so they breathe the menu material; the neutral grey
+    /// track / ticks / ring stay as-is. Default `false` (opaque).
+    var translucentBackground: Bool = false {
+        didSet {
+            guard translucentBackground != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
+    /// Apply ``translucentHueAlpha`` to a hue colour **only** when the translucent background is on;
+    /// otherwise return it unchanged (opaque default is byte-identical). `withAlphaComponent` on a
+    /// dynamic system colour stays dynamic, so the tinted colour still flips light/dark.
+    private func popupTint(_ c: NSColor) -> NSColor {
+        translucentBackground ? c.withAlphaComponent(translucentHueAlpha) : c
+    }
+
     private enum Metrics {
         /// Height of the pacing bar itself (the coloured zones + indicator dot).
         static let barHeight: CGFloat = 6
@@ -155,13 +182,22 @@ final class PopupBarView: NSView {
         /// **half-way between** `tertiaryLabelColor` and the dimmest `quaternaryLabelColor` — dimmer than
         /// the menu bar's `barTrack` (`labelColor@0.22`) so the popup track recedes into the NSMenu
         /// material, but not as dark as full quaternary (#224). The menu-bar widget keeps its own
-        /// `barTrack` tone unchanged — only this popup surface is quieter. Computed (not a `static let`)
-        /// so it re-resolves in the current drawing appearance every draw (a `static let` would bake in
-        /// the first-access appearance). `blended` returns non-nil for these dynamic label colours in a
-        /// real drawing context; the `?? tertiary` fallback keeps it total.
-        static var monochromeGrey: NSColor {
-            NSColor.tertiaryLabelColor.blended(withFraction: 0.5, of: .quaternaryLabelColor)
-                ?? .tertiaryLabelColor
+        /// `barTrack` tone unchanged — only this popup surface is quieter.
+        ///
+        /// A **dynamic** `NSColor(name:)` whose blend is computed **inside**
+        /// `performAsCurrentDrawingAppearance`, so it re-resolves per appearance and flips light/dark —
+        /// exactly like ``PopupViewController/defaultDimmedLabel``. A plain `.blended(...)` (even from a
+        /// computed `var`) bakes in whatever appearance was current at the call site: under an NSMenu-hosted
+        /// view the drawing appearance is not reliably current when `draw()` reads it, so the light theme
+        /// rendered the dark tone (and vice-versa). `blended` returns non-nil for these dynamic label
+        /// colours in a real drawing context; the `?? tertiary` fallback keeps it total.
+        static let monochromeGrey = NSColor(name: nil) { appearance in
+            var mixed: NSColor = .tertiaryLabelColor
+            appearance.performAsCurrentDrawingAppearance {
+                mixed = NSColor.tertiaryLabelColor.blended(withFraction: 0.5, of: .quaternaryLabelColor)
+                    ?? .tertiaryLabelColor
+            }
+            return mixed
         }
     }
 
@@ -173,11 +209,9 @@ final class PopupBarView: NSView {
 
     /// The grey both bar base zones (`used` + future/unused tail) render in — the **popup-only** tone
     /// half-way between tertiary and quaternary label (quieter than the menu bar's `barTrack`), where
-    /// only the pacing gap + dot
-    /// carry colour. A **computed** accessor (not a `static let`), so it re-resolves the dynamic label
-    /// colour in the *current* drawing appearance every draw — a `static let` would bake in whatever
-    /// appearance was current at first access and render the
-    /// wrong tone after a theme flip (near-white on light). Menu-bar `drawBar` reads it live the same way.
+    /// only the pacing gap + dot carry colour. Backed by the **dynamic** `Palette.monochromeGrey`
+    /// provider, which resolves its blend per appearance (so it flips light/dark correctly). Menu-bar
+    /// `drawBar` reads it live the same way.
     static var monochromeGrey: NSColor { Palette.monochromeGrey }
 
     /// The exhausted-pacing red (`aheadColor`'s cap rung). Exposed so the popup can paint the **one**
@@ -203,7 +237,8 @@ final class PopupBarView: NSView {
         if idle {
             let idlePath = NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner)
             // Blocked idle (#158) → grey (no path to start); otherwise the "ready to start" blue.
-            (blocked ? Self.monochromeGrey : Palette.idleBlue).setFill()
+            // Grey (blocked) is an already-translucent neutral — leave it; only the blue hue is tinted (#188).
+            (blocked ? Self.monochromeGrey : popupTint(Palette.idleBlue)).setFill()
             idlePath.fill()
             drawTicks(in: rect, width: w)
             return
@@ -224,10 +259,10 @@ final class PopupBarView: NSView {
         path.addClip()
         let gapColor: NSColor
         if l.pacing == .ahead {
-            gapColor = Self.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
+            gapColor = popupTint(Self.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds))
         } else {
             // Calm side: base 5h/7d bars split green↔blue via behindColor; per-model/credits stay green.
-            gapColor = isBaseLimit ? Self.behindColor(l) : Palette.gapGreen
+            gapColor = popupTint(isBaseLimit ? Self.behindColor(l) : Palette.gapGreen)
         }
 
         // Simple style (#224): a left-anchored ribbon whose LENGTH equals the pacing gap's width
@@ -280,7 +315,7 @@ final class PopupBarView: NSView {
         let markerRect = NSRect(x: cx - mw / 2, y: cy - mh / 2, width: mw, height: mh)
         let marker = NSBezierPath(
             roundedRect: markerRect, xRadius: Metrics.indicatorCorner, yRadius: Metrics.indicatorCorner)
-        indicatorColor(l).setFill()
+        popupTint(indicatorColor(l)).setFill()
         marker.fill()
         // Edge outline only where the marker overlaps the bar (`quaternaryLabelColor`): two short vertical
         // strokes flanking the marker's left/right edges, clipped to the bar's height — the ends that stand
@@ -580,13 +615,26 @@ final class PopupViewController: NSViewController {
     /// Whether the popup uses the native translucent system menu material instead of the opaque solid
     /// fill (#188). When `true`, ``rebuildBackdrop()`` skips the bar-section `SolidBackdropView` so the
     /// `NSMenu` vibrancy shows through under our bars. The whole-menu overlay is skipped separately in
-    /// `AppDelegate.installOpaqueMenuBackdropIfNeeded()`. Unlike `barStyle`/`showTicks` this rebuilds
-    /// the **backdrop**, not the content stack. Default `false` (opaque). Outside the Appearance presets.
+    /// `AppDelegate.installOpaqueMenuBackdropIfNeeded()`. Default `false` (opaque). Outside the Appearance presets.
+    ///
+    /// The `didSet` rebuilds **both** the backdrop and the content stack: besides removing the opaque
+    /// fill, the flag now tints the hue-carrying content (dots, gap, marker, idle blue, pills, ⚠️, link,
+    /// brand) via ``popupTint(_:)``, and those views are rebuilt in `rebuild()` — so a live toggle must
+    /// re-run it (the `PopupBarView` children pick up the flag through `addBar`).
     var translucentBackground: Bool = false {
         didSet {
             guard isViewLoaded, translucentBackground != oldValue else { return }
             rebuildBackdrop()
+            rebuild()
         }
+    }
+
+    /// Apply ``translucentHueAlpha`` to a hue colour **only** when the translucent background is on;
+    /// otherwise return it unchanged. Mirrors `PopupBarView.popupTint` for content the VC builds itself
+    /// (service dots, pills, the ⚠️ triangle, the link word, the brand accent). `withAlphaComponent` on a
+    /// dynamic system colour stays dynamic, so the tinted colour still flips light/dark.
+    private func popupTint(_ c: NSColor) -> NSColor {
+        translucentBackground ? c.withAlphaComponent(translucentHueAlpha) : c
     }
 
     private enum Metrics {
@@ -749,7 +797,7 @@ final class PopupViewController: NSViewController {
         let sectionHeader = addSplitLine(
             left: Self.claudeCodeSectionTitle, right: showAge ? Self.ageText(layout.lastUpdateAge) : "",
             leftFont: Self.menuItemFont, rightFont: .systemFont(ofSize: Metrics.textSize),
-            leftColor: Self.claudeBrandColor, rightColor: Self.dimmedLabelColor)
+            leftColor: popupTint(Self.claudeBrandColor), rightColor: Self.dimmedLabelColor)
         stack.setCustomSpacing(Metrics.sectionSpacing, after: sectionHeader)
 
         if showStatusRows, let status {
@@ -857,7 +905,7 @@ final class PopupViewController: NSViewController {
         addTitleStatusLine(
             title: Self.extraUsageTitle,
             status: Self.creditsStatusText(bar),
-            badge: credits.inUse ? Self.makeInUsePill() : nil)
+            badge: credits.inUse ? makeInUsePill() : nil)
         addDetailLine(
             used: Self.creditsAmountText(spent: credits.spent, limit: limit),
             reset: credits.resetLine ?? "resetting…",
@@ -898,17 +946,20 @@ final class PopupViewController: NSViewController {
     /// covering an exhausted plan limit (`CreditsRow.inUse`). A small rounded, layer-backed capsule in
     /// the exhausted **red** (`PopupBarView.gapRed`, #224 — was accent blue) with white text, so it reads
     /// as a warning that a limit is spent onto paid credit. Sizing comes from the text + insets.
-    private static func makeInUsePill() -> NSView {
-        makePill(text: inUseBadgeText, fill: { PopupBarView.gapRed })
+    private func makeInUsePill() -> NSView {
+        // #188: tint the red fill so the pill breathes the material when translucent. `pillText` (white)
+        // stays opaque for legibility. Instance method so the closure can reach `popupTint`.
+        Self.makePill(text: Self.inUseBadgeText, fill: { [weak self] in self?.popupTint(PopupBarView.gapRed) ?? PopupBarView.gapRed })
     }
 
     /// The blocking-reset badge (#158): a red capsule carrying the reset countdown (e.g. "4d"), shown
     /// flush-right on the one row whose reset actually unblocks work. Same pill shape as the "in use"
     /// badge, filled with the exhausted red (`PopupBarView.gapRed`) so it reads as the blocker. A
     /// hover tooltip ("Effective blocker") explains why this one reset is highlighted.
-    private static func makeResetBadge(text: String) -> NSView {
-        let pill = makePill(text: text, fill: { PopupBarView.gapRed })
-        pill.toolTip = blockingResetHint
+    private func makeResetBadge(text: String) -> NSView {
+        // #188: same red-fill tint as makeInUsePill when translucent. Instance method for `popupTint`.
+        let pill = Self.makePill(text: text, fill: { [weak self] in self?.popupTint(PopupBarView.gapRed) ?? PopupBarView.gapRed })
+        pill.toolTip = Self.blockingResetHint
         return pill
     }
 
@@ -964,7 +1015,7 @@ final class PopupViewController: NSViewController {
         // the single reset that will actually unblock — every other reset stays the plain dimmed label,
         // even if its own limit is also exhausted.
         if resetIsBlocking {
-            return addSplitRow(leadingView: usedLabel, rightView: Self.makeResetBadge(text: reset))
+            return addSplitRow(leadingView: usedLabel, rightView: makeResetBadge(text: reset))
         }
         let resetLabel = NSTextField(labelWithString: reset)
         resetLabel.font = font
@@ -1045,7 +1096,7 @@ final class PopupViewController: NSViewController {
     @discardableResult
     private func addWarningTitle(_ text: String) -> NSView {
         let font = NSFont.boldSystemFont(ofSize: Metrics.textSize)
-        let color = ColorStore.shared.color(.red)
+        let color = popupTint(ColorStore.shared.color(.red))   // #188: breathe the material when translucent
         let attributed = NSMutableAttributedString()
 
         let symbolConfig = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
@@ -1087,6 +1138,7 @@ final class PopupViewController: NSViewController {
         view.isBaseLimit = isBaseLimit   // only base 5h/7d rows render the far-behind blue zone
         view.barStyle = barStyle   // pacing (gap+marker) vs simple (left-anchored ribbon) — #224
         view.showTicks = showTicks   // under-bar tick ruler on/off — #224
+        view.translucentBackground = translucentBackground   // tint hue fills to breathe the material — #188
         view.translatesAutoresizingMaskIntoConstraints = false
         view.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.hPadding).isActive = true
         view.heightAnchor.constraint(equalToConstant: PopupBarView.viewHeight).isActive = true
@@ -1113,7 +1165,7 @@ final class PopupViewController: NSViewController {
         // is the trailing half, so every status word right-aligns into one column.
         let leading = NSMutableAttributedString()
         if let attachment = Self.dotAttachment(
-            color: Self.dotColor(status),
+            color: popupTint(Self.dotColor(status)),   // #188: breathe the material when translucent
             accessibility: status == .operational ? "operational" : "issue") {
             leading.append(NSAttributedString(attachment: attachment))
             leading.append(NSAttributedString(string: "  "))
@@ -1128,7 +1180,7 @@ final class PopupViewController: NSViewController {
         let word = Self.word(status)
         let isLink = status != .operational
         let wordAttributed = NSAttributedString(string: word, attributes: isLink
-            ? [.font: font, .foregroundColor: ColorStore.shared.color(.link), .underlineStyle: NSUnderlineStyle.single.rawValue]
+            ? [.font: font, .foregroundColor: popupTint(ColorStore.shared.color(.link)), .underlineStyle: NSUnderlineStyle.single.rawValue]
             : [.font: font, .foregroundColor: Self.dimmedLabelColor])
         let wordLabel = StatusLineLabel(labelWithAttributedString: wordAttributed)
         if isLink {
