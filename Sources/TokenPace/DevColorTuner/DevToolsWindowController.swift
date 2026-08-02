@@ -194,7 +194,7 @@ final class DevToolsWindowController: NSWindowController {
 
     /// Preview content = the live popup view, a divider, and two mock update-notification rows (#185
     /// request): a blue dot "new update available" and a red dot "auto-update failed" — mirroring the
-    /// real menu update item so those colours (popupServiceBlue / popupWarningRed) are visible for tuning.
+    /// real menu update item so those colours (blue / red) are visible for tuning.
     private func buildPreviewContent() -> NSView {
         previewVC.view.translatesAutoresizingMaskIntoConstraints = false
 
@@ -202,8 +202,8 @@ final class DevToolsWindowController: NSWindowController {
         divider.boxType = .separator
         divider.translatesAutoresizingMaskIntoConstraints = false
 
-        let updateRow = makeUpdateRow(dot: .popupServiceBlue, text: "New update available")
-        let failRow = makeUpdateRow(dot: .popupWarningRed, text: "Automatic update failed")
+        let updateRow = makeUpdateRow(dot: .blue, text: "New update available")
+        let failRow = makeUpdateRow(dot: .red, text: "Automatic update failed")
 
         // The update rows carry their own left inset; the popup view spans the full width flush to the
         // edges (it draws its own backdrop), so there is no pale margin beside it. The whole content view
@@ -264,8 +264,8 @@ final class DevToolsWindowController: NSWindowController {
         dot.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 9, weight: .regular))
         dot.contentTintColor = ColorStore.shared.color(role)
-        dot.tag = role.rawValue == ColorRole.popupServiceBlue.rawValue ? 1 : 2
-        dot.identifier = .init(role == .popupServiceBlue ? "updateDot" : "failDot")
+        dot.tag = role == .blue ? 1 : 2
+        dot.identifier = .init(role == .blue ? "updateDot" : "failDot")
         let label = NSTextField(labelWithString: text)
         label.font = .systemFont(ofSize: NSFont.systemFontSize)
         let row = NSStackView(views: [dot, label])

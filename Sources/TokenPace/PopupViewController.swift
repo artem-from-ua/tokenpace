@@ -67,7 +67,8 @@ final class PopupBarView: NSView {
         static let indicatorHeight: CGFloat = 14
         /// Corner radius of the time-indicator marker (lightly rounded, matching the bar corners).
         static let indicatorCorner: CGFloat = 2
-        static let indicatorStroke: CGFloat = 1
+        /// Width of each flanking edge-outline stroke on the marker/bar intersection (`quaternaryLabelColor`).
+        static let indicatorStroke: CGFloat = 2
         // Tick ruler, drawn *below* the bar like an axis (issue #38, "under-bar ruler" style).
         static let tickLength: CGFloat = 3
         static let tickGap: CGFloat = 2
@@ -93,90 +94,51 @@ final class PopupBarView: NSView {
     // automatically (PopupBarView draws in its real appearance — no manual observation needed).
     @MainActor
     private enum Palette {
-        /// Pacing gap colours. Green (on pace) is the **system** colour, matching the Claude
-        /// service-status dots. The ahead-of-pace grade — amber (< 15 pts ahead) → orange (≥ 15) → red
-        /// (exhausted) — uses **custom** sRGB, pulled apart so the steps read clearly distinct: a golden
-        /// **amber** (not a pale yellow — a pure light yellow washed out against the light-grey bar, so
-        /// the mildest step is a darker golden tone instead), an orange nudged toward red, and a pure
-        /// saturated red (no blue tint unlike `systemRed`).
-        static var gapGreen: NSColor { ColorStore.shared.color(.popupGapGreen) }
+        /// Pacing gap colours — the unified semantic hues shared with the menu bar. Green (on pace) is
+        /// `.systemGreen`; the ahead-of-pace grade is `.systemYellow` (mild lead) → `.systemOrange`
+        /// (strong lead) → `.systemRed` (exhausted), via `aheadColor`.
+        static var gapGreen: NSColor { ColorStore.shared.color(.green) }
         /// The **idle** 5-hour bar's solid fill (#100, ADR-0027): the 5h window has no active session, so
-        /// the bar is a knobless solid track meaning "ready to start, full quota available" — a neutral
-        /// blue, not a pacing colour (green is reserved for an active window's pacing status). Built on
-        /// `NSColor.systemBlue` (the appearance-aware pair to `gapGreen`'s `systemGreen`), then
-        /// **slightly desaturated** (mixed ~15 % toward a mid `.gray`) so it reads a touch softer than a
-        /// pure `systemBlue` without changing its brightness; on the **light theme** it is additionally
-        /// **lightened** (mixed ~22 % toward white) so it does not read as heavy against the pale panel.
-        /// Both blends are computed **inside** the provider, in the target appearance, so `systemBlue`
-        /// resolves to its real per-theme RGB before mixing (a `static let … .blended(...)` would bake in
-        /// whatever appearance was current at first access — the same trap `dimmedLabelColor` documents).
-        static var idleBlue: NSColor { ColorStore.shared.color(.popupIdleBlue) }
-        static var gapRed: NSColor { ColorStore.shared.color(.popupGapRed) }
-        static var gapYellow: NSColor { ColorStore.shared.color(.popupGapYellow) }
-        static var gapOrange: NSColor { ColorStore.shared.color(.popupGapOrange) }
+        /// the bar is a knobless solid track meaning "ready to start, full quota available" — plain
+        /// `.systemBlue`, the appearance-aware pair to the on-pace green; the unified `blue` role, so it
+        /// flips light/dark like the native icons and matches the menu-bar idle bar exactly.
+        static var idleBlue: NSColor { ColorStore.shared.color(.blue) }
+        static var gapRed: NSColor { ColorStore.shared.color(.red) }
+        static var gapYellow: NSColor { ColorStore.shared.color(.yellow) }
+        static var gapOrange: NSColor { ColorStore.shared.color(.orange) }
 
-        /// Indicator-dot ring: a soft separation between the dot and the bar beneath it. On **light** a
-        /// near-white translucent ring (the earlier `windowBackgroundColor·0.4` read too dark against the
-        /// light-grey bar); on **dark** the panel background at reduced opacity, which already reads as a
-        /// soft dark ring there.
-        static var indicatorStroke: NSColor { ColorStore.shared.color(.popupIndicatorStroke) }
+        /// Indicator-dot ring: a soft separation between the dot and the bar beneath it. `separatorColor`
+        /// — the unified `indicatorRing` role, the same semantic hairline the menu-bar ring uses.
+        static var indicatorStroke: NSColor { ColorStore.shared.color(.indicatorRing) }
 
-        /// Tick-ruler marks below the bar: a muted neutral **solid** grey (opaque, not translucent) so
-        /// it renders the same regardless of what's behind — a translucent tick composited against the
-        /// opaque backdrop read far too dark on dark. Weaker than the indicator dot.
-        static var tick: NSColor { ColorStore.shared.color(.popupTick) }
+        /// Tick-ruler marks below the bar: `tertiaryLabelColor` — a muted neutral that flips light/dark
+        /// and reads weaker than the indicator dot.
+        static var tick: NSColor { ColorStore.shared.color(.tick) }
 
-        /// The monochrome base-zone grey (the bar's `used` + future/unused zones): a **solid** light grey
-        /// on light, a darker solid grey on dark, so the bar's base recedes while the pacing gap and dot
-        /// stay the clear foreground — and it never depends on alpha compositing against the backdrop.
-        static var monochromeGrey: NSColor { ColorStore.shared.color(.popupMonochromeGrey) }
+        /// The monochrome base-zone grey (the bar's `used` + future/unused zones): `labelColor` at 22 %
+        /// alpha — the unified `barTrack` role, the same track tone the menu-bar bar uses. Translucent, so
+        /// the base recedes and breathes the popup's NSMenu material while the pacing gap and dot stay
+        /// foreground.
+        static var monochromeGrey: NSColor { ColorStore.shared.color(.barTrack) }
     }
 
-    // MARK: - Shipped colour defaults (appearance-aware / system)
+    // MARK: - Shipped colour defaults
 
-    // These reproduce the original `Palette` provider literals and are the single source of truth for
-    // `ColorRole.defaultColor` (the dev color tuner reads them, and the store falls back to them when a
-    // role is not overridden). Kept here — not inlined in `ColorRole` — so the per-appearance logic
-    // lives in one place next to the draw code.
+    // The one remaining per-appearance provider backing `ColorRole.defaultColor`. The semantic hues and
+    // greys are now plain system/semantic colours resolved directly in `ColorRole.defaultColor`; only
+    // `defaultDimmedLabel` (below) still computes a per-appearance blend, so it stays a provider.
 
-    static let defaultIdleBlue = NSColor(name: nil) { appearance in
-        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        var result: NSColor = .systemBlue
-        appearance.performAsCurrentDrawingAppearance {
-            // Desaturate slightly (toward a mid grey — lowers saturation, keeps brightness).
-            let muted = NSColor.systemBlue.blended(withFraction: 0.15, of: .gray) ?? .systemBlue
-            // On light, also lighten toward white so it isn't heavy on the pale panel.
-            result = isDark ? muted : (muted.blended(withFraction: 0.22, of: .white) ?? muted)
-        }
-        return result
-    }
-
-    static let defaultIndicatorStroke = paletteDynamic(
-        dark: NSColor.windowBackgroundColor.withAlphaComponent(0.4),
-        light: NSColor(white: 1, alpha: 0.65)
-    )
-
-    static let defaultTick = paletteDynamic(dark: paletteGray(120), light: paletteGray(150))
-
-    static let defaultMonochromeGrey = paletteDynamic(dark: paletteGray(78), light: paletteGray(210))
-
-    private static func paletteGray(_ v: CGFloat) -> NSColor {
-        NSColor(srgbRed: v/255, green: v/255, blue: v/255, alpha: 1)
-    }
-
-    /// Resolves to `dark` under a dark appearance, `light` otherwise; AppKit swaps on theme change.
-    private static func paletteDynamic(dark: NSColor, light: NSColor) -> NSColor {
-        NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light }
-    }
-
-    /// The solid grey both bar base zones (`used` + future/unused tail) render in — a monochrome,
-    /// low-contrast bar where only the pacing gap + dot carry colour. Exposed so ``StatusItemView``
-    /// draws the menu-bar bars identically.
-    static let monochromeGrey = Palette.monochromeGrey
+    /// The grey both bar base zones (`used` + future/unused tail) render in — the unified `barTrack`
+    /// (`labelColor@0.22`), where only the pacing gap + dot carry colour. A **computed** accessor (not a
+    /// `static let`), so it re-resolves the dynamic `labelColor` in the *current* drawing appearance every
+    /// draw — a `static let` would bake in whatever appearance was current at first access and render the
+    /// wrong tone after a theme flip (near-white on light). Menu-bar `drawBar` reads it live the same way.
+    static var monochromeGrey: NSColor { Palette.monochromeGrey }
 
     /// The exhausted-pacing red (`aheadColor`'s cap rung). Exposed so the popup can paint the **one**
-    /// blocking reset time red (#158) in the same tone the bars use for an exhausted limit.
-    static let gapRed = Palette.gapRed
+    /// blocking reset time red (#158) in the same tone the bars use for an exhausted limit. Computed (not
+    /// a `static let`) for the same appearance-freshness reason as ``monochromeGrey``.
+    static var gapRed: NSColor { Palette.gapRed }
 
     override var isFlipped: Bool { true }
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: Metrics.height) }
@@ -206,17 +168,33 @@ final class PopupBarView: NSView {
 
         let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner)
 
-        // Whole-bar rounded background = the monochrome future/unused base (others paint over it).
+        // Whole-bar rounded grey track (drawn first; the gap paints over it). Both flanks of the gap —
+        // the used head and the future/unused tail — are this one tone, so they read identical. The track
+        // is drawn ONCE for the whole bar; the used head is NOT re-filled (a second fill would double the
+        // translucent labelColor@0.22 and darken the left flank — the menu-bar `drawBar` draws it the same).
         Self.monochromeGrey.setFill()
         path.fill()
 
         NSGraphicsContext.saveGraphicsState()
         path.addClip()
-        fillZone(from: 0, to: l.usageFraction, in: rect, width: w, color: Self.monochromeGrey)
         let gapColor = l.pacing == .ahead
             ? Self.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
             : Palette.gapGreen
         fillZone(from: l.gapStart, to: l.gapEnd, in: rect, width: w, color: gapColor)
+        // `quaternaryLabelColor` dividers wherever the coloured gap meets the grey — on the used-head side
+        // (`gapStart`) and the future-tail side (`gapEnd`), matching the marker's intersection outline. Each
+        // side is skipped when the gap reaches that end of the bar (no grey there to divide from). The
+        // strokes sit in the grey, flush against the gap edge, so they don't eat into the colour.
+        let sw = Metrics.indicatorStroke
+        Palette.indicatorStroke.setFill()   // quaternaryLabelColor (tunable via .indicatorRing)
+        if l.gapStart > 0 {
+            let x = rect.minX + CGFloat(l.gapStart) * w - sw
+            NSRect(x: x, y: rect.minY, width: sw, height: rect.height).fill()
+        }
+        if l.gapEnd < 1 {
+            let x = rect.minX + CGFloat(l.gapEnd) * w
+            NSRect(x: x, y: rect.minY, width: sw, height: rect.height).fill()
+        }
         NSGraphicsContext.restoreGraphicsState()
 
         // Tick ruler: `subdivisions - 1` interior marks at k/subdivisions, drawn below the bar and
@@ -234,9 +212,18 @@ final class PopupBarView: NSView {
             roundedRect: markerRect, xRadius: Metrics.indicatorCorner, yRadius: Metrics.indicatorCorner)
         indicatorColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds).setFill()
         marker.fill()
-        Palette.indicatorStroke.setStroke()
-        marker.lineWidth = Metrics.indicatorStroke
-        marker.stroke()
+        // Edge outline only where the marker overlaps the bar (`quaternaryLabelColor`): two short vertical
+        // strokes flanking the marker's left/right edges, clipped to the bar's height — the ends that stand
+        // proud above/below the bar carry no outline. The strokes sit **outside** the marker fill (not on
+        // top of it), so they read as an outline, not an inset. Matches `StatusItemView.strokeMarkerEdges`.
+        let y0 = max(markerRect.minY, rect.minY)
+        let y1 = min(markerRect.maxY, rect.maxY)
+        if y1 > y0 {
+            Palette.indicatorStroke.setFill()   // quaternaryLabelColor (tunable via .indicatorRing)
+            for x in [markerRect.minX - sw, markerRect.maxX] {
+                NSRect(x: x, y: y0, width: sw, height: y1 - y0).fill()
+            }
+        }
     }
 
     /// Draw the under-bar tick ruler: vertical teeth at each interior window boundary
@@ -275,16 +262,12 @@ final class PopupBarView: NSView {
     /// slack early in a window, shrinking to 0 at the end. Shared with `BarLayout.severity` (Kit) so
     /// colour and severity never drift; the `< threshold` comparison is strict (a lead exactly at the
     /// threshold is orange).
-    /// Which surface's pacing palette to resolve. The menu-bar and popup ahead-of-pace colours are
-    /// independently tunable (dev color tuner #185), so the same rung maps to a different `ColorRole`
-    /// depending on the caller. Menu-bar callers additionally lighten the result ~10 % at the draw site.
-    enum PacingSurface { case popup, menuBar }
-
-    static func aheadColor(usage: Double, time: Double, remainingSeconds: TimeInterval,
-                           surface: PacingSurface = .popup) -> NSColor {
-        let red: NSColor = surface == .popup ? Palette.gapRed : ColorStore.shared.color(.menuGapRed)
-        let yellow: NSColor = surface == .popup ? Palette.gapYellow : ColorStore.shared.color(.menuGapYellow)
-        let orange: NSColor = surface == .popup ? Palette.gapOrange : ColorStore.shared.color(.menuGapOrange)
+    /// The ahead-of-pace grade, shared by both surfaces: they now resolve the same unified
+    /// `red`/`yellow`/`orange` roles, so the menu-bar bar and popup bar always agree.
+    static func aheadColor(usage: Double, time: Double, remainingSeconds: TimeInterval) -> NSColor {
+        let red = ColorStore.shared.color(.red)
+        let yellow = ColorStore.shared.color(.yellow)
+        let orange = ColorStore.shared.color(.orange)
         if usage >= 1 { return red }
         if remainingSeconds <= PacingModel.pacingOrangeOverrideSeconds { return orange }
         return (usage - time) < PacingModel.aheadThreshold(timeFraction: time) ? yellow : orange
@@ -534,7 +517,7 @@ final class PopupViewController: NSViewController {
     /// against `anthropics/skills`' `brand-guidelines/SKILL.md` on GitHub, the same value the local
     /// Claude Code "claude" theme slot resolves to. Used only for the "Claude Code" section header,
     /// so the popup echoes the CLI's own brand mark rather than a generic label colour.
-    private static var claudeBrandColor: NSColor { ColorStore.shared.color(.popupClaudeBrand) }
+    private static var claudeBrandColor: NSColor { ColorStore.shared.color(.claudeBrand) }
 
     /// `Metrics.textSize`, bold — the "Claude Code" section header and the two native menu items
     /// below it (via `App.swift`'s `attributedTitle`) all resolve to this exact font, so there is no
@@ -550,7 +533,7 @@ final class PopupViewController: NSViewController {
     /// appearance, so it re-resolves per view and adapts to light/dark. A plain `static let ...
     /// .blended(...)` bakes in whatever appearance was current at first access — which made it render
     /// near-black under the dark system theme.
-    static var dimmedLabelColor: NSColor { ColorStore.shared.color(.popupDimmedLabel) }
+    static var dimmedLabelColor: NSColor { ColorStore.shared.color(.dimmedLabel) }
 
     /// The shipped default for ``dimmedLabelColor`` — a **dynamic** `NSColor(name:)` whose blend is
     /// computed inside the provider (see the note above). Source of truth for `ColorRole.defaultColor`.
@@ -751,10 +734,10 @@ final class PopupViewController: NSViewController {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = font
-        titleLabel.textColor = ColorStore.shared.color(.popupLabel)
+        titleLabel.textColor = ColorStore.shared.color(.label)
         let statusLabel = NSTextField(labelWithString: status)
         statusLabel.font = font
-        statusLabel.textColor = ColorStore.shared.color(.popupLabel)
+        statusLabel.textColor = ColorStore.shared.color(.label)
         guard let badge else {
             return addSplitRow(leftLabel: titleLabel, rightLabel: statusLabel)
         }
@@ -772,7 +755,7 @@ final class PopupViewController: NSViewController {
     /// Claude web UI puts on usage credits. Sizing comes from the text + insets; the capsule radius is
     /// half the height, so it reads as a pill at any font size.
     private static func makeInUsePill() -> NSView {
-        makePill(text: inUseBadgeText, fill: { ColorStore.shared.color(.popupInUsePill) })
+        makePill(text: inUseBadgeText, fill: { ColorStore.shared.color(.inUsePill) })
     }
 
     /// The blocking-reset badge (#158): a red capsule carrying the reset countdown (e.g. "4d"), shown
@@ -794,7 +777,7 @@ final class PopupViewController: NSViewController {
     private static func makePill(text: String, fill: @escaping () -> NSColor) -> NSView {
         let label = NSTextField(labelWithString: text)
         label.font = .systemFont(ofSize: Metrics.textSize - 2, weight: .medium)
-        label.textColor = ColorStore.shared.color(.popupPillText)
+        label.textColor = ColorStore.shared.color(.pillText)
         label.translatesAutoresizingMaskIntoConstraints = false
 
         let pill = PillView()
@@ -819,7 +802,7 @@ final class PopupViewController: NSViewController {
     private func addLabel(_ text: String, font: NSFont, secondary: Bool = false, color: NSColor? = nil) -> NSView {
         let label = NSTextField(labelWithString: text)
         label.font = font
-        label.textColor = color ?? (secondary ? Self.dimmedLabelColor : ColorStore.shared.color(.popupLabel))
+        label.textColor = color ?? (secondary ? Self.dimmedLabelColor : ColorStore.shared.color(.label))
         stack.addArrangedSubview(label)
         return label
     }
@@ -901,7 +884,7 @@ final class PopupViewController: NSViewController {
     private func addWrappingLabel(_ text: String, font: NSFont, secondary: Bool = false) -> NSView {
         let label = NSTextField(wrappingLabelWithString: text)
         label.font = font
-        label.textColor = secondary ? Self.dimmedLabelColor : ColorStore.shared.color(.popupLabel)
+        label.textColor = secondary ? Self.dimmedLabelColor : ColorStore.shared.color(.label)
         label.lineBreakMode = .byWordWrapping
         label.translatesAutoresizingMaskIntoConstraints = false
         let contentWidth = Metrics.width - 2 * Metrics.hPadding
@@ -918,7 +901,7 @@ final class PopupViewController: NSViewController {
     @discardableResult
     private func addWarningTitle(_ text: String) -> NSView {
         let font = NSFont.boldSystemFont(ofSize: Metrics.textSize)
-        let color = ColorStore.shared.color(.popupWarningRed)
+        let color = ColorStore.shared.color(.red)
         let attributed = NSMutableAttributedString()
 
         let symbolConfig = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
@@ -989,7 +972,7 @@ final class PopupViewController: NSViewController {
 
         // Prefix the component's display label (e.g. "API: ") in the normal label colour.
         attributed.append(NSAttributedString(string: "\(label): ", attributes: [
-            .font: font, .foregroundColor: ColorStore.shared.color(.popupLabel),
+            .font: font, .foregroundColor: ColorStore.shared.color(.label),
         ]))
 
         // Status word. Operational → plain dimmed text (no link). Otherwise → underlined link
@@ -998,7 +981,7 @@ final class PopupViewController: NSViewController {
         let isLink = status != .operational
         let wordStart = attributed.length
         attributed.append(NSAttributedString(string: word, attributes: isLink
-            ? [.font: font, .foregroundColor: ColorStore.shared.color(.popupLink), .underlineStyle: NSUnderlineStyle.single.rawValue]
+            ? [.font: font, .foregroundColor: ColorStore.shared.color(.link), .underlineStyle: NSUnderlineStyle.single.rawValue]
             : [.font: font, .foregroundColor: Self.dimmedLabelColor]))
 
         let field = StatusLineLabel(labelWithAttributedString: attributed)
@@ -1015,12 +998,12 @@ final class PopupViewController: NSViewController {
     /// dark panels, exactly like the warning triangle's `.systemRed`. Exhaustive, no `default`.
     static func dotColor(_ status: ServiceStatus) -> NSColor {
         switch status {
-        case .operational:      return ColorStore.shared.color(.popupServiceGreen)
-        case .degraded:         return ColorStore.shared.color(.popupServiceYellow)
-        case .partialOutage:    return ColorStore.shared.color(.popupServiceOrange)
-        case .majorOutage:      return ColorStore.shared.color(.popupServiceRed)
-        case .underMaintenance: return ColorStore.shared.color(.popupServiceBlue)
-        case .unknown:          return ColorStore.shared.color(.popupServiceGray)
+        case .operational:      return ColorStore.shared.color(.green)
+        case .degraded:         return ColorStore.shared.color(.yellow)
+        case .partialOutage:    return ColorStore.shared.color(.orange)
+        case .majorOutage:      return ColorStore.shared.color(.red)
+        case .underMaintenance: return ColorStore.shared.color(.blue)
+        case .unknown:          return ColorStore.shared.color(.gray)
         }
     }
 

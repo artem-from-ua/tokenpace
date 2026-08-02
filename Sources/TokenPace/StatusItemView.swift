@@ -138,53 +138,52 @@ final class StatusItemView: NSView {
         /// Pacing gap / dot when on pace or behind — `.systemGreen`. The ahead-of-pace colours are NOT
         /// here: they come from `PopupBarView.aheadColor` (discrete yellow/orange/red buckets), shared
         /// with the popup so both bars agree.
-        static var gapGreen: NSColor { ColorStore.shared.color(.menuGapGreen) }
+        static var gapGreen: NSColor { ColorStore.shared.color(.green) }
 
-        /// Time-indicator dot when on pace. A distinct role from the gap green so the tuner can nudge
-        /// the marker independently; both now resolve to the same system semantic green (`.systemGreen`),
-        /// so the marker reads as the gap's colour with no manual lightening.
-        static var dotGreen: NSColor { ColorStore.shared.color(.menuDotGreen) }
+        /// Time-indicator dot when on pace. Shares the unified green with the gap (`.systemGreen`), so the
+        /// marker reads as the gap's colour with no manual lightening.
+        static var dotGreen: NSColor { ColorStore.shared.color(.green) }
         /// Ring around the time-indicator marker so it stays distinct over any coloured zone —
         /// `.separatorColor`, so the ring flips with the bar (dark ring on a light bar and vice versa).
-        static var indicatorStroke: NSColor { ColorStore.shared.color(.menuIndicatorStroke) }
+        static var indicatorStroke: NSColor { ColorStore.shared.color(.indicatorRing) }
         /// The neutral grey track of a menu-bar bar — the whole-bar background, i.e. BOTH the `used`
-        /// head and the future/unused tail on either side of the coloured pacing gap. `tertiaryLabelColor`
-        /// (the disabled/tertiary band), so both flanks read identical and the track "breathes" with the
-        /// wallpaper like a native icon. Menu-bar only; the popup keeps its own `monochromeGrey`.
-        static var unusedGrey: NSColor { ColorStore.shared.color(.menuUnusedGrey) }
+        /// head and the future/unused tail on either side of the coloured pacing gap. `labelColor` at
+        /// 22 % alpha, so both flanks read identical and the track "breathes" with the wallpaper like a
+        /// native icon. The unified `barTrack` role — the popup bar uses the same one.
+        static var unusedGrey: NSColor { ColorStore.shared.color(.barTrack) }
         /// The **idle** 5-hour bar's solid fill (#100, ADR-0027) — the 5h window has no active session,
         /// so the bar is a knobless solid track meaning "ready to start, full quota available", not a
         /// pacing state. `.systemBlue`, so it flips light/dark and honours Increase Contrast like the
-        /// native icons; distinct from the pacing greens/ambers.
-        static var idleBlue: NSColor { ColorStore.shared.color(.menuIdleBlue) }
+        /// native icons; the unified `blue` role, shared with the popup idle bar and maintenance dot.
+        static var idleBlue: NSColor { ColorStore.shared.color(.blue) }
         /// The **calm-colours** replacement for the "ready to start" idle blue (#105/#158): under Calm
         /// colours the idle blue mutes to this quieter neutral rather than the plain `calmWhite`. Only the
         /// *ready* idle bar uses it; a *blocked* idle bar is the base track grey in both colour modes (see
         /// `drawBar`). `secondaryLabelColor` — a semantic neutral that flips with the bar.
-        static var idleCalmGrey: NSColor { ColorStore.shared.color(.menuIdleCalmGrey) }
+        static var idleCalmGrey: NSColor { ColorStore.shared.color(.idleCalmGrey) }
         /// Idle glyph + reset label — follow the menu-bar foreground.
-        static var foreground: NSColor { ColorStore.shared.color(.menuForeground) }
+        static var foreground: NSColor { ColorStore.shared.color(.foreground) }
 
         /// The "calm colours" replacement (#105): the soft pacing colours (idle blue, on-pace green,
         /// mild-ahead yellow) — and, since the time-indicator marker now shares its gap's colour, the
         /// marker too — collapse to this when the user opts into a quieter menu bar. `labelColor`, the
         /// same semantic foreground the reset label uses, so the calm signals read as the neutral
         /// foreground and flip with the bar (a fixed light tone would vanish on a light bar).
-        static var calmWhite: NSColor { ColorStore.shared.color(.menuCalmWhite) }
+        static var calmWhite: NSColor { ColorStore.shared.color(.calmWhite) }
 
-        // Service-status dot (issue #31). System semantic colours (`.systemYellow/.systemOrange/…`),
-        // matching the popup's service palette, so the dot flips light/dark and honours Increase
-        // Contrast. `operational` is never drawn (the dot appears only for a problem), so it is omitted.
-        static var statusYellow: NSColor { ColorStore.shared.color(.menuStatusYellow) }
-        static var statusOrange: NSColor { ColorStore.shared.color(.menuStatusOrange) }
-        static var statusRed:    NSColor { ColorStore.shared.color(.menuStatusRed) }
-        static var statusBlue:   NSColor { ColorStore.shared.color(.menuStatusBlue) }
-        static var statusGray:   NSColor { ColorStore.shared.color(.menuStatusGray) }
+        // Service-status dot (issue #31). The unified semantic hues (`.yellow/.orange/…`), shared with
+        // the popup service dots, so the dot flips light/dark and honours Increase Contrast.
+        // `operational` is never drawn (the dot appears only for a problem), so it is omitted.
+        static var statusYellow: NSColor { ColorStore.shared.color(.yellow) }
+        static var statusOrange: NSColor { ColorStore.shared.color(.orange) }
+        static var statusRed:    NSColor { ColorStore.shared.color(.red) }
+        static var statusBlue:   NSColor { ColorStore.shared.color(.blue) }
+        static var statusGray:   NSColor { ColorStore.shared.color(.gray) }
 
         /// The orange "pause" glyph drawn to the left of the bars when the user is fully blocked
-        /// (`CreditsPacing.isBlocked`) and kept the bars visible in that state (#199). `.systemOrange`,
-        /// tunable independently of the service-status orange dot.
-        static var pauseOrange: NSColor { ColorStore.shared.color(.menuPauseOrange) }
+        /// (`CreditsPacing.isBlocked`) and kept the bars visible in that state (#199). The unified
+        /// `orange` role.
+        static var pauseOrange: NSColor { ColorStore.shared.color(.orange) }
     }
 
     // MARK: Colour resolution (ADR-0059)
@@ -201,6 +200,21 @@ final class StatusItemView: NSView {
     private func bright(_ color: NSColor) -> NSColor {
         guard let rgb = color.usingColorSpace(.sRGB) else { return color }
         return rgb.withAlphaComponent(Self.brightAlpha)
+    }
+
+    /// Outline the time-indicator marker's **left and right edges only where it overlaps the bar** —
+    /// `quaternaryLabelColor` vertical strokes from the bar's top to its bottom, so the marker is set off
+    /// from the coloured zone it sits over without ringing the ends that stand proud above/below the bar.
+    private func strokeMarkerEdges(_ markerRect: NSRect, in barRect: NSRect, width: CGFloat) {
+        let y0 = max(markerRect.minY, barRect.minY)
+        let y1 = min(markerRect.maxY, barRect.maxY)
+        guard y1 > y0 else { return }
+        Palette.indicatorStroke.setFill()   // quaternaryLabelColor (tunable via .indicatorRing)
+        // Flank the marker's edges from **outside** the fill, so the outline sits beside the marker rather
+        // than eating into it.
+        for x in [markerRect.minX - width, markerRect.maxX] {
+            NSRect(x: x, y: y0, width: width, height: y1 - y0).fill()
+        }
     }
 
     /// Scale a **colour accent** (pacing gap, service dot, idle blue) by ``accentSaturation`` — blend the
@@ -378,7 +392,7 @@ final class StatusItemView: NSView {
         if calmColors && credits.isCalm { return bright(Palette.calmWhite) }
         guard let l = credits.bar else { return bright(Palette.foreground) }   // unlimited → neutral
         return accent(l.timeFraction < l.usageFraction
-            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds, surface: .menuBar)
+            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
             : Palette.dotGreen)
     }
 
@@ -600,13 +614,26 @@ final class StatusItemView: NSView {
         let markerRect = NSRect(x: cx - mw / 2, y: cy - mh / 2, width: mw, height: mh)
         let marker = NSBezierPath(
             roundedRect: markerRect, xRadius: Metrics.tickCorner, yRadius: Metrics.tickCorner)
+        // Reset the bar under the marker back to the bare track (clipped to the bar), REPLACING the gap
+        // there instead of layering over it. The marker fill is translucent (`bright(...)` = labelColor at
+        // 0.865, kept translucent so it breathes the wallpaper); without this, a marker sitting inside the
+        // gap would composite its own tone over the gap's identical tone — two half-transparent layers —
+        // and read too dark (measured 0x1b vs the target 0x26 in calm on-pace). `.copy` overwrites rather
+        // than blends, so the marker lands on ONE track layer, matching the reset text / tick opacity.
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner).addClip()
+        NSGraphicsContext.current?.compositingOperation = .copy
+        Palette.unusedGrey.setFill()
+        NSRect(x: markerRect.minX, y: rect.minY, width: markerRect.width, height: rect.height).fill()
+        NSGraphicsContext.restoreGraphicsState()
         // The marker takes the EXACT colour of this state's pacing gap (`calmedGapColor`) — one tone
         // per pacing status, so the "you are here" tick reads as the same colour as the zone it marks.
         calmedGapColor(l).setFill()
         marker.fill()
-        Palette.indicatorStroke.setStroke()   // separatorColor
-        marker.lineWidth = Metrics.tickStroke
-        marker.stroke()
+        // Edge outline only where the marker overlaps the bar (`quaternaryLabelColor`): two short vertical
+        // strokes down the marker's left and right edges, clipped to the bar's height — the parts of the
+        // marker that stand proud above/below the bar carry no outline.
+        strokeMarkerEdges(markerRect, in: rect, width: Metrics.tickStroke)
     }
 
     /// The pacing-gap fill colour, with calm mode (#105) applied. Normally this is the on-pace green
@@ -618,7 +645,7 @@ final class StatusItemView: NSView {
         // pacing gap is an accent (scaled by accentSaturation). Neither is the dimmed bar track.
         if calmColors && l.isCalm { return bright(Palette.calmWhite) }
         return accent(l.pacing == .ahead
-            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds, surface: .menuBar)
+            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
             : Palette.gapGreen)
     }
 

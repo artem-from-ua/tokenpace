@@ -1,10 +1,11 @@
 import AppKit
 
 /// Every named UI colour the app draws, as a flat catalogue the dev color tuner (#185) can enumerate,
-/// describe, and override live. Each case carries its shipped default (mirroring the literal that used
-/// to live in the two private `Palette` enums), the functional group it belongs to, an exhaustive note
-/// of where it is drawn, and — when the on-screen pixel is **not** the raw constant — a description of
-/// the transform our own code applies on top (lighten, desaturate, alpha, calm-mode swap).
+/// describe, and override live. Roles are **surface-neutral**: one role per semantic hue, shared by
+/// both the menu bar and the popup (and by both pacing gaps and service-status dots). Each case carries
+/// its shipped default, the functional group it belongs to, an exhaustive note of where it is drawn,
+/// and — when the on-screen pixel is **not** the raw constant — a description of the transform our own
+/// code applies on top (alpha, calm-mode swap).
 ///
 /// The tuner reads this catalogue for its dropdown, its captions, and its reset-to-default action; the
 /// two `Palette` enums read the *live* value for each role through ``ColorStore``. Outside a dev-tools
@@ -15,65 +16,48 @@ import AppKit
 /// its ``defaultColor`` here in the same commit.
 enum ColorRole: String, CaseIterable {
 
-    // MARK: Menu-bar palette (StatusItemView) — fixed sRGB, non-template image
+    // MARK: Semantic hues — one role per hue, shared by BOTH surfaces (menu bar + popup) and by BOTH
+    // pacing gaps AND service/status dots. `.system*` defaults flip light/dark + honour Increase Contrast.
 
-    case menuGapGreen
-    case menuDotGreen
-    case menuIndicatorStroke
-    case menuIdleBlue
-    case menuIdleCalmGrey
-    case menuForeground
-    case menuCalmWhite
-    case menuStatusYellow
-    case menuStatusOrange
-    case menuStatusRed
-    case menuStatusBlue
-    case menuStatusGray
-    // The neutral grey track of a menu-bar pacing bar — the whole background under the coloured gap,
-    // i.e. both the `used` head and the future/unused tail, one flat tone so both flanks read identical.
-    case menuUnusedGrey
-    // Orange "pause" glyph drawn left of the bars when fully blocked and the bars are kept visible.
-    case menuPauseOrange
-    // Menu-bar ahead-of-pace pacing (previously shared with the popup via aheadColor; now independent).
-    case menuGapRed
-    case menuGapYellow
-    case menuGapOrange
+    case green
+    case yellow
+    case orange
+    case red
+    case blue
+    case gray
 
-    // MARK: Popup palette (PopupBarView) — appearance-aware / system, except the three ahead sRGB
+    // MARK: Bar / chrome — track, ring, ticks, pill fill (shared where identical across surfaces)
 
-    case popupGapGreen
-    case popupIdleBlue
-    case popupGapRed
-    case popupGapYellow
-    case popupGapOrange
-    case popupIndicatorStroke
-    case popupTick
-    case popupMonochromeGrey
+    // The neutral grey track of a pacing bar (both surfaces) — used head + future/unused tail, one flat
+    // tone so both flanks read identical; also the blocked-idle fill. labelColor at 22 % alpha.
+    case barTrack
+    case indicatorRing
+    case tick
+    case inUsePill
 
-    // MARK: Popup extras (outside the Palette enum)
+    // MARK: Text / foreground
 
-    case popupClaudeBrand
-    case popupDimmedLabel
-    case popupWarningRed
-    case popupInUsePill
+    case foreground
+    case dimmedLabel
+    case label
+    case link
     // White text drawn on the popup pills (both the "in use" and blocking-reset badge fills).
-    case popupPillText
-    case popupLink
-    case popupLabel
-    // Popup service-status dots — appearance-aware `.system*`, distinct from the fixed-sRGB menu dots.
-    case popupServiceGreen
-    case popupServiceYellow
-    case popupServiceOrange
-    case popupServiceRed
-    case popupServiceBlue
-    case popupServiceGray
+    case pillText
+
+    // MARK: Calm mode (menu-bar)
+
+    case calmWhite
+    case idleCalmGrey
+
+    // MARK: Brand (Claude accent stays sRGB)
+
+    case claudeBrand
 
     // MARK: - Grouping
 
     enum Group: String, CaseIterable {
-        case pacing = "Pacing"
-        case service = "Service status"
-        case chrome = "Chrome / background"
+        case semantic = "Semantic colours"
+        case chrome = "Bar / chrome"
         case text = "Text / foreground"
         case calm = "Calm mode"
         case brand = "Brand"
@@ -81,165 +65,97 @@ enum ColorRole: String, CaseIterable {
 
     var group: Group {
         switch self {
-        case .menuGapGreen, .menuDotGreen, .menuGapRed, .menuGapYellow, .menuGapOrange,
-             .popupGapGreen, .popupGapRed, .popupGapYellow, .popupGapOrange:
-            return .pacing
-        case .menuStatusYellow, .menuStatusOrange, .menuStatusRed, .menuStatusBlue, .menuStatusGray,
-             .menuPauseOrange,
-             .popupServiceGreen, .popupServiceYellow, .popupServiceOrange,
-             .popupServiceRed, .popupServiceBlue, .popupServiceGray,
-             .popupWarningRed:
-            return .service
-        case .menuIndicatorStroke, .menuIdleBlue, .menuUnusedGrey, .popupIdleBlue,
-             .popupIndicatorStroke, .popupTick, .popupMonochromeGrey, .popupInUsePill:
+        case .green, .yellow, .orange, .red, .blue, .gray:
+            return .semantic
+        case .barTrack, .indicatorRing, .tick, .inUsePill:
             return .chrome
-        case .menuForeground, .popupDimmedLabel, .popupLink, .popupLabel, .popupPillText:
+        case .foreground, .dimmedLabel, .label, .link, .pillText:
             return .text
-        case .menuIdleCalmGrey, .menuCalmWhite:
+        case .calmWhite, .idleCalmGrey:
             return .calm
-        case .popupClaudeBrand:
+        case .claudeBrand:
             return .brand
         }
     }
 
     // MARK: - Display
 
-    /// Human label for the dropdown, prefixed by surface so the two palettes never collide by eye.
+    /// Human label for the dropdown; surface-neutral now that both surfaces share one role per hue.
     var displayName: String {
         switch self {
-        case .menuGapGreen:        return "Menu-bar · gap green"
-        case .menuDotGreen:        return "Menu-bar · dot green"
-        case .menuIndicatorStroke: return "Menu-bar · indicator ring"
-        case .menuIdleBlue:        return "Menu-bar · idle blue"
-        case .menuIdleCalmGrey:    return "Menu-bar · idle calm grey"
-        case .menuForeground:      return "Menu-bar · foreground"
-        case .menuCalmWhite:       return "Menu-bar · calm neutral"
-        case .menuStatusYellow:    return "Menu-bar · status yellow (degraded)"
-        case .menuStatusOrange:    return "Menu-bar · status orange (partial outage)"
-        case .menuStatusRed:       return "Menu-bar · status red (major outage)"
-        case .menuStatusBlue:      return "Menu-bar · status blue (maintenance)"
-        case .menuStatusGray:      return "Menu-bar · status grey (unknown / operational)"
-        case .menuUnusedGrey:      return "Menu-bar · bar track grey"
-        case .menuPauseOrange:     return "Menu-bar · blocked pause"
-        case .popupGapGreen:       return "Popup · gap green"
-        case .popupIdleBlue:       return "Popup · idle blue"
-        case .popupGapRed:         return "Popup · gap red"
-        case .popupGapYellow:      return "Popup · gap yellow (amber)"
-        case .popupGapOrange:      return "Popup · gap orange"
-        case .popupIndicatorStroke: return "Popup · indicator ring"
-        case .popupTick:           return "Popup · tick ruler"
-        case .popupMonochromeGrey: return "Popup · base grey"
-        case .popupClaudeBrand:    return "Popup · Claude brand"
-        case .popupDimmedLabel:    return "Popup · dimmed label"
-        case .menuGapRed:          return "Menu-bar · gap red"
-        case .menuGapYellow:       return "Menu-bar · gap yellow (amber)"
-        case .menuGapOrange:       return "Menu-bar · gap orange"
-        case .popupWarningRed:     return "Popup · warning red (⚠️)"
-        case .popupInUsePill:      return "Popup · \"in use\" pill"
-        case .popupPillText:       return "Popup · pill text"
-        case .popupLink:           return "Popup · link"
-        case .popupLabel:          return "Popup · label"
-        case .popupServiceGreen:   return "Popup · service green (operational)"
-        case .popupServiceYellow:  return "Popup · service yellow (degraded)"
-        case .popupServiceOrange:  return "Popup · service orange (partial outage)"
-        case .popupServiceRed:     return "Popup · service red (major outage)"
-        case .popupServiceBlue:    return "Popup · service blue (maintenance)"
-        case .popupServiceGray:    return "Popup · service grey (unknown)"
+        case .green:         return "Green (on-pace / operational)"
+        case .yellow:        return "Yellow (mild ahead / degraded)"
+        case .orange:        return "Orange (strong ahead / partial outage)"
+        case .red:           return "Red (exhausted / major outage)"
+        case .blue:          return "Blue (idle / maintenance)"
+        case .gray:          return "Grey (unknown status)"
+        case .barTrack:      return "Bar track"
+        case .indicatorRing: return "Indicator ring"
+        case .tick:          return "Tick ruler"
+        case .inUsePill:     return "\"In use\" pill"
+        case .foreground:    return "Foreground"
+        case .dimmedLabel:   return "Dimmed label"
+        case .label:         return "Label"
+        case .link:          return "Link"
+        case .pillText:      return "Pill text"
+        case .calmWhite:     return "Calm neutral"
+        case .idleCalmGrey:  return "Idle calm grey"
+        case .claudeBrand:   return "Claude brand"
         }
     }
 
     /// Exhaustive note of where this colour is drawn — the caption shown beside the picker.
     var usageDescription: String {
         switch self {
-        case .menuGapGreen:
-            return "Menu-bar pacing gap when on pace or behind (via calmedGapColor) — AND the "
-                 + "time-indicator marker in that same state, which now shares the gap's exact colour. "
-                 + "Ahead-of-pace colours are the separate Menu-bar gap red/yellow/orange roles."
-        case .menuDotGreen:
-            return "Credits ¤ icon when on pace / behind. (No longer the time-indicator marker — the "
-                 + "marker now takes its pacing gap's colour, i.e. the Menu-bar gap green/red/yellow/orange roles.)"
-        case .menuIndicatorStroke:
-            return "Dark ring stroked around the menu-bar time-indicator marker."
-        case .menuIdleBlue:
-            return "Solid fill of the idle 5-hour menu-bar bar (ready-to-start, full quota)."
-        case .menuIdleCalmGrey:
-            return "Calm-mode replacement for the idle blue on a ready idle bar."
-        case .menuForeground:
-            return "Menu-bar idle glyph, reset label, and the ⚠️ palette glyph. Follows labelColor by default."
-        case .menuCalmWhite:
-            return "Calm-mode neutral for on-pace marker / gap / credits / degraded status dot in the "
-                 + "menu bar. A system-matched light grey (#E5E5E5), not a pure white — pure white read "
-                 + "too bright next to the OS menu-bar controls."
-        case .menuStatusYellow:
-            return "Menu-bar service-status dot: degraded (non-calm)."
-        case .menuStatusOrange:
-            return "Menu-bar service-status dot: partial outage."
-        case .menuStatusRed:
-            return "Menu-bar service-status dot: major outage."
-        case .menuStatusBlue:
-            return "Menu-bar service-status dot: under maintenance."
-        case .menuStatusGray:
-            return "Menu-bar service-status dot: unknown / operational."
-        case .menuUnusedGrey:
-            return "The neutral grey track of a menu-bar pacing bar — the whole-bar background under "
-                 + "the coloured gap, i.e. both the `used` head and the future/unused tail. One flat "
-                 + "tone so the strips left and right of the gap read identical. #393939 sRGB."
-        case .menuPauseOrange:
-            return "Menu-bar orange pause glyph drawn left of the bars when all limits are gone "
-                 + "(CreditsPacing.isBlocked) and the bars are kept visible in that state (#199)."
-        case .popupGapGreen:
-            return "Popup bar pacing gap and indicator when on pace. Default is systemGreen."
-        case .popupIdleBlue:
-            return "Popup idle 5-hour bar fill (ready-to-start). Blocked idle uses the base grey instead."
-        case .popupGapRed:
-            return "Popup pacing gap when the limit is exhausted; also the blocking reset-time pill (#158)."
-        case .popupGapYellow:
-            return "Popup pacing gap for a mild ahead-of-pace lead (< threshold)."
-        case .popupGapOrange:
-            return "Popup pacing gap for a strong ahead-of-pace lead / little time to reset."
-        case .popupIndicatorStroke:
-            return "Soft ring stroked around the popup indicator dot."
-        case .popupTick:
-            return "Tick-ruler marks below the popup bar."
-        case .popupMonochromeGrey:
-            return "Popup bar base zones (used + future/unused), plus the popup's blocked idle fill. "
-                 + "(The menu bar has its own track grey — see Menu-bar · bar track grey.)"
-        case .popupClaudeBrand:
-            return "Popup \"Claude Code\" header accent (#d97757)."
-        case .popupDimmedLabel:
-            return "Popup secondary / dimmed labels."
-        case .menuGapRed:
-            return "Menu-bar pacing gap / indicator when the limit is exhausted (ahead-of-pace red)."
-        case .menuGapYellow:
-            return "Menu-bar pacing gap / indicator for a mild ahead-of-pace lead (< threshold)."
-        case .menuGapOrange:
-            return "Menu-bar pacing gap / indicator for a strong ahead-of-pace lead / little time to reset."
-        case .popupWarningRed:
-            return "Popup error banner: the ⚠️ title and message text when a poll is failing. Default systemRed."
-        case .popupInUsePill:
+        case .green:
+            return "On-pace / behind pacing gap AND the time-indicator marker in that state, on both the "
+                 + "menu bar and popup; also the credits ¤ icon and the operational service-status dot."
+        case .yellow:
+            return "Mild ahead-of-pace pacing gap / marker (lead below the dynamic threshold) on both "
+                 + "surfaces, and the degraded service-status dot."
+        case .orange:
+            return "Strong ahead-of-pace pacing gap / marker (lead at/above threshold, or little time to "
+                 + "reset) on both surfaces; the partial-outage service dot; and the menu-bar blocked pause glyph."
+        case .red:
+            return "Exhausted-limit pacing gap / marker on both surfaces; the major-outage service dot "
+                 + "(and the update-menu \"update failed\" dot); the blocking reset-time pill; and the "
+                 + "popup ⚠️ error banner text."
+        case .blue:
+            return "Idle 5-hour bar fill (ready to start) on both surfaces; the maintenance service dot "
+                 + "(and the update-menu \"new version available\" dot)."
+        case .gray:
+            return "Unknown / operational service-status dot on both surfaces."
+        case .barTrack:
+            return "The neutral grey track of a pacing bar on both surfaces — the whole-bar background "
+                 + "under the coloured gap (used head + future/unused tail), plus the blocked-idle fill. "
+                 + "One flat tone so both flanks read identical. labelColor at 22 % alpha."
+        case .indicatorRing:
+            return "Edge outline down the time-indicator marker's left/right sides, only where it overlaps "
+                 + "the bar, on both surfaces. Default quaternaryLabelColor."
+        case .tick:
+            return "Tick-ruler marks below the popup bar. Default tertiaryLabelColor."
+        case .inUsePill:
             return "Popup \"in use\" pill fill beside the header when credits are actively spending (#146). "
                  + "Default controlAccentColor."
-        case .popupPillText:
+        case .foreground:
+            return "Menu-bar idle glyph, reset label, and the ⚠️ palette glyph. Follows labelColor "
+                 + "(re-alpha'd by bright())."
+        case .dimmedLabel:
+            return "Popup secondary / dimmed labels."
+        case .label:
+            return "Popup primary titles and value text. Default labelColor."
+        case .link:
+            return "Popup service-status word rendered as a link to the status page. Default linkColor."
+        case .pillText:
             return "White text on the popup pills — the \"active\" in-use badge (#146) and the blocking "
                  + "reset-time badge (#158). Drawn on both the blue and red pill fills. Default white."
-        case .popupLink:
-            return "Popup service-status word rendered as a link to the status page. Default linkColor."
-        case .popupLabel:
-            return "Popup primary titles and value text. Default labelColor."
-        case .popupServiceGreen:
-            return "Popup service-status dot: operational. Default systemGreen."
-        case .popupServiceYellow:
-            return "Popup service-status dot: degraded. Default systemYellow."
-        case .popupServiceOrange:
-            return "Popup service-status dot: partial outage. Default systemOrange."
-        case .popupServiceRed:
-            return "Popup service-status dot: major outage. Also the update-menu \"automatic update "
-                 + "failed\" dot (#130), via PopupViewController.dotColor(.majorOutage). Default systemRed."
-        case .popupServiceBlue:
-            return "Popup service-status dot: under maintenance. Also the update-menu \"new version "
-                 + "available\" dot (#130), via PopupViewController.dotColor(.underMaintenance). Default systemBlue."
-        case .popupServiceGray:
-            return "Popup service-status dot: unknown. Default systemGray."
+        case .calmWhite:
+            return "Calm-mode neutral for on-pace marker / gap / credits / degraded status dot in the "
+                 + "menu bar. Follows labelColor (re-alpha'd by bright())."
+        case .idleCalmGrey:
+            return "Calm-mode replacement for the idle blue on a ready idle bar."
+        case .claudeBrand:
+            return "Popup \"Claude Code\" header accent (#d97757)."
         }
     }
 
@@ -248,88 +164,52 @@ enum ColorRole: String, CaseIterable {
     /// means the colour is drawn as-is.
     var distortion: String? {
         switch self {
-        case .menuIdleBlue:
-            return "The idle 5-hour bar; swapped for the calm grey under Calm colours. Default is a "
-                 + "dynamic system colour resolved per-appearance; a picked colour replaces it flat."
-        case .popupIdleBlue:
-            return "Default is systemBlue desaturated ~15% toward grey, and additionally ~22% toward white "
-                 + "on the light theme (computed per-appearance). A picked colour replaces this provider flat."
-        case .popupIndicatorStroke:
-            return "Default carries alpha (0.4 dark / 0.65 light) and is appearance-aware; a picked colour "
-                 + "replaces the provider flat."
-        case .popupTick, .popupMonochromeGrey:
-            return "Default is appearance-aware (per-theme grey); a picked colour replaces the provider flat."
-        case .popupDimmedLabel:
-            return "Default is tertiaryLabelColor blended 50% toward secondaryLabelColor (per-appearance)."
-        case .menuForeground, .menuGapGreen, .menuDotGreen, .menuGapRed, .menuGapYellow, .menuGapOrange,
-             .menuStatusYellow, .menuStatusOrange, .menuStatusRed, .menuStatusBlue, .menuStatusGray,
-             .menuPauseOrange, .menuUnusedGrey, .menuIndicatorStroke, .menuCalmWhite, .menuIdleCalmGrey:
+        case .green, .yellow, .orange, .red, .blue, .gray,
+             .indicatorRing, .tick, .inUsePill, .link, .label, .foreground,
+             .calmWhite, .idleCalmGrey:
             return "Default is a dynamic system colour (flips light/dark, honours Increase Contrast); "
                  + "a picked colour replaces it flat and loses that adaptation."
-        case .popupLink, .popupLabel, .popupInUsePill, .popupWarningRed,
-             .popupServiceGreen, .popupServiceYellow, .popupServiceOrange,
-             .popupServiceRed, .popupServiceBlue, .popupServiceGray:
-            return "Default is a dynamic system colour; a picked colour replaces it flat."
-        default:
+        case .barTrack:
+            return "Default is labelColor at 22 % alpha — translucent, so it composites against the bar's "
+                 + "material (it breathes the wallpaper / menu tint); a picked colour replaces it flat and "
+                 + "loses that adaptation."
+        case .dimmedLabel:
+            return "Default is tertiaryLabelColor blended 50 % toward secondaryLabelColor (per-appearance)."
+        case .claudeBrand, .pillText:
             return nil
         }
     }
 
-    // MARK: - Shipped defaults (mirror the Palette literals 1:1)
+    // MARK: - Shipped defaults
 
     @MainActor
     var defaultColor: NSColor {
         switch self {
-        // Menu-bar palette (StatusItemView.swift) — system semantic colours only, so the bar flips
-        // light/dark and carries accessibility (Increase Contrast) variants automatically, exactly
-        // like the battery/Wi-Fi icons. No fixed sRGB, no theme-specific tones. The bar **track** is
-        // `labelColor` at 22 % alpha (translucent — dims *and* breathes the wallpaper like the moon);
-        // the **bright** mono tones (reset text, ⚠️, tick) are `labelColor` re-alpha'd at the draw site
-        // to the system text opacity (`StatusItemView.bright(_:)`). Accents map 1:1 onto the discrete
-        // pacing/service buckets, scaled by `accentSaturation`.
-        case .menuGapGreen:        return .systemGreen
-        case .menuDotGreen:        return .systemGreen   // marker == gap colour; no separate lighter tone
-        case .menuIndicatorStroke: return .separatorColor // rings the marker, flips with the bar
-        case .menuIdleBlue:        return .systemBlue
-        case .menuIdleCalmGrey:    return .secondaryLabelColor   // calm idle track — quiet, still flips
-        case .menuForeground:      return .labelColor            // reset text / ⚠️ — re-alpha'd by bright()
-        case .menuCalmWhite:       return .labelColor            // calm neutral — re-alpha'd by bright()
-        case .menuStatusYellow:    return .systemYellow
-        case .menuStatusOrange:    return .systemOrange
-        case .menuStatusRed:       return .systemRed
-        case .menuStatusBlue:      return .systemBlue
-        case .menuStatusGray:      return .systemGray
-        case .menuUnusedGrey:      return NSColor.labelColor.withAlphaComponent(0.22)   // bar track — the moon: a ~22% labelColor silhouette; the bar shows through 78%, so it dims AND breathes the wallpaper tint (ticket §3), matched live to the moon on teal/white/blue bars
-        case .menuPauseOrange:     return .systemOrange
-        // Popup palette (PopupViewController.swift) — system / appearance-aware defaults.
-        case .popupGapGreen:       return .systemGreen
-        case .popupIdleBlue:       return PopupBarView.defaultIdleBlue
-        case .popupGapRed:         return NSColor(srgbRed: 225/255, green: 45/255, blue: 35/255, alpha: 1)
-        case .popupGapYellow:      return NSColor(srgbRed: 230/255, green: 180/255, blue: 25/255, alpha: 1)
-        case .popupGapOrange:      return NSColor(srgbRed: 248/255, green: 118/255, blue: 15/255, alpha: 1)
-        case .popupIndicatorStroke: return PopupBarView.defaultIndicatorStroke
-        case .popupTick:           return PopupBarView.defaultTick
-        case .popupMonochromeGrey: return PopupBarView.defaultMonochromeGrey
-        case .popupClaudeBrand:    return NSColor(srgbRed: 0xd9/255, green: 0x77/255, blue: 0x57/255, alpha: 1)
-        case .popupDimmedLabel:    return PopupViewController.defaultDimmedLabel
-        // Menu-bar ahead-of-pace pacing — system semantic, matching the discrete yellow/orange/red
-        // buckets `aheadColor` selects. Split from the popup roles so the tuner can nudge them
-        // independently, but the shipped default is the native system colour (flips + accessibility).
-        case .menuGapRed:          return .systemRed
-        case .menuGapYellow:       return .systemYellow
-        case .menuGapOrange:       return .systemOrange
-        // Popup extras / system colours.
-        case .popupWarningRed:     return .systemRed
-        case .popupInUsePill:      return .controlAccentColor
-        case .popupPillText:       return .white
-        case .popupLink:           return .linkColor
-        case .popupLabel:          return .labelColor
-        case .popupServiceGreen:   return .systemGreen
-        case .popupServiceYellow:  return .systemYellow
-        case .popupServiceOrange:  return .systemOrange
-        case .popupServiceRed:     return .systemRed
-        case .popupServiceBlue:    return .systemBlue
-        case .popupServiceGray:    return .systemGray
+        // One flat catalogue shared by BOTH surfaces (menu bar + popup). The semantic hues are system
+        // colours only, so they flip light/dark and carry accessibility (Increase Contrast) variants
+        // automatically, like the battery/Wi-Fi icons — no fixed sRGB, no theme-specific tones. The bar
+        // **track** is `labelColor` at 22 % alpha (translucent — dims *and* breathes the wallpaper/menu
+        // material); the **bright** mono tones (reset text, ⚠️, tick) are `labelColor` re-alpha'd at the
+        // draw site to the system text opacity (`StatusItemView.bright(_:)`). Claude brand is the one
+        // deliberate sRGB constant (no system twin for the terracotta).
+        case .green:         return .systemGreen
+        case .yellow:        return .systemYellow
+        case .orange:        return .systemOrange
+        case .red:           return .systemRed
+        case .blue:          return .systemBlue
+        case .gray:          return .systemGray
+        case .barTrack:      return NSColor.labelColor.withAlphaComponent(0.22)   // the moon: a ~22% labelColor silhouette; the bar shows through 78%, so it dims AND breathes the wallpaper/menu tint
+        case .indicatorRing: return .quaternaryLabelColor
+        case .tick:          return .tertiaryLabelColor
+        case .inUsePill:     return .controlAccentColor
+        case .foreground:    return .labelColor            // reset text / ⚠️ — re-alpha'd by bright()
+        case .dimmedLabel:   return PopupViewController.defaultDimmedLabel
+        case .label:         return .labelColor
+        case .link:          return .linkColor
+        case .pillText:      return .white
+        case .calmWhite:     return .labelColor            // calm neutral — re-alpha'd by bright()
+        case .idleCalmGrey:  return .secondaryLabelColor   // calm idle track — quiet, still flips
+        case .claudeBrand:   return NSColor(srgbRed: 0xd9/255, green: 0x77/255, blue: 0x57/255, alpha: 1)
         }
     }
 }

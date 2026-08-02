@@ -62,8 +62,9 @@ git config core.hooksPath .githooks
   картки, chip і time-picker більше **не** ручні AppKit-винятки: row height/padding/corner
   radius/dividers, grouped-фон, скруглений `DatePicker` дає система без жодної константи. Раніше тут були
   виміряні константи (`SettingsCard` тощо) — усунено. **Menu-bar-віджет і popup лишаються AppKit** (див.
-  ADR-0009/0021/0022) — але **menu-bar тепер малює системними semantic-кольорами** (`labelColor`-родина +
-  `.system*`, ADR-0059), не фіксованим sRGB; попап зберігає свою фіксовану палітру (ADR-0022).
+  ADR-0009/0021/0022) — але **обидві поверхні тепер малюють системними semantic-кольорами**
+  (`labelColor`-родина + `.system*`; menu-bar — ADR-0059, попап — ADR-0060), не фіксованим sRGB. Виняток —
+  Claude-бренд-акцент попапа (`popupClaudeBrand`), який лишається sRGB.
 - **Перед PR перевіряти в обох темах (light+dark) і всіх станах** (sidebar icon size, dev-білд/`.app`)
   скриншотами. Повний розбір, метод вимірювання й типові помилки —
   [system-settings-parity.md](system-settings-parity.md); рішення-принципи — ADR-0040 (нуль хардкоду),

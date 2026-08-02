@@ -123,3 +123,5 @@ env-overrides `TOKENPACE_MONO_BRIGHTNESS/ACCENT_SATURATION/CALIB_HEX`.
 - [ADR-0040](0040-native-system-metrics-no-hardcoded-ui.md) — §3 виняток «StatusItemView fixed sRGB»
   скасовано (тепер бар підпорядковано правилу §1 «нуль хардкоду»).
 - [ADR-0046](0046-dev-color-tuner-override-layer.md) — ColorStore/ColorRole, який це рішення розширює.
+- [ADR-0060](0060-popup-native-semantic-colours.md) — поширює це рішення (системні semantic-кольори) на
+  **попап** (окреме follow-on рішення, #217).
