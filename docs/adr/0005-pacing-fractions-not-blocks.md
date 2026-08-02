@@ -1,9 +1,15 @@
 ---
 status: accepted
 date: 2026-06-21
+superseded_by: [0059]
 ---
 
 # ADR-0005: PacingModel — зони у відсотках, не дискретні блоки
+
+> **Частково superseded [ADR-0059](0059-menu-bar-native-semantic-colours.md):** колірна прив'язка
+> «PacingState → RGB» (dark_gray=236/green=71/red=167/blue=23, xterm-256 палітра statusline, див.
+> «Наслідки») скасована — menu-bar-віджет тепер малює системними semantic-кольорами, а не фіксованим
+> sRGB зі statusline. Решта цього ADR (зони як частки [0,1], а не дискретні блоки) лишається чинною.
 
 ## Контекст
 

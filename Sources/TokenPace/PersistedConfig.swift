@@ -328,6 +328,27 @@ enum PersistedConfig {
         set { defaults.set(newValue, forKey: Key.showModelSpecificLimits) }
     }
 
+    /// Revert every setting the **Appearance** pane owns to its factory default — the menu-bar widget
+    /// toggles, the wallpaper-brightness theme, the reset-countdown mode, and the dropdown's per-model
+    /// toggle. Done by **removing** each key (not writing an explicit default), so each property's getter
+    /// falls back to its own default and the two never drift apart. Only these keys are cleared — never
+    /// the whole domain (which would also wipe unrelated panes' settings). The caller re-syncs the model
+    /// and re-applies the values to the widget.
+    static func resetAppearanceToDefaults() {
+        for key in [
+            Key.calmMenuBarColors,
+            Key.resetCountdownModeMenuBar,
+            Key.showServiceStatusDot,
+            Key.hideCalmSevenDayBar,
+            Key.hideBarsWhenBlocked,
+            Key.showBlockedPause,
+            Key.showExtraUsage,
+            Key.showModelSpecificLimits,
+        ] {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
     /// Whether polling pauses while the screen is **locked, off, or running a screensaver** (#114,
     /// ADR-0032). **Default-on** (opt-out): an absent key reads as `true`, so a screen-off Mac stops
     /// spending usage-API quota on refreshes nobody sees, resuming with an immediate poll on wake.

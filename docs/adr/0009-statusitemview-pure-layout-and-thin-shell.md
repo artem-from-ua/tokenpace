@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-06-22
-superseded_by: [0015]
+superseded_by: [0015, 0059]
 ---
 
 # ADR-0009: StatusItemView — чиста MenuBarLayout + тонкий AppKit-shell
@@ -9,6 +9,13 @@ superseded_by: [0015]
 > **Частково superseded [ADR-0015](0015-no-idle-mode.md):** рішення §2 (поріг idle 5 %) і §4
 > (idle-гліф `*`) скасовано — компактного/idle-режиму більше немає. Решта цього ADR (розкол
 > pure/shell, `MenuBarMode` як відкритий enum, малювання смужок, monochrome ⚠️) лишається чинною.
+>
+> **Частково superseded [ADR-0059](0059-menu-bar-native-semantic-colours.md):** §5–§9 (показ через
+> non-template `NSImage` з фіксованим sRGB, точна statusline-256-палітра, теза «`labelColor` дає
+> неправильний RGB в off-screen образі») скасовано — кольори тепер системні semantic (`labelColor`-
+> родина + `.system*`), резолвлені eager проти `button.effectiveAppearance`; хибну передумову про
+> `labelColor` спростовано (артефакт лінивого малювання в неправильному appearance). Розкол pure/shell і
+> геометрія лишаються чинними.
 
 ## Контекст
 

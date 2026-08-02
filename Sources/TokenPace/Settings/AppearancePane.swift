@@ -10,6 +10,16 @@ struct AppearancePane: View {
 
     var body: some View {
         Form {
+            // First section: a one-click revert of every Appearance setting to its factory default.
+            // The button is trailing-aligned (label left, control right — the standard Form row shape).
+            Section {
+                HStack {
+                    Text("Revert appearance settings to default")
+                    Spacer()
+                    Button("Reset") { model.resetAppearanceToDefaults() }
+                }
+            }
+
             Section("Menu Bar Widget") {
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Calm non-critical colors", isOn: Binding(

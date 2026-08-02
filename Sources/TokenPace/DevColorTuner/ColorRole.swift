@@ -248,17 +248,12 @@ enum ColorRole: String, CaseIterable {
     /// means the colour is drawn as-is.
     var distortion: String? {
         switch self {
-        case .menuGapGreen:
-            return "Lightened ~10% toward white at the draw site (calmedGapColor → lightened)."
-        case .menuDotGreen:
-            return "Lightened ~10% toward white when used as the on-pace indicator dot (not for the credits icon)."
         case .menuIdleBlue:
-            return "The idle 5-hour bar; swapped for the calm grey under Calm colours (not blended)."
+            return "The idle 5-hour bar; swapped for the calm grey under Calm colours. Default is a "
+                 + "dynamic system colour resolved per-appearance; a picked colour replaces it flat."
         case .popupIdleBlue:
             return "Default is systemBlue desaturated ~15% toward grey, and additionally ~22% toward white "
                  + "on the light theme (computed per-appearance). A picked colour replaces this provider flat."
-        case .menuGapRed, .menuGapYellow, .menuGapOrange:
-            return "Lightened ~10% toward white at the menu-bar draw site (aheadColor → lightened)."
         case .popupIndicatorStroke:
             return "Default carries alpha (0.4 dark / 0.65 light) and is appearance-aware; a picked colour "
                  + "replaces the provider flat."
@@ -266,8 +261,11 @@ enum ColorRole: String, CaseIterable {
             return "Default is appearance-aware (per-theme grey); a picked colour replaces the provider flat."
         case .popupDimmedLabel:
             return "Default is tertiaryLabelColor blended 50% toward secondaryLabelColor (per-appearance)."
-        case .menuForeground:
-            return "Default is the dynamic labelColor; a picked colour replaces it flat."
+        case .menuForeground, .menuGapGreen, .menuDotGreen, .menuGapRed, .menuGapYellow, .menuGapOrange,
+             .menuStatusYellow, .menuStatusOrange, .menuStatusRed, .menuStatusBlue, .menuStatusGray,
+             .menuPauseOrange, .menuUnusedGrey, .menuIndicatorStroke, .menuCalmWhite, .menuIdleCalmGrey:
+            return "Default is a dynamic system colour (flips light/dark, honours Increase Contrast); "
+                 + "a picked colour replaces it flat and loses that adaptation."
         case .popupLink, .popupLabel, .popupInUsePill, .popupWarningRed,
              .popupServiceGreen, .popupServiceYellow, .popupServiceOrange,
              .popupServiceRed, .popupServiceBlue, .popupServiceGray:
@@ -282,23 +280,27 @@ enum ColorRole: String, CaseIterable {
     @MainActor
     var defaultColor: NSColor {
         switch self {
-        // Menu-bar palette (StatusItemView.swift) — fixed sRGB.
-        case .menuGapGreen:        return NSColor(srgbRed: 95/255, green: 175/255, blue: 95/255, alpha: 1)
-        case .menuDotGreen:        return NSColor(srgbRed: 143/255, green: 199/255, blue: 143/255, alpha: 1)
-        case .menuIndicatorStroke: return NSColor(srgbRed: 24/255, green: 24/255, blue: 24/255, alpha: 1)
-        case .menuIdleBlue:        return NSColor(srgbRed: 85/255, green: 130/255, blue: 180/255, alpha: 1)
-        case .menuIdleCalmGrey:    return NSColor(srgbRed: 150/255, green: 150/255, blue: 150/255, alpha: 1)
-        case .menuForeground:      return .labelColor
-        // Calm-mode tone — the neutral the system menu-bar widgets use, not a pure #ffffff (which
-        // read too bright next to the OS controls). #E5E5E5 sRGB = 229/255.
-        case .menuCalmWhite:       return NSColor(srgbRed: 229/255, green: 229/255, blue: 229/255, alpha: 1)
-        case .menuStatusYellow:    return NSColor(srgbRed: 240/255, green: 190/255, blue: 50/255, alpha: 1)
-        case .menuStatusOrange:    return NSColor(srgbRed: 240/255, green: 140/255, blue: 40/255, alpha: 1)
-        case .menuStatusRed:       return NSColor(srgbRed: 225/255, green: 70/255, blue: 70/255, alpha: 1)
-        case .menuStatusBlue:      return NSColor(srgbRed: 70/255, green: 140/255, blue: 230/255, alpha: 1)
-        case .menuStatusGray:      return NSColor(srgbRed: 150/255, green: 150/255, blue: 150/255, alpha: 1)
-        case .menuUnusedGrey:      return NSColor(srgbRed: 0x39/255, green: 0x39/255, blue: 0x39/255, alpha: 1)
-        case .menuPauseOrange:     return NSColor(srgbRed: 240/255, green: 140/255, blue: 40/255, alpha: 1)
+        // Menu-bar palette (StatusItemView.swift) — system semantic colours only, so the bar flips
+        // light/dark and carries accessibility (Increase Contrast) variants automatically, exactly
+        // like the battery/Wi-Fi icons. No fixed sRGB, no theme-specific tones. The bar **track** is
+        // `labelColor` at 22 % alpha (translucent — dims *and* breathes the wallpaper like the moon);
+        // the **bright** mono tones (reset text, ⚠️, tick) are `labelColor` re-alpha'd at the draw site
+        // to the system text opacity (`StatusItemView.bright(_:)`). Accents map 1:1 onto the discrete
+        // pacing/service buckets, scaled by `accentSaturation`.
+        case .menuGapGreen:        return .systemGreen
+        case .menuDotGreen:        return .systemGreen   // marker == gap colour; no separate lighter tone
+        case .menuIndicatorStroke: return .separatorColor // rings the marker, flips with the bar
+        case .menuIdleBlue:        return .systemBlue
+        case .menuIdleCalmGrey:    return .secondaryLabelColor   // calm idle track — quiet, still flips
+        case .menuForeground:      return .labelColor            // reset text / ⚠️ — re-alpha'd by bright()
+        case .menuCalmWhite:       return .labelColor            // calm neutral — re-alpha'd by bright()
+        case .menuStatusYellow:    return .systemYellow
+        case .menuStatusOrange:    return .systemOrange
+        case .menuStatusRed:       return .systemRed
+        case .menuStatusBlue:      return .systemBlue
+        case .menuStatusGray:      return .systemGray
+        case .menuUnusedGrey:      return NSColor.labelColor.withAlphaComponent(0.22)   // bar track — the moon: a ~22% labelColor silhouette; the bar shows through 78%, so it dims AND breathes the wallpaper tint (ticket §3), matched live to the moon on teal/white/blue bars
+        case .menuPauseOrange:     return .systemOrange
         // Popup palette (PopupViewController.swift) — system / appearance-aware defaults.
         case .popupGapGreen:       return .systemGreen
         case .popupIdleBlue:       return PopupBarView.defaultIdleBlue
@@ -310,11 +312,12 @@ enum ColorRole: String, CaseIterable {
         case .popupMonochromeGrey: return PopupBarView.defaultMonochromeGrey
         case .popupClaudeBrand:    return NSColor(srgbRed: 0xd9/255, green: 0x77/255, blue: 0x57/255, alpha: 1)
         case .popupDimmedLabel:    return PopupViewController.defaultDimmedLabel
-        // Menu-bar ahead-of-pace pacing — start from the same values the popup uses (they were shared
-        // until now); tune independently from here. Fixed sRGB (non-template menu-bar image).
-        case .menuGapRed:          return NSColor(srgbRed: 225/255, green: 45/255, blue: 35/255, alpha: 1)
-        case .menuGapYellow:       return NSColor(srgbRed: 230/255, green: 180/255, blue: 25/255, alpha: 1)
-        case .menuGapOrange:       return NSColor(srgbRed: 248/255, green: 118/255, blue: 15/255, alpha: 1)
+        // Menu-bar ahead-of-pace pacing — system semantic, matching the discrete yellow/orange/red
+        // buckets `aheadColor` selects. Split from the popup roles so the tuner can nudge them
+        // independently, but the shipped default is the native system colour (flips + accessibility).
+        case .menuGapRed:          return .systemRed
+        case .menuGapYellow:       return .systemYellow
+        case .menuGapOrange:       return .systemOrange
         // Popup extras / system colours.
         case .popupWarningRed:     return .systemRed
         case .popupInUsePill:      return .controlAccentColor

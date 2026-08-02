@@ -7,12 +7,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The menu-bar item. Held strongly for the process lifetime — releasing it removes the item.
     private var statusItem: NSStatusItem?
 
-    /// The custom view that renders the menu-bar image. Held so the image can be re-snapshotted when
-    /// the menu-bar appearance changes (Dark ↔ Light).
+    /// The custom view that renders the menu-bar image. Held so the image can be re-rendered when the
+    /// data changes. The image is a single non-template `NSImage` (semantic colours resolved in the
+    /// button's appearance); the KVO below re-snapshots it on a theme flip.
     private var statusView: StatusItemView?
 
-    /// KVO token for the button's `effectiveAppearance`, so the non-template image's semantic
-    /// colours (idle glyph / reset label) track the menu-bar theme.
+    /// KVO on the button's `effectiveAppearance`. The menu-bar image is **non-template**, so it does not
+    /// re-resolve its semantic colours on a theme flip by itself — this re-snapshots it when the bar
+    /// flips light/dark. This is the standard technique for a custom-drawn menu-bar widget (Stats/iStat).
     private var appearanceObservation: NSKeyValueObservation?
 
     /// The detail popup's content controller (issue #11). Hosted inside a menu item so the popup
@@ -217,13 +219,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusView = view
         self.statusItem = item
 
-        // Hand the button a ready non-template image. (Hosting the custom NSView as a button
-        // subview is unreliable — the system button paints over it; see StatusItemView.snapshotImage.)
+        // Hand the button a ready image. (Hosting the custom NSView as a button subview is unreliable —
+        // the system button paints over it; see StatusItemView.snapshotImage.) The image is non-template,
+        // so it must be re-snapshotted on a theme flip — the KVO below does that.
         refreshStatusImage()
-
-        // The image is non-template, so macOS won't re-tint it when the menu-bar theme flips;
-        // re-snapshot in the new appearance ourselves (otherwise the reset label / idle glyph,
-        // drawn in labelColor, stay the wrong shade — e.g. dark text on a dark menu bar).
         appearanceObservation = item.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
             MainActor.assumeIsolated { self?.refreshStatusImage() }
         }
@@ -1345,11 +1344,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Menu-bar image
 
-    /// Re-render the menu-bar image in the button's current appearance and resize the item to fit.
-    /// Called at launch, on every poll, and whenever the menu-bar theme changes.
+    /// Re-render the menu-bar image and resize the item to fit. Called at launch, on every poll (when the
+    /// *data* changes), and on a theme flip (via the `effectiveAppearance` KVO). The image is a single
+    /// non-template `NSImage` drawn in the button's current appearance, so its semantic colours resolve to
+    /// the right light/dark value; the KVO re-snapshots it when the bar flips (non-template does not
+    /// re-resolve on its own).
     private func refreshStatusImage() {
         guard let button = statusItem?.button, let view = statusView else { return }
-        let image = view.snapshotImage(appearance: button.effectiveAppearance)
+        var image: NSImage?
+        button.effectiveAppearance.performAsCurrentDrawingAppearance { image = view.snapshotImage() }
+        guard let image else { return }
         button.image = image
         statusItem?.length = image.size.width
     }
