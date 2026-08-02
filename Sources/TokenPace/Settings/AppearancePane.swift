@@ -169,6 +169,15 @@ struct AppearancePane: View {
 
                 Toggle("Show ticks on bars", isOn: Binding(
                     get: { model.showTicks }, set: { model.setShowTicks($0) }))
+
+                // #188 — opt-in native translucent menu material behind the whole dropdown.
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Translucent system background", isOn: Binding(
+                        get: { model.popupTranslucentBackground },
+                        set: { model.setPopupTranslucentBackground($0) }))
+                    SettingsHint(text: "Uses the native translucent menu material instead of a solid "
+                        + "fill. Bars and text may be harder to read over a busy background.")
+                }
             }
         }
         .formStyle(.grouped)

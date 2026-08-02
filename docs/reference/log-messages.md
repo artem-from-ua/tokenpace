@@ -177,6 +177,7 @@ token itself never is.
 | — | `lifecycle` | `.notice` | `bar-style: set <style>` | user picked a "Bar style" segment (#224); `<style>` is the raw `BarStyle` (`pacing`/`mixed`/`simple`) — governs both surfaces |
 | — | `lifecycle` | `.notice` | `far-behind-interval: set <interval>` | user picked a "Far behind pace interval" option (#224); `<interval>` is the raw `FarBehindInterval` (`off`/`short`/`medium`/`long`) |
 | — | `lifecycle` | `.notice` | `show-ticks: popup set <bool>` | user toggled the "Show ticks on bars" checkbox (#224) — popup-only tick ruler |
+| — | `lifecycle` | `.notice` | `popup-translucent-background: set <bool>` | user toggled the "Translucent system background" checkbox (#188) — popup opaque fill vs native menu vibrancy |
 | 434 | `lifecycle` | `.notice` | `reset-countdown: menu-bar mode set <mode>` | user picked a "Show reset countdown" segment (#103); `<mode>` is the raw `ResetCountdownMode` |
 | 442 | `lifecycle` | `.notice` | `service-status-dot: menu-bar set <bool>` | user toggled the "Show service status dot on issues" checkbox (#31) |
 | — | `lifecycle` | `.notice` | `extra-usage-icon: menu-bar set <bool>` | user toggled the "Show extra-usage credits icon" checkbox (#146) |

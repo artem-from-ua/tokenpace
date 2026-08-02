@@ -32,6 +32,7 @@ final class SettingsModel {
     var onResetCountdownModeMenuBarChange: ((ResetCountdownMode) -> Void)?
     var onBarStyleChange: ((BarStyle) -> Void)?
     var onShowTicksChange: ((Bool) -> Void)?
+    var onPopupTranslucentBackgroundChange: ((Bool) -> Void)?
     var onFarBehindIntervalChange: ((FarBehindInterval) -> Void)?
     var onServiceDotChange: ((Bool) -> Void)?
     var onExtraUsageChange: ((Bool) -> Void)?
@@ -84,6 +85,10 @@ final class SettingsModel {
     /// Whether the popup draws the under-bar tick ruler on the pacing bars (#224). A popup concern,
     /// shown under the "Dropdown Widget" section.
     var showTicks = false
+    /// Whether the popup uses the native translucent system menu material instead of the opaque solid
+    /// fill (#188). A popup concern shown under the "Dropdown Widget" section; **outside the Appearance
+    /// presets** (they never reset it).
+    var popupTranslucentBackground = false
     /// The far-behind (green→blue) threshold interval (#224), shown as a menu picker.
     var farBehindInterval: FarBehindInterval = .medium
 
@@ -254,6 +259,7 @@ final class SettingsModel {
         resetRadio = PersistedConfig.resetCountdownModeMenuBar.radio
         barStyle = PersistedConfig.barStyle
         showTicks = PersistedConfig.showTicks
+        popupTranslucentBackground = PersistedConfig.popupTranslucentBackground
         farBehindInterval = PersistedConfig.farBehindInterval
 
         let ms = PersistedConfig.monitoredServices
@@ -352,6 +358,15 @@ final class SettingsModel {
         PersistedConfig.showTicks = on
         AppLogger.lifecycle.notice("show-ticks: popup set \(on, privacy: .public)")
         onShowTicksChange?(on)
+    }
+
+    /// Persist the popup translucent-background toggle (#188) and fire the callback. Outside the
+    /// Appearance presets — they never reset it.
+    func setPopupTranslucentBackground(_ on: Bool) {
+        popupTranslucentBackground = on
+        PersistedConfig.popupTranslucentBackground = on
+        AppLogger.lifecycle.notice("popup-translucent-background: set \(on, privacy: .public)")
+        onPopupTranslucentBackgroundChange?(on)
     }
 
     /// Persist the far-behind (green→blue) interval (#224) and fire the callback. The picker writes

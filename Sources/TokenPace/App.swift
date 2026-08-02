@@ -231,6 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popupVC.loadView()   // realise the view so it can be sized before the menu measures it
         popupVC.barStyle = PersistedConfig.barStyle   // apply the saved bar style from launch (#224)
         popupVC.showTicks = PersistedConfig.showTicks   // apply the saved tick-ruler choice from launch (#224)
+        popupVC.translucentBackground = PersistedConfig.popupTranslucentBackground   // saved translucency choice (#188)
         setPopupLayout(PopupLayout.make(
             from: nil, health: coldHealth, now: now, interval: PollingBackoff.defaultInterval))
 
@@ -393,6 +394,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Popup-only (#224): the tick ruler lives in `PopupBarView`; the VC's `showTicks` didSet
                 // rebuilds so each child bar picks up the new value. No menu-bar change.
                 self?.popupVC.showTicks = on
+            }
+            wc.onPopupTranslucentBackgroundChange = { [weak self] on in
+                // Popup-only (#188): the VC's `translucentBackground` didSet rebuilds the bar-section
+                // backdrop (skipping the opaque fill when on). The whole-menu overlay reads
+                // `PersistedConfig` afresh on each open (installOpaqueMenuBackdropIfNeeded), so no extra
+                // call is needed here; this updates the bar section live if the menu is open.
+                self?.popupVC.translucentBackground = on
             }
             wc.onFarBehindIntervalChange = { [weak self] _ in
                 // The green→blue threshold changes each bar's `behindMultiplier` (#224), which is baked
@@ -1428,6 +1436,9 @@ extension AppDelegate: NSMenuDelegate {
     private func installOpaqueMenuBackdropIfNeeded() {
         opaqueMenuBackdrop?.removeFromSuperview()
         opaqueMenuBackdrop = nil
+        // Translucent mode (#188): leave the native menu vibrancy in place across the whole dropdown,
+        // including the native Settings/Quit items — do not cover it with an opaque overlay.
+        guard !PersistedConfig.popupTranslucentBackground else { return }
         guard let bg = popupVC.view.window?.contentView else { return }
         let overlay = SolidBackdropView(frame: bg.bounds)
         overlay.autoresizingMask = [.width, .height]

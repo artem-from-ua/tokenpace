@@ -577,6 +577,18 @@ final class PopupViewController: NSViewController {
         }
     }
 
+    /// Whether the popup uses the native translucent system menu material instead of the opaque solid
+    /// fill (#188). When `true`, ``rebuildBackdrop()`` skips the bar-section `SolidBackdropView` so the
+    /// `NSMenu` vibrancy shows through under our bars. The whole-menu overlay is skipped separately in
+    /// `AppDelegate.installOpaqueMenuBackdropIfNeeded()`. Unlike `barStyle`/`showTicks` this rebuilds
+    /// the **backdrop**, not the content stack. Default `false` (opaque). Outside the Appearance presets.
+    var translucentBackground: Bool = false {
+        didSet {
+            guard isViewLoaded, translucentBackground != oldValue else { return }
+            rebuildBackdrop()
+        }
+    }
+
     private enum Metrics {
         static let width: CGFloat = 280
         static let hPadding: CGFloat = 14
@@ -685,12 +697,19 @@ final class PopupViewController: NSViewController {
     }
 
     /// (Re)build the popup's solid opaque backdrop, inserting it as the **bottom-most** subview (below
-    /// `stack`) pinned to every container edge, so nothing shows through. Called on load and on a dev
-    /// theme change (so the fresh `SolidBackdropView` re-resolves `windowBackgroundColor`).
+    /// `stack`) pinned to every container edge, so nothing shows through. Called on load, on a dev
+    /// theme change (so the fresh `SolidBackdropView` re-resolves `windowBackgroundColor`), and on a
+    /// ``translucentBackground`` toggle.
+    ///
+    /// When ``translucentBackground`` is on, **no** backdrop is inserted — the `NSMenu` vibrancy
+    /// material shows through under our bars (#188). The whole-menu overlay is skipped separately in
+    /// `AppDelegate.installOpaqueMenuBackdropIfNeeded()`.
     func rebuildBackdrop() {
         guard isViewLoaded else { return }
         backdropView?.removeFromSuperview()
         backdropView = nil
+        // Translucent mode (#188): leave the bar section unbacked so the menu vibrancy shows through.
+        guard !translucentBackground else { return }
 
         let new = SolidBackdropView()   // self-updates its fill on theme change (see updateLayer)
         new.matchesMenuBackground = matchesMenuBackground   // preview-only #2C2C2C match (see the flag)
