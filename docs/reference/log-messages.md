@@ -181,8 +181,7 @@ token itself never is.
 | 442 | `lifecycle` | `.notice` | `service-status-dot: menu-bar set <bool>` | user toggled the "Show service status dot on issues" checkbox (#31) |
 | — | `lifecycle` | `.notice` | `extra-usage-icon: menu-bar set <bool>` | user toggled the "Show extra-usage credits icon" checkbox (#146) |
 | — | `lifecycle` | `.notice` | `hide-calm-7d: menu-bar set <bool>` | user toggled the "Hide 7-day bar when calm" checkbox (#94, ADR-0034) |
-| — | `lifecycle` | `.notice` | `hide-bars-when-blocked: menu-bar set <bool>` | user toggled the "Show pacing bars when 5h/7d limits reached" checkbox (stored inverted as `hideBarsWhenBlocked`; #194, ADR-0049) |
-| — | `lifecycle` | `.notice` | `show-blocked-pause: menu-bar set <bool>` | user toggled the "Show pause icon when fully blocked" checkbox (#199, ADR-0051) |
+| — | `lifecycle` | `.notice` | `pause-hides-bars: menu-bar set <bool>` | user toggled the "Pause icon hides bars" checkbox — stored as `pauseHidesBars`; when fully blocked the red pause icon is always shown, this only gates whether the pacing bars are hidden beside it (#194, #199, #227; ADR-0063) |
 | — | `lifecycle` | `.notice` | `model-specific-limits: popup set <bool>` | user toggled the "Show model & service limits" checkbox — gates the popup's per-model/per-service rows (Opus/Sonnet/scoped) (#211) |
 | — | `lifecycle` | `.notice` | `appearance settings reset to defaults` | user cleared the Appearance keys (#214); all eleven Appearance keys cleared to their defaults |
 | — | `lifecycle` | `.notice` | `appearance preset applied: <preset>` | user picked an Appearance-pane preset segment (#215, #224); `<preset>` is the raw `AppearancePreset` (`chill`/`workHarder`/`controlFreak`) — sets all eleven Appearance keys at once |

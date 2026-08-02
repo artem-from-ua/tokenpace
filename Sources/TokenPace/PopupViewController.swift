@@ -714,26 +714,31 @@ final class PopupViewController: NSViewController {
 
         // The "Claude Code" section header (first line): the brand-coloured, bold title (always
         // shown — see `claudeBrandColor`) flush left. Its right half carries the dim data age
-        // ("2m ago") **only while ⌥ Option is held** — the age is an on-demand detail.
+        // ("2m ago"): shown **whenever the data is stale** — the age has grown past
+        // ``Self.staleAgeThreshold`` (2× the poll floor) so it becomes worth surfacing on its own — and
+        // otherwise **only while ⌥ Option is held** (the age is an on-demand detail when data is fresh).
         //
         // The service status rows (issue #31, #89) show **only when there is a real problem** —
         // `worstProblem != nil`, i.e. at least one monitored component is non-operational. All-
-        // operational lines add nothing worth the space, so a healthy status is never shown (⌥ still
-        // reveals the data age, but not the status). When a problem is present we show **one row per
-        // monitored component**, each with its own status — `API` always, then `Code`, `WEB/Desktop`,
-        // and `Cowork` when their services are enabled (the healthy ones for context). Each row is a
-        // single component, so there is nothing to expand under ⌥.
+        // operational lines add nothing worth the space, so a healthy status is never shown. When a
+        // problem is present we show **only the problematic components** by default; holding ⌥ Option
+        // reveals **all** monitored components (the healthy ones for context: `API`, `Code`,
+        // `WEB/Desktop`, `Cowork` when enabled).
         let status = layout.serviceStatus
         let showStatusRows = status?.worstProblem != nil
+        let showAge = optionHeld || layout.lastUpdateAge >= Self.staleAgeThreshold
         let sectionHeader = addSplitLine(
-            left: Self.claudeCodeSectionTitle, right: optionHeld ? Self.ageText(layout.lastUpdateAge) : "",
+            left: Self.claudeCodeSectionTitle, right: showAge ? Self.ageText(layout.lastUpdateAge) : "",
             leftFont: Self.menuItemFont, rightFont: .systemFont(ofSize: Metrics.textSize),
             leftColor: Self.claudeBrandColor, rightColor: Self.dimmedLabelColor)
         stack.setCustomSpacing(Metrics.sectionSpacing, after: sectionHeader)
 
         if showStatusRows, let status {
             var lastRow: NSView?
-            for component in status.checks.flatMap(\.components) {
+            // Default: only the non-operational components. ⌥ Option: every monitored component.
+            let components = status.checks.flatMap(\.components)
+                .filter { optionHeld || $0.status.isProblem }
+            for component in components {
                 lastRow = addServiceStatusRow(label: Self.displayName(component), status: component.status)
             }
             if let lastRow { stack.setCustomSpacing(Metrics.sectionSpacing, after: lastRow) }
@@ -1083,38 +1088,36 @@ final class PopupViewController: NSViewController {
     @discardableResult
     private func addServiceStatusRow(label: String, status: ServiceStatus) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
-        let attributed = NSMutableAttributedString()
 
-        // Colour dot — the shared baseline-nudged attachment (#130), tinted by status, so the popup
-        // rows align with the update menu item and the menu-bar dot.
+        // Leading half: the colour dot (#130, tinted by status so rows align with the update menu item
+        // and the menu-bar dot) + the component's display label (e.g. "API:"). No status word here — it
+        // is the trailing half, so every status word right-aligns into one column.
+        let leading = NSMutableAttributedString()
         if let attachment = Self.dotAttachment(
             color: Self.dotColor(status),
             accessibility: status == .operational ? "operational" : "issue") {
-            attributed.append(NSAttributedString(attachment: attachment))
-            attributed.append(NSAttributedString(string: "  "))
+            leading.append(NSAttributedString(attachment: attachment))
+            leading.append(NSAttributedString(string: "  "))
         }
-
-        // Prefix the component's display label (e.g. "API: ") in the normal label colour.
-        attributed.append(NSAttributedString(string: "\(label): ", attributes: [
+        leading.append(NSAttributedString(string: label, attributes: [
             .font: font, .foregroundColor: ColorStore.shared.color(.label),
         ]))
+        let leadingLabel = StatusLineLabel(labelWithAttributedString: leading)
 
-        // Status word. Operational → plain dimmed text (no link). Otherwise → underlined link
-        // colour, opened on click by StatusLineLabel over the word's range.
+        // Trailing half: the status word, pinned flush-right. Operational → plain dimmed text (no link);
+        // otherwise → underlined link colour, opened on click by StatusLineLabel over the word's range.
         let word = Self.word(status)
         let isLink = status != .operational
-        let wordStart = attributed.length
-        attributed.append(NSAttributedString(string: word, attributes: isLink
+        let wordAttributed = NSAttributedString(string: word, attributes: isLink
             ? [.font: font, .foregroundColor: ColorStore.shared.color(.link), .underlineStyle: NSUnderlineStyle.single.rawValue]
-            : [.font: font, .foregroundColor: Self.dimmedLabelColor]))
-
-        let field = StatusLineLabel(labelWithAttributedString: attributed)
+            : [.font: font, .foregroundColor: Self.dimmedLabelColor])
+        let wordLabel = StatusLineLabel(labelWithAttributedString: wordAttributed)
         if isLink {
-            field.linkRange = NSRange(location: wordStart, length: (word as NSString).length)
-            field.linkURL = StatusHealth.pageURL
+            wordLabel.linkRange = NSRange(location: 0, length: (word as NSString).length)
+            wordLabel.linkURL = StatusHealth.pageURL
         }
-        stack.addArrangedSubview(field)
-        return field
+
+        return addSplitRow(leadingView: leadingLabel, rightView: wordLabel)
     }
 
     /// AppKit colour for one service status — the popup's indicator palette. Appearance-aware
@@ -1203,7 +1206,14 @@ final class PopupViewController: NSViewController {
         row.resetLine ?? "resetting…"
     }
 
-    /// The data age shown flush-right in the "Claude Code" header (under the ⌥/problem gate):
+    /// Data-age threshold past which the header timestamp is shown **unconditionally** (not just under
+    /// ⌥): `2 ×` the healthy base poll cadence (`PollingEngine.baseInterval`, 180 s → 360 s / 6 min).
+    /// Below it the data is at most one missed poll old — normal jitter — so the age stays an on-demand
+    /// ⌥ detail; past two full cadences a poll has clearly been missed and the age is worth surfacing on
+    /// its own. Derived from the engine cadence so the two never drift.
+    static let staleAgeThreshold: TimeInterval = PollingEngine.baseInterval * 2
+
+    /// The data age shown flush-right in the "Claude Code" header (under the ⌥/stale gate):
     /// `"2m ago"`, or `"just now"` for anything under a full minute — the age never shows seconds
     /// (user preference), so a sub-minute age reads as "just now", not "40s".
     static let justNowThreshold = 60

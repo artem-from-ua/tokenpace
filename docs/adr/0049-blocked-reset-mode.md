@@ -1,9 +1,15 @@
 ---
-status: accepted
+status: superseded
 date: 2026-07-31
+superseded_by: [0063]
 ---
 
 # ADR-0049: Окремий `MenuBarMode.blockedReset` для віджета «лише countdown»
+
+> **Витіснено [ADR-0063](0063-unified-pause-hides-bars.md).** Тумблер «Show pacing bars when 5h/7d
+> limits reached» (ключ `hideBarsWhenBlocked`) злито в єдиний `pauseHidesBars`, а предикат ховання
+> барів звужено з `mainWindowExhausted` до `isBlocked`. Кейс `MenuBarMode.blockedReset` лишається в
+> моделі, але тепер гейтиться новим ключем.
 
 ## Контекст
 

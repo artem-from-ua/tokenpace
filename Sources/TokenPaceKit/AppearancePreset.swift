@@ -6,7 +6,7 @@ import Foundation
 /// reset-countdown mode, the bar presentation style, and the dropdown's per-model toggle (#215, #224).
 /// Generalises the single "Reset to defaults" row from #214: `.chill` is the calm, quiet look
 /// (simplified bars), `.workHarder` is `.chill` plus the coloured far-behind blue, `.controlFreak`
-/// turns everything on (dense pacing bars). Applying a preset writes all eleven keys at once via
+/// turns everything on (dense pacing bars). Applying a preset writes all ten keys at once via
 /// `PersistedConfig.apply(_:)`.
 ///
 /// The preset **values** live here in the kit (not the AppKit/SwiftUI shell) so they are unit-testable
@@ -28,18 +28,18 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
     case controlFreak = "controlFreak"
 
     /// The fixed value set this preset writes to the eleven Appearance keys. Stored in the **as-persisted**
-    /// sense, matching `PersistedConfig` — note `hideCalmSevenDay` / `hideBarsWhenBlocked` are *hide*
-    /// flags (the pane shows them inverted as "Show …").
+    /// sense, matching `PersistedConfig` — note `hideCalmSevenDay` is a *hide* flag (the pane shows it
+    /// inverted as "Show …"). `pauseHidesBars` is stored as-is (the pane's toggle is not inverted).
     public var values: AppearancePresetValues {
         switch self {
         case .chill:
-            // The calm look: every menu-bar Bool on, per-model rows on, countdown smart, simplified
-            // bars. Work harder off — the far-behind blue mutes with the rest of the calm colours.
+            // The calm look: per-model rows on, countdown smart, simplified bars, and — when fully
+            // blocked — only the red pause icon (bars hidden). Work harder off — the far-behind blue
+            // mutes with the rest of the calm colours.
             return AppearancePresetValues(
                 calmColorMode: .yellowGreenBlue,   // greens/yellows AND far-behind blue all mute
                 hideCalmSevenDayBar: true,
-                hideBarsWhenBlocked: true,
-                showBlockedPause: true,
+                pauseHidesBars: true,   // when blocked, show only the pause icon (bars hidden)
                 showExtraUsage: true,
                 showServiceStatusDot: true,
                 showModelSpecificLimits: true,
@@ -49,12 +49,12 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 farBehindInterval: .off)   // …and no blue far-behind zone
         case .workHarder:
             // `.chill` with Work harder on and the **mixed** bar style (pace-only menu bar, pace & time
-            // in the dropdown); far-behind blue stays coloured under calm colours; ticks on.
+            // in the dropdown); far-behind blue stays coloured under calm colours; ticks on. When
+            // blocked, keep the bars beside the pause icon.
             return AppearancePresetValues(
                 calmColorMode: .yellowGreen,   // greens/yellows mute; far-behind blue stays coloured
                 hideCalmSevenDayBar: true,
-                hideBarsWhenBlocked: true,
-                showBlockedPause: true,
+                pauseHidesBars: false,   // when blocked, keep the bars beside the pause icon
                 showExtraUsage: true,
                 showServiceStatusDot: true,
                 showModelSpecificLimits: true,
@@ -65,11 +65,11 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
         case .controlFreak:
             // Show everything: calm off; nothing hidden; every glyph/dot/credits/per-model row on;
             // countdown always; dense pacing bars. Work harder on so the far-behind blue stays loud too.
+            // When blocked, keep the bars beside the pause icon.
             return AppearancePresetValues(
                 calmColorMode: .off,   // nothing muted — every state keeps its colour (loud)
                 hideCalmSevenDayBar: false,
-                hideBarsWhenBlocked: false,
-                showBlockedPause: true,
+                pauseHidesBars: false,   // when blocked, keep the bars beside the pause icon
                 showExtraUsage: true,
                 showServiceStatusDot: true,
                 showModelSpecificLimits: true,
@@ -111,13 +111,16 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
 
 // MARK: - AppearancePresetValues
 
-/// The eleven Appearance-pane values a preset sets, in the same **as-persisted** sense as
-/// `PersistedConfig` (the two `hide…` flags are the stored *hide* form, not the pane's inverted "Show …").
+/// The ten Appearance-pane values a preset sets, in the same **as-persisted** sense as
+/// `PersistedConfig` (`hideCalmSevenDayBar` is the stored *hide* form, not the pane's inverted "Show …";
+/// `pauseHidesBars` is stored as-is).
 public struct AppearancePresetValues: Sendable, Equatable {
     public let calmColorMode: CalmColorMode
     public let hideCalmSevenDayBar: Bool
-    public let hideBarsWhenBlocked: Bool
-    public let showBlockedPause: Bool
+    /// When the user is fully blocked (`CreditsPacing.isBlocked`), whether the red pause icon **hides**
+    /// the pacing bars (`true` → icon only) or keeps them beside it (`false` → icon + bars). The pause
+    /// icon itself is always drawn when blocked, independent of this flag (#199, #227).
+    public let pauseHidesBars: Bool
     public let showExtraUsage: Bool
     public let showServiceStatusDot: Bool
     public let showModelSpecificLimits: Bool
@@ -129,8 +132,7 @@ public struct AppearancePresetValues: Sendable, Equatable {
     public init(
         calmColorMode: CalmColorMode,
         hideCalmSevenDayBar: Bool,
-        hideBarsWhenBlocked: Bool,
-        showBlockedPause: Bool,
+        pauseHidesBars: Bool,
         showExtraUsage: Bool,
         showServiceStatusDot: Bool,
         showModelSpecificLimits: Bool,
@@ -141,8 +143,7 @@ public struct AppearancePresetValues: Sendable, Equatable {
     ) {
         self.calmColorMode = calmColorMode
         self.hideCalmSevenDayBar = hideCalmSevenDayBar
-        self.hideBarsWhenBlocked = hideBarsWhenBlocked
-        self.showBlockedPause = showBlockedPause
+        self.pauseHidesBars = pauseHidesBars
         self.showExtraUsage = showExtraUsage
         self.showServiceStatusDot = showServiceStatusDot
         self.showModelSpecificLimits = showModelSpecificLimits

@@ -56,10 +56,10 @@ struct AppearancePane: View {
                             active: model.barStyle,
                             onSelect: { model.setBarStyle($0) })
                     }
-                    SettingsHint(text: "Pace shows a colour ribbon from the left; Pace & Time adds the "
-                        + "time marker. Both use the same state color and ribbon size.")
-                    SettingsHint(text: "Mixed keeps the compact menu-bar bar as Pace and shows Pace & "
-                        + "Time in the dropdown.")
+                    SettingsHint(text: "*Pace* shows a colour ribbon from the left; *Pace & Time* adds "
+                        + "the time marker. Both use the same state color and ribbon size.")
+                    SettingsHint(text: "*Mixed* keeps the compact menu-bar bar as *Pace* and shows "
+                        + "*Pace & Time* in the dropdown.")
                 }
             }
 
@@ -101,8 +101,8 @@ struct AppearancePane: View {
                                 .init(value: CalmColorMode.yellowGreenBlue, title: "+ Blue",
                                       selectable: model.farBehindInterval != .off,
                                       inactiveHelp: model.farBehindInterval == .off
-                                        ? "There's no blue to mute while Far behind pace interval is "
-                                          + "\"Less blue, please!\". Pick an interval first."
+                                        ? "There's no blue to mute while *Far behind pace interval* is "
+                                          + "*Less blue, please!*. Pick an interval first."
                                         : nil),
                             ],
                             active: model.calmColorMode,
@@ -112,13 +112,14 @@ struct AppearancePane: View {
                         + "always stay coloured.")
                 }
 
-                // #199 — placed third by request. Independent of the pacing-bars toggle below: the
-                // glyph shows whenever fully blocked, before the bars or before the countdown.
+                // #194, #227 — the single "blocked" control. When fully blocked a red pause icon is
+                // always shown; this toggle only decides whether it hides the bars or keeps them beside it.
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Show pause icon when fully blocked", isOn: Binding(
-                        get: { model.showBlockedPause }, set: { model.setShowBlockedPause($0) }))
-                    SettingsHint(text: "An orange pause icon when every limit is exhausted and "
-                        + "extra-usage credits can't cover.")
+                    Toggle("Pause icon hides bars", isOn: Binding(
+                        get: { model.pauseHidesBars }, set: { model.setPauseHidesBars($0) }))
+                    SettingsHint(text: "When every limit is exhausted and extra-usage credits can't "
+                        + "cover, a red pause icon appears. On shows only the icon and the reset "
+                        + "countdown; off keeps the pacing bars beside it.")
                 }
 
                 // Shown to the user as "Show 7-day bar when calm" — the inverse of the stored
@@ -128,16 +129,6 @@ struct AppearancePane: View {
                         get: { !model.hideCalmSevenDay }, set: { model.setHideCalmSevenDay(!$0) }))
                     SettingsHint(text: "Off hides the 7-day bar while it's calm, bringing it back "
                         + "when it turns orange or red.")
-                }
-
-                // Shown to the user as "Show pacing bars when 5h/7d limits reached" — the inverse of
-                // the stored `hideBarsWhenBlocked` flag (off by default = bars hidden when blocked,
-                // #194 behaviour preserved).
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Show pacing bars when 5h/7d limits reached", isOn: Binding(
-                        get: { !model.hideBarsWhenBlocked }, set: { model.setHideBarsWhenBlocked(!$0) }))
-                    SettingsHint(text: "Off shows just the reset countdown when a 5-hour or 7-day "
-                        + "limit is exhausted.")
                 }
 
                 // Reset-countdown mode: a segmented control matching the pane's other three-way rows,
@@ -155,8 +146,8 @@ struct AppearancePane: View {
                             active: model.resetRadio,
                             onSelect: { model.resetRadio = $0; model.commitResetCountdownMode() })
                     }
-                    SettingsHint(text: "Smart shows the countdown only when you're pacing well ahead or "
-                        + "a limit is reached.")
+                    SettingsHint(text: "*Smart* shows the countdown only when you're pacing well ahead "
+                        + "or a limit is reached.")
                 }
 
                 Toggle("Show extra-usage credits icon", isOn: Binding(

@@ -37,8 +37,7 @@ final class SettingsModel {
     var onExtraUsageChange: ((Bool) -> Void)?
     var onShowModelSpecificLimitsChange: ((Bool) -> Void)?
     var onHideCalmSevenDayChange: ((Bool) -> Void)?
-    var onHideBarsWhenBlockedChange: ((Bool) -> Void)?
-    var onShowBlockedPauseChange: ((Bool) -> Void)?
+    var onPauseHidesBarsChange: ((Bool) -> Void)?
     var onPausePollingChange: ((Bool) -> Void)?
     var onArchiveNow: (() -> Void)?
     var onBackToWorkEnabled: ((@escaping @MainActor (BackToWorkNotifier.AuthState) -> Void) -> Void)?
@@ -71,8 +70,7 @@ final class SettingsModel {
 
     var calmColorMode: CalmColorMode = .yellowGreenBlue
     var hideCalmSevenDay = false
-    var hideBarsWhenBlocked = false
-    var showBlockedPause = false
+    var pauseHidesBars = false
     var showExtraUsage = false
     /// Whether the popup lists the per-model 7-day limit rows (Opus/Sonnet/scoped, #211). A popup
     /// concern, not a menu-bar one — shown under the separate "Dropdown" section of the pane.
@@ -179,8 +177,7 @@ final class SettingsModel {
         AppearancePresetValues(
             calmColorMode: calmColorMode,
             hideCalmSevenDayBar: hideCalmSevenDay,
-            hideBarsWhenBlocked: hideBarsWhenBlocked,
-            showBlockedPause: showBlockedPause,
+            pauseHidesBars: pauseHidesBars,
             showExtraUsage: showExtraUsage,
             showServiceStatusDot: showServiceDot,
             showModelSpecificLimits: showModelSpecificLimits,
@@ -250,8 +247,7 @@ final class SettingsModel {
 
         calmColorMode = PersistedConfig.calmColorMode
         hideCalmSevenDay = PersistedConfig.hideCalmSevenDayBar
-        hideBarsWhenBlocked = PersistedConfig.hideBarsWhenBlocked
-        showBlockedPause = PersistedConfig.showBlockedPause
+        pauseHidesBars = PersistedConfig.pauseHidesBars
         showExtraUsage = PersistedConfig.showExtraUsage
         showModelSpecificLimits = PersistedConfig.showModelSpecificLimits
         showServiceDot = PersistedConfig.showServiceStatusDot
@@ -305,18 +301,11 @@ final class SettingsModel {
         onHideCalmSevenDayChange?(on)
     }
 
-    func setHideBarsWhenBlocked(_ on: Bool) {
-        hideBarsWhenBlocked = on
-        PersistedConfig.hideBarsWhenBlocked = on
-        AppLogger.lifecycle.notice("hide-bars-when-blocked: menu-bar set \(on, privacy: .public)")
-        onHideBarsWhenBlockedChange?(on)
-    }
-
-    func setShowBlockedPause(_ on: Bool) {
-        showBlockedPause = on
-        PersistedConfig.showBlockedPause = on
-        AppLogger.lifecycle.notice("show-blocked-pause: menu-bar set \(on, privacy: .public)")
-        onShowBlockedPauseChange?(on)
+    func setPauseHidesBars(_ on: Bool) {
+        pauseHidesBars = on
+        PersistedConfig.pauseHidesBars = on
+        AppLogger.lifecycle.notice("pause-hides-bars: menu-bar set \(on, privacy: .public)")
+        onPauseHidesBarsChange?(on)
     }
 
     func setShowExtraUsage(_ on: Bool) {
@@ -403,8 +392,7 @@ final class SettingsModel {
     private func fireAppearanceCallbacks() {
         onCalmColorModeChange?(calmColorMode)
         onHideCalmSevenDayChange?(hideCalmSevenDay)
-        onHideBarsWhenBlockedChange?(hideBarsWhenBlocked)
-        onShowBlockedPauseChange?(showBlockedPause)
+        onPauseHidesBarsChange?(pauseHidesBars)
         onExtraUsageChange?(showExtraUsage)
         onShowModelSpecificLimitsChange?(showModelSpecificLimits)
         onServiceDotChange?(showServiceDot)

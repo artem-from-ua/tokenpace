@@ -1,9 +1,15 @@
 ---
-status: accepted
+status: superseded
 date: 2026-07-31
+superseded_by: [0063]
 ---
 
 # ADR-0051: Оранжевий «pause» гліф перед барами у стані повного блокування
+
+> **Витіснено [ADR-0063](0063-unified-pause-hides-bars.md).** Опцію «Show pause icon when fully
+> blocked» (ключ `showBlockedPause`) прибрано — pause-гліф тепер малюється **завжди** під `isBlocked`
+> і став **червоним** (роль `menuPauseOrange` → `menuPauseRed`). Тумблер злито в єдиний
+> `pauseHidesBars`, що керує лише барами.
 
 ## Контекст
 
