@@ -50,7 +50,17 @@ struct AboutPane: View {
                         .buttonStyle(.link)
                 }
                 LabeledContent("Version") {
-                    Text(model.versionText).foregroundStyle(.secondary)
+                    HStack(spacing: 10) {
+                        Text(model.versionText).foregroundStyle(.secondary)
+                        // A "Release notes" link for the installed version, shown only in a real
+                        // `.app` bundle (a dev build has no published release to point at) — #224.
+                        if model.inAppBundle {
+                            Button("Release notes") {
+                                model.openReleaseNotes(tag: model.currentVersionTag)
+                            }
+                            .buttonStyle(.link)
+                        }
+                    }
                 }
 
                 if let release = model.latestRelease {

@@ -48,15 +48,16 @@ enum PersistedConfig {
         /// The latest release tag last surfaced to the user (#37), so the same version is not
         /// notified twice.
         static let lastSeenLatestVersion = "lastSeenLatestVersion"
-        /// Whether the menu-bar widget mutes its soft pacing colours to white (#105). Default-off
-        /// (opt-in) — see the property.
-        static let calmMenuBarColors = "calmMenuBarColors"
-        /// Whether the far-behind **blue** pacing zone stays coloured under calm colours ("Work
-        /// harder"). Default-off (opt-in) — see the property.
-        static let workHarderColors = "workHarderColors"
+        /// How much of the non-critical pacing palette the menu-bar widget mutes to white (#105, #224),
+        /// stored as the raw `CalmColorMode` string. Replaces the old `calmMenuBarColors` +
+        /// `workHarderColors` pair — see the property.
+        static let calmColorMode = "calmColorMode"
         /// How the menu-bar widget picks/hides the reset countdown (#103), stored as the raw
         /// `ResetCountdownMode` string. Default `.smart` — see the property.
         static let resetCountdownModeMenuBar = "resetCountdownModeMenuBar"
+        /// How the pacing bars are presented on both surfaces (#224), stored as the raw `BarStyle`
+        /// string. Default `.pacing` — see the property.
+        static let barStyle = "barStyle"
         /// Whether the menu-bar widget draws the service-status dot on a service issue (#31).
         /// Default-on (opt-out) — see the property.
         static let showServiceStatusDot = "showServiceStatusDot"
@@ -76,6 +77,12 @@ enum PersistedConfig {
         /// Whether the popup shows the per-model 7-day limit rows (`Opus`/`Sonnet`/`weekly_scoped`,
         /// e.g. `Fable`) below the `5h`/`7d` rows (#211). Default-on (opt-out) — see the property.
         static let showModelSpecificLimits = "showModelSpecificLimits"
+        /// Whether the popup draws the under-bar tick ruler on the pacing bars (#224). Default-on
+        /// (opt-out) — see the property.
+        static let showTicks = "showTicks"
+        /// The far-behind (green→blue) threshold interval (#224), stored as the raw `FarBehindInterval`
+        /// string. Default `.medium` — see the property.
+        static let farBehindInterval = "farBehindInterval"
         /// Whether polling pauses while the screen is locked / off / running a screensaver (#114).
         /// Default-on (opt-out) — see the property.
         static let pausePollingWhenScreenLocked = "pausePollingWhenScreenLocked"
@@ -236,24 +243,17 @@ enum PersistedConfig {
         set { defaults.set(newValue, forKey: Key.lastSeenLatestVersion) }
     }
 
-    /// Whether the menu-bar widget renders its **soft** pacing colours as white (#105) — the idle
-    /// blue track, the on-pace green, and the mild ahead-of-pace yellow. **Default-on** (opt-out, #168):
-    /// an absent key reads as `true`, so the calm/non-critical look is the out-of-the-box default.
-    /// `object(forKey:) as? Bool ?? true` distinguishes "unset" (→ true) from an explicit choice.
-    /// The strong warnings (orange/red), the time-indicator dot, the service-status dot, and the
-    /// error triangle are unaffected; the popup keeps its full colour too.
-    static var calmMenuBarColors: Bool {
-        get { defaults.object(forKey: Key.calmMenuBarColors) as? Bool ?? true }
-        set { defaults.set(newValue, forKey: Key.calmMenuBarColors) }
-    }
-
-    /// Whether the far-behind **blue** pacing zone (deep behind pace / big surplus) on the base 5h/7d
-    /// bars stays coloured under ``calmMenuBarColors`` instead of muting to white — "Work harder".
-    /// **Default-off** (opt-in): an absent key reads as `false`, so out of the box blue mutes with the
-    /// rest of the calm states. Only has a visible effect when `calmMenuBarColors` is on.
-    static var workHarderColors: Bool {
-        get { defaults.object(forKey: Key.workHarderColors) as? Bool ?? false }
-        set { defaults.set(newValue, forKey: Key.workHarderColors) }
+    /// How much of the menu-bar widget's **soft** pacing palette mutes to white (#105, #224, ADR-0061)
+    /// — the single three-way ``CalmColorMode`` that replaces the old `calmMenuBarColors` +
+    /// `workHarderColors` pair. `.off` keeps every colour; `.yellowGreen` mutes the greens/yellows but
+    /// keeps the far-behind blue coloured (the old "Work harder"); `.yellowGreenBlue` mutes the blue
+    /// too (the quietest). Stored as the raw string; an absent key or an unrecognised value (a newer
+    /// build's) falls back to the factory default (`AppearancePreset.default`). The strong warnings
+    /// (orange/red), the time-indicator dot, and the error triangle are unaffected; the popup keeps its
+    /// full colour too.
+    static var calmColorMode: CalmColorMode {
+        get { CalmColorMode(rawValue: defaults.string(forKey: Key.calmColorMode) ?? "") ?? AppearancePreset.defaultValues.calmColorMode }
+        set { defaults.set(newValue.rawValue, forKey: Key.calmColorMode) }
     }
 
     /// How the **menu-bar** widget picks or hides the reset countdown (#103, ADR-0029). Named for the
@@ -262,8 +262,18 @@ enum PersistedConfig {
     /// legacy `show_distant_7d`/`hide_distant_7d` from before #168) reads as the default
     /// ``ResetCountdownMode/smart`` — so an older build never trips on a future value.
     static var resetCountdownModeMenuBar: ResetCountdownMode {
-        get { ResetCountdownMode(rawValue: defaults.string(forKey: Key.resetCountdownModeMenuBar) ?? "") ?? .smart }
+        get { ResetCountdownMode(rawValue: defaults.string(forKey: Key.resetCountdownModeMenuBar) ?? "") ?? AppearancePreset.defaultValues.resetCountdownModeMenuBar }
         set { defaults.set(newValue.rawValue, forKey: Key.resetCountdownModeMenuBar) }
+    }
+
+    /// How the pacing bars are **presented** on both surfaces — the menu-bar widget *and* the dropdown
+    /// popup (#224). A single choice governs both. Stored as the raw `BarStyle` string; an absent key
+    /// or an unrecognised value (a newer build's) reads as the default ``BarStyle/pacing`` (the shipped
+    /// dense gap+marker look) — so an older build never trips on a future value. Render-only: never
+    /// changes the underlying layout, severity, or which bars are shown.
+    static var barStyle: BarStyle {
+        get { BarStyle(rawValue: defaults.string(forKey: Key.barStyle) ?? "") ?? AppearancePreset.defaultValues.barStyle }
+        set { defaults.set(newValue.rawValue, forKey: Key.barStyle) }
     }
 
     /// Whether the **menu-bar** widget draws the service-status dot when a monitored service has a
@@ -273,7 +283,7 @@ enum PersistedConfig {
     /// silently defeat the opt-out default. Menu-bar only: the popup's service-status rows are
     /// unaffected.
     static var showServiceStatusDot: Bool {
-        get { defaults.object(forKey: Key.showServiceStatusDot) as? Bool ?? true }
+        get { defaults.object(forKey: Key.showServiceStatusDot) as? Bool ?? AppearancePreset.defaultValues.showServiceStatusDot }
         set { defaults.set(newValue, forKey: Key.showServiceStatusDot) }
     }
 
@@ -286,7 +296,7 @@ enum PersistedConfig {
     /// always stays visible; the error state (⚠️ + stale bars, #12) is unaffected — the 7-day bar is
     /// kept there for diagnostics regardless of this toggle.
     static var hideCalmSevenDayBar: Bool {
-        get { defaults.object(forKey: Key.hideCalmSevenDayBar) as? Bool ?? true }
+        get { defaults.object(forKey: Key.hideCalmSevenDayBar) as? Bool ?? AppearancePreset.defaultValues.hideCalmSevenDayBar }
         set { defaults.set(newValue, forKey: Key.hideCalmSevenDayBar) }
     }
 
@@ -298,7 +308,7 @@ enum PersistedConfig {
     /// "unset" (→ true) from an explicit `false` the user chose — `bool(forKey:)` would collapse both to
     /// `false` and silently defeat the opt-out default. Menu-bar only: the popup keeps its full bars.
     static var hideBarsWhenBlocked: Bool {
-        get { defaults.object(forKey: Key.hideBarsWhenBlocked) as? Bool ?? true }
+        get { defaults.object(forKey: Key.hideBarsWhenBlocked) as? Bool ?? AppearancePreset.defaultValues.hideBarsWhenBlocked }
         set { defaults.set(newValue, forKey: Key.hideBarsWhenBlocked) }
     }
 
@@ -310,7 +320,7 @@ enum PersistedConfig {
     /// bars-less `.blockedReset` mode. `object(forKey:) as? Bool ?? true` distinguishes "unset" (→ true)
     /// from an explicit `false` the user chose. Menu-bar only.
     static var showBlockedPause: Bool {
-        get { defaults.object(forKey: Key.showBlockedPause) as? Bool ?? true }
+        get { defaults.object(forKey: Key.showBlockedPause) as? Bool ?? AppearancePreset.defaultValues.showBlockedPause }
         set { defaults.set(newValue, forKey: Key.showBlockedPause) }
     }
 
@@ -324,7 +334,7 @@ enum PersistedConfig {
     /// - Note: The Settings toggle for this lives in #146; until then the gate is read from this
     ///   default-on property, so the icon is on for everyone with credits.
     static var showExtraUsage: Bool {
-        get { defaults.object(forKey: Key.showExtraUsage) as? Bool ?? true }
+        get { defaults.object(forKey: Key.showExtraUsage) as? Bool ?? AppearancePreset.defaultValues.showExtraUsage }
         set { defaults.set(newValue, forKey: Key.showExtraUsage) }
     }
 
@@ -336,8 +346,26 @@ enum PersistedConfig {
     /// `false` the user chose — `bool(forKey:)` would collapse both to `false` and silently defeat
     /// the opt-out default.
     static var showModelSpecificLimits: Bool {
-        get { defaults.object(forKey: Key.showModelSpecificLimits) as? Bool ?? true }
+        get { defaults.object(forKey: Key.showModelSpecificLimits) as? Bool ?? AppearancePreset.defaultValues.showModelSpecificLimits }
         set { defaults.set(newValue, forKey: Key.showModelSpecificLimits) }
+    }
+
+    /// Whether the **popup** draws the under-bar tick ruler on the pacing bars (#224). Gates
+    /// `PopupBarView.drawTicks` only; the menu-bar widget has no tick ruler. Falls back to the factory
+    /// default (`AppearancePreset.default`) when the key is absent, so the out-of-the-box value tracks
+    /// the default preset. `object(forKey:) as? Bool` distinguishes "unset" from an explicit choice.
+    static var showTicks: Bool {
+        get { defaults.object(forKey: Key.showTicks) as? Bool ?? AppearancePreset.defaultValues.showTicks }
+        set { defaults.set(newValue, forKey: Key.showTicks) }
+    }
+
+    /// The far-behind (green→blue) threshold interval (#224) — how big a surplus turns the behind side
+    /// blue (`.off` = never blue; `.short`/`.medium`/`.long` = 1×/2×/3× the 1h(5h)/1d(7d) base). Stored
+    /// as the raw `FarBehindInterval` string; an absent key or an unrecognised value falls back to the
+    /// factory default (`AppearancePreset.default`). Governs both surfaces via `BarLayout.behindMultiplier`.
+    static var farBehindInterval: FarBehindInterval {
+        get { FarBehindInterval(rawValue: defaults.string(forKey: Key.farBehindInterval) ?? "") ?? AppearancePreset.defaultValues.farBehindInterval }
+        set { defaults.set(newValue.rawValue, forKey: Key.farBehindInterval) }
     }
 
     /// Revert every setting the **Appearance** pane owns to its factory default — the menu-bar widget
@@ -348,8 +376,7 @@ enum PersistedConfig {
     /// and re-applies the values to the widget.
     static func resetAppearanceToDefaults() {
         for key in [
-            Key.calmMenuBarColors,
-            Key.workHarderColors,
+            Key.calmColorMode,
             Key.resetCountdownModeMenuBar,
             Key.showServiceStatusDot,
             Key.hideCalmSevenDayBar,
@@ -357,20 +384,23 @@ enum PersistedConfig {
             Key.showBlockedPause,
             Key.showExtraUsage,
             Key.showModelSpecificLimits,
+            Key.barStyle,
+            Key.showTicks,
+            Key.farBehindInterval,
         ] {
             defaults.removeObject(forKey: key)
         }
     }
 
-    /// Write every **Appearance**-pane key from a named preset's fixed value set (#215) — the general
-    /// form of `resetAppearanceToDefaults()`. Unlike reset (which *removes* keys so getters fall back to
-    /// their defaults), this writes explicit values, because a preset can differ from the defaults
-    /// (e.g. `.controlFreak` turns calm off). The caller re-syncs the model and re-applies the values to
-    /// the widget. `.chill` writes the same values reset restores.
+    /// Write every **Appearance**-pane key from a named preset's fixed value set (#215, #224) — the
+    /// general form of `resetAppearanceToDefaults()`. Unlike reset (which *removes* keys so getters fall
+    /// back to their defaults), this writes explicit values, because a preset can differ from the
+    /// factory defaults (e.g. `.controlFreak` turns calm off; `.chill` opts into `.simple` bars while
+    /// the shipped `barStyle` default is `.pacing`). The caller re-syncs the model and re-applies the
+    /// values to the widget.
     static func apply(_ preset: AppearancePreset) {
         let v = preset.values
-        calmMenuBarColors = v.calmMenuBarColors
-        workHarderColors = v.workHarderColors
+        calmColorMode = v.calmColorMode
         hideCalmSevenDayBar = v.hideCalmSevenDayBar
         hideBarsWhenBlocked = v.hideBarsWhenBlocked
         showBlockedPause = v.showBlockedPause
@@ -378,6 +408,28 @@ enum PersistedConfig {
         showServiceStatusDot = v.showServiceStatusDot
         showModelSpecificLimits = v.showModelSpecificLimits
         resetCountdownModeMenuBar = v.resetCountdownModeMenuBar
+        barStyle = v.barStyle
+        showTicks = v.showTicks
+        farBehindInterval = v.farBehindInterval
+    }
+
+    /// The live Appearance config assembled into an `AppearancePresetValues` — the read-mirror of
+    /// ``apply(_:)`` (#224). Used by the Settings model to light the preset segmented control's active
+    /// segment via `AppearancePreset.matching(_:)`: equal to a preset's `.values` → that preset is
+    /// active; equal to none → the "Custom" indicator.
+    static var currentAppearanceValues: AppearancePresetValues {
+        AppearancePresetValues(
+            calmColorMode: calmColorMode,
+            hideCalmSevenDayBar: hideCalmSevenDayBar,
+            hideBarsWhenBlocked: hideBarsWhenBlocked,
+            showBlockedPause: showBlockedPause,
+            showExtraUsage: showExtraUsage,
+            showServiceStatusDot: showServiceStatusDot,
+            showModelSpecificLimits: showModelSpecificLimits,
+            resetCountdownModeMenuBar: resetCountdownModeMenuBar,
+            barStyle: barStyle,
+            showTicks: showTicks,
+            farBehindInterval: farBehindInterval)
     }
 
     /// Whether polling pauses while the screen is **locked, off, or running a screensaver** (#114,

@@ -173,17 +173,19 @@ token itself never is.
 |------|----------|-------|---------|------|
 | 158 | `lifecycle` | `.notice` | `launch-at-login: user set <true/false>` | user toggled the launch-at-login checkbox successfully |
 | 164 | `lifecycle` | `.error` | `launch-at-login: toggle failed: <error>` | toggle threw (e.g. unsigned build) — a deliberate user action, so it stays `.error` |
-| 424 | `lifecycle` | `.notice` | `calm-colors: menu-bar set <bool>` | user toggled the "Calm MenuBar Widget colors" checkbox (#105) |
-| — | `lifecycle` | `.notice` | `work-harder-colors: menu-bar set <bool>` | user toggled the "Work harder" checkbox (far-behind blue stays coloured under Calm colors; ADR-0061) |
-| 434 | `lifecycle` | `.notice` | `reset-countdown: menu-bar mode set <mode>` | user picked a "Reset countdown" radio (#103); `<mode>` is the raw `ResetCountdownMode` |
+| — | `lifecycle` | `.notice` | `calm-color-mode: set <mode>` | user picked a "Calm non-critical colors" segment (#105, #224); `<mode>` is the raw `CalmColorMode` (`off`/`yellowGreen`/`yellowGreenBlue`) — replaces the old `calm-colors` + `work-harder-colors` toggles |
+| — | `lifecycle` | `.notice` | `bar-style: set <style>` | user picked a "Bar style" segment (#224); `<style>` is the raw `BarStyle` (`pacing`/`mixed`/`simple`) — governs both surfaces |
+| — | `lifecycle` | `.notice` | `far-behind-interval: set <interval>` | user picked a "Far behind pace interval" option (#224); `<interval>` is the raw `FarBehindInterval` (`off`/`short`/`medium`/`long`) |
+| — | `lifecycle` | `.notice` | `show-ticks: popup set <bool>` | user toggled the "Show ticks on bars" checkbox (#224) — popup-only tick ruler |
+| 434 | `lifecycle` | `.notice` | `reset-countdown: menu-bar mode set <mode>` | user picked a "Show reset countdown" segment (#103); `<mode>` is the raw `ResetCountdownMode` |
 | 442 | `lifecycle` | `.notice` | `service-status-dot: menu-bar set <bool>` | user toggled the "Show service status dot on issues" checkbox (#31) |
 | — | `lifecycle` | `.notice` | `extra-usage-icon: menu-bar set <bool>` | user toggled the "Show extra-usage credits icon" checkbox (#146) |
 | — | `lifecycle` | `.notice` | `hide-calm-7d: menu-bar set <bool>` | user toggled the "Hide 7-day bar when calm" checkbox (#94, ADR-0034) |
 | — | `lifecycle` | `.notice` | `hide-bars-when-blocked: menu-bar set <bool>` | user toggled the "Show pacing bars when 5h/7d limits reached" checkbox (stored inverted as `hideBarsWhenBlocked`; #194, ADR-0049) |
 | — | `lifecycle` | `.notice` | `show-blocked-pause: menu-bar set <bool>` | user toggled the "Show pause icon when fully blocked" checkbox (#199, ADR-0051) |
 | — | `lifecycle` | `.notice` | `model-specific-limits: popup set <bool>` | user toggled the "Show model & service limits" checkbox — gates the popup's per-model/per-service rows (Opus/Sonnet/scoped) (#211) |
-| — | `lifecycle` | `.notice` | `appearance settings reset to defaults` | user clicked the Appearance-pane "Reset" (#214); all eight Appearance keys cleared to their defaults |
-| — | `lifecycle` | `.notice` | `appearance preset applied: <preset>` | user clicked an Appearance-pane preset button (#215); `<preset>` is the raw `AppearancePreset` (`chill`/`controlFreak`) — sets all eight Appearance keys at once |
+| — | `lifecycle` | `.notice` | `appearance settings reset to defaults` | user cleared the Appearance keys (#214); all eleven Appearance keys cleared to their defaults |
+| — | `lifecycle` | `.notice` | `appearance preset applied: <preset>` | user picked an Appearance-pane preset segment (#215, #224); `<preset>` is the raw `AppearancePreset` (`chill`/`workHarder`/`controlFreak`) — sets all eleven Appearance keys at once |
 | — | `lifecycle` | `.notice` | `screen-lock-pause: setting set <bool>` | user toggled the "Pause polling while the screen is locked" checkbox (#114, ADR-0032) |
 | 439 | `lifecycle` | `.notice` | `update: automatic checks set <bool>` | user toggled the "Check for updates automatically" checkbox (#37) |
 | — | `lifecycle` | `.notice` | `archive: enabled set <bool>` | user toggled the "Archive session logs to a folder" checkbox (#110) |

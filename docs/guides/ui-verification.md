@@ -205,16 +205,35 @@ unlimited-ліміту — `«… €10.77 so far.»`. **Потребує реа
 | `calm5-orange7` | calm | orange (days away) | кейс, де режим reset-countdown (smart vs never) дає видиму різницю |
 | `calm-both` | green | green | обидва calm **зелені** (малий запас: 5h ~10 пт < 0.20, 7d ~9 пт < 0.143 — під фіксованим behind-порогом, тож НЕ сині); за default-ON #94 7d ховається → **одинока центрована зелена 5h** без reset-тексту (зніми чекбокс — знову дві смужки) |
 | `near-reset` | orange (override) | green | ADR-0044: 5h попереду лише ~2 пт (usage 98 vs elapsed ~96 %), але ресет за **12 хв** → override робить бар **помаранчевим** (без override був би жовтий/calm), countdown зʼявляється. Перевірка динамічного порога + 20-хв override |
-| `far-behind` | blue | blue | ADR-0061: обидва базові бари глибоко позаду (5h запас ~0.55, 7d ~0.61 — над behind-порогом, past 20-хв start-override) → **сині**. Перевірка синьої зони + опції **«Work harder»**: увімкни Calm colors (Settings → Appearance) — під **Work harder OFF** синій мутиться в білий, під **Work harder ON** лишається синім. Per-model/credits рядки (у попапі) лишаються зеленими навіть тут |
+| `far-behind` | blue | blue | ADR-0061/0062: обидва базові бари глибоко позаду (5h запас ~0.55, 7d ~0.61 — над behind-порогом за дефолтного `FarBehindInterval` ×2, past 20-хв start-override) → **сині**. Перевірка синьої зони + `CalmColorMode`: Settings → Appearance → «Calm non-critical colors» — під **Yellow + Green** синій лишається кольоровим, під **+ Blue** мутиться в білий, під **Off** усе кольорове. Плюс `FarBehindInterval`: «Less blue, please!» робить обидва бари зеленими (синього немає). Per-model/credits рядки (у попапі) лишаються зеленими завжди |
 
-> Додаючи нову фічу зі своїм станом — **додай стуб і онови цю таблицю** (як зробили для #103, #94, ADR-0044, ADR-0061).
+> Додаючи нову фічу зі своїм станом — **додай стуб і онови цю таблицю** (як зробили для #103, #94, ADR-0044, ADR-0061, ADR-0062).
 >
 > **Синій — лише базові 5h/7d.** Синя зона (`.farBehind`, ADR-0061) з'являється, коли запас
-> `time − usage` перевищує behind-поріг **фіксованої часової ширини** — 60 хв / 5h = 0.20, 24 год / 7d
-> ≈ 0.143 — і минуло > 20 хв вікна. Наявні «зелені» стуби (`calm-both`, `red-green`, `calm5-orange7`,
-> `near-reset` 7d) мають **малий** запас, тож коректно лишаються зеленими — синій демонструє лише
-> `far-behind`. Опція «Work harder» (Appearance, друга після «Calm colors») тримає синій кольоровим
-> під Calm; дефолт off, Chill off / Control freak on.
+> `time − usage` перевищує behind-поріг **конфігурованої** ширини (ADR-0062): база 1h / 5h, 1d / 7d,
+> помножена на `FarBehindInterval` (×1/×2/×3; дефолт ×2 = 2h/2d = 0.40/0.286), або зовсім вимкнена
+> (`.off`) — і минуло > 20 хв вікна. Наявні «зелені» стуби (`calm-both`, `red-green`, `calm5-orange7`,
+> `near-reset` 7d) мають **малий** запас, тож коректно лишаються зеленими за будь-якого інтервалу.
+
+### Нові Appearance-опції подачі барів (#224, ADR-0062)
+
+Перевіряти на будь-якому pacing-стубі (напр. `far-behind`, `both-red`, `calm-both`):
+`TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2 TOKENPACE_STUB=far-behind swift run`.
+
+- **Change UI preset** (сегментед `Chill | Work harder! | Control freak | Custom`): клік застосовує
+  пресет; `Custom` некликабельний, підсвічується лише коли конфіг не збігається з жодним пресетом
+  (клік → popover-пояснення). **Work harder!** — дефолтний пресет (fresh install / Reset).
+- **Bar style** (`Pace | Mixed | Pace & Time`): «Pace» — стрічка від лівого краю без маркера на обох
+  поверхнях; «Pace & Time» — gap + маркер часу; «Mixed» — стрічка в menu bar, маркер у дропдауні.
+  Перевір **обидві** поверхні (клікни значок для дропдауна).
+- **Calm non-critical colors** (`Off | Yellow + Green | + Blue`): що мутиться в білий (orange/red завжди
+  кольорові). «+ Blue» **disabled** коли Far behind = «Less blue, please!» (клік → popover причини).
+- **Far behind pace interval** (`1h/1d | 2h/2d | 3h/3d | Less blue, please!`): поріг green→blue; «Less
+  blue» вимикає синій зовсім (на `far-behind` стубі бари стають зеленими).
+- **Show ticks on bars** (Dropdown Widget): вмикає/вимикає під-барову шкалу засічок у попапі (menu bar
+  засічок не має).
+- **Release notes** лінк в About праворуч від версії — **лише в нотаризованому `.app`** (у `swift run`
+  його немає; це очікувано).
 
 ## Сценарії без стубу
 

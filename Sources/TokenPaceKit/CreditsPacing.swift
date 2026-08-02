@@ -212,7 +212,10 @@ public enum CreditsPacing {
         // Use the 7-day length as a stable placeholder for the monthly window.
         return BarLayout(usageFraction: usageFraction, timeFraction: timeFraction,
                          pacing: pacing, remainingSeconds: remaining,
-                         windowDurationSeconds: LimitWindow.sevenDay.durationSeconds)
+                         windowDurationSeconds: LimitWindow.sevenDay.durationSeconds,
+                         // Credits are out of the blue-zone scope (never `isBaseLimit`), so this only
+                         // feeds `severity`, which stays calm. Medium (×2) is an immaterial placeholder.
+                         behindMultiplier: 2)
     }
 
     /// The time zone the monthly spend limit resets in — **UTC**.

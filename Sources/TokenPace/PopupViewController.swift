@@ -66,6 +66,26 @@ final class PopupBarView: NSView {
         }
     }
 
+    /// Bar presentation style (#224). ``BarStyle/pacing`` draws the gap + time-indicator marker + gap
+    /// dividers; ``BarStyle/simple`` draws a left-anchored ribbon coloured by the pacing state and keeps
+    /// the under-bar tick ruler, but no marker or dividers. Pushed in from `PopupViewController.addBar`.
+    /// Mirror of `StatusItemView.barStyle` — keep the two draw paths in sync. Default `.pacing`.
+    var barStyle: BarStyle = .pacing {
+        didSet {
+            guard barStyle != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
+    /// Whether the under-bar tick ruler is drawn (#224). Pushed in from `PopupViewController.addBar`.
+    /// Default `true`.
+    var showTicks: Bool = true {
+        didSet {
+            guard showTicks != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
     private enum Metrics {
         /// Height of the pacing bar itself (the coloured zones + indicator dot).
         static let barHeight: CGFloat = 6
@@ -80,10 +100,11 @@ final class PopupBarView: NSView {
         static let indicatorCorner: CGFloat = 2
         /// Width of each flanking edge-outline stroke on the marker/bar intersection (`quaternaryLabelColor`).
         static let indicatorStroke: CGFloat = 2
-        // Tick ruler, drawn *below* the bar like an axis (issue #38, "under-bar ruler" style).
-        static let tickLength: CGFloat = 3
+        // Tick ruler, drawn *below* the bar like an axis (issue #38, "under-bar ruler" style). Made
+        // more prominent (2×5) in #224 so the marks read clearly against the dimmer popup track.
+        static let tickLength: CGFloat = 5
         static let tickGap: CGFloat = 2
-        static let tickWidth: CGFloat = 1
+        static let tickWidth: CGFloat = 2
         /// Total view height: tall enough for the bar + under-bar tick ruler **and** for the marker,
         /// which is centred on the bar and so overhangs it by `indicatorHeight/2 − barHeight/2`
         /// on top; without that headroom a taller marker would be clipped by the view's frame.
@@ -126,15 +147,22 @@ final class PopupBarView: NSView {
         /// — the unified `indicatorRing` role, the same semantic hairline the menu-bar ring uses.
         static var indicatorStroke: NSColor { ColorStore.shared.color(.indicatorRing) }
 
-        /// Tick-ruler marks below the bar: `tertiaryLabelColor` — a muted neutral that flips light/dark
-        /// and reads weaker than the indicator dot.
+        /// Tick-ruler marks below the bar: `tertiaryLabelColor` (the `.tick` role) — a muted neutral that
+        /// flips light/dark and reads weaker than the indicator dot.
         static var tick: NSColor { ColorStore.shared.color(.tick) }
 
-        /// The monochrome base-zone grey (the bar's `used` + future/unused zones): `labelColor` at 22 %
-        /// alpha — the unified `barTrack` role, the same track tone the menu-bar bar uses. Translucent, so
-        /// the base recedes and breathes the popup's NSMenu material while the pacing gap and dot stay
-        /// foreground.
-        static var monochromeGrey: NSColor { ColorStore.shared.color(.barTrack) }
+        /// The monochrome base-zone grey (the bar's `used` + future/unused zones). **Popup-only**: a tone
+        /// **half-way between** `tertiaryLabelColor` and the dimmest `quaternaryLabelColor` — dimmer than
+        /// the menu bar's `barTrack` (`labelColor@0.22`) so the popup track recedes into the NSMenu
+        /// material, but not as dark as full quaternary (#224). The menu-bar widget keeps its own
+        /// `barTrack` tone unchanged — only this popup surface is quieter. Computed (not a `static let`)
+        /// so it re-resolves in the current drawing appearance every draw (a `static let` would bake in
+        /// the first-access appearance). `blended` returns non-nil for these dynamic label colours in a
+        /// real drawing context; the `?? tertiary` fallback keeps it total.
+        static var monochromeGrey: NSColor {
+            NSColor.tertiaryLabelColor.blended(withFraction: 0.5, of: .quaternaryLabelColor)
+                ?? .tertiaryLabelColor
+        }
     }
 
     // MARK: - Shipped colour defaults
@@ -143,10 +171,12 @@ final class PopupBarView: NSView {
     // greys are now plain system/semantic colours resolved directly in `ColorRole.defaultColor`; only
     // `defaultDimmedLabel` (below) still computes a per-appearance blend, so it stays a provider.
 
-    /// The grey both bar base zones (`used` + future/unused tail) render in — the unified `barTrack`
-    /// (`labelColor@0.22`), where only the pacing gap + dot carry colour. A **computed** accessor (not a
-    /// `static let`), so it re-resolves the dynamic `labelColor` in the *current* drawing appearance every
-    /// draw — a `static let` would bake in whatever appearance was current at first access and render the
+    /// The grey both bar base zones (`used` + future/unused tail) render in — the **popup-only** tone
+    /// half-way between tertiary and quaternary label (quieter than the menu bar's `barTrack`), where
+    /// only the pacing gap + dot
+    /// carry colour. A **computed** accessor (not a `static let`), so it re-resolves the dynamic label
+    /// colour in the *current* drawing appearance every draw — a `static let` would bake in whatever
+    /// appearance was current at first access and render the
     /// wrong tone after a theme flip (near-white on light). Menu-bar `drawBar` reads it live the same way.
     static var monochromeGrey: NSColor { Palette.monochromeGrey }
 
@@ -199,6 +229,27 @@ final class PopupBarView: NSView {
             // Calm side: base 5h/7d bars split green↔blue via behindColor; per-model/credits stay green.
             gapColor = isBaseLimit ? Self.behindColor(l) : Palette.gapGreen
         }
+
+        // Simple style (#224): a left-anchored ribbon whose LENGTH equals the pacing gap's width
+        // (`gapEnd - gapStart`) — the same amount of colour as Pace & Time, always anchored at the left
+        // edge — in the SAME pacing state colour, no time marker, with the divider where the ribbon meets
+        // the grey and the under-bar tick ruler kept. Mirror of `StatusItemView.drawBar`'s simple branch.
+        if !barStyle.popupShowsTimeMarker {
+            let ribbon = l.gapEnd - l.gapStart
+            fillZone(from: 0, to: ribbon, in: rect, width: w, color: gapColor)
+            // `quaternaryLabelColor` divider where the coloured ribbon meets the grey tail — flush against
+            // the ribbon's right edge, in the grey. Skipped when the ribbon fills the whole bar (no grey).
+            let sw = Metrics.indicatorStroke
+            if ribbon < 1 {
+                Palette.indicatorStroke.setFill()
+                let x = rect.minX + CGFloat(ribbon) * w
+                NSRect(x: x, y: rect.minY, width: sw, height: rect.height).fill()
+            }
+            NSGraphicsContext.restoreGraphicsState()
+            drawTicks(in: rect, width: w)
+            return
+        }
+
         fillZone(from: l.gapStart, to: l.gapEnd, in: rect, width: w, color: gapColor)
         // `quaternaryLabelColor` dividers wherever the coloured gap meets the grey — on the used-head side
         // (`gapStart`) and the future-tail side (`gapEnd`), matching the marker's intersection outline. Each
@@ -249,15 +300,18 @@ final class PopupBarView: NSView {
     /// (`k / subdivisions` for `k` in `1 ..< subdivisions`), pixel-snapped on x. No-op when
     /// `subdivisions < 2` (nothing to subdivide).
     private func drawTicks(in barRect: NSRect, width: CGFloat) {
-        guard subdivisions >= 2 else { return }
+        guard showTicks, subdivisions >= 2 else { return }   // #224 — tick ruler opt-out
         let top = barRect.maxY + Metrics.tickGap           // flipped: just below the bar
         let bottom = top + Metrics.tickLength
         Palette.tick.setFill()
+        // Rounded (capsule) teeth — corner = half the width so the ends read soft, not blocky.
+        let corner = Metrics.tickWidth / 2
         for k in 1 ..< subdivisions {
             let f = CGFloat(k) / CGFloat(subdivisions)
-            // Pixel-snap a 1.5px-wide tooth so it stays crisp at @1x and @2x.
+            // Pixel-snap the tooth's centre so it stays crisp at @1x and @2x.
             let cx = (barRect.minX + f * width).rounded()
-            NSRect(x: cx - Metrics.tickWidth / 2, y: top, width: Metrics.tickWidth, height: bottom - top).fill()
+            let rect = NSRect(x: cx - Metrics.tickWidth / 2, y: top, width: Metrics.tickWidth, height: bottom - top)
+            NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner).fill()
         }
     }
 
@@ -307,9 +361,11 @@ final class PopupBarView: NSView {
     /// to base 5h/7d bars by the caller (`isBaseLimit`); per-model / credits rows stay green.
     static func behindColor(_ l: BarLayout) -> NSColor {
         let green = ColorStore.shared.color(.green)
+        // `behindMultiplier == 0` (FarBehindInterval.off): blue is disabled — always green, any surplus.
+        if l.behindMultiplier == 0 { return green }
         let elapsed = Double(l.windowDurationSeconds) - l.remainingSeconds
         if elapsed <= PacingModel.pacingBlueStartOverrideSeconds { return green }
-        return (l.timeFraction - l.usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: l.windowDurationSeconds)
+        return (l.timeFraction - l.usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: l.windowDurationSeconds, multiplier: l.behindMultiplier)
             ? ColorStore.shared.color(.paceBlue) : green
     }
 
@@ -445,25 +501,28 @@ final class StatusLineLabel: NSTextField {
 
 // MARK: - PillView
 
-/// A small rounded, layer-backed capsule — the "in use" badge beside the "Extra usage" heading (#146,
-/// `controlAccentColor` blue) and the blocking-reset badge on a limit row (#158, the exhausted red).
-/// The corner radius tracks the height (half of it, so it is a true pill), and the fill CGColor is
-/// re-resolved in `updateLayer()` because CGColor is not appearance-dynamic (the standard
-/// layer-backed dark/light trap).
+/// A small rounded, layer-backed badge — the "in use" badge beside the "Extra usage" heading (#146,
+/// #224 exhausted red) and the blocking-reset badge on a limit row (#158, the exhausted red). The
+/// corner radius is a fraction of the height (`cornerFraction`) — a softly rounded rect rather than a
+/// full pill (#224) — and the fill CGColor is re-resolved in `updateLayer()` because CGColor is not
+/// appearance-dynamic (the standard layer-backed dark/light trap).
 final class PillView: NSView {
-    /// The capsule fill. Defaults to the accent blue; the blocking-reset badge sets it to the
-    /// exhausted red. A closure (not a stored `NSColor`) so a dynamic colour re-resolves per appearance.
+    /// The badge fill. Defaults to the accent blue; callers set it (e.g. the exhausted red). A closure
+    /// (not a stored `NSColor`) so a dynamic colour re-resolves per appearance.
     var fill: () -> NSColor = { .controlAccentColor }
+
+    /// Corner radius as a fraction of the height. `0.5` is a full pill; lower is a softer rounded rect.
+    private static let cornerFraction: CGFloat = 0.35
 
     override var wantsUpdateLayer: Bool { true }
 
     override func layout() {
         super.layout()
-        layer?.cornerRadius = bounds.height / 2
+        layer?.cornerRadius = bounds.height * Self.cornerFraction
     }
 
     override func updateLayer() {
-        layer?.cornerRadius = bounds.height / 2
+        layer?.cornerRadius = bounds.height * Self.cornerFraction
         layer?.backgroundColor = fill().cgColor
     }
 }
@@ -495,6 +554,25 @@ final class PopupViewController: NSViewController {
     var optionHeld = false {
         didSet {
             guard isViewLoaded, optionHeld != oldValue else { return }
+            rebuild()
+        }
+    }
+
+    /// Bar presentation style (#224), governing every bar in the popup. Pushed into each `PopupBarView`
+    /// during `rebuild()` → `addBar`. Child bars are built fresh on each rebuild, so a change here must
+    /// rebuild (not just redraw) to reach them — mirrors `optionHeld`. Default `.pacing`.
+    var barStyle: BarStyle = .pacing {
+        didSet {
+            guard isViewLoaded, barStyle != oldValue else { return }
+            rebuild()
+        }
+    }
+
+    /// Whether the under-bar tick ruler is drawn on the pacing bars (#224). Pushed into each
+    /// `PopupBarView` during `rebuild()` → `addBar`, like `barStyle`. Default `true`.
+    var showTicks: Bool = true {
+        didSet {
+            guard isViewLoaded, showTicks != oldValue else { return }
             rebuild()
         }
     }
@@ -792,13 +870,12 @@ final class PopupViewController: NSViewController {
         return addSplitRow(leadingView: leading, rightLabel: statusLabel)
     }
 
-    /// The blue **"in use"** pill shown next to the "Extra usage" heading while paid credits are actually
+    /// The **"in use"** pill shown next to the "Extra usage" heading while paid credits are actually
     /// covering an exhausted plan limit (`CreditsRow.inUse`). A small rounded, layer-backed capsule in
-    /// `controlAccentColor` with white text — mirroring the native "Up to 30 % off" style badge the
-    /// Claude web UI puts on usage credits. Sizing comes from the text + insets; the capsule radius is
-    /// half the height, so it reads as a pill at any font size.
+    /// the exhausted **red** (`PopupBarView.gapRed`, #224 — was accent blue) with white text, so it reads
+    /// as a warning that a limit is spent onto paid credit. Sizing comes from the text + insets.
     private static func makeInUsePill() -> NSView {
-        makePill(text: inUseBadgeText, fill: { ColorStore.shared.color(.inUsePill) })
+        makePill(text: inUseBadgeText, fill: { PopupBarView.gapRed })
     }
 
     /// The blocking-reset badge (#158): a red capsule carrying the reset countdown (e.g. "4d"), shown
@@ -984,6 +1061,8 @@ final class PopupViewController: NSViewController {
         view.idle = idle   // solid-blue knobless track when the 5h window is idle (#100)
         view.blocked = blocked   // grey instead of blue when that idle state is blocked (#158)
         view.isBaseLimit = isBaseLimit   // only base 5h/7d rows render the far-behind blue zone
+        view.barStyle = barStyle   // pacing (gap+marker) vs simple (left-anchored ribbon) — #224
+        view.showTicks = showTicks   // under-bar tick ruler on/off — #224
         view.translatesAutoresizingMaskIntoConstraints = false
         view.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.hPadding).isActive = true
         view.heightAnchor.constraint(equalToConstant: PopupBarView.viewHeight).isActive = true
@@ -1240,9 +1319,10 @@ final class PopupViewController: NSViewController {
     /// the base 5h/7d rows (which render blue) get the "far behind pace" wording.
     private static func isFarBehind(_ bar: BarLayout) -> Bool {
         guard bar.pacing == .onPaceOrBehind else { return false }
+        if bar.behindMultiplier == 0 { return false }   // FarBehindInterval.off → never blue
         let elapsed = Double(bar.windowDurationSeconds) - bar.remainingSeconds
         if elapsed <= PacingModel.pacingBlueStartOverrideSeconds { return false }
-        return (bar.timeFraction - bar.usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: bar.windowDurationSeconds)
+        return (bar.timeFraction - bar.usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: bar.windowDurationSeconds, multiplier: bar.behindMultiplier)
     }
 
     // MARK: Extra usage (money-credits) formatters (#145)

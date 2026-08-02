@@ -29,9 +29,12 @@ final class SettingsWindowController: NSWindowController {
         /// window never resizes; the sidebar/detail split moves inside it (sidebar 258, detail 599).
         static let contentWidth: CGFloat = 857
         /// Fixed window content height. Bumped 480 → 520 (#199), 520 → 560 (#211), 560 → 600 (#215),
-        /// then 600 → 636 (the new "Work harder" toggle + two hint lines in the Appearance pane) so the
-        /// taller Appearance pane and the other panes breathe without inner scrolling.
-        static let contentHeight: CGFloat = 636
+        /// 600 → 636 (the "Work harder" toggle), then 636 → 684 / 684 → 776 (#224 — "Bar style", the
+        /// "Far behind pace interval" section, "Show ticks on bars"), then trimmed 776 → 720 (#224 —
+        /// the Calm + Work-harder toggles merged into one "Calm non-critical colors" segmented row)
+        /// so the Appearance pane and the other panes breathe without inner scrolling. Nudged to 732
+        /// for the "Show reset countdown" segmented row's added Smart-explanation line (#224).
+        static let contentHeight: CGFloat = 732
     }
 
     /// The single observable state object, alive for the controller's lifetime (so background
@@ -50,17 +53,31 @@ final class SettingsWindowController: NSWindowController {
         get { model.onCheckForUpdatesNow } set { model.onCheckForUpdatesNow = newValue }
     }
 
-    /// Called when the user toggles "Calm MenuBar Widget colors" (#105), with the new state.
-    var onCalmColorsChange: ((Bool) -> Void)? {
-        get { model.onCalmColorsChange } set { model.onCalmColorsChange = newValue }
-    }
-    var onWorkHarderColorsChange: ((Bool) -> Void)? {
-        get { model.onWorkHarderColorsChange } set { model.onWorkHarderColorsChange = newValue }
+    /// Called when the user changes the calm-colours mode (#105, #224), with the new `CalmColorMode`.
+    var onCalmColorModeChange: ((CalmColorMode) -> Void)? {
+        get { model.onCalmColorModeChange } set { model.onCalmColorModeChange = newValue }
     }
 
     /// Called when the user changes the menu-bar "Reset countdown" mode (#103), with the new mode.
     var onResetCountdownModeMenuBarChange: ((ResetCountdownMode) -> Void)? {
         get { model.onResetCountdownModeMenuBarChange } set { model.onResetCountdownModeMenuBarChange = newValue }
+    }
+
+    /// Called when the user changes the "Bar style" segmented control (#224), with the new style.
+    /// Governs both the menu-bar widget and the dropdown popup.
+    var onBarStyleChange: ((BarStyle) -> Void)? {
+        get { model.onBarStyleChange } set { model.onBarStyleChange = newValue }
+    }
+
+    /// Called when the user toggles "Show ticks on bars" (#224), with the new state. Popup-only.
+    var onShowTicksChange: ((Bool) -> Void)? {
+        get { model.onShowTicksChange } set { model.onShowTicksChange = newValue }
+    }
+
+    /// Called when the user changes the "Far behind pace interval" picker (#224), with the new interval.
+    /// Governs the green→blue threshold on both surfaces.
+    var onFarBehindIntervalChange: ((FarBehindInterval) -> Void)? {
+        get { model.onFarBehindIntervalChange } set { model.onFarBehindIntervalChange = newValue }
     }
 
     /// Called when the user toggles "Show service status dot on issues" (#31), with the new state.

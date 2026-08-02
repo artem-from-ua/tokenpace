@@ -299,9 +299,10 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///     bars are never dropped.
     public static func make(
         from snapshot: UsageSnapshot, now: Date, resetMode: ResetCountdownMode = .smart,
-        hideCalmSevenDay: Bool = false, hideBarsWhenBlocked: Bool = false
+        hideCalmSevenDay: Bool = false, hideBarsWhenBlocked: Bool = false,
+        behindMultiplier: Int = 2
     ) -> MenuBarLayout {
-        let seven = bar(for: snapshot.sevenDay, window: .sevenDay, now: now)
+        let seven = bar(for: snapshot.sevenDay, window: .sevenDay, now: now, behindMultiplier: behindMultiplier)
         let sevenResetsAt = ResetClock.parse(snapshot.sevenDay.resetsAt)
         // Elide the 7-day bar when it is calm and the user opted in (#94). `selectReset` below still
         // sees the real `seven.severity`, so the reset-countdown logic is untouched.
@@ -328,7 +329,7 @@ public struct MenuBarLayout: Sendable, Equatable {
             let five = BarView(
                 // Inert placeholder: `.onPaceOrBehind` → `severity` is `.calm` before `remainingSeconds`
                 // is ever read, so the value here is immaterial (0).
-                layout: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0, windowDurationSeconds: 0),
+                layout: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0, windowDurationSeconds: 0, behindMultiplier: 2),
                 indicator: .neutral, window: .fiveHour, idle: true, blocked: blocked)
             // In the idle state the 5h window is legitimately date-less (ADR-0027, not an error), but the
             // 7-day window is real: if it reports usage yet its `resets_at` is unparseable, that is the
@@ -363,7 +364,7 @@ public struct MenuBarLayout: Sendable, Equatable {
                 fiveHour: five, sevenDay: sevenToShow, resetToShow: resetToShow))
         }
 
-        let five = bar(for: snapshot.fiveHour, window: .fiveHour, now: now)
+        let five = bar(for: snapshot.fiveHour, window: .fiveHour, now: now, behindMultiplier: behindMultiplier)
         let fiveResetsAt = ResetClock.parse(snapshot.fiveHour.resetsAt)
 
         // API data error (#167, ADR-0043): a window the server reports as **active** (real usage) but
@@ -441,12 +442,13 @@ public struct MenuBarLayout: Sendable, Equatable {
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
         serviceProblem: ServiceStatus? = nil, resetMode: ResetCountdownMode = .smart,
         hideCalmSevenDay: Bool = false, showCredits: Bool = false, hideBarsWhenBlocked: Bool = false,
-        showBlockedPause: Bool = false
+        showBlockedPause: Bool = false, behindMultiplier: Int = 2
     ) -> MenuBarLayout {
         let credits = showCredits ? snapshot.flatMap { creditsMarker(for: $0, now: now) } : nil
         let layout = usageMode(from: snapshot, health: health, now: now,
                                resetMode: resetMode, hideCalmSevenDay: hideCalmSevenDay,
-                               hideBarsWhenBlocked: hideBarsWhenBlocked)
+                               hideBarsWhenBlocked: hideBarsWhenBlocked,
+                               behindMultiplier: behindMultiplier)
         // Pause glyph: whenever opted in and fully blocked, independent of the bars toggle — drawn left
         // of the bars (`.expanded`) or left of the countdown (`.blockedReset`, #194). The diagnostic
         // `.error` state never carries it (stale bars / cold start are not a "fully blocked" signal).
@@ -485,19 +487,22 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// so ``make(from:health:now:serviceProblem:resetMode:)`` can graft the service dot onto its result.
     private static func usageMode(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
-        resetMode: ResetCountdownMode, hideCalmSevenDay: Bool, hideBarsWhenBlocked: Bool
+        resetMode: ResetCountdownMode, hideCalmSevenDay: Bool, hideBarsWhenBlocked: Bool,
+        behindMultiplier: Int
     ) -> MenuBarLayout {
         // Healthy, or stale within the grace window: show the (possibly stale) bars unchanged.
         // A healthy state with no snapshot only happens at the very first tick before the first
         // poll resolves; with no data to draw, fall back to the bare ⚠️ error glyph.
         guard let age = health.failureAge(now: now) else {
             return snapshot.map { make(from: $0, now: now, resetMode: resetMode,
-                                       hideCalmSevenDay: hideCalmSevenDay, hideBarsWhenBlocked: hideBarsWhenBlocked) }
+                                       hideCalmSevenDay: hideCalmSevenDay, hideBarsWhenBlocked: hideBarsWhenBlocked,
+                                       behindMultiplier: behindMultiplier) }
                 ?? MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
         }
         if let snapshot, age <= UsageHealth.glyphAfter {
             return make(from: snapshot, now: now, resetMode: resetMode,
-                        hideCalmSevenDay: hideCalmSevenDay, hideBarsWhenBlocked: hideBarsWhenBlocked)
+                        hideCalmSevenDay: hideCalmSevenDay, hideBarsWhenBlocked: hideBarsWhenBlocked,
+                        behindMultiplier: behindMultiplier)
         }
 
         // Failing past the glyph threshold. Keep the bars only in the 30–60 min stale window and
@@ -510,7 +515,8 @@ public struct MenuBarLayout: Sendable, Equatable {
         // on `make` never returning `.blockedReset` here (#194).
         let keepBars = snapshot != nil && age <= UsageHealth.hideBarsAfter
         guard keepBars, let snapshot,
-              case let .expanded(five, seven, _) = make(from: snapshot, now: now, resetMode: resetMode).mode else {
+              case let .expanded(five, seven, _) = make(from: snapshot, now: now, resetMode: resetMode,
+                                                        behindMultiplier: behindMultiplier).mode else {
             return MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
         }
         // Both `resets_at` unparseable → no diagnostic countdown (the ⚠️ + stale bars still show).
@@ -555,13 +561,15 @@ public struct MenuBarLayout: Sendable, Equatable {
 
     /// One `BarView` for a window, combining its bar geometry and its exhausted flag
     /// (`limitIndicator`, `.critical` when usage truncates to 100).
-    private static func bar(for window: UsageWindow, window kind: LimitWindow, now: Date) -> BarView {
+    private static func bar(for window: UsageWindow, window kind: LimitWindow, now: Date,
+                            behindMultiplier: Int) -> BarView {
         let resetsAt = ResetClock.parse(window.resetsAt) ?? now  // unparseable → elapsedFraction = 1.0
         let layout = PacingModel.barLayout(
             utilization: window.utilization,
             resetsAt: resetsAt,
             now: now,
-            window: kind
+            window: kind,
+            behindMultiplier: behindMultiplier
         )
         let indicator = PacingModel.limitIndicator(utilization: window.utilization)
         return BarView(layout: layout, indicator: indicator, window: kind)

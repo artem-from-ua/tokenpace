@@ -2,9 +2,17 @@
 status: accepted
 date: 2026-08-02
 supersedes: []
+superseded_by: [0062]
 ---
 
 # ADR-0061: Синя зона пейсингу «far behind» + опція «Work harder»
+
+> **Частково витіснений [ADR-0062](0062-configurable-bar-presentation.md) (#224).** Behind-поріг більше
+> не **фіксованої** ширини — тепер конфігурований через `FarBehindInterval` (множник ×1/×2/×3 або
+> off), дефолт 2h/2d. Bool-опція «Work harder» (розділ 5) замінена триставним `CalmColorMode`
+> (`.off` / `.yellowGreen` / `.yellowGreenBlue`). Чинними лишаються: синій severity-case `farBehind`
+> (розділ 3), 20-хв start-override (розділ 2), обсяг 5h/7d (розділ 4), роль `ColorRole.paceBlue` і
+> поле `BarLayout.windowDurationSeconds`.
 
 ## Контекст
 

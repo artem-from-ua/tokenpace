@@ -28,9 +28,11 @@ final class SettingsModel {
 
     var onMonitoredServicesChange: ((MonitoredServices) -> Void)?
     var onCheckForUpdatesNow: (() -> Void)?
-    var onCalmColorsChange: ((Bool) -> Void)?
-    var onWorkHarderColorsChange: ((Bool) -> Void)?
+    var onCalmColorModeChange: ((CalmColorMode) -> Void)?
     var onResetCountdownModeMenuBarChange: ((ResetCountdownMode) -> Void)?
+    var onBarStyleChange: ((BarStyle) -> Void)?
+    var onShowTicksChange: ((Bool) -> Void)?
+    var onFarBehindIntervalChange: ((FarBehindInterval) -> Void)?
     var onServiceDotChange: ((Bool) -> Void)?
     var onExtraUsageChange: ((Bool) -> Void)?
     var onShowModelSpecificLimitsChange: ((Bool) -> Void)?
@@ -67,8 +69,7 @@ final class SettingsModel {
 
     // MARK: Appearance (menu-bar widget)
 
-    var calmColors = false
-    var workHarderColors = false
+    var calmColorMode: CalmColorMode = .yellowGreenBlue
     var hideCalmSevenDay = false
     var hideBarsWhenBlocked = false
     var showBlockedPause = false
@@ -79,6 +80,14 @@ final class SettingsModel {
     var showServiceDot = false
     /// The reset-countdown choice (always / smart / never), shown as a menu picker.
     var resetRadio: ResetRadio = .smart
+    /// The bar presentation style (pacing / simple), shown as a segmented control (#224). Governs
+    /// both the menu-bar widget and the dropdown popup.
+    var barStyle: BarStyle = .pacing
+    /// Whether the popup draws the under-bar tick ruler on the pacing bars (#224). A popup concern,
+    /// shown under the "Dropdown Widget" section.
+    var showTicks = false
+    /// The far-behind (green→blue) threshold interval (#224), shown as a menu picker.
+    var farBehindInterval: FarBehindInterval = .medium
 
     // MARK: Monitored Services
 
@@ -119,6 +128,10 @@ final class SettingsModel {
     /// "Back to work" master switch (ADR-0012 §4, ADR-0018).
     let inAppBundle = LaunchAtLoginController.isAppBundle
     let versionText = SettingsModel.makeVersionText()
+    /// The GitHub release tag of the **installed** version (`vX.Y.Z`) — used by the About pane's
+    /// "Release notes" link beside the version (#224). Shown only in a real `.app` bundle (`inAppBundle`);
+    /// a dev build has no published release to point at.
+    let currentVersionTag = "v\(TokenPaceKit.version)"
 
     /// A forced install-failure for live verification of the About pane (#210), from
     /// `TOKENPACE_FAKE_FAILURE=<stage>:<reason>` (e.g. `verify:team id mismatch (expected …)`); the
@@ -156,6 +169,32 @@ final class SettingsModel {
     }
 
     var webDesktopRadioEnabled: Bool { webDesktopEnabled }
+
+    /// The live Appearance config assembled from the model's own (observable) fields — the model-side
+    /// mirror of `PersistedConfig.currentAppearanceValues`. Reads the stored fields rather than
+    /// `PersistedConfig` so it stays reactive under `@Observable`: any toggle/picker change invalidates
+    /// it and re-lights the preset control. The two `hide…` fields are in the same *hide* form as
+    /// `AppearancePresetValues` (see `syncFromConfig`).
+    private var liveAppearanceValues: AppearancePresetValues {
+        AppearancePresetValues(
+            calmColorMode: calmColorMode,
+            hideCalmSevenDayBar: hideCalmSevenDay,
+            hideBarsWhenBlocked: hideBarsWhenBlocked,
+            showBlockedPause: showBlockedPause,
+            showExtraUsage: showExtraUsage,
+            showServiceStatusDot: showServiceDot,
+            showModelSpecificLimits: showModelSpecificLimits,
+            resetCountdownModeMenuBar: ResetCountdownMode.from(radio: resetRadio),
+            barStyle: barStyle,
+            showTicks: showTicks,
+            farBehindInterval: farBehindInterval)
+    }
+
+    /// Which preset the live config matches, or `nil` for the "Custom" state (#215, #224). Drives the
+    /// Appearance preset segmented control's active segment: after any manual change the config drifts
+    /// off every preset and this becomes `nil`, so the control honestly shows "Custom". Reactive because
+    /// it reads the observable fields via `liveAppearanceValues`.
+    var activePreset: AppearancePreset? { AppearancePreset.matching(liveAppearanceValues) }
 
     /// The master "Back to work" switch is disabled on a dev build (authorization is impossible there,
     /// so the feature can never work — like launch-at-login / auto-install).
@@ -209,8 +248,7 @@ final class SettingsModel {
         launchAtLogin = LaunchAtLogin.toggleState(for: status)
         pausePolling = PersistedConfig.pausePollingWhenScreenLocked
 
-        calmColors = PersistedConfig.calmMenuBarColors
-        workHarderColors = PersistedConfig.workHarderColors
+        calmColorMode = PersistedConfig.calmColorMode
         hideCalmSevenDay = PersistedConfig.hideCalmSevenDayBar
         hideBarsWhenBlocked = PersistedConfig.hideBarsWhenBlocked
         showBlockedPause = PersistedConfig.showBlockedPause
@@ -218,6 +256,9 @@ final class SettingsModel {
         showModelSpecificLimits = PersistedConfig.showModelSpecificLimits
         showServiceDot = PersistedConfig.showServiceStatusDot
         resetRadio = PersistedConfig.resetCountdownModeMenuBar.radio
+        barStyle = PersistedConfig.barStyle
+        showTicks = PersistedConfig.showTicks
+        farBehindInterval = PersistedConfig.farBehindInterval
 
         let ms = PersistedConfig.monitoredServices
         claudeCodeEnabled = ms.claudeCodeEnabled
@@ -250,18 +291,11 @@ final class SettingsModel {
         onPausePollingChange?(on)
     }
 
-    func setCalmColors(_ on: Bool) {
-        calmColors = on
-        PersistedConfig.calmMenuBarColors = on
-        AppLogger.lifecycle.notice("calm-colors: menu-bar set \(on, privacy: .public)")
-        onCalmColorsChange?(on)
-    }
-
-    func setWorkHarderColors(_ on: Bool) {
-        workHarderColors = on
-        PersistedConfig.workHarderColors = on
-        AppLogger.lifecycle.notice("work-harder-colors: menu-bar set \(on, privacy: .public)")
-        onWorkHarderColorsChange?(on)
+    func setCalmColorMode(_ mode: CalmColorMode) {
+        calmColorMode = mode
+        PersistedConfig.calmColorMode = mode
+        AppLogger.lifecycle.notice("calm-color-mode: set \(mode.rawValue, privacy: .public)")
+        onCalmColorModeChange?(mode)
     }
 
     func setHideCalmSevenDay(_ on: Bool) {
@@ -314,6 +348,32 @@ final class SettingsModel {
         onResetCountdownModeMenuBarChange?(mode)
     }
 
+    /// Persist the bar presentation style (#224) and fire the callback. The segmented control writes
+    /// `barStyle` directly (via the binding), then calls this. Governs both surfaces.
+    func setBarStyle(_ style: BarStyle) {
+        barStyle = style
+        PersistedConfig.barStyle = style
+        AppLogger.lifecycle.notice("bar-style: set \(style.rawValue, privacy: .public)")
+        onBarStyleChange?(style)
+    }
+
+    /// Persist the popup tick-ruler toggle (#224) and fire the callback.
+    func setShowTicks(_ on: Bool) {
+        showTicks = on
+        PersistedConfig.showTicks = on
+        AppLogger.lifecycle.notice("show-ticks: popup set \(on, privacy: .public)")
+        onShowTicksChange?(on)
+    }
+
+    /// Persist the far-behind (green→blue) interval (#224) and fire the callback. The picker writes
+    /// `farBehindInterval` directly (via the binding), then calls this. Governs both surfaces.
+    func setFarBehindInterval(_ interval: FarBehindInterval) {
+        farBehindInterval = interval
+        PersistedConfig.farBehindInterval = interval
+        AppLogger.lifecycle.notice("far-behind-interval: set \(interval.rawValue, privacy: .public)")
+        onFarBehindIntervalChange?(interval)
+    }
+
     /// Revert every Appearance-pane setting to its factory default (the "Reset" button). Clears the
     /// stored keys, re-syncs the model so the controls repaint, then fires each pane callback with the
     /// now-default value so the menu-bar widget rebuilds — the same notifications the individual setters
@@ -325,10 +385,11 @@ final class SettingsModel {
         fireAppearanceCallbacks()
     }
 
-    /// Apply a named Appearance **preset** (#215) — the general form of `resetAppearanceToDefaults()`.
-    /// Writes all eight keys from the preset's fixed value set, re-syncs the model so the controls
-    /// repaint, then fires each pane callback so the menu-bar widget rebuilds. `.chill` is equivalent
-    /// to a reset; the picker buttons in `AppearancePane` call this.
+    /// Apply a named Appearance **preset** (#215, #224) — the general form of
+    /// `resetAppearanceToDefaults()`. Writes all eleven keys from the preset's fixed value set, re-syncs
+    /// the model so the controls repaint (the preset segmented control re-lights via `activePreset`),
+    /// then fires each pane callback so both surfaces rebuild. The segmented control in `AppearancePane`
+    /// calls this.
     func apply(_ preset: AppearancePreset) {
         PersistedConfig.apply(preset)
         syncFromConfig()
@@ -340,8 +401,7 @@ final class SettingsModel {
     /// menu-bar widget rebuilds — the same notifications the individual setters send. Shared by the
     /// reset and preset paths, which both mutate all keys at once and then re-render as a batch.
     private func fireAppearanceCallbacks() {
-        onCalmColorsChange?(calmColors)
-        onWorkHarderColorsChange?(workHarderColors)
+        onCalmColorModeChange?(calmColorMode)
         onHideCalmSevenDayChange?(hideCalmSevenDay)
         onHideBarsWhenBlockedChange?(hideBarsWhenBlocked)
         onShowBlockedPauseChange?(showBlockedPause)
@@ -349,6 +409,9 @@ final class SettingsModel {
         onShowModelSpecificLimitsChange?(showModelSpecificLimits)
         onServiceDotChange?(showServiceDot)
         onResetCountdownModeMenuBarChange?(ResetCountdownMode.from(radio: resetRadio))
+        onBarStyleChange?(barStyle)
+        onShowTicksChange?(showTicks)
+        onFarBehindIntervalChange?(farBehindInterval)
     }
 
     /// Build `MonitoredServices` from the current toggles/radio, persist, and fire the callback.
