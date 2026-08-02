@@ -25,8 +25,6 @@ struct AppearancePane: View {
                             Button(preset.displayName) { model.apply(preset) }
                         }
                     }
-                    SettingsHint(text: "Sets every option below at once. Chill restores the shipped "
-                        + "defaults; Control freak turns everything on.")
                     SettingsHint(text: "This overwrites your current choices.", warning: true)
                 }
             }
@@ -39,7 +37,19 @@ struct AppearancePane: View {
                         + "colored; on-pace and mild states stay a neutral white.")
                 }
 
-                // #199 — placed second by request. Independent of the pacing-bars toggle below: the
+                // Second by request. Only meaningful while "Calm non-critical colors" above is on
+                // (with Calm off the far-behind blue is already coloured), so the toggle is hidden
+                // entirely when Calm is off rather than shown as a no-op.
+                if model.calmColors {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle("Work harder", isOn: Binding(
+                            get: { model.workHarderColors }, set: { model.setWorkHarderColors($0) }))
+                        SettingsHint(text: "Keeps the deep-behind blue colored under Calm colors — a nudge "
+                            + "that you're well under pace and have room to push.")
+                    }
+                }
+
+                // #199 — placed third by request. Independent of the pacing-bars toggle below: the
                 // glyph shows whenever fully blocked, before the bars or before the countdown.
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Show pause icon when fully blocked", isOn: Binding(

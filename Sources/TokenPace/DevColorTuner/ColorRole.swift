@@ -24,6 +24,7 @@ enum ColorRole: String, CaseIterable {
     case orange
     case red
     case blue
+    case paceBlue
     case gray
 
     // MARK: Bar / chrome — track, ring, ticks, pill fill (shared where identical across surfaces)
@@ -65,7 +66,7 @@ enum ColorRole: String, CaseIterable {
 
     var group: Group {
         switch self {
-        case .green, .yellow, .orange, .red, .blue, .gray:
+        case .green, .yellow, .orange, .red, .blue, .paceBlue, .gray:
             return .semantic
         case .barTrack, .indicatorRing, .tick, .inUsePill:
             return .chrome
@@ -88,6 +89,7 @@ enum ColorRole: String, CaseIterable {
         case .orange:        return "Orange (strong ahead / partial outage)"
         case .red:           return "Red (exhausted / major outage)"
         case .blue:          return "Blue (idle / maintenance)"
+        case .paceBlue:      return "Pacing blue (far behind / big surplus)"
         case .gray:          return "Grey (unknown status)"
         case .barTrack:      return "Bar track"
         case .indicatorRing: return "Indicator ring"
@@ -123,6 +125,10 @@ enum ColorRole: String, CaseIterable {
         case .blue:
             return "Idle 5-hour bar fill (ready to start) on both surfaces; the maintenance service dot "
                  + "(and the update-menu \"new version available\" dot)."
+        case .paceBlue:
+            return "Far-behind pacing gap / marker (surplus above the dynamic behind-threshold, past the "
+                 + "20-min start override) on the base 5h/7d bars only, on both surfaces. Distinct from the "
+                 + "idle-bar blue; per-model and credits rows never use it."
         case .gray:
             return "Unknown / operational service-status dot on both surfaces."
         case .barTrack:
@@ -164,7 +170,7 @@ enum ColorRole: String, CaseIterable {
     /// means the colour is drawn as-is.
     var distortion: String? {
         switch self {
-        case .green, .yellow, .orange, .red, .blue, .gray,
+        case .green, .yellow, .orange, .red, .blue, .paceBlue, .gray,
              .indicatorRing, .tick, .inUsePill, .link, .label, .foreground,
              .calmWhite, .idleCalmGrey:
             return "Default is a dynamic system colour (flips light/dark, honours Increase Contrast); "
@@ -197,6 +203,7 @@ enum ColorRole: String, CaseIterable {
         case .orange:        return .systemOrange
         case .red:           return .systemRed
         case .blue:          return .systemBlue
+        case .paceBlue:      return .systemBlue
         case .gray:          return .systemGray
         case .barTrack:      return NSColor.labelColor.withAlphaComponent(0.22)   // the moon: a ~22% labelColor silhouette; the bar shows through 78%, so it dims AND breathes the wallpaper/menu tint
         case .indicatorRing: return .quaternaryLabelColor

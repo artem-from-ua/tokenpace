@@ -12,6 +12,7 @@ struct AppearancePresetTests {
     @Test func chillIsShippedDefaults() {
         let v = AppearancePreset.chill.values
         #expect(v.calmMenuBarColors)
+        #expect(!v.workHarderColors)   // blue mutes with the rest of the calm colours
         #expect(v.hideCalmSevenDayBar)
         #expect(v.hideBarsWhenBlocked)
         #expect(v.showBlockedPause)
@@ -26,6 +27,7 @@ struct AppearancePresetTests {
     @Test func controlFreakShowsEverything() {
         let v = AppearancePreset.controlFreak.values
         #expect(!v.calmMenuBarColors)
+        #expect(v.workHarderColors)   // blue stays loud too
         #expect(!v.hideCalmSevenDayBar)
         #expect(!v.hideBarsWhenBlocked)
         #expect(v.showBlockedPause)

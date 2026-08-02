@@ -37,6 +37,7 @@ enum StubScenario: String, CaseIterable {
     case calm5Orange7 = "calm5-orange7"
     case nearReset = "near-reset"
     case calmBoth = "calm-both"
+    case farBehind = "far-behind"
     case calmDegraded = "calm-degraded"
     case creditsActive = "credits-active"
     case creditsLimitReached = "credits-limit-reached"
@@ -71,6 +72,7 @@ enum StubScenario: String, CaseIterable {
         case .calm5Orange7:        return "Pacing · 5h calm, 7d orange"
         case .nearReset:           return "Pacing · near-reset override"
         case .calmBoth:            return "Pacing · both calm"
+        case .farBehind:           return "Pacing · both far behind (blue)"
         case .calmDegraded:        return "Calm bars + degraded dot"
         case .creditsActive:       return "Credits · active (paced)"
         case .creditsLimitReached: return "Credits · limit reached (red)"
@@ -133,6 +135,9 @@ enum StubScenario: String, CaseIterable {
         case .calmBoth:
             return "Both bars calm (#94): with \"Hide 7-day bar when calm\" on, the 7-day bar is "
                  + "dropped and a lone green 5h bar sits centred."
+        case .farBehind:
+            return "Both base bars far behind pace (ADR-0061): a big surplus past the behind-threshold "
+                 + "→ blue. Turn \"Work harder\" on with Calm colours to keep the blue coloured."
         case .calmDegraded:
             return "Calm bars + a degraded (yellow) service dot: with \"Calm colours\" (#105) off the "
                  + "dot is yellow; turn Calm on and it mutes to white."
@@ -184,6 +189,7 @@ enum StubScenario: String, CaseIterable {
         case .calm5Orange7:        return StubUsageTransport(mode: .pacing(.calmFiveOrangeSeven))
         case .nearReset:           return StubUsageTransport(mode: .pacing(.nearResetFiveHour))
         case .calmBoth:            return StubUsageTransport(mode: .pacing(.calmBoth))
+        case .farBehind:           return StubUsageTransport(mode: .pacing(.farBehind))
         case .calmDegraded:        return StubUsageTransport(mode: .calmDegraded)
         case .creditsActive:       return StubUsageTransport(mode: .credits(.active))
         case .creditsLimitReached: return StubUsageTransport(mode: .credits(.limitReached))
