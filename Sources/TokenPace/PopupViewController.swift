@@ -679,7 +679,7 @@ final class PopupViewController: NSViewController {
         // sections below it are told apart by the bold per-row title and the `limitSpacing` gap
         // after each bar, not by a line.
         for (index, row) in layout.rows.enumerated() {
-            addTitleStatusLine(title: row.title, status: Self.statusText(row))
+            addTitleStatusLine(title: row.title, status: Self.statusText(row, isBaseLimit: index <= 1))
             // The idle 5-hour row (#100) has **no** second line at all — no "0%", no reset — so it reads
             // as a compact "5-hour  ready to start" (or "waiting for limit reset" when blocked, #158) +
             // solid bar. Every other row shows the detail; its reset goes red when it is *the* blocking
@@ -1203,14 +1203,18 @@ final class PopupViewController: NSViewController {
     /// window elapsed) — that was a statusline carry-over, and our bar has outgrown it. `.warning` and
     /// `.neutral` now read the same "(well) ahead of pace" wording; only the exhausted rung (`.critical`,
     /// `usage == 100`) still gets its own "limit reached".
-    private static func statusText(_ row: LimitRow) -> String {
+    private static func statusText(_ row: LimitRow, isBaseLimit: Bool) -> String {
         // Idle 5-hour row (#100): "ready to start" instead of a pacing phrase — there is no active
         // window to pace. When that idle state is also blocked (#158 — 7d exhausted, credits cannot
         // cover) it becomes "waiting for limit reset". Guarded first so the inert placeholder
         // indicator/pacing are never consulted.
         if row.sessionIdle { return row.sessionBlocked ? blockedStatusText : idleStatusText }
         if row.indicator == .critical { return "limit reached" }
-        return row.pacing == .ahead ? aheadPhrase(row) : "on pace"
+        if row.pacing == .ahead { return aheadPhrase(row) }
+        // On-pace/behind side: base 5h/7d bars read "far behind pace" when the gap is blue
+        // (``PopupBarView/behindColor``); everything closer to the line (and all per-model rows) is
+        // "on pace". Word and colour agree via ``isFarBehind(_:)`` (gated by `isBaseLimit`).
+        return (isBaseLimit && isFarBehind(row.bar)) ? "far behind pace" : "on pace"
     }
 
     /// "well ahead of pace" when the bar reads orange (the ``isWellAhead(_:)`` condition), else "ahead
@@ -1226,6 +1230,18 @@ final class PopupViewController: NSViewController {
     private static func isWellAhead(_ bar: BarLayout) -> Bool {
         if bar.remainingSeconds <= PacingModel.pacingOrangeOverrideSeconds { return true }
         return (bar.usageFraction - bar.timeFraction) >= PacingModel.aheadThreshold(timeFraction: bar.timeFraction)
+    }
+
+    /// Whether this bar reads **blue** (far behind pace) — the exact match of the `>` blue test in
+    /// ``PopupBarView/behindColor``, so the wording and the gap colour always agree: on the
+    /// on-pace/behind side, past the 20-min start override, with a surplus `>` the dynamic
+    /// ``PacingModel/behindThreshold(timeFraction:)``. The caller gates this on `isBaseLimit` so only
+    /// the base 5h/7d rows (which render blue) get the "far behind pace" wording.
+    private static func isFarBehind(_ bar: BarLayout) -> Bool {
+        guard bar.pacing == .onPaceOrBehind else { return false }
+        let elapsed = Double(bar.windowDurationSeconds) - bar.remainingSeconds
+        if elapsed <= PacingModel.pacingBlueStartOverrideSeconds { return false }
+        return (bar.timeFraction - bar.usageFraction) > PacingModel.behindThreshold(timeFraction: bar.timeFraction)
     }
 
     // MARK: Extra usage (money-credits) formatters (#145)
