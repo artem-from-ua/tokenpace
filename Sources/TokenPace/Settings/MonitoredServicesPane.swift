@@ -31,7 +31,7 @@ struct MonitoredServicesPane: View {
                     get: { model.claudeCodeEnabled },
                     set: { model.claudeCodeEnabled = $0; model.commitMonitoredServices() }))
 
-                Toggle("Claude WEB / Desktop", isOn: Binding(
+                Toggle("Claude Web / Desktop", isOn: Binding(
                     get: { model.webDesktopEnabled },
                     set: { model.webDesktopEnabled = $0; model.commitMonitoredServices() }))
 

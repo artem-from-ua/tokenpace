@@ -32,7 +32,7 @@ struct AppearancePane: View {
                             active: model.activePreset,
                             onSelect: { picked in if let preset = picked { model.apply(preset) } })
                     }
-                    SettingsHint(text: "Sets all the options below at once. Pick one of three, from "
+                    SettingsHint(text: "Set all the options below at once. Pick one of three, from "
                         + "calmest to loudest: *highlight only critical states* → *also nudge you "
                         + "when you're underpacing* → *show every indicator*.")
                     SettingsHint(text: "This overwrites your current choices.", warning: true)
@@ -58,7 +58,7 @@ struct AppearancePane: View {
                             active: model.barStyle,
                             onSelect: { model.setBarStyle($0) })
                     }
-                    SettingsHint(text: "*Pace* shows a colour ribbon from the left; *Pace & Time* adds "
+                    SettingsHint(text: "*Pace* shows a color ribbon from the left; *Pace & Time* adds "
                         + "the time marker. Both use the same state color and ribbon size.")
                     SettingsHint(text: "*Mixed* keeps the compact menu-bar bar as *Pace* and shows "
                         + "*Pace & Time* in the dropdown.")
@@ -79,8 +79,9 @@ struct AppearancePane: View {
                         .labelsHidden()
                         .fixedSize()
                     }
-                    SettingsHint(text: "How much of a surplus tells apart \"on-pace\" green from "
-                        + "\"far-behind\" blue. Larger needs a bigger surplus before a bar turns blue.")
+                    SettingsHint(text: "How much of a surplus separates \"on-pace\" green from "
+                        + "\"far-behind\" blue. A larger interval needs a bigger surplus before a bar "
+                        + "turns blue.")
                 }
             }
 
@@ -107,8 +108,8 @@ struct AppearancePane: View {
                             active: model.calmColorMode,
                             onSelect: { model.setCalmColorMode($0) })
                     }
-                    SettingsHint(text: "Which calm colours mute to a neutral white. Orange/red warnings "
-                        + "always stay coloured.")
+                    SettingsHint(text: "Which calm colors mute to a neutral white. Orange/red warnings "
+                        + "always stay colored.")
                 }
 
                 // #194, #227 — the single "blocked" control. When fully blocked a red pause icon is

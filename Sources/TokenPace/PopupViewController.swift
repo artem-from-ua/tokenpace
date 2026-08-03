@@ -1307,7 +1307,7 @@ final class PopupViewController: NSViewController {
         switch component.name {
         case StatusHealth.claudeAPIComponentName:    return "API"
         case StatusHealth.claudeCodeComponentName:   return "Code"
-        case StatusHealth.claudeWebComponentName:    return "WEB/Desktop"
+        case StatusHealth.claudeWebComponentName:    return "Web/Desktop"
         case StatusHealth.claudeCoworkComponentName: return "Cowork"
         default:                                     return component.name
         }
