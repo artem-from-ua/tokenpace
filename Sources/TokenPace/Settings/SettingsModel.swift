@@ -116,6 +116,11 @@ final class SettingsModel {
     private(set) var archiveDestination: String?
     private(set) var archiveStatusText = ""
 
+    // MARK: Insights — usage journal (#242)
+
+    /// Whether the usage journal records each poll to an append-only JSONL file. Default-off (opt-in).
+    var journalEnabled = false
+
     // MARK: Awaiting-input indicator (#233, ADR-0066)
 
     /// Master toggle: show the "N sessions awaiting input" indicator. Default-off. Placement is
@@ -296,6 +301,8 @@ final class SettingsModel {
 
         awaitingInputEnabled = PersistedConfig.awaitingInputEnabled
         awaitingInputInMenuBar = PersistedConfig.awaitingInputInMenuBar
+
+        journalEnabled = PersistedConfig.journalEnabled
     }
 
     // MARK: Setters (persist first, then fire the callback — the ordering invariant)
@@ -311,6 +318,14 @@ final class SettingsModel {
         awaitingInputEnabled = on
         PersistedConfig.awaitingInputEnabled = on
         onAwaitingInputEnabledChange?(on)
+    }
+
+    /// Toggle the usage journal (#242). No callback: the poll seam reads `PersistedConfig.journalEnabled`
+    /// live on each write, so a change takes effect on the next poll without a restart or a wiring hop.
+    func setJournalEnabled(_ on: Bool) {
+        journalEnabled = on
+        PersistedConfig.journalEnabled = on
+        AppLogger.lifecycle.notice("journal: enabled set \(on, privacy: .public)")
     }
 
     func setAwaitingInputInMenuBar(_ on: Bool) {

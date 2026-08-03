@@ -39,4 +39,7 @@ public enum AppLogger {
     /// Session-log archiver: sync start/finish, file/byte counts, failures. Never logs file paths at
     /// `.notice`/`.info` (they contain project names); paths are `.debug`-only. (Ticket: #110)
     public static let archive   = Logger(subsystem: subsystem, category: "archive")
+    /// Usage journal (#242): append-write failures, gap/resume markers. Percentages only, never a
+    /// token — the journal records the usage-API numbers, which carry no secret. (Ticket: #242)
+    public static let journal   = Logger(subsystem: subsystem, category: "journal")
 }

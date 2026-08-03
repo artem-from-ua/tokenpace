@@ -19,16 +19,16 @@ struct SettingsRootView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(SettingsSection.allCases, selection: $model.selection) { section in
-                Label {
-                    Text(section.title)
-                        .font(.system(size: model.sidebarIcons.label))
-                } icon: {
-                    SidebarChip(symbol: section.symbol, tint: section.tint, metrics: model.sidebarIcons)
+            // Two groups so a divider separates the leading Insights section from the rest (the
+            // journal it hosts underpins the Insights feature area, #238/#242). A `.sidebar` List
+            // renders the gap between `Section`s as the divider — no manual rule needed.
+            List(selection: $model.selection) {
+                Section {
+                    sidebarRow(.insights)
                 }
-                // SwiftUI's default Label gap is ~half the System Settings sidebar gap; set it explicitly.
-                .labelStyle(SidebarLabelStyle(gap: model.sidebarIcons.chipLabelGap))
-                .tag(section)
+                Section {
+                    ForEach(SettingsSection.mainSections) { sidebarRow($0) }
+                }
             }
             .listStyle(.sidebar)
             // `.navigationSplitViewColumnWidth` is unreliable for a `.sidebar` List (it leaves the
@@ -45,9 +45,24 @@ struct SettingsRootView: View {
         .frame(minWidth: minWidth, maxWidth: .infinity, minHeight: minHeight, maxHeight: .infinity)
     }
 
+    /// One sidebar row for a section — the tinted chip plus the title, tagged for selection. Shared by
+    /// both sidebar groups (the leading Insights section and the main list).
+    private func sidebarRow(_ section: SettingsSection) -> some View {
+        Label {
+            Text(section.title)
+                .font(.system(size: model.sidebarIcons.label))
+        } icon: {
+            SidebarChip(symbol: section.symbol, tint: section.tint, metrics: model.sidebarIcons)
+        }
+        // SwiftUI's default Label gap is ~half the System Settings sidebar gap; set it explicitly.
+        .labelStyle(SidebarLabelStyle(gap: model.sidebarIcons.chipLabelGap))
+        .tag(section)
+    }
+
     @ViewBuilder
     private var detailPane: some View {
         switch model.selection {
+        case .insights:          InsightsPane(model: model)
         case .about:             AboutPane(model: model)
         case .general:           GeneralPane(model: model)
         case .appearance:        AppearancePane(model: model)

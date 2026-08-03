@@ -257,7 +257,8 @@ unlimited-ліміту — `«… €10.77 so far.»`. **Потребує реа
 ### Нові Appearance-опції подачі барів (#224, ADR-0062)
 
 Перевіряти на будь-якому pacing-стубі (напр. `far-behind`, `both-red`, `calm-both`):
-`TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2 TOKENPACE_STUB=far-behind swift run`.
+`TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=3 TOKENPACE_STUB=far-behind swift run`
+(Appearance — індекс `3` після додавання Insights першим пунктом, #242).
 
 - **Change UI preset** (сегментед `Chill | Work harder! | Control freak | Custom`): клік застосовує
   пресет; `Custom` некликабельний, підсвічується лише коли конфіг не збігається з жодним пресетом
@@ -373,11 +374,11 @@ locked».
 
 Стуб **`TOKENPACE_FAKE_FAILURE=<stage>:<reason>`** форсує failure-рядок у About (пише лише в пам'ять,
 **не** в `UserDefaults`); `<stage>` ∈ `download|unzip|verify|replace`; тег береться з
-`TOKENPACE_FAKE_LATEST` або дефолтний `vX.Y.Z`. Разом із `TOKENPACE_SETTINGS_SECTION=0` відкриває
-одразу About. Приклад:
+`TOKENPACE_FAKE_LATEST` або дефолтний `vX.Y.Z`. Разом із `TOKENPACE_SETTINGS_SECTION=1` відкриває
+одразу About (індекс `1` після додавання Insights першим пунктом, #242). Приклад:
 
 ```sh
-TOKENPACE_STUB=1 TOKENPACE_DEVTOOLS=1 TOKENPACE_SETTINGS_SECTION=0 \
+TOKENPACE_STUB=1 TOKENPACE_DEVTOOLS=1 TOKENPACE_SETTINGS_SECTION=1 \
 TOKENPACE_UPDATE_STATE=failed TOKENPACE_FAKE_LATEST=v0.56.0 \
 TOKENPACE_FAKE_FAILURE='verify:team id mismatch (expected S5A4U9798Y, got ABCDE12345)' \
 swift run
@@ -428,11 +429,12 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_STUB=screenshot swift run
 поводиться так само лише за явно виставленого env, чого при нормальному запуску не буває.
 
 Додатково `TOKENPACE_SETTINGS_SECTION=<index>` відкриває **конкретну** секцію Settings за 0-based
-індексом (0=About, 1=General, 2=Appearance, 3=Monitored Services, 4=Notifications, 5=Session Logs) —
-щоб зробити скриншот потрібної панелі без AX-кліку по sidebar-рядку:
+індексом (0=Insights, 1=About, 2=General, 3=Appearance, 4=Monitored Services, 5=Notifications,
+6=Session Logs — Insights став першим пунктом, #242) — щоб зробити скриншот потрібної панелі без
+AX-кліку по sidebar-рядку:
 
 ```sh
-TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=4 swift run   # відкриє одразу на Notifications
+TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=5 swift run   # відкриє одразу на Notifications
 ```
 
 ### Авто-відкриття вікна Troubleshoot при запуску
@@ -558,6 +560,28 @@ TOKENPACE_STUB=1 TOKENPACE_AWAITING=8 TOKENPACE_AWAITING_DAYS=3,28,10,5,25,12,20
 Реальний (не-стуб) шлях: watcher читає `~/.claude/sessions` + `jobs/` через FSEvents; щоб побачити
 живий лічильник, запусти кілька Claude-сесій, що чекають на дозвіл/план (без стуба, з увімкненим
 тумблером). Деталі каденції — `docs/design/awaiting-input-refresh.md`.
+
+### Журнал використання (#242, ADR-0067)
+
+Журнал **не має `TOKENPACE_STUB`-сценарію**: він пише лише на живих реальних даних
+(`currentScenario == .realNetwork` І тумблер «Record usage history» у Settings → Insights
+увімкнено) — синтетичний стуб у журнал не потрапляє навмисно.
+
+- **Живий запис:** підніми лог-стрім **першим** (`log stream --predicate 'subsystem ==
+  "com.artem-n.tokenpace"' --level debug`), тоді `swift run TokenPace` (без стуба) з увімкненим
+  тумблером → файл `~/Library/Application Support/com.artem-n.tokenpace/usage-journal-dev-YYYY-MM.jsonl`
+  (суфікс `-dev`, бо `.build/debug` поза `/Applications`) наповнюється валідними `usage`/`status`-рядками.
+  Тумблер OFF → нічого не пишеться.
+- **Багатоденний файл для downstream-читачів** (dev-хуки, обходять live-only — це фікстура, не полл):
+
+  ```sh
+  # згенерувати 14-денний журнал у вказаний файл і вийти:
+  TOKENPACE_GENERATE_JOURNAL=14 TOKENPACE_JOURNAL_FILE=/tmp/journal.jsonl swift run TokenPace
+  # згодовати той файл читачу (коли з'явиться downstream-чарт):
+  TOKENPACE_JOURNAL_FILE=/tmp/journal.jsonl swift run TokenPace
+  ```
+
+  Файл містить `usage`/`status`/`error`/`resume`-рядки з розривами — вхід для #239/#240/#241.
 
 ## Що НЕ рахується за верифікацію
 
