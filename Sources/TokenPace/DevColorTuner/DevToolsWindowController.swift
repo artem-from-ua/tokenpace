@@ -153,10 +153,15 @@ final class DevToolsWindowController: NSWindowController {
 
     // MARK: - Preview window
 
+    /// Whether the system is in dark mode — drives the preview window's Vibrant appearance choice.
+    private static var isDarkMode: Bool {
+        NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
+
     private func showPreviewWindow() {
         if previewWindow == nil {
-            // The preview is a plain window, not an NSMenu; its menu material comes from the vibrancy
-            // backing in `buildPreviewContent`, not the popup itself.
+            // The preview is a plain window, not an NSMenu; its #212121 menu-matched backdrop comes from
+            // the `ThemedFillView` container in `buildPreviewContent`, not the popup itself.
             previewVC.loadView()
             // Seed the bar presentation so the first frame matches the current settings (updatePreview
             // keeps them in sync on every refresh thereafter).
@@ -176,6 +181,12 @@ final class DevToolsWindowController: NSWindowController {
             // behind them as square corners). The rounded, filled container provides the visible surface.
             win.isOpaque = false
             win.backgroundColor = .clear
+            // Match the real NSMenu popup's **Vibrant** appearance (not plain aqua/darkAqua): system label
+            // colours resolve differently under vibrancy — e.g. the popup's translucent grey track resolves
+            // to an opaque #323232 in VibrantDark vs a light white@0.17 in DarkAqua — so without this the
+            // preview's neutrals read noticeably lighter than the live menu. Diagnosed live: the menu window
+            // is `NSAppearanceNameVibrantDark`; the preview window defaulted to `DarkAqua`.
+            win.appearance = NSAppearance(named: Self.isDarkMode ? .vibrantDark : .vibrantLight)
             win.contentView = buildPreviewContent()
             previewWindow = win
         }
@@ -228,35 +239,20 @@ final class DevToolsWindowController: NSWindowController {
         plaqueDivider.translatesAutoresizingMaskIntoConstraints = false
 
         let container = ThemedFillView()
-        // Unlike the real popup (hosted in an opaque, system-owned NSMenu), THIS preview window is ours and
-        // non-opaque, so we can give it genuine `.behindWindow` vibrancy — the same see-through menu look
-        // the live dropdown has, with the desktop/wallpaper tone bleeding through. The flat fill is dropped
-        // (`.clear`); a rounded `NSVisualEffectView(.menu)` becomes the bottom-most backing, and the popup's
-        // own semi-transparent `CardBackdropView` plate then floats over it exactly like the real menu.
-        container.fillColor = .clear
+        // Flat `#212121` menu-matched backing (not `.behindWindow` vibrancy): a real `NSVisualEffectView`
+        // renders lighter here than the system NSMenu's on-screen colour, which pushed the popup's
+        // translucent content (greys/ticks/dimmed text) lighter than the live menu. Since the tuner's job
+        // is an accurate colour reference, we match the menu's flat tone exactly rather than show a
+        // translucency the real menu can't reproduce for its neutrals.
+        container.fillColor = .popupMenuMatchedBackground
         container.borderColor = .popupMenuBorder   // hairline edge, like a real system menu window
         container.cornerRadius = Self.menuPopupCornerRadius(for: window)
-
-        let vibrancy = NSVisualEffectView()
-        vibrancy.material = .menu
-        vibrancy.blendingMode = .behindWindow
-        vibrancy.state = .active
-        vibrancy.wantsLayer = true
-        vibrancy.layer?.cornerRadius = Self.menuPopupCornerRadius(for: window)
-        vibrancy.layer?.masksToBounds = true
-        vibrancy.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(vibrancy)   // bottom-most: the menu material behind everything
 
         container.addSubview(plaque)
         container.addSubview(plaqueDivider)
         container.addSubview(previewVC.view)
         container.addSubview(footer)
         NSLayoutConstraint.activate([
-            vibrancy.topAnchor.constraint(equalTo: container.topAnchor),
-            vibrancy.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            vibrancy.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            vibrancy.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-
             plaque.topAnchor.constraint(equalTo: container.topAnchor),
             plaque.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             plaque.trailingAnchor.constraint(equalTo: container.trailingAnchor),
