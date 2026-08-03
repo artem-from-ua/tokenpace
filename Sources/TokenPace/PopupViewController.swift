@@ -418,9 +418,9 @@ final class PopupBarView: NSView {
     /// reads as too much), twice the strength.
     private static let idleGlowRadius: CGFloat = 10.5
     private static let idleGlowStrength: CGFloat = 0.5
-    /// Marker glow: a touch stronger than the bar.
-    private static let markerGlowRadius: CGFloat = 10
-    private static let markerGlowStrength: CGFloat = 0.7
+    /// Marker glow: a soft halo, kept subtle so the marker doesn't bloom over the card.
+    private static let markerGlowRadius: CGFloat = 7
+    private static let markerGlowStrength: CGFloat = 0.5
 
     /// Run `body` with a coloured drop-shadow (blur = `radius`, no offset) set as the current shadow, so
     /// whatever `body` fills gets a soft same-colour halo. Wrapped in a graphics-state save/restore so the
