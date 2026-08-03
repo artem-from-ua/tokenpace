@@ -11,13 +11,13 @@ import TokenPaceKit
 let dropdownTextSize: CGFloat = NSFont.systemFontSize
 
 /// The alpha applied to the popup's **hue-carrying** elements (service dots, pacing gap, idle blue,
-/// time marker, pills, ⚠️ triangle, link word, brand accent) **only** when the translucent background
-/// (#188) is on, so they composite with the NSMenu vibrancy material instead of reading as dense
-/// opaque patches. On the opaque default the tint is a no-op and these stay fully opaque. The neutral
-/// greys (track, ticks, indicator ring, dimmed labels) are already semi-transparent and are left
-/// untouched. A single named constant because the exact value needs live tuning against the material
-/// in both light and dark (contrast vs. breathing).
-let translucentHueAlpha: CGFloat = 0.88
+/// time marker, pills, ⚠️ triangle, link word, brand accent) when the translucent background (#188) is on.
+///
+/// Now that the whole section sits on a (near-)opaque Control-Center card (`CardBackdropView`), the
+/// content no longer composites directly against the menu vibrancy, so the hue elements use **standard**
+/// (fully opaque) tinting — `1.0`. Kept as a named constant (rather than deleting `popupTint` outright)
+/// so the behaviour is easy to revisit if the card ever becomes translucent again.
+let translucentHueAlpha: CGFloat = 1.0
 
 // MARK: - PopupBarView
 
@@ -444,6 +444,40 @@ final class SolidBackdropView: NSView {
     }
 }
 
+// MARK: - CardBackdropView
+
+/// The Control-Center-style rounded "plate" behind the whole Claude section (#188 follow-up). An inset,
+/// rounded plate that floats above the popup background — the menu material / backdrop shows as a margin
+/// around it. Shown **always**, on both the opaque default and the translucent (#188) background.
+///
+/// A flat, layer-backed fill using the dynamic `underPageBackgroundColor` system colour, which resolves to
+/// a raised-surface tone in each theme automatically (dark ≈ #282828, light ≈ a mid grey) — so it adapts
+/// to light/dark with no per-theme constants. (A `.behindWindow` `NSVisualEffectView` was tried first for
+/// a wallpaper-tone "vibe", but inside the `NSMenu` it degrades to a flat control colour and shows no tint,
+/// so a predictable flat fill is used instead.) Layer-backed with `updateLayer` (like `SolidBackdropView`/
+/// `PillView`) so the fill + border CGColors re-resolve on a theme flip; corner radius is set in both
+/// `updateLayer` and `layout` so it survives resize.
+final class CardBackdropView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var wantsUpdateLayer: Bool { true }
+    override func updateLayer() {
+        layer?.cornerRadius = PopupViewController.cardCornerRadius
+        layer?.borderWidth = PopupViewController.cardBorderWidth
+        layer?.backgroundColor = NSColor.cardPlateFill.cgColor
+        layer?.borderColor = NSColor.cardPlateBorder.cgColor
+    }
+
+    override func layout() {
+        super.layout()
+        layer?.cornerRadius = PopupViewController.cardCornerRadius
+    }
+}
+
 extension NSColor {
     /// The popup card's background **as the real `NSMenu` renders it on screen**, for surfaces outside a
     /// menu (the dev colour-tuner's "Popup Preview" window, #185). Inside the real menu the vibrancy
@@ -476,6 +510,28 @@ extension NSColor {
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         return isDark ? NSColor(srgbRed: 0x4D/255, green: 0x4D/255, blue: 0x4D/255, alpha: 1)
                       : NSColor(srgbRed: 0xC4/255, green: 0xC4/255, blue: 0xC4/255, alpha: 1)
+    }
+
+    /// Fill of the Control-Center-style section card (`CardBackdropView`, #188 follow-up).
+    /// `controlBackgroundColor` (light #FFFFFF, dark #1E1E1E) at **partial alpha**, so the layer *below*
+    /// the card within our own view — the `NSMenu` vibrancy material when the translucent background
+    /// (#188) is on — shows through and lends the plate a subtle tone, while our chosen colour sits on
+    /// top. (True wallpaper `.behindWindow` tint is impossible inside an NSMenu — the menu window is
+    /// system-opaque — so this `.withinWindow`-style translucency over the menu's own material is the
+    /// closest achievable "vibe". With #188 off the opaque backdrop below is our own flat tone, so the
+    /// plate simply reads as that colour.) `cardPlateAlpha` is the single knob for how much tone bleeds in.
+    static var cardPlateFill: NSColor { NSColor.controlBackgroundColor.withAlphaComponent(cardPlateAlpha) }
+
+    /// How opaque the section-card fill is; the remainder lets the layer below (menu material when #188 is
+    /// on) tint the plate. 1.0 = fully our colour (no bleed); lower = more tone from below. Tunable.
+    static let cardPlateAlpha: CGFloat = 0.85
+
+    /// Hairline edge of the section card (`CardBackdropView`). A subtle border that reads on both the
+    /// opaque and translucent backgrounds; dynamic so it tracks the theme.
+    static let cardPlateBorder = NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark ? NSColor(white: 1, alpha: 0.10)
+                      : NSColor(white: 0, alpha: 0.08)
     }
 }
 
@@ -638,28 +694,60 @@ final class PopupViewController: NSViewController {
     }
 
     private enum Metrics {
-        static let width: CGFloat = 280
+        /// Popup width. Sized so the inner content column stays 252 pt once the Control-Center-style card
+        /// adds its outer margin (308 − 2·14 card inset − 2·14 inner = 252).
+        static let width: CGFloat = 308
         static let hPadding: CGFloat = 14
+        /// Outer margin between the popup edge and the rounded "card". Matched to the horizontal inset of
+        /// the native menu separator so the card is exactly as wide as the divider between the menu items
+        /// below it (the Control-Center float gap; the menu material shows in this strip around the plate).
+        static let cardInset: CGFloat = 14
+        /// Top outer margin. Smaller than `cardInset` because `NSMenu` already adds its own vertical pad
+        /// above our hosted item view, so a full `cardInset` on top would read as a larger gap than the
+        /// sides. Trimmed so the visible top gap looks balanced against the sides.
+        static let cardTopInset: CGFloat = 10
+        /// Bottom outer margin — trimmed below `cardInset` so the gap between the card and the native
+        /// "Settings…" item beneath it is tighter (NSMenu adds its own pad there too).
+        static let cardBottomInset: CGFloat = 4
+        /// Corner radius of the section card — matches Control Center's ~10 pt rounded plate.
+        static let cardCornerRadius: CGFloat = 10
+        /// Hairline width of the card's subtle edge.
+        static let cardBorderWidth: CGFloat = 0.5
         static let vPadding: CGFloat = 10
-        /// Top inset — a touch tighter than `vPadding` so the content sits closer to the top edge
-        /// without the extra strip of empty background above the "Claude Code" line, but not cramped.
-        static let topPadding: CGFloat = 7
-        /// Bottom inset — tighter than `vPadding` so the last bar sits close to the menu's separator
-        /// below it (the section already ends there; a full `vPadding` reads as too much air).
-        static let bottomPadding: CGFloat = 3
+        /// Top **inner** padding — space between the card's top edge and the "Claude" header. Matched to
+        /// `hPadding` so the gap above the header equals the gap from the card's left edge to it.
+        static let topPadding: CGFloat = 14
+        /// Bottom **inner** padding — space between the last bar's tick ruler and the card's bottom edge.
+        /// Roomier now that the content sits on its own card (a tight 3 pt left the ticks crowding the
+        /// rounded edge).
+        static let bottomPadding: CGFloat = 10
         static let rowSpacing: CGFloat = 3
         static let sectionSpacing: CGFloat = 14
         /// Gap **between limit blocks** (after each section's bar) — a touch tighter than
         /// `sectionSpacing` so the limit list reads as a group without the header's larger breathing room.
         static let limitSpacing: CGFloat = 10
         static let textSize: CGFloat = dropdownTextSize
+        /// The inner content column width for fixed-width rows/labels — the popup width minus the card's
+        /// outer inset on both sides minus the inner horizontal padding on both sides. Held constant at
+        /// 252 pt (296 − 2·8 − 2·14) so bar/label wrapping is identical to before the card was added.
+        static let contentWidth: CGFloat = width - 2 * cardInset - 2 * hPadding
     }
 
     private let stack = NSStackView()
 
-    /// The solid opaque backdrop behind the content (below `stack`), so nothing shows through the popup.
-    /// Built once by ``rebuildBackdrop()`` on load; it re-resolves its own fill on theme change.
+    /// Corner radius / border width of the section card, exposed for `CardBackdropView` (which lives
+    /// outside this type and cannot read the private `Metrics`).
+    static var cardCornerRadius: CGFloat { Metrics.cardCornerRadius }
+    static var cardBorderWidth: CGFloat { Metrics.cardBorderWidth }
+
+    /// The solid opaque backdrop behind the content (below `cardView`), so nothing shows through the popup
+    /// in the opaque (#188 off) mode. Built by ``rebuildBackdrop()``; re-resolves its fill on theme change.
     private var backdropView: NSView?
+
+    /// The Control-Center-style rounded plate behind the whole Claude section (#188 follow-up). Created
+    /// once in `loadView`, sits above `backdropView` and below `stack`, inset from the popup edge. Shown
+    /// **always** (both #188 modes); never torn down by the `translucentBackground` toggle.
+    private var cardView: CardBackdropView?
 
     /// Preview-only (#185 colour tuner): when `true`, the opaque backdrop fills with
     /// ``NSColor/popupMenuMatchedBackground`` instead of `windowBackgroundColor`. The real popup lives
@@ -731,12 +819,27 @@ final class PopupViewController: NSViewController {
         stack.alignment = .leading
         stack.spacing = Metrics.rowSpacing
         stack.translatesAutoresizingMaskIntoConstraints = false
+
+        // Control-Center-style card: inset from the popup edge, with `stack` pinned inside it (inner
+        // padding). The card sits above the opaque backdrop (added in `rebuildBackdrop`) and below `stack`.
+        let card = CardBackdropView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(card)
         container.addSubview(stack)
+        cardView = card
+
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.topPadding),
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.hPadding),
-            container.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: Metrics.hPadding),
-            container.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: Metrics.bottomPadding),
+            // Card inset from the container. Top uses the trimmed `cardTopInset` to offset NSMenu's own
+            // vertical padding above our item view, so the visible top gap matches the sides.
+            card.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.cardTopInset),
+            card.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.cardInset),
+            container.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: Metrics.cardInset),
+            container.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: Metrics.cardBottomInset),
+            // Content pinned inside the card with the existing inner padding.
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: Metrics.topPadding),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Metrics.hPadding),
+            card.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: Metrics.hPadding),
+            card.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: Metrics.bottomPadding),
             container.widthAnchor.constraint(equalToConstant: Metrics.width),
         ])
         self.view = container
@@ -762,8 +865,9 @@ final class PopupViewController: NSViewController {
         let new = SolidBackdropView()   // self-updates its fill on theme change (see updateLayer)
         new.matchesMenuBackground = matchesMenuBackground   // preview-only #2C2C2C match (see the flag)
         new.translatesAutoresizingMaskIntoConstraints = false
-        // Bottom-most so the stack (and its bars/labels) draw on top of it.
-        view.addSubview(new, positioned: .below, relativeTo: stack)
+        // Bottom-most so z-order is backdrop → card → stack (the card plate sits above the full-bleed
+        // backdrop; the content draws on top of both).
+        view.addSubview(new, positioned: .below, relativeTo: cardView ?? stack)
         NSLayoutConstraint.activate([
             new.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             new.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -1063,7 +1167,7 @@ final class PopupViewController: NSViewController {
         row.orientation = .horizontal
         row.distribution = .equalSpacing
         row.translatesAutoresizingMaskIntoConstraints = false
-        row.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.hPadding).isActive = true
+        row.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
         stack.addArrangedSubview(row)
         return row
     }
@@ -1082,7 +1186,7 @@ final class PopupViewController: NSViewController {
         label.textColor = secondary ? Self.dimmedLabelColor : ColorStore.shared.color(.label)
         label.lineBreakMode = .byWordWrapping
         label.translatesAutoresizingMaskIntoConstraints = false
-        let contentWidth = Metrics.width - 2 * Metrics.hPadding
+        let contentWidth = Metrics.contentWidth
         label.preferredMaxLayoutWidth = contentWidth
         label.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
         stack.addArrangedSubview(label)
@@ -1140,7 +1244,7 @@ final class PopupViewController: NSViewController {
         view.showTicks = showTicks   // under-bar tick ruler on/off — #224
         view.translucentBackground = translucentBackground   // tint hue fills to breathe the material — #188
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.hPadding).isActive = true
+        view.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
         view.heightAnchor.constraint(equalToConstant: PopupBarView.viewHeight).isActive = true
         stack.addArrangedSubview(view)
         // Between-section gap after every bar except the last (the last sits above the menu separator).

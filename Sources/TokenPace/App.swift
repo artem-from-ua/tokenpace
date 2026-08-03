@@ -246,7 +246,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Action items at the bottom of the same menu (#14). `keyEquivalent: ""` keeps a shortcut
         // glyph off the right edge — none is wanted, and there is no main menu to host a default ⌘Q.
-        menu.addItem(.separator())
+        // No separator before "Settings…": the Claude section now sits on its own inset card (#188
+        // follow-up), which already visually detaches it from the native items below.
         // "Settings…" is always visible. Directly below it sits the optional "Troubleshoot…" item
         // (ADR-0020), hidden by default and revealed only while ⌥ Option is held. The native
         // `isAlternate` mechanism does NOT work in a status-item menu, so the reveal is driven by a
