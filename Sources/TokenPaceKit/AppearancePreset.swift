@@ -6,7 +6,7 @@ import Foundation
 /// reset-countdown mode, the bar presentation style, and the dropdown's per-model toggle (#215, #224).
 /// Generalises the single "Reset to defaults" row from #214: `.chill` is the calm, quiet look
 /// (simplified bars), `.workHarder` is `.chill` plus the coloured far-behind blue, `.controlFreak`
-/// turns everything on (dense pacing bars). Applying a preset writes all ten keys at once via
+/// turns everything on (dense pacing bars). Applying a preset writes all eleven keys at once via
 /// `PersistedConfig.apply(_:)`.
 ///
 /// The preset **values** live here in the kit (not the AppKit/SwiftUI shell) so they are unit-testable
@@ -42,6 +42,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 pauseHidesBars: true,   // when blocked, show only the pause icon (bars hidden)
                 showExtraUsage: true,
                 showServiceStatusDot: true,
+                awaitingInputInMenuBar: false,   // calm look: awaiting hand stays in the popup only
                 showModelSpecificLimits: true,
                 resetCountdownModeMenuBar: .smart,
                 barStyle: .simple,
@@ -57,6 +58,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 pauseHidesBars: false,   // when blocked, keep the bars beside the pause icon
                 showExtraUsage: true,
                 showServiceStatusDot: true,
+                awaitingInputInMenuBar: true,   // work harder: surface the awaiting hand in the menu bar
                 showModelSpecificLimits: true,
                 resetCountdownModeMenuBar: .smart,
                 barStyle: .mixed,
@@ -72,6 +74,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 pauseHidesBars: false,   // when blocked, keep the bars beside the pause icon
                 showExtraUsage: true,
                 showServiceStatusDot: true,
+                awaitingInputInMenuBar: true,   // control freak: everything on, incl. the awaiting hand
                 showModelSpecificLimits: true,
                 resetCountdownModeMenuBar: .always,
                 barStyle: .pacing,
@@ -111,7 +114,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
 
 // MARK: - AppearancePresetValues
 
-/// The ten Appearance-pane values a preset sets, in the same **as-persisted** sense as
+/// The eleven Appearance-pane values a preset sets, in the same **as-persisted** sense as
 /// `PersistedConfig` (`hideCalmSevenDayBar` is the stored *hide* form, not the pane's inverted "Show …";
 /// `pauseHidesBars` is stored as-is).
 public struct AppearancePresetValues: Sendable, Equatable {
@@ -123,6 +126,10 @@ public struct AppearancePresetValues: Sendable, Equatable {
     public let pauseHidesBars: Bool
     public let showExtraUsage: Bool
     public let showServiceStatusDot: Bool
+    /// Whether the awaiting-input `hand.raised` indicator is shown in the menu bar (#233). The popup
+    /// always shows it while the feature is on; this only governs the menu-bar copy. Meaningful only
+    /// when the master toggle (`awaitingInputEnabled`, in General) is on.
+    public let awaitingInputInMenuBar: Bool
     public let showModelSpecificLimits: Bool
     public let resetCountdownModeMenuBar: ResetCountdownMode
     public let barStyle: BarStyle
@@ -135,6 +142,7 @@ public struct AppearancePresetValues: Sendable, Equatable {
         pauseHidesBars: Bool,
         showExtraUsage: Bool,
         showServiceStatusDot: Bool,
+        awaitingInputInMenuBar: Bool,
         showModelSpecificLimits: Bool,
         resetCountdownModeMenuBar: ResetCountdownMode,
         barStyle: BarStyle,
@@ -146,6 +154,7 @@ public struct AppearancePresetValues: Sendable, Equatable {
         self.pauseHidesBars = pauseHidesBars
         self.showExtraUsage = showExtraUsage
         self.showServiceStatusDot = showServiceStatusDot
+        self.awaitingInputInMenuBar = awaitingInputInMenuBar
         self.showModelSpecificLimits = showModelSpecificLimits
         self.resetCountdownModeMenuBar = resetCountdownModeMenuBar
         self.barStyle = barStyle

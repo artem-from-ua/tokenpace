@@ -1019,8 +1019,9 @@ final class PopupViewController: NSViewController {
             : "\(count) sessions are awaiting your input"
         guard count >= 2 else { return iconView }
 
-        let countLabel = NSTextField(labelWithString: "×\(count)")
-        // Regular weight (matches the "5-day" row labels), not bold — per maintainer feedback.
+        // A thin space (U+2009) between "×" and the number so the glyphs don't crowd (× sits tight
+        // against digits in the system font). Regular weight (matches the row labels), not bold.
+        let countLabel = NSTextField(labelWithString: "×\u{2009}\(count)")
         countLabel.font = .systemFont(ofSize: size)
         countLabel.textColor = ColorStore.shared.color(.label)
         let stack = NSStackView(views: [iconView, countLabel])

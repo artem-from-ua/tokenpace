@@ -433,6 +433,7 @@ enum PersistedConfig {
         pauseHidesBars = v.pauseHidesBars
         showExtraUsage = v.showExtraUsage
         showServiceStatusDot = v.showServiceStatusDot
+        awaitingInputInMenuBar = v.awaitingInputInMenuBar
         showModelSpecificLimits = v.showModelSpecificLimits
         resetCountdownModeMenuBar = v.resetCountdownModeMenuBar
         barStyle = v.barStyle
@@ -451,6 +452,7 @@ enum PersistedConfig {
             pauseHidesBars: pauseHidesBars,
             showExtraUsage: showExtraUsage,
             showServiceStatusDot: showServiceStatusDot,
+            awaitingInputInMenuBar: awaitingInputInMenuBar,
             showModelSpecificLimits: showModelSpecificLimits,
             resetCountdownModeMenuBar: resetCountdownModeMenuBar,
             barStyle: barStyle,
@@ -491,14 +493,14 @@ enum PersistedConfig {
     }
 
     /// Whether the awaiting-input indicator also renders in the menu bar (as the **first leading**
-    /// element, a bare icon with no `×N`), in addition to the popup — #233. **Default-off** (opt-in):
-    /// the popup always shows the indicator while the feature is on; this adds the menu-bar copy. Only
-    /// meaningful while ``awaitingInputEnabled`` is on. An Appearance option (cleared by
-    /// ``resetAppearanceToDefaults()``) but deliberately **outside** the appearance presets, so it
-    /// does not change the meaning of a preset. `object(forKey:) as? Bool ?? false` keeps the
-    /// unset-vs-explicit distinction.
+    /// element, a bare icon with no `×N`), in addition to the popup — #233. Part of the Appearance
+    /// **presets**: absent key falls back to the factory-default preset's value (`.workHarder` → on),
+    /// so `chill` = off, `workHarder`/`controlFreak` = on. The popup always shows the indicator while
+    /// the feature is on; this only governs the menu-bar copy, and is meaningful only while
+    /// ``awaitingInputEnabled`` is on.
     static var awaitingInputInMenuBar: Bool {
-        get { defaults.object(forKey: Key.awaitingInputInMenuBar) as? Bool ?? false }
+        get { defaults.object(forKey: Key.awaitingInputInMenuBar) as? Bool
+                ?? AppearancePreset.defaultValues.awaitingInputInMenuBar }
         set { defaults.set(newValue, forKey: Key.awaitingInputInMenuBar) }
     }
 

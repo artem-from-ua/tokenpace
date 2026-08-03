@@ -375,12 +375,11 @@ final class StatusItemView: NSView {
 
     /// Whether the awaiting-input hand should be drawn in the menu bar right now: the layout carries a
     /// count (feature on + ≥ 1 session) **and** the "show in menu bar" Appearance option is on (#233).
-    /// The `TOKENPACE_AWAITING` stub also forces the menu-bar copy on, so verification shows it without
-    /// toggling the Appearance option (verification only; no such env var in a real build).
+    /// The `TOKENPACE_AWAITING` stub only forces the *count* (upstream, so no live sessions are
+    /// needed); it must **not** bypass the Appearance option here, so toggling "Show in menu bar" hides
+    /// the hand under the stub exactly as it does with real data.
     private var showAwaitingInMenuBar: Bool {
-        guard layout?.awaitingInput != nil else { return false }
-        return PersistedConfig.awaitingInputInMenuBar
-            || ProcessInfo.processInfo.environment["TOKENPACE_AWAITING"] != nil
+        layout?.awaitingInput != nil && PersistedConfig.awaitingInputInMenuBar
     }
 
     /// Draw the small service-status dot at the **right edge** of `rect`, vertically centred — the

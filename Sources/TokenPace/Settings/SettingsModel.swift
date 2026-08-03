@@ -196,6 +196,7 @@ final class SettingsModel {
             pauseHidesBars: pauseHidesBars,
             showExtraUsage: showExtraUsage,
             showServiceStatusDot: showServiceDot,
+            awaitingInputInMenuBar: awaitingInputInMenuBar,
             showModelSpecificLimits: showModelSpecificLimits,
             resetCountdownModeMenuBar: ResetCountdownMode.from(radio: resetRadio),
             barStyle: barStyle,
@@ -431,6 +432,7 @@ final class SettingsModel {
         onBarStyleChange?(barStyle)
         onShowTicksChange?(showTicks)
         onFarBehindIntervalChange?(farBehindInterval)
+        onAwaitingInputAppearanceChange?()   // #233: a preset/reset may flip the menu-bar copy
     }
 
     /// Build `MonitoredServices` from the current toggles/radio, persist, and fire the callback.
