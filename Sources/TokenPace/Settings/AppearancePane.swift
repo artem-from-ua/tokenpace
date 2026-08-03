@@ -154,6 +154,19 @@ struct AppearancePane: View {
                     get: { model.showExtraUsage }, set: { model.setShowExtraUsage($0) }))
                 Toggle("Show service status dot on issues", isOn: Binding(
                     get: { model.showServiceDot }, set: { model.setShowServiceDot($0) }))
+
+                // Awaiting-input indicator placement (#233). Meaningful only while the master toggle
+                // in General is on, so it's disabled (with a hint) otherwise.
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Show awaiting-input icon left of the pause icon", isOn: Binding(
+                        get: { model.awaitingInputLeftOfPause },
+                        set: { model.setAwaitingInputLeftOfPause($0) }))
+                    .disabled(!model.awaitingInputEnabled)
+                    SettingsHint(text: model.awaitingInputEnabled
+                        ? "Adds a second, count-less copy of the indicator in the menu bar, left of "
+                          + "the pause icon."
+                        : "Enable *Show sessions awaiting input* in General first.")
+                }
             }
 
             // #211 — a popup-only option, so it lives in its own "Dropdown Widget" section rather than

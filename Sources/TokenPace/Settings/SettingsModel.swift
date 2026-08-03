@@ -39,6 +39,12 @@ final class SettingsModel {
     var onHideCalmSevenDayChange: ((Bool) -> Void)?
     var onPauseHidesBarsChange: ((Bool) -> Void)?
     var onPausePollingChange: ((Bool) -> Void)?
+    /// Master toggle for the awaiting-input indicator flipped (#233) — the shell starts/stops the
+    /// `AwaitingInputWatcher` and re-renders.
+    var onAwaitingInputEnabledChange: ((Bool) -> Void)?
+    /// An awaiting-input **appearance** option changed (e.g. left-of-pause placement, #233) — the
+    /// shell just re-renders from the last snapshot; no watcher restart needed.
+    var onAwaitingInputAppearanceChange: (() -> Void)?
     var onArchiveNow: (() -> Void)?
     var onBackToWorkEnabled: ((@escaping @MainActor (BackToWorkNotifier.AuthState) -> Void) -> Void)?
     /// Fire the "Back to work!" notification immediately, bypassing the edge-detection and quiet-hours
@@ -109,6 +115,15 @@ final class SettingsModel {
     var archiveEnabled = false
     private(set) var archiveDestination: String?
     private(set) var archiveStatusText = ""
+
+    // MARK: Awaiting-input indicator (#233, ADR-0066)
+
+    /// Master toggle: show the "N sessions awaiting input" indicator. Default-off. Placement is
+    /// configured separately in Appearance and only matters while this is on.
+    var awaitingInputEnabled = false
+    /// Appearance option: also show the indicator in the menu bar, left of the pause icon (bare
+    /// icon, no `×N`). Default-off. Only meaningful while ``awaitingInputEnabled`` is on.
+    var awaitingInputLeftOfPause = false
 
     // MARK: About / Updates (#37)
 
@@ -276,6 +291,9 @@ final class SettingsModel {
 
         archiveEnabled = PersistedConfig.archiveEnabled
         refreshArchiveStatus()
+
+        awaitingInputEnabled = PersistedConfig.awaitingInputEnabled
+        awaitingInputLeftOfPause = PersistedConfig.awaitingInputLeftOfPause
     }
 
     // MARK: Setters (persist first, then fire the callback — the ordering invariant)
@@ -285,6 +303,18 @@ final class SettingsModel {
         PersistedConfig.pausePollingWhenScreenLocked = on
         AppLogger.lifecycle.notice("screen-lock-pause: setting set \(on, privacy: .public)")
         onPausePollingChange?(on)
+    }
+
+    func setAwaitingInputEnabled(_ on: Bool) {
+        awaitingInputEnabled = on
+        PersistedConfig.awaitingInputEnabled = on
+        onAwaitingInputEnabledChange?(on)
+    }
+
+    func setAwaitingInputLeftOfPause(_ on: Bool) {
+        awaitingInputLeftOfPause = on
+        PersistedConfig.awaitingInputLeftOfPause = on
+        onAwaitingInputAppearanceChange?()
     }
 
     func setCalmColorMode(_ mode: CalmColorMode) {

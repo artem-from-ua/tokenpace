@@ -20,6 +20,13 @@ struct GeneralPane: View {
                 Toggle("Pause usage API polling while the screen is locked", isOn: Binding(
                     get: { model.pausePolling },
                     set: { model.setPausePolling($0) }))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Show sessions awaiting input", isOn: Binding(
+                        get: { model.awaitingInputEnabled },
+                        set: { model.setAwaitingInputEnabled($0) }))
+                    SettingsHint(text: "Shows how many Claude Code sessions are waiting for your reply. Configure where it appears in Appearance.")
+                }
             }
         }
         .formStyle(.grouped)

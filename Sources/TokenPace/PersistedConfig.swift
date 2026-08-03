@@ -90,6 +90,13 @@ enum PersistedConfig {
         static let pausePollingWhenScreenLocked = "pausePollingWhenScreenLocked"
         /// Whether the session-log archiver runs (#110). Default-off (opt-in) — see the property.
         static let archiveEnabled = "archiveEnabled"
+        /// Whether the "sessions awaiting input" indicator is shown (#233). Default-off (opt-in) —
+        /// master toggle in General; placement configured in Appearance. See the property.
+        static let awaitingInputEnabled = "awaitingInputEnabled"
+        /// Whether the awaiting-input indicator also appears in the menu bar, left of the pause icon
+        /// (#233). Default-off (opt-in). An Appearance option, but deliberately **not** part of the
+        /// appearance presets. See the property.
+        static let awaitingInputLeftOfPause = "awaitingInputLeftOfPause"
         /// Filesystem path of the user-chosen archive folder (#110), or absent if not yet set.
         static let archiveDestination = "archiveDestination"
         /// Instant of the last **successful** archive sync (#110), gating the 24 h cadence.
@@ -379,6 +386,7 @@ enum PersistedConfig {
             Key.barStyle,
             Key.showTicks,
             Key.farBehindInterval,
+            Key.awaitingInputLeftOfPause,
         ] {
             defaults.removeObject(forKey: key)
         }
@@ -469,6 +477,28 @@ enum PersistedConfig {
     static var archiveEnabled: Bool {
         get { defaults.object(forKey: Key.archiveEnabled) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.archiveEnabled) }
+    }
+
+    /// Whether the menu-bar / popup "sessions awaiting input" indicator is shown (#233, ADR-0066).
+    /// **Default-off** (opt-in): an absent key reads as `false`, so nothing is watched or drawn until
+    /// the user turns it on. Master toggle in Settings → General; the indicator's placement is
+    /// configured in Settings → Appearance (and is meaningful only while this is on). Gates whether
+    /// the ``AwaitingInputWatcher`` runs at all. `object(forKey:) as? Bool ?? false` distinguishes
+    /// "unset" from an explicit choice, consistent with the other opt-in toggles.
+    static var awaitingInputEnabled: Bool {
+        get { defaults.object(forKey: Key.awaitingInputEnabled) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.awaitingInputEnabled) }
+    }
+
+    /// Whether the awaiting-input indicator also renders in the menu bar, left of the pause icon,
+    /// always as a bare icon (no `×N`) — #233. **Default-off** (opt-in). Only meaningful while
+    /// ``awaitingInputEnabled`` is on. This is an Appearance option (cleared by
+    /// ``resetAppearanceToDefaults()``) but deliberately **outside** the appearance presets, so it
+    /// does not change the meaning of a preset. `object(forKey:) as? Bool ?? false` keeps the
+    /// unset-vs-explicit distinction.
+    static var awaitingInputLeftOfPause: Bool {
+        get { defaults.object(forKey: Key.awaitingInputLeftOfPause) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.awaitingInputLeftOfPause) }
     }
 
     /// Filesystem path of the archive folder the user chose (#110), or `nil` if none picked yet.
