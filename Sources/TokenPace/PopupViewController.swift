@@ -277,7 +277,9 @@ final class PopupBarView: NSView {
         // 4. Time-indicator marker at `timeFraction`: a slim rounded vertical bar filled with the pacing
         //    colour, with a border in the grey-track tone (blended 85 %) that separates it from the strip —
         //    replacing the old transparent slivers. 5. The marker carries a stronger ambient glow.
-        let cx = rect.minX + CGFloat(l.timeFraction) * w
+        // Pixel-snap the marker's centre x so its vertical edges land on whole pixels — a fractional
+        // `timeFraction * w` otherwise smears the thin border across two columns (the "crooked outline").
+        let cx = (rect.minX + CGFloat(l.timeFraction) * w).rounded()
         let cy = rect.midY
         let mw = Metrics.indicatorWidth
         let mh = Metrics.indicatorHeight
@@ -285,17 +287,23 @@ final class PopupBarView: NSView {
         let marker = NSBezierPath(
             roundedRect: markerRect, xRadius: Metrics.indicatorCorner, yRadius: Metrics.indicatorCorner)
         let markerColor = indicatorColor(l)
-        withGlow(markerColor, radius: Self.markerGlowRadius, strength: Self.markerGlowStrength) {
-            markerColor.setFill()
-            marker.fill()
-        }
-        // Border: a thin, fairly opaque grey-track-toned outline that detaches the marker from the strip it
-        // sits on. Denser than the strip's translucent grey (so it reads as a crisp edge) and narrow.
+        // Border as a filled frame (not a centred stroke, which straddles the edge and reads crooked on a
+        // 6-pt marker): fill the outer rounded rect in the grey-track-toned border colour, then fill an
+        // inset rounded rect in the marker colour on top — leaving a crisp `bw`-wide even border. The whole
+        // thing carries the ambient glow.
+        let bw: CGFloat = 1
         let border = (Self.monochromeGrey.blended(withFraction: 0.4, of: markerColor) ?? Self.monochromeGrey)
             .withAlphaComponent(0.9)
-        border.setStroke()
-        marker.lineWidth = 1
-        marker.stroke()
+        let innerRect = markerRect.insetBy(dx: bw, dy: bw)
+        let inner = NSBezierPath(roundedRect: innerRect,
+                                 xRadius: max(0, Metrics.indicatorCorner - bw),
+                                 yRadius: max(0, Metrics.indicatorCorner - bw))
+        withGlow(markerColor, radius: Self.markerGlowRadius, strength: Self.markerGlowStrength) {
+            border.setFill()
+            marker.fill()
+            markerColor.setFill()
+            inner.fill()
+        }
     }
 
     /// Draw the under-bar tick ruler: vertical teeth at each interior window boundary

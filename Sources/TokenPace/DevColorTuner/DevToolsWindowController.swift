@@ -155,9 +155,13 @@ final class DevToolsWindowController: NSWindowController {
 
     private func showPreviewWindow() {
         if previewWindow == nil {
-            // The preview is a plain window, not an NSMenu; its #212121 menu-matched backdrop comes from
-            // the `ThemedFillView` container below (`.popupMenuMatchedBackground`), not the popup itself.
+            // The preview is a plain window, not an NSMenu; its menu material comes from the vibrancy
+            // backing in `buildPreviewContent`, not the popup itself.
             previewVC.loadView()
+            // Seed the bar presentation so the first frame matches the current settings (updatePreview
+            // keeps them in sync on every refresh thereafter).
+            previewVC.barStyle = PersistedConfig.barStyle
+            previewVC.showTicks = PersistedConfig.showTicks
             // Borderless: attached as a child of the tuner, it has no title bar / close button — it can't
             // be closed on its own and always travels with the tuner. Its own "Popup Preview" heading is
             // drawn inside the content instead.
@@ -224,17 +228,35 @@ final class DevToolsWindowController: NSWindowController {
         plaqueDivider.translatesAutoresizingMaskIntoConstraints = false
 
         let container = ThemedFillView()
-        // Match the real NSMenu popup's on-screen colour (dark #212121), not the lighter fill a plain
-        // `windowBackgroundColor` renders here. Light already matches, so the dynamic colour only
-        // overrides dark. This container is what stands in for the menu material behind the popup.
-        container.fillColor = .popupMenuMatchedBackground
+        // Unlike the real popup (hosted in an opaque, system-owned NSMenu), THIS preview window is ours and
+        // non-opaque, so we can give it genuine `.behindWindow` vibrancy — the same see-through menu look
+        // the live dropdown has, with the desktop/wallpaper tone bleeding through. The flat fill is dropped
+        // (`.clear`); a rounded `NSVisualEffectView(.menu)` becomes the bottom-most backing, and the popup's
+        // own semi-transparent `CardBackdropView` plate then floats over it exactly like the real menu.
+        container.fillColor = .clear
         container.borderColor = .popupMenuBorder   // hairline edge, like a real system menu window
         container.cornerRadius = Self.menuPopupCornerRadius(for: window)
+
+        let vibrancy = NSVisualEffectView()
+        vibrancy.material = .menu
+        vibrancy.blendingMode = .behindWindow
+        vibrancy.state = .active
+        vibrancy.wantsLayer = true
+        vibrancy.layer?.cornerRadius = Self.menuPopupCornerRadius(for: window)
+        vibrancy.layer?.masksToBounds = true
+        vibrancy.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(vibrancy)   // bottom-most: the menu material behind everything
+
         container.addSubview(plaque)
         container.addSubview(plaqueDivider)
         container.addSubview(previewVC.view)
         container.addSubview(footer)
         NSLayoutConstraint.activate([
+            vibrancy.topAnchor.constraint(equalTo: container.topAnchor),
+            vibrancy.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            vibrancy.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            vibrancy.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+
             plaque.topAnchor.constraint(equalTo: container.topAnchor),
             plaque.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             plaque.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -279,6 +301,10 @@ final class DevToolsWindowController: NSWindowController {
     /// update dots so their `ColorRole`s track edits. No-op if not open.
     func updatePreview(_ layout: PopupLayout) {
         guard let preview = previewWindow, preview.isVisible else { return }
+        // Keep the bar presentation in sync so a Bar style / tick-ruler change re-renders the preview
+        // (each is a no-op didSet unless it actually changed).
+        previewVC.barStyle = PersistedConfig.barStyle
+        previewVC.showTicks = PersistedConfig.showTicks
         previewVC.layout = layout
         for (dot, role) in previewUpdateDots { dot.contentTintColor = ColorStore.shared.color(role) }
         // The container is Auto Layout; size the window to its fitting size (popup width + footer height).

@@ -384,11 +384,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.statusView?.barStyle = style
                 self?.popupVC.barStyle = style
                 self?.refreshStatusImage()
+                self?.reRenderForCurrentTime()   // also push the new style into the dev-tuner preview
             }
             wc.onShowTicksChange = { [weak self] on in
                 // Popup-only (#224): the tick ruler lives in `PopupBarView`; the VC's `showTicks` didSet
                 // rebuilds so each child bar picks up the new value. No menu-bar change.
                 self?.popupVC.showTicks = on
+                self?.reRenderForCurrentTime()   // also push the tick-ruler change into the preview
             }
             wc.onFarBehindIntervalChange = { [weak self] _ in
                 // The green→blue threshold changes each bar's `behindMultiplier` (#224), which is baked
