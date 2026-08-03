@@ -10,15 +10,6 @@ import TokenPaceKit
 /// to *write* the same one). `NSFont.systemFontSize` (13 pt) is the documented default UI text size.
 let dropdownTextSize: CGFloat = NSFont.systemFontSize
 
-/// The alpha applied to the popup's **hue-carrying** elements (service dots, pacing gap, idle blue,
-/// time marker, pills, ⚠️ triangle, link word, brand accent) when the translucent background (#188) is on.
-///
-/// Now that the whole section sits on a (near-)opaque Control-Center card (`CardBackdropView`), the
-/// content no longer composites directly against the menu vibrancy, so the hue elements use **standard**
-/// (fully opaque) tinting — `1.0`. Kept as a named constant (rather than deleting `popupTint` outright)
-/// so the behaviour is easy to revisit if the card ever becomes translucent again.
-let translucentHueAlpha: CGFloat = 1.0
-
 // MARK: - PopupBarView
 
 /// A pacing bar drawn inside the popup, in the **same** three-zone style as the menu-bar widget:
@@ -103,24 +94,6 @@ final class PopupBarView: NSView {
             guard showTicks != oldValue else { return }
             needsDisplay = true
         }
-    }
-
-    /// Whether the popup background is translucent (#188). Pushed in from `PopupViewController.addBar`,
-    /// like `showTicks`. When `true`, the bar's hue-carrying fills (gap, idle blue, marker) are drawn at
-    /// ``translucentHueAlpha`` via ``popupTint(_:)`` so they breathe the menu material; the neutral grey
-    /// track / ticks / ring stay as-is. Default `false` (opaque).
-    var translucentBackground: Bool = false {
-        didSet {
-            guard translucentBackground != oldValue else { return }
-            needsDisplay = true
-        }
-    }
-
-    /// Apply ``translucentHueAlpha`` to a hue colour **only** when the translucent background is on;
-    /// otherwise return it unchanged (opaque default is byte-identical). `withAlphaComponent` on a
-    /// dynamic system colour stays dynamic, so the tinted colour still flips light/dark.
-    private func popupTint(_ c: NSColor) -> NSColor {
-        translucentBackground ? c.withAlphaComponent(translucentHueAlpha) : c
     }
 
     private enum Metrics {
@@ -253,7 +226,7 @@ final class PopupBarView: NSView {
                 idlePath.fill()
             } else {
                 // The solid idle strip carries the same ambient glow as a pacing strip (#188).
-                let idleColor = popupTint(Palette.idleBlue)
+                let idleColor = Palette.idleBlue
                 withGlow(idleColor, radius: Self.idleGlowRadius, strength: Self.idleGlowStrength) {
                     idleColor.setFill()
                     idlePath.fill()
@@ -268,10 +241,10 @@ final class PopupBarView: NSView {
         // Pacing-gap colour.
         let gapColor: NSColor
         if l.pacing == .ahead {
-            gapColor = popupTint(Self.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds))
+            gapColor = Self.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
         } else {
             // Calm side: base 5h/7d bars split green↔blue via behindColor; per-model/credits stay green.
-            gapColor = popupTint(isBaseLimit ? Self.behindColor(l) : Palette.gapGreen)
+            gapColor = isBaseLimit ? Self.behindColor(l) : Palette.gapGreen
         }
 
         // 1. Full-length grey track (rounded), drawn first as the base.
@@ -311,7 +284,7 @@ final class PopupBarView: NSView {
         let markerRect = NSRect(x: cx - mw / 2, y: cy - mh / 2, width: mw, height: mh)
         let marker = NSBezierPath(
             roundedRect: markerRect, xRadius: Metrics.indicatorCorner, yRadius: Metrics.indicatorCorner)
-        let markerColor = popupTint(indicatorColor(l))
+        let markerColor = indicatorColor(l)
         withGlow(markerColor, radius: Self.markerGlowRadius, strength: Self.markerGlowStrength) {
             markerColor.setFill()
             marker.fill()
@@ -427,50 +400,19 @@ final class PopupBarView: NSView {
     }
 }
 
-// MARK: - SolidBackdropView
-
-/// A plain opaque fill for the popup's solid backdrop. Layer-backed and drawn via `updateLayer`, so
-/// AppKit re-runs it on theme change and the fill CGColor re-resolves (a raw `layer.backgroundColor`
-/// set once would not track light/dark).
-final class SolidBackdropView: NSView {
-    /// Preview-only: fill with ``NSColor/popupMenuMatchedBackground`` (dark #212121) instead of
-    /// `windowBackgroundColor`. See ``PopupViewController/matchesMenuBackground``.
-    var matchesMenuBackground = false { didSet { needsDisplay = true } }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    override var wantsUpdateLayer: Bool { true }
-    override func updateLayer() {
-        // The system panel background, resolved in this view's own appearance so it tracks light/dark
-        // and matches the surrounding menu chrome.
-        //
-        // Deliberately **not** a `ColorRole` (audit #206): in the shipped popup the visible card surface
-        // is painted by the `NSMenu`'s own vibrancy material (dark ≈ #212121), and this opaque backdrop
-        // sits *underneath* it purely to keep the panel from showing through — it is never the pixel the
-        // eye sees. The real background is system-owned and cannot be re-tinted from our side, so exposing
-        // a tuner slider for it would move nothing in the live menu. `popupMenuMatchedBackground` exists
-        // only to reproduce that #212121 in the tuner's borderless *preview* window (`matchesMenuBackground`).
-        let fill: NSColor = matchesMenuBackground ? .popupMenuMatchedBackground : .windowBackgroundColor
-        layer?.backgroundColor = fill.cgColor
-    }
-}
-
 // MARK: - CardBackdropView
 
-/// The Control-Center-style rounded "plate" behind the whole Claude section (#188 follow-up). An inset,
-/// rounded plate that floats above the popup background — the menu material / backdrop shows as a margin
-/// around it. Shown **always**, on both the opaque default and the translucent (#188) background.
+/// The Control-Center-style rounded "plate" behind the whole Claude section (#188). An inset, rounded
+/// plate that floats above the popup background — the native `NSMenu` vibrancy material shows as a margin
+/// around it (the popup is always translucent).
 ///
 /// A flat, layer-backed fill using the dynamic `underPageBackgroundColor` system colour, which resolves to
 /// a raised-surface tone in each theme automatically (dark ≈ #282828, light ≈ a mid grey) — so it adapts
 /// to light/dark with no per-theme constants. (A `.behindWindow` `NSVisualEffectView` was tried first for
 /// a wallpaper-tone "vibe", but inside the `NSMenu` it degrades to a flat control colour and shows no tint,
-/// so a predictable flat fill is used instead.) Layer-backed with `updateLayer` (like `SolidBackdropView`/
-/// `PillView`) so the fill + border CGColors re-resolve on a theme flip; corner radius is set in both
-/// `updateLayer` and `layout` so it survives resize.
+/// so a predictable flat fill is used instead.) Layer-backed with `updateLayer` (like `PillView`) so the
+/// fill + border CGColors re-resolve on a theme flip; corner radius is set in both `updateLayer` and
+/// `layout` so it survives resize.
 final class CardBackdropView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -532,14 +474,12 @@ extension NSColor {
                       : NSColor(srgbRed: 0xC4/255, green: 0xC4/255, blue: 0xC4/255, alpha: 1)
     }
 
-    /// Fill of the Control-Center-style section card (`CardBackdropView`, #188 follow-up).
-    /// `controlBackgroundColor` (light #FFFFFF, dark #1E1E1E) at **partial alpha**, so the layer *below*
-    /// the card within our own view — the `NSMenu` vibrancy material when the translucent background
-    /// (#188) is on — shows through and lends the plate a subtle tone, while our chosen colour sits on
-    /// top. (True wallpaper `.behindWindow` tint is impossible inside an NSMenu — the menu window is
-    /// system-opaque — so this `.withinWindow`-style translucency over the menu's own material is the
-    /// closest achievable "vibe". With #188 off the opaque backdrop below is our own flat tone, so the
-    /// plate simply reads as that colour.) `cardPlateAlpha` is the single knob for how much tone bleeds in.
+    /// Fill of the Control-Center-style section card (`CardBackdropView`, #188). `controlBackgroundColor`
+    /// (light #FFFFFF, dark #1E1E1E) at **partial alpha**, so the `NSMenu` vibrancy material below the card
+    /// shows through and lends the plate a subtle tone, while our chosen colour sits on top. (True
+    /// wallpaper `.behindWindow` tint is impossible inside an NSMenu — the menu window is system-opaque —
+    /// so this translucency over the menu's own material is the closest achievable "vibe".) `cardPlateAlpha`
+    /// is the single knob for how much tone bleeds in.
     static var cardPlateFill: NSColor { NSColor.controlBackgroundColor.withAlphaComponent(cardPlateAlpha) }
 
     /// How opaque the section-card fill is; the remainder lets the layer below (menu material when #188 is
@@ -721,31 +661,6 @@ final class PopupViewController: NSViewController {
         }
     }
 
-    /// Whether the popup uses the native translucent system menu material instead of the opaque solid
-    /// fill (#188). When `true`, ``rebuildBackdrop()`` skips the bar-section `SolidBackdropView` so the
-    /// `NSMenu` vibrancy shows through under our bars. The whole-menu overlay is skipped separately in
-    /// `AppDelegate.installOpaqueMenuBackdropIfNeeded()`. Default `false` (opaque). Outside the Appearance presets.
-    ///
-    /// The `didSet` rebuilds **both** the backdrop and the content stack: besides removing the opaque
-    /// fill, the flag now tints the hue-carrying content (dots, gap, marker, idle blue, pills, ⚠️, link,
-    /// brand) via ``popupTint(_:)``, and those views are rebuilt in `rebuild()` — so a live toggle must
-    /// re-run it (the `PopupBarView` children pick up the flag through `addBar`).
-    var translucentBackground: Bool = false {
-        didSet {
-            guard isViewLoaded, translucentBackground != oldValue else { return }
-            rebuildBackdrop()
-            rebuild()
-        }
-    }
-
-    /// Apply ``translucentHueAlpha`` to a hue colour **only** when the translucent background is on;
-    /// otherwise return it unchanged. Mirrors `PopupBarView.popupTint` for content the VC builds itself
-    /// (service dots, pills, the ⚠️ triangle, the link word, the brand accent). `withAlphaComponent` on a
-    /// dynamic system colour stays dynamic, so the tinted colour still flips light/dark.
-    private func popupTint(_ c: NSColor) -> NSColor {
-        translucentBackground ? c.withAlphaComponent(translucentHueAlpha) : c
-    }
-
     private enum Metrics {
         /// Popup width. Sized so the inner content column stays 252 pt once the Control-Center-style card
         /// adds its outer margin (308 − 2·14 card inset − 2·14 inner = 252).
@@ -798,24 +713,10 @@ final class PopupViewController: NSViewController {
     static var cardCornerRadius: CGFloat { Metrics.cardCornerRadius }
     static var cardBorderWidth: CGFloat { Metrics.cardBorderWidth }
 
-    /// The solid opaque backdrop behind the content (below `cardView`), so nothing shows through the popup
-    /// in the opaque (#188 off) mode. Built by ``rebuildBackdrop()``; re-resolves its fill on theme change.
-    private var backdropView: NSView?
-
-    /// The Control-Center-style rounded plate behind the whole Claude section (#188 follow-up). Created
-    /// once in `loadView`, sits above `backdropView` and below `stack`, inset from the popup edge. Shown
-    /// **always** (both #188 modes); never torn down by the `translucentBackground` toggle.
+    /// The Control-Center-style rounded plate behind the whole Claude section (#188). Created once in
+    /// `loadView`, sits below `stack`, inset from the popup edge. The `NSMenu` vibrancy shows through the
+    /// margin around it; the popup has no opaque backdrop of its own (always translucent).
     private var cardView: CardBackdropView?
-
-    /// Preview-only (#185 colour tuner): when `true`, the opaque backdrop fills with
-    /// ``NSColor/popupMenuMatchedBackground`` instead of `windowBackgroundColor`. The real popup lives
-    /// inside an `NSMenu`, whose vibrancy material paints the visible surface (#212121 in dark) — the
-    /// opaque `windowBackgroundColor` backdrop sits underneath and is never seen. The preview window has
-    /// no such material, so it would show the raw `windowBackgroundColor`, which renders visibly lighter.
-    /// Matching the menu colour here brings the preview backdrop to #212121. Light is already an exact
-    /// match, so ``NSColor/popupMenuMatchedBackground`` only overrides the dark branch. Default `false`
-    /// keeps the real popup untouched.
-    var matchesMenuBackground = false
 
     /// The bold header of the popup's first section — "Claude" covers the update-cadence line and the
     /// per-component service status rows beneath it (see `rebuild`).
@@ -879,7 +780,7 @@ final class PopupViewController: NSViewController {
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         // Control-Center-style card: inset from the popup edge, with `stack` pinned inside it (inner
-        // padding). The card sits above the opaque backdrop (added in `rebuildBackdrop`) and below `stack`.
+        // padding). Added before `stack` so it sits below the content; the menu vibrancy shows around it.
         let card = CardBackdropView()
         card.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(card)
@@ -901,38 +802,7 @@ final class PopupViewController: NSViewController {
             container.widthAnchor.constraint(equalToConstant: Metrics.width),
         ])
         self.view = container
-        rebuildBackdrop()
         rebuild()
-    }
-
-    /// (Re)build the popup's solid opaque backdrop, inserting it as the **bottom-most** subview (below
-    /// `stack`) pinned to every container edge, so nothing shows through. Called on load, on a dev
-    /// theme change (so the fresh `SolidBackdropView` re-resolves `windowBackgroundColor`), and on a
-    /// ``translucentBackground`` toggle.
-    ///
-    /// When ``translucentBackground`` is on, **no** backdrop is inserted — the `NSMenu` vibrancy
-    /// material shows through under our bars (#188). The whole-menu overlay is skipped separately in
-    /// `AppDelegate.installOpaqueMenuBackdropIfNeeded()`.
-    func rebuildBackdrop() {
-        guard isViewLoaded else { return }
-        backdropView?.removeFromSuperview()
-        backdropView = nil
-        // Translucent mode (#188): leave the bar section unbacked so the menu vibrancy shows through.
-        guard !translucentBackground else { return }
-
-        let new = SolidBackdropView()   // self-updates its fill on theme change (see updateLayer)
-        new.matchesMenuBackground = matchesMenuBackground   // preview-only #2C2C2C match (see the flag)
-        new.translatesAutoresizingMaskIntoConstraints = false
-        // Bottom-most so z-order is backdrop → card → stack (the card plate sits above the full-bleed
-        // backdrop; the content draws on top of both).
-        view.addSubview(new, positioned: .below, relativeTo: cardView ?? stack)
-        NSLayoutConstraint.activate([
-            new.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            new.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            new.topAnchor.constraint(equalTo: view.topAnchor),
-            new.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-        ])
-        backdropView = new
     }
 
     // MARK: Rendering
@@ -959,7 +829,7 @@ final class PopupViewController: NSViewController {
         let sectionHeader = addSplitLine(
             left: Self.claudeCodeSectionTitle, right: showAge ? Self.ageText(layout.lastUpdateAge) : "",
             leftFont: Self.menuItemFont, rightFont: .systemFont(ofSize: Metrics.textSize),
-            leftColor: popupTint(Self.claudeBrandColor), rightColor: Self.dimmedLabelColor)
+            leftColor: Self.claudeBrandColor, rightColor: Self.dimmedLabelColor)
         stack.setCustomSpacing(Metrics.sectionSpacing, after: sectionHeader)
 
         if showStatusRows, let status {
@@ -1109,9 +979,7 @@ final class PopupViewController: NSViewController {
     /// the exhausted **red** (`PopupBarView.gapRed`, #224 — was accent blue) with white text, so it reads
     /// as a warning that a limit is spent onto paid credit. Sizing comes from the text + insets.
     private func makeInUsePill() -> NSView {
-        // #188: tint the red fill so the pill breathes the material when translucent. `pillText` (white)
-        // stays opaque for legibility. Instance method so the closure can reach `popupTint`.
-        Self.makePill(text: Self.inUseBadgeText, fill: { [weak self] in self?.popupTint(PopupBarView.gapRed) ?? PopupBarView.gapRed })
+        Self.makePill(text: Self.inUseBadgeText, fill: { PopupBarView.gapRed })
     }
 
     /// The blocking-reset badge (#158): a red capsule carrying the reset countdown (e.g. "4d"), shown
@@ -1119,8 +987,7 @@ final class PopupViewController: NSViewController {
     /// badge, filled with the exhausted red (`PopupBarView.gapRed`) so it reads as the blocker. A
     /// hover tooltip ("Effective blocker") explains why this one reset is highlighted.
     private func makeResetBadge(text: String) -> NSView {
-        // #188: same red-fill tint as makeInUsePill when translucent. Instance method for `popupTint`.
-        let pill = Self.makePill(text: text, fill: { [weak self] in self?.popupTint(PopupBarView.gapRed) ?? PopupBarView.gapRed })
+        let pill = Self.makePill(text: text, fill: { PopupBarView.gapRed })
         pill.toolTip = Self.blockingResetHint
         return pill
     }
@@ -1258,7 +1125,7 @@ final class PopupViewController: NSViewController {
     @discardableResult
     private func addWarningTitle(_ text: String) -> NSView {
         let font = NSFont.boldSystemFont(ofSize: Metrics.textSize)
-        let color = popupTint(ColorStore.shared.color(.red))   // #188: breathe the material when translucent
+        let color = ColorStore.shared.color(.red)
         let attributed = NSMutableAttributedString()
 
         let symbolConfig = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
@@ -1300,7 +1167,6 @@ final class PopupViewController: NSViewController {
         view.isBaseLimit = isBaseLimit   // only base 5h/7d rows render the far-behind blue zone
         view.barStyle = barStyle   // pacing (gap+marker) vs simple (left-anchored ribbon) — #224
         view.showTicks = showTicks   // under-bar tick ruler on/off — #224
-        view.translucentBackground = translucentBackground   // tint hue fills to breathe the material — #188
         view.translatesAutoresizingMaskIntoConstraints = false
         view.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
         view.heightAnchor.constraint(equalToConstant: PopupBarView.viewHeight).isActive = true
@@ -1327,7 +1193,7 @@ final class PopupViewController: NSViewController {
         // here — it is the trailing half, so every status word right-aligns into one column.
         let dot = GlowDotView()
         let dotStatus = status
-        dot.fill = { [weak self] in (self?.popupTint(Self.dotColor(dotStatus)) ?? Self.dotColor(dotStatus)) }
+        dot.fill = { Self.dotColor(dotStatus) }
         dot.glowRadius = Self.dotGlowRadius
         dot.glowStrength = Self.dotGlowStrength
         dot.translatesAutoresizingMaskIntoConstraints = false
@@ -1351,7 +1217,7 @@ final class PopupViewController: NSViewController {
         let word = Self.word(status)
         let isLink = status != .operational
         let wordAttributed = NSAttributedString(string: word, attributes: isLink
-            ? [.font: font, .foregroundColor: popupTint(ColorStore.shared.color(.link)), .underlineStyle: NSUnderlineStyle.single.rawValue]
+            ? [.font: font, .foregroundColor: ColorStore.shared.color(.link), .underlineStyle: NSUnderlineStyle.single.rawValue]
             : [.font: font, .foregroundColor: Self.dimmedLabelColor])
         let wordLabel = StatusLineLabel(labelWithAttributedString: wordAttributed)
         if isLink {

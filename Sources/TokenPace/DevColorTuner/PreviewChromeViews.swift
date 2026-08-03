@@ -3,7 +3,7 @@ import AppKit
 /// A layer-backed fill that re-resolves its colour on every theme change. A raw `layer.backgroundColor`
 /// set once freezes the CGColor at whatever appearance was current, so the preview window's background
 /// stayed light under the dark system theme (#185). Drawing via `updateLayer` lets AppKit re-run it when
-/// the effective appearance flips (same technique as the popup's `SolidBackdropView`).
+/// the effective appearance flips (same technique as the popup's `CardBackdropView`/`PillView`).
 @MainActor
 final class ThemedFillView: NSView {
     var fillColor: NSColor = .windowBackgroundColor { didSet { needsDisplay = true } }

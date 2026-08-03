@@ -155,9 +155,8 @@ final class DevToolsWindowController: NSWindowController {
 
     private func showPreviewWindow() {
         if previewWindow == nil {
-            // The preview is a plain window, not an NSMenu, so its popup backdrop must match the menu's
-            // on-screen colour itself (dark #212121) rather than the lighter `windowBackgroundColor` fill.
-            previewVC.matchesMenuBackground = true
+            // The preview is a plain window, not an NSMenu; its #212121 menu-matched backdrop comes from
+            // the `ThemedFillView` container below (`.popupMenuMatchedBackground`), not the popup itself.
             previewVC.loadView()
             // Borderless: attached as a child of the tuner, it has no title bar / close button — it can't
             // be closed on its own and always travels with the tuner. Its own "Popup Preview" heading is
@@ -227,7 +226,7 @@ final class DevToolsWindowController: NSWindowController {
         let container = ThemedFillView()
         // Match the real NSMenu popup's on-screen colour (dark #212121), not the lighter fill a plain
         // `windowBackgroundColor` renders here. Light already matches, so the dynamic colour only
-        // overrides dark. The hosted popup view uses the same colour via `matchesMenuBackground`.
+        // overrides dark. This container is what stands in for the menu material behind the popup.
         container.fillColor = .popupMenuMatchedBackground
         container.borderColor = .popupMenuBorder   // hairline edge, like a real system menu window
         container.cornerRadius = Self.menuPopupCornerRadius(for: window)

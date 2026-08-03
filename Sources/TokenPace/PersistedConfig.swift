@@ -82,9 +82,6 @@ enum PersistedConfig {
         /// Whether the popup draws the under-bar tick ruler on the pacing bars (#224). Default-on
         /// (opt-out) — see the property.
         static let showTicks = "showTicks"
-        /// Whether the popup uses the native translucent system menu material instead of the opaque
-        /// solid fill (#188). Default-off (opt-in), **outside the Appearance presets** — see the property.
-        static let popupTranslucentBackground = "popupTranslucentBackground"
         /// The far-behind (green→blue) threshold interval (#224), stored as the raw `FarBehindInterval`
         /// string. Default `.medium` — see the property.
         static let farBehindInterval = "farBehindInterval"
@@ -354,23 +351,6 @@ enum PersistedConfig {
         set { defaults.set(newValue, forKey: Key.showTicks) }
     }
 
-    /// Whether the **popup** dropdown uses the native translucent system menu material (vibrancy)
-    /// instead of the opaque solid fill (#188). When on, both opaque backdrops are skipped — the
-    /// bar-section `SolidBackdropView` (``PopupViewController/rebuildBackdrop()``) and the whole-menu
-    /// overlay (``AppDelegate/installOpaqueMenuBackdropIfNeeded()``, #86) — so the `NSMenu` vibrancy
-    /// shows through and our text/bars draw on top of it.
-    ///
-    /// **Default-off (opt-in), and deliberately outside the Appearance presets** — the presets never
-    /// reset it (so it is absent from ``resetAppearanceToDefaults()``/``apply(_:)``/`AppearancePreset`).
-    /// The default is therefore hardcoded here, not driven by `AppearancePreset.defaultValues`.
-    /// `object(forKey:) as? Bool ?? false` distinguishes "unset" (→ opaque) from an explicit choice.
-    ///
-    /// - Note: Translucency exposes whatever is behind the menu; bar/text contrast over an arbitrary
-    ///   backdrop is not guaranteed (ADR-0022), which is why the opaque look stays the default.
-    static var popupTranslucentBackground: Bool {
-        get { defaults.object(forKey: Key.popupTranslucentBackground) as? Bool ?? false }
-        set { defaults.set(newValue, forKey: Key.popupTranslucentBackground) }
-    }
 
     /// The far-behind (green→blue) threshold interval (#224) — how big a surplus turns the behind side
     /// blue (`.off` = never blue; `.short`/`.medium`/`.long` = 1×/2×/3× the 1h(5h)/1d(7d) base). Stored

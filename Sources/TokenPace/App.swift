@@ -59,11 +59,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// stub actually running.
     private var quitDevTitle: String?
 
-    /// The opaque overlay inserted into the menu window's background view to make the *whole* dropdown
-    /// solid (issue #86). Weak: the menu window owns it, and it is torn down when the menu closes. Held
-    /// only so a re-open can clear a stale one defensively.
-    private weak var opaqueMenuBackdrop: NSView?
-
 
     /// Polls the ⌥ Option state while the dropdown is open, showing/hiding `troubleshootItem` when it
     /// changes (ADR-0020). A timer — not an event monitor — because NSMenu tracking runs a modal
@@ -231,7 +226,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popupVC.loadView()   // realise the view so it can be sized before the menu measures it
         popupVC.barStyle = PersistedConfig.barStyle   // apply the saved bar style from launch (#224)
         popupVC.showTicks = PersistedConfig.showTicks   // apply the saved tick-ruler choice from launch (#224)
-        popupVC.translucentBackground = PersistedConfig.popupTranslucentBackground   // saved translucency choice (#188)
         setPopupLayout(PopupLayout.make(
             from: nil, health: coldHealth, now: now, interval: PollingBackoff.defaultInterval))
 
@@ -395,13 +389,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Popup-only (#224): the tick ruler lives in `PopupBarView`; the VC's `showTicks` didSet
                 // rebuilds so each child bar picks up the new value. No menu-bar change.
                 self?.popupVC.showTicks = on
-            }
-            wc.onPopupTranslucentBackgroundChange = { [weak self] on in
-                // Popup-only (#188): the VC's `translucentBackground` didSet rebuilds the bar-section
-                // backdrop (skipping the opaque fill when on). The whole-menu overlay reads
-                // `PersistedConfig` afresh on each open (installOpaqueMenuBackdropIfNeeded), so no extra
-                // call is needed here; this updates the bar section live if the menu is open.
-                self?.popupVC.translucentBackground = on
             }
             wc.onFarBehindIntervalChange = { [weak self] _ in
                 // The green→blue threshold changes each bar's `behindMultiplier` (#224), which is baked
@@ -1414,49 +1401,14 @@ extension AppDelegate: NSMenuDelegate {
         }
         RunLoop.main.add(timer, forMode: .common)
         optionPollTimer = timer
-
-        // Make the WHOLE dropdown solid — including the native Settings/Quit items — not just our bar
-        // section. The menu window mounts after menuWillOpen, so defer to the next runloop turn (mirrors
-        // the ⌥-poll timing).
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated { self?.installOpaqueMenuBackdropIfNeeded() }
-        }
-    }
-
-    /// Make the entire dropdown opaque by inserting an opaque overlay into the menu window's background
-    /// view — covering the native Settings/Quit items that our own `PopupViewController` backdrop cannot
-    /// reach (issue #86).
-    ///
-    /// **Fragile — leans on `NSMenu`'s private view hierarchy.** Probed on macOS 15: the dropdown lives
-    /// in an `NSPopupMenuWindow` whose `contentView` is an `NSRootMenuWindowBackgroundView`; the window
-    /// is already `isOpaque`, and the see-through look is that background view's translucent system
-    /// material. We drop a `SolidBackdropView` (opaque, appearance-aware) as its **bottom-most** subview
-    /// (below the `NSMenuScrollView` that hosts the items), so the whole panel reads solid. If a future
-    /// macOS renames/reshapes this hierarchy the guard simply finds nothing and no-ops — the popup's own
-    /// backdrop still covers the bar section, so this degrades gracefully rather than breaking.
-    private func installOpaqueMenuBackdropIfNeeded() {
-        opaqueMenuBackdrop?.removeFromSuperview()
-        opaqueMenuBackdrop = nil
-        // Translucent mode (#188): leave the native menu vibrancy in place across the whole dropdown,
-        // including the native Settings/Quit items — do not cover it with an opaque overlay.
-        guard !PersistedConfig.popupTranslucentBackground else { return }
-        guard let bg = popupVC.view.window?.contentView else { return }
-        let overlay = SolidBackdropView(frame: bg.bounds)
-        overlay.autoresizingMask = [.width, .height]
-        bg.addSubview(overlay, positioned: .below, relativeTo: bg.subviews.first)
-        opaqueMenuBackdrop = overlay
     }
 
     /// Stop the poll and hide the Troubleshoot item again, so the next open starts clean (and no
-    /// timer leaks between openings). Also tear down the whole-dropdown opaque overlay.
+    /// timer leaks between openings).
     func menuDidClose(_ menu: NSMenu) {
         optionPollTimer?.invalidate()
         optionPollTimer = nil
         lastOptionHeld = true            // force the reset below to apply
         updateTroubleshootVisibility(false)
-        // Tear down the whole-dropdown opaque overlay (issue #86); the menu window is going away, but
-        // clear it explicitly so a re-open never reuses a stale one.
-        opaqueMenuBackdrop?.removeFromSuperview()
-        opaqueMenuBackdrop = nil
     }
 }

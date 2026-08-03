@@ -74,11 +74,6 @@ final class SettingsWindowController: NSWindowController {
         get { model.onShowTicksChange } set { model.onShowTicksChange = newValue }
     }
 
-    /// Called when the user toggles "Translucent system background" (#188), with the new state. Popup-only.
-    var onPopupTranslucentBackgroundChange: ((Bool) -> Void)? {
-        get { model.onPopupTranslucentBackgroundChange } set { model.onPopupTranslucentBackgroundChange = newValue }
-    }
-
     /// Called when the user changes the "Far behind pace interval" picker (#224), with the new interval.
     /// Governs the green→blue threshold on both surfaces.
     var onFarBehindIntervalChange: ((FarBehindInterval) -> Void)? {
