@@ -153,12 +153,20 @@ final class DevToolsWindowController: NSWindowController {
 
     // MARK: - Preview window
 
+    /// Whether the system is in dark mode — drives the preview window's Vibrant appearance choice.
+    private static var isDarkMode: Bool {
+        NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
+
     private func showPreviewWindow() {
         if previewWindow == nil {
-            // The preview is a plain window, not an NSMenu, so its popup backdrop must match the menu's
-            // on-screen colour itself (dark #212121) rather than the lighter `windowBackgroundColor` fill.
-            previewVC.matchesMenuBackground = true
+            // The preview is a plain window, not an NSMenu; its #212121 menu-matched backdrop comes from
+            // the `ThemedFillView` container in `buildPreviewContent`, not the popup itself.
             previewVC.loadView()
+            // Seed the bar presentation so the first frame matches the current settings (updatePreview
+            // keeps them in sync on every refresh thereafter).
+            previewVC.barStyle = PersistedConfig.barStyle
+            previewVC.showTicks = PersistedConfig.showTicks
             // Borderless: attached as a child of the tuner, it has no title bar / close button — it can't
             // be closed on its own and always travels with the tuner. Its own "Popup Preview" heading is
             // drawn inside the content instead.
@@ -173,6 +181,12 @@ final class DevToolsWindowController: NSWindowController {
             // behind them as square corners). The rounded, filled container provides the visible surface.
             win.isOpaque = false
             win.backgroundColor = .clear
+            // Match the real NSMenu popup's **Vibrant** appearance (not plain aqua/darkAqua): system label
+            // colours resolve differently under vibrancy — e.g. the popup's translucent grey track resolves
+            // to an opaque #323232 in VibrantDark vs a light white@0.17 in DarkAqua — so without this the
+            // preview's neutrals read noticeably lighter than the live menu. Diagnosed live: the menu window
+            // is `NSAppearanceNameVibrantDark`; the preview window defaulted to `DarkAqua`.
+            win.appearance = NSAppearance(named: Self.isDarkMode ? .vibrantDark : .vibrantLight)
             win.contentView = buildPreviewContent()
             previewWindow = win
         }
@@ -225,12 +239,15 @@ final class DevToolsWindowController: NSWindowController {
         plaqueDivider.translatesAutoresizingMaskIntoConstraints = false
 
         let container = ThemedFillView()
-        // Match the real NSMenu popup's on-screen colour (dark #212121), not the lighter fill a plain
-        // `windowBackgroundColor` renders here. Light already matches, so the dynamic colour only
-        // overrides dark. The hosted popup view uses the same colour via `matchesMenuBackground`.
+        // Flat `#212121` menu-matched backing (not `.behindWindow` vibrancy): a real `NSVisualEffectView`
+        // renders lighter here than the system NSMenu's on-screen colour, which pushed the popup's
+        // translucent content (greys/ticks/dimmed text) lighter than the live menu. Since the tuner's job
+        // is an accurate colour reference, we match the menu's flat tone exactly rather than show a
+        // translucency the real menu can't reproduce for its neutrals.
         container.fillColor = .popupMenuMatchedBackground
         container.borderColor = .popupMenuBorder   // hairline edge, like a real system menu window
         container.cornerRadius = Self.menuPopupCornerRadius(for: window)
+
         container.addSubview(plaque)
         container.addSubview(plaqueDivider)
         container.addSubview(previewVC.view)
@@ -280,6 +297,10 @@ final class DevToolsWindowController: NSWindowController {
     /// update dots so their `ColorRole`s track edits. No-op if not open.
     func updatePreview(_ layout: PopupLayout) {
         guard let preview = previewWindow, preview.isVisible else { return }
+        // Keep the bar presentation in sync so a Bar style / tick-ruler change re-renders the preview
+        // (each is a no-op didSet unless it actually changed).
+        previewVC.barStyle = PersistedConfig.barStyle
+        previewVC.showTicks = PersistedConfig.showTicks
         previewVC.layout = layout
         for (dot, role) in previewUpdateDots { dot.contentTintColor = ColorStore.shared.color(role) }
         // The container is Auto Layout; size the window to its fitting size (popup width + footer height).

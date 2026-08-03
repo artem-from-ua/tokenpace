@@ -39,9 +39,11 @@ struct AppearancePane: View {
                 }
             }
 
-            // Bar presentation style (#224) — a segmented control governing BOTH the menu-bar widget and
-            // the dropdown popup. Its own section (no header) because it spans both surfaces. Both modes
-            // show pacing by colour; "Pace & Time" additionally marks where you are in the window.
+            // Bar presentation style (#224) + far-behind (green→blue) threshold (#224) — both govern the
+            // pacing bars across BOTH surfaces, so they share one header-less section rather than sitting
+            // in two adjacent bordered cards. "Bar style": both modes show pacing by colour, "Pace & Time"
+            // also marks where you are in the window. "Far behind pace interval": how big a surplus turns
+            // the behind side blue.
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -61,10 +63,7 @@ struct AppearancePane: View {
                     SettingsHint(text: "*Mixed* keeps the compact menu-bar bar as *Pace* and shows "
                         + "*Pace & Time* in the dropdown.")
                 }
-            }
 
-            // Far-behind (green→blue) threshold (#224) — how big a surplus turns the behind side blue.
-            Section {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("Far behind pace interval")

@@ -18,6 +18,16 @@ let dropdownTextSize: CGFloat = NSFont.systemFontSize
 /// kept in sync with `StatusItemView` by mirroring the same sRGB values.
 final class PopupBarView: NSView {
 
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        // Layer-backed with a clear backing so `.clear`-composited cuts (the gaps flanking the coloured
+        // gap and around the marker) become genuinely transparent holes — the card plate shows through
+        // them — rather than painting black (which a non-layer-backed view would do). #188 follow-up.
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
     var bar: BarLayout? {
         didSet {
             guard bar != oldValue else { return }
@@ -155,13 +165,22 @@ final class PopupBarView: NSView {
         /// **half-way between** `tertiaryLabelColor` and the dimmest `quaternaryLabelColor` — dimmer than
         /// the menu bar's `barTrack` (`labelColor@0.22`) so the popup track recedes into the NSMenu
         /// material, but not as dark as full quaternary (#224). The menu-bar widget keeps its own
-        /// `barTrack` tone unchanged — only this popup surface is quieter. Computed (not a `static let`)
-        /// so it re-resolves in the current drawing appearance every draw (a `static let` would bake in
-        /// the first-access appearance). `blended` returns non-nil for these dynamic label colours in a
-        /// real drawing context; the `?? tertiary` fallback keeps it total.
-        static var monochromeGrey: NSColor {
-            NSColor.tertiaryLabelColor.blended(withFraction: 0.5, of: .quaternaryLabelColor)
-                ?? .tertiaryLabelColor
+        /// `barTrack` tone unchanged — only this popup surface is quieter.
+        ///
+        /// A **dynamic** `NSColor(name:)` whose blend is computed **inside**
+        /// `performAsCurrentDrawingAppearance`, so it re-resolves per appearance and flips light/dark —
+        /// exactly like ``PopupViewController/defaultDimmedLabel``. A plain `.blended(...)` (even from a
+        /// computed `var`) bakes in whatever appearance was current at the call site: under an NSMenu-hosted
+        /// view the drawing appearance is not reliably current when `draw()` reads it, so the light theme
+        /// rendered the dark tone (and vice-versa). `blended` returns non-nil for these dynamic label
+        /// colours in a real drawing context; the `?? tertiary` fallback keeps it total.
+        static let monochromeGrey = NSColor(name: nil) { appearance in
+            var mixed: NSColor = .tertiaryLabelColor
+            appearance.performAsCurrentDrawingAppearance {
+                mixed = NSColor.tertiaryLabelColor.blended(withFraction: 0.5, of: .quaternaryLabelColor)
+                    ?? .tertiaryLabelColor
+            }
+            return mixed
         }
     }
 
@@ -173,11 +192,9 @@ final class PopupBarView: NSView {
 
     /// The grey both bar base zones (`used` + future/unused tail) render in — the **popup-only** tone
     /// half-way between tertiary and quaternary label (quieter than the menu bar's `barTrack`), where
-    /// only the pacing gap + dot
-    /// carry colour. A **computed** accessor (not a `static let`), so it re-resolves the dynamic label
-    /// colour in the *current* drawing appearance every draw — a `static let` would bake in whatever
-    /// appearance was current at first access and render the
-    /// wrong tone after a theme flip (near-white on light). Menu-bar `drawBar` reads it live the same way.
+    /// only the pacing gap + dot carry colour. Backed by the **dynamic** `Palette.monochromeGrey`
+    /// provider, which resolves its blend per appearance (so it flips light/dark correctly). Menu-bar
+    /// `drawBar` reads it live the same way.
     static var monochromeGrey: NSColor { Palette.monochromeGrey }
 
     /// The exhausted-pacing red (`aheadColor`'s cap rung). Exposed so the popup can paint the **one**
@@ -203,25 +220,25 @@ final class PopupBarView: NSView {
         if idle {
             let idlePath = NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner)
             // Blocked idle (#158) → grey (no path to start); otherwise the "ready to start" blue.
-            (blocked ? Self.monochromeGrey : Palette.idleBlue).setFill()
-            idlePath.fill()
+            // Grey (blocked) is an already-translucent neutral — leave it; only the blue hue is tinted (#188).
+            if blocked {
+                Self.monochromeGrey.setFill()
+                idlePath.fill()
+            } else {
+                // The solid idle strip carries the same ambient glow as a pacing strip (#188).
+                let idleColor = Palette.idleBlue
+                withGlow(idleColor, radius: Self.idleGlowRadius, strength: Self.idleGlowStrength) {
+                    idleColor.setFill()
+                    idlePath.fill()
+                }
+            }
             drawTicks(in: rect, width: w)
             return
         }
 
         guard let l = bar else { return }
 
-        let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner)
-
-        // Whole-bar rounded grey track (drawn first; the gap paints over it). Both flanks of the gap —
-        // the used head and the future/unused tail — are this one tone, so they read identical. The track
-        // is drawn ONCE for the whole bar; the used head is NOT re-filled (a second fill would double the
-        // translucent labelColor@0.22 and darken the left flank — the menu-bar `drawBar` draws it the same).
-        Self.monochromeGrey.setFill()
-        path.fill()
-
-        NSGraphicsContext.saveGraphicsState()
-        path.addClip()
+        // Pacing-gap colour.
         let gapColor: NSColor
         if l.pacing == .ahead {
             gapColor = Self.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
@@ -230,69 +247,62 @@ final class PopupBarView: NSView {
             gapColor = isBaseLimit ? Self.behindColor(l) : Palette.gapGreen
         }
 
-        // Simple style (#224): a left-anchored ribbon whose LENGTH equals the pacing gap's width
-        // (`gapEnd - gapStart`) — the same amount of colour as Pace & Time, always anchored at the left
-        // edge — in the SAME pacing state colour, no time marker, with the divider where the ribbon meets
-        // the grey and the under-bar tick ruler kept. Mirror of `StatusItemView.drawBar`'s simple branch.
-        if !barStyle.popupShowsTimeMarker {
-            let ribbon = l.gapEnd - l.gapStart
-            fillZone(from: 0, to: ribbon, in: rect, width: w, color: gapColor)
-            // `quaternaryLabelColor` divider where the coloured ribbon meets the grey tail — flush against
-            // the ribbon's right edge, in the grey. Skipped when the ribbon fills the whole bar (no grey).
-            let sw = Metrics.indicatorStroke
-            if ribbon < 1 {
-                Palette.indicatorStroke.setFill()
-                let x = rect.minX + CGFloat(ribbon) * w
-                NSRect(x: x, y: rect.minY, width: sw, height: rect.height).fill()
+        // 1. Full-length grey track (rounded), drawn first as the base.
+        Self.monochromeGrey.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner).fill()
+
+        // 2. Coloured strip laid exactly over its span, both ends fully rounded (capsule). Pace & Time uses
+        //    the gap `gapStart..gapEnd`; Simple uses a left-anchored ribbon `0..(gapEnd-gapStart)`. A flush
+        //    end rounds identically to the grey bar's own cap, so it reads as one continuous rounded edge.
+        //    3. The strip carries the ambient glow.
+        let stripFrom = barStyle.popupShowsTimeMarker ? l.gapStart : 0
+        let stripTo = barStyle.popupShowsTimeMarker ? l.gapEnd : (l.gapEnd - l.gapStart)
+        let sx0 = rect.minX + CGFloat(stripFrom) * w
+        let sx1 = rect.minX + CGFloat(stripTo) * w
+        if sx1 > sx0 {
+            let capsule = rect.height / 2
+            let stripRect = NSRect(x: sx0, y: rect.minY, width: sx1 - sx0, height: rect.height)
+            let stripPath = NSBezierPath(roundedRect: stripRect, xRadius: capsule, yRadius: capsule)
+            withGlow(gapColor, radius: Self.gapGlowRadius, strength: Self.gapGlowStrength) {
+                gapColor.setFill()
+                stripPath.fill()
             }
-            NSGraphicsContext.restoreGraphicsState()
-            drawTicks(in: rect, width: w)
-            return
         }
 
-        fillZone(from: l.gapStart, to: l.gapEnd, in: rect, width: w, color: gapColor)
-        // `quaternaryLabelColor` dividers wherever the coloured gap meets the grey — on the used-head side
-        // (`gapStart`) and the future-tail side (`gapEnd`), matching the marker's intersection outline. Each
-        // side is skipped when the gap reaches that end of the bar (no grey there to divide from). The
-        // strokes sit in the grey, flush against the gap edge, so they don't eat into the colour.
-        let sw = Metrics.indicatorStroke
-        Palette.indicatorStroke.setFill()   // quaternaryLabelColor (tunable via .indicatorRing)
-        if l.gapStart > 0 {
-            let x = rect.minX + CGFloat(l.gapStart) * w - sw
-            NSRect(x: x, y: rect.minY, width: sw, height: rect.height).fill()
-        }
-        if l.gapEnd < 1 {
-            let x = rect.minX + CGFloat(l.gapEnd) * w
-            NSRect(x: x, y: rect.minY, width: sw, height: rect.height).fill()
-        }
-        NSGraphicsContext.restoreGraphicsState()
-
-        // Tick ruler: `subdivisions - 1` interior marks at k/subdivisions, drawn below the bar and
-        // *under* the indicator marker in z-order (so the marker always reads as the primary mark).
         drawTicks(in: rect, width: w)
 
-        // Time-indicator marker at timeFraction, coloured by the raw usage-vs-time relationship.
-        // A slim, lightly-rounded vertical bar rather than a dot — a crisp position tick.
-        let cx = rect.minX + CGFloat(l.timeFraction) * w
+        // Simple style (#224): no time marker — the ribbon above already conveys pacing by colour + length.
+        if !barStyle.popupShowsTimeMarker { return }
+
+        // 4. Time-indicator marker at `timeFraction`: a slim rounded vertical bar filled with the pacing
+        //    colour, with a border in the grey-track tone (blended 85 %) that separates it from the strip —
+        //    replacing the old transparent slivers. 5. The marker carries a stronger ambient glow.
+        // Pixel-snap the marker's centre x so its vertical edges land on whole pixels — a fractional
+        // `timeFraction * w` otherwise smears the thin border across two columns (the "crooked outline").
+        let cx = (rect.minX + CGFloat(l.timeFraction) * w).rounded()
         let cy = rect.midY
         let mw = Metrics.indicatorWidth
         let mh = Metrics.indicatorHeight
         let markerRect = NSRect(x: cx - mw / 2, y: cy - mh / 2, width: mw, height: mh)
         let marker = NSBezierPath(
             roundedRect: markerRect, xRadius: Metrics.indicatorCorner, yRadius: Metrics.indicatorCorner)
-        indicatorColor(l).setFill()
-        marker.fill()
-        // Edge outline only where the marker overlaps the bar (`quaternaryLabelColor`): two short vertical
-        // strokes flanking the marker's left/right edges, clipped to the bar's height — the ends that stand
-        // proud above/below the bar carry no outline. The strokes sit **outside** the marker fill (not on
-        // top of it), so they read as an outline, not an inset. Matches `StatusItemView.strokeMarkerEdges`.
-        let y0 = max(markerRect.minY, rect.minY)
-        let y1 = min(markerRect.maxY, rect.maxY)
-        if y1 > y0 {
-            Palette.indicatorStroke.setFill()   // quaternaryLabelColor (tunable via .indicatorRing)
-            for x in [markerRect.minX - sw, markerRect.maxX] {
-                NSRect(x: x, y: y0, width: sw, height: y1 - y0).fill()
-            }
+        let markerColor = indicatorColor(l)
+        // Border as a filled frame (not a centred stroke, which straddles the edge and reads crooked on a
+        // 6-pt marker): fill the outer rounded rect in the grey-track-toned border colour, then fill an
+        // inset rounded rect in the marker colour on top — leaving a crisp `bw`-wide even border. The whole
+        // thing carries the ambient glow.
+        let bw: CGFloat = 1
+        let border = (Self.monochromeGrey.blended(withFraction: 0.4, of: markerColor) ?? Self.monochromeGrey)
+            .withAlphaComponent(0.9)
+        let innerRect = markerRect.insetBy(dx: bw, dy: bw)
+        let inner = NSBezierPath(roundedRect: innerRect,
+                                 xRadius: max(0, Metrics.indicatorCorner - bw),
+                                 yRadius: max(0, Metrics.indicatorCorner - bw))
+        withGlow(markerColor, radius: Self.markerGlowRadius, strength: Self.markerGlowStrength) {
+            border.setFill()
+            marker.fill()
+            markerColor.setFill()
+            inner.fill()
         }
     }
 
@@ -369,43 +379,72 @@ final class PopupBarView: NSView {
             ? ColorStore.shared.color(.paceBlue) : green
     }
 
-    private func fillZone(from: Double, to: Double, in rect: NSRect, width: CGFloat, color: NSColor) {
-        let x0 = rect.minX + CGFloat(from) * width
-        let x1 = rect.minX + CGFloat(to) * width
-        guard x1 > x0 else { return }
-        color.setFill()
-        NSRect(x: x0, y: rect.minY, width: x1 - x0, height: rect.height).fill()
+    /// Glow radii (#188 follow-up): a soft coloured halo (ambient) behind the coloured pacing strip, the
+    /// time marker, and the service-status dots so they lift off the card.
+    /// Bar strip glow: a large, soft, low-intensity halo.
+    private static let gapGlowRadius: CGFloat = 21
+    private static let gapGlowStrength: CGFloat = 0.25
+    /// Idle-bar glow: half the pacing-strip radius (the idle strip spans the whole bar, so a big halo
+    /// reads as too much), twice the strength.
+    private static let idleGlowRadius: CGFloat = 10.5
+    private static let idleGlowStrength: CGFloat = 0.5
+    /// Marker glow: a touch stronger than the bar.
+    private static let markerGlowRadius: CGFloat = 10
+    private static let markerGlowStrength: CGFloat = 0.7
+
+    /// Run `body` with a coloured drop-shadow (blur = `radius`, no offset) set as the current shadow, so
+    /// whatever `body` fills gets a soft same-colour halo. Wrapped in a graphics-state save/restore so the
+    /// shadow does not leak into later drawing.
+    private func withGlow(_ color: NSColor, radius: CGFloat, strength: CGFloat, _ body: () -> Void) {
+        guard radius > 0, strength > 0 else { body(); return }   // glow off — draw plainly, no shadow
+        NSGraphicsContext.saveGraphicsState()
+        let glow = NSShadow()
+        glow.shadowColor = color.withAlphaComponent(min(1, strength))
+        glow.shadowBlurRadius = radius
+        glow.shadowOffset = .zero
+        glow.set()
+        body()
+        NSGraphicsContext.restoreGraphicsState()
     }
 }
 
-// MARK: - SolidBackdropView
+// MARK: - CardBackdropView
 
-/// A plain opaque fill for the popup's solid backdrop. Layer-backed and drawn via `updateLayer`, so
-/// AppKit re-runs it on theme change and the fill CGColor re-resolves (a raw `layer.backgroundColor`
-/// set once would not track light/dark).
-final class SolidBackdropView: NSView {
-    /// Preview-only: fill with ``NSColor/popupMenuMatchedBackground`` (dark #212121) instead of
-    /// `windowBackgroundColor`. See ``PopupViewController/matchesMenuBackground``.
-    var matchesMenuBackground = false { didSet { needsDisplay = true } }
-
+/// The Control-Center-style rounded "plate" behind the whole Claude section (#188). An inset, rounded
+/// plate that floats above the popup background — the native `NSMenu` vibrancy material shows as a margin
+/// around it (the popup is always translucent).
+///
+/// A flat, layer-backed fill using the dynamic `underPageBackgroundColor` system colour, which resolves to
+/// a raised-surface tone in each theme automatically (dark ≈ #282828, light ≈ a mid grey) — so it adapts
+/// to light/dark with no per-theme constants. (A `.behindWindow` `NSVisualEffectView` was tried first for
+/// a wallpaper-tone "vibe", but inside the `NSMenu` it degrades to a flat control colour and shows no tint,
+/// so a predictable flat fill is used instead.) Layer-backed with `updateLayer` (like `PillView`) so the
+/// fill + border CGColors re-resolve on a theme flip; corner radius is set in both `updateLayer` and
+/// `layout` so it survives resize.
+final class CardBackdropView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
     override var wantsUpdateLayer: Bool { true }
     override func updateLayer() {
-        // The system panel background, resolved in this view's own appearance so it tracks light/dark
-        // and matches the surrounding menu chrome.
-        //
-        // Deliberately **not** a `ColorRole` (audit #206): in the shipped popup the visible card surface
-        // is painted by the `NSMenu`'s own vibrancy material (dark ≈ #212121), and this opaque backdrop
-        // sits *underneath* it purely to keep the panel from showing through — it is never the pixel the
-        // eye sees. The real background is system-owned and cannot be re-tinted from our side, so exposing
-        // a tuner slider for it would move nothing in the live menu. `popupMenuMatchedBackground` exists
-        // only to reproduce that #212121 in the tuner's borderless *preview* window (`matchesMenuBackground`).
-        let fill: NSColor = matchesMenuBackground ? .popupMenuMatchedBackground : .windowBackgroundColor
-        layer?.backgroundColor = fill.cgColor
+        layer?.cornerRadius = PopupViewController.cardCornerRadius
+        layer?.borderWidth = PopupViewController.cardBorderWidth
+        layer?.backgroundColor = NSColor.cardPlateFill.cgColor
+        layer?.borderColor = NSColor.cardPlateBorder.cgColor
+        // Soft drop shadow so the plate reads as raised above the popup background (#188). `masksToBounds`
+        // stays false (default) so the shadow is visible outside the rounded fill.
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.35
+        layer?.shadowRadius = 8
+        layer?.shadowOffset = CGSize(width: 0, height: -2)
+    }
+
+    override func layout() {
+        super.layout()
+        layer?.cornerRadius = PopupViewController.cardCornerRadius
     }
 }
 
@@ -441,6 +480,26 @@ extension NSColor {
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         return isDark ? NSColor(srgbRed: 0x4D/255, green: 0x4D/255, blue: 0x4D/255, alpha: 1)
                       : NSColor(srgbRed: 0xC4/255, green: 0xC4/255, blue: 0xC4/255, alpha: 1)
+    }
+
+    /// Fill of the Control-Center-style section card (`CardBackdropView`, #188). `controlBackgroundColor`
+    /// (light #FFFFFF, dark #1E1E1E) at **partial alpha**, so the `NSMenu` vibrancy material below the card
+    /// shows through and lends the plate a subtle tone, while our chosen colour sits on top. (True
+    /// wallpaper `.behindWindow` tint is impossible inside an NSMenu — the menu window is system-opaque —
+    /// so this translucency over the menu's own material is the closest achievable "vibe".) `cardPlateAlpha`
+    /// is the single knob for how much tone bleeds in.
+    static var cardPlateFill: NSColor { NSColor.controlBackgroundColor.withAlphaComponent(cardPlateAlpha) }
+
+    /// How opaque the section-card fill is; the remainder lets the layer below (menu material when #188 is
+    /// on) tint the plate. 1.0 = fully our colour (no bleed); lower = more tone from below. Tunable.
+    static let cardPlateAlpha: CGFloat = 0.85
+
+    /// Hairline edge of the section card (`CardBackdropView`). A subtle border that reads on both the
+    /// opaque and translucent backgrounds; dynamic so it tracks the theme.
+    static let cardPlateBorder = NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark ? NSColor(white: 1, alpha: 0.10)
+                      : NSColor(white: 0, alpha: 0.08)
     }
 }
 
@@ -527,6 +586,39 @@ final class PillView: NSView {
     }
 }
 
+// MARK: - GlowDotView
+
+/// A service-status colour dot with an ambient glow (#188), as a **layer-backed subview** rather than a
+/// baked text-attachment image — so both the fill and the coloured glow re-resolve on a light/dark theme
+/// flip (a baked image would freeze the appearance it was rendered in). `fill` is a closure so the dynamic
+/// `.system*` colour re-resolves per appearance in `updateLayer` (the standard layer-backed dark/light
+/// trap); the shadow colour tracks it. The dot is a `diameter`-wide circle centred in the view; the view
+/// itself is sized to `diameter` (the glow spills outside its bounds via the layer shadow, which is not
+/// clipped).
+final class GlowDotView: NSView {
+    var fill: () -> NSColor = { .systemGray }
+    var glowRadius: CGFloat = 5
+    var glowStrength: CGFloat = 1.0
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.cornerRadius = bounds.height / 2
+        layer?.masksToBounds = false
+        let c = fill()
+        layer?.backgroundColor = c.cgColor
+        layer?.shadowColor = c.withAlphaComponent(min(1, glowStrength)).cgColor
+        layer?.shadowRadius = glowRadius
+        layer?.shadowOpacity = 1
+        layer?.shadowOffset = .zero
+    }
+
+    override func layout() {
+        super.layout()
+        layer?.cornerRadius = bounds.height / 2
+    }
+}
+
 // MARK: - PopupViewController
 
 /// The click-to-open detail popup's content — the thin AppKit shell of issue #11, styled after
@@ -578,38 +670,61 @@ final class PopupViewController: NSViewController {
     }
 
     private enum Metrics {
-        static let width: CGFloat = 280
-        static let hPadding: CGFloat = 14
+        /// Popup width. Sized so the inner content column stays 252 pt once the Control-Center-style card
+        /// adds its outer margin (308 − 2·14 card inset − 2·14 inner = 252).
+        static let width: CGFloat = 312
+        static let hPadding: CGFloat = 16
+        /// Outer margin between the popup edge and the rounded "card". Matched to the horizontal inset of
+        /// the native menu separator so the card is exactly as wide as the divider between the menu items
+        /// below it (the Control-Center float gap; the menu material shows in this strip around the plate).
+        static let cardInset: CGFloat = 14
+        /// Top outer margin. Smaller than `cardInset` because `NSMenu` already adds its own vertical pad
+        /// above our hosted item view, so a full `cardInset` on top would read as a larger gap than the
+        /// sides. Trimmed so the visible top gap looks balanced against the sides.
+        static let cardTopInset: CGFloat = 10
+        /// Bottom outer margin — trimmed below `cardInset` so the gap between the card and the native
+        /// "Settings…" item beneath it is tighter (NSMenu adds its own pad there too).
+        static let cardBottomInset: CGFloat = 4
+        /// Corner radius of the section card — matches Control Center's ~10 pt rounded plate.
+        static let cardCornerRadius: CGFloat = 10
+        /// Hairline width of the card's subtle edge.
+        static let cardBorderWidth: CGFloat = 0.5
         static let vPadding: CGFloat = 10
-        /// Top inset — a touch tighter than `vPadding` so the content sits closer to the top edge
-        /// without the extra strip of empty background above the "Claude Code" line, but not cramped.
-        static let topPadding: CGFloat = 7
-        /// Bottom inset — tighter than `vPadding` so the last bar sits close to the menu's separator
-        /// below it (the section already ends there; a full `vPadding` reads as too much air).
-        static let bottomPadding: CGFloat = 3
+        /// Top **inner** padding — space between the card's top edge and the "Claude" header. Matched to
+        /// `hPadding` so the gap above the header equals the gap from the card's left edge to it.
+        static let topPadding: CGFloat = 16
+        /// Bottom **inner** padding — space between the last bar's tick ruler and the card's bottom edge.
+        /// Roomier now that the content sits on its own card (a tight 3 pt left the ticks crowding the
+        /// rounded edge).
+        static let bottomPadding: CGFloat = 12
         static let rowSpacing: CGFloat = 3
         static let sectionSpacing: CGFloat = 14
         /// Gap **between limit blocks** (after each section's bar) — a touch tighter than
         /// `sectionSpacing` so the limit list reads as a group without the header's larger breathing room.
         static let limitSpacing: CGFloat = 10
         static let textSize: CGFloat = dropdownTextSize
+        /// Diameter of the service-status glow dot (#188), the gap between it and the component name, and
+        /// the extra leading inset that pushes the dot in from the card's left edge.
+        static let statusDotDiameter: CGFloat = 9
+        static let statusDotGap: CGFloat = 10
+        static let statusRowLeadingInset: CGFloat = 15
+        /// The inner content column width for fixed-width rows/labels — the popup width minus the card's
+        /// outer inset on both sides minus the inner horizontal padding on both sides. Held constant at
+        /// 252 pt (296 − 2·8 − 2·14) so bar/label wrapping is identical to before the card was added.
+        static let contentWidth: CGFloat = width - 2 * cardInset - 2 * hPadding
     }
 
     private let stack = NSStackView()
 
-    /// The solid opaque backdrop behind the content (below `stack`), so nothing shows through the popup.
-    /// Built once by ``rebuildBackdrop()`` on load; it re-resolves its own fill on theme change.
-    private var backdropView: NSView?
+    /// Corner radius / border width of the section card, exposed for `CardBackdropView` (which lives
+    /// outside this type and cannot read the private `Metrics`).
+    static var cardCornerRadius: CGFloat { Metrics.cardCornerRadius }
+    static var cardBorderWidth: CGFloat { Metrics.cardBorderWidth }
 
-    /// Preview-only (#185 colour tuner): when `true`, the opaque backdrop fills with
-    /// ``NSColor/popupMenuMatchedBackground`` instead of `windowBackgroundColor`. The real popup lives
-    /// inside an `NSMenu`, whose vibrancy material paints the visible surface (#212121 in dark) — the
-    /// opaque `windowBackgroundColor` backdrop sits underneath and is never seen. The preview window has
-    /// no such material, so it would show the raw `windowBackgroundColor`, which renders visibly lighter.
-    /// Matching the menu colour here brings the preview backdrop to #212121. Light is already an exact
-    /// match, so ``NSColor/popupMenuMatchedBackground`` only overrides the dark branch. Default `false`
-    /// keeps the real popup untouched.
-    var matchesMenuBackground = false
+    /// The Control-Center-style rounded plate behind the whole Claude section (#188). Created once in
+    /// `loadView`, sits below `stack`, inset from the popup edge. The `NSMenu` vibrancy shows through the
+    /// margin around it; the popup has no opaque backdrop of its own (always translucent).
+    private var cardView: CardBackdropView?
 
     /// The bold header of the popup's first section — "Claude" covers the update-cadence line and the
     /// per-component service status rows beneath it (see `rebuild`).
@@ -671,39 +786,31 @@ final class PopupViewController: NSViewController {
         stack.alignment = .leading
         stack.spacing = Metrics.rowSpacing
         stack.translatesAutoresizingMaskIntoConstraints = false
+
+        // Control-Center-style card: inset from the popup edge, with `stack` pinned inside it (inner
+        // padding). Added before `stack` so it sits below the content; the menu vibrancy shows around it.
+        let card = CardBackdropView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(card)
         container.addSubview(stack)
+        cardView = card
+
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.topPadding),
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.hPadding),
-            container.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: Metrics.hPadding),
-            container.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: Metrics.bottomPadding),
+            // Card inset from the container. Top uses the trimmed `cardTopInset` to offset NSMenu's own
+            // vertical padding above our item view, so the visible top gap matches the sides.
+            card.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.cardTopInset),
+            card.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Metrics.cardInset),
+            container.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: Metrics.cardInset),
+            container.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: Metrics.cardBottomInset),
+            // Content pinned inside the card with the existing inner padding.
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: Metrics.topPadding),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Metrics.hPadding),
+            card.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: Metrics.hPadding),
+            card.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: Metrics.bottomPadding),
             container.widthAnchor.constraint(equalToConstant: Metrics.width),
         ])
         self.view = container
-        rebuildBackdrop()
         rebuild()
-    }
-
-    /// (Re)build the popup's solid opaque backdrop, inserting it as the **bottom-most** subview (below
-    /// `stack`) pinned to every container edge, so nothing shows through. Called on load and on a dev
-    /// theme change (so the fresh `SolidBackdropView` re-resolves `windowBackgroundColor`).
-    func rebuildBackdrop() {
-        guard isViewLoaded else { return }
-        backdropView?.removeFromSuperview()
-        backdropView = nil
-
-        let new = SolidBackdropView()   // self-updates its fill on theme change (see updateLayer)
-        new.matchesMenuBackground = matchesMenuBackground   // preview-only #2C2C2C match (see the flag)
-        new.translatesAutoresizingMaskIntoConstraints = false
-        // Bottom-most so the stack (and its bars/labels) draw on top of it.
-        view.addSubview(new, positioned: .below, relativeTo: stack)
-        NSLayoutConstraint.activate([
-            new.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            new.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            new.topAnchor.constraint(equalTo: view.topAnchor),
-            new.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-        ])
-        backdropView = new
     }
 
     // MARK: Rendering
@@ -838,7 +945,7 @@ final class PopupViewController: NSViewController {
         addTitleStatusLine(
             title: Self.extraUsageTitle,
             status: Self.creditsStatusText(bar),
-            badge: credits.inUse ? Self.makeInUsePill() : nil)
+            badge: credits.inUse ? makeInUsePill() : nil)
         addDetailLine(
             used: Self.creditsAmountText(spent: credits.spent, limit: limit),
             reset: credits.resetLine ?? "resetting…",
@@ -879,17 +986,17 @@ final class PopupViewController: NSViewController {
     /// covering an exhausted plan limit (`CreditsRow.inUse`). A small rounded, layer-backed capsule in
     /// the exhausted **red** (`PopupBarView.gapRed`, #224 — was accent blue) with white text, so it reads
     /// as a warning that a limit is spent onto paid credit. Sizing comes from the text + insets.
-    private static func makeInUsePill() -> NSView {
-        makePill(text: inUseBadgeText, fill: { PopupBarView.gapRed })
+    private func makeInUsePill() -> NSView {
+        Self.makePill(text: Self.inUseBadgeText, fill: { PopupBarView.gapRed })
     }
 
     /// The blocking-reset badge (#158): a red capsule carrying the reset countdown (e.g. "4d"), shown
     /// flush-right on the one row whose reset actually unblocks work. Same pill shape as the "in use"
     /// badge, filled with the exhausted red (`PopupBarView.gapRed`) so it reads as the blocker. A
     /// hover tooltip ("Effective blocker") explains why this one reset is highlighted.
-    private static func makeResetBadge(text: String) -> NSView {
-        let pill = makePill(text: text, fill: { PopupBarView.gapRed })
-        pill.toolTip = blockingResetHint
+    private func makeResetBadge(text: String) -> NSView {
+        let pill = Self.makePill(text: text, fill: { PopupBarView.gapRed })
+        pill.toolTip = Self.blockingResetHint
         return pill
     }
 
@@ -945,7 +1052,7 @@ final class PopupViewController: NSViewController {
         // the single reset that will actually unblock — every other reset stays the plain dimmed label,
         // even if its own limit is also exhausted.
         if resetIsBlocking {
-            return addSplitRow(leadingView: usedLabel, rightView: Self.makeResetBadge(text: reset))
+            return addSplitRow(leadingView: usedLabel, rightView: makeResetBadge(text: reset))
         }
         let resetLabel = NSTextField(labelWithString: reset)
         resetLabel.font = font
@@ -993,7 +1100,7 @@ final class PopupViewController: NSViewController {
         row.orientation = .horizontal
         row.distribution = .equalSpacing
         row.translatesAutoresizingMaskIntoConstraints = false
-        row.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.hPadding).isActive = true
+        row.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
         stack.addArrangedSubview(row)
         return row
     }
@@ -1012,7 +1119,7 @@ final class PopupViewController: NSViewController {
         label.textColor = secondary ? Self.dimmedLabelColor : ColorStore.shared.color(.label)
         label.lineBreakMode = .byWordWrapping
         label.translatesAutoresizingMaskIntoConstraints = false
-        let contentWidth = Metrics.width - 2 * Metrics.hPadding
+        let contentWidth = Metrics.contentWidth
         label.preferredMaxLayoutWidth = contentWidth
         label.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
         stack.addArrangedSubview(label)
@@ -1069,7 +1176,7 @@ final class PopupViewController: NSViewController {
         view.barStyle = barStyle   // pacing (gap+marker) vs simple (left-anchored ribbon) — #224
         view.showTicks = showTicks   // under-bar tick ruler on/off — #224
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.widthAnchor.constraint(equalToConstant: Metrics.width - 2 * Metrics.hPadding).isActive = true
+        view.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
         view.heightAnchor.constraint(equalToConstant: PopupBarView.viewHeight).isActive = true
         stack.addArrangedSubview(view)
         // Between-section gap after every bar except the last (the last sits above the menu separator).
@@ -1089,20 +1196,29 @@ final class PopupViewController: NSViewController {
     private func addServiceStatusRow(label: String, status: ServiceStatus) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
 
-        // Leading half: the colour dot (#130, tinted by status so rows align with the update menu item
-        // and the menu-bar dot) + the component's display label (e.g. "API:"). No status word here — it
-        // is the trailing half, so every status word right-aligns into one column.
-        let leading = NSMutableAttributedString()
-        if let attachment = Self.dotAttachment(
-            color: Self.dotColor(status),
-            accessibility: status == .operational ? "operational" : "issue") {
-            leading.append(NSAttributedString(attachment: attachment))
-            leading.append(NSAttributedString(string: "  "))
-        }
-        leading.append(NSAttributedString(string: label, attributes: [
-            .font: font, .foregroundColor: ColorStore.shared.color(.label),
-        ]))
-        let leadingLabel = StatusLineLabel(labelWithAttributedString: leading)
+        // Leading half: the colour dot (#130) as a glowing layer-backed subview (#188 — re-resolves on a
+        // theme flip, unlike a baked image) + the component's display label (e.g. "API"). No status word
+        // here — it is the trailing half, so every status word right-aligns into one column.
+        let dot = GlowDotView()
+        let dotStatus = status
+        dot.fill = { Self.dotColor(dotStatus) }
+        dot.glowRadius = Self.dotGlowRadius
+        dot.glowStrength = Self.dotGlowStrength
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.toolTip = status == .operational ? "operational" : "issue"
+        NSLayoutConstraint.activate([
+            dot.widthAnchor.constraint(equalToConstant: Metrics.statusDotDiameter),
+            dot.heightAnchor.constraint(equalToConstant: Metrics.statusDotDiameter),
+        ])
+        let nameLabel = NSTextField(labelWithString: label)
+        nameLabel.font = font
+        nameLabel.textColor = ColorStore.shared.color(.label)
+        let leadingLabel = NSStackView(views: [dot, nameLabel])
+        leadingLabel.orientation = .horizontal
+        leadingLabel.alignment = .centerY
+        leadingLabel.spacing = Metrics.statusDotGap
+        // Push the dot in from the card's left edge (#188).
+        leadingLabel.edgeInsets = NSEdgeInsets(top: 0, left: Metrics.statusRowLeadingInset, bottom: 0, right: 0)
 
         // Trailing half: the status word, pinned flush-right. Operational → plain dimmed text (no link);
         // otherwise → underlined link colour, opened on click by StatusLineLabel over the word's range.
@@ -1163,6 +1279,10 @@ final class PopupViewController: NSViewController {
         attachment.bounds = CGRect(x: 0, y: rise, width: symbol.size.width, height: dotHeight)
         return attachment
     }
+
+    /// Ambient-glow parameters for the popup service-status dots (#188 — `GlowDotView`).
+    static let dotGlowRadius: CGFloat = 5
+    static let dotGlowStrength: CGFloat = 0.75
 
     /// The human status word shown after the component name. Exhaustive, no `default`, so a new
     /// `ServiceStatus` case breaks the build until consciously worded (like `warningTitle`).

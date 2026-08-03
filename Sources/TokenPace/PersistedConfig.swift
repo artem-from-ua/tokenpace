@@ -351,6 +351,7 @@ enum PersistedConfig {
         set { defaults.set(newValue, forKey: Key.showTicks) }
     }
 
+
     /// The far-behind (green→blue) threshold interval (#224) — how big a surplus turns the behind side
     /// blue (`.off` = never blue; `.short`/`.medium`/`.long` = 1×/2×/3× the 1h(5h)/1d(7d) base). Stored
     /// as the raw `FarBehindInterval` string; an absent key or an unrecognised value falls back to the
