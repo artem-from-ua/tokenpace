@@ -191,6 +191,29 @@ GlyphOnly : ⚠️ only
 
 ![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/VP4nJiH034NxEONBBB0I4X95XD0k3NGh4I4Ae9XDd6IaYRCQEqMEG4LFHSCTECzUW2lW91iIXA0QZVs-vV-zOh51cieRSU8HxjWM22LQBoL86P3BscSCKONKmDQ6XNauUeBbyX9kUgY56BnbIPeqHMO8c2A96PiTc8ZLoJ7arlac86onSCIF57K5HqNYA4LWb8KPq4vqRmDXDgdMkjR--HtEJg5ofEB2jxjodGlgIWUuqrrtvGtvzhVqV9IMBiCh6tXGm-OMKZK9VHJpMPD37jpbZOTTxVripx-PQPF_kQcZyV89K0szDpFczhCCqSMGmRVj6FQlRvyVBt3Se_eGMhsSw34qLJEFv43M-ZChf4ml_mK0)
 
+## Sessions awaiting input (#233, ADR-0066)
+
+Окреме джерело даних, **незалежне від usage-полу**: лічильник локальних сесій Claude Code, що
+очікують вводу користувача («Needs input» у FleetView). Читається не з API, а з файлів стану, які
+Claude Code пише сам:
+
+```
+awaiting = ~/.claude/sessions/<pid>.json  .status == "waiting"
+        OR ~/.claude/jobs/<jobId>/state.json .needs != null / .tempo == "blocked"
+```
+
+- **`AwaitingInputScanner`** (`TokenPaceKit`, pure, stateless) — читає ці файли (без `JSONDecoder`,
+  таргетовані regex), джойнить лише по живих сесіях, повертає `Int`. ~0.18 ms/скан.
+- **`AwaitingInputWatcher`** (shell) — event-driven через **FSEvents** на каталогах `sessions/` +
+  `jobs/` (не на файлах — набір сесій змінний), + рідкий safety-poll (~45 с). Викликає `scan()` лише
+  на реальні зміни; колбек у shell спрацьовує тільки коли лічильник змінився.
+- **Рендер** — count графтиться на готові layout'и (`MenuBarLayout.withAwaitingInput`,
+  `PopupLayout.withAwaitingInput`) у `render()`, поза usage-`make`. Menu bar: іконка `hand.raised`
+  (trailing, без `×N`); popup: `Claude ✋ ×N` праворуч від бренду (`×N` лише при N≥2). Opt-in
+  (Settings → General, дефолт OFF); розміщення — Settings → Appearance.
+
+Повний дизайн каденції/кешу/логування — [awaiting-input-refresh.md](../../design/awaiting-input-refresh.md).
+
 ## Компоненти потоку даних
 
 | Компонент | Відповідальність |

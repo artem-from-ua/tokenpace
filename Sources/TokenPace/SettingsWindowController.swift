@@ -111,6 +111,16 @@ final class SettingsWindowController: NSWindowController {
         get { model.onPausePollingChange } set { model.onPausePollingChange = newValue }
     }
 
+    /// Called when the awaiting-input master toggle flips (#233) — start/stop the watcher + re-render.
+    var onAwaitingInputEnabledChange: ((Bool) -> Void)? {
+        get { model.onAwaitingInputEnabledChange } set { model.onAwaitingInputEnabledChange = newValue }
+    }
+
+    /// Called when an awaiting-input appearance option changes (#233) — re-render only.
+    var onAwaitingInputAppearanceChange: (() -> Void)? {
+        get { model.onAwaitingInputAppearanceChange } set { model.onAwaitingInputAppearanceChange = newValue }
+    }
+
     /// Called when the user clicks "Archive now" (#110).
     var onArchiveNow: (() -> Void)? {
         get { model.onArchiveNow } set { model.onArchiveNow = newValue }

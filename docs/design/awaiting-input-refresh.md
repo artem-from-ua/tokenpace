@@ -1,8 +1,8 @@
-# Design: awaiting-input refresh pipeline (poll + FSEvents + cache)
+# Design: awaiting-input refresh pipeline (FSEvents + safety poll)
 
 > Companion to [ADR-0066](../adr/0066-detect-sessions-awaiting-input.md). ADR-0066 fixes *what* we
-> read and *why*; this note fixes *how* the count stays fresh — the interaction of FSEvents, a rare
-> safety poll, and the mtime cache — before the shell code is written.
+> read and *why*; this note fixes *how* the count stays fresh — the interaction of FSEvents and a
+> rare safety poll over a stateless scanner — plus the indicator's icon choice.
 
 ## Goal
 
@@ -211,8 +211,25 @@ the logs unless the awaiting count changes or something breaks.
 
 ## Test seams
 
-- Core `scan()` + cache: covered (`AwaitingInputScannerTests`, fixture tree, mtime rewrite, vanish).
-- Debounce/should-render policy (if extracted to Kit): unit-testable on synthetic trigger sequences,
-  same shape as `LivePollSchedulerTests`.
+- Core stateless `scan()`: covered (`AwaitingInputScannerTests`, fixture tree, re-scan reflects
+  rewrite / vanished session, idle-rescue via `state.json`, missing-`state.json` fallback).
 - The FSEvents wrapper and gate are shell glue → verified live via the stub (`TOKENPACE_AWAITING`)
   and by driving a real Claude session, per `docs/guides/ui-verification.md`.
+
+## Icon choice
+
+The indicator uses the SF Symbol **`hand.raised`** — a session "raising its hand" to ask for your
+attention/reply, which maps cleanly onto the awaiting-input meaning and stays legible at menu-bar
+size. Chosen from these candidates (rejected ones kept for the record):
+
+| Symbol | Reading | Verdict |
+| --- | --- | --- |
+| **`hand.raised`** | raised hand — wants your attention | **chosen** — precise, clean shape, scales well |
+| `questionmark.bubble` | a question posed to you (permission/approve ≈ a question) | strong runner-up |
+| `ellipsis.bubble` | a conversation paused, waiting on you | good, a touch generic |
+| `bell.badge` | a notification waiting | familiar, but the badge dot muddies at small sizes |
+| `exclamationmark.bubble` | a message needing reply | reads more like "error/alert" than "waiting" |
+| `person.badge.clock` | someone waiting on a timer | too detailed, doesn't scale to ~14 px |
+| `hourglass` / `pause.circle` | waiting / paused | reads as "busy/paused", not "waiting for *you*" |
+| `figure.wave` | waving for attention | playful; detail lost when small |
+| `cursorarrow.rays` | needs your click | noisy at small sizes |

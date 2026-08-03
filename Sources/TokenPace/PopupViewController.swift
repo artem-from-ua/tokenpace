@@ -834,10 +834,28 @@ final class PopupViewController: NSViewController {
         let status = layout.serviceStatus
         let showStatusRows = status?.worstProblem != nil
         let showAge = optionHeld || layout.lastUpdateAge >= Self.staleAgeThreshold
-        let sectionHeader = addSplitLine(
-            left: Self.claudeCodeSectionTitle, right: showAge ? Self.ageText(layout.lastUpdateAge) : "",
-            leftFont: Self.menuItemFont, rightFont: .systemFont(ofSize: Metrics.textSize),
-            leftColor: Self.claudeBrandColor, rightColor: Self.dimmedLabelColor)
+        let ageString = showAge ? Self.ageText(layout.lastUpdateAge) : ""
+        let ageLabel = NSTextField(labelWithString: ageString)
+        ageLabel.font = .systemFont(ofSize: Metrics.textSize)
+        ageLabel.textColor = Self.dimmedLabelColor
+        // "Claude" brand title, with the awaiting-input indicator (#233) grafted right of it when the
+        // feature reports a count. `addSplitLine`'s plain path is used when there's nothing to graft.
+        let sectionHeader: NSView
+        if let awaiting = layout.awaitingInput {
+            let brand = NSTextField(labelWithString: Self.claudeCodeSectionTitle)
+            brand.font = Self.menuItemFont
+            brand.textColor = Self.claudeBrandColor
+            let leading = NSStackView(views: [brand, makeAwaitingBadge(count: awaiting)])
+            leading.orientation = .horizontal
+            leading.alignment = .centerY
+            leading.spacing = 6
+            sectionHeader = addSplitRow(leadingView: leading, rightView: ageLabel)
+        } else {
+            sectionHeader = addSplitLine(
+                left: Self.claudeCodeSectionTitle, right: ageString,
+                leftFont: Self.menuItemFont, rightFont: .systemFont(ofSize: Metrics.textSize),
+                leftColor: Self.claudeBrandColor, rightColor: Self.dimmedLabelColor)
+        }
         stack.setCustomSpacing(Metrics.sectionSpacing, after: sectionHeader)
 
         if showStatusRows, let status {
@@ -980,6 +998,34 @@ final class PopupViewController: NSViewController {
         leading.alignment = .centerY
         leading.spacing = 6
         return addSplitRow(leadingView: leading, rightLabel: statusLabel)
+    }
+
+    /// The awaiting-input indicator (#233) shown right of the "Claude" brand title: a `hand.raised`
+    /// icon, followed by `×N` when `count ≥ 2`. A single awaiting session shows the bare icon (no
+    /// `×1`). Icon + label are laid out in a small horizontal stack, tinted with the neutral label
+    /// colour so the count reads as supporting text, not a warning. `count` is always `≥ 1` here (the
+    /// caller passes `nil` for "hide", handled upstream).
+    private func makeAwaitingBadge(count: Int) -> NSView {
+        let size = Metrics.textSize
+        let config = NSImage.SymbolConfiguration(pointSize: size, weight: .semibold)
+        let iconView = NSImageView()
+        iconView.image = NSImage(
+            systemSymbolName: "hand.raised", accessibilityDescription: "sessions awaiting input")?
+            .withSymbolConfiguration(config)
+        iconView.contentTintColor = ColorStore.shared.color(.label)
+        iconView.toolTip = count == 1
+            ? "1 session is awaiting your input"
+            : "\(count) sessions are awaiting your input"
+        guard count >= 2 else { return iconView }
+
+        let countLabel = NSTextField(labelWithString: "×\(count)")
+        countLabel.font = .monospacedDigitSystemFont(ofSize: size, weight: .semibold)
+        countLabel.textColor = ColorStore.shared.color(.label)
+        let stack = NSStackView(views: [iconView, countLabel])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 2
+        return stack
     }
 
     /// The **"in use"** pill shown next to the "Extra usage" heading while paid credits are actually

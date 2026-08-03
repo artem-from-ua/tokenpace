@@ -245,12 +245,22 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// width is reserved.
     public let blockedPause: Bool
 
+    /// The number of Claude Code sessions awaiting user input to advertise with the `hand.raised`
+    /// indicator (#233, ADR-0066), or `nil` to draw nothing. `nil` whenever the feature is off, the
+    /// count is `0`, or the watcher isn't running — the view reserves no width in that case. When
+    /// non-`nil` (always `≥ 1`) the menu bar draws the **bare icon** as a **trailing** element (no
+    /// `×N` — the count only appears in the popup). Sourced by the shell from `AwaitingInputWatcher`,
+    /// independent of the usage snapshot, so it's grafted on like `credits`/`blockedPause` rather than
+    /// computed in `make`.
+    public let awaitingInput: Int?
+
     public init(mode: MenuBarMode, serviceProblem: ServiceStatus? = nil, credits: CreditsMarker? = nil,
-                blockedPause: Bool = false) {
+                blockedPause: Bool = false, awaitingInput: Int? = nil) {
         self.mode = mode
         self.serviceProblem = serviceProblem
         self.credits = credits
         self.blockedPause = blockedPause
+        self.awaitingInput = awaitingInput
     }
 
     // MARK: make
@@ -534,8 +544,18 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// A copy of this layout carrying `serviceProblem`, `credits`, and `blockedPause` (the `mode` is
     /// unchanged) — the decorations grafted onto the usage `mode` computed by
     /// ``usageMode(from:health:now:resetMode:hideCalmSevenDay:pauseHidesBars:)``.
-    func with(serviceProblem: ServiceStatus?, credits: CreditsMarker?, blockedPause: Bool) -> MenuBarLayout {
-        MenuBarLayout(mode: mode, serviceProblem: serviceProblem, credits: credits, blockedPause: blockedPause)
+    func with(serviceProblem: ServiceStatus?, credits: CreditsMarker?, blockedPause: Bool,
+              awaitingInput: Int? = nil) -> MenuBarLayout {
+        MenuBarLayout(mode: mode, serviceProblem: serviceProblem, credits: credits,
+                      blockedPause: blockedPause, awaitingInput: awaitingInput)
+    }
+
+    /// A copy of this layout with the awaiting-input count grafted on, everything else unchanged
+    /// (#233). The shell calls this on the `make(...)` result so the awaiting indicator — sourced
+    /// from `AwaitingInputWatcher`, not the usage snapshot — doesn't have to thread through `make`.
+    public func withAwaitingInput(_ awaitingInput: Int?) -> MenuBarLayout {
+        MenuBarLayout(mode: mode, serviceProblem: serviceProblem, credits: credits,
+                      blockedPause: blockedPause, awaitingInput: awaitingInput)
     }
 
     // MARK: - Private
