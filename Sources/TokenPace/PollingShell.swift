@@ -364,6 +364,12 @@ actor StubUsageTransport: UsageTransport {
         /// `degraded_performance`, so the menu bar shows the lone calm 5h bar *and* a yellow service
         /// dot. The one frame that verifies calm colours muting the yellow service dot to white.
         case calmDegraded
+        /// Calm bars + **all-operational** service status (every component green): the usage side mirrors
+        /// `.pacing(.calmBoth)` while the status side reports every component `operational`, so
+        /// `worstProblem` is `nil` and the popup shows **no** status rows by default. Holding ⌥ Option
+        /// then reveals the four green rows — the one frame that verifies "⌥ reveals statuses even when
+        /// all green". Distinct from every other stub, which leaves the API `degraded_performance`.
+        case allGreen
         /// A money-credits ("extra usage") frame for the trailing ¤ icon (#144). Each `CreditsFrame`
         /// pins the 7-day window at 100 % (so `anyBaseLimitExhausted` holds and the icon shows) and
         /// carries a `spend` + `extra_usage` block covering one credits state (paced / limit-reached /
@@ -548,10 +554,15 @@ actor StubUsageTransport: UsageTransport {
             // Stale-error frame (spacing bug): API + Code both **major outage** (the red dots from the
             // reported screenshot), everything else operational.
             let staleError = mode == .staleError
+            // All-green frame: every component operational, so `worstProblem` is `nil` — the popup shows
+            // no status rows unless ⌥ Option is held, which then reveals the four green rows. The one
+            // frame that verifies "⌥ reveals statuses even when all green"; every other stub leaves the
+            // API degraded (below), so this is the only way to see the all-operational rows.
+            let allGreen = mode == .allGreen
             let codeStatus = staleError ? "major_outage"
                 : (failing || calmDegraded) ? "degraded_performance" : "operational"
             let apiStatus = staleError ? "major_outage"
-                : calmDegraded ? "operational" : "degraded_performance"
+                : (calmDegraded || allGreen) ? "operational" : "degraded_performance"
             let webStatus = failing ? "partial_outage" : "operational"
             let coworkStatus = failing ? "degraded_performance" : "operational"
             let body = """
@@ -835,11 +846,12 @@ actor StubUsageTransport: UsageTransport {
         // empty for every mode except `.screenshot`, which stages a healthy extra-usage state.
         var creditsBlock = ""
 
-        // `.calmDegraded` reuses the calm-both bar frame for its usage side — only its service dot
-        // differs (handled in the status branch above) — so resolve both to a `PacingFrame`.
+        // `.calmDegraded` and `.allGreen` reuse the calm-both bar frame for their usage side — only the
+        // service status differs (handled in the status branch above) — so resolve them to a `PacingFrame`.
         let pacingFrame: PacingFrame? = switch mode {
         case let .pacing(frame): frame
         case .calmDegraded:      .calmBoth
+        case .allGreen:          .calmBoth
         default:                 nil
         }
         if let frame = pacingFrame {

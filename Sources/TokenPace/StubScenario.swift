@@ -40,6 +40,7 @@ enum StubScenario: String, CaseIterable {
     case farBehind = "far-behind"
     case nearZero = "near-zero"
     case calmDegraded = "calm-degraded"
+    case allGreen = "all-green"
     case creditsActive = "credits-active"
     case creditsLimitReached = "credits-limit-reached"
     case creditsNoLimit = "credits-no-limit"
@@ -76,6 +77,7 @@ enum StubScenario: String, CaseIterable {
         case .farBehind:           return "Pacing · both far behind (blue)"
         case .nearZero:            return "Pacing · near-zero (pill caps)"
         case .calmDegraded:        return "Calm bars + degraded dot"
+        case .allGreen:            return "All services green (⌥ reveals)"
         case .creditsActive:       return "Credits · active (paced)"
         case .creditsLimitReached: return "Credits · limit reached (red)"
         case .creditsNoLimit:      return "Credits · no limit (neutral)"
@@ -148,6 +150,9 @@ enum StubScenario: String, CaseIterable {
         case .calmDegraded:
             return "Calm bars + a degraded (yellow) service dot: with \"Calm colours\" (#105) off the "
                  + "dot is yellow; turn Calm on and it mutes to white."
+        case .allGreen:
+            return "Calm bars + every service operational (all green): the popup shows no status rows by "
+                 + "default; hold ⌥ Option to reveal the four green rows (API, Code, Web/Desktop, Cowork)."
         case .creditsActive:
             return "Credits ¤ icon (#144): enabled €15 limit, €10.77 spent (~72 %) → paced icon "
                  + "colour. 7-day pinned at 100 % so the icon shows — and since credits cover the "
@@ -203,6 +208,7 @@ enum StubScenario: String, CaseIterable {
         case .farBehind:           return StubUsageTransport(mode: .pacing(.farBehind), now: now)
         case .nearZero:            return StubUsageTransport(mode: .pacing(.nearZero), now: now)
         case .calmDegraded:        return StubUsageTransport(mode: .calmDegraded, now: now)
+        case .allGreen:            return StubUsageTransport(mode: .allGreen, now: now)
         case .creditsActive:       return StubUsageTransport(mode: .credits(.active), now: now)
         case .creditsLimitReached: return StubUsageTransport(mode: .credits(.limitReached), now: now)
         case .creditsNoLimit:      return StubUsageTransport(mode: .credits(.noLimit), now: now)

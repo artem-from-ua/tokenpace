@@ -671,9 +671,10 @@ final class PopupViewController: NSViewController {
 
 
     /// Whether ⌥ Option is currently held (ADR-0020's modifier-poll timer feeds this live while the
-    /// dropdown is open). It reveals the on-demand data age ("2m ago") in the "Claude Code" header;
-    /// it does **not** gate the service-status rows, which show only when a component is
-    /// non-operational (`rebuild()`'s `showStatusRows`) — two green lines are never worth the space.
+    /// dropdown is open). It reveals the on-demand data age ("2m ago") in the "Claude Code" header,
+    /// and — once the first status poll has succeeded — the service-status rows: while ⌥ is up they
+    /// show only when a component is non-operational, and holding ⌥ reveals **all** components even
+    /// when every one is green (`rebuild()`'s `showStatusRows`).
     var optionHeld = false {
         didSet {
             guard isViewLoaded, optionHeld != oldValue else { return }
@@ -856,14 +857,15 @@ final class PopupViewController: NSViewController {
         // ``Self.staleAgeThreshold`` (2× the poll floor) so it becomes worth surfacing on its own — and
         // otherwise **only while ⌥ Option is held** (the age is an on-demand detail when data is fresh).
         //
-        // The service status rows (issue #31, #89) show **only when there is a real problem** —
-        // `worstProblem != nil`, i.e. at least one monitored component is non-operational. All-
-        // operational lines add nothing worth the space, so a healthy status is never shown. When a
-        // problem is present we show **only the problematic components** by default; holding ⌥ Option
-        // reveals **all** monitored components (the healthy ones for context: `API`, `Code`,
-        // `WEB/Desktop`, `Cowork` when enabled).
+        // The service status rows (issue #31, #89) show **when there is a real problem** —
+        // `worstProblem != nil`, i.e. at least one monitored component is non-operational — **or**
+        // whenever ⌥ Option is held (once the first status poll has succeeded, `status != nil`).
+        // With no problem and ⌥ up, the all-operational lines add nothing worth the space, so the
+        // healthy status stays hidden; holding ⌥ reveals it on demand. When rows are shown we show
+        // **only the problematic components** by default and **all** monitored components (the healthy
+        // ones for context: `API`, `Code`, `WEB/Desktop`, `Cowork` when enabled) while ⌥ is held.
         let status = layout.serviceStatus
-        let showStatusRows = status?.worstProblem != nil
+        let showStatusRows = status != nil && (optionHeld || status?.worstProblem != nil)
         let showAge = optionHeld || layout.lastUpdateAge >= Self.staleAgeThreshold
         let ageString = showAge ? Self.ageText(layout.lastUpdateAge) : ""
         // Header layout (#233): the "Claude" brand title with the "Nm ago" age beside it on the left;
