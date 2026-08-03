@@ -40,6 +40,7 @@ Claude Code з macOS Keychain. **Токен ніколи не покидає Mac
 ## Документація
 
 - [docs/README.md](docs/README.md) — **карта всієї документації** (почни звідси).
+- [USER-GUIDE.md](USER-GUIDE.md) — довідник інтерфейсу: що показує menu bar і попап, усі стани й кольори.
 - [SPEC.md](SPEC.md) — продуктовий спек (проблема, архітектура, UI, фази, монетизація).
 - [docs/architecture.md](docs/architecture.md) — архітектура та потік даних.
 - [docs/building.md](docs/guides/building.md) — збірка з джерел (для контриб'юторів).

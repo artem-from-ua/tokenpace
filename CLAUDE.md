@@ -67,7 +67,10 @@ swift run          # запуск
   `main` (не stacked).
 - **Доки — частина коду.** Зміна модуля → оновити `docs/architecture.md`; нове рішення між
   підходами → новий ADR; **зміна логування** (новий/видалений виклик, інший текст меседжа,
-  рівень чи категорія) → оновити `docs/log-messages.md` у тому самому коміті.
+  рівень чи категорія) → оновити `docs/log-messages.md` у тому самому коміті; **зміна вигляду
+  чи поведінки UI** (menu bar іконка або попап — новий/змінений елемент, стан, колір, поріг,
+  текст-статус, налаштування) → оновити user-facing довідник
+  [USER-GUIDE.md](USER-GUIDE.md) у тому самому коміті.
 - **Не стверджувати з пам'яті** факти про зовнішні API/інструменти — перевіряти (curl/--help/docs).
 - **`gh release create` runs only after the maintainer's explicit go-ahead.** A direct instruction to publish this release — "релізь", "make release", "publish the release" or equivalent — is required each time. Building, notarizing, tagging and drafting release notes may proceed without it, but the actual `gh release create` waits for that explicit word. This is separate from and additional to the `RELEASE_NOTES_APPROVED=1` notes-approval gate (that gate guards the notes; this rule guards the act of publishing).
 
