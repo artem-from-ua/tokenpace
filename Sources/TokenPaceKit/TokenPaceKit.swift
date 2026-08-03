@@ -7,5 +7,5 @@ public enum TokenPaceKit {
     /// PollingEngine (#13, live loop: sleep/wake, network, 3-min base + Retry-After hold — ADR-0032),
     /// LaunchAtLogin (#14, pure decision core for the launch-at-login toggle),
     /// DelegatedRefresh (#8b, delegated token refresh via the claude CLI — ADR-0017).
-    public static let version = "0.62.0"
+    public static let version = "0.63.0"
 }

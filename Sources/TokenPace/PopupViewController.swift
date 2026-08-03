@@ -212,7 +212,6 @@ final class PopupBarView: NSView {
         let overhang = max(0, (Metrics.indicatorHeight - Metrics.barHeight) / 2)
         let rect = NSRect(
             x: bounds.minX, y: bounds.minY + overhang, width: bounds.width, height: Metrics.barHeight)
-        let w = rect.width
 
         // Idle 5h bar (#100, ADR-0027): a solid blue track + the under-bar tick ruler, but no pacing
         // zones and no time-indicator dot ("no active session, full quota available"). Rendered before
@@ -232,7 +231,7 @@ final class PopupBarView: NSView {
                     idlePath.fill()
                 }
             }
-            drawTicks(in: rect, width: w)
+            drawTicks(in: rect)
             return
         }
 
@@ -257,11 +256,8 @@ final class PopupBarView: NSView {
         //    3. The strip carries the ambient glow.
         let stripFrom = barStyle.popupShowsTimeMarker ? l.gapStart : 0
         let stripTo = barStyle.popupShowsTimeMarker ? l.gapEnd : (l.gapEnd - l.gapStart)
-        let sx0 = rect.minX + CGFloat(stripFrom) * w
-        let sx1 = rect.minX + CGFloat(stripTo) * w
-        if sx1 > sx0 {
-            let capsule = rect.height / 2
-            let stripRect = NSRect(x: sx0, y: rect.minY, width: sx1 - sx0, height: rect.height)
+        if let stripRect = Self.stripRect(from: stripFrom, to: stripTo, in: rect) {
+            let capsule = min(stripRect.width, stripRect.height) / 2
             let stripPath = NSBezierPath(roundedRect: stripRect, xRadius: capsule, yRadius: capsule)
             withGlow(gapColor, radius: Self.gapGlowRadius, strength: Self.gapGlowStrength) {
                 gapColor.setFill()
@@ -269,7 +265,7 @@ final class PopupBarView: NSView {
             }
         }
 
-        drawTicks(in: rect, width: w)
+        drawTicks(in: rect)
 
         // Simple style (#224): no time marker — the ribbon above already conveys pacing by colour + length.
         if !barStyle.popupShowsTimeMarker { return }
@@ -278,8 +274,8 @@ final class PopupBarView: NSView {
         //    colour, with a border in the grey-track tone (blended 85 %) that separates it from the strip —
         //    replacing the old transparent slivers. 5. The marker carries a stronger ambient glow.
         // Pixel-snap the marker's centre x so its vertical edges land on whole pixels — a fractional
-        // `timeFraction * w` otherwise smears the thin border across two columns (the "crooked outline").
-        let cx = (rect.minX + CGFloat(l.timeFraction) * w).rounded()
+        // scaled x otherwise smears the thin border across two columns (the "crooked outline").
+        let cx = Self.scaleX(CGFloat(l.timeFraction), in: rect).rounded()
         let cy = rect.midY
         let mw = Metrics.indicatorWidth
         let mh = Metrics.indicatorHeight
@@ -306,10 +302,43 @@ final class PopupBarView: NSView {
         }
     }
 
+    // MARK: - Inset scale (min-strip geometry)
+
+    /// The minimum width of the coloured strip — so a near-zero span renders as a rounded "pill"
+    /// (a short capsule with fully-rounded ends) rather than a hairline sliver. Set to ¾ of the bar
+    /// height, i.e. slightly shorter than a full circle (whose diameter would be the height).
+    static func minStripWidth(_ rect: NSRect) -> CGFloat { 0.75 * rect.height }
+
+    /// Map a fraction `f ∈ [0,1]` to an x inside the bar, with a symmetric inset (`minStripWidth/2`)
+    /// on each end reserved for the min-strip's rounded caps. The 0..100 % scale therefore lives in
+    /// `[minX+BS, maxX−BS]`, so the pill at 0 % (or 100 %) has its rounded end land flush *inside* the
+    /// rounded track — never overhanging the track's cap. The tick ruler and time marker use the same
+    /// map so they stay aligned with the strip.
+    static func scaleX(_ f: CGFloat, in rect: NSRect) -> CGFloat {
+        let bs = minStripWidth(rect) / 2
+        return rect.minX + bs + f * (rect.width - 2 * bs)
+    }
+
+    /// The coloured strip's rect for the fraction span `from..to`, mapped through ``scaleX`` and
+    /// floored to ``minStripWidth`` (expanded symmetrically about its centre) so a tiny non-zero span
+    /// reads as a pill. Returns `nil` for an empty span (`to <= from`) — nothing to draw.
+    static func stripRect(from: Double, to: Double, in rect: NSRect) -> NSRect? {
+        var sx0 = scaleX(CGFloat(from), in: rect)
+        var sx1 = scaleX(CGFloat(to), in: rect)
+        guard sx1 > sx0 else { return nil }
+        let msw = minStripWidth(rect)
+        if sx1 - sx0 < msw {
+            let c = (sx0 + sx1) / 2
+            sx0 = c - msw / 2
+            sx1 = c + msw / 2
+        }
+        return NSRect(x: sx0, y: rect.minY, width: sx1 - sx0, height: rect.height)
+    }
+
     /// Draw the under-bar tick ruler: vertical teeth at each interior window boundary
     /// (`k / subdivisions` for `k` in `1 ..< subdivisions`), pixel-snapped on x. No-op when
     /// `subdivisions < 2` (nothing to subdivide).
-    private func drawTicks(in barRect: NSRect, width: CGFloat) {
+    private func drawTicks(in barRect: NSRect) {
         guard showTicks, subdivisions >= 2 else { return }   // #224 — tick ruler opt-out
         let top = barRect.maxY + Metrics.tickGap           // flipped: just below the bar
         let bottom = top + Metrics.tickLength
@@ -318,8 +347,9 @@ final class PopupBarView: NSView {
         let corner = Metrics.tickWidth / 2
         for k in 1 ..< subdivisions {
             let f = CGFloat(k) / CGFloat(subdivisions)
-            // Pixel-snap the tooth's centre so it stays crisp at @1x and @2x.
-            let cx = (barRect.minX + f * width).rounded()
+            // Pixel-snap the tooth's centre so it stays crisp at @1x and @2x. Mapped through the same
+            // inset scale as the coloured strip / marker so the ruler stays aligned with them (#…).
+            let cx = Self.scaleX(f, in: barRect).rounded()
             let rect = NSRect(x: cx - Metrics.tickWidth / 2, y: top, width: Metrics.tickWidth, height: bottom - top)
             NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner).fill()
         }

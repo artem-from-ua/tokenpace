@@ -461,6 +461,14 @@ actor StubUsageTransport: UsageTransport {
         /// see the far-behind blue zone and the "Work harder" toggle (blue stays coloured under Calm).
         case farBehind
 
+        /// **Near-zero** frame: tiny usage on a *fresh* window (barely any time elapsed), so the pacing
+        /// gap is a hairline — the case that exercises the min-strip "pill" geometry. Both usage and
+        /// `timeFraction` are ≈ 0 (5h resets ~17 950 s out of an 18 000 s window; 7d ~596 000 s out of
+        /// 604 800 s), so the coloured span shrinks to near-zero and must render as a rounded pill that
+        /// sits flush inside the rounded track — not a sliver overhanging the cap. Per-model rows are
+        /// pinned near-zero too (see the stub body) so Fable/Mythos show the same pill.
+        case nearZero
+
         /// (fiveUtil, sevenUtil, fiveResetSeconds, sevenResetSeconds).
         var values: (five: Double, seven: Double, fiveIn: TimeInterval, sevenIn: TimeInterval) {
             switch self {
@@ -473,6 +481,8 @@ actor StubUsageTransport: UsageTransport {
             case .calmBoth:           return (10, 20, 4 * 3600, 5 * 24 * 3600)
             case .nearResetFiveHour:  return (98, 20, 12 * 60, 5 * 24 * 3600)
             case .farBehind:          return (5, 10, 2 * 3600, 2 * 24 * 3600)
+            // Fresh windows: reset is almost a full window away → timeFraction ≈ 0 → hairline gap.
+            case .nearZero:           return (0, 4, 17_950, 596_000)
             }
         }
     }
@@ -828,8 +838,16 @@ actor StubUsageTransport: UsageTransport {
             let v = frame.values
             five = v.five
             seven = v.seven
-            fable = 60.0
-            mythos = 100.0
+            // Per-model rows are otherwise pinned to the climbing default (60/100) so the popup has
+            // content; the near-zero frame instead pins them near-zero too, so every row exercises the
+            // min-strip pill geometry at once.
+            if frame == .nearZero {
+                fable = 4.0
+                mythos = 1.5
+            } else {
+                fable = 60.0
+                mythos = 100.0
+            }
             fiveReset = Self.resetsAt(inSeconds: v.fiveIn)
             sevenReset = Self.resetsAt(inSeconds: v.sevenIn)
             weeklyReset = sevenReset
