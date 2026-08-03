@@ -119,23 +119,18 @@ struct AwaitingInputScannerTests {
         #expect(fx.scanner().scan() == 1)
     }
 
-    // MARK: incremental mtime cache
+    // MARK: re-scan reflects live changes (stateless — no cache)
 
-    @Test func cachedVerdictSurvivesAndUpdatesOnRewrite() {
+    @Test func rescanReflectsStatusRewrite() {
         let fx = ClaudeFixture()
         let url = fx.session("1", status: "waiting")
         let scanner = fx.scanner()
-        #expect(scanner.scan() == 1)          // first tick: reads, caches awaiting=true
-
-        // Rewrite the file to a non-waiting status with a strictly newer mtime; the scanner must
-        // re-read (mtime advanced) and drop the count.
+        #expect(scanner.scan() == 1)
         try? #"{"pid":1,"status":"idle"}"#.write(to: url, atomically: true, encoding: .utf8)
-        try? FileManager.default.setAttributes(
-            [.modificationDate: Date().addingTimeInterval(60)], ofItemAtPath: url.path)
-        #expect(scanner.scan() == 0)
+        #expect(scanner.scan() == 0)          // stateless: next scan just re-reads the new content
     }
 
-    @Test func vanishedSessionIsForgotten() {
+    @Test func rescanReflectsVanishedSession() {
         let fx = ClaudeFixture()
         let url = fx.session("1", status: "waiting")
         let scanner = fx.scanner()

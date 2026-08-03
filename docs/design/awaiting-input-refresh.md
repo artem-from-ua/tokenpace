@@ -27,7 +27,7 @@ unlocked**.
  │  │ safety Timer  │──────────────────▶ ┌──────────────────────────┐    │
  │  └───────────────┘                    │ AwaitingInputScanner     │◀───┼── pure core
  │        ▲                               │  (TokenPaceKit)          │    │  (unit-tested)
- │        │ gate signals                  │  · mtime cache (memory)  │    │
+ │        │ gate signals                  │  · stateless, no cache   │    │
  │  ┌─────┴──────────────┐                │  · scan() → Int          │    │
  │  │ NSWorkspace lock/   │                └──────────────────────────┘    │
  │  │ unlock, Claude probe│                         │                     │
@@ -36,17 +36,49 @@ unlocked**.
  └─────────────────────────────────────────────────────────────────────┘
 ```
 
-1. **`AwaitingInputScanner`** (pure, `TokenPaceKit`, already built). Owns the in-memory mtime cache;
-   `scan()` returns the current count, re-reading only files whose mtime advanced. This is the
-   single source of the number — every trigger funnels through it.
+1. **`AwaitingInputScanner`** (pure, `TokenPaceKit`, already built). **Stateless** — `scan()` reads
+   the handful of `sessions/*.json` (+ the matching `jobs/<id>/state.json`) and returns the count,
+   every time. A full scan is ~0.18 ms, so it is the single source of the number and every trigger
+   funnels through it.
 2. **FSEvents stream** (shell). The primary trigger. Watches `~/.claude/sessions` and `~/.claude/jobs`
    recursively; the OS wakes us with a coalesced list of changed paths.
 3. **Safety poll** (shell). A rare (30–60 s) timer that also calls `scan()`, to catch anything
    FSEvents coalesced away or dropped across sleep/logout.
 
-The mtime cache is what makes running the *same* `scan()` from three triggers (FSEvents batch,
-safety tick, catch-up-on-unlock) cheap: whichever fires, unchanged files cost one `stat()` and no
-re-read.
+### Why no cache
+
+An earlier draft cached `path → (mtime, awaiting)` and re-read only files whose mtime advanced.
+**Dropped** — with FSEvents as the trigger we already scan *only when the watched trees changed*
+(plus a rare safety tick), so a cache would skip re-reading a handful of sub-KB files to save
+microseconds, at the cost of a stateful `class`, mtime edge cases (coarse fs granularity, atomic
+`rename` bumping mtime), and heavier tests.
+
+> **A cache is only worth it in a poll-*without*-FSEvents design** — i.e. re-scanning on a fixed
+> short timer while, most ticks, nothing changed. There the cache earns its keep by turning "read
+> every file every 5 s" into "`stat()` every file, read only the changed ones". If we ever revert to
+> pure polling, reintroduce the per-session mtime cache in `AwaitingInputScanner`. As long as
+> FSEvents drives refresh, keep the scanner a pure value.
+
+### FSEvents watches paths, not inodes
+
+FSEvents is **path/directory-based**, not inode- or fd-based. We register the two **directory
+paths** `~/.claude/sessions` and `~/.claude/jobs` (recursive); with `kFSEventStreamCreateFlagFileEvents`
+the callback reports individual changed **paths** (e.g. `sessions/91763.json`) — never an inode.
+
+**Watch the directories, never individual `.json` files.** The set of session files is not fixed —
+every new session creates a fresh `sessions/<pid>.json` (and a `jobs/<jobId>/` dir), and finished
+ones are pruned. Subscribing to specific files would miss exactly the sessions that appear *after*
+we start watching. A directory watch fires on create / modify / delete of anything inside the tree,
+so new sessions are picked up for free. The watcher therefore does **not** inspect the event's path
+list at all — any batch just means "the tree changed", and we re-run the full stateless `scan()`
+(which re-enumerates the directory, so it naturally includes newly created files).
+
+Directory-watching is also why atomic rewrites are a non-issue: Claude Code writes these state files
+**atomically** (write temp + `rename` over the name), which changes a file's inode but keeps its
+path and its parent directory, so the directory watch still fires and a subsequent read-by-path sees
+the new content. (An inode/fd watch — `kqueue`/`EVFILT_VNODE` on an open file — would follow the
+*old* unlinked inode across an atomic rename, miss the update, and see nothing for files that didn't
+exist when it started; that's why it's the wrong tool for this directory-of-churning-files case.)
 
 ## FSEvents specifics
 
@@ -55,11 +87,57 @@ re-read.
   - `latency 0.75s` **is** the "інтервал на обробку вхідних івентів" — the OS batches a burst of
     writes into one callback, so a chatty session doesn't spin us. `NoDefer` delivers the first
     event of an idle→busy burst promptly, then coalesces the tail.
-- Callback runs on a dedicated dispatch queue; it forwards the batch to `RefreshCoordinator`, which
-  hops to the main actor to touch UI.
-- We keep the last `FSEventStreamEventId`. On **stop→start** (unlock, or Claude reappearing) we start
-  `sinceWhen: lastEventId` so events during a brief stop are replayed — plus we always run one
-  explicit catch-up `scan()` on start regardless (cheap, and covers the "events were dropped" case).
+- The callback is dispatched on the main queue; it does not inspect the changed paths (see above) —
+  it just coalesces into one `scan()` on the next runloop turn.
+- On every **start** (unlock, or Claude reappearing) we create the stream `sinceNow` and always run
+  one explicit catch-up `scan()`. We deliberately do **not** replay from a saved `lastEventId`: the
+  scan is stateless and reads current disk state, so a single catch-up read fully reconciles whatever
+  changed while parked — simpler than persisting an event id, same result.
+
+## State machine
+
+The watcher is a two-level state machine: an outer **Inactive ↔ Active** gate, and, while Active,
+an inner Idle → Scanning → (Emitting | Idle) loop that processes every FSEvents batch and safety
+tick. The gate = *feature-enabled AND screen-unlocked AND claude-running*.
+
+```plantuml
+@startuml
+title AwaitingInputWatcher — state machine (gating + FSEvents/poll processing)
+skinparam StateBackgroundColor #F5F5F5
+skinparam StateBorderColor #95A5A6
+
+[*] --> Inactive
+
+state Inactive #FDE8E8 {
+}
+Inactive : indicator hidden (UI shows nothing)
+Inactive : no FSEvents stream, no safety timer
+
+state Active #E8F5E9 {
+  [*] --> Idle
+  Idle : stream running, safety timer armed
+  Idle --> Scanning : FSEvents batch\n(dir changed)
+  Idle --> Scanning : safety tick (~45s)
+  Scanning : run stateless scan()
+  Scanning --> Idle : count unchanged\n(silent, no render)
+  Scanning --> Emitting : count changed
+  Emitting : log old -> new,\nonCountChanged(N)
+  Emitting --> Idle
+}
+
+Inactive --> Active : gate TRUE\n(feature & unlocked & claude running)\n/ start stream + timer, catch-up scan
+Active --> Inactive : gate FALSE\n(lock / claude exit / feature off)\n/ stop stream + timer
+
+legend right
+  |= color |= meaning |
+  |<#FDE8E8>| inactive (parked) |
+  |<#E8F5E9>| active (watching) |
+  gate = feature-enabled AND screen-unlocked AND claude-running
+endlegend
+@enduml
+```
+
+![State machine of the awaiting-input watcher: Inactive parks with no stream; Active runs Idle→Scanning→Emitting on each FSEvents batch or safety tick.](https://www.plantuml.com/plantuml/svg/TLHHRzCm47xthpW92QMiKLyewX2R5hfKgeJsG9bue3nuzZMnwjYHuwmWEiIFu1VoIpWdSTOneKfjVFxklk_kk_IgyTpvjjBCAwyHiWDNNfbYRUhMV-PUbEZWpw_VG3YFK75HAeEG53oWu0nMc_mUZMzcjTKQQcS5DWrTJLYpLwRcZbUm2RdlkTWNphP6Bgss3bwivk7p36QTH3T0pkVPF7l3s9TNNo5DBs5jkF3g7XdhvSGp5RlE5_a2Vh07DWRVWZ9I2UwfLAcaH0F9xHgQqXuQCDQNdSmJkB5ZEzIlGrvDGwpXE_JVmQiANMJE1jvyiPhdvyGBC8gK6kaOVgXcNmTSQmpHJPyK0-ugb14RSZU2TpXA79NS1HUs9f7AWIYvAL1E_fCp5XTxI7w-dZS1U79FAdeZDPa43LqaJn1HFa45EUMXDGCZyJTAavvk8WuDcVGiDQ-KzprJdpua4-xaIji2h9P02GOFqwsnPXdGonwSt4nEyUD47zYZLI6OHTUAuCUdZxSvQTmXzwr3U4dAjHLxbFGeD6ybHWicMpE3RkkZDsUz6rCGOT9fMtUJOTaZrycET6ohxCCcq0KAc4K2_AOydQ86kziDNBR-XuenZGND49mgIa_j7YzeOc7bwQ52tatq6EBlXis-FD8o3o8IUbseiqb4z3j8Y7X_27s4LZj4f_WYoahHy3jDSybkhgbFXsZISLOXrZUJ3jDYfBBNogxeY_ue_W80)
 
 ## Gating (the two conditions)
 

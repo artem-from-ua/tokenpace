@@ -25,15 +25,16 @@ import Foundation
 /// **No `JSONDecoder`.** These files are read as raw strings and matched with a few small regexes
 /// on the 3–4 fields we need. `sessions/*.json` is written compact (`"status":"waiting"`);
 /// `jobs/*/state.json` is pretty-printed with spaces (`"needs": "approve plan"`), so the patterns
-/// tolerate optional whitespace. A full scan measured ~0.18 ms.
+/// tolerate optional whitespace.
 ///
-/// **Incremental by mtime (in-memory cache).** The shell polls this every ~5 s (only while Claude
-/// Code is running and the screen is unlocked). To avoid re-reading unchanged files, the scanner
-/// keeps a per-session cache `path → (mtime, awaiting)` and re-reads a session file **only** when
-/// its modification date is newer than the cached one — otherwise it reuses the cached verdict.
-/// Sessions whose files vanished are dropped from the cache each tick. The cache lives **only in
-/// memory** and is deliberately **not persisted across launches**: a fresh process starts with an
-/// empty cache, so the first tick reads every live session and subsequent ticks go incremental.
+/// **Stateless — no cache.** ``scan()`` reads and counts every time; a full scan measured ~0.18 ms
+/// (a handful of sub-KB files). The shell drives it from FSEvents (see
+/// `docs/design/awaiting-input-refresh.md`), so scans already happen only when the watched trees
+/// change — there is essentially nothing to cache away. An mtime cache would only pay off in a
+/// **poll-without-FSEvents** design (re-scanning on a fixed timer while nothing changed); if we ever
+/// revert to that, reintroduce a per-session `path → (mtime, awaiting)` cache here. As is, keeping
+/// the type a pure value keeps it trivially testable and free of atomic-write / coarse-mtime edge
+/// cases.
 ///
 /// **Private, undocumented format.** The file layout and the `status`/`state`/`tempo`/`needs`
 /// values are Claude Code internals (observed on v2.1.212) and may change without notice. Every
@@ -41,20 +42,13 @@ import Foundation
 /// the count never crashes and the feature quietly reads zero rather than misbehaving.
 ///
 /// `claudeHome` and `fileManager` are injectable so a test can point at a fixture tree, mirroring
-/// ``LogArchiver``. A `final class` (not a value type) because it owns the mutable mtime cache; the
-/// shell drives ``scan()`` from its single poll heartbeat, so it is not concurrently mutated.
-public final class AwaitingInputScanner {
+/// ``LogArchiver``. A pure value type; `scan()` is side-effect-free and safe to call off the main
+/// thread. (`fileManager` is not `Sendable`, so the struct isn't marked `Sendable` — the shell owns
+/// one instance and calls it from its single refresh path.)
+public struct AwaitingInputScanner {
     /// The `~/.claude` directory. Injectable so a test can point at a fixture tree.
     private let claudeHome: URL
     private let fileManager: FileManager
-
-    /// Per-session incremental cache: the session file's last-seen mtime and the awaiting verdict
-    /// derived from it. In-memory only, never persisted (see type doc).
-    private struct CacheEntry {
-        var mtime: Date
-        var awaiting: Bool
-    }
-    private var cache: [String: CacheEntry] = [:]
 
     public init(
         claudeHome: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude"),
@@ -69,44 +63,20 @@ public final class AwaitingInputScanner {
     /// The number of live sessions currently awaiting user input. `0` when the feature has nothing
     /// to show (no live sessions, or none blocked) — the UI hides its indicator at `0`.
     ///
-    /// Re-reads only session files whose mtime advanced since the last call; reuses cached verdicts
-    /// otherwise. Any I/O error (unreadable dir, torn file mid-write) is swallowed and simply
-    /// contributes nothing to the count.
+    /// Pure and side-effect-free. Any I/O error (unreadable dir, torn file mid-write) is swallowed
+    /// and simply contributes nothing to the count.
     public func scan() -> Int {
         let sessionsDir = claudeHome.appendingPathComponent("sessions")
         guard let entries = try? fileManager.contentsOfDirectory(
-            at: sessionsDir, includingPropertiesForKeys: [.contentModificationDateKey]
+            at: sessionsDir, includingPropertiesForKeys: nil
         ) else {
-            cache.removeAll()   // sessions dir gone → nothing awaiting, forget stale entries
             return 0
         }
-
         var count = 0
-        var seen = Set<String>()
         for url in entries where url.pathExtension == "json" {
-            let key = url.path
-            seen.insert(key)
-            let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
-                .contentModificationDate
-
-            // Reuse the cached verdict if the file has not been modified since we last read it.
-            if let mtime, let cached = cache[key], cached.mtime >= mtime {
-                if cached.awaiting { count += 1 }
-                continue
-            }
-
-            guard let raw = try? String(contentsOf: url, encoding: .utf8) else {
-                // Unreadable (e.g. torn mid-write) — skip this tick, keep any prior cache entry.
-                if cache[key]?.awaiting == true { count += 1 }
-                continue
-            }
-            let awaiting = isAwaiting(sessionJSON: raw)
-            if let mtime { cache[key] = CacheEntry(mtime: mtime, awaiting: awaiting) }
-            if awaiting { count += 1 }
+            guard let raw = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            if isAwaiting(sessionJSON: raw) { count += 1 }
         }
-
-        // Drop cache entries for sessions whose files disappeared this tick.
-        cache = cache.filter { seen.contains($0.key) }
         return count
     }
 
