@@ -93,25 +93,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Watches `~/.claude/sessions` + `jobs` for sessions awaiting user input, or `nil` while the
     /// feature is off. Created/destroyed by ``updateAwaitingInputWatcher()``.
     private var awaitingInputWatcher: AwaitingInputWatcher?
-    /// The latest awaiting-input count from the watcher (0 when none / feature off). Read by
+    /// The latest awaiting-input result from the watcher (count, urgency, per-project). Read by
     /// ``awaitingInputForDisplay`` at render time.
-    private var awaitingInputCount = 0
-    /// Verification stub: `TOKENPACE_AWAITING=N` forces the count to `N`, bypassing the watcher, so
-    /// the indicator can be driven without live Claude sessions (see docs/guides/ui-verification.md).
-    private let awaitingInputStub: Int? = {
-        ProcessInfo.processInfo.environment["TOKENPACE_AWAITING"].flatMap(Int.init)
+    private var awaitingInput: AwaitingSessions = .none
+    /// Verification stub: `TOKENPACE_AWAITING=N` synthesizes `N` awaiting sessions, bypassing the
+    /// watcher. `TOKENPACE_AWAITING_DAYS=d1,d2,…` sets each session's days-until-deletion (to drive the
+    /// urgency tint / red/orange buckets); missing days default to 20 (neutral). `TOKENPACE_AWAITING_
+    /// PROJECTS=a,b,…` names the sessions' projects (round-robin) for the per-project popover. See
+    /// docs/guides/ui-verification.md. Verification only — no such env var in a real build.
+    private let awaitingInputStub: AwaitingSessions? = {
+        let env = ProcessInfo.processInfo.environment
+        guard let n = env["TOKENPACE_AWAITING"].flatMap(Int.init), n >= 0 else { return nil }
+        let days = (env["TOKENPACE_AWAITING_DAYS"] ?? "").split(separator: ",").compactMap { Double($0) }
+        let projects = (env["TOKENPACE_AWAITING_PROJECTS"] ?? "app").split(separator: ",").map(String.init)
+        let sessions = (0..<n).map { i in
+            AwaitingSession(
+                project: projects.isEmpty ? "app" : projects[i % projects.count],
+                daysUntilDeletion: i < days.count ? days[i] : 20)
+        }
+        return AwaitingSessions(sessions)
     }()
 
-    /// The awaiting-input count to render, or `nil` to hide the indicator. `nil` unless the feature is
-    /// enabled **and** the count is `≥ 1`.
+    /// The awaiting-input result to render, or `nil` to hide the indicator. `nil` unless the feature is
+    /// enabled **and** at least one session is waiting.
     ///
-    /// The `TOKENPACE_AWAITING` stub forces the count **and** treats the feature as enabled, so the
+    /// The `TOKENPACE_AWAITING` stub forces the result **and** treats the feature as enabled, so the
     /// indicator can be verified with a plain `swift run` without toggling settings or running live
     /// Claude sessions (verification-only; a real build has no such env var). See ui-verification.md.
-    private var awaitingInputForDisplay: Int? {
-        if let stub = awaitingInputStub { return stub >= 1 ? stub : nil }
+    private var awaitingInputForDisplay: AwaitingSessions? {
+        if let stub = awaitingInputStub { return stub.count >= 1 ? stub : nil }
         guard PersistedConfig.awaitingInputEnabled else { return nil }
-        return awaitingInputCount >= 1 ? awaitingInputCount : nil
+        return awaitingInput.count >= 1 ? awaitingInput : nil
     }
 
     // MARK: Claude service status (#31)
@@ -1364,13 +1376,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard wantWatcher else {
             awaitingInputWatcher?.setActive(false)
             awaitingInputWatcher = nil
-            awaitingInputCount = 0
+            awaitingInput = .none
             return
         }
         if awaitingInputWatcher == nil {
-            let watcher = AwaitingInputWatcher(onCountChanged: { [weak self] count in
+            let watcher = AwaitingInputWatcher(onResultChanged: { [weak self] result in
                 guard let self else { return }
-                self.awaitingInputCount = count
+                self.awaitingInput = result
                 self.reRenderForCurrentTime()
             })
             awaitingInputWatcher = watcher

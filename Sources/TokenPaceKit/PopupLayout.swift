@@ -175,13 +175,14 @@ public struct PopupLayout: Sendable, Equatable {
     /// Exactly one reset is ever highlighted, even when several limits are simultaneously exhausted.
     public let blockingReset: BlockingReset.Choice?
 
-    /// The number of Claude Code sessions awaiting user input to advertise next to the "Claude"
-    /// section title (#233, ADR-0066), or `nil` to draw nothing. `nil` whenever the feature is off,
-    /// the count is `0`, or the watcher isn't running. When non-`nil` (always `≥ 1`) the popup draws
-    /// a `hand.raised` icon **right of the "Claude" brand title**; a count of `1` shows the bare icon,
-    /// `≥ 2` appends `×N`. Sourced by the shell from `AwaitingInputWatcher`, independent of the usage
-    /// snapshot, so it's supplied to `make` rather than derived from it.
-    public let awaitingInput: Int?
+    /// The Claude Code sessions awaiting user input to advertise flush-right in the "Claude" section
+    /// header (#233, ADR-0066), or `nil` to draw nothing. `nil` whenever the feature is off, the count
+    /// is `0`, or the watcher isn't running. When non-`nil` (count `≥ 1`) the popup draws a
+    /// `hand.raised` icon tinted by ``AwaitingSessions/urgency``; a count of `1` shows the bare icon,
+    /// `≥ 2` appends the count. Clicking the block opens the per-project breakdown
+    /// (``AwaitingSessions/perProject``). Sourced by the shell from `AwaitingInputWatcher`,
+    /// independent of the usage snapshot, so it's supplied to `make` rather than derived from it.
+    public let awaitingInput: AwaitingSessions?
 
     public init(
         lastUpdateAge: TimeInterval,
@@ -191,7 +192,7 @@ public struct PopupLayout: Sendable, Equatable {
         serviceStatus: StatusHealth? = nil,
         credits: CreditsRow? = nil,
         blockingReset: BlockingReset.Choice? = nil,
-        awaitingInput: Int? = nil
+        awaitingInput: AwaitingSessions? = nil
     ) {
         self.lastUpdateAge = lastUpdateAge
         self.intervalSeconds = intervalSeconds
@@ -206,7 +207,7 @@ public struct PopupLayout: Sendable, Equatable {
     /// A copy of this layout with the awaiting-input count grafted on, everything else unchanged
     /// (#233). The shell calls this on the `make(...)` result so the awaiting indicator — sourced
     /// from `AwaitingInputWatcher`, not the usage snapshot — doesn't have to thread through `make`.
-    public func withAwaitingInput(_ awaitingInput: Int?) -> PopupLayout {
+    public func withAwaitingInput(_ awaitingInput: AwaitingSessions?) -> PopupLayout {
         PopupLayout(
             lastUpdateAge: lastUpdateAge, intervalSeconds: intervalSeconds, rows: rows,
             warning: warning, serviceStatus: serviceStatus, credits: credits,

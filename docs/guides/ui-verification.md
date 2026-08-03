@@ -495,23 +495,37 @@ Wi-Fi, battery) має **суворий метод**, вироблений бо�
 Лічильник сесій Claude Code, що очікують вводу користувача, у menu bar та попапі. Фіча **opt-in**
 (Settings → General → «Show sessions awaiting input», дефолт OFF); розміщення — Settings → Appearance.
 
-Стуб **`TOKENPACE_AWAITING=<N>`** форсує лічильник у `N`, оминаючи watcher (не потрібні живі
+Стуб **`TOKENPACE_AWAITING=<N>`** синтезує `N` awaiting-сесій, оминаючи watcher (не потрібні живі
 Claude-сесії), **і** вмикає показ (обходить master-тумблер — лише під стубом), тож фіча видима
-одразу під `swift run`. `N=0` ховає індикатор (як і в реальності).
+одразу під `swift run`. `N=0` ховає індикатор (як і в реальності). Додатково:
 
-Перевірка (menu bar + попап):
+- **`TOKENPACE_AWAITING_DAYS=d1,d2,…`** — днів до видалення для кожної сесії (керує кольором:
+  `<7` → червоний, `<15` → помаранч, решта → нейтральний). Пропущені — дефолт 20 (нейтр.).
+- **`TOKENPACE_AWAITING_PROJECTS=a,b,…`** — назви проєктів сесій (round-robin) для розбивки по
+  проєктах.
+
+Перевірка (menu bar + попап + кольори + ⌥-розбивка):
 
 ```sh
-TOKENPACE_STUB=1 TOKENPACE_AWAITING=3 TOKENPACE_DEVTOOLS=1 swift run
+TOKENPACE_STUB=1 TOKENPACE_AWAITING=4 TOKENPACE_AWAITING_DAYS=5,10,25,20 \
+  TOKENPACE_AWAITING_PROJECTS=app,app,app,lib TOKENPACE_DEVTOOLS=1 swift run
 ```
 
-- **Menu bar**: іконка `hand.raised` (✋) як **перший (leading) елемент** віджета — перед
-  паузою/кредитами/барами, **лише іконка, без `×N`**. Показ у барі керується Appearance-опцією
-  «Show awaiting-input icon in the menu bar» (під стубом форсується ON). Роби скріншот **верхньої
-  смуги повного екрана** (реальний бар), не вікна.
-- **Попап**: `Claude [Nm ago]` зліва (бренд + час оновлення), а індикатор `✋ ×3` — **flush right**
-  (найправіший). `×N` — **звичайним шрифтом** (як «5-day»), не bold. При `TOKENPACE_AWAITING=1` —
-  **лише іконка, без `×1`**. (Попап показує індикатор завжди, поки фіча ON.)
+Цей приклад: `app` має [червону (5d), помаранч (10d), нейтр. (25d)], `lib` — [нейтр. (20d)] →
+загальний тон **червоний** (найтерміновіша виграє).
+
+- **Індикатор** = `N✋` — **число ПЕРЕД долонею** (лічильник «N сесій»), без `×`. Долоня **тонована
+  за терміновістю** (червона <7d / помаранч <15d / нейтр. до видалення); число — звичайне.
+- **Menu bar**: `hand.raised` як **перший (leading) елемент** віджета (перед паузою/кредитами/
+  барами), **лише долоня, без числа**. Показ керується Appearance-опцією «Show awaiting-input icon
+  in the menu bar» (пресети workHarder/controlFreak = ON). Скріншот — **верхня смуга повного екрана**.
+- **Попап (без ⌥)**: `Claude [Nm ago]` зліва, `N✋` — **flush right**. При `TOKENPACE_AWAITING=1` —
+  лише долоня, без числа. Наведення → tooltip «Sessions waiting for your answer.\nHold ⌥ (Option) for
+  per-project stats».
+- **Попап (тримати ⌥)**: `N✋` праворуч **зникає** (age «just now» лишається біля «Claude»); нижче —
+  **inline-розбивка по проєктах**: `project ..... 2✋ 1✋ 6✋` (по одній долоні на непорожній бакет,
+  порядок нейтр→оранж→червон, завжди з числом вкл. 1). Наведення на кожну руку → tooltip бакета
+  («<7d/<15d/>15d till deletion»). (Попап показує індикатор завжди, поки фіча ON.)
 - **Appearance-опція** «Show awaiting-input icon in the menu bar» (після «Calm non-critical
   colors»): ON → долоня в барі (leading); OFF → лише в попапі. Активна лише коли master ON; інакше
   недоступна з **⚠️-підказкою** «Enable *Show sessions awaiting input* in General first.».

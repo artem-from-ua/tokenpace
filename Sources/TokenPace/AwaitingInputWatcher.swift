@@ -38,24 +38,24 @@ final class AwaitingInputWatcher {
     private let scanner: AwaitingInputScanner
     private let watchedPaths: [String]
     private let devLoggingEnabled: Bool
-    /// Fired on the main actor whenever the awaiting count changes.
-    private let onCountChanged: @MainActor (Int) -> Void
+    /// Fired on the main actor whenever the awaiting result changes (count, urgency, or breakdown).
+    private let onResultChanged: @MainActor (AwaitingSessions) -> Void
 
     private var stream: FSEventStreamRef?
     private var safetyTimer: Timer?
-    /// Last count pushed to the UI; `nil` until the first scan so the initial value always fires.
-    private var lastCount: Int?
+    /// Last result pushed to the UI; `nil` until the first scan so the initial value always fires.
+    private var lastResult: AwaitingSessions?
     /// A scan already scheduled for the next runloop turn — coalesces multiple triggers into one.
     private var scanScheduled = false
 
     /// - Parameters:
     ///   - claudeHome: the `~/.claude` directory (injectable for tests / dev).
     ///   - devLoggingEnabled: emit `.debug` per-batch detail (wired to `TOKENPACE_DEVTOOLS`).
-    ///   - onCountChanged: called on the main actor with the new count on every change.
+    ///   - onResultChanged: called on the main actor with the new result on every change.
     init(
         claudeHome: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude"),
         devLoggingEnabled: Bool = ProcessInfo.processInfo.environment["TOKENPACE_DEVTOOLS"] != nil,
-        onCountChanged: @escaping @MainActor (Int) -> Void
+        onResultChanged: @escaping @MainActor (AwaitingSessions) -> Void
     ) {
         self.scanner = AwaitingInputScanner(claudeHome: claudeHome)
         self.watchedPaths = [
@@ -63,7 +63,7 @@ final class AwaitingInputWatcher {
             claudeHome.appendingPathComponent("jobs").path,
         ]
         self.devLoggingEnabled = devLoggingEnabled
-        self.onCountChanged = onCountChanged
+        self.onResultChanged = onResultChanged
     }
 
     // MARK: Lifecycle gate
@@ -84,9 +84,9 @@ final class AwaitingInputWatcher {
             guard stream != nil || safetyTimer != nil else { return }
             stopStream()
             safetyTimer?.invalidate(); safetyTimer = nil
-            // Forget the last count so the next start re-reports (and the UI, hidden while inactive,
-            // starts clean). We do NOT push 0 here — the shell hides the indicator when inactive.
-            lastCount = nil
+            // Forget the last result so the next start re-reports (and the UI, hidden while inactive,
+            // starts clean). We do NOT push .none here — the shell hides the indicator when inactive.
+            lastResult = nil
             AppLogger.lifecycle.notice("awaiting-input watcher stopped")
         }
     }
@@ -170,14 +170,15 @@ final class AwaitingInputWatcher {
     }
 
     private func performScan() {
-        let count = scanner.scan()
-        guard count != lastCount else { return }   // steady state: silent, no render
-        let previous = lastCount
-        lastCount = count
-        // Log only the real transition (rare). `previous == nil` is the first scan after start.
+        let result = scanner.scan(now: Date())
+        guard result != lastResult else { return }   // steady state: silent, no render
+        let previous = lastResult
+        lastResult = result
+        // Log only a real transition (rare). `previous == nil` is the first scan after start. Include
+        // the urgency so the log is useful when the count is unchanged but a session crossed a bucket.
         AppLogger.lifecycle.notice(
-            "awaiting-input count \(previous.map(String.init) ?? "—", privacy: .public) → \(count, privacy: .public)")
-        onCountChanged(count)
+            "awaiting-input \(previous?.count.description ?? "—", privacy: .public) → \(result.count, privacy: .public) (urgency \(result.urgency.rawValue, privacy: .public))")
+        onResultChanged(result)
     }
 }
 

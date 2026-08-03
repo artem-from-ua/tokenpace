@@ -398,13 +398,22 @@ final class StatusItemView: NSView {
 
     /// Draw the `hand.raised` awaiting-input indicator at **leading** `x`, vertically centred on
     /// `rect`, and return its right-edge x so the caller can place the next element beside it — the
-    /// **first** leading decoration (before pause/credits/bars). Bare icon, no count (the `×N` lives
+    /// **first** leading decoration (before pause/credits/bars). Bare icon, no count (the count lives
     /// in the popup). Neutral menu-bar foreground so it reads like the other decorations without
     /// stealing pacing colours. Returns `x` unchanged if `hand.raised` can't be built.
     @discardableResult
     private func drawAwaitingIcon(atX x: CGFloat, in rect: NSRect) -> CGFloat {
+        // Tint by urgency (soonest deletion across all awaiting sessions): red < 7d left, orange
+        // < 15d, neutral otherwise (#233/#234). accent(...) for the coloured states so they read at
+        // the same weight as the pause/credits glyphs; bright(label) for neutral.
+        let tint: NSColor
+        switch layout?.awaitingInput?.urgency ?? .neutral {
+        case .red:     tint = accent(.systemRed)
+        case .orange:  tint = accent(.systemOrange)
+        case .neutral: tint = bright(NSColor.labelColor)
+        }
         let config = NSImage.SymbolConfiguration(pointSize: Metrics.awaitingIconSize, weight: .semibold)
-            .applying(.init(paletteColors: [bright(NSColor.labelColor)]))
+            .applying(.init(paletteColors: [tint]))
         guard let symbol = NSImage(
             systemSymbolName: "hand.raised", accessibilityDescription: "sessions awaiting input")?
             .withSymbolConfiguration(config) else { return x }

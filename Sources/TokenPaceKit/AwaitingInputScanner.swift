@@ -60,24 +60,65 @@ public struct AwaitingInputScanner {
 
     // MARK: Public API
 
-    /// The number of live sessions currently awaiting user input. `0` when the feature has nothing
-    /// to show (no live sessions, or none blocked) — the UI hides its indicator at `0`.
+    /// Every live session currently awaiting user input, with its project and days-until-deletion —
+    /// ``AwaitingSessions/none`` when nothing is waiting (the UI then hides the indicator).
     ///
-    /// Pure and side-effect-free. Any I/O error (unreadable dir, torn file mid-write) is swallowed
-    /// and simply contributes nothing to the count.
-    public func scan() -> Int {
+    /// `now` is injected so age math is deterministic in tests. Pure and side-effect-free; any I/O
+    /// error (unreadable dir, torn file mid-write) is swallowed and simply contributes nothing.
+    public func scan(now: Date) -> AwaitingSessions {
         let sessionsDir = claudeHome.appendingPathComponent("sessions")
         guard let entries = try? fileManager.contentsOfDirectory(
             at: sessionsDir, includingPropertiesForKeys: nil
         ) else {
-            return 0
+            return .none
         }
-        var count = 0
+        let cleanupDays = cleanupPeriodDays()
+        var found: [AwaitingSession] = []
         for url in entries where url.pathExtension == "json" {
-            guard let raw = try? String(contentsOf: url, encoding: .utf8) else { continue }
-            if isAwaiting(sessionJSON: raw) { count += 1 }
+            guard let raw = try? String(contentsOf: url, encoding: .utf8),
+                  isAwaiting(sessionJSON: raw) else { continue }
+            found.append(session(from: raw, now: now, cleanupDays: cleanupDays))
         }
-        return count
+        return AwaitingSessions(found)
+    }
+
+    /// Convenience: just the count (the menu-bar hand when per-session detail isn't needed).
+    public func count(now: Date) -> Int { scan(now: now).count }
+
+    // MARK: Building a session
+
+    /// Build an ``AwaitingSession`` from a session-file body: project = repo root (job `originCwd`,
+    /// then session `cwd`), age from `updatedAt` (→ days until the `cleanupDays` cleanup deletes it).
+    private func session(from sessionJSON: String, now: Date, cleanupDays: Double) -> AwaitingSession {
+        // Age from updatedAt/statusUpdatedAt (ms epoch); missing → treat as brand-new (age 0).
+        let updatedMs = firstMatch(Self.reUpdatedAt, in: sessionJSON).flatMap(Double.init)
+        let ageDays: Double = updatedMs.map { max(0, (now.timeIntervalSince1970 * 1000 - $0) / 86_400_000) } ?? 0
+        let daysLeft = cleanupDays - ageDays
+
+        // Project: the job's originCwd (repo root, worktrees collapse) if resolvable, else session cwd.
+        let cwd = firstMatch(Self.reCwd, in: sessionJSON) ?? ""
+        var project = cwd
+        if let jobId = firstMatch(Self.reJobID, in: sessionJSON),
+           let state = try? String(contentsOf: jobStateURL(jobId), encoding: .utf8),
+           let origin = firstMatch(Self.reOriginCwd, in: state), !origin.isEmpty {
+            project = origin
+        }
+        return AwaitingSession(project: project, daysUntilDeletion: daysLeft)
+    }
+
+    /// Claude Code's cleanup horizon in days: `cleanupPeriodDays` from `~/.claude/settings.json`, or
+    /// **30** (the documented default) when the key/file is absent or unparseable (ADR-0031).
+    private func cleanupPeriodDays() -> Double {
+        let settingsURL = claudeHome.appendingPathComponent("settings.json")
+        guard let raw = try? String(contentsOf: settingsURL, encoding: .utf8),
+              let value = firstMatch(Self.reCleanupDays, in: raw).flatMap(Double.init),
+              value > 0 else { return 30 }
+        return value
+    }
+
+    private func jobStateURL(_ jobId: String) -> URL {
+        claudeHome.appendingPathComponent("jobs").appendingPathComponent(jobId)
+            .appendingPathComponent("state.json")
     }
 
     // MARK: Per-session decision
@@ -93,11 +134,7 @@ public struct AwaitingInputScanner {
         // 2. Semantic "blocked, waiting for your decision" — the session file may still say "idle"
         //    here, so consult the daemon-computed job state (the FleetView source).
         guard let jobId = firstMatch(Self.reJobID, in: sessionJSON) else { return false }
-        let stateURL = claudeHome
-            .appendingPathComponent("jobs")
-            .appendingPathComponent(jobId)
-            .appendingPathComponent("state.json")
-        guard let state = try? String(contentsOf: stateURL, encoding: .utf8) else { return false }
+        guard let state = try? String(contentsOf: jobStateURL(jobId), encoding: .utf8) else { return false }
 
         // `needs` present (a non-empty string) is the most precise "awaiting" marker; `tempo` ==
         // "blocked" is the same signal expressed as the coarse state. Either one counts.
@@ -116,6 +153,15 @@ public struct AwaitingInputScanner {
     private static let reNeeds = regex(#""needs"\s*:\s*"([^"]*)""#)
     /// `"tempo": "blocked"` (spaced, from `jobs/*/state.json`).
     private static let reTempo = regex(#""tempo"\s*:\s*"([a-z]+)""#)
+    /// `"updatedAt":1785777905225` (ms epoch, from `sessions/*.json`) — the session's last activity.
+    private static let reUpdatedAt = regex(#""updatedAt"\s*:\s*(\d+)"#)
+    /// `"cwd":"/path"` (from `sessions/*.json`) — the session working directory (project fallback).
+    private static let reCwd = regex(#""cwd"\s*:\s*"([^"]*)""#)
+    /// `"originCwd": "/repo/root"` (spaced, from `jobs/*/state.json`) — the repo root the session
+    /// started in, so worktrees of one repo group into a single project.
+    private static let reOriginCwd = regex(#""originCwd"\s*:\s*"([^"]*)""#)
+    /// `"cleanupPeriodDays": 30` (from `settings.json`) — Claude Code's retention horizon (ADR-0031).
+    private static let reCleanupDays = regex(#""cleanupPeriodDays"\s*:\s*(\d+)"#)
 
     private static func regex(_ pattern: String) -> NSRegularExpression {
         // Patterns are compile-time constants; a failure here is a programmer error, not runtime input.

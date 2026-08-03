@@ -122,7 +122,7 @@ final class SettingsModel {
     /// configured separately in Appearance and only matters while this is on.
     var awaitingInputEnabled = false
     /// Appearance option: also show the indicator in the menu bar (first leading element, bare icon,
-    /// no `×N`), in addition to the popup. Default-off. Only meaningful while ``awaitingInputEnabled``
+    /// no count), in addition to the popup. Default-off. Only meaningful while ``awaitingInputEnabled``
     /// is on.
     var awaitingInputInMenuBar = false
 
