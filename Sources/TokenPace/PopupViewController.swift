@@ -102,7 +102,7 @@ final class PopupBarView: NSView {
         static let corner: CGFloat = 2
         /// Width of the time-indicator marker — a slim vertical bar, narrower than the old dot so it
         /// reads as a crisp position tick rather than a blob.
-        static let indicatorWidth: CGFloat = 6
+        static let indicatorWidth: CGFloat = 7
         /// Height of the time-indicator marker — taller than the bar (≈2×) so it reads clearly as the
         /// primary time marker, standing proud above and below the pacing zones.
         static let indicatorHeight: CGFloat = 14
