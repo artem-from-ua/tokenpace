@@ -209,8 +209,10 @@ awaiting = ~/.claude/sessions/<pid>.json  .status == "waiting"
   на реальні зміни; колбек у shell спрацьовує тільки коли лічильник змінився.
 - **Рендер** — count графтиться на готові layout'и (`MenuBarLayout.withAwaitingInput`,
   `PopupLayout.withAwaitingInput`) у `render()`, поза usage-`make`. Menu bar: іконка `hand.raised`
-  (trailing, без `×N`); popup: `Claude ✋ ×N` праворуч від бренду (`×N` лише при N≥2). Opt-in
-  (Settings → General, дефолт OFF); розміщення — Settings → Appearance.
+  як **перший leading** елемент (без `×N`), лише коли ввімкнено Appearance-опцію «Show awaiting-input
+  icon in the menu bar»; popup: `Claude [age]` зліва, індикатор `✋ ×N` flush-right (`×N` лише при
+  N≥2, звичайним шрифтом). Opt-in (Settings → General, дефолт OFF); menu-bar-показ — Settings →
+  Appearance.
 
 Повний дизайн каденції/кешу/логування — [awaiting-input-refresh.md](../../design/awaiting-input-refresh.md).
 

@@ -505,12 +505,16 @@ Claude-сесії), **і** вмикає показ (обходить master-ту
 TOKENPACE_STUB=1 TOKENPACE_AWAITING=3 TOKENPACE_DEVTOOLS=1 swift run
 ```
 
-- **Menu bar**: іконка `hand.raised` (✋) праворуч від reset-лейбла, лівіше service-dot — **лише
-  іконка, без `×N`**. Роби скріншот **верхньої смуги повного екрана** (реальний бар), не вікна.
-- **Попап**: `Claude ✋ ×3` — іконка одразу праворуч від бренду «Claude», тоді `×N`. При
-  `TOKENPACE_AWAITING=1` — **лише іконка, без `×1`**.
-- **Appearance-опція «left of pause»**: увімкни в Settings → Appearance (активна лише коли master
-  ON) — додає ще одну (без `×N`) копію іконки в menu bar ліворуч від іконки паузи.
+- **Menu bar**: іконка `hand.raised` (✋) як **перший (leading) елемент** віджета — перед
+  паузою/кредитами/барами, **лише іконка, без `×N`**. Показ у барі керується Appearance-опцією
+  «Show awaiting-input icon in the menu bar» (під стубом форсується ON). Роби скріншот **верхньої
+  смуги повного екрана** (реальний бар), не вікна.
+- **Попап**: `Claude [Nm ago]` зліва (бренд + час оновлення), а індикатор `✋ ×3` — **flush right**
+  (найправіший). `×N` — **звичайним шрифтом** (як «5-day»), не bold. При `TOKENPACE_AWAITING=1` —
+  **лише іконка, без `×1`**. (Попап показує індикатор завжди, поки фіча ON.)
+- **Appearance-опція** «Show awaiting-input icon in the menu bar» (після «Calm non-critical
+  colors»): ON → долоня в барі (leading); OFF → лише в попапі. Активна лише коли master ON; інакше
+  недоступна з **⚠️-підказкою** «Enable *Show sessions awaiting input* in General first.».
 
 Реальний (не-стуб) шлях: watcher читає `~/.claude/sessions` + `jobs/` через FSEvents; щоб побачити
 живий лічильник, запусти кілька Claude-сесій, що чекають на дозвіл/план (без стуба, з увімкненим

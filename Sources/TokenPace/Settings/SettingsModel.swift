@@ -121,9 +121,10 @@ final class SettingsModel {
     /// Master toggle: show the "N sessions awaiting input" indicator. Default-off. Placement is
     /// configured separately in Appearance and only matters while this is on.
     var awaitingInputEnabled = false
-    /// Appearance option: also show the indicator in the menu bar, left of the pause icon (bare
-    /// icon, no `×N`). Default-off. Only meaningful while ``awaitingInputEnabled`` is on.
-    var awaitingInputLeftOfPause = false
+    /// Appearance option: also show the indicator in the menu bar (first leading element, bare icon,
+    /// no `×N`), in addition to the popup. Default-off. Only meaningful while ``awaitingInputEnabled``
+    /// is on.
+    var awaitingInputInMenuBar = false
 
     // MARK: About / Updates (#37)
 
@@ -293,7 +294,7 @@ final class SettingsModel {
         refreshArchiveStatus()
 
         awaitingInputEnabled = PersistedConfig.awaitingInputEnabled
-        awaitingInputLeftOfPause = PersistedConfig.awaitingInputLeftOfPause
+        awaitingInputInMenuBar = PersistedConfig.awaitingInputInMenuBar
     }
 
     // MARK: Setters (persist first, then fire the callback — the ordering invariant)
@@ -311,9 +312,9 @@ final class SettingsModel {
         onAwaitingInputEnabledChange?(on)
     }
 
-    func setAwaitingInputLeftOfPause(_ on: Bool) {
-        awaitingInputLeftOfPause = on
-        PersistedConfig.awaitingInputLeftOfPause = on
+    func setAwaitingInputInMenuBar(_ on: Bool) {
+        awaitingInputInMenuBar = on
+        PersistedConfig.awaitingInputInMenuBar = on
         onAwaitingInputAppearanceChange?()
     }
 

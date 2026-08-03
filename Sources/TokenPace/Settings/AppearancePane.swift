@@ -112,6 +112,22 @@ struct AppearancePane: View {
                         + "always stay colored.")
                 }
 
+                // Awaiting-input in the menu bar (#233). The popup always shows the indicator while the
+                // feature is on; this adds the menu-bar copy (a leading hand icon). Meaningful only
+                // while the master toggle in General is on, so it's disabled — with a ⚠️ hint — otherwise.
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Show awaiting-input icon in the menu bar", isOn: Binding(
+                        get: { model.awaitingInputInMenuBar },
+                        set: { model.setAwaitingInputInMenuBar($0) }))
+                    .disabled(!model.awaitingInputEnabled)
+                    SettingsHint(
+                        text: model.awaitingInputEnabled
+                            ? "Adds a hand icon to the menu bar (leading) when sessions are waiting. "
+                              + "The count is shown only in the dropdown."
+                            : "Enable *Show sessions awaiting input* in General first.",
+                        warning: !model.awaitingInputEnabled)
+                }
+
                 // #194, #227 — the single "blocked" control. When fully blocked a red pause icon is
                 // always shown; this toggle only decides whether it hides the bars or keeps them beside it.
                 VStack(alignment: .leading, spacing: 4) {
@@ -121,6 +137,9 @@ struct AppearancePane: View {
                         + "cover, a red pause icon appears. On shows only the icon and the reset "
                         + "countdown; off keeps the pacing bars beside it.")
                 }
+
+                Toggle("Show extra-usage credits icon", isOn: Binding(
+                    get: { model.showExtraUsage }, set: { model.setShowExtraUsage($0) }))
 
                 // Shown to the user as "Show 7-day bar when calm" — the inverse of the stored
                 // `hideCalmSevenDay` flag (off by default = the calm 7-day bar is hidden by default).
@@ -150,23 +169,8 @@ struct AppearancePane: View {
                         + "or a limit is reached.")
                 }
 
-                Toggle("Show extra-usage credits icon", isOn: Binding(
-                    get: { model.showExtraUsage }, set: { model.setShowExtraUsage($0) }))
                 Toggle("Show service status dot on issues", isOn: Binding(
                     get: { model.showServiceDot }, set: { model.setShowServiceDot($0) }))
-
-                // Awaiting-input indicator placement (#233). Meaningful only while the master toggle
-                // in General is on, so it's disabled (with a hint) otherwise.
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Show awaiting-input icon left of the pause icon", isOn: Binding(
-                        get: { model.awaitingInputLeftOfPause },
-                        set: { model.setAwaitingInputLeftOfPause($0) }))
-                    .disabled(!model.awaitingInputEnabled)
-                    SettingsHint(text: model.awaitingInputEnabled
-                        ? "Adds a second, count-less copy of the indicator in the menu bar, left of "
-                          + "the pause icon."
-                        : "Enable *Show sessions awaiting input* in General first.")
-                }
             }
 
             // #211 — a popup-only option, so it lives in its own "Dropdown Widget" section rather than

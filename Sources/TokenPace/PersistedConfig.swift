@@ -93,10 +93,10 @@ enum PersistedConfig {
         /// Whether the "sessions awaiting input" indicator is shown (#233). Default-off (opt-in) —
         /// master toggle in General; placement configured in Appearance. See the property.
         static let awaitingInputEnabled = "awaitingInputEnabled"
-        /// Whether the awaiting-input indicator also appears in the menu bar, left of the pause icon
-        /// (#233). Default-off (opt-in). An Appearance option, but deliberately **not** part of the
-        /// appearance presets. See the property.
-        static let awaitingInputLeftOfPause = "awaitingInputLeftOfPause"
+        /// Whether the awaiting-input indicator also appears in the menu bar (as the first leading
+        /// element), in addition to the popup (#233). Default-off (opt-in). An Appearance option, but
+        /// deliberately **not** part of the appearance presets. See the property.
+        static let awaitingInputInMenuBar = "awaitingInputInMenuBar"
         /// Filesystem path of the user-chosen archive folder (#110), or absent if not yet set.
         static let archiveDestination = "archiveDestination"
         /// Instant of the last **successful** archive sync (#110), gating the 24 h cadence.
@@ -386,7 +386,7 @@ enum PersistedConfig {
             Key.barStyle,
             Key.showTicks,
             Key.farBehindInterval,
-            Key.awaitingInputLeftOfPause,
+            Key.awaitingInputInMenuBar,
         ] {
             defaults.removeObject(forKey: key)
         }
@@ -490,15 +490,16 @@ enum PersistedConfig {
         set { defaults.set(newValue, forKey: Key.awaitingInputEnabled) }
     }
 
-    /// Whether the awaiting-input indicator also renders in the menu bar, left of the pause icon,
-    /// always as a bare icon (no `×N`) — #233. **Default-off** (opt-in). Only meaningful while
-    /// ``awaitingInputEnabled`` is on. This is an Appearance option (cleared by
+    /// Whether the awaiting-input indicator also renders in the menu bar (as the **first leading**
+    /// element, a bare icon with no `×N`), in addition to the popup — #233. **Default-off** (opt-in):
+    /// the popup always shows the indicator while the feature is on; this adds the menu-bar copy. Only
+    /// meaningful while ``awaitingInputEnabled`` is on. An Appearance option (cleared by
     /// ``resetAppearanceToDefaults()``) but deliberately **outside** the appearance presets, so it
     /// does not change the meaning of a preset. `object(forKey:) as? Bool ?? false` keeps the
     /// unset-vs-explicit distinction.
-    static var awaitingInputLeftOfPause: Bool {
-        get { defaults.object(forKey: Key.awaitingInputLeftOfPause) as? Bool ?? false }
-        set { defaults.set(newValue, forKey: Key.awaitingInputLeftOfPause) }
+    static var awaitingInputInMenuBar: Bool {
+        get { defaults.object(forKey: Key.awaitingInputInMenuBar) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.awaitingInputInMenuBar) }
     }
 
     /// Filesystem path of the archive folder the user chose (#110), or `nil` if none picked yet.

@@ -835,21 +835,22 @@ final class PopupViewController: NSViewController {
         let showStatusRows = status?.worstProblem != nil
         let showAge = optionHeld || layout.lastUpdateAge >= Self.staleAgeThreshold
         let ageString = showAge ? Self.ageText(layout.lastUpdateAge) : ""
-        let ageLabel = NSTextField(labelWithString: ageString)
-        ageLabel.font = .systemFont(ofSize: Metrics.textSize)
-        ageLabel.textColor = Self.dimmedLabelColor
-        // "Claude" brand title, with the awaiting-input indicator (#233) grafted right of it when the
-        // feature reports a count. `addSplitLine`'s plain path is used when there's nothing to graft.
+        // Header layout (#233): the "Claude" brand title with the "Nm ago" age beside it on the left;
+        // the awaiting-input indicator (hand + ×N) pinned flush right. When there's no awaiting count,
+        // fall back to the plain brand-left / age-right split line.
         let sectionHeader: NSView
         if let awaiting = layout.awaitingInput {
             let brand = NSTextField(labelWithString: Self.claudeCodeSectionTitle)
             brand.font = Self.menuItemFont
             brand.textColor = Self.claudeBrandColor
-            let leading = NSStackView(views: [brand, makeAwaitingBadge(count: awaiting)])
+            let age = NSTextField(labelWithString: ageString)
+            age.font = .systemFont(ofSize: Metrics.textSize)
+            age.textColor = Self.dimmedLabelColor
+            let leading = NSStackView(views: [brand, age])
             leading.orientation = .horizontal
-            leading.alignment = .centerY
-            leading.spacing = 6
-            sectionHeader = addSplitRow(leadingView: leading, rightView: ageLabel)
+            leading.alignment = .firstBaseline
+            leading.spacing = 8
+            sectionHeader = addSplitRow(leadingView: leading, rightView: makeAwaitingBadge(count: awaiting))
         } else {
             sectionHeader = addSplitLine(
                 left: Self.claudeCodeSectionTitle, right: ageString,
@@ -1019,7 +1020,8 @@ final class PopupViewController: NSViewController {
         guard count >= 2 else { return iconView }
 
         let countLabel = NSTextField(labelWithString: "×\(count)")
-        countLabel.font = .monospacedDigitSystemFont(ofSize: size, weight: .semibold)
+        // Regular weight (matches the "5-day" row labels), not bold — per maintainer feedback.
+        countLabel.font = .systemFont(ofSize: size)
         countLabel.textColor = ColorStore.shared.color(.label)
         let stack = NSStackView(views: [iconView, countLabel])
         stack.orientation = .horizontal
