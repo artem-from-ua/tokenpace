@@ -29,10 +29,10 @@ struct NotificationsPane: View {
                     HStack {
                         Text("Back to work")
                         Spacer()
-                        // "Try" fires the notification on demand for verification (#193). It sits
+                        // "Preview" fires the notification on demand for verification (#193). It sits
                         // before the on/off switch and is always enabled — even with the feature off:
                         // the post checks support + authorization itself (a silent no-op if not granted).
-                        Button("Try") { model.tryBackToWork() }
+                        Button("Preview") { model.tryBackToWork() }
                         Toggle("Back to work", isOn: Binding(
                             get: { model.backToWorkEnabled },
                             set: { model.setBackToWork($0) }))
@@ -52,9 +52,9 @@ struct NotificationsPane: View {
                     HStack {
                         Text("Switching to Extra Usage")
                         Spacer()
-                        // "Try" fires the banner on demand for verification, mirroring "Back to work" —
+                        // "Preview" fires the banner on demand for verification, mirroring "Back to work" —
                         // always enabled (the post gates on support + authorization itself).
-                        Button("Try") { model.tryExtraUsage() }
+                        Button("Preview") { model.tryExtraUsage() }
                         Toggle("Switching to Extra Usage", isOn: Binding(
                             get: { model.extraUsageNotifyEnabled },
                             set: { model.setExtraUsageNotify($0) }))
