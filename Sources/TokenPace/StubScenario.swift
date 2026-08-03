@@ -176,35 +176,39 @@ enum StubScenario: String, CaseIterable {
     /// `URLSession.shared` for ``realNetwork``. Constructing a fresh stub resets its per-poll `calls`
     /// counter, so re-selecting a call-sequence scenario (stale-error, reset-grace, …) replays it from
     /// the first poll.
-    func makeTransport() -> UsageTransport {
+    ///
+    /// `now` is the base clock every stub `resets_at` is stamped against — pass the same provider the
+    /// App renders with (``clock(realNow:)``) so the transport's reset instants and the layout's
+    /// countdowns stay in lock-step. Defaults to the wall clock (`realNetwork` ignores it).
+    func makeTransport(now: @escaping @Sendable () -> Date = { Date() }) -> UsageTransport {
         switch self {
         case .realNetwork:         return URLSession.shared
-        case .climbing:            return StubUsageTransport(mode: .climbing)
-        case .screenshot:          return StubUsageTransport(mode: .screenshot)
-        case .authError:           return StubUsageTransport(mode: .authError)
-        case .staleError:          return StubUsageTransport(mode: .staleError)
-        case .idle:                return StubUsageTransport(mode: .idle)
-        case .idleBlocked:         return StubUsageTransport(mode: .idleBlocked)
-        case .activeBlocked:       return StubUsageTransport(mode: .activeBlocked)
-        case .optimisticReset:     return StubUsageTransport(mode: .optimisticReset)
-        case .brokenReset:         return StubUsageTransport(mode: .brokenReset)
-        case .fiveOrange:          return StubUsageTransport(mode: .pacing(.fiveOrange))
-        case .bothOrange:          return StubUsageTransport(mode: .pacing(.bothOrange))
-        case .bothRed:             return StubUsageTransport(mode: .pacing(.bothRed))
-        case .redOrange:           return StubUsageTransport(mode: .pacing(.redOrange))
-        case .redGreen:            return StubUsageTransport(mode: .pacing(.redGreen))
-        case .calm5Orange7:        return StubUsageTransport(mode: .pacing(.calmFiveOrangeSeven))
-        case .nearReset:           return StubUsageTransport(mode: .pacing(.nearResetFiveHour))
-        case .calmBoth:            return StubUsageTransport(mode: .pacing(.calmBoth))
-        case .farBehind:           return StubUsageTransport(mode: .pacing(.farBehind))
-        case .nearZero:            return StubUsageTransport(mode: .pacing(.nearZero))
-        case .calmDegraded:        return StubUsageTransport(mode: .calmDegraded)
-        case .creditsActive:       return StubUsageTransport(mode: .credits(.active))
-        case .creditsLimitReached: return StubUsageTransport(mode: .credits(.limitReached))
-        case .creditsNoLimit:      return StubUsageTransport(mode: .credits(.noLimit))
-        case .justUnblocked:       return StubUsageTransport(mode: .justUnblocked)
-        case .creditsOnset:        return StubUsageTransport(mode: .creditsOnset)
-        case .resetGrace:          return StubUsageTransport(mode: .resetGrace)
+        case .climbing:            return StubUsageTransport(mode: .climbing, now: now)
+        case .screenshot:          return StubUsageTransport(mode: .screenshot, now: now)
+        case .authError:           return StubUsageTransport(mode: .authError, now: now)
+        case .staleError:          return StubUsageTransport(mode: .staleError, now: now)
+        case .idle:                return StubUsageTransport(mode: .idle, now: now)
+        case .idleBlocked:         return StubUsageTransport(mode: .idleBlocked, now: now)
+        case .activeBlocked:       return StubUsageTransport(mode: .activeBlocked, now: now)
+        case .optimisticReset:     return StubUsageTransport(mode: .optimisticReset, now: now)
+        case .brokenReset:         return StubUsageTransport(mode: .brokenReset, now: now)
+        case .fiveOrange:          return StubUsageTransport(mode: .pacing(.fiveOrange), now: now)
+        case .bothOrange:          return StubUsageTransport(mode: .pacing(.bothOrange), now: now)
+        case .bothRed:             return StubUsageTransport(mode: .pacing(.bothRed), now: now)
+        case .redOrange:           return StubUsageTransport(mode: .pacing(.redOrange), now: now)
+        case .redGreen:            return StubUsageTransport(mode: .pacing(.redGreen), now: now)
+        case .calm5Orange7:        return StubUsageTransport(mode: .pacing(.calmFiveOrangeSeven), now: now)
+        case .nearReset:           return StubUsageTransport(mode: .pacing(.nearResetFiveHour), now: now)
+        case .calmBoth:            return StubUsageTransport(mode: .pacing(.calmBoth), now: now)
+        case .farBehind:           return StubUsageTransport(mode: .pacing(.farBehind), now: now)
+        case .nearZero:            return StubUsageTransport(mode: .pacing(.nearZero), now: now)
+        case .calmDegraded:        return StubUsageTransport(mode: .calmDegraded, now: now)
+        case .creditsActive:       return StubUsageTransport(mode: .credits(.active), now: now)
+        case .creditsLimitReached: return StubUsageTransport(mode: .credits(.limitReached), now: now)
+        case .creditsNoLimit:      return StubUsageTransport(mode: .credits(.noLimit), now: now)
+        case .justUnblocked:       return StubUsageTransport(mode: .justUnblocked, now: now)
+        case .creditsOnset:        return StubUsageTransport(mode: .creditsOnset, now: now)
+        case .resetGrace:          return StubUsageTransport(mode: .resetGrace, now: now)
         }
     }
 
@@ -212,4 +216,56 @@ enum StubScenario: String, CaseIterable {
     /// the bearer, so the Keychain is skipped). Only ``realNetwork`` reads the real Keychain / spawns
     /// the live refresher.
     var usesStubToken: Bool { self != .realNetwork }
+
+    // MARK: - Clock
+
+    /// A **fixed** instant this scenario's canned data is anchored to, or `nil` to run off the wall
+    /// clock. Stubs are decoupled from today's date by default so a frozen frame is reproducible (same
+    /// weekday and reset times every launch) — the exception is scenarios whose behaviour *is* the
+    /// passage of real time (see ``usesRealClock``), which return `nil`.
+    ///
+    /// Most stubs share one anchor (a fixed Wednesday midday, UTC); ``screenshot`` uses a late-month
+    /// instant so its extra-usage bar reads as a long green (month ≈99 % elapsed vs ~22 % spent) with a
+    /// matching "<1d" reset line — bar and text driven by the same clock, so they never disagree.
+    var stubClock: Date? {
+        guard !usesRealClock, self != .realNetwork else { return nil }
+        return self == .screenshot ? Self.screenshotAnchor : Self.defaultAnchor
+    }
+
+    /// Whether this scenario must run off the **real** wall clock because its observable behaviour is
+    /// the clock advancing: ``optimisticReset`` arms a one-shot timer for a reset ~20 s out and watches
+    /// it fire; ``resetGrace`` holds the 5h bar "ready" across empty polls via a real-time freshness
+    /// window. Every other stub is driven purely by the poll counter, so a frozen clock reproduces it.
+    var usesRealClock: Bool {
+        switch self {
+        case .optimisticReset, .resetGrace: return true
+        default:                            return false
+        }
+    }
+
+    /// Emoji badges shown before the scenario's name in the dev-tools dropdown, marking how "live" it
+    /// is: **⚡** = real usage API (``realNetwork``), **⏱** = real wall clock (``usesRealClock``). A
+    /// fully canned, date-decoupled stub carries neither. Empty string when there is nothing to flag.
+    var badges: String {
+        var out = ""
+        if self == .realNetwork { out += "⚡" }
+        if usesRealClock { out += "⏱" }
+        return out.isEmpty ? "" : out + " "
+    }
+
+    /// This scenario's render/transport clock: the fixed ``stubClock`` when set, else the live `realNow`
+    /// (the wall clock, or a scenario on ``usesRealClock``). One provider feeds both the App's render
+    /// and the stub transport so their instants agree.
+    func clock(realNow: @escaping @Sendable () -> Date = { Date() }) -> @Sendable () -> Date {
+        if let fixed = stubClock { return { fixed } }
+        return realNow
+    }
+
+    /// The shared fixed anchor for date-decoupled stubs: **2026-01-14 12:00:00 UTC**, a Wednesday
+    /// midday — a stable, unambiguous weekday/clock for reproducible frames.
+    private static let defaultAnchor = Date(timeIntervalSince1970: 1_768_392_000)
+
+    /// The ``screenshot`` anchor: **2026-01-31 22:00:00 UTC** — late in the month (≈99 % elapsed) so the
+    /// extra-usage bar is a long green and its reset line reads "<1d", consistent with the bar.
+    private static let screenshotAnchor = Date(timeIntervalSince1970: 1_769_896_800)
 }

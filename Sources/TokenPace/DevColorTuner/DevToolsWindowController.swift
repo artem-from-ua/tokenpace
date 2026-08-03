@@ -326,7 +326,8 @@ final class DevToolsWindowController: NSWindowController {
         stubPopUp.translatesAutoresizingMaskIntoConstraints = false
         stubPopUp.removeAllItems()
         for scenario in stubScenarios {
-            stubPopUp.addItem(withTitle: scenario.displayName)
+            // Prefix the ⚡ (real API) / ⏱ (real clock) badges so a live scenario is flagged at a glance.
+            stubPopUp.addItem(withTitle: scenario.badges + scenario.displayName)
             stubPopUp.lastItem?.representedObject = scenario
         }
 

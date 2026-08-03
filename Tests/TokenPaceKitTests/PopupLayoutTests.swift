@@ -714,13 +714,26 @@ struct PopupLayoutCreditsTests {
         #expect(credits.inUse == false)
     }
 
-    /// `inUse` is `true` once a base limit is exhausted (here 7-day at 100 %) — the same gate as the
-    /// menu-bar icon, so credits are genuinely covering an overflowing plan limit.
+    /// `inUse` is `true` once a **main** window (5h / 7d) is exhausted (here 7-day at 100 %) — a work is
+    /// genuinely overflowing onto the paid tier.
     @Test func inUseTrueWhenBaseLimitExhausted() {
         let spend = SpendInfo(used: eur(1077), limit: eur(1500), enabled: true)
         let p = layout(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 100, spend: spend))
         let credits = try! #require(p.credits)
         #expect(credits.inUse == true)
+    }
+
+    /// `inUse` uses `mainWindowExhausted` (5h / 7d only), NOT the icon's wider `anyBaseLimitExhausted`:
+    /// a per-model / scoped row at 100 % (here Mythos) while both main windows are below 100 % does NOT
+    /// gate work, so credits are not actually being spent — the "active" badge must stay off.
+    @Test func inUseFalseWhenOnlyScopedModelExhausted() {
+        let spend = SpendInfo(used: eur(1077), limit: eur(1500), enabled: true)
+        let p = layout(from: snapshot(
+            fiveHourUtil: 10, sevenDayUtil: 20,
+            limits: [scopedLimit(name: "Mythos", percent: 100, resetsIn: 3 * 24 * 3600)],
+            spend: spend))
+        let credits = try! #require(p.credits)
+        #expect(credits.inUse == false)
     }
 
     /// `inUse` is **`false`** once the money cap is reached (`spend_limit_reached` → the server sets

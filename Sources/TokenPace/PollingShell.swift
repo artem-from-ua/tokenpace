@@ -488,9 +488,16 @@ actor StubUsageTransport: UsageTransport {
     }
 
     private let mode: Mode
+    /// The base clock every `resets_at` in the stub body is stamped relative to. Injected so a stub
+    /// scenario can run off a **fixed** instant (`StubScenario.stubClock`) instead of the wall clock —
+    /// this keeps a stubbed frame reproducible (same weekday / reset times every launch) and, crucially,
+    /// keeps the transport's `resets_at` in lock-step with the App's render clock (both read the same
+    /// `now`), so the pacing bars and reset lines never disagree. Defaults to the live `Date()`.
+    private let now: @Sendable () -> Date
 
-    init(mode: Mode = .climbing) {
+    init(mode: Mode = .climbing, now: @escaping @Sendable () -> Date = { Date() }) {
         self.mode = mode
+        self.now = now
     }
 
     /// ISO-8601 string for a `Date`, matching the API's `+00:00` offset form.
@@ -502,23 +509,23 @@ actor StubUsageTransport: UsageTransport {
     }
 
     /// ISO-8601 string for `now + seconds`, matching the API's `+00:00` offset form.
-    private static func resetsAt(inSeconds seconds: TimeInterval) -> String {
-        isoString(Date().addingTimeInterval(seconds))
+    private func resetsAt(inSeconds seconds: TimeInterval) -> String {
+        Self.isoString(now().addingTimeInterval(seconds))
     }
 
     /// `now + seconds`, rounded to the nearest 10-minute mark, as a UTC ISO string — gives the
     /// screenshot a clean absolute reset (`…:x0`) while keeping the elapsed fraction ≈ the target.
-    private static func resetsAtRounded10(inSeconds seconds: TimeInterval) -> String {
-        let raw = Date().addingTimeInterval(seconds).timeIntervalSince1970
+    private func resetsAtRounded10(inSeconds seconds: TimeInterval) -> String {
+        let raw = now().addingTimeInterval(seconds).timeIntervalSince1970
         let rounded = (raw / 600).rounded() * 600
-        return isoString(Date(timeIntervalSince1970: rounded))
+        return Self.isoString(Date(timeIntervalSince1970: rounded))
     }
 
     /// `daysFromNow` days ahead, snapped to the next top-of-the-hour, as a UTC ISO string — a clean
     /// `…:00` absolute reset shared by the 7-day window and its Sonnet sub-window in the screenshot.
-    private static func hourBoundary(daysFromNow days: Int) -> Date {
+    private func hourBoundary(daysFromNow days: Int) -> Date {
         let cal = Calendar.current
-        let target = Date().addingTimeInterval(Double(days) * 86_400)
+        let target = now().addingTimeInterval(Double(days) * 86_400)
         let nextHour = cal.nextDate(after: target, matching: DateComponents(minute: 0, second: 0),
                                     matchingPolicy: .nextTime) ?? target
         return nextHour
@@ -568,7 +575,7 @@ actor StubUsageTransport: UsageTransport {
         // `weekly_scoped` row keeps a normal per-model section on screen. Mirrors the live "no active
         // session" body shape (Body A) verbatim.
         if mode == .idle {
-            let sevenReset = Self.resetsAt(inSeconds: 4.2 * 24 * 3600)   // ≥ 24 h → "4d" via timeToResetCompactDays
+            let sevenReset = self.resetsAt(inSeconds: 4.2 * 24 * 3600)   // ≥ 24 h → "4d" via timeToResetCompactDays
             let body = """
             {"five_hour":{"utilization":0.0,"resets_at":null},\
             "seven_day":{"utilization":31.0,"resets_at":"\(sevenReset)"},\
@@ -588,7 +595,7 @@ actor StubUsageTransport: UsageTransport {
         // "waiting for limit reset" status word, and the red blocking-reset badge on the 7-day row (its
         // reset is ~4 days out, the only exhausted candidate → the blocking reset).
         if mode == .idleBlocked {
-            let sevenReset = Self.resetsAt(inSeconds: 4.2 * 24 * 3600)   // ≥ 24 h → "4d"
+            let sevenReset = self.resetsAt(inSeconds: 4.2 * 24 * 3600)   // ≥ 24 h → "4d"
             let body = """
             {"five_hour":{"utilization":0.0,"resets_at":null},\
             "seven_day":{"utilization":100.0,"resets_at":"\(sevenReset)"},\
@@ -606,8 +613,8 @@ actor StubUsageTransport: UsageTransport {
         // reset (the sole exhausted candidate, ~4 days out) is drawn **red** as the blocking reset. Before
         // the fix `isBlocked` returned false (it required 5h exhausted too) → no badge.
         if mode == .activeBlocked {
-            let fiveReset = Self.resetsAt(inSeconds: 2 * 3600)          // active 5h, resets in ~2 h
-            let sevenReset = Self.resetsAt(inSeconds: 4.2 * 24 * 3600)  // ≥ 24 h → "4d"
+            let fiveReset = self.resetsAt(inSeconds: 2 * 3600)          // active 5h, resets in ~2 h
+            let sevenReset = self.resetsAt(inSeconds: 4.2 * 24 * 3600)  // ≥ 24 h → "4d"
             let body = """
             {"five_hour":{"utilization":48.0,"resets_at":"\(fiveReset)"},\
             "seven_day":{"utilization":100.0,"resets_at":"\(sevenReset)"},\
@@ -628,7 +635,7 @@ actor StubUsageTransport: UsageTransport {
         // the last bars) rather than a fabricated "<1m". The 7-day window is calm with a valid reset,
         // so it is not the data-error source — the error comes purely from the chosen 5h.
         if mode == .brokenReset {
-            let sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
+            let sevenReset = self.resetsAt(inSeconds: 5 * 24 * 3600)
             // A **non-empty but unparseable** `resets_at` — NOT `null`. A null/empty 5h date decodes to
             // the honest `sessionIdle` state (ADR-0027), not a data error; a malformed *present* string
             // keeps the window active (`hasResetsAt == true`) while `ResetClock.parse` returns nil, which
@@ -654,7 +661,7 @@ actor StubUsageTransport: UsageTransport {
             let first = calls == 0
             calls += 1
             guard first else { throw URLError(.timedOut) }
-            let sevenReset = Self.resetsAt(inSeconds: 4.2 * 24 * 3600)   // ≥ 24 h → "5d"
+            let sevenReset = self.resetsAt(inSeconds: 4.2 * 24 * 3600)   // ≥ 24 h → "5d"
             let body = """
             {"five_hour":{"utilization":0.0,"resets_at":null},\
             "seven_day":{"utilization":18.0,"resets_at":"\(sevenReset)"},\
@@ -697,8 +704,8 @@ actor StubUsageTransport: UsageTransport {
             let first = calls == 0
             calls += 1
             let fiveUtil = first ? 60.0 : 0.0
-            let fiveReset = Self.resetsAt(inSeconds: first ? 20 : 5 * 3600)
-            let sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
+            let fiveReset = self.resetsAt(inSeconds: first ? 20 : 5 * 3600)
+            let sevenReset = self.resetsAt(inSeconds: 5 * 24 * 3600)
             let body = """
             {"five_hour":{"utilization":\(fiveUtil),"resets_at":"\(fiveReset)"},\
             "seven_day":{"utilization":40.0,"resets_at":"\(sevenReset)"},\
@@ -723,14 +730,14 @@ actor StubUsageTransport: UsageTransport {
             let n = calls
             calls += 1
             let empty = (n == 2 || n == 3)
-            let sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
+            let sevenReset = self.resetsAt(inSeconds: 5 * 24 * 3600)
             let fiveBody: String
             if empty {
                 // Post-reset gap: server has no 5h window yet (created by the first token spend).
                 fiveBody = #""five_hour":{"utilization":0.0,"resets_at":null}"#
             } else {
                 // Active window, mid-window (n<2) or freshly reset (n>3).
-                let fiveReset = Self.resetsAt(inSeconds: 3 * 3600)
+                let fiveReset = self.resetsAt(inSeconds: 3 * 3600)
                 let fiveUtil = n < 2 ? 40.0 : 5.0
                 fiveBody = #""five_hour":{"utilization":\#(fiveUtil),"resets_at":"\#(fiveReset)"}"#
             }
@@ -752,8 +759,8 @@ actor StubUsageTransport: UsageTransport {
             let blocked = calls == 0
             calls += 1
             let sevenUtil = blocked ? 100.0 : 40.0
-            let fiveReset = Self.resetsAt(inSeconds: 3 * 3600)
-            let sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
+            let fiveReset = self.resetsAt(inSeconds: 3 * 3600)
+            let sevenReset = self.resetsAt(inSeconds: 5 * 24 * 3600)
             let body = """
             {"five_hour":{"utilization":18.0,"resets_at":"\(fiveReset)"},\
             "seven_day":{"utilization":\(sevenUtil),"resets_at":"\(sevenReset)"},\
@@ -772,8 +779,8 @@ actor StubUsageTransport: UsageTransport {
             let onCredits = calls > 0
             calls += 1
             let sevenUtil = onCredits ? 100.0 : 40.0
-            let fiveReset = Self.resetsAt(inSeconds: 3 * 3600)
-            let sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
+            let fiveReset = self.resetsAt(inSeconds: 3 * 3600)
+            let sevenReset = self.resetsAt(inSeconds: 5 * 24 * 3600)
             // A `weekly_all` critical limit only once the 7-day window is actually exhausted.
             let weeklyLimit = onCredits
                 ? #""limits":[{"kind":"weekly_all","group":"weekly","percent":100,"severity":"critical","resets_at":"\#(sevenReset)","scope":null,"is_active":true}],"#
@@ -795,8 +802,8 @@ actor StubUsageTransport: UsageTransport {
         // month-elapsed pacing (`CreditsPacing.barLayout`). Status endpoint stays all-operational so the
         // frame reads clean (handled in the status branch above).
         if case let .credits(frame) = mode {
-            let fiveReset = Self.resetsAt(inSeconds: 3 * 3600)          // active 5h, mid-window
-            let sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)    // weekly limit hit, resets in 5 d
+            let fiveReset = self.resetsAt(inSeconds: 3 * 3600)          // active 5h, mid-window
+            let sevenReset = self.resetsAt(inSeconds: 5 * 24 * 3600)    // weekly limit hit, resets in 5 d
             let body = """
             {"five_hour":{"utilization":18.0,"resets_at":"\(fiveReset)"},\
             "seven_day":{"utilization":100.0,"resets_at":"\(sevenReset)"},\
@@ -824,6 +831,9 @@ actor StubUsageTransport: UsageTransport {
         let fiveReset: String
         let sevenReset: String
         let weeklyReset: String
+        // Optional `spend` + `extra_usage` fragment (leading comma included) spliced into the body;
+        // empty for every mode except `.screenshot`, which stages a healthy extra-usage state.
+        var creditsBlock = ""
 
         // `.calmDegraded` reuses the calm-both bar frame for its usage side — only its service dot
         // differs (handled in the status branch above) — so resolve both to a `PacingFrame`.
@@ -848,8 +858,8 @@ actor StubUsageTransport: UsageTransport {
                 fable = 60.0
                 mythos = 100.0
             }
-            fiveReset = Self.resetsAt(inSeconds: v.fiveIn)
-            sevenReset = Self.resetsAt(inSeconds: v.sevenIn)
+            fiveReset = self.resetsAt(inSeconds: v.fiveIn)
+            sevenReset = self.resetsAt(inSeconds: v.sevenIn)
             weeklyReset = sevenReset
         } else if mode == .screenshot {
             // Hand-picked, frozen frame for the README screenshot. Pacing states on screen:
@@ -864,9 +874,24 @@ actor StubUsageTransport: UsageTransport {
             fable = 70.0
             mythos = 100.0
             // 5h window = 18000 s; reset at ≈ now + 6300 s ⇒ elapsed ≈ 65 %, snapped to :x0.
-            fiveReset = Self.resetsAtRounded10(inSeconds: 6300)
-            weeklyReset = Self.isoString(Self.hourBoundary(daysFromNow: 5))
+            fiveReset = self.resetsAtRounded10(inSeconds: 6300)
+            weeklyReset = Self.isoString(self.hourBoundary(daysFromNow: 5))
             sevenReset = weeklyReset                    // 7d and every per-model row end at the same boundary
+            // Extra-usage credits: ¤10.88 spent of a ¤50.00 monthly limit (~21.8 %). Combined with the
+            // scenario's `creditsMonthElapsedOverride` (≈99 % of the month elapsed, pinned in the App
+            // layer) this renders as a long GREEN extra-usage bar — well behind the month's pace. USD so
+            // the screenshot shows the "$" glyph. `enabled`/`spend_limit_reached:false` → a healthy,
+            // within-limit paced state (the section shows without a red ceiling).
+            creditsBlock = """
+            ,"extra_usage":{"is_enabled":true,"monthly_limit":5000,"used_credits":1088.0,\
+            "utilization":21.8,"currency":"USD","decimal_places":2,"disabled_reason":null,\
+            "user_disabled":false,"spend_limit_reached":false,"credits_ever_enabled":true,\
+            "daily":null,"weekly":null},\
+            "spend":{"used":{"amount_minor":108800,"currency":"USD","exponent":2},\
+            "limit":{"amount_minor":500000,"currency":"USD","exponent":2},"percent":22,\
+            "severity":"normal","enabled":true,"disabled_reason":null,"balance":null,\
+            "auto_reload":null}
+            """
         } else {
             // Step utilisation every 3rd poll so some adjacent polls are "unchanged" (cadence
             // doubles) and some "changed" (cadence resets) — exercising the live interval logic.
@@ -878,8 +903,8 @@ actor StubUsageTransport: UsageTransport {
             //  • 5h resets in ~2 h → ≈60 % elapsed > 20 % used → behind pace → GREEN gap.
             //  • 7d resets in ~5 d → only ≈29 % elapsed < 55 % used → ahead of pace → ORANGE gap.
             //  • Per-model rows share the 7d reset (≈29 % elapsed) → ORANGE / RED (#65).
-            fiveReset = Self.resetsAt(inSeconds: 2 * 3600)
-            sevenReset = Self.resetsAt(inSeconds: 5 * 24 * 3600)
+            fiveReset = self.resetsAt(inSeconds: 2 * 3600)
+            sevenReset = self.resetsAt(inSeconds: 5 * 24 * 3600)
             weeklyReset = sevenReset
         }
         // These models have NO top-level window in the live API — each exists only as a `weekly_scoped`
@@ -896,7 +921,7 @@ actor StubUsageTransport: UsageTransport {
         let body = """
         {"five_hour":{"utilization":\(five),"resets_at":"\(fiveReset)"},\
         "seven_day":{"utilization":\(seven),"resets_at":"\(sevenReset)"},\
-        "limits":[\(scoped)]}
+        "limits":[\(scoped)]\(creditsBlock)}
         """.data(using: .utf8)!
         let response = HTTPURLResponse(
             url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!

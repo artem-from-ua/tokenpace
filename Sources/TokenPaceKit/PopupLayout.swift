@@ -356,11 +356,15 @@ public struct PopupLayout: Sendable, Equatable {
             ? nil
             : CreditsPacing.monthEnd(now: now).flatMap { ResetClock.resetLine(resetsAt: $0, now: now) }
         // "active" badge = credits are actually being spent right now — `isSpending` (enabled AND not
-        // capped AND a base limit exhausted). Deliberately stricter than the icon's `shouldShowIcon`:
+        // capped AND a main window exhausted). Deliberately stricter than the icon's `shouldShowIcon`:
         // once the money cap is reached the server disables credits (Claude is blocked), so the badge
-        // must NOT claim they are active even though the icon still shows (red "ceiling hit").
+        // must NOT claim they are active even though the icon still shows (red "ceiling hit"). It also
+        // uses `mainWindowExhausted` — NOT the icon's wider `anyBaseLimitExhausted` — so only the two
+        // windows that actually gate work (5h / 7d) turn it "active": a per-model row at 100 %
+        // (Opus / Sonnet / a scoped model like Fable or Mythos) does not put credits in use, since work
+        // isn't blocked and nothing has overflowed onto the paid tier yet.
         let inUse = CreditsPacing.isSpending(
-            spend, baseLimitExhausted: CreditsPacing.anyBaseLimitExhausted(in: snapshot))
+            spend, baseLimitExhausted: CreditsPacing.mainWindowExhausted(in: snapshot))
         return CreditsRow(
             spent: spent, limit: spend.limit, bar: bar, resetLine: resetLine, inUse: inUse)
     }
