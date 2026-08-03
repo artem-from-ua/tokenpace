@@ -1074,11 +1074,12 @@ final class PopupViewController: NSViewController {
 
         let stack = NSStackView()
         // Count **before** the icon — reads as "N sessions" (numeral + noun), the natural English
-        // count order. Label colour; only the hand carries the bucket colour (per maintainer).
+        // count order. The count is dimmed (same colour as the "20%" utilisation text); the hand keeps
+        // its bucket colour (red/orange, or the plain label colour when neutral).
         if count >= 2 || showCountForOne {
             let countLabel = NSTextField(labelWithString: "\(count)")
             countLabel.font = .systemFont(ofSize: size)
-            countLabel.textColor = ColorStore.shared.color(.label)
+            countLabel.textColor = Self.dimmedLabelColor
             stack.addArrangedSubview(countLabel)
         }
         stack.addArrangedSubview(iconView)

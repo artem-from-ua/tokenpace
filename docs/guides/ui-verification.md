@@ -520,12 +520,18 @@ Claude-сесії), **і** вмикає показ (обходить master-ту
 Перевірка (menu bar + попап + кольори + ⌥-розбивка):
 
 ```sh
-TOKENPACE_STUB=1 TOKENPACE_AWAITING=4 TOKENPACE_AWAITING_DAYS=5,10,25,20 \
-  TOKENPACE_AWAITING_PROJECTS=app,app,app,lib TOKENPACE_DEVTOOLS=1 swift run
+TOKENPACE_STUB=1 TOKENPACE_AWAITING=8 TOKENPACE_AWAITING_DAYS=3,28,10,5,25,12,20,4 \
+  TOKENPACE_AWAITING_PROJECTS=tokenpace-menubar,claude-code-daemon,awaiting-input-watcher \
+  TOKENPACE_DEVTOOLS=1 swift run
 ```
 
-Цей приклад: `app` має [червону (5d), помаранч (10d), нейтр. (25d)], `lib` — [нейтр. (20d)] →
-загальний тон **червоний** (найтерміновіша виграє).
+Проєкти чергуються round-robin (`i % 3`), тож 8 сесій дають різні бакети (не самі одинички). Долоні
+в кожному рядку йдуть у порядку нейтр→оранж→червон:
+- `tokenpace-menubar` (дні 3, 5, 20): **1 нейтр., 2 червоні** → `1✋ 2✋`
+- `claude-code-daemon` (дні 28, 25, 4): **2 нейтр., 1 червона** → `2✋ 1✋`
+- `awaiting-input-watcher` (дні 10, 12): **2 помаранч.** → `2✋`
+
+Загальний тон індикатора — **червоний** (найтерміновіша сесія виграє).
 
 - **Індикатор** = `N✋` — **число ПЕРЕД долонею** (лічильник «N сесій»), без `×`. Долоня **тонована
   за терміновістю** (червона <7d / помаранч <15d / нейтр. до видалення); число — звичайне.
