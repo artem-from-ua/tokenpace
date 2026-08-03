@@ -1,6 +1,7 @@
 ---
 status: draft
 date: 2026-08-02
+superseded_by: [0064]
 ---
 
 # ADR-0060: Уніфікована палітра — системні semantic-кольори, спільні для menu-bar і попапа (крім Claude-бренду)
@@ -108,7 +109,9 @@ menu-ролі в тюнері не міняла попап і навпаки) б
   саме рішення на попап.
 - [ADR-0022](0022-popup-bar-transparency-and-contrast-experiment.md) — вигляд popup-барів; клауза про
   **непрозорий монохромний** track (§4.2) та числову реалізацію pacing-кольорів (§4.3) superseded цим
-  ADR; рішення про суцільний фон дропдауна (`SolidBackdropView`) лишається чинним.
+  ADR; рішення про суцільний фон дропдауна (`SolidBackdropView`) далі superseded
+  [ADR-0064](0064-popup-translucent-card-and-glow-bars.md) — попап тепер завжди напівпрозорий (плашка),
+  `SolidBackdropView` видалено.
 - [ADR-0046](0046-dev-color-tuner-override-layer.md) — ColorStore/ColorRole, який це рішення розширює;
   тюнер працює як раніше (але для *системних* кольорів «flattens» адаптацію — тому експеримент робиться
   редагуванням `defaultColor`, не тюнером).
