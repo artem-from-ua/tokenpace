@@ -90,6 +90,13 @@ enum PersistedConfig {
         static let pausePollingWhenScreenLocked = "pausePollingWhenScreenLocked"
         /// Whether the session-log archiver runs (#110). Default-off (opt-in) — see the property.
         static let archiveEnabled = "archiveEnabled"
+        /// Whether the "sessions awaiting input" indicator is shown (#233). Default-off (opt-in) —
+        /// master toggle in General; placement configured in Appearance. See the property.
+        static let awaitingInputEnabled = "awaitingInputEnabled"
+        /// Whether the awaiting-input indicator also appears in the menu bar (as the first leading
+        /// element), in addition to the popup (#233). Default-off (opt-in). An Appearance option, but
+        /// deliberately **not** part of the appearance presets. See the property.
+        static let awaitingInputInMenuBar = "awaitingInputInMenuBar"
         /// Filesystem path of the user-chosen archive folder (#110), or absent if not yet set.
         static let archiveDestination = "archiveDestination"
         /// Instant of the last **successful** archive sync (#110), gating the 24 h cadence.
@@ -379,6 +386,7 @@ enum PersistedConfig {
             Key.barStyle,
             Key.showTicks,
             Key.farBehindInterval,
+            Key.awaitingInputInMenuBar,
         ] {
             defaults.removeObject(forKey: key)
         }
@@ -425,6 +433,7 @@ enum PersistedConfig {
         pauseHidesBars = v.pauseHidesBars
         showExtraUsage = v.showExtraUsage
         showServiceStatusDot = v.showServiceStatusDot
+        awaitingInputInMenuBar = v.awaitingInputInMenuBar
         showModelSpecificLimits = v.showModelSpecificLimits
         resetCountdownModeMenuBar = v.resetCountdownModeMenuBar
         barStyle = v.barStyle
@@ -443,6 +452,7 @@ enum PersistedConfig {
             pauseHidesBars: pauseHidesBars,
             showExtraUsage: showExtraUsage,
             showServiceStatusDot: showServiceStatusDot,
+            awaitingInputInMenuBar: awaitingInputInMenuBar,
             showModelSpecificLimits: showModelSpecificLimits,
             resetCountdownModeMenuBar: resetCountdownModeMenuBar,
             barStyle: barStyle,
@@ -469,6 +479,29 @@ enum PersistedConfig {
     static var archiveEnabled: Bool {
         get { defaults.object(forKey: Key.archiveEnabled) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.archiveEnabled) }
+    }
+
+    /// Whether the menu-bar / popup "sessions awaiting input" indicator is shown (#233, ADR-0066).
+    /// **Default-off** (opt-in): an absent key reads as `false`, so nothing is watched or drawn until
+    /// the user turns it on. Master toggle in Settings → General; the indicator's placement is
+    /// configured in Settings → Appearance (and is meaningful only while this is on). Gates whether
+    /// the ``AwaitingInputWatcher`` runs at all. `object(forKey:) as? Bool ?? false` distinguishes
+    /// "unset" from an explicit choice, consistent with the other opt-in toggles.
+    static var awaitingInputEnabled: Bool {
+        get { defaults.object(forKey: Key.awaitingInputEnabled) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.awaitingInputEnabled) }
+    }
+
+    /// Whether the awaiting-input indicator also renders in the menu bar (as the **first leading**
+    /// element, a bare icon with no `×N`), in addition to the popup — #233. Part of the Appearance
+    /// **presets**: absent key falls back to the factory-default preset's value (`.workHarder` → on),
+    /// so `chill` = off, `workHarder`/`controlFreak` = on. The popup always shows the indicator while
+    /// the feature is on; this only governs the menu-bar copy, and is meaningful only while
+    /// ``awaitingInputEnabled`` is on.
+    static var awaitingInputInMenuBar: Bool {
+        get { defaults.object(forKey: Key.awaitingInputInMenuBar) as? Bool
+                ?? AppearancePreset.defaultValues.awaitingInputInMenuBar }
+        set { defaults.set(newValue, forKey: Key.awaitingInputInMenuBar) }
     }
 
     /// Filesystem path of the archive folder the user chose (#110), or `nil` if none picked yet.

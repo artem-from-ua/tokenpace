@@ -175,6 +175,15 @@ public struct PopupLayout: Sendable, Equatable {
     /// Exactly one reset is ever highlighted, even when several limits are simultaneously exhausted.
     public let blockingReset: BlockingReset.Choice?
 
+    /// The Claude Code sessions awaiting user input to advertise flush-right in the "Claude" section
+    /// header (#233, ADR-0066), or `nil` to draw nothing. `nil` whenever the feature is off, the count
+    /// is `0`, or the watcher isn't running. When non-`nil` (count `≥ 1`) the popup draws a
+    /// `hand.raised` icon tinted by ``AwaitingSessions/urgency``; a count of `1` shows the bare icon,
+    /// `≥ 2` appends the count. Clicking the block opens the per-project breakdown
+    /// (``AwaitingSessions/perProject``). Sourced by the shell from `AwaitingInputWatcher`,
+    /// independent of the usage snapshot, so it's supplied to `make` rather than derived from it.
+    public let awaitingInput: AwaitingSessions?
+
     public init(
         lastUpdateAge: TimeInterval,
         intervalSeconds: TimeInterval,
@@ -182,7 +191,8 @@ public struct PopupLayout: Sendable, Equatable {
         warning: FailureReason? = nil,
         serviceStatus: StatusHealth? = nil,
         credits: CreditsRow? = nil,
-        blockingReset: BlockingReset.Choice? = nil
+        blockingReset: BlockingReset.Choice? = nil,
+        awaitingInput: AwaitingSessions? = nil
     ) {
         self.lastUpdateAge = lastUpdateAge
         self.intervalSeconds = intervalSeconds
@@ -191,6 +201,17 @@ public struct PopupLayout: Sendable, Equatable {
         self.serviceStatus = serviceStatus
         self.credits = credits
         self.blockingReset = blockingReset
+        self.awaitingInput = awaitingInput
+    }
+
+    /// A copy of this layout with the awaiting-input count grafted on, everything else unchanged
+    /// (#233). The shell calls this on the `make(...)` result so the awaiting indicator — sourced
+    /// from `AwaitingInputWatcher`, not the usage snapshot — doesn't have to thread through `make`.
+    public func withAwaitingInput(_ awaitingInput: AwaitingSessions?) -> PopupLayout {
+        PopupLayout(
+            lastUpdateAge: lastUpdateAge, intervalSeconds: intervalSeconds, rows: rows,
+            warning: warning, serviceStatus: serviceStatus, credits: credits,
+            blockingReset: blockingReset, awaitingInput: awaitingInput)
     }
 
     // MARK: make

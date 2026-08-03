@@ -88,6 +88,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// between polls (the data is unchanged; only `now` advances).
     private var lastOutput: PollOutput?
 
+    // MARK: Awaiting-input indicator (#233, ADR-0066)
+
+    /// Watches `~/.claude/sessions` + `jobs` for sessions awaiting user input, or `nil` while the
+    /// feature is off. Created/destroyed by ``updateAwaitingInputWatcher()``.
+    private var awaitingInputWatcher: AwaitingInputWatcher?
+    /// The latest awaiting-input result from the watcher (count, urgency, per-project). Read by
+    /// ``awaitingInputForDisplay`` at render time.
+    private var awaitingInput: AwaitingSessions = .none
+    /// Verification stub: `TOKENPACE_AWAITING=N` synthesizes `N` awaiting sessions, bypassing the
+    /// watcher. `TOKENPACE_AWAITING_DAYS=d1,d2,…` sets each session's days-until-deletion (to drive the
+    /// urgency tint / red/orange buckets); missing days default to 20 (neutral). `TOKENPACE_AWAITING_
+    /// PROJECTS=a,b,…` names the sessions' projects (round-robin) for the per-project popover. See
+    /// docs/guides/ui-verification.md. Verification only — no such env var in a real build.
+    private let awaitingInputStub: AwaitingSessions? = {
+        let env = ProcessInfo.processInfo.environment
+        guard let n = env["TOKENPACE_AWAITING"].flatMap(Int.init), n >= 0 else { return nil }
+        let days = (env["TOKENPACE_AWAITING_DAYS"] ?? "").split(separator: ",").compactMap { Double($0) }
+        let projects = (env["TOKENPACE_AWAITING_PROJECTS"] ?? "app").split(separator: ",").map(String.init)
+        let sessions = (0..<n).map { i in
+            AwaitingSession(
+                project: projects.isEmpty ? "app" : projects[i % projects.count],
+                daysUntilDeletion: i < days.count ? days[i] : 20)
+        }
+        return AwaitingSessions(sessions)
+    }()
+
+    /// The awaiting-input result to render, or `nil` to hide the indicator. `nil` unless the feature is
+    /// enabled **and** at least one session is waiting.
+    ///
+    /// The `TOKENPACE_AWAITING` stub forces the result **and** treats the feature as enabled, so the
+    /// indicator can be verified with a plain `swift run` without toggling settings or running live
+    /// Claude sessions (verification-only; a real build has no such env var). See ui-verification.md.
+    private var awaitingInputForDisplay: AwaitingSessions? {
+        if let stub = awaitingInputStub { return stub.count >= 1 ? stub : nil }
+        guard PersistedConfig.awaitingInputEnabled else { return nil }
+        return awaitingInput.count >= 1 ? awaitingInput : nil
+    }
+
     // MARK: Claude service status (#31)
 
     /// The transport used for status polls — the same seam as the usage transport (real
@@ -311,6 +349,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         startPolling()
 
+        // #233: start the awaiting-input watcher if the feature is already on from a prior launch.
+        // No-op (and no file watching) while the feature is off — it's opt-in.
+        updateAwaitingInputWatcher()
+
         // Opt-out auto-registration of launch-at-login (#14): register on the first launch only,
         // log the outcome, never crash on an unsigned build.
         registerLaunchAtLoginIfNeeded()
@@ -428,6 +470,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // `.wake` so it resumes immediately. Turning it ON changes nothing now — the next lock
                 // will park it (the observer reads the pref live). No render impact either way.
                 if !on { self?.signals.send(.wake) }
+            }
+            wc.onAwaitingInputEnabledChange = { [weak self] _ in
+                // #233: the master toggle flipped — start/stop the watcher (which reads the pref) and
+                // re-render so the indicator appears/disappears from the last poll.
+                self?.updateAwaitingInputWatcher()
+                self?.reRenderForCurrentTime()
+            }
+            wc.onAwaitingInputAppearanceChange = { [weak self] in
+                // #233: an awaiting-input appearance option changed (left-of-pause placement) — just
+                // re-render from the last poll; no watcher restart needed.
+                self?.reRenderForCurrentTime()
             }
             wc.onArchiveNow = { [weak self] in self?.performArchiveSync(userInitiated: true) }
             wc.archiveSummaryProvider = { [weak self] in self?.lastArchiveSummary }
@@ -1312,6 +1365,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         render(output, at: Date())
     }
 
+    /// Bring the awaiting-input watcher in line with the current feature state (#233). Creates the
+    /// watcher lazily when the master toggle is on and drives it via `setActive`; tears it down when
+    /// off. Called at launch and whenever the toggle flips.
+    ///
+    /// The `TOKENPACE_AWAITING` stub short-circuits the watcher entirely — the forced count is read
+    /// directly by `awaitingInputForDisplay`, so there's nothing to watch.
+    private func updateAwaitingInputWatcher() {
+        let wantWatcher = PersistedConfig.awaitingInputEnabled && awaitingInputStub == nil
+        guard wantWatcher else {
+            awaitingInputWatcher?.setActive(false)
+            awaitingInputWatcher = nil
+            awaitingInput = .none
+            return
+        }
+        if awaitingInputWatcher == nil {
+            let watcher = AwaitingInputWatcher(onResultChanged: { [weak self] result in
+                guard let self else { return }
+                self.awaitingInput = result
+                self.reRenderForCurrentTime()
+            })
+            awaitingInputWatcher = watcher
+        }
+        // Active whenever the feature is on. FSEvents makes this cheap; a finer gate (pause while the
+        // screen is locked / Claude isn't running, mirroring #114) can be layered on later by calling
+        // `setActive(false/true)` from the lock and claude-activity signals — the watcher supports it.
+        awaitingInputWatcher?.setActive(true)
+    }
+
     /// Render a poll result into the menu-bar image and popup model at instant `now`.
     private func render(_ output: PollOutput, at now: Date) {
         // Roll any window whose reset boundary has already passed forward to its next window *before*
@@ -1322,6 +1403,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // on every render. It is a no-op when nothing has crossed a boundary, and the next authoritative
         // poll overwrites it wholesale (the API stays the source of truth). See ADR-0043.
         let snapshot = output.snapshot.map { ResetClock.optimisticReset($0, now: now) }
+        // #233: the awaiting-input count is `nil` (hidden) unless the feature is on and ≥ 1 session is
+        // waiting. Sourced from the watcher (or the `TOKENPACE_AWAITING` stub), independent of the poll.
+        let awaitingInput = awaitingInputForDisplay
         statusView?.layout = MenuBarLayout.make(
             from: snapshot, health: output.health, now: now,
             // #31: honour the "Show service status dot" toggle — nil hides the dot and reclaims its width.
@@ -1339,6 +1423,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // "Far behind" interval: the user's green→blue crossover scale (off→0/no-blue, short→1,
             // medium→2, long→3). `nil` (off) maps to 0.
             behindMultiplier: PersistedConfig.farBehindInterval.multiplier ?? 0)
+            .withAwaitingInput(awaitingInput)   // #233: graft the awaiting-input indicator (trailing)
         refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
         setPopupLayout(PopupLayout.make(
             from: snapshot, health: output.health, now: now, interval: output.interval,
@@ -1348,7 +1433,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showModelSpecificLimits: PersistedConfig.showModelSpecificLimits,
             // "Far behind" interval: the user's green→blue crossover scale (off→0/no-blue, short→1,
             // medium→2, long→3). `nil` (off) maps to 0.
-            behindMultiplier: PersistedConfig.farBehindInterval.multiplier ?? 0))
+            behindMultiplier: PersistedConfig.farBehindInterval.multiplier ?? 0)
+            .withAwaitingInput(awaitingInput))   // #233: graft the awaiting-input indicator (right of brand)
     }
 
     /// Set the popup model **and** resize the hosted view to fit. A menu item's hosted view must

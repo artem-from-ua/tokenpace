@@ -639,6 +639,7 @@ final class PopupViewController: NSViewController {
         }
     }
 
+
     /// Whether ⌥ Option is currently held (ADR-0020's modifier-poll timer feeds this live while the
     /// dropdown is open). It reveals the on-demand data age ("2m ago") in the "Claude Code" header;
     /// it does **not** gate the service-status rows, which show only when a component is
@@ -834,11 +835,44 @@ final class PopupViewController: NSViewController {
         let status = layout.serviceStatus
         let showStatusRows = status?.worstProblem != nil
         let showAge = optionHeld || layout.lastUpdateAge >= Self.staleAgeThreshold
-        let sectionHeader = addSplitLine(
-            left: Self.claudeCodeSectionTitle, right: showAge ? Self.ageText(layout.lastUpdateAge) : "",
-            leftFont: Self.menuItemFont, rightFont: .systemFont(ofSize: Metrics.textSize),
-            leftColor: Self.claudeBrandColor, rightColor: Self.dimmedLabelColor)
+        let ageString = showAge ? Self.ageText(layout.lastUpdateAge) : ""
+        // Header layout (#233): the "Claude" brand title with the "Nm ago" age beside it on the left;
+        // the awaiting-input indicator (hand + count) pinned flush right. When there's no awaiting count,
+        // fall back to the plain brand-left / age-right split line.
+        let sectionHeader: NSView
+        if let awaiting = layout.awaitingInput {
+            // "Claude  <age>" together on the left. On the right: the summary badge when ⌥ is up;
+            // nothing when ⌥ is held (the per-project breakdown below supersedes it — but the age
+            // stays put next to "Claude", it does not move to where the badge was). (#233)
+            let brand = NSTextField(labelWithString: Self.claudeCodeSectionTitle)
+            brand.font = Self.menuItemFont
+            brand.textColor = Self.claudeBrandColor
+            let age = NSTextField(labelWithString: ageString)
+            age.font = .systemFont(ofSize: Metrics.textSize)
+            age.textColor = Self.dimmedLabelColor
+            let leading = NSStackView(views: [brand, age])
+            leading.orientation = .horizontal
+            leading.alignment = .firstBaseline
+            leading.spacing = 8
+            let right: NSView = optionHeld ? NSView() : makeAwaitingBadge(awaiting)
+            sectionHeader = addSplitRow(leadingView: leading, rightView: right)
+        } else {
+            sectionHeader = addSplitLine(
+                left: Self.claudeCodeSectionTitle, right: ageString,
+                leftFont: Self.menuItemFont, rightFont: .systemFont(ofSize: Metrics.textSize),
+                leftColor: Self.claudeBrandColor, rightColor: Self.dimmedLabelColor)
+        }
         stack.setCustomSpacing(Metrics.sectionSpacing, after: sectionHeader)
+
+        // #233: while ⌥ is held, reveal the per-project awaiting breakdown right under the header —
+        // one row per project with a coloured hand chip per non-empty time-to-deletion bucket.
+        if optionHeld, let awaiting = layout.awaitingInput {
+            var lastRow: NSView?
+            for stat in awaiting.perProject {
+                lastRow = makeAwaitingProjectRow(stat)
+            }
+            if let lastRow { stack.setCustomSpacing(Metrics.sectionSpacing, after: lastRow) }
+        }
 
         if showStatusRows, let status {
             var lastRow: NSView?
@@ -980,6 +1014,86 @@ final class PopupViewController: NSViewController {
         leading.alignment = .centerY
         leading.spacing = 6
         return addSplitRow(leadingView: leading, rightLabel: statusLabel)
+    }
+
+    /// The awaiting-input indicator (#233) shown flush-right in the "Claude" header: a `hand.raised`
+    /// icon tinted by urgency (red < 7d / orange < 15d left before Claude Code deletes the session /
+    /// neutral otherwise), followed by the count when `count ≥ 2` (a single session shows the bare icon).
+    /// Hovering shows a tooltip inviting ⌥ Option, which reveals the per-project breakdown inline
+    /// (built in `rebuild()`). `sessions.count` is always `≥ 1` here (caller passes `nil` for "hide").
+    private func makeAwaitingBadge(_ sessions: AwaitingSessions) -> NSView {
+        // Header badge: bare hand when a single session, hand + count otherwise. Icon + count share
+        // the urgency tint.
+        let chip = makeHandChip(count: sessions.count, tint: Self.awaitingTint(sessions.urgency),
+                                showCountForOne: false)
+        chip.toolTip = "Sessions waiting for your answer.\nHold ⌥ (Option) for per-project stats"
+        return chip
+    }
+
+    /// A `hand.raised` icon + count chip (#233), the icon tinted by `tint`, the count kept neutral
+    /// (uncoloured). When `showCountForOne` is false a count of `1` renders as the bare hand (the
+    /// header badge); the per-project rows pass `true` so every bucket shows the count including 1.
+    private func makeHandChip(count: Int, tint: NSColor, showCountForOne: Bool) -> NSStackView {
+        let size = Metrics.textSize
+        let config = NSImage.SymbolConfiguration(pointSize: size, weight: .semibold)
+        let iconView = NSImageView()
+        iconView.image = NSImage(
+            systemSymbolName: "hand.raised", accessibilityDescription: "sessions awaiting input")?
+            .withSymbolConfiguration(config)
+        iconView.contentTintColor = tint
+
+        let stack = NSStackView()
+        // Count **before** the icon — reads as "N sessions" (numeral + noun), the natural English
+        // count order. Label colour; only the hand carries the bucket colour (per maintainer).
+        if count >= 2 || showCountForOne {
+            let countLabel = NSTextField(labelWithString: "\(count)")
+            countLabel.font = .systemFont(ofSize: size)
+            countLabel.textColor = ColorStore.shared.color(.label)
+            stack.addArrangedSubview(countLabel)
+        }
+        stack.addArrangedSubview(iconView)
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 2
+        return stack
+    }
+
+    /// One per-project breakdown row (#233), revealed while ⌥ is held: the project name flush-left, a
+    /// hand chip per **non-empty** bucket flush-right — neutral (>15d left), orange (<15d), red (<7d),
+    /// in that order — each showing its count (including 1). The hand carries the bucket colour; the count is
+    /// neutral.
+    private func makeAwaitingProjectRow(_ stat: ProjectAwaitingStats) -> NSView {
+        let name = NSTextField(labelWithString: stat.projectName)
+        name.font = .systemFont(ofSize: Metrics.textSize)
+        name.textColor = ColorStore.shared.color(.label)
+
+        let chips = NSStackView()
+        chips.orientation = .horizontal
+        chips.alignment = .centerY
+        chips.spacing = 8
+        // Order: neutral → orange → red; only non-empty buckets. Each chip's tooltip states its
+        // time-to-deletion bucket.
+        let buckets: [(Int, NSColor, String)] = [
+            (stat.recent, ColorStore.shared.color(.label), ">15d till deletion"),
+            (stat.orange, .systemOrange, "<15d till deletion"),
+            (stat.red, .systemRed, "<7d till deletion"),
+        ]
+        for (n, color, tip) in buckets where n > 0 {
+            let chip = makeHandChip(count: n, tint: color, showCountForOne: true)
+            chip.toolTip = tip
+            chips.addArrangedSubview(chip)
+        }
+        return addSplitRow(leadingView: name, rightView: chips)
+    }
+
+    /// The AppKit colour for an awaiting-input urgency, shared by the icon and the count label so they
+    /// read as one unit (#233). Matches the menu-bar tint mapping in `StatusItemView`.
+    private static func awaitingTint(_ urgency: AwaitingUrgency) -> NSColor {
+        switch urgency {
+        case .red:     return .systemRed
+        case .orange:  return .systemOrange
+        case .neutral: return ColorStore.shared.color(.label)
+        }
     }
 
     /// The **"in use"** pill shown next to the "Extra usage" heading while paid credits are actually
@@ -1217,8 +1331,8 @@ final class PopupViewController: NSViewController {
         leadingLabel.orientation = .horizontal
         leadingLabel.alignment = .centerY
         leadingLabel.spacing = Metrics.statusDotGap
-        // Push the dot in from the card's left edge (#188).
-        leadingLabel.edgeInsets = NSEdgeInsets(top: 0, left: Metrics.statusRowLeadingInset, bottom: 0, right: 0)
+        // Dot flush-left with the rest of the widget's text (no extra leading inset), so the status
+        // rows align on the same left edge as "5-hour"/"7-day" and the per-project rows (#233).
 
         // Trailing half: the status word, pinned flush-right. Operational → plain dimmed text (no link);
         // otherwise → underlined link colour, opened on click by StatusLineLabel over the word's range.

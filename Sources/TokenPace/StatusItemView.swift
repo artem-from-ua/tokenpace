@@ -141,6 +141,13 @@ final class StatusItemView: NSView {
         static let pauseGlyphSize: CGFloat = 11
         /// Gap between the pause glyph and the element to its right (credits icon or bars).
         static let pauseGlyphGap: CGFloat = 3
+        /// Point size of the awaiting-input `hand.raised` indicator (#233), drawn as the **first
+        /// leading** element (before pause/credits/bars). Sized like the credits glyph so it reads at
+        /// the same weight as the other menu-bar decorations.
+        static let awaitingIconSize: CGFloat = 12
+        /// Gap between the awaiting-input icon and the element to its right (pause / credits / bars).
+        /// A touch wider than the other decoration gaps so the hand doesn't crowd the next element.
+        static let awaitingIconGap: CGFloat = 6
     }
 
     // MARK: Colour mapping (system semantic colours → NSColor)
@@ -352,6 +359,11 @@ final class StatusItemView: NSView {
     /// content** consistent across both modes (#199, #227).
     private func drawLeadingDecorations(in rect: NSRect) -> CGFloat {
         var originX = rect.minX + Metrics.hPadding
+        // #233: the awaiting-input hand is the **first** leading element (left of pause/credits/bars),
+        // drawn only when the count is present and the "show in menu bar" option is on.
+        if showAwaitingInMenuBar {
+            originX = drawAwaitingIcon(atX: originX, in: rect) + Metrics.awaitingIconGap
+        }
         if layout?.blockedPause == true {
             originX = drawPauseGlyph(atX: originX, in: rect) + Metrics.pauseGlyphGap
         }
@@ -359,6 +371,15 @@ final class StatusItemView: NSView {
             originX = drawCreditsIcon(credits, atX: originX, in: rect) + Metrics.creditsIconGap
         }
         return originX
+    }
+
+    /// Whether the awaiting-input hand should be drawn in the menu bar right now: the layout carries a
+    /// count (feature on + ≥ 1 session) **and** the "show in menu bar" Appearance option is on (#233).
+    /// The `TOKENPACE_AWAITING` stub only forces the *count* (upstream, so no live sessions are
+    /// needed); it must **not** bypass the Appearance option here, so toggling "Show in menu bar" hides
+    /// the hand under the stub exactly as it does with real data.
+    private var showAwaitingInMenuBar: Bool {
+        layout?.awaitingInput != nil && PersistedConfig.awaitingInputInMenuBar
     }
 
     /// Draw the small service-status dot at the **right edge** of `rect`, vertically centred — the
@@ -371,6 +392,36 @@ final class StatusItemView: NSView {
         let dot = NSBezierPath(ovalIn: NSRect(x: x, y: y, width: d, height: d))
         statusDotColor(status).setFill()
         dot.fill()
+    }
+
+    // MARK: Awaiting-input icon (#233)
+
+    /// Draw the `hand.raised` awaiting-input indicator at **leading** `x`, vertically centred on
+    /// `rect`, and return its right-edge x so the caller can place the next element beside it — the
+    /// **first** leading decoration (before pause/credits/bars). Bare icon, no count (the count lives
+    /// in the popup). Neutral menu-bar foreground so it reads like the other decorations without
+    /// stealing pacing colours. Returns `x` unchanged if `hand.raised` can't be built.
+    @discardableResult
+    private func drawAwaitingIcon(atX x: CGFloat, in rect: NSRect) -> CGFloat {
+        // Tint by urgency (soonest deletion across all awaiting sessions): red < 7d left, orange
+        // < 15d, neutral otherwise (#233/#234). accent(...) for the coloured states so they read at
+        // the same weight as the pause/credits glyphs; bright(label) for neutral.
+        let tint: NSColor
+        switch layout?.awaitingInput?.urgency ?? .neutral {
+        case .red:     tint = accent(.systemRed)
+        case .orange:  tint = accent(.systemOrange)
+        case .neutral: tint = bright(NSColor.labelColor)
+        }
+        let config = NSImage.SymbolConfiguration(pointSize: Metrics.awaitingIconSize, weight: .semibold)
+            .applying(.init(paletteColors: [tint]))
+        guard let symbol = NSImage(
+            systemSymbolName: "hand.raised", accessibilityDescription: "sessions awaiting input")?
+            .withSymbolConfiguration(config) else { return x }
+        let size = symbol.size
+        let drawRect = NSRect(x: x, y: rect.midY - size.height / 2, width: size.width, height: size.height)
+        symbol.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1,
+                    respectFlipped: true, hints: nil)
+        return x + size.width
     }
 
     // MARK: Money-credits icon (issue #144)
@@ -782,8 +833,11 @@ final class StatusItemView: NSView {
         // Leading red pause glyph (#199, #227) reserves its width + gap in both bars modes, mirroring the
         // origin shift in `drawLeadingDecorations`; zero when not fully blocked.
         let pauseInset = (layout?.blockedPause == true) ? pauseGlyphWidth() + Metrics.pauseGlyphGap : 0
-        // Leading decorations in the bars modes: pause glyph + credits icon.
-        let leadingInset = pauseInset + creditsInset
+        // Awaiting-input hand (#233) is the first leading element in the bars modes when the count is
+        // present and the "show in menu bar" option is on; zero otherwise. Mirrors drawLeadingDecorations.
+        let awaitingInset = showAwaitingInMenuBar ? awaitingIconWidth() + Metrics.awaitingIconGap : 0
+        // Leading decorations in the bars modes: awaiting hand → pause glyph → credits icon.
+        let leadingInset = awaitingInset + pauseInset + creditsInset
         switch layout?.mode {
         case .none:
             // Cold start (no layout / `.error` reached via trailing credits): credits is trailing here.
@@ -842,5 +896,14 @@ final class StatusItemView: NSView {
         let symbol = NSImage(systemSymbolName: "pause.fill", accessibilityDescription: nil)?
             .withSymbolConfiguration(config)
         return ceil(symbol?.size.width ?? Metrics.pauseGlyphSize)
+    }
+
+    /// The reserved width of the awaiting-input `hand.raised` icon (#233), measured the same way it is
+    /// drawn — so `itemWidth` reserves exactly what `drawAwaitingIcon` paints.
+    private func awaitingIconWidth() -> CGFloat {
+        let config = NSImage.SymbolConfiguration(pointSize: Metrics.awaitingIconSize, weight: .semibold)
+        let symbol = NSImage(systemSymbolName: "hand.raised", accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+        return ceil(symbol?.size.width ?? Metrics.awaitingIconSize)
     }
 }

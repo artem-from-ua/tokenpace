@@ -191,6 +191,36 @@ GlyphOnly : ⚠️ only
 
 ![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/VP4nJiH034NxEONBBB0I4X95XD0k3NGh4I4Ae9XDd6IaYRCQEqMEG4LFHSCTECzUW2lW91iIXA0QZVs-vV-zOh51cieRSU8HxjWM22LQBoL86P3BscSCKONKmDQ6XNauUeBbyX9kUgY56BnbIPeqHMO8c2A96PiTc8ZLoJ7arlac86onSCIF57K5HqNYA4LWb8KPq4vqRmDXDgdMkjR--HtEJg5ofEB2jxjodGlgIWUuqrrtvGtvzhVqV9IMBiCh6tXGm-OMKZK9VHJpMPD37jpbZOTTxVripx-PQPF_kQcZyV89K0szDpFczhCCqSMGmRVj6FQlRvyVBt3Se_eGMhsSw34qLJEFv43M-ZChf4ml_mK0)
 
+## Sessions awaiting input (#233, ADR-0066)
+
+Окреме джерело даних, **незалежне від usage-полу**: лічильник локальних сесій Claude Code, що
+очікують вводу користувача («Needs input» у FleetView). Читається не з API, а з файлів стану, які
+Claude Code пише сам:
+
+```
+awaiting = ~/.claude/sessions/<pid>.json  .status == "waiting"
+        OR ~/.claude/jobs/<jobId>/state.json .needs != null / .tempo == "blocked"
+```
+
+- **`AwaitingInputScanner`** (`TokenPaceKit`, pure, stateless) — читає файли (без `JSONDecoder`,
+  таргетовані regex), джойнить лише по живих сесіях, повертає **`AwaitingSessions`** (кожна сесія:
+  проєкт = `originCwd`/repo-root + `daysUntilDeletion` = `cleanupPeriodDays` − вік_за_updatedAt).
+  `cleanupPeriodDays` з `~/.claude/settings.json` (дефолт 30, ADR-0031). ~0.18 ms/скан.
+- **`AwaitingSessions`** — агрегат: `count`, `urgency` (найтерміновіша сесія: <7d→червона, <15d→
+  помаранч, інакше нейтр.), `perProject` (розбивка по бакетах). Керує тоном індикатора.
+- **`AwaitingInputWatcher`** (shell) — event-driven через **FSEvents** на каталогах `sessions/` +
+  `jobs/` (не на файлах — набір сесій змінний), + рідкий safety-poll (~45 с). Кличе `scan(now:)` лише
+  на реальні зміни; колбек спрацьовує тільки коли результат змінився (count/urgency/розбивка).
+- **Рендер** — результат графтиться на layout'и (`withAwaitingInput`) у `render()`, поза usage-`make`.
+  Індикатор = `N✋` (число **перед** долонею), долоня тонована за `urgency`. Menu bar: лише долоня
+  (без числа), **перший leading** елемент, за Appearance-опцією «Show awaiting-input icon in the menu
+  bar». Popup (без ⌥): `Claude [age]` зліва, `N✋` flush-right (1 → лише долоня). Popup з **⌥**: `N✋`
+  зникає, нижче inline-розбивка по проєктах (`project … 2✋ 1✋ 6✋`, долоня на бакет, tooltip бакета).
+  Opt-in (Settings → General, дефолт OFF); menu-bar-показ — Settings → Appearance (у пресетах:
+  chill=OFF, workHarder/controlFreak=ON).
+
+Повний дизайн каденції/кешу/логування — [awaiting-input-refresh.md](../../design/awaiting-input-refresh.md).
+
 ## Компоненти потоку даних
 
 | Компонент | Відповідальність |

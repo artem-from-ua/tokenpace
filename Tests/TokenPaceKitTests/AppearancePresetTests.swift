@@ -16,6 +16,7 @@ struct AppearancePresetTests {
         #expect(v.pauseHidesBars)   // Chill: when blocked, show only the pause icon (bars hidden)
         #expect(v.showExtraUsage)
         #expect(v.showServiceStatusDot)
+        #expect(!v.awaitingInputInMenuBar)   // Chill: awaiting hand stays in the popup only (#233)
         #expect(v.showModelSpecificLimits)
         #expect(v.resetCountdownModeMenuBar == .smart)
         #expect(v.barStyle == .simple)
@@ -40,6 +41,8 @@ struct AppearancePresetTests {
         #expect(wh.hideCalmSevenDayBar == chill.hideCalmSevenDayBar)
         #expect(wh.showExtraUsage == chill.showExtraUsage)
         #expect(wh.showServiceStatusDot == chill.showServiceStatusDot)
+        #expect(wh.awaitingInputInMenuBar)          // difference 6 — Work harder shows the hand in the menu bar
+        #expect(!chill.awaitingInputInMenuBar)      // …Chill keeps it popup-only (#233)
         #expect(wh.showModelSpecificLimits == chill.showModelSpecificLimits)
         #expect(wh.resetCountdownModeMenuBar == chill.resetCountdownModeMenuBar)
         #expect(wh.farBehindInterval == .medium)   // difference 4 — Chill is .off (no blue)
@@ -55,6 +58,7 @@ struct AppearancePresetTests {
         #expect(!v.pauseHidesBars)   // Control freak: when blocked, keep the bars beside the pause icon
         #expect(v.showExtraUsage)
         #expect(v.showServiceStatusDot)
+        #expect(v.awaitingInputInMenuBar)   // Control freak: awaiting hand in the menu bar too (#233)
         #expect(v.showModelSpecificLimits)
         #expect(v.resetCountdownModeMenuBar == .always)
         #expect(v.barStyle == .pacing)
@@ -99,6 +103,7 @@ struct AppearancePresetTests {
             pauseHidesBars: chill.pauseHidesBars,
             showExtraUsage: chill.showExtraUsage,
             showServiceStatusDot: chill.showServiceStatusDot,
+            awaitingInputInMenuBar: chill.awaitingInputInMenuBar,
             showModelSpecificLimits: chill.showModelSpecificLimits,
             resetCountdownModeMenuBar: chill.resetCountdownModeMenuBar,
             barStyle: .pacing,   // Chill uses .simple → this is off every preset
