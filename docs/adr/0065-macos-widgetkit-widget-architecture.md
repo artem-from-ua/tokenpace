@@ -47,13 +47,53 @@ Group** entitlement, токен читає підпроцесом `security` CLI
 Клік по віджету — `widgetURL`, який активує/запускає застосунок і просить його розгорнути menu-bar
 dropdown біля іконки.**
 
-### 1. Канал даних — App Group snapshot (app пише, віджет читає)
+```plantuml
+@startuml
+title Потік даних віджета — полл, рендер, клік
+skinparam sequenceArrowThickness 1.5
+skinparam LifeLineBorderColor #C0C0C0
+skinparam participantBackgroundColor #E8F4FD
+skinparam participantBorderColor #7FB3D8
 
+actor User
+participant "TokenPace.app\n(menu-bar agent)" as App
+participant "usage API" as API
+database "App Group\ncontainer" as Group
+participant "Widget\nextension" as Widget
+
+group Успішний полл (app має токен)
+  App -> API: GET /api/oauth/usage
+  API --> App: UsageSnapshot
+  App ->> Group: write token-free snapshot (+updatedAt)
+end
+
+group Рендер віджета (за бюджетом системи)
+  Widget -> Group: read snapshot
+  Group --> Widget: snapshot | none
+  alt свіжий снапшот
+    Widget -> Widget: render bars + pacing (TokenPaceKit)
+  else застарілий / відсутній
+    Widget -> Widget: render stale state ("Open TokenPace")
+  end
+end
+
+group Клік по віджету
+  User -> Widget: tap
+  Widget ->> App: widgetURL tokenpace://open-dropdown
+  App -> App: activate/launch + expand menu-bar dropdown
+end
+
+legend right
+  ACK responses omitted for clarity
+  -> sync request  --> sync response
+  ->> async fire-and-forget
+end legend
+@enduml
 ```
-TokenPace.app  ──кожен успішний полл──▶  App Group container  ◀──читає──  Widget extension
-   (fetch, has token)                    (JSON snapshot,          (render only, no token)
-                                          NO token, NO creds)
-```
+
+![Sequence-діаграма потоку даних віджета: полл, рендер, клік](https://www.plantuml.com/plantuml/svg/VLJDJXin4BxlKupIIn24j6gheXmGuLS8f4Ojg1SkPdUIMDbuNTjRGEeXW2hrr1FYq4ihzGNI2YWG2A_WVOK-ISVUT5agjOfanUFFdk-R-MONj67AfFquCDp42FQB7MT7sQcz1djcX_RMNcOVmFwWo9cziEVPaHt2hy49s3ixjYCxce5iOCy9TqQ7WncmrtRahWUwnuLaYlL1uziKHOXDfPAzhIuFUmArXYUppqkWJTx6JIvmCL4HggKaJXGyMdhiVYKKhOQ7N39X5bdOwwWa5T44l3At-cnr-H_WygilLXUVBiy50GiDRRSrgg04XSfMqaFHOY7ECYbtHBMF8gtjCWMiWy9CLO1fQ4hvy5AgwHIQhVNykBKUHComNQOHAWI6DQ9AZuM9C8naAW_pmOVllE5H1ysEm7s3GlD4U60U3G8dM8BzbXtQk-mq--ZwOw-APa2L68EziSFi1AXLO-e6zMOg04SOQlEEM0FMLhQWpYIl9omrtRgdxY2jTQWvZ9GDAWi5NmicTJSnnVtvd783zXGt2CPLgjPMYA0dKAXEfvAaOzGqKm6Ag23zzTucVnkgQd_IQhzdduhWsDu0gRpC3cbpJf8kdOgy3ax8X8T25XMv2U33NaKERTmJUmyY4KudYurxsb6uyEMZpIrv_OxgIUOdH3dHdtSKQK45v0CDq-Ija8iEL0klR73Z269C3NTgFEzXDg0a8v-aFX5D1yTqT4l_h_wVYaQJ9f9MgdIrybAYW29TnIUZwfOh_3aVFM-71oNEZWdjZ5xEOfWiLtJIzps_ttwrcJUNT6AZNayeUIrIYOoIFL5oaxj1OyJV4STwp58HTgauk4zUZg2Oc-AY9niZZL44YdUwtbXB6oHOoqHer93qkI7lG9icCumPkUo0C9HA7uYGSFGbqGPyWoUH_AO7pTEek62RAwmHWngzuiR6fSkp1WkqqDVkDm00)
+
+### 1. Канал даних — App Group snapshot (app пише, віджет читає)
 
 - Застосунок після кожного успішного `PollOutput` серіалізує **очищений** снапшот (усе потрібне для
   рендеру: `fiveHour`/`sevenDay` utilization + `resetsAt`, опційні per-model і `spend`, severity-входи,
