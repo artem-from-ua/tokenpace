@@ -722,7 +722,7 @@ final class StatusItemView: NSView {
         // A slim, lightly-rounded vertical bar rather than a dot — reads as a crisp position tick.
         // Filled with this state's pacing-gap colour, ringed with `separatorColor` so it separates
         // cleanly over the coloured zone on both light and dark bars.
-        let cx = rect.minX + CGFloat(l.timeFraction) * w
+        let cx = PopupBarView.scaleX(CGFloat(l.timeFraction), in: rect)
         let cy = rect.midY
         let mw = Metrics.tickWidth
         let mh = Metrics.tickHeight
@@ -771,13 +771,16 @@ final class StatusItemView: NSView {
         return accent(PopupBarView.behindColor(l))
     }
 
-    /// Fill the sub-rect spanning the fraction range `[from, to)` of a bar.
+    /// Fill the coloured strip spanning the fraction range `[from, to)` of a bar as a rounded capsule.
+    /// Shares `PopupBarView`'s inset-scale geometry: the span is mapped through the same `minStripWidth/2`
+    /// inset and floored to a minimum width, so a near-zero span reads as a rounded "pill" (rounded on
+    /// both ends) instead of a hairline, and its cap never overhangs the rounded track — matching the
+    /// popup exactly. `width` is unused now (the map reads `rect.width`); kept for call-site symmetry.
     private func fillZone(from: Double, to: Double, in rect: NSRect, width: CGFloat, color: NSColor) {
-        let x0 = rect.minX + CGFloat(from) * width
-        let x1 = rect.minX + CGFloat(to) * width
-        guard x1 > x0 else { return }
+        guard let stripRect = PopupBarView.stripRect(from: from, to: to, in: rect) else { return }
+        let r = min(stripRect.width, stripRect.height) / 2
         color.setFill()
-        NSRect(x: x0, y: rect.minY, width: x1 - x0, height: rect.height).fill()
+        NSBezierPath(roundedRect: stripRect, xRadius: r, yRadius: r).fill()
     }
 
     /// Draw the reset countdown text to the right of the bars.

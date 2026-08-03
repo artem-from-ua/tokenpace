@@ -205,6 +205,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// by the Quit dev-build tag and the dropdown preselection so both agree on what's live.
     private var currentScenario: StubScenario = AppDelegate.launchScenario
 
+    /// The clock the **visible** render reads. Normally the wall clock, but a date-decoupled stub
+    /// (`StubScenario.stubClock`) pins it to a fixed instant so a stubbed frame is reproducible and,
+    /// crucially, agrees with the stub transport's `resets_at` (both are built from this same clock).
+    /// Only the visible path (layouts, reset countdowns, optimistic-reset overlay) uses this — service
+    /// cadence (status/update/archive polls, quiet-hours) stays on the real `Date()`.
+    private func currentDate() -> Date { currentScenario.stubClock ?? Date() }
+
     /// A forced update menu-item state from `TOKENPACE_UPDATE_STATE` (#130), or `nil` for the real,
     /// version-derived state. Lets a maintainer verify each of the four dropdown states on a dev build
     /// without a real newer release or a failed install — `failed` (red), `available` (blue, auto off),
@@ -244,7 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Cold start: no data yet — render the structure (idle/empty), not fake bars. The first
         // poll replaces this within a moment.
-        let now = Date()
+        let now = currentDate()
         let coldHealth = UsageHealth(lastSuccess: nil, failingSince: nil, reason: nil)
         let view = StatusItemView(frame: NSRect(origin: .zero, size: NSSize(width: 0, height: 22)))
         view.layout = MenuBarLayout.make(from: nil, health: coldHealth, now: now)
@@ -558,7 +565,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             resetTimer?.invalidate()
             resetTimer = nil
         case .wake:
-            rescheduleResetTimer(from: lastOutput?.snapshot, now: Date())
+            rescheduleResetTimer(from: lastOutput?.snapshot, now: currentDate())
         default:
             break
         }
@@ -598,7 +605,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// successful response overwrites the optimistic overlay wholesale (the API is the source of truth).
     private func fireOptimisticReset() {
         guard let output = lastOutput, let snapshot = output.snapshot else { return }
-        let now = Date()
+        let now = currentDate()
         let reset = ResetClock.optimisticReset(snapshot, now: now)
         // Nothing actually crossed a boundary (early/spurious fire) — leave state untouched.
         guard reset != snapshot else { return }
@@ -783,7 +790,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func buildAndRunEngine(for scenario: StubScenario) {
         pollTask?.cancel()
 
-        let transport = scenario.makeTransport()
+        // The scenario's clock (fixed for a date-decoupled stub, else the wall clock) feeds BOTH the
+        // stub transport's `resets_at` and the engine's own `now`, so canned resets and pacing math
+        // never disagree. The visible render reads the same clock via `currentDate()`.
+        let clock = scenario.clock()
+        let transport = scenario.makeTransport(now: clock)
         // The status poll uses the same transport seam (the stub answers the status endpoint too).
         statusTransport = transport
         // Under a stub the bearer token is never validated (canned responses), so skip the Keychain
@@ -808,7 +819,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refresher: refresher,
             scheduler: LivePollScheduler(signals: signals.newStream()),
             probe: ProcessClaudeActivityProbe(),
-            now: { Date() })
+            now: clock)
 
         // Consume on the main actor — every PollOutput drives the menu bar + popup.
         pollTask = Task { [weak self] in
@@ -863,11 +874,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         detectBackToWorkEdge(output)
         detectExtraUsageEdge(output)
         lastOutput = output
-        render(output, at: Date())
+        render(output, at: currentDate())
         // Re-arm the optimistic-reset timer against this poll's `resets_at` (#36). A successful poll
         // fully overwrites any prior optimistic overlay; a 429/error poll carries the stale last-known
         // snapshot, so rescheduling is a harmless no-op (same instant).
-        rescheduleResetTimer(from: output.snapshot, now: Date())
+        rescheduleResetTimer(from: output.snapshot, now: currentDate())
         // Live-update an open Troubleshoot window: both sections (JSON, timestamps, next update,
         // token dates) refresh in place each poll (ADR-0020). No-op while the controller is nil.
         troubleshootWC?.render(output)
@@ -1362,7 +1373,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// advances the menu bar's stale thresholds. No-op before the first poll. **Never fetches.**
     private func reRenderForCurrentTime() {
         guard let output = lastOutput else { return }
-        render(output, at: Date())
+        render(output, at: currentDate())
     }
 
     /// Bring the awaiting-input watcher in line with the current feature state (#233). Creates the
