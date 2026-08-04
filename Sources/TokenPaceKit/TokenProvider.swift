@@ -71,10 +71,23 @@ public struct OAuthCredentials: Sendable, Equatable {
 public struct TokenCredentials: Sendable, Equatable {
     public let accessToken: String
     public let expiresAt: Date
+    /// The plan tier from the Keychain payload (`subscriptionType`, e.g. `"max"`), or `nil` when
+    /// absent. **Not a secret** — a plan label, carried alongside `expiresAt` so the journal (#242)
+    /// and diagnostics can record which plan produced a reading (limits/pacing differ by plan).
+    public let subscriptionType: String?
+    /// The rate-limit tier (`rateLimitTier`, e.g. `"default_claude_max_5x"`), or `nil`. Not a secret.
+    public let rateLimitTier: String?
 
-    public init(accessToken: String, expiresAt: Date) {
+    public init(
+        accessToken: String,
+        expiresAt: Date,
+        subscriptionType: String? = nil,
+        rateLimitTier: String? = nil
+    ) {
         self.accessToken = accessToken
         self.expiresAt = expiresAt
+        self.subscriptionType = subscriptionType
+        self.rateLimitTier = rateLimitTier
     }
 
     /// Whether the token is expired at `now` — equality counts as expired (`expiresAt <= now`),
@@ -181,7 +194,9 @@ public enum TokenProvider {
     ///   from ``credentials()``.
     public static func currentCredentials(now: Date) throws -> TokenCredentials {
         let creds = try credentials()
-        return TokenCredentials(accessToken: creds.accessToken, expiresAt: creds.expiresAt)
+        return TokenCredentials(
+            accessToken: creds.accessToken, expiresAt: creds.expiresAt,
+            subscriptionType: creds.subscriptionType, rateLimitTier: creds.rateLimitTier)
     }
 
     // MARK: decode

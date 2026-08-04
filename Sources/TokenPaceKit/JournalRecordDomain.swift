@@ -15,7 +15,13 @@ extension JournalRecord {
     /// All the derived states are computed here (in the pure Kit) so the shell stays a thin
     /// serialiser: window pacing via ``PacingModel``/``PacingBucket``, credits via ``CreditsPacing``,
     /// blocked/credits flags, `hasBrokenActiveReset`, and the blocking-reset choice.
-    public static func usage(from snapshot: UsageSnapshot, now: Date, durationMs: Int? = nil) -> JournalRecord {
+    public static func usage(
+        from snapshot: UsageSnapshot,
+        now: Date,
+        durationMs: Int? = nil,
+        plan: String? = nil,
+        tier: String? = nil
+    ) -> JournalRecord {
         let credits = CreditsFlags(
             active: snapshot.spend.map(CreditsPacing.isActive) ?? false,
             showIcon: snapshot.spend.map {
@@ -26,6 +32,8 @@ extension JournalRecord {
         let sample = UsageSample(
             t: ResetClock.isoString(from: now),
             ms: durationMs,
+            plan: plan,
+            tier: tier,
             h5: window(snapshot.fiveHour, window: .fiveHour, now: now),
             d7: window(snapshot.sevenDay, window: .sevenDay, now: now),
             opus: snapshot.sevenDayOpus.map { window($0, window: .sevenDay, now: now) },

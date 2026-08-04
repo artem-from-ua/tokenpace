@@ -101,6 +101,29 @@ struct JournalUsageMappingTests {
         #expect(abs(gap - (js.monthPct * 100 - frac * 100)) < 0.001)
     }
 
+    @Test func planAndTierAreRecorded() throws {
+        let snapshot = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 40, resetsAt: isoOffset(9_000)),
+            sevenDay: UsageWindow(utilization: 60, resetsAt: isoOffset(302_400)))
+        guard case let .usage(s) = JournalRecord.usage(
+            from: snapshot, now: now, plan: "max", tier: "default_claude_max_5x") else {
+            Issue.record("expected .usage"); return
+        }
+        #expect(s.plan == "max")
+        #expect(s.tier == "default_claude_max_5x")
+    }
+
+    @Test func planAndTierNilWhenAbsent() throws {
+        let snapshot = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 40, resetsAt: isoOffset(9_000)),
+            sevenDay: UsageWindow(utilization: 60, resetsAt: isoOffset(302_400)))
+        guard case let .usage(s) = JournalRecord.usage(from: snapshot, now: now) else {
+            Issue.record("expected .usage"); return
+        }
+        #expect(s.plan == nil)
+        #expect(s.tier == nil)
+    }
+
     @Test func idleSnapshotCarriesFlag() throws {
         let snapshot = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 0, resetsAt: ""),

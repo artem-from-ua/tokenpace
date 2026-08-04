@@ -26,6 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// second click focuses the existing window rather than opening a duplicate (single-instance).
     private var settingsWC: SettingsWindowController?
 
+    /// The "Insights" window (#242, ADR-0067) — the separate data-visualisation surface reached from
+    /// the first menu item. Lazily created and kept alive (single-instance), like `settingsWC`.
+    private var insightsWC: InsightsWindowController?
+
     /// The hidden Troubleshoot window (ADR-0020), reached via ⌥ Option on "Settings…". Lazily
     /// created and kept alive; while open it re-renders on every poll (see `apply(_:)`).
     private var troubleshootWC: TroubleshootWindowController?
@@ -296,6 +300,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popupItem.view = popupVC.view
         menu.addItem(popupItem)
 
+        // "Insights…" is the first action item (#242, ADR-0067) — opens the separate usage-history
+        // visualisation window — followed by a divider that separates it from the standard app items.
+        let insightsItem = NSMenuItem(title: "", action: #selector(openInsights), keyEquivalent: "")
+        insightsItem.attributedTitle = Self.dropdownMenuItemText("Insights…")
+        insightsItem.target = self
+        menu.addItem(insightsItem)
+        menu.addItem(.separator())
+
         // Action items at the bottom of the same menu (#14). `keyEquivalent: ""` keeps a shortcut
         // glyph off the right edge — none is wanted, and there is no main menu to host a default ⌘Q.
         // No separator before "Settings…": the Claude section now sits on its own inset card (#188
@@ -420,6 +432,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// a fresh window lands on About (the model's default); a reused one keeps its last-viewed pane.
     @objc private func openSettings() {
         openSettings(section: nil)
+    }
+
+    /// Open (or focus) the Insights window from the first menu item (#242, ADR-0067). Lazily creates the
+    /// single instance and keeps it alive, mirroring the Settings window's single-instance pattern.
+    @objc private func openInsights() {
+        if insightsWC == nil { insightsWC = InsightsWindowController() }
+        insightsWC?.show()
     }
 
     /// Open (or focus) the Settings… window, optionally forcing a specific `section` (#210 — the update
@@ -914,7 +933,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let interval = output.interval
         let record: JournalRecord
         if output.health.failingSince == nil, let snapshot = output.snapshot {
-            record = .usage(from: snapshot, now: now, durationMs: output.diagnostics?.fetch.durationMs)
+            record = .usage(
+                from: snapshot, now: now,
+                durationMs: output.diagnostics?.fetch.durationMs,
+                plan: output.diagnostics?.token?.subscriptionType,
+                tier: output.diagnostics?.token?.rateLimitTier)
         } else if let fetch = output.diagnostics?.fetch {
             record = .error(diagnostics: fetch, failure: output.health.reason, now: now)
         } else {

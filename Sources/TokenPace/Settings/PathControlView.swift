@@ -12,18 +12,28 @@ import AppKit
 struct PathControlView: NSViewRepresentable {
     let url: URL?
     var placeholder: String = "No folder selected"
+    /// When `true` (default), clicking the control reveals the folder in Finder. Set `false` for a
+    /// display-only path that has its own separate "Open in Finder" button (#242) — no click action, and
+    /// the control hugs its content instead of stretching, so it sizes to the folder name.
+    var clickToReveal: Bool = true
 
     func makeNSView(context: Context) -> NSPathControl {
         let control = NSPathControl()
-        // `.popUp` shows just the chosen folder (not the full breadcrumb trail `.standard` draws) and
-        // stays clickable → Finder. All sizing/spacing is the control's own system default.
+        // `.popUp` shows just the chosen folder (not the full breadcrumb trail `.standard` draws).
         control.pathStyle = .popUp
         control.isEditable = false
-        control.target = context.coordinator
-        control.action = #selector(Coordinator.reveal(_:))
-        // Let it shrink and truncate rather than force the row wider.
-        control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        control.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        if clickToReveal {
+            control.target = context.coordinator
+            control.action = #selector(Coordinator.reveal(_:))
+            // Let it shrink and truncate rather than force the row wider.
+            control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            control.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        } else {
+            // Display-only: no click action, and hug the content so the control is exactly as wide as
+            // the folder name (it can still compress/truncate if the row is too narrow).
+            control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            control.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        }
         return control
     }
 

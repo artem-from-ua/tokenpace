@@ -19,15 +19,13 @@ struct SettingsRootView: View {
 
     var body: some View {
         NavigationSplitView {
-            // Two groups so a divider separates the leading Insights section from the rest (the
-            // journal it hosts underpins the Insights feature area, #238/#242). A `.sidebar` List
-            // renders the gap between `Section`s as the divider — no manual rule needed.
+            // Grouped so dividers separate About (top) and Extra features (bottom) from the standard
+            // panes in the middle — a `.sidebar` List renders the gap between `Section`s as the divider.
             List(selection: $model.selection) {
-                Section {
-                    sidebarRow(.insights)
-                }
-                Section {
-                    ForEach(SettingsSection.mainSections) { sidebarRow($0) }
+                ForEach(Array(SettingsSection.groups.enumerated()), id: \.offset) { _, group in
+                    Section {
+                        ForEach(group) { sidebarRow($0) }
+                    }
                 }
             }
             .listStyle(.sidebar)
@@ -62,13 +60,11 @@ struct SettingsRootView: View {
     @ViewBuilder
     private var detailPane: some View {
         switch model.selection {
-        case .insights:          InsightsPane(model: model)
         case .about:             AboutPane(model: model)
         case .general:           GeneralPane(model: model)
         case .appearance:        AppearancePane(model: model)
-        case .monitoredServices: MonitoredServicesPane(model: model)
         case .notifications:     NotificationsPane(model: model)
-        case .sessionLogs:       SessionLogsPane(model: model)
+        case .extraFeatures:     ExtraFeaturesPane(model: model)
         }
     }
 }

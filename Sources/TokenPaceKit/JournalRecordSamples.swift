@@ -9,6 +9,11 @@ public struct UsageSample: Sendable, Equatable, Codable {
     public let t: String
     /// Usage-API response latency in milliseconds, or `nil` when unmeasured.
     public let ms: Int?
+    /// Plan tier from the Keychain (`subscriptionType`, e.g. `"max"`), or `nil`. Not a secret — lets a
+    /// reading be attributed to a plan (limits/pacing differ by plan).
+    public let plan: String?
+    /// Rate-limit tier from the Keychain (`rateLimitTier`, e.g. `"default_claude_max_5x"`), or `nil`.
+    public let tier: String?
     public let h5: WindowSample
     public let d7: WindowSample
     public let opus: WindowSample?
@@ -27,6 +32,8 @@ public struct UsageSample: Sendable, Equatable, Codable {
     public init(
         t: String,
         ms: Int? = nil,
+        plan: String? = nil,
+        tier: String? = nil,
         h5: WindowSample,
         d7: WindowSample,
         opus: WindowSample? = nil,
@@ -41,6 +48,8 @@ public struct UsageSample: Sendable, Equatable, Codable {
     ) {
         self.t = t
         self.ms = ms
+        self.plan = plan
+        self.tier = tier
         self.h5 = h5
         self.d7 = d7
         self.opus = opus
@@ -55,7 +64,7 @@ public struct UsageSample: Sendable, Equatable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case t, ms, h5, d7, opus, sonnet, scoped, sessionIdle, spend
+        case t, ms, plan, tier, h5, d7, opus, sonnet, scoped, sessionIdle, spend
         case blocked, credits, brokenReset, blockingReset
     }
 
@@ -64,6 +73,8 @@ public struct UsageSample: Sendable, Equatable, Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.t = try c.decodeIfPresent(String.self, forKey: .t) ?? ""
         self.ms = try c.decodeIfPresent(Int.self, forKey: .ms)
+        self.plan = try c.decodeIfPresent(String.self, forKey: .plan)
+        self.tier = try c.decodeIfPresent(String.self, forKey: .tier)
         self.h5 = try c.decodeIfPresent(WindowSample.self, forKey: .h5)
             ?? WindowSample(util: 0, reset: "", timePct: 0, gap: 0, sev: .green)
         self.d7 = try c.decodeIfPresent(WindowSample.self, forKey: .d7)
