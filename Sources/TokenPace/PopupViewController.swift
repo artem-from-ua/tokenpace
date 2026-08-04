@@ -590,11 +590,14 @@ final class StatusLineLabel: NSTextField {
 
 // MARK: - PillView
 
-/// A small rounded, layer-backed badge — the "in use" badge beside the "Extra usage" heading (#146,
-/// #224 exhausted red) and the blocking-reset badge on a limit row (#158, the exhausted red). The
-/// corner radius is a fraction of the height (`cornerFraction`) — a softly rounded rect rather than a
-/// full pill (#224) — and the fill CGColor is re-resolved in `updateLayer()` because CGColor is not
-/// appearance-dynamic (the standard layer-backed dark/light trap).
+/// A small rounded, layer-backed badge — the blocking-reset badge on a limit row (#158, the exhausted
+/// red). The corner radius is a fraction of the height (`cornerFraction`) — a softly rounded rect
+/// rather than a full pill (#224) — and the fill CGColor is re-resolved in `updateLayer()` because
+/// CGColor is not appearance-dynamic (the standard layer-backed dark/light trap).
+///
+/// Since #254 this is the popup's **only** filled badge: the credits "in use" marker moved to the
+/// knocked-out glyph of ``KnockoutGlyphBadge``, so a solid fill now means exactly one thing — the
+/// reset that unblocks work.
 final class PillView: NSView {
     /// The badge fill. Defaults to the accent blue; callers set it (e.g. the exhausted red). A closure
     /// (not a stored `NSColor`) so a dynamic colour re-resolves per appearance.
@@ -613,6 +616,131 @@ final class PillView: NSView {
     override func updateLayer() {
         layer?.cornerRadius = bounds.height * Self.cornerFraction
         layer?.backgroundColor = fill().cgColor
+    }
+}
+
+// MARK: - KnockoutGlyphBadge
+
+/// A filled badge with a symbol **knocked out** of it (#254): the plaque is drawn in a solid colour and
+/// the glyph is punched through it, so the popup background shows through the symbol itself rather than
+/// the symbol being painted on top.
+///
+/// This is the third "credits are in use" anatomy under discussion — a `label`-coloured plaque carrying a
+/// see-through currency glyph. It reads as a *chip* (a mode marker) rather than an alarm, because the
+/// colour is the ordinary label ink rather than a status red, while still being a solid, deliberate
+/// object next to the heading.
+///
+/// **How the knockout works.** The badge layer is filled with `fill()`, and a mask layer whose contents
+/// are the *inverted* glyph is applied: the mask is opaque everywhere except where the symbol is, so the
+/// fill is erased exactly under the glyph. Both the fill colour and the mask are rebuilt in
+/// `updateLayer()`/`layout()` because CGColor and rendered images are not appearance-dynamic — the same
+/// dark/light trap `PillView` documents.
+final class KnockoutGlyphBadge: NSView {
+    /// The plaque fill. A closure so a dynamic colour re-resolves per appearance.
+    var fill: () -> NSColor = { ColorStore.shared.color(.label) }
+
+    /// The SF Symbol punched out of the plaque.
+    var symbolName: String = "eurosign"
+
+    /// Point size of the knocked-out glyph.
+    var symbolPointSize: CGFloat = 11
+
+    /// Padding around the glyph inside the plaque. `hInset` is per-side, so the plaque is `2 × hInset`
+    /// wider than the glyph's box; it runs a little wider than `vInset` because a currency glyph is
+    /// narrow and tall, and equal padding on both axes leaves it looking pinched left-to-right.
+    private static let hInset: CGFloat = 5.5
+    private static let vInset: CGFloat = 3
+
+    /// Corner radius as a fraction of the height — matches `PillView` so the two badge anatomies share a
+    /// silhouette family.
+    private static let cornerFraction: CGFloat = 0.35
+
+    override var wantsUpdateLayer: Bool { true }
+
+    /// Plaque size: the glyph's box padded by the insets, rounded to whole points.
+    ///
+    /// Deliberately simple. Measuring the glyph's ink and trying to centre on it exactly chases a
+    /// sub-point difference that survives every rounding (an SF Symbol's ink sits half a point off inside
+    /// its own box, which is a whole pixel on a 2× display) — so instead the glyph is box-centred and a
+    /// single hand-tuned ``opticalNudge`` corrects what is left. Cheap, legible, and adjustable by eye,
+    /// which is how this kind of optical alignment is settled anyway.
+    override var intrinsicContentSize: NSSize {
+        let box = glyphImage()?.size ?? NSSize(width: symbolPointSize, height: symbolPointSize)
+        return NSSize(width: (box.width + Self.hInset * 2).rounded(),
+                      height: (box.height + Self.vInset * 2).rounded())
+    }
+
+    override func layout() {
+        super.layout()
+        layer?.cornerRadius = bounds.height * Self.cornerFraction
+        applyMask()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        // The mask is rendered for a specific size; rebuild it whenever the plaque is resized, or the
+        // glyph stays centred on the old bounds and drifts off-centre.
+        applyMask()
+    }
+
+    override func updateLayer() {
+        layer?.cornerRadius = bounds.height * Self.cornerFraction
+        layer?.backgroundColor = fill().cgColor
+        applyMask()
+    }
+
+    /// Horizontal correction applied to the box-centred glyph, in points.
+    ///
+    /// A currency SF Symbol's ink sits slightly off-centre inside its own bounding box, so a box-centred
+    /// glyph reads as sitting too far right — it needs a sliver of extra space on its right to look
+    /// balanced. Computing the exact correction is possible but chases a sub-point difference that every
+    /// rounding step reintroduces, and the pixel extents of the knocked-out hole turn out not to predict
+    /// what the eye reads; a fixed nudge settled by eye is simpler and does the job.
+    ///
+    /// Negative moves the glyph **left**, opening up space on the right.
+    private static let opticalNudge: CGFloat = -0.4
+
+    /// The symbol image used both for sizing and for building the knockout mask.
+    private func glyphImage() -> NSImage? {
+        NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: symbolPointSize, weight: .bold))
+    }
+
+    /// Build and attach the inverted-glyph mask: opaque plaque everywhere except the symbol, which is
+    /// cleared so the popup background shows through.
+    ///
+    /// The glyph is punched out with `NSCompositingOperation.destinationOut` rather than a CoreGraphics
+    /// blend mode: an SF Symbol is a **template** image, and `CGContext.setBlendMode(.destinationOut)`
+    /// leaves the mask fully opaque (the symbol never erases anything, so nothing shows through). Drawing
+    /// the symbol black first and then compositing gives a fully transparent knockout instead of the
+    /// partial ~0.6 alpha a straight template composite produces at the glyph's antialiased edges.
+    private func applyMask() {
+        guard bounds.width > 0, bounds.height > 0, let glyph = glyphImage() else { return }
+        let size = bounds.size
+        let g = glyph.size
+        // Box-centre the glyph, plus a fixed optical nudge — see `opticalNudge`.
+        let rect = CGRect(x: (size.width - g.width) / 2 + Self.opticalNudge,
+                          y: (size.height - g.height) / 2,
+                          width: g.width, height: g.height)
+        // A solid-black copy of the symbol: a template image draws in whatever colour is set, and an
+        // opaque source is what makes `destinationOut` erase all the way to zero alpha.
+        let solid = NSImage(size: g, flipped: false) { _ in
+            NSColor.black.set()
+            glyph.draw(in: CGRect(origin: .zero, size: g), from: .zero, operation: .sourceOver, fraction: 1)
+            CGRect(origin: .zero, size: g).fill(using: .sourceAtop)
+            return true
+        }
+        let image = NSImage(size: size, flipped: false) { _ in
+            NSColor.black.setFill()
+            CGRect(origin: .zero, size: size).fill()
+            solid.draw(in: rect, from: .zero, operation: .destinationOut, fraction: 1)
+            return true
+        }
+        let mask = CALayer()
+        mask.frame = bounds
+        mask.contents = image
+        mask.contentsScale = window?.backingScaleFactor ?? 2
+        layer?.mask = mask
     }
 }
 
@@ -1033,7 +1161,7 @@ final class PopupViewController: NSViewController {
         addTitleStatusLine(
             title: Self.extraUsageTitle,
             status: Self.creditsStatusText(bar),
-            badge: credits.inUse ? makeInUsePill() : nil)
+            badge: credits.inUse ? makeInUseMarker(currency: credits.spent.currency) : nil)
         addDetailLine(
             used: Self.creditsAmountText(spent: credits.spent, limit: limit),
             reset: credits.resetLine ?? "resetting…",
@@ -1151,13 +1279,41 @@ final class PopupViewController: NSViewController {
         }
     }
 
-    /// The **"in use"** pill shown next to the "Extra usage" heading while paid credits are actually
-    /// covering an exhausted plan limit (`CreditsRow.inUse`). A small rounded, layer-backed capsule in
-    /// the exhausted **red** (`PopupBarView.gapRed`, #224 — was accent blue) with white text, so it reads
-    /// as a warning that a limit is spent onto paid credit. Sizing comes from the text + insets.
-    private func makeInUsePill() -> NSView {
-        Self.makePill(text: Self.inUseBadgeText, fill: { PopupBarView.gapRed })
+    /// The **"in use"** marker shown next to the "Extra usage" heading while paid credits are actually
+    /// covering an exhausted plan limit (`CreditsRow.inUse`): a `label`-coloured plaque with the currency
+    /// glyph **knocked out** of it, so the popup background shows through the symbol (#254).
+    ///
+    /// Replaces the solid red `active` pill this badge used to be (#224). Crossing onto paid credit is a
+    /// *mode change* worth flagging, but a red fill made it a *severity*: it took the same token as the
+    /// blocking-reset badge — the one badge that means "you are stopped" — and it fired at its loudest at
+    /// €0.00 spent, leaving nothing louder for the cap. A neutral plaque states the mode without claiming
+    /// the row is blocked, and reuses the menu bar's own currency glyph
+    /// (``StatusItemView/creditsSymbolName(for:)``) so both surfaces mark this feature with one symbol.
+    private func makeInUseMarker(currency: String) -> NSView {
+        let badge = KnockoutGlyphBadge()
+        badge.symbolName = StatusItemView.creditsSymbolName(for: currency)
+        badge.symbolPointSize = Metrics.textSize - 1
+        badge.fill = { ColorStore.shared.color(.inUsePill) }
+        badge.wantsLayer = true
+        badge.translatesAutoresizingMaskIntoConstraints = false
+        badge.toolTip = Self.inUseHint
+        badge.setAccessibilityLabel(Self.inUseAccessibilityLabel)
+        // Pin the plaque to its intrinsic size: inside the title stack an unpinned view is stretched to
+        // fill, which widens the plaque without moving the knocked-out glyph — it reads as a lopsided
+        // badge with too much padding on one side.
+        badge.setContentHuggingPriority(.required, for: .horizontal)
+        badge.setContentHuggingPriority(.required, for: .vertical)
+        badge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        badge.setContentCompressionResistancePriority(.required, for: .vertical)
+        return badge
     }
+
+    /// Hover text for the "in use" marker — the words the old `active` badge used to spell out, stating
+    /// explicitly that the spending is happening *right now*.
+    static let inUseHint = "Currently spending Extra Usage Credit — your plan limit is exhausted"
+
+    /// VoiceOver label for the "in use" marker.
+    static let inUseAccessibilityLabel = "currently spending Extra Usage Credit"
 
     /// The blocking-reset badge (#158): a red capsule carrying the reset countdown (e.g. "4d"), shown
     /// flush-right on the one row whose reset actually unblocks work. Same pill shape as the "in use"
@@ -1195,9 +1351,6 @@ final class PopupViewController: NSViewController {
         ])
         return pill
     }
-
-    /// Localisation seam for the credits "active" badge text.
-    static let inUseBadgeText = "active"
 
     @discardableResult
     private func addLabel(_ text: String, font: NSFont, secondary: Bool = false, color: NSColor? = nil) -> NSView {
