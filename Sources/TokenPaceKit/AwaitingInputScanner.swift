@@ -142,12 +142,28 @@ public struct AwaitingInputScanner {
     /// (which the live daemon rewrites on every status flip). A frozen `state.json` is ignored and
     /// the fresh session `status` wins. See ADR-0066 for the original source-of-truth choice.
     ///
+    /// **Post-approval stall (`busy` guard).** The freshness guard above only catches a job state
+    /// that *lags* the session. Right after a plan is approved the daemon stops rewriting **both**
+    /// files at once: `state.json` keeps `needs:"approve plan"` and the session's `statusUpdatedAt`
+    /// freezes at the same instant, so the (purely relative) freshness check sees a "fresh" pair and
+    /// lets the stale `needs` through. The session file still reports the truth — `status:"busy"` —
+    /// so a `busy` session is never awaiting, regardless of what its job state advertises. Observed
+    /// on Claude Code v2.1.220: the phantom hand lasts exactly as long as the turn, since the daemon
+    /// only rewrites the job state when the turn ends (`state:"done"`, `needs:null`).
+    ///
     /// Internal (not private) so unit tests can exercise the join logic directly on fixture strings.
     func isAwaiting(sessionJSON: String) -> Bool {
-        // 1. Direct real-time signal from the session file. Covers an active permission / plan prompt.
-        if firstMatch(Self.reStatus, in: sessionJSON) == "waiting" { return true }
+        let status = firstMatch(Self.reStatus, in: sessionJSON)
 
-        // 2. Semantic "blocked, waiting for your decision" — the session file may still say "idle"
+        // 1. Direct real-time signal from the session file. Covers an active permission / plan prompt.
+        if status == "waiting" { return true }
+
+        // 2. A session the daemon calls `busy` is *running a turn*, so it is by definition not
+        //    waiting on us — and its job state is not to be trusted (see the post-approval stall
+        //    above). Checked after step 1 so a real prompt still wins.
+        if status == "busy" { return false }
+
+        // 3. Semantic "blocked, waiting for your decision" — the session file may still say "idle"
         //    here, so consult the daemon-computed job state (the FleetView source).
         guard let jobId = firstMatch(Self.reJobID, in: sessionJSON) else { return false }
         guard let state = try? String(contentsOf: jobStateURL(jobId), encoding: .utf8) else { return false }
