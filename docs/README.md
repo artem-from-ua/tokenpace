@@ -27,6 +27,8 @@
 
 - [conventions.md](reference/conventions.md) — конвенції розробки: мова, стиль, логування, версіонування.
 - [log-messages.md](reference/log-messages.md) — повний перелік кожного лог-повідомлення, згрупований за файлом.
+- [performance.md](reference/performance.md) — гейти пʼяти періодичних завдань в одній таблиці: що
+  зупиняє screen lock, sleep, батарея, metered-мережа; які гейти відсутні.
 - [architecture.md](architecture.md) — архітектура (індекс), розбита на під-сторінки:
   - [reference/architecture/overview.md](reference/architecture/overview.md) — принципи, розгортання, каденції, SPM.
   - [reference/architecture/data-flow.md](reference/architecture/data-flow.md) — полінг, токен, pacing, рендер, діаграми потоку.
