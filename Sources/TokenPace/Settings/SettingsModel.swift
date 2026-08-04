@@ -60,6 +60,15 @@ final class SettingsModel {
     /// The section the root view should show. Seeded once from `TOKENPACE_SETTINGS_SECTION` on `show()`.
     var selection: SettingsSection = .about
 
+    /// Whether a data stub (`TOKENPACE_STUB`, or the dev-tools selector) is driving the app rather than
+    /// the real network. Seeded from the launch scenario and kept in sync by the shell when the stub is
+    /// switched live (#187), so it can't be read from `ProcessInfo` at render time.
+    ///
+    /// Drives the ⚠️ "Stubbed in this development build." hints: under a stub the service statuses are
+    /// canned rather than fetched, and the awaiting-input watcher doesn't run at all. The toggles stay
+    /// enabled — the stored preferences still apply to the next real run.
+    var stubScenarioActive = AppDelegate.launchScenario != .realNetwork
+
     /// Live sidebar icon sizing, keyed off the system "Sidebar icon size" (System Settings). Lives here
     /// so it persists with the window and keeps observing while open.
     let sidebarIcons = SidebarIconMetrics()

@@ -204,8 +204,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The `TOKENPACE_STUB` scenario the app launched with, or `.realNetwork` for a normal run. Read
     /// once from the environment and mapped through the shared ``StubScenario`` registry (unknown /
-    /// absent value → `.realNetwork`). Seeds ``currentScenario`` and the dropdown's initial selection.
-    private static let launchScenario =
+    /// absent value → `.realNetwork`). Seeds ``currentScenario`` and the dropdown's initial selection,
+    /// plus the Settings model's initial stub state (the dev-tools selector keeps it in sync after that).
+    static let launchScenario =
         StubScenario(rawValue: ProcessInfo.processInfo.environment["TOKENPACE_STUB"] ?? "") ?? .realNetwork
 
     /// The scenario currently driving the data source. Starts at ``launchScenario`` and changes only
@@ -872,6 +873,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateQuitDevTitle()             // keep the ⌥-Option Quit tag in sync with the live stub
         buildAndRunEngine(for: scenario)
         lastStatusSuccess = nil          // make the status poll due on the next (immediate) tick
+        // The awaiting-input watcher is gated on `.realNetwork`, so switching *into* a stub tears it
+        // down and switching back out brings it up again — without this the gate would only ever be
+        // evaluated at launch. Also refresh the Settings hints that explain the stubbed state.
+        updateAwaitingInputWatcher()
+        reRenderForCurrentTime()         // drop the stale awaiting count from the widget right away
+        settingsWC?.updateStubState(active: scenario != .realNetwork)
         signals.send(.manualRefresh)     // wake the freshly-built usage loop now
     }
 
@@ -1468,8 +1475,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ///
     /// The `TOKENPACE_AWAITING` stub short-circuits the watcher entirely — the forced count is read
     /// directly by `awaitingInputForDisplay`, so there's nothing to watch.
+    ///
+    /// A data stub also short-circuits it: on any scenario but `.realNetwork` the watcher stays down,
+    /// mirroring the journal's `currentScenario == .realNetwork` gate. A stub is meant to be a frozen,
+    /// reproducible frame, but the watcher reads the *live* `~/.claude` trees — so a screenshot run
+    /// would show whatever real sessions happen to be waiting right then. `TOKENPACE_AWAITING=N` stays
+    /// the way to exercise the indicator under a stub, with synthetic sessions instead of live ones.
     private func updateAwaitingInputWatcher() {
-        let wantWatcher = PersistedConfig.awaitingInputEnabled && awaitingInputStub == nil
+        let wantWatcher = PersistedConfig.awaitingInputEnabled
+            && awaitingInputStub == nil
+            && currentScenario == .realNetwork
         guard wantWatcher else {
             awaitingInputWatcher?.setActive(false)
             awaitingInputWatcher = nil

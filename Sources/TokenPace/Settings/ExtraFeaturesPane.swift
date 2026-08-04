@@ -52,6 +52,12 @@ struct ExtraFeaturesPane: View {
                         .fixedSize()
                     }
                 }
+
+                // Under a data stub the status page is never fetched — the stub transport answers the
+                // status endpoint too, so these switches pick between canned components (#187).
+                if model.stubScenarioActive {
+                    SettingsHint(text: Self.stubbedHint, warning: true)
+                }
             }
 
             // MARK: Sessions backup (was "Session Logs")
@@ -87,6 +93,12 @@ struct ExtraFeaturesPane: View {
                         get: { model.awaitingInputEnabled },
                         set: { model.setAwaitingInputEnabled($0) }))
                     SettingsHint(text: "Shows how many Claude Code sessions are waiting for your reply. Configure where it appears in Appearance.")
+                    // The watcher is gated on the real network: a stub is a frozen frame, and reading
+                    // the live ~/.claude trees would let real waiting sessions leak into it. Use
+                    // `TOKENPACE_AWAITING=N` to exercise the indicator with synthetic sessions instead.
+                    if model.stubScenarioActive {
+                        SettingsHint(text: Self.stubbedHint, warning: true)
+                    }
                 }
             }
 
@@ -123,6 +135,10 @@ struct ExtraFeaturesPane: View {
         .animation(nil, value: model.journalEnabled)
         .animation(nil, value: model.webDesktopEnabled)
     }
+
+    /// The ⚠️ line shown under any section whose data is canned by a `TOKENPACE_STUB` scenario. Shared
+    /// with `AppearancePane` so the wording stays identical across panes.
+    static let stubbedHint = "Stubbed in this development build."
 
     private var archiveDestinationURL: URL? {
         guard let path = model.archiveDestination else { return nil }
