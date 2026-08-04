@@ -475,6 +475,15 @@ actor StubUsageTransport: UsageTransport {
         /// pinned near-zero too (see the stub body) so Fable/Mythos show the same pill.
         case nearZero
 
+        /// **Edge-extremes** frame: the two ends of the scale at once — 5h at 0 % and 7d at 100 % on
+        /// *fresh* windows, so `timeFraction` ≈ 0 and each gap runs `[0, usage]` from the track's very
+        /// start. The 7d bar therefore fills end to end, both caps hard against the track's rounded
+        /// ends. This is the frame that exercises `stripRect`'s end-snapping: without it the `scaleX`
+        /// cap inset leaves a grey sliver past the fill (the "bar doesn't reach the end" bug). Note the
+        /// ribbon in Simple/Mixed spans `gapEnd - gapStart` ≈ 0.9987, not exactly 1 — which is why the
+        /// snap tests a band rather than equality.
+        case edgeExtremes
+
         /// (fiveUtil, sevenUtil, fiveResetSeconds, sevenResetSeconds).
         var values: (five: Double, seven: Double, fiveIn: TimeInterval, sevenIn: TimeInterval) {
             switch self {
@@ -489,6 +498,9 @@ actor StubUsageTransport: UsageTransport {
             case .farBehind:          return (5, 10, 2 * 3600, 2 * 24 * 3600)
             // Fresh windows: reset is almost a full window away → timeFraction ≈ 0 → hairline gap.
             case .nearZero:           return (0, 4, 17_950, 596_000)
+            // Fresh windows (almost the whole window left) → timeFraction ≈ 0, so the gap is
+            // `[0, usage]` and the 7d bar at 100 % fills the track end to end.
+            case .edgeExtremes:       return (0, 100, 17_950, 604_000)
             }
         }
     }

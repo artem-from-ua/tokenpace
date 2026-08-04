@@ -334,14 +334,24 @@ final class PopupBarView: NSView {
             sx0 = c - msw / 2
             sx1 = c + msw / 2
         }
-        // Snap an end that sits within the reserved cap band flush to the track. `scaleX` insets the
+        // Snap an end that lands within the reserved cap band flush to the track. `scaleX` insets the
         // 0..100 % scale by `bs` on each side so a cap never overhangs the rounded track — but at the
-        // track's own ends there is nothing to overhang, and the inset reads as a grey gap before the
-        // fill starts. Applied after the min-width floor, which would otherwise push the end back off
-        // the track's edge.
-        let bs = msw / 2
-        if sx0 <= rect.minX + bs { sx0 = rect.minX }
-        if sx1 >= rect.maxX - bs { sx1 = rect.maxX }
+        // track's own ends there is nothing to overhang (`drawBar`/`draw` clip the fill to the rounded
+        // track anyway), and that inset reads as a grey sliver past the end of the fill.
+        //
+        // The test is "within the cap band", not "exactly at 0 % / 100 %": a full bar rarely maps to a
+        // clean 1.0. In the menu bar's Simple/Mixed styles the strip is the ribbon `0..(gapEnd-gapStart)`,
+        // so a 100 %-used window whose clock has barely moved yields `0.9987`, not `1` — close enough
+        // that the leftover is pure inset, but too far for an equality test to catch.
+        //
+        // The band is the strip's own cap radius (half the bar height) rather than `bs`: the leftover at
+        // `0.9987` is `bs` plus a sliver of scaled span, which just overshoots `bs` itself. Anything
+        // thinner than a cap cannot read as a deliberate gap — it only reads as the fill missing the end.
+        //
+        // Applied after the min-width floor, which would otherwise push a snapped end back off the edge.
+        let band = rect.height / 2
+        if sx0 - rect.minX <= band { sx0 = rect.minX }
+        if rect.maxX - sx1 <= band { sx1 = rect.maxX }
         return NSRect(x: sx0, y: rect.minY, width: sx1 - sx0, height: rect.height)
     }
 
