@@ -10,10 +10,15 @@ import SwiftUI
 /// hand-tuned card/row/padding metrics (the whole point of moving to `Form.formStyle(.grouped)`).
 struct SettingsRootView: View {
     @Bindable var model: SettingsModel
-    /// The window's fixed content size (857×480). The hosting view has no intrinsic size for a
+    /// The window's floor: 857 wide (pinned — the width never changes) and, since ADR-0069, the
+    /// smallest height it can be dragged to. The hosting view has no intrinsic size for a
     /// `NavigationSplitView`, so the root asks to fill at least the window — otherwise the whole
     /// SwiftUI content lays out narrower than the window and the split's columns shrink with it (a
     /// too-narrow sidebar that truncates, plus dead space on the right of the detail).
+    ///
+    /// `minHeight` must match the window's `contentMinSize.height`, and `SettingsWindowController`
+    /// passes both explicitly so they cannot drift: if the window could be dragged shorter than this,
+    /// SwiftUI would clip the detail pane instead of letting its grouped `Form` scroll.
     var minWidth: CGFloat = 857
     var minHeight: CGFloat = 480
 

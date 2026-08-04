@@ -129,6 +129,9 @@ enum PersistedConfig {
         /// Whether the usage journal records each poll to an append-only JSONL file (#242). Default-off
         /// (opt-in) — writing to disk without asking is a habit we don't start. See the property.
         static let journalEnabled = "journalEnabled"
+        /// The Settings window's last frame, `[x, y, width, height]` in screen coordinates (ADR-0069).
+        /// See the property.
+        static let settingsWindowFrame = "settingsWindowFrame"
     }
 
     /// The marketing version the config was last written under, or `nil` if none has been recorded
@@ -492,6 +495,31 @@ enum PersistedConfig {
     static var journalEnabled: Bool {
         get { defaults.object(forKey: Key.journalEnabled) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.journalEnabled) }
+    }
+
+    /// The Settings window's last frame as `[x, y, width, height]` in screen coordinates (ADR-0069),
+    /// or `nil` when nothing usable is stored. Plain `Double`s rather than `NSStringFromRect` so this
+    /// file stays AppKit-free (it is Foundation + kit only), and so a hand-edited or truncated value
+    /// is rejected here rather than decoded into a garbage rect.
+    ///
+    /// The window is the only geometry we persist, and unlike every other key here it describes
+    /// *system* state rather than a preference (ADR-0023 draws that line). It earns its place because
+    /// the value must be **validated before it is applied** — `WindowFrameValidator` checks it against
+    /// the live screen layout — and `setFrameAutosaveName` restores a frame before any such check can
+    /// run. That is exactly the failure ADR-0035 removed autosave over.
+    static var settingsWindowFrame: [Double]? {
+        get {
+            guard let raw = defaults.array(forKey: Key.settingsWindowFrame) as? [Double],
+                  raw.count == 4 else { return nil }
+            return raw
+        }
+        set {
+            if let newValue, newValue.count == 4 {
+                defaults.set(newValue, forKey: Key.settingsWindowFrame)
+            } else {
+                defaults.removeObject(forKey: Key.settingsWindowFrame)
+            }
+        }
     }
 
     /// Whether the menu-bar / popup "sessions awaiting input" indicator is shown (#233, ADR-0066).

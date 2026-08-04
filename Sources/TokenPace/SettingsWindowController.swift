@@ -25,16 +25,23 @@ import TokenPaceKit
 final class SettingsWindowController: NSWindowController {
 
     private enum Metrics {
-        /// Fixed window content width, matching System Settings exactly (measured 857 pt, #156). The
-        /// window never resizes; the sidebar/detail split moves inside it (sidebar 258, detail 599).
+        /// Fixed window content width, matching System Settings exactly (measured 857 pt, #156). Still
+        /// pinned min == max: only the **height** resizes (ADR-0069). The sidebar/detail split is tuned
+        /// to this width (sidebar 258, detail 599) and would reflow if the user could drag it.
         static let contentWidth: CGFloat = 857
-        /// Fixed window content height. Bumped 480 → 520 (#199), 520 → 560 (#211), 560 → 600 (#215),
-        /// 600 → 636 (the "Work harder" toggle), then 636 → 684 / 684 → 776 (#224 — "Bar style", the
-        /// "Far behind pace interval" section, "Show ticks on bars"), then trimmed 776 → 720 (#224 —
-        /// the Calm + Work-harder toggles merged into one "Calm non-critical colors" segmented row)
-        /// so the Appearance pane and the other panes breathe without inner scrolling. Nudged to 732
-        /// for the "Show reset countdown" segmented row's added Smart-explanation line (#224).
-        static let contentHeight: CGFloat = 732
+        /// Content height the window **opens at** — a default since ADR-0069, a hard size before it.
+        /// It was hand-bumped every time the Appearance pane grew an option: 480 → 520 (#199) → 560
+        /// (#211) → 600 (#215) → 636 (the "Work harder" toggle) → 684 → 776 (#224 — "Bar style", the
+        /// "Far behind pace interval" section, "Show ticks on bars"), trimmed to 720 (#224 — the Calm
+        /// and Work-harder toggles merged into one segmented row), then 732 for the "Show reset
+        /// countdown" row's Smart-explanation line (#224). The window is height-resizable now and the
+        /// grouped `Form` scrolls, so a new option no longer *requires* a bump — bump this only to
+        /// keep the opening size comfortable.
+        static let defaultContentHeight: CGFloat = 732
+        /// Smallest content height the user can drag to. Matches ``SettingsRootView``'s own floor
+        /// (passed to it explicitly below, so the two cannot drift): below it SwiftUI stops shrinking
+        /// and would clip the detail pane instead of letting the grouped `Form` scroll.
+        static let minContentHeight: CGFloat = 480
     }
 
     /// The single observable state object, alive for the controller's lifetime (so background
@@ -152,34 +159,44 @@ final class SettingsWindowController: NSWindowController {
     private var hasBeenPositioned = false
 
     convenience init() {
-        // A settings window is fixed-size, not user-resizable: HIG says it "accommodates the size of
-        // the current pane," so minimize/maximize are dimmed (#156). Dropping `.resizable`/
-        // `.miniaturizable` from the style mask stops resizing; the still-drawn zoom/minimize buttons
-        // are also hidden below, leaving only close.
+        // Width-pinned, height-resizable (ADR-0069). System Settings sizes itself to the current pane
+        // and offers no resize at all (#156), which worked while our panes were small — but Appearance
+        // outgrew every screen it was measured on, and its height had to be hand-bumped each time.
+        // Letting the user set the height (and the grouped `Form` scroll below it) retires that ritual;
+        // the width stays fixed because the sidebar/detail split is tuned to it.
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: Metrics.contentWidth, height: Metrics.contentHeight),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(x: 0, y: 0,
+                                width: Metrics.contentWidth, height: Metrics.defaultContentHeight),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false)
         window.title = "TokenPace Settings"
         window.level = .floating               // float above other apps from a menu-bar app (ADR-0012 §6)
         window.isReleasedWhenClosed = false    // keep the controller alive so re-opening reuses it
-        // No `setFrameAutosaveName`: the window opens centred every launch rather than restoring a saved
-        // frame. A restored frame can outlive its display layout (disconnected monitor, changed
-        // resolution/scale) and reopen off-screen; centring is always on-screen (see `show()`).
-        window.standardWindowButton(.zoomButton)?.isHidden = true
-        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        // Fixed content size (857×520), like System Settings — a non-resizable single-pane form. Pin
-        // min == max so the window never resizes by pane or by the hosting view's ideal size, and the
-        // sidebar/detail split moves inside it.
-        window.contentMinSize = NSSize(width: Metrics.contentWidth, height: Metrics.contentHeight)
-        window.contentMaxSize = NSSize(width: Metrics.contentWidth, height: Metrics.contentHeight)
+        // Zoom means "as tall as the screen" here, not "as large as the screen" — see
+        // `windowWillUseStandardFrame`. Full screen is refused outright: a `.floating` window in its
+        // own Space fights whatever app is actually full-screen (the conflict that made ADR-0020 drop
+        // `.floating` from Troubleshoot; here we keep the level and drop full screen instead).
+        window.collectionBehavior.insert(.fullScreenNone)
+        // No `setFrameAutosaveName`, even though the frame *is* persisted now (ADR-0069): autosave
+        // restores a frame before anything can check it against the current screen layout, which is
+        // the off-screen failure ADR-0035 removed persistence over. `PersistedConfig.settingsWindowFrame`
+        // plus `WindowFrameValidator` give us "read → validate → apply once" instead (see `show()`).
         self.init(window: window)
-        let hosting = NSHostingController(rootView: SettingsRootView(model: model))
-        // Don't let the hosting controller drive the window size from SwiftUI's ideal — the window is
-        // fixed (above), and a NavigationSplitView's ideal would otherwise collapse it to a sliver.
+        window.delegate = self                 // zoom shape + frame persistence (below); `delegate` is weak
+        let hosting = NSHostingController(
+            rootView: SettingsRootView(model: model,
+                                       minWidth: Metrics.contentWidth,
+                                       minHeight: Metrics.minContentHeight))
+        // Don't let the hosting controller drive the window size from SwiftUI's ideal — the width is
+        // pinned and the height is the user's, and a NavigationSplitView's ideal would otherwise
+        // collapse the window to a sliver.
         hosting.sizingOptions = []
         window.contentViewController = hosting
+        // Bounds go on **after** the hosting controller: assigning a `contentViewController`
+        // re-derives them from the SwiftUI tree and would overwrite anything set earlier. They are
+        // re-applied on every `show()` for the same reason — see `pinSizeBounds()`.
+        pinSizeBounds()
     }
 
     /// Show or re-focus the window. Re-syncs every field from `PersistedConfig`/the system into the
@@ -197,19 +214,13 @@ final class SettingsWindowController: NSWindowController {
         // `updateAvailability`, called by `AppDelegate.openSettings` before `show()`.
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
-        // Fix the content size to the full 857×520 *before* centring. The `NSHostingController` content
-        // has no intrinsic size, so at first show the window is still a zero-width title-bar sliver;
-        // centring it while zero-width lands the left edge near the screen centre, and growing to 857
-        // afterwards pushes the right half off-screen. Sizing first makes `center()` centre correctly.
-        window?.setContentSize(NSSize(width: Metrics.contentWidth, height: Metrics.contentHeight))
-        // Always open centred on the first show of a session (later shows leave the user's position
-        // alone, #131). We deliberately don't persist/restore the frame across launches: a saved
-        // position can outlive the display layout it was valid for (a monitor was disconnected, the
-        // resolution or scale changed) and reopen the window off-screen. Centring is always on-screen
-        // and needs no per-launch validation.
+        pinSizeBounds()
+        // All geometry happens once per session, here. Every later show leaves the window exactly as
+        // the user left it — it is theirs to resize now (ADR-0069), and re-applying a size on each
+        // open would throw that away.
         if !hasBeenPositioned {
             hasBeenPositioned = true
-            window?.center()
+            applyRestoredOrDefaultFrame()
         }
         window?.makeKeyAndOrderFront(nil)
         // Dev helper: `TOKENPACE_SETTINGS_SECTION=<index>` opens straight to a given pane (0-based).
@@ -217,6 +228,71 @@ final class SettingsWindowController: NSWindowController {
            let idx = Int(raw), let section = SettingsSection(rawValue: idx) {
             model.selection = section
         }
+    }
+
+    // MARK: Geometry (ADR-0069)
+
+    /// One-shot geometry for the first show of the session: restore the persisted frame when it still
+    /// makes sense on the screens attached *right now*, otherwise open at the default size, centred.
+    ///
+    /// The ordering here is the whole point. `NSHostingController` content has no intrinsic size, so
+    /// until something sizes it the window is a zero-width title-bar sliver — and `center()` computed
+    /// at zero width puts the left edge at the screen's centre, after which growing to 857 pushes the
+    /// right half off-screen. That was ADR-0035's off-screen bug. So: size first, position second, and
+    /// in the restore path set both at once with `setFrame`, where no intermediate size exists at all.
+    /// Re-assert the size bounds. They express the intent (fixed width, floored height) and stop most
+    /// programmatic resizes, but they are **not** what enforces it — see `windowWillResize`.
+    ///
+    /// Re-applied rather than set once because `NSHostingController`, hosting a SwiftUI tree,
+    /// overwrites *every* size bound — `contentMinSize`/`contentMaxSize` and the frame-level
+    /// `minSize`/`maxSize` alike — during its first layout pass, some time after the window is shown,
+    /// leaving `0×0` … `∞×∞`. Measured on this window, not assumed.
+    private func pinSizeBounds() {
+        guard let window else { return }
+        window.contentMinSize = NSSize(width: Metrics.contentWidth, height: Metrics.minContentHeight)
+        window.contentMaxSize = NSSize(width: Metrics.contentWidth, height: .greatestFiniteMagnitude)
+    }
+
+    private func applyRestoredOrDefaultFrame() {
+        guard let window else { return }
+        // What we persist is a *frame* (content plus title bar), while `Metrics` is stated in content
+        // points, so convert the bounds into frame space before comparing. Mixing the two would let a
+        // window be restored a title bar's worth shorter than `minContentHeight` allows.
+        let decision = WindowFrameValidator.resolve(
+            stored: PersistedConfig.settingsWindowFrame.map(WindowFrameBox.init(components:)),
+            visibleFrames: NSScreen.screens.map { WindowFrameBox(cgRect: $0.visibleFrame) },
+            defaultSize: frameSize(forContentHeight: Metrics.defaultContentHeight, of: window),
+            minimumSize: frameSize(forContentHeight: Metrics.minContentHeight, of: window))
+
+        switch decision {
+        case .restore(let box):
+            // A validated frame carries size *and* position, so one call and no sliver in between.
+            window.setFrame(box.cgRect, display: false)
+        case .centreDefault:
+            // Size first, then position — `center()` on an unsized window is the off-screen bug.
+            window.setContentSize(NSSize(width: Metrics.contentWidth,
+                                         height: Metrics.defaultContentHeight))
+            window.center()
+        }
+    }
+
+    /// The full window size (content plus chrome) for a given **content** height at the pinned width —
+    /// the unit the persisted frame is measured in.
+    private func frameSize(forContentHeight height: CGFloat, of window: NSWindow)
+        -> WindowFrameBox.Size {
+        let frame = frameRect(forContentHeight: height, of: window)
+        return .init(width: Double(frame.width), height: Double(frame.height))
+    }
+
+    /// Record the window's frame so the next launch can reopen at it. Cheap enough to do on every
+    /// resize/move step: it is a four-number `UserDefaults` write.
+    ///
+    /// The `isVisible` gate drops the frames AppKit reports while the window is still being set up —
+    /// before `makeKeyAndOrderFront` the window can still be the zero-sized sliver, and persisting
+    /// that would hand the next launch a frame the validator has to throw away.
+    private func persistFrame() {
+        guard let window, window.isVisible else { return }
+        PersistedConfig.settingsWindowFrame = WindowFrameBox(cgRect: window.frame).components
     }
 
     /// Reflect the current update state (#37). Safe to call while the window is closed — it mutates
@@ -236,4 +312,94 @@ final class SettingsWindowController: NSWindowController {
     func updateStubState(active: Bool) {
         model.stubScenarioActive = active
     }
+}
+
+// MARK: - NSWindowDelegate (ADR-0069)
+
+extension SettingsWindowController: NSWindowDelegate {
+
+    /// Shape the green button's zoom: **taller, never wider**. The width is pinned, so AppKit's own
+    /// proposal would only grow the height anyway — but it also re-origins x, sliding the window
+    /// sideways on the way. Returning an explicit frame keeps the window where the user put it and
+    /// only stretches it to the screen's usable height.
+    ///
+    /// `defaultFrame` is AppKit's proposal, already the target screen's visible frame (menu bar and
+    /// Dock excluded), so its vertical extent is exactly what "as tall as the screen" means — no
+    /// `NSScreen` lookup needed. Clicking again restores the previous size; `NSWindow.zoom(_:)`
+    /// remembers it, so there is no toggle to implement here.
+    func windowWillUseStandardFrame(_ window: NSWindow, defaultFrame: NSRect) -> NSRect {
+        NSRect(x: window.frame.origin.x,
+               y: defaultFrame.origin.y,
+               width: pinnedFrameWidth(of: window),
+               height: defaultFrame.height)
+    }
+
+    /// Hold the width at 857 through every resize, and keep the height above its floor. **This is
+    /// what actually enforces the pin** — AppKit asks here before every resize, whoever asked, so the
+    /// answer is authoritative where the size bounds are not: `NSHostingController` wipes those
+    /// during its first layout pass (see `pinSizeBounds()`), and AppKit applies them only to user
+    /// drags anyway, letting anything programmatic (Accessibility, window managers) straight past.
+    ///
+    /// Known cosmetic flaw: the side edges still show the ↔ resize cursor, so the window offers a
+    /// horizontal resize that this method then refuses. AppKit has no supported way to suppress that
+    /// cursor for one axis — `resizeIncrements`, both size-bound pairs, and the style mask were each
+    /// measured against it and none removes it, and Apple's own Settings window (which pins its width
+    /// identically, verified via Accessibility) presumably uses something private. Tracked separately.
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        NSSize(width: pinnedFrameWidth(of: sender),
+               height: max(frameSize.height, minimumFrameHeight(of: sender)))
+    }
+
+    /// The pinned width expressed as a *frame* width — `Metrics.contentWidth` plus whatever side
+    /// chrome the window has (none, for a standard titled window, but derived rather than assumed).
+    private func pinnedFrameWidth(of window: NSWindow) -> CGFloat {
+        frameRect(forContentHeight: Metrics.defaultContentHeight, of: window).width
+    }
+
+    /// The height floor as a *frame* height — `Metrics.minContentHeight` plus the title bar.
+    private func minimumFrameHeight(of window: NSWindow) -> CGFloat {
+        frameRect(forContentHeight: Metrics.minContentHeight, of: window).height
+    }
+
+    private func frameRect(forContentHeight height: CGFloat, of window: NSWindow) -> NSRect {
+        window.frameRect(forContentRect:
+            NSRect(x: 0, y: 0, width: Metrics.contentWidth, height: height))
+    }
+
+    /// SwiftUI's first layout pass wipes the size bounds; by the time the window takes key focus that
+    /// pass has run, so this is where the pin reliably sticks. See `pinSizeBounds()`.
+    func windowDidBecomeKey(_ notification: Notification) { pinSizeBounds() }
+
+    func windowDidResize(_ notification: Notification) { persistFrame() }
+
+    func windowDidMove(_ notification: Notification) { persistFrame() }
+
+    /// The state the window was in when it went away is the one to reopen at — a resize immediately
+    /// followed by a close would otherwise be the one change that never got recorded.
+    func windowWillClose(_ notification: Notification) { persistFrame() }
+}
+
+// MARK: - WindowFrameBox ↔ CoreGraphics
+
+/// The kit's frame type is deliberately CoreGraphics-free (it has to stay portable to Phase 2), so the
+/// conversion lives here, at the AppKit boundary.
+extension WindowFrameBox {
+
+    init(cgRect: CGRect) {
+        self.init(x: Double(cgRect.origin.x), y: Double(cgRect.origin.y),
+                  width: Double(cgRect.width), height: Double(cgRect.height))
+    }
+
+    /// Rebuild from the persisted `[x, y, width, height]`. The array's length is guaranteed by
+    /// `PersistedConfig.settingsWindowFrame`, which rejects anything else.
+    init(components: [Double]) {
+        self.init(x: components[0], y: components[1], width: components[2], height: components[3])
+    }
+
+    var cgRect: CGRect {
+        CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// Flattened for storage — see `PersistedConfig.settingsWindowFrame` for why plain numbers.
+    var components: [Double] { [x, y, width, height] }
 }
