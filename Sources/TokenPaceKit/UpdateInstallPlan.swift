@@ -110,4 +110,90 @@ public enum UpdateInstallPlan {
         }
         return .install(asset: asset, targetVersion: release.tagName)
     }
+
+    /// **Every** environment gate currently blocking `release` — the explanatory counterpart to
+    /// ``decide(release:currentVersion:isAppBundle:autoInstallEnabled:freeDiskBytes:onACPower:networkIsMetered:)``
+    /// (#221).
+    ///
+    /// `decide` is first-fail-wins: the right shape for "install or not", but it stops at the first
+    /// closed gate, so it cannot say that *two* conditions are blocking. This reports all of them, so
+    /// the UI never sends the user to plug in power only to reveal a metered network afterwards.
+    ///
+    /// Returns `[]` when nothing environmental blocks — **including** when the release isn't
+    /// installable at all (auto-install off / not newer / dev build / no asset). Those are settled-no
+    /// cases, not deferrals: nothing about the environment would change them, so there is no pending
+    /// install to explain.
+    ///
+    /// The order is `UpdateDeferralReason.allCases`, not the gate order of `decide`, so the sentence
+    /// the UI composes stays stable between renders.
+    ///
+    /// Parameters mirror `decide` exactly, and callers pass the **real** environment here even when
+    /// forcing an install — this describes the conditions, it does not decide anything.
+    public static func deferralReasons(
+        release: GitHubRelease,
+        currentVersion: String,
+        isAppBundle: Bool,
+        autoInstallEnabled: Bool,
+        freeDiskBytes: Int,
+        onACPower: Bool,
+        networkIsMetered: Bool
+    ) -> [UpdateDeferralReason] {
+        // The settled-no gates (1-4) short-circuit: an uninstallable release has no pending install
+        // whose delay needs explaining. Mirrors `decide`'s gates 1-4 exactly.
+        guard autoInstallEnabled,
+              UpdateComparison.isNewer(tag: release.tagName, than: currentVersion),
+              isAppBundle,
+              let asset = UpdateAssetSelector.selectZIP(from: release)
+        else { return [] }
+
+        return UpdateDeferralReason.allCases.filter { reason in
+            switch reason {
+            case .insufficientSpace: return freeDiskBytes - asset.size < minFreeBytesAfterDownload
+            case .onBattery:         return !onACPower
+            case .meteredNetwork:    return networkIsMetered
+            }
+        }
+    }
+}
+
+// MARK: - UpdateDeferralReason
+
+/// One environment condition holding back an otherwise-installable release (#221) — the reportable
+/// form of the `defer…` cases of ``UpdateInstallDecision``.
+///
+/// Exists so the UI can explain a pending update instead of showing a bare "Update pending…", which
+/// left the user with no way to learn that plugging in the power adapter is all it takes.
+///
+/// The `clause` wording lives here rather than in the view because it is a *semantic* label of the
+/// condition, the same call as `LastUpdateFailure.Stage.displayName` — the kit names the thing, the
+/// view decides how to present it (ADR-0009).
+public enum UpdateDeferralReason: String, Sendable, Equatable, CaseIterable {
+    /// The Mac is running on battery — deferred so a drained battery can't interrupt the install.
+    case onBattery
+    /// The network is expensive or constrained (cellular, hotspot, Low Data Mode).
+    case meteredNetwork
+    /// Downloading would leave less than ``UpdateInstallPlan/minFreeBytesAfterDownload`` free.
+    case insufficientSpace
+
+    /// The clause naming this condition, phrased to slot into "Update pending because …".
+    public var clause: String {
+        switch self {
+        case .onBattery:         return "your Mac is on battery"
+        case .meteredNetwork:    return "the network is metered"
+        case .insufficientSpace: return "there isn't enough free disk space"
+        }
+    }
+
+    /// The full sentence explaining why an update is pending, or `nil` when nothing blocks it.
+    ///
+    /// Clauses are joined as prose — "a", "a and b", "a, b and c" — so the line reads as one
+    /// sentence rather than a list, keeping it to a single hint row however many gates are closed.
+    public static func pendingExplanation(for reasons: [UpdateDeferralReason]) -> String? {
+        let clauses = reasons.map(\.clause)
+        guard let last = clauses.last else { return nil }
+        let joined = clauses.count == 1
+            ? last
+            : clauses.dropLast().joined(separator: ", ") + " and " + last
+        return "Update pending because \(joined)."
+    }
 }

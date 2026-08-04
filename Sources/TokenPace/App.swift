@@ -160,6 +160,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Whether the last auto-install verdict was a `defer…` (battery / metered / low disk) — drives the
     /// blue "Update pending" item (#130). Set in `evaluateAutoInstall`, read by `refreshUpdateMenuItem`.
     private var installDeferred = false
+    /// **Every** environment condition currently holding the install back (#221), where
+    /// `installDeferred` only says *that* one does. Mirrored into `SettingsModel` so About can name
+    /// them; kept here too so a Settings window opened later starts from the current state.
+    private var installBlockers: [UpdateDeferralReason] = []
     /// The newest release found so far, or `nil` if none/up-to-date. Drives the update menu item state
     /// and the Settings "Update available" line.
     private var lastKnownRelease: GitHubRelease?
@@ -503,6 +507,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let wc = SettingsWindowController()
             wc.onMonitoredServicesChange = { [weak self] config in self?.monitoredServicesChanged(config) }
             wc.onCheckForUpdatesNow = { [weak self] in self?.performUpdateCheck(userInitiated: true) }
+            wc.onInstallUpdateNow = { [weak self] in self?.installUpdateNow() }
             wc.onCalmColorModeChange = { [weak self] mode in
                 self?.statusView?.calmColorMode = mode
                 self?.refreshStatusImage()   // pure colour change — no layout/width rebuild needed
@@ -594,8 +599,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             settingsWC = wc
         }
-        // Reflect the latest known update state whenever the window opens (#37).
+        // Reflect the latest known update state whenever the window opens (#37), including why an
+        // available update is still pending (#221) — the blockers were computed at the last install
+        // evaluation, which usually predates the window.
         settingsWC?.updateAvailability(lastKnownRelease)
+        settingsWC?.updateDeferral(installBlockers)
         // Same for the live data source: the model seeds itself from `launchScenario`, but the dev-tools
         // selector may have switched scenarios since — and any push from `switchScenario` before the
         // window first opened went to a nil controller. Pull the current value on every open so the
@@ -1213,7 +1221,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // build is the newest (`UpdateMenuState`).
                 self.lastKnownRelease = nil
                 self.installDeferred = false
+                self.installBlockers = []
                 self.settingsWC?.updateAvailability(nil)
+                self.settingsWC?.updateDeferral([])
                 self.refreshUpdateMenuItem()
             }
         }
@@ -1375,6 +1385,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             installDeferred = false
         }
 
+        // Every blocking condition, not just the one `decide` stopped at (#221), so About can explain
+        // the pending update in full. Deliberately read from the **real** environment even under a
+        // forced run: this describes conditions, it decides nothing — reporting "on AC" to a user
+        // sitting on battery would be a lie.
+        installBlockers = UpdateInstallPlan.deferralReasons(
+            release: release,
+            currentVersion: TokenPaceKit.version,
+            isAppBundle: LaunchAtLoginController.isAppBundle,
+            autoInstallEnabled: PersistedConfig.installUpdatesAutomatically,
+            freeDiskBytes: freeBytes,
+            onACPower: PowerSource.isOnACPower,
+            networkIsMetered: network.isMetered)
+        settingsWC?.updateDeferral(installBlockers)
+
         switch decision {
         case let .install(asset, targetVersion):
             AppLogger.lifecycle.notice(
@@ -1400,6 +1424,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Install the known release **now**, at the user's explicit request — the "Update Now" button in
+    /// Settings → About (#221).
+    ///
+    /// The environment gates exist as a *courtesy*: they keep a background install from spending a
+    /// metered link or risking a battery-drain mid-replace. An explicit click withdraws that courtesy,
+    /// so this passes `onACPower: true, networkIsMetered: false` — the bypass contract
+    /// `UpdateInstallPlan.decide` documents. Free space is **not** bypassed: no amount of user intent
+    /// makes it safe to fill the disk. Neither are the settled-no gates — without an installable asset
+    /// or a real `.app` bundle there is nothing to install, whatever the user asks.
+    ///
+    /// Distinct from `TOKENPACE_UPDATE_DRYRUN`, which conflates "bypass the gates" with "don't actually
+    /// install"; here only the first half applies, so the installer is constructed with
+    /// `dryRunForced: false` explicitly rather than letting it read the env.
+    func installUpdateNow() {
+        guard let release = lastKnownRelease else {
+            AppLogger.lifecycle.notice("update-install: decision=forced-skip reason=no-known-release")
+            return
+        }
+        let freeBytes = DiskSpace.availableBytes(forVolumeContaining: Bundle.main.bundleURL) ?? .max
+        let decision = UpdateInstallPlan.decide(
+            release: release,
+            currentVersion: TokenPaceKit.version,
+            isAppBundle: LaunchAtLoginController.isAppBundle,
+            // The user clicked "Update Now" — that *is* the opt-in for this one install, whatever the
+            // standing preference says. Without this, the button would be inert exactly where it is
+            // most wanted: auto-install off, a new version sitting there.
+            autoInstallEnabled: true,
+            freeDiskBytes: freeBytes,
+            onACPower: true,
+            networkIsMetered: false)
+
+        switch decision {
+        case let .install(asset, targetVersion):
+            AppLogger.lifecycle.notice(
+                "update-install: decision=forced-install target=\(targetVersion, privacy: .public) asset=\(asset.name, privacy: .public)")
+            startInstall(asset: asset, tag: targetVersion, forceRealInstall: true)
+        case let .deferInsufficientSpace(_, targetVersion):
+            // The one gate an explicit request cannot open.
+            AppLogger.lifecycle.notice(
+                "update-install: decision=forced-skip reason=insufficient-space target=\(targetVersion, privacy: .public)")
+        case .deferOnBattery, .deferMeteredNetwork:
+            // Unreachable: both gates were passed favourable values above.
+            AppLogger.lifecycle.error("update-install: forced install hit an environment gate — unexpected")
+        case .skipAutoInstallOff:
+            AppLogger.lifecycle.error("update-install: forced install reported auto-install-off — unexpected")
+        case .skipNotNewer:
+            AppLogger.lifecycle.notice("update-install: decision=forced-skip reason=not-newer")
+        case .skipNotAppBundle:
+            AppLogger.lifecycle.notice("update-install: decision=forced-skip reason=not-app-bundle")
+        case .skipNoAsset:
+            AppLogger.lifecycle.notice("update-install: decision=forced-skip reason=no-asset")
+        }
+    }
+
     /// Run the installer for an `.install` verdict — a dry run under `TOKENPACE_UPDATE_DRYRUN`
     /// (download/verify/unzip, no replace), otherwise the real install (atomic replace + relaunch).
     /// Any failure logs and falls back to the single dropdown item (`refreshUpdateMenuItem`).
@@ -1412,16 +1490,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// starts and shows the blue `whatsNew` item. On a failure the marker is cleared again (nothing was
     /// installed) and `lastFailedInstallVersion` is set so this exact tag is not retried — a newer tag
     /// still is. A dry run touches neither marker (nothing was really installed).
-    private func startInstall(asset: GitHubReleaseAsset, tag: String) {
+    private func startInstall(asset: GitHubReleaseAsset, tag: String, forceRealInstall: Bool = false) {
         installTask?.cancel()
-        let dryRun = ProcessInfo.processInfo.environment["TOKENPACE_UPDATE_DRYRUN"] == "1"
+        // `forceRealInstall` is the "Update Now" path (#221): the user asked for an install, so the
+        // dry-run env var must not turn it into a no-op — that flag means "rehearse the background
+        // install", not "never install".
+        let dryRun = !forceRealInstall
+            && ProcessInfo.processInfo.environment["TOKENPACE_UPDATE_DRYRUN"] == "1"
         // Persist the pending "what's new" up front so it survives the imminent relaunch. Skip for a
         // dry run (no real install / relaunch happens).
         if !dryRun {
             PersistedConfig.pendingWhatsNewVersion = tag
             AppLogger.lifecycle.notice("update-install: what's new pending set tag=\(tag, privacy: .public)")
         }
-        let installer = UpdateInstaller(ghAuthEnabled: ghAuthEnabled)
+        let installer = UpdateInstaller(ghAuthEnabled: ghAuthEnabled, dryRunForced: dryRun)
         installTask = Task { [weak self] in
             let outcome = await installer.install(asset, expectedTag: tag)
             guard let self, !Task.isCancelled else { return }

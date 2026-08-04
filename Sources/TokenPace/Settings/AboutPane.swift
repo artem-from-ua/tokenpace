@@ -64,18 +64,20 @@ struct AboutPane: View {
                 }
 
                 if let release = model.latestRelease {
-                    // "Release notes" sits by the label on the left; "Download" (the web release) is the
-                    // trailing link on the right (#210). A blue status dot matches the dropdown's "new
-                    // version available" item.
+                    // A blue status dot matches the dropdown's "new version available" item. The
+                    // "Download" button was dropped (#221): installing is now "Update Now" below, and
+                    // "release notes" doubles as the manual route — it opens the release page, which is
+                    // where a hand-download starts anyway.
                     LabeledContent {
-                        Button("Download") { model.openDownload() }
-                            .buttonStyle(.link)
+                        HStack(spacing: 6) {
+                            Text(SettingsModel.displayTag(release.tagName))
+                            Button("release notes") { model.openReleaseNotes(tag: release.tagName) }
+                                .buttonStyle(.link)
+                        }
                     } label: {
                         HStack(spacing: 6) {
                             UpdateStatusDot(role: .blue)
-                            Text("New version available: \(SettingsModel.displayTag(release.tagName))")
-                            Button("Release notes") { model.openReleaseNotes(tag: release.tagName) }
-                                .buttonStyle(.link)
+                            Text("New version available")
                         }
                     }
                 }
@@ -101,13 +103,35 @@ struct AboutPane: View {
                 // disabled), so the card shows only what applies.
                 if model.automaticUpdateChecks {
                     VStack(alignment: .leading, spacing: 4) {
-                        // When the feature can't work (a dev build), show the switch as OFF regardless
-                        // of the stored value — an on-but-disabled switch reads as "it's on" when it
-                        // isn't. The stored choice is preserved; it just isn't reflected while unusable.
-                        Toggle("Install updates automatically", isOn: Binding(
-                            get: { model.installAutoEnabled && model.installAutomatically },
-                            set: { model.setInstallAutomatically($0) }))
-                        .disabled(!model.installAutoEnabled)
+                        // "Update Now" sits before the switch, like "Check Now" on the row above. It
+                        // appears only when there is something to install (#221) — the button exists to
+                        // resolve a pending update, so with nothing pending it would be dead weight.
+                        LabeledContent {
+                            HStack(spacing: 10) {
+                                if model.canInstallNow {
+                                    Button("Update Now") { model.installUpdateNow() }
+                                }
+                                // When the feature can't work (a dev build), show the switch as OFF
+                                // regardless of the stored value — an on-but-disabled switch reads as
+                                // "it's on" when it isn't. The stored choice is preserved; it just
+                                // isn't reflected while unusable.
+                                Toggle("", isOn: Binding(
+                                    get: { model.installAutoEnabled && model.installAutomatically },
+                                    set: { model.setInstallAutomatically($0) }))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .disabled(!model.installAutoEnabled)
+                            }
+                        } label: {
+                            Text("Install updates automatically")
+                        }
+                        // Why an available update is sitting unapplied (#221) — every blocking
+                        // condition, not just the first, so fixing one doesn't reveal another. The ⚠️
+                        // alone carries it: this is a hint the user can act on (plug in power, leave
+                        // the metered network), and it reads as one with the dev-build hint below.
+                        if let explanation = model.deferralExplanation {
+                            SettingsHint(text: explanation, warning: true)
+                        }
                         // Only the dev-build ⚠️ note remains; the enabled description was dropped.
                         if model.installAutoHint.devBuild {
                             SettingsHint(text: model.installAutoHint.text, warning: true)

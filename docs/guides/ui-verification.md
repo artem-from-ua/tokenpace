@@ -424,6 +424,33 @@ swift run
 → відкрий Settings (меню) → About: перевір обидві крапки, клік по Version і по «Update available»
 (відкривають release notes у браузері), довгу причину (не обрізається, selectable).
 
+#### Причина відкладеного апдейту + «Update Now» (#221)
+
+Коли оновлення є, але гейт середовища не пускає install, About пояснює **чому** — рядком ⚠
+«Update pending because …», що перелічує **всі** активні причини (не лише ту, на якій спинився
+`decide`). Поруч із тумблером «Install updates automatically» зʼявляється кнопка **Update Now**
+(лише коли є що ставити), яка обходить гейти живлення й мережі — але **не** free-space.
+
+Стуб **`TOKENPACE_FAKE_DEFERRAL=battery,metered,space`** форсує причини (будь-яка підмножина, у
+будь-якому порядку — рядок завжди рендериться в порядку `allCases`; пише лише в память, **не** в
+`UserDefaults`). Він також показує «Update Now» на dev-білді, щоб кнопку було видно в `swift run`;
+клік там законно відмовляє (`forced-skip reason=not-app-bundle`) — це видно в логах.
+
+```sh
+TOKENPACE_STUB=1 TOKENPACE_DEVTOOLS=1 TOKENPACE_SETTINGS_SECTION=0 \
+TOKENPACE_FAKE_LATEST=v99.0.0 TOKENPACE_FAKE_DEFERRAL=battery,metered \
+swift run
+```
+
+Перевірити: одна / дві / три причини (текст читається реченням — «a», «a and b», «a, b and c»);
+кнопки «Download» немає, а «release notes» — з малої й вирівняне праворуч; висота сусідніх рядків не
+стрибає при появі рядка причини.
+
+**Наживо** (нотаризований `.app` із `/Applications`): на батареї, маючи доступний апдейт, About має
+показати «Update pending because your Mac is on battery.» → клік «Update Now» ставить оновлення, не
+чекаючи шнура. Free-space-гейт таким чином **не** обходиться — при переповненому диску install
+законно відмовляє (`forced-skip reason=insufficient-space`).
+
 ### Авто-встановлення оновлень (#122–#125, ADR-0033; сигнали ADR-0036)
 
 Повний флоу (download→verify→unzip→replace) працює **лише в нотаризованому `.app` із
