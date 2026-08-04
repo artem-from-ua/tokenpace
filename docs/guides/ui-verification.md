@@ -95,7 +95,7 @@
 | `reset-grace` ⏱ | грейс на межі ресету (ADR-0041, ADR-0045) — **реальний годинник** (⏱: freshness-вікно «utilization rose recently» міряється в реальному часі): активне 5h-вікно (поли 0–1) → **порожнє** post-reset тіло (поли 2–3: `five_hour.resets_at:null`, без `session`-ліміту — декодер сам по собі дав би `sessionIdle`) → активне знову (поли 4+). У «дірі» 5h-рядок має показувати спокійний **0 % «on pace» з rolled-forward відліком** (`Nh at …`), а меню-бар **не блимати** — **ніколи «resetting…» чи зелений бар на всю ширину** (ADR-0045). Грейс озброюється лише коли запущений процес `claude` (`claudeActive`) — інакше показується чесний idle «ready to start» одразу. Порівнюй з `idle`: там idle **справжній** і має показатися |
 | `broken-reset` | зламаний `resets_at` (#167, ADR-0043): «шумний» 5h (100 %) із **непарсабельним, але непорожнім** `resets_at` (`"not-a-date"`, НЕ `null` — `null`/порожній дав би чесний `sessionIdle`, а не помилку) → меню-бар показує **⚠️ замість пейсинг-барів** (як інша помилка API), а не фейкове `<1m`. 7d — calm із валідним ресетом (не джерело помилки) |
 | `calm-degraded` | calm-бари + **degraded (жовта)** service-крапка: за вимкненого «Calm colours» (#105) крапка жовта; увімкни Calm (Settings → General) — крапка **біліє** разом із барами. Кадр для перевірки гасіння service-крапки |
-| `all-green` | calm-бари + **усі сервіси operational** (зелені): `worstProblem == nil`, тож у попапі за замовчуванням **немає рядків статусів узагалі**; затисни ⌥ Option — з'являються всі чотири зелені рядки (API, Code, Web/Desktop, Cowork). Єдиний стуб з all-operational статусом (решта лишають API `degraded_performance`). Кадр для перевірки «⌥ розкриває статуси навіть коли всі зелені» |
+| `all-green` | calm-бари + **усі сервіси operational** (зелені): `worstProblem == nil`, тож у попапі за замовчуванням **немає рядків статусів узагалі**; затисни ⌥ Option — з'являються всі чотири зелені рядки (API, Code, Web/Desktop, Cowork). Кадр для перевірки «⌥ розкриває статуси навіть коли всі зелені» (решта стубів теж all-operational — окрім `error`, `stale-error`, `calm-degraded`) |
 | `just-unblocked` | «Back to work!» edge (#160): перший пол заблокований (7d=100 %, без кредитів), далі workable (7d=40 %) → нотифікація спрацьовує один раз. Див. окрему секцію нижче |
 | `credits-onset` | «Now using Extra Usage Credit» edge: перший пол **не** на кредитах (7d=40 %, кредити enabled, але базовий ліміт не вичерпано → `isOnCredits=false`), далі 7d=100 % з тими самими enabled `spend`/`extra_usage` → робота переливається на платний кредит → нотифікація спрацьовує один раз (€10.77 / €15.00). Див. окрему секцію нижче |
 
@@ -171,8 +171,11 @@ TOKENPACE_STUB=screenshot TOKENPACE_DEVTOOLS=1 swift run
   - `TOKENPACE_STUB=error` — відкрий дропдаун: видно тільки non-operational рядки; тримай ⌥ — список
     доповнюється рештою (live rebuild, без реполу).
   - `TOKENPACE_STUB=all-green` — усі сервіси зелені: без ⌥ рядків статусів **немає взагалі**; затисни ⌥ —
-    з'являються всі чотири зелені рядки (API, Code, Web/Desktop, Cowork). Це єдиний стуб, що дає
-    all-operational статус (решта лишають API `degraded_performance`).
+    з'являються всі чотири зелені рядки (API, Code, Web/Desktop, Cowork).
+
+  Статуси сервісів **не-operational лише в тих стубах, що їх власне перевіряють** — `error`,
+  `stale-error`, `calm-degraded`. Решта кадрів (pacing, credits, idle, colour-cycle тощо) віддають
+  all-operational статус, щоб чужа service-крапка не додавала шуму в кадр, який перевіряє зовсім інше.
 
 ### Plan label поряд із «Claude» у шапці попапа
 

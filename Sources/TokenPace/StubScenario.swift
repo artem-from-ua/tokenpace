@@ -235,7 +235,8 @@ enum StubScenario: String, CaseIterable {
                  + "dot is yellow; turn Calm on and it mutes to white."
         case .allGreen:
             return "Calm bars + every service operational (all green): the popup shows no status rows by "
-                 + "default; hold ⌥ Option to reveal the four green rows (API, Code, Web/Desktop, Cowork)."
+                 + "default; hold ⌥ Option to reveal the four green rows (API, Code, Web/Desktop, Cowork). "
+                 + "Most stubs are all-operational too — this one names the ⌥ reveal as its subject."
         case .creditsActive:
             return "Credits ¤ icon (#144): enabled €15 limit, €10.77 spent (~72 %) → paced icon "
                  + "colour. 7-day pinned at 100 % so the icon shows — and since credits cover the "
