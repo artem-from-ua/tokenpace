@@ -57,6 +57,7 @@ enum StubScenario: String, CaseIterable {
     case justUnblocked = "just-unblocked"
     case creditsOnset = "credits-onset"
     case resetGrace = "reset-grace"
+    case colorCycle = "color-cycle"
 
     /// The env id (`TOKENPACE_STUB` value), including `"real"` for ``realNetwork``.
     var id: String { rawValue }
@@ -161,6 +162,7 @@ enum StubScenario: String, CaseIterable {
         case .justUnblocked:       return "Back to work! edge"
         case .creditsOnset:        return "Extra Usage Credit onset"
         case .resetGrace:          return "Reset-boundary idle grace"
+        case .colorCycle:          return "Colour transitions (frozen bars)"
         }
     }
 
@@ -253,6 +255,11 @@ enum StubScenario: String, CaseIterable {
         case .resetGrace:
             return "Reset-boundary idle grace (ADR-0041): active → post-reset empty five_hour → active "
                  + "again. The 5h bar stays \"ready\" across the empty polls — no flicker."
+        case .colorCycle:
+            return "Colour-transition check (ADR-0070): the 5-hour bar and one service dot walk the "
+                 + "pacing palette — blue → green → yellow → orange → red and back — pausing 5 s on "
+                 + "each. Bar geometry is FROZEN (strip pinned at half the track, no time marker), so "
+                 + "the only thing moving is the colour. The 7-day bar stays put as a reference."
         }
     }
 
@@ -297,6 +304,9 @@ enum StubScenario: String, CaseIterable {
         case .justUnblocked:       return StubUsageTransport(mode: .justUnblocked, now: now)
         case .creditsOnset:        return StubUsageTransport(mode: .creditsOnset, now: now)
         case .resetGrace:          return StubUsageTransport(mode: .resetGrace, now: now)
+        // The colour walk is driven by `AppDelegate`'s own timer overlaying the retained snapshot, so
+        // the transport only has to supply a plain, stable frame for it to repaint (ADR-0070).
+        case .colorCycle:          return StubUsageTransport(mode: .pacing(.calmBoth), now: now)
         }
     }
 
@@ -324,10 +334,12 @@ enum StubScenario: String, CaseIterable {
     /// the clock advancing: ``optimisticReset`` arms a one-shot timer for a reset ~20 s out and watches
     /// it fire; ``resetGrace`` holds the 5h bar "ready" across empty polls via a real-time freshness
     /// window. Every other stub is driven purely by the poll counter, so a frozen clock reproduces it.
+    /// ``colorCycle`` likewise: its whole point is a colour changing *over time*, driven by a real
+    /// timer, so a frozen clock would leave every transition unobservable.
     var usesRealClock: Bool {
         switch self {
-        case .optimisticReset, .resetGrace: return true
-        default:                            return false
+        case .optimisticReset, .resetGrace, .colorCycle: return true
+        default:                                         return false
         }
     }
 

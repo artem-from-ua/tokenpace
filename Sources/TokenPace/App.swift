@@ -195,6 +195,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// only recomputes the view models against the current time.
     private var ageTimer: Timer?
 
+    /// Drives the smooth pacing-colour transitions on both surfaces (ADR-0070). Owned here rather
+    /// than by either view because the popup's bar views are rebuilt from scratch on every update —
+    /// state kept on them would be lost immediately — and because the two surfaces must share one
+    /// registry and one frame clock. Its frame callback is wired to ``reRenderForCurrentTime()``, so
+    /// an animation frame travels exactly the same path as any other change.
+    private let colorAnimator = ColorAnimator()
+
+    /// Steps the `color-cycle` verification stub through its pacing zones (ADR-0070): a colour walk
+    /// with the bar geometry pinned, so a maintainer can watch every transition without the usage
+    /// API. Non-nil only under that stub.
+    private var colorCycleTimer: Timer?
+
     /// One-shot timer firing exactly at the nearest window `resets_at` to apply a local optimistic
     /// reset + force a refresh (#36), so the menu bar rolls straight from a live countdown to a fresh
     /// window without ever showing the stale ⏰. Rescheduled on every `apply(_:)` against the latest
@@ -305,6 +317,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         view.layout = MenuBarLayout.make(from: nil, health: coldHealth, now: now)
         view.calmColorMode = PersistedConfig.calmColorMode     // apply the saved calm-colours mode from launch (#105, #224)
         view.barStyle = PersistedConfig.barStyle               // apply the saved bar style from launch (#224)
+        // Smooth colour transitions (ADR-0070): both surfaces share one animator, and a frame simply
+        // re-renders from the retained poll — the same path a settings change or an age tick takes.
+        view.colorAnimator = colorAnimator
+        popupVC.colorAnimator = colorAnimator
+        colorAnimator.onFrame = { [weak self] in self?.reRenderForCurrentTime() }
         self.statusView = view
         self.statusItem = item
 
@@ -313,7 +330,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // so it must be re-snapshotted on a theme flip — the KVO below does that.
         refreshStatusImage()
         appearanceObservation = item.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.refreshStatusImage() }
+            MainActor.assumeIsolated {
+                // A theme flip re-resolves every semantic colour, so the endpoints of any in-flight
+                // transition now describe *different* appearances — blending them would render a
+                // colour belonging to neither. Snap first, then re-snapshot (ADR-0070).
+                self?.colorAnimator.finishAll()
+                self?.refreshStatusImage()
+            }
         }
 
         popupVC.loadView()   // realise the view so it can be sized before the menu measures it
@@ -600,7 +623,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openDevTools() {
         if devToolsWC == nil {
             devToolsWC = DevToolsWindowController()
-            ColorStore.shared.onChange = { [weak self] in self?.reRenderForCurrentTime() }
+            ColorStore.shared.onChange = { [weak self] in
+                // The tuner exists to show the exact colour being dialled in — fading toward it would
+                // lag every slider drag by 450 ms and misrepresent the value (ADR-0070).
+                self?.colorAnimator.finishAll()
+                self?.reRenderForCurrentTime()
+            }
             // Live stub selector (#187): the dropdown reports its pick back here to swap the data source
             // without a restart. Mirrors the ColorStore.onChange bridge — the window holds no model ref.
             devToolsWC?.onStubChange = { [weak self] in self?.switchScenario($0) }
@@ -632,6 +660,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .sleep:
             resetTimer?.invalidate()
             resetTimer = nil
+            // Nothing is on screen to watch a fade, and a timer across sleep is unreliable anyway —
+            // settle every transition at its destination (ADR-0070).
+            colorAnimator.finishAll()
         case .wake:
             rescheduleResetTimer(from: lastOutput?.snapshot, now: currentDate())
         default:
@@ -804,6 +835,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         archiveTask?.cancel()
         ageTimer?.invalidate()
         resetTimer?.invalidate()
+        colorCycleTimer?.invalidate()
+        colorAnimator.finishAll()      // stop the transition frame timer (ADR-0070)
         sleepWake?.stop()
         screenLock?.stop()
         network.stop()
@@ -836,6 +869,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // data source without a restart, so the observers + age timer above stay put and only the
         // engine is rebuilt.
         buildAndRunEngine(for: currentScenario)
+        updateColorCycle(for: currentScenario)   // arm the colour walk when launched under that stub
 
         // Re-render on a fixed cadence so time-derived text ages without waiting for the next poll:
         // the popup's "Last update" line ("just now" → "1m ago") and the menu bar's stale ⚠️
@@ -910,6 +944,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // hand indicator against live sessions.
         scenarioWasExplicit = true
         updateQuitDevTitle()             // keep the ⌥-Option Quit tag in sync with the live stub
+        // The old and new data sources are unrelated worlds — carrying colours across would fade
+        // between two of them. Drop the state outright, then (re)arm the colour walk (ADR-0070).
+        colorAnimator.reset()
+        updateColorCycle(for: scenario)
         buildAndRunEngine(for: scenario)
         lastStatusSuccess = nil          // make the status poll due on the next (immediate) tick
         // The awaiting-input watcher is gated on `.realNetwork`, so switching *into* a stub tears it
@@ -1501,6 +1539,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Colour-cycle stub (ADR-0070)
+
+    /// Which step of the colour walk is showing. Advanced by ``colorCycleTimer``.
+    private var colorCycleStep = 0
+
+    /// Arm or tear down the `color-cycle` colour walk for `scenario`.
+    ///
+    /// The walk cannot be driven by polling — the cadence floor is 60 s (`PollingEngine.minInterval`),
+    /// far too slow to inspect a 450 ms fade — so it runs on its own short timer and overlays the
+    /// retained snapshot, the same technique `fireOptimisticReset` uses. No usage API is touched.
+    private func updateColorCycle(for scenario: StubScenario) {
+        colorCycleTimer?.invalidate()
+        colorCycleTimer = nil
+        colorCycleStep = 0
+        // Pin the bar geometry so the colour is the only thing that moves (nil clears it again when
+        // switching away from the stub).
+        let frozen = scenario == .colorCycle ? ColorCycleStub.stripFraction : nil
+        statusView?.frozenStripFraction = frozen
+        popupVC.frozenStripFraction = frozen
+        guard scenario == .colorCycle else { return }
+
+        AppLogger.lifecycle.notice("dev: colour-cycle stub armed")
+        // `.common` run-loop mode so the walk keeps stepping while the dropdown is open — the popup
+        // is an NSMenu-hosted view and its modal tracking loop would starve a `.default` timer.
+        let timer = Timer(timeInterval: ColorCycleStub.stepInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.advanceColorCycle() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        colorCycleTimer = timer
+        advanceColorCycle()   // show the first zone immediately rather than after a full step
+    }
+
+    /// Move the walk on one zone and repaint. Rewrites only the 5-hour window's utilisation (and the
+    /// worst-service status), leaving the 7-day bar untouched as a stationary reference.
+    private func advanceColorCycle() {
+        guard let output = lastOutput, let snapshot = output.snapshot else { return }
+        let now = currentDate()
+        let zone = ColorCycleStub.zones[colorCycleStep % ColorCycleStub.zones.count]
+        let status = ColorCycleStub.statuses[colorCycleStep % ColorCycleStub.statuses.count]
+        colorCycleStep += 1
+
+        // Where the time marker would sit, so the target utilisation can be placed relative to it.
+        let window = LimitWindow.fiveHour
+        let remaining = ResetClock.parse(snapshot.fiveHour.resetsAt)
+            .map { $0.timeIntervalSince(now) } ?? Double(window.durationSeconds) / 2
+        let elapsed = Double(window.durationSeconds) - remaining
+        let timeFraction = min(1, max(0, elapsed / Double(window.durationSeconds)))
+
+        let utilization = ColorCycleStub.utilization(
+            for: zone, timeFraction: timeFraction,
+            windowDurationSeconds: window.durationSeconds,
+            behindMultiplier: PersistedConfig.farBehindInterval.multiplier ?? 0)
+
+        let overlay = PollOutput(
+            snapshot: UsageSnapshot(
+                fiveHour: UsageWindow(utilization: utilization, resetsAt: snapshot.fiveHour.resetsAt),
+                sevenDay: snapshot.sevenDay,
+                sevenDayOpus: snapshot.sevenDayOpus,
+                sevenDaySonnet: snapshot.sevenDaySonnet,
+                limits: snapshot.limits,
+                sessionIdle: snapshot.sessionIdle,
+                spend: snapshot.spend),
+            health: output.health, interval: output.interval, diagnostics: output.diagnostics)
+        lastOutput = overlay
+        colorCycleStatus = status
+        render(overlay, at: now)
+    }
+
+    /// The service status the colour walk is currently forcing, or `nil` when the stub is inactive.
+    /// Read by ``render(_:at:)`` in place of the real worst-problem pick.
+    private var colorCycleStatus: ServiceStatus?
+
     /// Re-render the retained last poll against the current time — grows the "Last update" age and
     /// advances the menu bar's stale thresholds. No-op before the first poll. **Never fetches.**
     private func reRenderForCurrentTime() {
@@ -1553,6 +1663,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Render a poll result into the menu-bar image and popup model at instant `now`.
     private func render(_ output: PollOutput, at now: Date) {
+        // Open an animation frame: pin the instant every colour is sampled at (so bars drawn later in
+        // this pass don't sit further along the curve than their neighbours) and expire elements that
+        // have gone off screen. ADR-0070.
+        colorAnimator.beginFrame()
         // Roll any window whose reset boundary has already passed forward to its next window *before*
         // formatting, so a countdown never computes `remaining <= 0` (which used to surface the removed
         // `.resetNow` state). The exact `resetTimer` normally fires the roll-forward at the boundary
@@ -1567,7 +1681,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusView?.layout = MenuBarLayout.make(
             from: snapshot, health: output.health, now: now,
             // #31: honour the "Show service status dot" toggle — nil hides the dot and reclaims its width.
-            serviceProblem: PersistedConfig.showServiceStatusDot ? lastStatusHealth?.worstProblem : nil,
+            // The colour-cycle stub forces the dot through its own palette (ADR-0070); otherwise the
+            // real worst problem, subject to the "Show service status dot" toggle (#31).
+            serviceProblem: PersistedConfig.showServiceStatusDot
+                ? (colorCycleStatus ?? lastStatusHealth?.worstProblem) : nil,
             resetMode: PersistedConfig.resetCountdownModeMenuBar,   // #103: which reset countdown to show
             // #94: honour the "Hide 7-day bar when calm" toggle — drops a calm 7-day bar, centring 5h.
             hideCalmSevenDay: PersistedConfig.hideCalmSevenDayBar,

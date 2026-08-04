@@ -18,6 +18,11 @@ import TokenPaceKit
 /// the item repaints **only when the data changes** — never on a timer (architecture.md: energy
 /// efficiency). The polling layer (#13) will set ``layout`` after each successful poll; for now
 /// `AppDelegate` sets it once from a mock snapshot.
+///
+/// **One scoped exception (ADR-0070):** while a pacing colour is *changing*, ``ColorAnimator`` drives
+/// ~450 ms of frames so the new colour eases in instead of snapping (a threshold crossing used to
+/// read as a blink). The timer exists only for the duration of a transition and stops itself the
+/// moment nothing is animating — an idle widget still runs no loop at all.
 final class StatusItemView: NSView {
 
     // MARK: Layout input
@@ -64,6 +69,32 @@ final class StatusItemView: NSView {
             guard barStyle != oldValue else { return }
             needsDisplay = true
         }
+    }
+
+    /// Drives the smooth colour transitions (ADR-0070). Every colour that can *change* — the pacing
+    /// gap/ribbon, the time marker, the idle track, the service dot — is passed through
+    /// ``ColorAnimator/resolve(_:target:)`` at the draw site, which returns the eased in-between tone
+    /// while a transition is running and the plain target colour otherwise.
+    ///
+    /// Owned by `AppDelegate` (shared with the popup), never by this view: the animation must outlive
+    /// individual draws, and the popup's bar views are rebuilt from scratch on every update. `nil`
+    /// disables animation entirely — every colour renders at its target, which is exactly the old
+    /// behaviour (used by the dev-tools preview, which has no app delegate behind it).
+    weak var colorAnimator: ColorAnimator?
+
+    /// The pacing-bar geometry override used by the `color-cycle` verification stub: when set, the
+    /// **5-hour** bar's coloured strip is pinned to this fraction of the track (anchored at the left
+    /// edge) and its time marker parks at that same point, so the *only* thing that moves on screen
+    /// is the colour. Without it a colour walk would drag the strip's length and the marker along
+    /// with it, and the eye could not tell a colour transition from a geometry jump.
+    ///
+    /// The 7-day bar deliberately keeps its real geometry, so there is a motionless reference right
+    /// beside the animated one. `nil` on every real data path — see `StubScenario.colorCycle`.
+    var frozenStripFraction: Double?
+
+    /// The strip override for `bar`, applied only to the row the colour walk drives.
+    private func frozenStrip(for bar: BarView) -> Double? {
+        bar.window == .fiveHour ? frozenStripFraction : nil
     }
 
     /// Saturation/vividness of the **colour accents** (pacing gap, service dot, idle blue) — a multiplier
@@ -270,6 +301,16 @@ final class StatusItemView: NSView {
     /// neutral ones (maintenance blue, unknown grey) keep their colour, matching how the pacing gap
     /// keeps orange/red under calm.
     private func statusDotColor(_ status: ServiceStatus) -> NSColor {
+        let target = statusDotTarget(status)
+        guard let colorAnimator else { return target }
+        // One key for the widget's single dot — it always shows the *worst* problem, so a change of
+        // severity is a colour change on the same element, exactly what should fade (ADR-0070).
+        return colorAnimator.resolve(
+            .serviceDot(surface: .menuBar, component: "worst"), target: target)
+    }
+
+    /// The dot's colour for a status, before the transition layer.
+    private func statusDotTarget(_ status: ServiceStatus) -> NSColor {
         switch status {
         case .degraded:         return calmColorMode.mutesCalm ? bright(Palette.calmWhite) : accent(Palette.statusYellow)
         case .partialOutage:    return accent(Palette.statusOrange)
@@ -683,9 +724,12 @@ final class StatusItemView: NSView {
             // Idle bar fill (#100/#158): blocked → base track grey; ready+calm → quiet neutral;
             // ready+normal → the "ready to start" blue.
             let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
-            let fill: NSColor = bar.blocked
+            let idleTarget: NSColor = bar.blocked
                 ? Palette.unusedGrey
                 : (calmColorMode.mutesCalm ? Palette.idleCalmGrey : accent(Palette.idleBlue))
+            // Animated like any other bar colour, so idle→active (blue→green) and the blocked grey
+            // swap fade rather than snap.
+            let fill = animated(idleTarget, window: bar.window, part: .fill)
             fill.setFill()
             path.fill()
             return
@@ -709,9 +753,13 @@ final class StatusItemView: NSView {
         // time-indicator marker. The ribbon's LENGTH equals the pacing gap's width (`gapEnd - gapStart`)
         // but is always anchored at the left edge, so the same amount of colour appears as in
         // Pace & Time, just without a time position. Mirror of `PopupBarView.draw`'s simple branch.
+        // The `color-cycle` stub pins the strip's length so only the colour moves — see
+        // `frozenStripFraction`. The *style* still decides whether a marker follows, so Pace & Time
+        // keeps its full anatomy under the stub instead of collapsing into Simple.
         if !barStyle.menuBarShowsTimeMarker {
-            let ribbon = l.gapEnd - l.gapStart
-            fillZone(from: 0, to: ribbon, in: rect, width: w, color: calmedGapColor(l))
+            let ribbon = frozenStrip(for: bar) ?? (l.gapEnd - l.gapStart)
+            fillZone(from: 0, to: ribbon, in: rect, width: w,
+                     color: calmedGapColor(l, window: bar.window))
             NSGraphicsContext.restoreGraphicsState()
             return
         }
@@ -720,8 +768,13 @@ final class StatusItemView: NSView {
         // (`PopupBarView.aheadColor`: amber → orange → red by how far ahead), so the menu-bar bar and
         // the popup row agree — e.g. a yellow 7-day here reads yellow in the dropdown too. On pace →
         // `.systemGreen`.
-        let gapColor = calmedGapColor(l)
-        fillZone(from: l.gapStart, to: l.gapEnd, in: rect, width: w, color: gapColor)
+        let gapColor = calmedGapColor(l, window: bar.window)
+        // Under the stub the gap is pinned to `0…frozen` (and the marker parks at its end), so the
+        // Pace & Time anatomy stays intact while nothing but the colour moves.
+        let frozen = frozenStrip(for: bar)
+        let gapFrom = frozen != nil ? 0 : l.gapStart
+        let gapTo = frozen ?? l.gapEnd
+        fillZone(from: gapFrom, to: gapTo, in: rect, width: w, color: gapColor)
 
         NSGraphicsContext.restoreGraphicsState()
 
@@ -729,7 +782,7 @@ final class StatusItemView: NSView {
         // A slim, lightly-rounded vertical bar rather than a dot — reads as a crisp position tick.
         // Filled with this state's pacing-gap colour, ringed with `separatorColor` so it separates
         // cleanly over the coloured zone on both light and dark bars.
-        let cx = PopupBarView.scaleX(CGFloat(l.timeFraction), in: rect)
+        let cx = PopupBarView.scaleX(CGFloat(frozen ?? l.timeFraction), in: rect)
         let cy = rect.midY
         let mw = Metrics.tickWidth
         let mh = Metrics.tickHeight
@@ -750,7 +803,7 @@ final class StatusItemView: NSView {
         NSGraphicsContext.restoreGraphicsState()
         // The marker takes the EXACT colour of this state's pacing gap (`calmedGapColor`) — one tone
         // per pacing status, so the "you are here" tick reads as the same colour as the zone it marks.
-        calmedGapColor(l).setFill()
+        calmedGapColor(l, window: bar.window, part: .marker).setFill()
         marker.fill()
         // Edge outline only where the marker overlaps the bar (`quaternaryLabelColor`): two short vertical
         // strokes down the marker's left and right edges, clipped to the bar's height — the parts of the
@@ -762,7 +815,18 @@ final class StatusItemView: NSView {
     /// or the graded ahead colour (`PopupBarView.aheadColor`). When `calmColorMode.mutesCalm` is on, the **calm**
     /// states (`BarLayout.isCalm`: on-pace green + mild-ahead yellow) mute to white; the strong warnings
     /// (orange/red) stay coloured.
-    private func calmedGapColor(_ l: BarLayout) -> NSColor {
+    ///
+    /// `window` identifies which bar this is, so the transition registry can keep the 5-hour and
+    /// 7-day fades apart; `part` separates the strip from the time marker (they share a colour but
+    /// are resolved at different points in the draw). The animator wraps the **final** tone — after
+    /// `bright()`/`accent()` and after the calm decision — so the "coloured → calm neutral" switch
+    /// fades too, and the ADR-0059 alpha/desaturation rules stay untouched.
+    private func calmedGapColor(_ l: BarLayout, window: LimitWindow, part: BarPart = .fill) -> NSColor {
+        animated(gapColorTarget(l), window: window, part: part)
+    }
+
+    /// The bar's pacing colour for the current state, **before** the transition layer.
+    private func gapColorTarget(_ l: BarLayout) -> NSColor {
         // Calm neutral is a bright tone (labelColor at the text opacity, via `bright`); the coloured
         // pacing gap is an accent (scaled by accentSaturation). Neither is the dimmed bar track.
         // When `mutesBlue` is off (the old "Work harder") the far-behind blue is exempt from muting so
@@ -776,6 +840,14 @@ final class StatusItemView: NSView {
         }
         // Calm side: the menu bar only carries base 5h/7d bars, so split green↔blue unconditionally.
         return accent(PopupBarView.behindColor(l))
+    }
+
+    /// Route a bar colour through the transition layer (ADR-0070), or return it unchanged when no
+    /// animator is attached (the dev-tools preview renders without one).
+    private func animated(_ target: NSColor, window: LimitWindow, part: BarPart) -> NSColor {
+        guard let colorAnimator else { return target }
+        return colorAnimator.resolve(
+            .bar(surface: .menuBar, row: window.id, part: part), target: target)
     }
 
     /// Fill the coloured strip spanning the fraction range `[from, to)` of a bar as a rounded capsule.

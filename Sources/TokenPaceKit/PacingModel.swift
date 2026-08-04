@@ -8,9 +8,20 @@ import Foundation
 /// (`fiveHour` = 18 000 s, `sevenDay` = 604 800 s). The per-model sub-windows
 /// `seven_day_opus` and `seven_day_sonnet` share the seven-day duration, so they
 /// reuse `.sevenDay`.
-public enum LimitWindow: Sendable, Equatable {
+public enum LimitWindow: Sendable, Equatable, Hashable {
     case fiveHour
     case sevenDay
+
+    /// A stable identifier for this window, used to key per-bar UI state that must survive a view
+    /// being torn down and rebuilt (the colour-transition registry — see ``TweenKey``). Deliberately
+    /// spelled out rather than derived from the case name, so a future rename cannot silently change
+    /// the key and orphan an in-flight animation.
+    public var id: String {
+        switch self {
+        case .fiveHour: return "5h"
+        case .sevenDay: return "7d"
+        }
+    }
 
     /// Window length in whole seconds — the denominator for elapsed-time pacing.
     /// Matches the `window_seconds` argument of `calc_time_pct` in `statusline.sh`.
