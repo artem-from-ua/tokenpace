@@ -277,6 +277,7 @@ unlimited-ліміту — `«… €10.77 so far.»`. **Потребує реа
 - **Кнопка копіювання конфіга** (іконка `doc.on.doc` **ліворуч** від сегментеда, #257): клік кладе в
   буфер pretty-JSON з 11 Appearance-ключами + `preset` + `appVersion`; гліф на ~1.2 с стає
   `checkmark`, тоді вертається (тултип при наведенні: «Copy Appearance settings to clipboard»).
+  Той самий фідбек має давати копі-кнопка у вікні Troubleshoot — спільні константи в `CopyFeedback`.
   Вставити в редактор і перевірити **порядок ключів — він має збігатися з порядком контролів на
   сторінці згори вниз** (`barStyle` → `farBehindInterval` → `calmColorMode` → … → `showTicks`), а не
   бути алфавітним; це і є суть фічі, тож звіряти з панеллю поруч. Перемкнути пресет → `"preset"`
@@ -467,6 +468,13 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=3 swift run   # відкр�
 ```sh
 TOKENPACE_OPEN_TROUBLESHOOT=1 TOKENPACE_STUB=screenshot swift run
 ```
+
+**Кнопка копіювання (`doc.on.doc`, справа в заголовку «Usage API — last response»)** — з #257 дає
+такий самий фідбек, як кнопка копіювання конфіга в Settings → Appearance: гліф на ~1.2 с стає
+`checkmark`, тоді вертається (спільні константи — `CopyFeedback`). Перевіряти **обидві** кнопки в
+одному прогоні: тривалість і гліфи мають виглядати ідентично. Окремо глянути, що при **утриманні**
+кнопки натиснутою картинка не «блимає» — тип кнопки змінено на `.momentaryPushIn` саме тому, що
+`.momentaryChange` повертав гліф на mouse-up і затирав checkmark.
 
 Джерело істини цього порядку/індексів — `enum SettingsSection: Int` (ADR-0042); змінюючи секції, онови
 його і цей рядок разом. Detail-панелі тепер SwiftUI `Form.formStyle(.grouped)` (ADR-0042), тож паритет

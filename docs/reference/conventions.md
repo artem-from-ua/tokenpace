@@ -84,6 +84,18 @@ git config core.hooksPath .githooks
   пунктам меню (через `NSMenuItem.attributedTitle`), щоб розбіжність була структурно неможливою.
   Див. ADR-0021.
 
+### Кнопки копіювання в буфер — спільна поведінка (`CopyFeedback`)
+
+Запис у буфер обміну **невидимий**: на екрані нічого не змінюється, системного підтвердження немає.
+Тому кожна копі-кнопка на ~1.2 с підміняє свій гліф на `checkmark` і повертає назад. Константи —
+гліфи, тривалість, accessibility-лейбли — лежать у `CopyFeedback` (Kit), бо кнопки зроблені різними
+тулкітами (`AppearancePane` — SwiftUI, `TroubleshootWindowController` — AppKit), і константа,
+продубльована через цей шов, неминуче розійдеться.
+
+**Додаєш нову кнопку копіювання — бери гліфи й тривалість звідти**, не з власного числа. Для AppKit
+не забудь `setButtonType(.momentaryPushIn)`: `.momentaryChange` повертає картинку на mouse-up і
+затирає checkmark.
+
 ### Експорт конфіга: порядок ключів = порядок контролів у панелі
 
 Кнопка «Copy Appearance settings to clipboard» (Settings → Appearance, #257) віддає JSON, у якому

@@ -9,15 +9,14 @@ struct AppearancePane: View {
     @Bindable var model: SettingsModel
 
     /// Ephemeral "copied!" feedback for the config-copy button (#257): the glyph flips to a checkmark
-    /// for `copiedFeedbackDuration` after a click. Local `@State` rather than model state — it is
-    /// throwaway UI feedback, not configuration. The clipboard is invisible, so without it there is no
-    /// sign the click did anything.
+    /// per ``CopyFeedback``, the shared spec the Troubleshoot window's copy button also follows, so
+    /// both copy affordances behave identically. Local `@State` rather than model state: throwaway UI
+    /// feedback, not configuration. The clipboard is invisible, so without it there is no sign the
+    /// click did anything.
     @State private var didCopyConfig = false
     /// The in-flight reset back to the copy glyph, cancelled and restarted on each click so rapid
     /// clicks don't let an earlier timer clear the checkmark early.
     @State private var copyFeedbackTask: Task<Void, Never>?
-
-    private static let copiedFeedbackDuration = Duration.milliseconds(1200)
 
     var body: some View {
         Form {
@@ -218,15 +217,20 @@ struct AppearancePane: View {
         Button {
             copyConfigToClipboard()
         } label: {
-            Image(systemName: didCopyConfig ? "checkmark" : "doc.on.doc")
+            Image(systemName: didCopyConfig ? CopyFeedback.confirmedSymbol : CopyFeedback.restingSymbol)
                 // A fixed width keeps the segmented control from shifting sideways when the glyph
                 // swaps to the (narrower) checkmark and back.
                 .frame(width: 16)
         }
         .buttonStyle(.borderless)
-        .help("Copy Appearance settings to clipboard")
-        .accessibilityLabel("Copy Appearance settings to clipboard")
+        .help("Copy \(Self.copyTarget) to the clipboard")
+        .accessibilityLabel(didCopyConfig
+            ? CopyFeedback.confirmedLabel
+            : CopyFeedback.restingLabel(Self.copyTarget))
     }
+
+    /// What this button copies — used in the tooltip and the accessibility label.
+    private static let copyTarget = "Appearance settings"
 
     /// Write the model's JSON dump to the general pasteboard and show the checkmark. The pasteboard
     /// write lives here rather than in `SettingsModel` so the model stays free of AppKit.
@@ -238,7 +242,7 @@ struct AppearancePane: View {
         didCopyConfig = true
         copyFeedbackTask?.cancel()
         copyFeedbackTask = Task {
-            try? await Task.sleep(for: Self.copiedFeedbackDuration)
+            try? await Task.sleep(for: .seconds(CopyFeedback.duration))
             guard !Task.isCancelled else { return }
             didCopyConfig = false
         }
