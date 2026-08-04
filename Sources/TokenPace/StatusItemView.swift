@@ -485,25 +485,32 @@ final class StatusItemView: NSView {
         }
     }
 
-    /// The colour of the money-credits icon, from its ``CreditsMarker/bar`` via the **same** mapping
-    /// the pacing bars use — so a yellow credits icon and a yellow 7-day bar read as the same amber:
-    /// - `bar == nil` (unlimited monthly limit) → the neutral menu-bar foreground: the icon shows the
-    ///   credits are active but carries no pacing tint.
-    /// - on pace / behind (`usage <= time`) → the on-pace green (`dotGreen`, the brighter knob green,
-    ///   so a single glyph reads as clearly green rather than the darker gap fill).
-    /// - ahead of pace → the graded ahead colour (`PopupBarView.aheadColor`: amber → orange → red at
-    ///   the cap), identical to the bars' gap/knob.
+    /// The colour of the money-credits icon. Unlike the pacing bars, this glyph uses a deliberately
+    /// **three-step** scale — white → orange → red — and never green or yellow.
     ///
-    /// Calm mode (#105): the icon follows the bars — it mutes to white in exactly the **calm** states
-    /// (on pace / behind, mild-ahead yellow, and the neutral unlimited icon), and keeps its colour for
-    /// the strong warnings (orange/red). `CreditsMarker.isCalm` is the one predicate that decides this,
-    /// so the icon and the bars always agree.
+    /// The bars grade green/yellow/orange/red because they show *how you are pacing*. The credits glyph
+    /// answers a different question — *is real money moving, and how close is it to the cap* — where a
+    /// green "all good" tint would be misleading (money is being spent either way) and yellow adds a rung
+    /// that carries no action. So:
+    /// - `bar == nil` (unlimited monthly limit) → the neutral menu-bar foreground: credits are active but
+    ///   there is no cap to pace against.
+    /// - on pace / behind, or only mildly ahead → **white**: spending is under control.
+    /// - strongly ahead of pace → **orange**.
+    /// - at the cap → **red** (`aheadColor`'s `usage >= 1` rung).
+    ///
+    /// Calm mode (#105) still mutes the calm states to the calm white, which this scale already agrees
+    /// with — so the two paths cannot disagree.
     private func creditsIconColor(_ credits: CreditsMarker) -> NSColor {
         if calmColorMode.mutesCalm && credits.isCalm { return bright(Palette.calmWhite) }
         guard let l = credits.bar else { return bright(Palette.foreground) }   // unlimited → neutral
-        return accent(l.timeFraction < l.usageFraction
-            ? PopupBarView.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
-            : Palette.dotGreen)
+        // At the cap → red. Otherwise only a *strong* ahead reads as orange; on-pace/behind and the
+        // mild-ahead rung (which the bars paint yellow) both render white. The thresholds mirror
+        // `PopupBarView.aheadColor` so the glyph and the bars never disagree about which rung we're on.
+        if l.usageFraction >= 1 { return accent(ColorStore.shared.color(.red)) }
+        guard l.timeFraction < l.usageFraction else { return bright(Palette.calmWhite) }
+        let stronglyAhead = l.remainingSeconds <= PacingModel.pacingOrangeOverrideSeconds
+            || (l.usageFraction - l.timeFraction) >= PacingModel.aheadThreshold(timeFraction: l.timeFraction)
+        return stronglyAhead ? accent(ColorStore.shared.color(.orange)) : bright(Palette.calmWhite)
     }
 
     /// Rendered width of the money-credits glyph at ``Metrics/creditsIconSize`` — measured the same way

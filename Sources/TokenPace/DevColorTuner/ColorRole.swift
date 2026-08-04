@@ -141,8 +141,10 @@ enum ColorRole: String, CaseIterable {
         case .tick:
             return "Tick-ruler marks below the popup bar. Default tertiaryLabelColor."
         case .inUsePill:
-            return "Popup \"in use\" pill fill beside the header when credits are actively spending (#146). "
-                 + "Default controlAccentColor."
+            return "Popup \"in use\" plaque beside the Extra usage heading while credits are actively "
+                 + "spending (#146, #254). The currency glyph is knocked out of this fill, so the popup "
+                 + "background shows through the symbol. Default labelColor — deliberately not a status "
+                 + "colour: it states a mode, not a severity (ADR-0068)."
         case .foreground:
             return "Menu-bar idle glyph, reset label, and the ⚠️ palette glyph. Follows labelColor "
                  + "(re-alpha'd by bright())."
@@ -208,7 +210,7 @@ enum ColorRole: String, CaseIterable {
         case .barTrack:      return NSColor.labelColor.withAlphaComponent(0.22)   // the moon: a ~22% labelColor silhouette; the bar shows through 78%, so it dims AND breathes the wallpaper/menu tint
         case .indicatorRing: return .quaternaryLabelColor
         case .tick:          return .tertiaryLabelColor
-        case .inUsePill:     return .controlAccentColor
+        case .inUsePill:     return .labelColor           // #254: a mode marker, not a status colour
         case .foreground:    return .labelColor            // reset text / ⚠️ — re-alpha'd by bright()
         case .dimmedLabel:   return PopupViewController.defaultDimmedLabel
         case .label:         return .labelColor
