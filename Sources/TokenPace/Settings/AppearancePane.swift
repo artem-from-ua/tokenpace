@@ -8,6 +8,16 @@ import TokenPaceKit
 struct AppearancePane: View {
     @Bindable var model: SettingsModel
 
+    /// Ephemeral "copied!" feedback for the config-copy button (#257): the glyph flips to a checkmark
+    /// per ``CopyFeedback``, the shared spec the Troubleshoot window's copy button also follows, so
+    /// both copy affordances behave identically. Local `@State` rather than model state: throwaway UI
+    /// feedback, not configuration. The clipboard is invisible, so without it there is no sign the
+    /// click did anything.
+    @State private var didCopyConfig = false
+    /// The in-flight reset back to the copy glyph, cancelled and restarted on each click so rapid
+    /// clicks don't let an earlier timer clear the checkmark early.
+    @State private var copyFeedbackTask: Task<Void, Never>?
+
     var body: some View {
         Form {
             // First section: one-click Appearance presets (#215, #224) — a "Change UI preset" segmented
@@ -24,6 +34,7 @@ struct AppearancePane: View {
                     HStack {
                         Text("Change UI preset")
                         Spacer()
+                        copyConfigButton
                         SegmentedControl(
                             segments: AppearancePreset.allCases.map {
                                 .init(value: AppearancePreset?.some($0), title: $0.displayName)
@@ -114,18 +125,14 @@ struct AppearancePane: View {
 
                 // Awaiting-input in the menu bar (#233). The popup always shows the indicator while the
                 // feature is on; this adds the menu-bar copy (a leading hand icon). Meaningful only
-                // while the master toggle in General is on, so it's disabled — with a ⚠️ hint — otherwise.
+                // while the master toggle in Extra features is on, so it's disabled — with a ⚠️ hint —
+                // otherwise. A data stub is a third state: the watcher never runs, so the hint says so.
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Show awaiting-input icon in the menu bar", isOn: Binding(
                         get: { model.awaitingInputInMenuBar },
                         set: { model.setAwaitingInputInMenuBar($0) }))
                     .disabled(!model.awaitingInputEnabled)
-                    SettingsHint(
-                        text: model.awaitingInputEnabled
-                            ? "Adds a hand icon to the menu bar (leading) when sessions are waiting. "
-                              + "The count is shown only in the dropdown."
-                            : "Enable *Show sessions awaiting input* in General first.",
-                        warning: !model.awaitingInputEnabled)
+                    SettingsHint(text: awaitingInputHint, warning: awaitingInputHintIsWarning)
                 }
 
                 // #194, #227 — the single "blocked" control. When fully blocked a red pause icon is
@@ -189,5 +196,67 @@ struct AppearancePane: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    // MARK: Copy config (#257)
+
+    /// The copy-to-clipboard button sitting immediately **left of** the preset segmented control:
+    /// it puts the eleven Appearance values (plus the active preset and app version) on the clipboard
+    /// as pretty-printed JSON, so "what does your setup look like?" is one click instead of a
+    /// screenshot tour of the pane.
+    ///
+    /// `doc.on.doc` is the same glyph as the Troubleshoot window's copy button, keeping one visual
+    /// vocabulary for "copy" across the app — a share icon would promise a share sheet that isn't
+    /// there. The hint rides as a native tooltip rather than a `SettingsHint` row: the preset row
+    /// already carries two hint lines explaining the presets, and a third would crowd them.
+    private var copyConfigButton: some View {
+        Button {
+            copyConfigToClipboard()
+        } label: {
+            Image(systemName: didCopyConfig ? CopyFeedback.confirmedSymbol : CopyFeedback.restingSymbol)
+                // A fixed width keeps the segmented control from shifting sideways when the glyph
+                // swaps to the (narrower) checkmark and back.
+                .frame(width: 16)
+        }
+        .buttonStyle(.borderless)
+        .help("Copy \(Self.copyTarget) to the clipboard")
+        .accessibilityLabel(didCopyConfig
+            ? CopyFeedback.confirmedLabel
+            : CopyFeedback.restingLabel(Self.copyTarget))
+    }
+
+    /// What this button copies — used in the tooltip and the accessibility label.
+    private static let copyTarget = "Appearance settings"
+
+    /// Write the model's JSON dump to the general pasteboard and show the checkmark. The pasteboard
+    /// write lives here rather than in `SettingsModel` so the model stays free of AppKit.
+    private func copyConfigToClipboard() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(model.appearanceConfigJSON(), forType: .string)
+        AppLogger.ui.notice("appearance config copied to clipboard")
+
+        didCopyConfig = true
+        copyFeedbackTask?.cancel()
+        copyFeedbackTask = Task {
+            try? await Task.sleep(for: .seconds(CopyFeedback.duration))
+            guard !Task.isCancelled else { return }
+            didCopyConfig = false
+        }
+    }
+
+    /// The hint under the awaiting-input menu-bar toggle, in priority order: the master toggle is off
+    /// (nothing to place anywhere) → a stub is driving the app (the watcher doesn't run at all) → the
+    /// plain description. The first two are ⚠️ states; see ``awaitingInputHintIsWarning``.
+    private var awaitingInputHint: String {
+        guard model.awaitingInputEnabled else {
+            return "Enable *Show sessions awaiting input* in Extra features first."
+        }
+        if model.stubScenarioActive { return ExtraFeaturesPane.stubbedHint }
+        return "Adds a hand icon to the menu bar (leading) when sessions are waiting. "
+            + "The count is shown only in the dropdown."
+    }
+
+    private var awaitingInputHintIsWarning: Bool {
+        !model.awaitingInputEnabled || model.stubScenarioActive
     }
 }

@@ -59,6 +59,30 @@ struct SettingsHint: View {
     }
 }
 
+/// A section header — the plain title, plus an optional hint line directly beneath it. Because it
+/// lives in the `header:` slot it renders **outside** the grouped card, so a caveat that covers the
+/// whole section reads as part of the heading rather than as one more row among the controls.
+///
+/// `hint` is `nil` for the ordinary case, which then renders exactly like a plain `Section("Title")`.
+struct SectionHeaderWithHint: View {
+    let title: String
+    /// The caveat shown under the title. Always a ⚠️ line — a neutral note belongs on the control it
+    /// describes, not in the heading.
+    var hint: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+            if let hint {
+                // Cancel the header's inherited uppercase/tracking styling so the hint matches the
+                // in-card hints; `.textCase(nil)` has to sit on the text itself, not the VStack.
+                SettingsHint(text: hint, warning: true)
+                    .textCase(nil)
+            }
+        }
+    }
+}
+
 /// Shows the icon only when present, so a plain hint has no leading gap.
 private struct HintLabelStyle: LabelStyle {
     let showIcon: Bool

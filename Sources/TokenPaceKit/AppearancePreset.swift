@@ -128,7 +128,7 @@ public struct AppearancePresetValues: Sendable, Equatable {
     public let showServiceStatusDot: Bool
     /// Whether the awaiting-input `hand.raised` indicator is shown in the menu bar (#233). The popup
     /// always shows it while the feature is on; this only governs the menu-bar copy. Meaningful only
-    /// when the master toggle (`awaitingInputEnabled`, in General) is on.
+    /// when the master toggle (`awaitingInputEnabled`, in Extra features) is on.
     public let awaitingInputInMenuBar: Bool
     public let showModelSpecificLimits: Bool
     public let resetCountdownModeMenuBar: ResetCountdownMode

@@ -52,6 +52,10 @@ final class TroubleshootWindowController: NSWindowController {
     // Rows of the "Auth token" section.
     private var tokenStatusLabel: NSTextField!
     private var tokenExpiryLabel: NSTextField!
+    // The "copy JSON" button, held so its glyph can flip to a checkmark after a copy (#257), plus the
+    // pending revert back to the copy glyph — cancelled and re-armed on each click.
+    private weak var copyButton: NSButton?
+    private var copyFeedbackWorkItem: DispatchWorkItem?
 
     convenience init() {
         let window = NSWindow(
@@ -133,13 +137,18 @@ final class TroubleshootWindowController: NSWindowController {
         // same text ⌘C copies from a selection — so a payload can be lifted into a bug report with
         // one click. The row spans the section's full width so the button sits at the right edge.
         let copyButton = NSButton(
-            image: NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy JSON")!,
+            image: NSImage(
+                systemSymbolName: CopyFeedback.restingSymbol,
+                accessibilityDescription: CopyFeedback.restingLabel(Self.copyTarget))!,
             target: self, action: #selector(copyBodyClicked))
         copyButton.isBordered = false
         copyButton.bezelStyle = .inline
-        copyButton.setButtonType(.momentaryChange)
-        copyButton.toolTip = "Copy the response body to the clipboard"
+        // `.momentaryChange` would swap the image back on mouse-up, fighting the checkmark that
+        // `showCopiedFeedback()` sets — `.momentaryPushIn` leaves the image under our control.
+        copyButton.setButtonType(.momentaryPushIn)
+        copyButton.toolTip = "Copy \(Self.copyTarget) to the clipboard"
         copyButton.setContentHuggingPriority(.required, for: .horizontal)
+        self.copyButton = copyButton   // held so the glyph can flash a checkmark after a copy (#257)
         let headerSpacer = NSView()
         headerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let headerRow = NSStackView(views: [apiHeader, headerSpacer, copyButton])
@@ -242,12 +251,39 @@ final class TroubleshootWindowController: NSWindowController {
 
     /// Copy the response body verbatim to the clipboard for a bug report. Reads `bodyTextView.string`
     /// — exactly what is displayed (`TroubleshootLayout.bodyText`), the pretty-printed JSON or error
-    /// payload. First `NSPasteboard` use in the codebase.
+    /// payload.
+    ///
+    /// Flips the glyph to a checkmark per ``CopyFeedback``, the same feedback the Appearance pane's
+    /// copy button gives (#257) — the clipboard is invisible, so the swap is the only sign the click
+    /// landed, and both copy buttons in the app behave identically.
     @objc private func copyBodyClicked() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(bodyTextView.string, forType: .string)
+        showCopiedFeedback()
     }
+
+    /// Swap the copy button's glyph to a checkmark, then back. The pending revert is cancelled and
+    /// re-armed on each click (`copyFeedbackWorkItem`), so clicking again mid-flash restarts the full
+    /// duration rather than letting the earlier timer clear it early.
+    private func showCopiedFeedback() {
+        copyFeedbackWorkItem?.cancel()
+        copyButton?.image = NSImage(
+            systemSymbolName: CopyFeedback.confirmedSymbol,
+            accessibilityDescription: CopyFeedback.confirmedLabel)
+
+        let revert = DispatchWorkItem { [weak self] in
+            self?.copyButton?.image = NSImage(
+                systemSymbolName: CopyFeedback.restingSymbol,
+                accessibilityDescription: CopyFeedback.restingLabel(Self.copyTarget))
+        }
+        copyFeedbackWorkItem = revert
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + CopyFeedback.duration, execute: revert)
+    }
+
+    /// What this window's copy button copies — used in the accessibility label and tooltip.
+    private static let copyTarget = "the response body"
 
     // MARK: Live render
 

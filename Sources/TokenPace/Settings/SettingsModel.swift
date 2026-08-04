@@ -60,6 +60,16 @@ final class SettingsModel {
     /// The section the root view should show. Seeded once from `TOKENPACE_SETTINGS_SECTION` on `show()`.
     var selection: SettingsSection = .about
 
+    /// Whether a data stub (`TOKENPACE_STUB`, or the dev-tools selector) is driving the app rather than
+    /// the real network. Owned by the shell, which pushes the live value on every `openSettings` and
+    /// again whenever the dev-tools selector switches scenarios (#187) — it can't be derived from
+    /// `ProcessInfo` here, since the launch env goes stale the moment the selector is used.
+    ///
+    /// Drives the ⚠️ "Stubbed in this development build." hints: under a stub the service statuses are
+    /// canned rather than fetched, and the awaiting-input watcher doesn't run at all. The toggles stay
+    /// enabled — the stored preferences still apply to the next real run.
+    var stubScenarioActive = false
+
     /// Live sidebar icon sizing, keyed off the system "Sidebar icon size" (System Settings). Lives here
     /// so it persists with the window and keeps observing while open.
     let sidebarIcons = SidebarIconMetrics()
@@ -431,6 +441,22 @@ final class SettingsModel {
         syncFromConfig()
         AppLogger.lifecycle.notice("appearance preset applied: \(preset.rawValue, privacy: .public)")
         fireAppearanceCallbacks()
+    }
+
+    /// The live Appearance config as clipboard-ready pretty-printed JSON (#257) — the payload behind
+    /// the copy button in the pane's preset row. Read-only: unlike every setter above it writes nothing
+    /// to `PersistedConfig` and fires no callback, so it sits outside the "persist, then notify"
+    /// contract this class otherwise follows.
+    ///
+    /// Returns the string rather than writing the pasteboard itself, which keeps this class free of
+    /// AppKit (it imports only Foundation / Observation / the kit); the pane owns the `NSPasteboard`
+    /// write. Reads `liveAppearanceValues`, so the dump always matches what the controls show —
+    /// including the "Custom" state, which exports as `"preset": "custom"`.
+    func appearanceConfigJSON() -> String {
+        AppearanceConfigExport.json(
+            values: liveAppearanceValues,
+            preset: activePreset,
+            appVersion: TokenPaceKit.version)
     }
 
     /// Fire every Appearance-pane callback with the model's current (freshly-synced) value, so the

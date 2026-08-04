@@ -16,7 +16,7 @@ struct ExtraFeaturesPane: View {
     var body: some View {
         Form {
             // MARK: Monitored services (was its own sidebar pane)
-            Section("Monitored services") {
+            Section {
                 // Claude API is always monitored — a disabled on-switch + a muted trailing note. It is
                 // not part of the persisted MonitoredServices; it never participates in a commit.
                 LabeledContent {
@@ -52,6 +52,13 @@ struct ExtraFeaturesPane: View {
                         .fixedSize()
                     }
                 }
+            } header: {
+                // Under a data stub the status page is never fetched — the stub transport answers the
+                // status endpoint too, so the switches below pick between canned components (#187). The
+                // caveat covers the whole section, so it rides the *header*: directly under the title
+                // and outside the grouped card, rather than as a row among the switches.
+                SectionHeaderWithHint(title: "Monitored services",
+                                      hint: model.stubScenarioActive ? Self.stubbedHint : nil)
             }
 
             // MARK: Sessions backup (was "Session Logs")
@@ -81,13 +88,19 @@ struct ExtraFeaturesPane: View {
             }
 
             // MARK: Session status (moved from General)
-            Section("Session status") {
+            Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Show sessions awaiting input", isOn: Binding(
                         get: { model.awaitingInputEnabled },
                         set: { model.setAwaitingInputEnabled($0) }))
                     SettingsHint(text: "Shows how many Claude Code sessions are waiting for your reply. Configure where it appears in Appearance.")
                 }
+            } header: {
+                // The watcher is gated on the real network: a stub is a frozen frame, and reading the
+                // live ~/.claude trees would let real waiting sessions leak into it. `TOKENPACE_AWAITING=N`
+                // exercises the indicator with synthetic sessions instead. Same header treatment as above.
+                SectionHeaderWithHint(title: "Session status",
+                                      hint: model.stubScenarioActive ? Self.stubbedHint : nil)
             }
 
             // MARK: Usage history (usage journal collector, #242)
@@ -123,6 +136,10 @@ struct ExtraFeaturesPane: View {
         .animation(nil, value: model.journalEnabled)
         .animation(nil, value: model.webDesktopEnabled)
     }
+
+    /// The ⚠️ line shown under any section whose data is canned by a `TOKENPACE_STUB` scenario. Shared
+    /// with `AppearancePane` so the wording stays identical across panes.
+    static let stubbedHint = "Stubbed in this development build."
 
     private var archiveDestinationURL: URL? {
         guard let path = model.archiveDestination else { return nil }
