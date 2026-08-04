@@ -214,6 +214,16 @@ token itself never is.
 | — | `lifecycle` | `.notice` | `extra-usage: notify enabled set <bool>` | user toggled the "Switching to Extra Usage" notification switch |
 | — | `lifecycle` | `.notice` | `extra-usage: try (forced) notification` | user pressed the "Switching to Extra Usage" Settings "Try" button, forcing a `postExtraUsage` that bypasses edge-detection and quiet hours |
 
+## `Sources/TokenPace/Settings/AppearancePane.swift`
+
+The first — and so far only — user of the `ui` category. The Settings *toggle* lines above are
+`lifecycle` because they change persisted state; this one changes nothing, it only reports that a
+UI affordance ran, which is what `ui` is for.
+
+| Line | Category | Level | Message | When |
+|------|----------|-------|---------|------|
+| — | `ui` | `.notice` | `appearance config copied to clipboard` | user clicked the copy button in the "Change UI preset" row (#257); the JSON body itself is **not** logged — it is on the clipboard, and the log line only needs to establish that the click was handled |
+
 ## `Sources/TokenPace/BackToWorkNotifier.swift`
 
 Thin `UserNotifications` glue for the local notifications — "Back to work!" (#160, ADR-0039) and
@@ -349,11 +359,11 @@ One log line per interval change. The format is built by
 | `network` | 28 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `UpdateInstaller` (3), `PollingEngine` (2), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
 | `lifecycle` | 62 | `App` (29), `UpdateInstaller` (13), `SettingsWindowController` (10), `PollingShell` (7), `PollingEngine` (2), `ShellEnvironment` (1) |
 | `keychain` | 11 | `ClaudeCLIRefresher` (6), `TokenProvider` (4), `PollingEngine` (1) |
-| `ui` | 0 | — (category defined, unused) |
+| `ui` | 1 | `AppearancePane` (1) |
 | `archive` | 5 | `App` (3), `LogArchiver` (2) |
 | `journal` | 6 | `UsageJournal` (4), `App` (2) |
 
-**Total: 113 log statements** — `.error` ×37, `.notice` ×71, `.info` ×1, `.debug` ×3.
+**Total: 114 log statements** — `.error` ×37, `.notice` ×72, `.info` ×1, `.debug` ×3.
 
 The `journal: enabled set <bool>` toggle line (`SettingsModel`) is a `lifecycle` statement (like the
 other Settings-toggle lines), counted under `lifecycle`; the six `journal`-category statements are the

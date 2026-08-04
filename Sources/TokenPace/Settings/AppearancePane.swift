@@ -8,6 +8,17 @@ import TokenPaceKit
 struct AppearancePane: View {
     @Bindable var model: SettingsModel
 
+    /// Ephemeral "copied!" feedback for the config-copy button (#257): the glyph flips to a checkmark
+    /// for `copiedFeedbackDuration` after a click. Local `@State` rather than model state — it is
+    /// throwaway UI feedback, not configuration. The clipboard is invisible, so without it there is no
+    /// sign the click did anything.
+    @State private var didCopyConfig = false
+    /// The in-flight reset back to the copy glyph, cancelled and restarted on each click so rapid
+    /// clicks don't let an earlier timer clear the checkmark early.
+    @State private var copyFeedbackTask: Task<Void, Never>?
+
+    private static let copiedFeedbackDuration = Duration.milliseconds(1200)
+
     var body: some View {
         Form {
             // First section: one-click Appearance presets (#215, #224) — a "Change UI preset" segmented
@@ -24,6 +35,7 @@ struct AppearancePane: View {
                     HStack {
                         Text("Change UI preset")
                         Spacer()
+                        copyConfigButton
                         SegmentedControl(
                             segments: AppearancePreset.allCases.map {
                                 .init(value: AppearancePreset?.some($0), title: $0.displayName)
@@ -189,5 +201,46 @@ struct AppearancePane: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    // MARK: Copy config (#257)
+
+    /// The copy-to-clipboard button sitting immediately **left of** the preset segmented control:
+    /// it puts the eleven Appearance values (plus the active preset and app version) on the clipboard
+    /// as pretty-printed JSON, so "what does your setup look like?" is one click instead of a
+    /// screenshot tour of the pane.
+    ///
+    /// `doc.on.doc` is the same glyph as the Troubleshoot window's copy button, keeping one visual
+    /// vocabulary for "copy" across the app — a share icon would promise a share sheet that isn't
+    /// there. The hint rides as a native tooltip rather than a `SettingsHint` row: the preset row
+    /// already carries two hint lines explaining the presets, and a third would crowd them.
+    private var copyConfigButton: some View {
+        Button {
+            copyConfigToClipboard()
+        } label: {
+            Image(systemName: didCopyConfig ? "checkmark" : "doc.on.doc")
+                // A fixed width keeps the segmented control from shifting sideways when the glyph
+                // swaps to the (narrower) checkmark and back.
+                .frame(width: 16)
+        }
+        .buttonStyle(.borderless)
+        .help("Copy Appearance settings to clipboard")
+        .accessibilityLabel("Copy Appearance settings to clipboard")
+    }
+
+    /// Write the model's JSON dump to the general pasteboard and show the checkmark. The pasteboard
+    /// write lives here rather than in `SettingsModel` so the model stays free of AppKit.
+    private func copyConfigToClipboard() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(model.appearanceConfigJSON(), forType: .string)
+        AppLogger.ui.notice("appearance config copied to clipboard")
+
+        didCopyConfig = true
+        copyFeedbackTask?.cancel()
+        copyFeedbackTask = Task {
+            try? await Task.sleep(for: Self.copiedFeedbackDuration)
+            guard !Task.isCancelled else { return }
+            didCopyConfig = false
+        }
     }
 }
