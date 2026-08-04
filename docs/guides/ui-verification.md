@@ -428,11 +428,12 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_STUB=screenshot swift run
 поводиться так само лише за явно виставленого env, чого при нормальному запуску не буває.
 
 Додатково `TOKENPACE_SETTINGS_SECTION=<index>` відкриває **конкретну** секцію Settings за 0-based
-індексом (0=About, 1=General, 2=Appearance, 3=Monitored Services, 4=Notifications, 5=Session Logs) —
-щоб зробити скриншот потрібної панелі без AX-кліку по sidebar-рядку:
+індексом (0=About, 1=General, 2=Appearance, 3=Notifications, 4=Extra features) — щоб зробити скриншот
+потрібної панелі без AX-кліку по sidebar-рядку. (Monitored Services більше не окрема секція — це
+підсекція «Monitored services» у Extra features, #242.)
 
 ```sh
-TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=4 swift run   # відкриє одразу на Notifications
+TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=3 swift run   # відкриє одразу на Notifications
 ```
 
 ### Авто-відкриття вікна Troubleshoot при запуску
@@ -558,6 +559,32 @@ TOKENPACE_STUB=1 TOKENPACE_AWAITING=8 TOKENPACE_AWAITING_DAYS=3,28,10,5,25,12,20
 Реальний (не-стуб) шлях: watcher читає `~/.claude/sessions` + `jobs/` через FSEvents; щоб побачити
 живий лічильник, запусти кілька Claude-сесій, що чекають на дозвіл/план (без стуба, з увімкненим
 тумблером). Деталі каденції — `docs/design/awaiting-input-refresh.md`.
+
+### Журнал використання (#242, ADR-0067)
+
+Журнал **не має `TOKENPACE_STUB`-сценарію**: він пише лише на живих реальних даних
+(`currentScenario == .realNetwork` І тумблер «Record usage history» у Settings → **Extra features →
+Usage history** увімкнено) — синтетичний стуб у журнал не потрапляє навмисно.
+
+- **Тумблер:** Settings → **Extra features** → секція «Usage history» → «Record usage history»
+  (default-off); під ним read-only «Location» (шлях у Application Support) із кнопкою «Open in Finder».
+  Перегляд даних — окреме вікно **«Insights»**, що відкривається з **першого пункту dropdown-меню
+  «Insights…»** (у #242 — каркас-placeholder; чарти додає downstream).
+- **Живий запис:** підніми лог-стрім **першим** (`log stream --predicate 'subsystem ==
+  "com.artem-n.tokenpace"' --level debug`), тоді `swift run TokenPace` (без стуба) з увімкненим
+  тумблером → файл `~/Library/Application Support/com.artem-n.tokenpace/usage-journal-dev-YYYY-MM.jsonl`
+  (суфікс `-dev`, бо `.build/debug` поза `/Applications`) наповнюється валідними `usage`/`status`-рядками
+  (usage-рядок несе й `plan`/`tier` із Keychain). Тумблер OFF → нічого не пишеться.
+- **Багатоденний файл для downstream-читачів** (dev-хуки, обходять live-only — це фікстура, не полл):
+
+  ```sh
+  # згенерувати 14-денний журнал у вказаний файл і вийти:
+  TOKENPACE_GENERATE_JOURNAL=14 TOKENPACE_JOURNAL_FILE=/tmp/journal.jsonl swift run TokenPace
+  # згодовати той файл читачу (коли з'явиться downstream-чарт):
+  TOKENPACE_JOURNAL_FILE=/tmp/journal.jsonl swift run TokenPace
+  ```
+
+  Файл містить `usage`/`status`/`error`/`resume`-рядки з розривами — вхід для #239/#240/#241.
 
 ## Що НЕ рахується за верифікацію
 

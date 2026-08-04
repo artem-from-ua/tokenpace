@@ -26,6 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// second click focuses the existing window rather than opening a duplicate (single-instance).
     private var settingsWC: SettingsWindowController?
 
+    /// The "Insights" window (#242, ADR-0067) — the separate data-visualisation surface reached from
+    /// the first menu item. Lazily created and kept alive (single-instance), like `settingsWC`.
+    private var insightsWC: InsightsWindowController?
+
     /// The hidden Troubleshoot window (ADR-0020), reached via ⌥ Option on "Settings…". Lazily
     /// created and kept alive; while open it re-renders on every poll (see `apply(_:)`).
     private var troubleshootWC: TroubleshootWindowController?
@@ -166,6 +170,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var installTask: Task<Void, Never>?
     /// The in-flight archive sync, if any (#110) — cancelled before a new sync and on terminate.
     private var archiveTask: Task<Void, Never>?
+    /// The usage-journal writer (#242). An `actor`, so appends are dispatched to it off the main
+    /// actor; it never blocks a poll and swallows any write error. Only writes on the live
+    /// `.realNetwork` scenario and when the journal is enabled — both gates are checked at the seam.
+    private let usageJournal = UsageJournal()
     /// The result of the last archive sync, retained so the Settings status line can show
     /// "Last archived: … · N files" between runs (#110). `nil` until the first sync completes.
     private(set) var lastArchiveSummary: LogArchiver.Summary?
@@ -243,6 +251,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // only records the running version.
         runConfigMigrationsIfNeeded()
 
+        // Dev hook (#242): `TOKENPACE_GENERATE_JOURNAL=<days>` writes a synthetic multi-day journal and
+        // exits, so a downstream reader can be pointed at it via `TOKENPACE_JOURNAL_FILE`. Bypasses the
+        // live-only poll path on purpose — this is generated fixture data, not a real poll.
+        if let daysRaw = ProcessInfo.processInfo.environment["TOKENPACE_GENERATE_JOURNAL"],
+           let days = Int(daysRaw) {
+            generateJournalFixture(days: days)
+            return
+        }
+
         // Load the persisted monitored-services choice (#89) before the first status poll, so it
         // resolves the right logical services from the start. Falls back to `.default` when absent.
         monitoredServices = PersistedConfig.monitoredServices
@@ -282,6 +299,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let popupItem = NSMenuItem()
         popupItem.view = popupVC.view
         menu.addItem(popupItem)
+
+        // "Insights…" is the first action item (#242, ADR-0067) — opens the separate usage-history
+        // visualisation window — followed by a divider that separates it from the standard app items.
+        let insightsItem = NSMenuItem(title: "", action: #selector(openInsights), keyEquivalent: "")
+        insightsItem.attributedTitle = Self.dropdownMenuItemText("Insights…")
+        insightsItem.target = self
+        menu.addItem(insightsItem)
+        menu.addItem(.separator())
 
         // Action items at the bottom of the same menu (#14). `keyEquivalent: ""` keeps a shortcut
         // glyph off the right edge — none is wanted, and there is no main menu to host a default ⌘Q.
@@ -407,6 +432,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// a fresh window lands on About (the model's default); a reused one keeps its last-viewed pane.
     @objc private func openSettings() {
         openSettings(section: nil)
+    }
+
+    /// Open (or focus) the Insights window from the first menu item (#242, ADR-0067). Lazily creates the
+    /// single instance and keeps it alive, mirroring the Settings window's single-instance pattern.
+    @objc private func openInsights() {
+        if insightsWC == nil { insightsWC = InsightsWindowController() }
+        insightsWC?.show()
     }
 
     /// Open (or focus) the Settings… window, optionally forcing a specific `section` (#210 — the update
@@ -882,9 +914,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Live-update an open Troubleshoot window: both sections (JSON, timestamps, next update,
         // token dates) refresh in place each poll (ADR-0020). No-op while the controller is nil.
         troubleshootWC?.render(output)
+        journalPoll(output)
         pollStatusIfDue(usageInterval: output.interval)
         pollUpdateIfDue()
         pollArchiveIfDue()
+    }
+
+    /// Append this usage poll to the local journal (#242) — a `usage` line on success, an `error` line
+    /// on a genuine failure. No-op unless the journal is enabled **and** the app is on the live
+    /// `.realNetwork` scenario: synthetic stub data must never enter the journal.
+    ///
+    /// The record is built here (on the main actor, from the fresh `output`) but the file write is
+    /// dispatched to the `UsageJournal` actor, so the render path is never blocked and a write error is
+    /// swallowed by the writer. The interval carried on `output` is the gap-detector's expected cadence.
+    private func journalPoll(_ output: PollOutput) {
+        guard PersistedConfig.journalEnabled, currentScenario == .realNetwork else { return }
+        let now = currentDate()
+        let interval = output.interval
+        let record: JournalRecord
+        if output.health.failingSince == nil, let snapshot = output.snapshot {
+            record = .usage(
+                from: snapshot, now: now,
+                durationMs: output.diagnostics?.fetch.durationMs,
+                plan: output.diagnostics?.token?.subscriptionType,
+                tier: output.diagnostics?.token?.rateLimitTier)
+        } else if let fetch = output.diagnostics?.fetch {
+            record = .error(diagnostics: fetch, failure: output.health.reason, now: now)
+        } else {
+            return  // A failure with no diagnostics (never in the live path) — nothing to record.
+        }
+        Task { [usageJournal] in
+            await usageJournal.append(record, at: now, expectedInterval: interval)
+        }
+    }
+
+    /// Dev hook (#242): generate a synthetic multi-day journal and terminate. Writes through
+    /// `UsageJournal` (honouring `TOKENPACE_JOURNAL_FILE`), bypassing the live-only poll gates because
+    /// this is fixture data for downstream UI verification, not a real poll. Logs the target path.
+    private func generateJournalFixture(days: Int) {
+        let records = JournalFixture.multiDay(days: days, endingAt: Date())
+        AppLogger.journal.notice(
+            "journal: generating fixture — \(days, privacy: .public) days, \(records.count, privacy: .public) records")
+        Task { [usageJournal] in
+            await usageJournal.appendFixture(records)
+            AppLogger.journal.notice("journal: fixture written")
+            await MainActor.run { NSApp.terminate(nil) }
+        }
     }
 
     /// Detect the blocked→unblocked edge for the "Back to work!" notification (#160) and post when it
@@ -987,9 +1062,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusTask = Task { [weak self] in
             let health: StatusHealth
             let succeeded: Bool
+            var fetchedSummary: StatusSummary?
             do {
                 let summary = try await StatusClient.fetch(transport: transport)
                 health = .from(summary, config: config)
+                fetchedSummary = summary
                 succeeded = true
             } catch {
                 // Any failure → honest "unknown" (grey), and don't advance lastStatusSuccess so the
@@ -1000,6 +1077,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, !Task.isCancelled else { return }
             self.lastStatusHealth = health
             if succeeded { self.lastStatusSuccess = Date() }
+            // Journal the successful status poll as its own data sample (#242) — same live-only /
+            // enabled gates as the usage seam. Status rides a separate cadence, so it does **not** run
+            // the usage gap detector; it is an independent sample in the shared file.
+            if succeeded, let summary = fetchedSummary,
+               PersistedConfig.journalEnabled, self.currentScenario == .realNetwork {
+                let record = JournalRecord.status(from: summary, health: health, now: self.currentDate())
+                let at = self.currentDate()
+                Task { [usageJournal = self.usageJournal] in await usageJournal.appendStatus(record, at: at) }
+            }
             // Re-render with the new status against the retained usage output.
             self.reRenderForCurrentTime()
         }

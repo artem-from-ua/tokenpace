@@ -17,6 +17,7 @@ unified logging) — see [`Sources/TokenPaceKit/AppLogger.swift`](../../Sources/
   - `lifecycle` — app launch, launch-at-login, sleep/wake, network up/down, polling-interval changes.
   - `ui` — menu-bar rendering diagnostics (defined, currently unused).
   - `archive` — session-log archiver: sync start/finish, file/byte counts, failures (ADR-0030). File paths only at `.debug` (they contain project names).
+  - `journal` — usage journal (#242, ADR-0067): append-write failures, fixture generation. Percentages only, never a token.
 
 ## Collecting logs — methods & gotchas
 
@@ -145,6 +146,22 @@ logged and skipped without aborting the sync; file paths stay `.private`/`.debug
 | — | `archive` | `.debug` | `archive root <root>: <n> source files, <m> to copy` | `sync(to:)` — per allow-listed root (`projects`/`file-history`/`plans`), after the plan is computed |
 | — | `archive` | `.error` | `archive copy failed for <path>: <error>` | `sync(to:)` — one file could not be copied (unreadable/locked); logged and skipped, sync continues. `<path>` is `.private` |
 
+## `Sources/TokenPace/UsageJournal.swift`
+
+Append-only usage-journal writer (#242, ADR-0067). All write errors are swallowed (logged) so a
+journal problem never fails a poll. No file paths at `.notice` (Application Support, but keep the
+discipline). The two fixture-generation lines are emitted from `App.swift` under the same `journal`
+category (the dev `TOKENPACE_GENERATE_JOURNAL` hook).
+
+| Line | Category | Level | Message | When |
+|------|----------|-------|---------|------|
+| — | `journal` | `.error` | `journal write failed: <error>` | `writeLine` — the record could not be encoded or the directory/file could not be prepared; the line is dropped, the poll continues |
+| — | `journal` | `.error` | `journal open failed: errno=<errno>` | `appendLocked` — `open()` on the journal file failed |
+| — | `journal` | `.error` | `journal lock failed: errno=<errno>` | `appendLocked` — `flock(LOCK_EX)` failed; the line is dropped rather than risk an interleaved write |
+| — | `journal` | `.error` | `journal write() failed: errno=<errno>` | `appendLocked` — a `write()` returned ≤ 0 mid-line |
+| — | `journal` | `.notice` | `journal: generating fixture — <days> days, <n> records` | `generateJournalFixture` (App) — the dev `TOKENPACE_GENERATE_JOURNAL` hook started synthesizing a journal |
+| — | `journal` | `.notice` | `journal: fixture written` | `generateJournalFixture` (App) — the fixture was written; the app then terminates |
+
 ## `Sources/TokenPace/ShellEnvironment.swift`
 
 Reads a variable from the login shell's rc files for a login-launched app (#37, ADR-0025).
@@ -189,6 +206,7 @@ token itself never is.
 | 439 | `lifecycle` | `.notice` | `update: automatic checks set <bool>` | user toggled the "Check for updates automatically" checkbox (#37) |
 | — | `lifecycle` | `.notice` | `archive: enabled set <bool>` | user toggled the "Archive session logs to a folder" checkbox (#110) |
 | — | `lifecycle` | `.notice` | `archive: destination chosen` | user picked an archive folder via `NSOpenPanel` (#110); the path itself is not logged |
+| — | `lifecycle` | `.notice` | `journal: enabled set <bool>` | user toggled the "Record usage history" checkbox in Settings → Extra features → Usage history (#242, ADR-0067) |
 | — | `lifecycle` | `.notice` | `back-to-work: enabled set <bool>` | user toggled the "Back to work" notification switch (#160, ADR-0039) |
 | — | `lifecycle` | `.notice` | `back-to-work: time window set <start>–<end>` | user changed the allowed-hours pickers; `<start>`/`<end>` are minute-of-day (#160) |
 | — | `lifecycle` | `.notice` | `back-to-work: suppress set <raw>` | user picked a "Suppress notifications on" radio; `<raw>` is the raw `SuppressDays` (#160) |
@@ -333,8 +351,13 @@ One log line per interval change. The format is built by
 | `keychain` | 11 | `ClaudeCLIRefresher` (6), `TokenProvider` (4), `PollingEngine` (1) |
 | `ui` | 0 | — (category defined, unused) |
 | `archive` | 5 | `App` (3), `LogArchiver` (2) |
+| `journal` | 6 | `UsageJournal` (4), `App` (2) |
 
-**Total: 106 log statements** — `.error` ×33, `.notice` ×69, `.info` ×1, `.debug` ×3.
+**Total: 113 log statements** — `.error` ×37, `.notice` ×71, `.info` ×1, `.debug` ×3.
+
+The `journal: enabled set <bool>` toggle line (`SettingsModel`) is a `lifecycle` statement (like the
+other Settings-toggle lines), counted under `lifecycle`; the six `journal`-category statements are the
+four `UsageJournal` write-failure lines plus the two `App` fixture-generation lines.
 
 The `five_hour idle …` / `window active again` pair is one call site (`sessionIdleTransition`) that
 emits one of two strings; it is counted once under `PollingEngine` network. The

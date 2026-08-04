@@ -146,6 +146,12 @@ public enum UsageClient {
             return DiagnosedFetch(result: .failure(.missingUserAgent), diagnostics: diag)
         }
 
+        // Wall-clock latency of the network call only (not decode). Measured in the I/O layer around
+        // the awaited transport — this is real elapsed time, distinct from the injected poll `now`
+        // (which anchors the deterministic pure pipeline). Journalled as the API's response time (#242).
+        let sentAt = Date()
+        func elapsedMs() -> Int { Int((Date().timeIntervalSince(sentAt) * 1000).rounded()) }
+
         let data: Data
         let response: URLResponse
         do {
@@ -156,16 +162,19 @@ public enum UsageClient {
                 "usage request transport error: \(error.localizedDescription, privacy: .public)")
             let diag = FetchDiagnostics(
                 attemptAt: now, httpStatus: nil, body: nil,
-                outcome: .transportError(message: error.localizedDescription))
+                outcome: .transportError(message: error.localizedDescription),
+                durationMs: elapsedMs())
             return DiagnosedFetch(
                 result: .failure(.transport(message: error.localizedDescription, code: code)),
                 diagnostics: diag)
         }
+        let durationMs = elapsedMs()
 
         guard let http = response as? HTTPURLResponse else {
             AppLogger.network.error("usage response not HTTP")
             let diag = FetchDiagnostics(
-                attemptAt: now, httpStatus: nil, body: nil, outcome: .nonHTTPResponse)
+                attemptAt: now, httpStatus: nil, body: nil, outcome: .nonHTTPResponse,
+                durationMs: durationMs)
             return DiagnosedFetch(result: .failure(.nonHTTPResponse), diagnostics: diag)
         }
 
@@ -186,12 +195,14 @@ public enum UsageClient {
                 let bodyText = String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
                 AppLogger.network.notice("usage 200 ok body=\(bodyText, privacy: .public)")
                 let diag = FetchDiagnostics(
-                    attemptAt: now, httpStatus: 200, body: fullBody, outcome: .success)
+                    attemptAt: now, httpStatus: 200, body: fullBody, outcome: .success,
+                    durationMs: durationMs)
                 return DiagnosedFetch(result: .success(snapshot), diagnostics: diag)
             } catch {
                 // `decode` already logged the (capped) body; here the diagnostic keeps the full one.
                 let diag = FetchDiagnostics(
-                    attemptAt: now, httpStatus: 200, body: fullBody, outcome: .decodeFailure)
+                    attemptAt: now, httpStatus: 200, body: fullBody, outcome: .decodeFailure,
+                    durationMs: durationMs)
                 return DiagnosedFetch(result: .failure(.decode), diagnostics: diag)
             }
         case 429:
@@ -199,7 +210,8 @@ public enum UsageClient {
             AppLogger.network.error(
                 "usage rate-limited: HTTP 429 retryAfter=\(retryAfter ?? -1, privacy: .public)")
             let diag = FetchDiagnostics(
-                attemptAt: now, httpStatus: 429, body: fullBody, outcome: .httpError)
+                attemptAt: now, httpStatus: 429, body: fullBody, outcome: .httpError,
+                retryAfter: retryAfter, durationMs: durationMs)
             return DiagnosedFetch(
                 result: .failure(.rateLimited(retryAfter: retryAfter)), diagnostics: diag)
         default:
@@ -207,7 +219,8 @@ public enum UsageClient {
             AppLogger.network.error(
                 "usage request failed: HTTP \(http.statusCode, privacy: .public)")
             let diag = FetchDiagnostics(
-                attemptAt: now, httpStatus: http.statusCode, body: fullBody, outcome: .httpError)
+                attemptAt: now, httpStatus: http.statusCode, body: fullBody, outcome: .httpError,
+                durationMs: durationMs)
             return DiagnosedFetch(
                 result: .failure(.http(status: http.statusCode, body: body)), diagnostics: diag)
         }

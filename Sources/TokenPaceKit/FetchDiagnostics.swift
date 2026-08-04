@@ -49,12 +49,30 @@ public struct FetchDiagnostics: Sendable, Equatable {
     public let body: String?
     /// How the attempt ended.
     public let outcome: Outcome
+    /// `Retry-After` header value in seconds when the server sent one (only on HTTP 429), else `nil`.
+    /// Captured here so the usage journal (#242) can record how long the server asked us to back off
+    /// without re-parsing the response — the popup's aggregated health drops this detail.
+    public let retryAfter: TimeInterval?
+    /// The request round-trip latency in **milliseconds** — measured around `transport.data(for:)`,
+    /// so it covers only the network call (not decode). `nil` when the request was never sent
+    /// (``Outcome/notSent``) or the User-Agent guard tripped. Journalled (#242) as the API's response
+    /// time; also handy for the Troubleshoot window.
+    public let durationMs: Int?
 
-    public init(attemptAt: Date, httpStatus: Int?, body: String?, outcome: Outcome) {
+    public init(
+        attemptAt: Date,
+        httpStatus: Int?,
+        body: String?,
+        outcome: Outcome,
+        retryAfter: TimeInterval? = nil,
+        durationMs: Int? = nil
+    ) {
         self.attemptAt = attemptAt
         self.httpStatus = httpStatus
         self.body = body
         self.outcome = outcome
+        self.retryAfter = retryAfter
+        self.durationMs = durationMs
     }
 }
 
@@ -73,10 +91,17 @@ public struct FetchDiagnostics: Sendable, Equatable {
 public struct TokenDiagnostics: Sendable, Equatable {
     public let readAt: Date
     public let expiresAt: Date
+    /// Plan tier from the Keychain payload (`subscriptionType`, e.g. `"max"`), or `nil`. Not a secret —
+    /// a plan label the journal (#242) records so a reading can be attributed to a plan.
+    public let subscriptionType: String?
+    /// Rate-limit tier (`rateLimitTier`, e.g. `"default_claude_max_5x"`), or `nil`. Not a secret.
+    public let rateLimitTier: String?
 
-    public init(readAt: Date, expiresAt: Date) {
+    public init(readAt: Date, expiresAt: Date, subscriptionType: String? = nil, rateLimitTier: String? = nil) {
         self.readAt = readAt
         self.expiresAt = expiresAt
+        self.subscriptionType = subscriptionType
+        self.rateLimitTier = rateLimitTier
     }
 }
 

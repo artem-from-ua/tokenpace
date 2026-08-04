@@ -126,6 +126,9 @@ enum PersistedConfig {
         /// Whether the ⌥-revealed "Development tools…" menu / live colour tuner is unlocked (#185).
         /// Default-off (opt-in) — see the property.
         static let devToolsEnabled = "devToolsEnabled"
+        /// Whether the usage journal records each poll to an append-only JSONL file (#242). Default-off
+        /// (opt-in) — writing to disk without asking is a habit we don't start. See the property.
+        static let journalEnabled = "journalEnabled"
     }
 
     /// The marketing version the config was last written under, or `nil` if none has been recorded
@@ -479,6 +482,16 @@ enum PersistedConfig {
     static var archiveEnabled: Bool {
         get { defaults.object(forKey: Key.archiveEnabled) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.archiveEnabled) }
+    }
+
+    /// Whether the usage journal records each poll to an append-only JSONL file (#242). **Default-off**
+    /// (opt-in): an absent key reads as `false`, so nothing is written until the user turns it on. The
+    /// journal stores percentages/amounts (not transcripts), so its privacy surface is lighter than the
+    /// archiver's — but writing to disk without asking is a habit we don't start. `object(forKey:) as?
+    /// Bool ?? false` distinguishes "unset" from an explicit choice, like the other opt-in toggles.
+    static var journalEnabled: Bool {
+        get { defaults.object(forKey: Key.journalEnabled) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.journalEnabled) }
     }
 
     /// Whether the menu-bar / popup "sessions awaiting input" indicator is shown (#233, ADR-0066).

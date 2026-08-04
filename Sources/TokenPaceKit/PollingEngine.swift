@@ -661,7 +661,8 @@ public struct PollingEngine: Sendable {
             // (no Security import needed — `.malformedData` carries no OSStatus).
             return tokenErrorResult(.malformedData, refresh: nil)
         }
-        token = TokenDiagnostics(readAt: now(), expiresAt: creds.expiresAt)
+        token = TokenDiagnostics(readAt: now(), expiresAt: creds.expiresAt,
+                                 subscriptionType: creds.subscriptionType, rateLimitTier: creds.rateLimitTier)
 
         // Expiry is judged here now (moved out of the provider, ADR-0020): a stale token must not
         // reach the network. On expiry try one delegated refresh + re-read within this cycle.
@@ -678,7 +679,8 @@ public struct PollingEngine: Sendable {
                 return tokenErrorResult(.expired, refresh: attempt, token: token)
             }
             creds = reread
-            token = TokenDiagnostics(readAt: now(), expiresAt: reread.expiresAt)
+            token = TokenDiagnostics(readAt: now(), expiresAt: reread.expiresAt,
+                                     subscriptionType: reread.subscriptionType, rateLimitTier: reread.rateLimitTier)
         }
 
         let fetched = await UsageClient.diagnosedFetch(

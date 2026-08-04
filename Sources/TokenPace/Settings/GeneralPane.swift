@@ -2,7 +2,8 @@ import SwiftUI
 
 // MARK: - GeneralPane (#168, ADR-0042)
 
-/// Settings → General: launch-at-login and screen-lock polling pause.
+/// Settings → General: launch-at-login and screen-lock polling pause. (The awaiting-input and
+/// usage-history toggles moved to the "Extra features" pane, #242.)
 struct GeneralPane: View {
     @Bindable var model: SettingsModel
 
@@ -20,13 +21,6 @@ struct GeneralPane: View {
                 Toggle("Pause usage API polling while the screen is locked", isOn: Binding(
                     get: { model.pausePolling },
                     set: { model.setPausePolling($0) }))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Show sessions awaiting input", isOn: Binding(
-                        get: { model.awaitingInputEnabled },
-                        set: { model.setAwaitingInputEnabled($0) }))
-                    SettingsHint(text: "Shows how many Claude Code sessions are waiting for your reply. Configure where it appears in Appearance.")
-                }
             }
         }
         .formStyle(.grouped)
