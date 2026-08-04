@@ -433,6 +433,22 @@ final class SettingsModel {
         fireAppearanceCallbacks()
     }
 
+    /// The live Appearance config as clipboard-ready pretty-printed JSON (#257) — the payload behind
+    /// the copy button in the pane's preset row. Read-only: unlike every setter above it writes nothing
+    /// to `PersistedConfig` and fires no callback, so it sits outside the "persist, then notify"
+    /// contract this class otherwise follows.
+    ///
+    /// Returns the string rather than writing the pasteboard itself, which keeps this class free of
+    /// AppKit (it imports only Foundation / Observation / the kit); the pane owns the `NSPasteboard`
+    /// write. Reads `liveAppearanceValues`, so the dump always matches what the controls show —
+    /// including the "Custom" state, which exports as `"preset": "custom"`.
+    func appearanceConfigJSON() -> String {
+        AppearanceConfigExport.json(
+            values: liveAppearanceValues,
+            preset: activePreset,
+            appVersion: TokenPaceKit.version)
+    }
+
     /// Fire every Appearance-pane callback with the model's current (freshly-synced) value, so the
     /// menu-bar widget rebuilds — the same notifications the individual setters send. Shared by the
     /// reset and preset paths, which both mutate all keys at once and then re-render as a batch.
