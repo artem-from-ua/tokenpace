@@ -33,6 +33,12 @@
   - [reference/architecture/update-system.md](reference/architecture/update-system.md) — перевірка й авто-встановлення оновлень.
   - [reference/architecture/services-and-config.md](reference/architecture/services-and-config.md) — статус сервісів, конфіг, Settings, архіватор.
 
+## Дизайн UI
+
+- [design/menu-bar-pixel-alignment.md](design/menu-bar-pixel-alignment.md) — піксельне вирівнювання
+  в menu bar: чому `NSStatusBarButton` стоїть на пів-пойнті, як через це розмиваються краї, і чому
+  скріншот цю проблему не показує.
+
 ## Рішення (чому саме так)
 
 - [adr/](adr/) — 36 ADR (0001–0036). Індекс і конвенція повного/часткового витіснення —
