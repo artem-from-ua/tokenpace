@@ -64,6 +64,16 @@ end note
 Environment-гейти (місце / живлення / metered) — **лише для встановлення**, не для check-шляху;
 `.defer…` переоцінюється наступним heartbeat, `.skip…` — settled.
 
+**Явний запит користувача — «Update Now» у Settings → About** (#221, `AppDelegate.installUpdateNow`)
+проходить ті самі гейти, але з `onACPower: true, networkIsMetered: false`: гейти живлення й мережі —
+це *ввічливість* фонового процесу (не палити metered-трафік, не ризикувати розрядом посеред заміни),
+і явний клік цю ввічливість знімає. Клік також рахується за opt-in для **цієї** інсталяції
+(`autoInstallEnabled: true`), інакше кнопка була б мертвою рівно там, де потрібна найбільше —
+коли авто-встановлення вимкнене. Free-space-гейт **не** обходиться: жоден намір не робить безпечним
+заповнення диска. Чому не через `TOKENPACE_UPDATE_DRYRUN` — той прапорець зліплює «обійти гейти» з
+«не встановлювати насправді»; тут потрібна лише перша половина, тож `startInstall(…,
+forceRealInstall: true)` явно передає `dryRunForced: false`.
+
 ```plantuml
 @startuml
 title Auto-install decision gates (UpdateInstallPlan.decide)
@@ -117,6 +127,7 @@ stop
 | **SemanticVersion / UpdateComparison** | Чистий семвер-парсер (#37, `TokenPaceKit`, ADR-0025). `SemanticVersion(_:)` парсить `vX.Y.Z`/`X.Y.Z` консервативно (рівно 3 числові компоненти; суфікс `-beta`/`+meta` відкидається), `Comparable`. `UpdateComparison.isNewer(tag:than:)` → `false` на будь-якій помилці парсингу (контракт «ніколи не смикати на смітті») |
 | **GitHubRelease / GitHubReleaseClient** | HTTP-seam GitHub-релізу (#37, ADR-0025). `GitHubRelease` (Decodable) парсить `tag_name`/`html_url` + `assets[]` (forward-compat). `checkForUpdate(using:currentVersion:)` — fetch → decode → `isNewer`, повертає реліз лише якщо новіший, будь-яка помилка (в т.ч. 404) → `nil`. Транспорт абстрагований на `UpdateFetcher` (не `UsageTransport`), бо один шлях — subprocess |
 | **UpdateAssetSelector / UpdateInstallPlan** | Чисті seam-и авто-встановлення (#122, `TokenPaceKit`, ADR-0033). `selectZIP(from:)` вибирає version-named `.zip` (`TokenPace-<X.Y.Z>.zip`), відкидає не-HTTPS. `decide(...)` — впорядковані гейти (opt-in → newer → real `.app` → asset → free space ≥5 GB → AC power → unmetered) → `.install` / `.skip…` / `.defer…`. Факти інжектяться з shell |
+| **UpdateDeferralReason** | Пояснювальний двійник `decide` (#221, `TokenPaceKit`). `UpdateInstallPlan.deferralReasons(...)` повертає **всі** активні environment-блокери (`onBattery` / `meteredNetwork` / `insufficientSpace`) у сталому порядку `allCases`, тоді як `decide` спиняється на першому — тож UI не жене користувача чинити одну умову, щоб потім відкрити наступну. Settled-no випадки (auto off / not newer / dev / no asset) → `[]`: там немає відкладеного install, який треба пояснювати. `pendingExplanation(for:)` складає з них одне речення («a», «a and b», «a, b and c») для About-рядка ⚠ |
 | **UpdateCheckCadence** | Чистий seam частоти update-чеку (#37, ADR-0025) — фіксований 12-год інтервал (не прив'язаний до usage-cadence). Shell також перевіряє **безумовно при старті**; маркер `lastUpdateCheck` радиться на **кожній** спробі (навіть 404) |
 | **UpdateMenuState** | Чиста машина станів **єдиного** update-пункту (#130, `TokenPaceKit`, ADR-0036). `evaluate(...)` → `Item`-enum (`hidden`/`updateFailed`/`updateAvailable`/`updatePending`/`whatsNew`) за пріоритетною таблицею. Колір/текст — у view. **Замінив `UpdateNotifier`** (банер видалено). ADR-0036 |
 | **GHReleaseFetcher / ShellEnvironment** | `gh`-subprocess-конформер `UpdateFetcher` (#37, ADR-0025) — `gh api repos/…/releases/latest`, таймаут 20 с, stdout захоплюється, середовище успадковується (`gh` потребує keyring). Обирається коли встановлено `TOKENPACE_GH_AUTH`, який резолвиться власним `AppDelegate.resolveGHAuth`: `ProcessInfo` → login-shell fallback через `ShellEnvironment` (`zsh -l -i`; `SMAppService` стартує без шелла). `StubUpdateFetcher` — `TOKENPACE_FAKE_LATEST` |

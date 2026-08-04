@@ -60,6 +60,12 @@ final class SettingsWindowController: NSWindowController {
         get { model.onCheckForUpdatesNow } set { model.onCheckForUpdatesNow = newValue }
     }
 
+    /// Called when the user clicks "Update Now" (#221) — installs the known release immediately,
+    /// bypassing the power/metered courtesy gates.
+    var onInstallUpdateNow: (() -> Void)? {
+        get { model.onInstallUpdateNow } set { model.onInstallUpdateNow = newValue }
+    }
+
     /// Called when the user changes the calm-colours mode (#105, #224), with the new `CalmColorMode`.
     var onCalmColorModeChange: ((CalmColorMode) -> Void)? {
         get { model.onCalmColorModeChange } set { model.onCalmColorModeChange = newValue }
@@ -299,6 +305,12 @@ final class SettingsWindowController: NSWindowController {
     /// model state, which lives independent of any view (ADR-0042).
     func updateAvailability(_ release: GitHubRelease?) {
         model.updateAvailability(release)
+    }
+
+    /// Reflect why an available update is sitting unapplied (#221) — every currently-blocking
+    /// environment gate, or `[]` when nothing blocks. Safe to call while the window is closed.
+    func updateDeferral(_ reasons: [UpdateDeferralReason]) {
+        model.updateDeferral(reasons)
     }
 
     /// Reflect the current archive state (#110). Safe to call while the window is closed.

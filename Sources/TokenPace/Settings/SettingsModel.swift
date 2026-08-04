@@ -28,6 +28,7 @@ final class SettingsModel {
 
     var onMonitoredServicesChange: ((MonitoredServices) -> Void)?
     var onCheckForUpdatesNow: (() -> Void)?
+    var onInstallUpdateNow: (() -> Void)?
     var onCalmColorModeChange: ((CalmColorMode) -> Void)?
     var onResetCountdownModeMenuBarChange: ((ResetCountdownMode) -> Void)?
     var onBarStyleChange: ((BarStyle) -> Void)?
@@ -150,6 +151,11 @@ final class SettingsModel {
     /// `PersistedConfig` in `syncFromConfig()` (so it refreshes each time the window opens); a past
     /// event, so no live update is needed. Drives the ⚠️ "Update … failed" row on the About pane.
     private(set) var lastUpdateFailure: LastUpdateFailure?
+    /// Every environment condition currently holding back an available update (#221), or `[]` when
+    /// nothing blocks. Pushed in by the AppDelegate on each install evaluation, so it tracks the live
+    /// state rather than a snapshot taken when the window opened. Drives the ⚠️ "Update pending
+    /// because …" row on the About pane.
+    private(set) var deferralReasons: [UpdateDeferralReason] = SettingsModel.forcedDeferralReasons ?? []
 
     // MARK: Static build facts
 
@@ -176,6 +182,27 @@ final class SettingsModel {
         guard let stage = LastUpdateFailure.Stage(rawValue: stageRaw), !reason.isEmpty else { return nil }
         let tag = env["TOKENPACE_FAKE_LATEST"].flatMap { $0.isEmpty ? nil : $0 } ?? "v\(TokenPaceKit.version)"
         return LastUpdateFailure(tag: tag, stage: stage, reason: reason)
+    }()
+
+    /// Forced deferral reasons for live verification of the About pane (#221), from
+    /// `TOKENPACE_FAKE_DEFERRAL=battery,metered,space` (any subset, in any order — the row renders
+    /// them in `allCases` order regardless). Like `TOKENPACE_FAKE_FAILURE` it never writes
+    /// UserDefaults, and it exists because the real reasons need a `.app` bundle plus an actual
+    /// unplugged/metered/full-disk Mac to reproduce. `nil` for a normal run; unknown tokens are ignored.
+    static let forcedDeferralReasons: [UpdateDeferralReason]? = {
+        guard let raw = ProcessInfo.processInfo.environment["TOKENPACE_FAKE_DEFERRAL"], !raw.isEmpty
+        else { return nil }
+        let tokens = Set(raw.split(separator: ",").map {
+            $0.trimmingCharacters(in: .whitespaces).lowercased()
+        })
+        let reasons = UpdateDeferralReason.allCases.filter { reason in
+            switch reason {
+            case .onBattery:         return tokens.contains("battery")
+            case .meteredNetwork:    return tokens.contains("metered")
+            case .insufficientSpace: return tokens.contains("space")
+            }
+        }
+        return reasons.isEmpty ? nil : reasons
     }()
 
     // MARK: Computed enablement (was the scattered imperative `updateX Availability()` methods)
@@ -264,6 +291,25 @@ final class SettingsModel {
         return ("On by default: downloads and installs a newer release in the background, then "
               + "restarts. If anything fails, the menu shows a \u{201C}New version available\u{201D} "
               + "item linking to the release instead.", false)
+    }
+
+    /// The ⚠️ line explaining why an available update hasn't installed (#221), or `nil` when nothing
+    /// blocks it. Wording comes from the kit so it stays testable; the view supplies the icon and dot.
+    var deferralExplanation: String? {
+        UpdateDeferralReason.pendingExplanation(for: deferralReasons)
+    }
+
+    /// Whether "Update Now" can do anything — a known release, and a real `.app` to replace. The
+    /// power/metered gates are deliberately **not** consulted: bypassing them is the button's whole
+    /// purpose. A disk too full still lets the user click; the install then declines and logs why,
+    /// which beats an unexplained dead button.
+    var canInstallNow: Bool {
+        // Under `TOKENPACE_FAKE_DEFERRAL` show the button regardless of the build: the whole point of
+        // that stub is to review this row on a dev build, and the real bundle check would hide the
+        // very control being verified. Clicking it there still declines (`skipNotAppBundle`) and logs.
+        if SettingsModel.forcedDeferralReasons != nil { return true }
+        guard inAppBundle, let release = latestRelease else { return false }
+        return UpdateAssetSelector.selectZIP(from: release) != nil
     }
 
     // MARK: Sync from config / system (called by the controller's show())
@@ -575,6 +621,11 @@ final class SettingsModel {
 
     func checkForUpdatesNow() { onCheckForUpdatesNow?() }
 
+    func installUpdateNow() {
+        AppLogger.lifecycle.notice("update-install: user requested an immediate install")
+        onInstallUpdateNow?()
+    }
+
     func setArchiveEnabled(_ on: Bool) {
         if on, PersistedConfig.archiveDestination == nil {
             // Turning on with no folder yet → prompt. If the user cancels (still no folder), the
@@ -617,14 +668,11 @@ final class SettingsModel {
     }
 
     /// Open the release-notes page for a specific tag (#210) — used by the "New version available"
-    /// row's "Release notes" link, which carries that release's own tag.
+    /// row's "release notes" link, which carries that release's own tag. Since the "Download" button
+    /// was dropped (#221) this is also the manual fallback: the release page is where a hand-download
+    /// starts, which matters where auto-install can't run (dev build, or a release with no asset).
     func openReleaseNotes(tag: String) {
         NSWorkspaceOpener.open(GitHubReleaseClient.releaseNotesURL(tag: tag).absoluteString)
-    }
-
-    func openDownload() {
-        guard let release = latestRelease else { return }
-        NSWorkspaceOpener.open(release.htmlURL)
     }
 
     // MARK: Background-driven mutators (safe while the window is closed — they touch model state only)
@@ -633,6 +681,13 @@ final class SettingsModel {
     /// "Update available: vX.Y.Z" + Download when non-nil.
     func updateAvailability(_ release: GitHubRelease?) {
         latestRelease = release
+    }
+
+    /// Reflect why an available update hasn't installed (#221): the About pane turns these into the
+    /// "Update pending because …" row. A forced set from `TOKENPACE_FAKE_DEFERRAL` wins, so live
+    /// verification isn't overwritten by the real (unblocked) environment on the next check.
+    func updateDeferral(_ reasons: [UpdateDeferralReason]) {
+        deferralReasons = SettingsModel.forcedDeferralReasons ?? reasons
     }
 
     /// Reflect the current archive state (#110): destination + the "Last archived …" status line.
