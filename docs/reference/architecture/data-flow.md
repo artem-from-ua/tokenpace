@@ -244,6 +244,26 @@ awaiting = ~/.claude/sessions/<pid>.json  .status == "waiting"
   єдиний attributed-лейбл (спільна базова лінія). Обидві гілки заголовка (звичайна / з awaiting-індикатором)
   використовують той самий лейбл.
 
+## Insights pipeline (#238)
+
+Окремий від живого рендера **read-back**-потік: історія використання, яку колектор пише на диск,
+згодом читається для аналітики. Три ланки, кожна — окрема сесія/PR проти `main`:
+
+1. **Collector + storage (#242, ADR-0067)** — append-only JSONL, один рядок на успішний полл
+   (`JournalRecord`), плюс resume-маркери на розривах семплування. Пише `UsageJournal` (actor,
+   non-blocking); читає назад `JournalReader.parse(_:)`. Деталі типів — рядок «JournalRecord …» у
+   [services-and-config.md](services-and-config.md).
+2. **Aggregator (#244)** — чистий `UsageGridAggregator.grid(...)`: `[JournalRecord]` → сітка
+   **днів × годин** для однієї метрики під одним фільтром (5h/7d). Пілотна метрика `sampleDensity`
+   рахує щільність семплів; комірки-розриви (`GridCell.gap`) тримаються окремо від «0 семплів», щоб
+   візуалізація не інтерполювала крізь діри (та сама чесність, що `ServiceStatus.unknown`/ADR-0027).
+   AppKit-free, в `TokenPaceKit` — одне місце, яке пілотний чарт і будь-яка пізніша метрика реюзають.
+3. **Window + pilot chart (#245)** — вікно Insights (`InsightsWindowController`, стиль Settings)
+   рендерить сітку агрегатора першим чартом; відкривається з першого dropdown-пункту «Insights…».
+
+Кінцеві consumer-фічі поверх журналу — окремі: unexplained relief (#239), personal service-status
+history (#240), burn-rate vs baseline (#241). Вони читають той самий журнал через `JournalReader`.
+
 ## Компоненти потоку даних
 
 | Компонент | Відповідальність |

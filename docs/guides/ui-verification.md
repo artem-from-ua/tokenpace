@@ -581,7 +581,7 @@ Usage history** увімкнено) — синтетичний стуб у жу�
 - **Тумблер:** Settings → **Extra features** → секція «Usage history» → «Record usage history»
   (default-off); під ним read-only «Location» (шлях у Application Support) із кнопкою «Open in Finder».
   Перегляд даних — окреме вікно **«Insights»**, що відкривається з **першого пункту dropdown-меню
-  «Insights…»** (у #242 — каркас-placeholder; чарти додає downstream).
+  «Insights…»** (у #242 — каркас-placeholder; наповнюють агрегатор #244 і вікно+пілотний чарт #245).
 - **Живий запис:** підніми лог-стрім **першим** (`log stream --predicate 'subsystem ==
   "com.artem-n.tokenpace"' --level debug`), тоді `swift run TokenPace` (без стуба) з увімкненим
   тумблером → файл `~/Library/Application Support/com.artem-n.tokenpace/usage-journal-dev-YYYY-MM.jsonl`
@@ -592,11 +592,12 @@ Usage history** увімкнено) — синтетичний стуб у жу�
   ```sh
   # згенерувати 14-денний журнал у вказаний файл і вийти:
   TOKENPACE_GENERATE_JOURNAL=14 TOKENPACE_JOURNAL_FILE=/tmp/journal.jsonl swift run TokenPace
-  # згодовати той файл читачу (коли з'явиться downstream-чарт):
+  # згодовати той файл читачу (коли з'явиться downstream-чарт #245):
   TOKENPACE_JOURNAL_FILE=/tmp/journal.jsonl swift run TokenPace
   ```
 
-  Файл містить `usage`/`status`/`error`/`resume`-рядки з розривами — вхід для #239/#240/#241.
+  Файл містить `usage`/`status`/`error`/`resume`-рядки з розривами — вхід агрегатора `UsageGridAggregator`
+  (#244) і пілотного чарта (#245), а також consumer-фіч #239/#240/#241.
 
 ## Що НЕ рахується за верифікацію
 
