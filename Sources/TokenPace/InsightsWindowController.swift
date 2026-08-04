@@ -60,6 +60,19 @@ final class InsightsWindowController: NSWindowController {
 /// Placeholder content for the Insights window (#242). The usage journal is the data source; the
 /// charts that render it land in a downstream ticket (#239/#240/#241). Until then this states what the
 /// window will show and reflects whether recording is on, so the empty state is honest rather than blank.
+///
+/// The empty state says outright that the window is still a placeholder and the charts come in a later
+/// version (#253) — without it a user who has just enabled recording reads the unchanged screen as a
+/// broken feature. Three deliberate wordings, all from that ticket:
+///
+/// - The ⚠️ caveat reuses the Settings hint treatment (#156) so both surfaces flag a caveat alike.
+/// - "over time" is gone from the lead line: it was the only temporal claim in the window and it was
+///   unbounded, so it invited exactly the "should I come back in an hour or a month?" question the
+///   ticket opens with. Quantifying it honestly means counting *days with data* (idle cadence and
+///   `pausePollingWhenScreenLocked` leave gaps, so wall-clock overstates coverage) — that belongs with
+///   the charts, not with a placeholder, so the promise is dropped rather than made precise.
+/// - The Settings pointer names **Extra features**, where the toggle actually lives; it used to say
+///   General, which is where it was before #242 moved it (see `ExtraFeaturesPane`).
 private struct InsightsRootView: View {
     /// Read once on appear — a plain read of the collector switch (no live binding needed for a
     /// placeholder; the window is short-lived and re-reads on each open).
@@ -72,10 +85,15 @@ private struct InsightsRootView: View {
                 .foregroundStyle(.secondary)
             Text("Usage Insights")
                 .font(.title2.weight(.semibold))
-            Text("Charts of your usage over time will appear here.")
+            Text("Charts of your usage will appear here.")
                 .foregroundStyle(.secondary)
+            // Warning triangle, not a plain line: the caveat has to read as a caveat at a glance,
+            // otherwise it blends into the neutral lines around it. Reuses the Settings ⚠️ hint
+            // treatment (#156) so the two surfaces state a caveat the same way.
+            SettingsHint(text: "This window is still a placeholder — the charts arrive in a future version of TokenPace.",
+                         warning: true)
             if !recording {
-                Text("Turn on **Record usage history** in Settings → General to start collecting data.")
+                Text("Turn on **Record usage history** in Settings → Extra features to start collecting data.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
