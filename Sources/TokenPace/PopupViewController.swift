@@ -321,7 +321,9 @@ final class PopupBarView: NSView {
 
     /// The coloured strip's rect for the fraction span `from..to`, mapped through ``scaleX`` and
     /// floored to ``minStripWidth`` (expanded symmetrically about its centre) so a tiny non-zero span
-    /// reads as a pill. Returns `nil` for an empty span (`to <= from`) — nothing to draw.
+    /// reads as a pill. An end that lands inside the inset band reserved by ``scaleX`` is snapped
+    /// flush to the track's own end, so the strip's cap meets the track's cap with no grey sliver
+    /// left between them. Returns `nil` for an empty span (`to <= from`) — nothing to draw.
     static func stripRect(from: Double, to: Double, in rect: NSRect) -> NSRect? {
         var sx0 = scaleX(CGFloat(from), in: rect)
         var sx1 = scaleX(CGFloat(to), in: rect)
@@ -332,6 +334,14 @@ final class PopupBarView: NSView {
             sx0 = c - msw / 2
             sx1 = c + msw / 2
         }
+        // Snap an end that sits within the reserved cap band flush to the track. `scaleX` insets the
+        // 0..100 % scale by `bs` on each side so a cap never overhangs the rounded track — but at the
+        // track's own ends there is nothing to overhang, and the inset reads as a grey gap before the
+        // fill starts. Applied after the min-width floor, which would otherwise push the end back off
+        // the track's edge.
+        let bs = msw / 2
+        if sx0 <= rect.minX + bs { sx0 = rect.minX }
+        if sx1 >= rect.maxX - bs { sx1 = rect.maxX }
         return NSRect(x: sx0, y: rect.minY, width: sx1 - sx0, height: rect.height)
     }
 
