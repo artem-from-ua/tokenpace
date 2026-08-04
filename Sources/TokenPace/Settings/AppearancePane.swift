@@ -125,18 +125,14 @@ struct AppearancePane: View {
 
                 // Awaiting-input in the menu bar (#233). The popup always shows the indicator while the
                 // feature is on; this adds the menu-bar copy (a leading hand icon). Meaningful only
-                // while the master toggle in General is on, so it's disabled — with a ⚠️ hint — otherwise.
+                // while the master toggle in Extra features is on, so it's disabled — with a ⚠️ hint —
+                // otherwise. A data stub is a third state: the watcher never runs, so the hint says so.
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Show awaiting-input icon in the menu bar", isOn: Binding(
                         get: { model.awaitingInputInMenuBar },
                         set: { model.setAwaitingInputInMenuBar($0) }))
                     .disabled(!model.awaitingInputEnabled)
-                    SettingsHint(
-                        text: model.awaitingInputEnabled
-                            ? "Adds a hand icon to the menu bar (leading) when sessions are waiting. "
-                              + "The count is shown only in the dropdown."
-                            : "Enable *Show sessions awaiting input* in General first.",
-                        warning: !model.awaitingInputEnabled)
+                    SettingsHint(text: awaitingInputHint, warning: awaitingInputHintIsWarning)
                 }
 
                 // #194, #227 — the single "blocked" control. When fully blocked a red pause icon is
@@ -246,5 +242,21 @@ struct AppearancePane: View {
             guard !Task.isCancelled else { return }
             didCopyConfig = false
         }
+    }
+
+    /// The hint under the awaiting-input menu-bar toggle, in priority order: the master toggle is off
+    /// (nothing to place anywhere) → a stub is driving the app (the watcher doesn't run at all) → the
+    /// plain description. The first two are ⚠️ states; see ``awaitingInputHintIsWarning``.
+    private var awaitingInputHint: String {
+        guard model.awaitingInputEnabled else {
+            return "Enable *Show sessions awaiting input* in Extra features first."
+        }
+        if model.stubScenarioActive { return ExtraFeaturesPane.stubbedHint }
+        return "Adds a hand icon to the menu bar (leading) when sessions are waiting. "
+            + "The count is shown only in the dropdown."
+    }
+
+    private var awaitingInputHintIsWarning: Bool {
+        !model.awaitingInputEnabled || model.stubScenarioActive
     }
 }

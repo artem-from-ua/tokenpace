@@ -542,11 +542,21 @@ Wi-Fi, battery) має **суворий метод**, вироблений бо�
 ### Індикатор «sessions awaiting input» (#233, ADR-0066)
 
 Лічильник сесій Claude Code, що очікують вводу користувача, у menu bar та попапі. Фіча **opt-in**
-(Settings → General → «Show sessions awaiting input», дефолт OFF); розміщення — Settings → Appearance.
+(Settings → Extra features → «Show sessions awaiting input», дефолт OFF); розміщення — Settings →
+Appearance.
+
+> **Під будь-яким `TOKENPACE_STUB` watcher не працює взагалі.** Стуб — це заморожений відтворюваний
+> кадр, а watcher читає **живі** `~/.claude/sessions|jobs`, тож на стубі в кадр протікали б реальні
+> сесії, що випадково чекають вводу в момент зйомки. Гейт той самий, що в журналу
+> (`currentScenario == .realNetwork`), і він перераховується при **живому** перемиканні стуба в
+> dev-tools. Наслідки: під стубом без `TOKENPACE_AWAITING` індикатора нема **навіть із увімкненим
+> тумблером**, а в Settings (Extra features → Session status і Appearance) видно ⚠️ «Stubbed in this
+> development build.». Живий лічильник перевіряють **без стуба**.
 
 Стуб **`TOKENPACE_AWAITING=<N>`** синтезує `N` awaiting-сесій, оминаючи watcher (не потрібні живі
 Claude-сесії), **і** вмикає показ (обходить master-тумблер — лише під стубом), тож фіча видима
-одразу під `swift run`. `N=0` ховає індикатор (як і в реальності). Додатково:
+одразу під `swift run` — і це єдиний спосіб побачити індикатор під стубом. `N=0` ховає індикатор
+(як і в реальності). Додатково:
 
 - **`TOKENPACE_AWAITING_DAYS=d1,d2,…`** — днів до видалення для кожної сесії (керує кольором:
   `<7` → червоний, `<15` → помаранч, решта → нейтральний). Пропущені — дефолт 20 (нейтр.).
@@ -583,11 +593,16 @@ TOKENPACE_STUB=1 TOKENPACE_AWAITING=8 TOKENPACE_AWAITING_DAYS=3,28,10,5,25,12,20
   («<7d/<15d/>15d till deletion»). (Попап показує індикатор завжди, поки фіча ON.)
 - **Appearance-опція** «Show awaiting-input icon in the menu bar» (після «Calm non-critical
   colors»): ON → долоня в барі (leading); OFF → лише в попапі. Активна лише коли master ON; інакше
-  недоступна з **⚠️-підказкою** «Enable *Show sessions awaiting input* in General first.».
+  недоступна з **⚠️-підказкою** «Enable *Show sessions awaiting input* in Extra features first.».
 
 Реальний (не-стуб) шлях: watcher читає `~/.claude/sessions` + `jobs/` через FSEvents; щоб побачити
-живий лічильник, запусти кілька Claude-сесій, що чекають на дозвіл/план (без стуба, з увімкненим
-тумблером). Деталі каденції — `docs/design/awaiting-input-refresh.md`.
+живий лічильник, запусти кілька Claude-сесій, що чекають на дозвіл/план (**обов'язково без стуба**, з
+увімкненим тумблером). Деталі каденції — `docs/design/awaiting-input-refresh.md`.
+
+Перевірка самого гейта (без живих сесій не обійтися — потрібна хоч одна сесія, що чекає вводу):
+запусти `TOKENPACE_STUB=screenshot swift run` з увімкненим тумблером → індикатора **немає** ні в
+барі, ні в попапі; у dev-tools перемкни «Data source (stub)» на **Real network** → лічильник
+з'являється без рестарту, ⚠️-рядки в Settings зникають; назад на стуб → знову гасне.
 
 ### Журнал використання (#242, ADR-0067)
 

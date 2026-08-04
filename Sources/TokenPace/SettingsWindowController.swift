@@ -229,4 +229,11 @@ final class SettingsWindowController: NSWindowController {
     func updateArchiveStatus() {
         model.refreshArchiveStatus()
     }
+
+    /// Reflect the live data source after the dev-tools stub selector switches scenarios (#187), so the
+    /// ⚠️ "Stubbed in this development build." hints appear/disappear without reopening the window.
+    /// Safe to call while the window is closed.
+    func updateStubState(active: Bool) {
+        model.stubScenarioActive = active
+    }
 }
