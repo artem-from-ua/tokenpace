@@ -1092,31 +1092,31 @@ final class PopupViewController: NSViewController {
         let showStatusRows = status != nil && (optionHeld || status?.worstProblem != nil)
         let showAge = optionHeld || layout.lastUpdateAge >= Self.staleAgeThreshold
         let ageString = showAge ? Self.ageText(layout.lastUpdateAge) : ""
-        // Header layout (#233): the "Claude" brand title with the "Nm ago" age beside it on the left;
-        // the awaiting-input indicator (hand + count) pinned flush right. When there's no awaiting count,
-        // fall back to the plain brand-left / age-right split line.
-        let sectionHeader: NSView
+        // Header layout (#233): the "Claude" brand title with the "Nm ago" age beside it on the left —
+        // **always**, whether or not an awaiting-input count exists. The age belongs to the brand title,
+        // not to the right edge: pushing it flush right (the old no-awaiting fallback) made it jump
+        // across the header the moment the awaiting count dropped to zero or the feature was off.
+        // The right slot is reserved for the awaiting-input indicator (hand + count) and stays empty
+        // otherwise.
         // The brand title — "Claude" plus the plan label ("Max 5x") when present, both in brand colour.
         let brand = Self.brandTitleLabel(plan: layout.planLabel)
-        if let awaiting = layout.awaitingInput {
-            // "Claude Max 5x  <age>" together on the left. On the right: the summary badge when ⌥ is up;
-            // nothing when ⌥ is held (the per-project breakdown below supersedes it — but the age
-            // stays put next to the brand title, it does not move to where the badge was). (#233)
-            let age = NSTextField(labelWithString: ageString)
-            age.font = .systemFont(ofSize: Metrics.textSize)
-            age.textColor = Self.dimmedLabelColor
-            let leading = NSStackView(views: [brand, age])
-            leading.orientation = .horizontal
-            leading.alignment = .firstBaseline
-            leading.spacing = 8
-            let right: NSView = optionHeld ? NSView() : makeAwaitingBadge(awaiting)
-            sectionHeader = addSplitRow(leadingView: leading, rightView: right)
+        let age = NSTextField(labelWithString: ageString)
+        age.font = .systemFont(ofSize: Metrics.textSize)
+        age.textColor = Self.dimmedLabelColor
+        let leading = NSStackView(views: [brand, age])
+        leading.orientation = .horizontal
+        leading.alignment = .firstBaseline
+        leading.spacing = 8
+        // Right slot: the summary badge when there is an awaiting count and ⌥ is up; nothing when ⌥ is
+        // held (the per-project breakdown below supersedes it — but the age stays put next to the brand
+        // title, it does not move to where the badge was) or when there is no awaiting count at all.
+        let right: NSView
+        if let awaiting = layout.awaitingInput, !optionHeld {
+            right = makeAwaitingBadge(awaiting)
         } else {
-            let age = NSTextField(labelWithString: ageString)
-            age.font = .systemFont(ofSize: Metrics.textSize)
-            age.textColor = Self.dimmedLabelColor
-            sectionHeader = addSplitRow(leadingView: brand, rightView: age)
+            right = NSView()
         }
+        let sectionHeader = addSplitRow(leadingView: leading, rightView: right)
         stack.setCustomSpacing(Metrics.sectionSpacing, after: sectionHeader)
 
         // #233: while ⌥ is held, reveal the per-project awaiting breakdown right under the header —
