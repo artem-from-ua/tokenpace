@@ -42,6 +42,14 @@
 `StubScenario` (`Sources/TokenPace/StubScenario.swift`): `rawValue` кожного кейса = ім'я стуба з
 таблиці нижче, `summary` — опис.
 
+> **Жива мережа вмикається лише явно (#267).** У `swift run` дефолт — `screenshot`, а не живий API:
+> `swift run` **без** `TOKENPACE_STUB` дає заморожений кадр. Щоб отримати справжні дані в dev-збірці,
+> проси їх на імʼя — **`TOKENPACE_STUB=real`** (або перемкни на «Real network (no stub)» у dev-tools).
+> Невідоме значення (`TOKENPACE_STUB=healthy` — такого сценарію немає) теж дає `screenshot` **і** пише
+> `.notice` зі списком валідних id; раніше воно мовчки вело в живу мережу, і стубовий на вигляд прогін
+> насправді ходив у прод. Встановлений `.app` без env, як і раніше, живий — для кінцевого користувача
+> нічого не змінилось.
+
 > **Живе перемикання без рестарту (#187, ADR-0047).** Коли dev-tools увімкнено
 > (`defaults write com.artem-n.tokenpace devToolsEnabled -bool true` на **встановленому `.app`** — ADR-0053;
 > у `swift run` ключ не діє, бо бінарник без bundle id → інший домен `UserDefaults`), відкрий
@@ -593,7 +601,13 @@ Appearance.
 > (`currentScenario == .realNetwork`), і він перераховується при **живому** перемиканні стуба в
 > dev-tools. Наслідки: під стубом без `TOKENPACE_AWAITING` індикатора нема **навіть із увімкненим
 > тумблером**, а в Settings (Extra features → Session status і Appearance) видно ⚠️ «Stubbed in this
-> development build.». Живий лічильник перевіряють **без стуба**.
+> development build.».
+>
+> **Живого watcher'а мало бути в `.realNetwork` — цей live має бути обраний явно (#267).** Тобто
+> `TOKENPACE_STUB=real` або перемикання на «Real network (no stub)» у dev-tools; в обох випадках
+> індикатор працює й на dev-збірці, і це штатний спосіб перевірити підняту руку на живих сесіях.
+> Якщо ж застосунок опинився в живому режимі **не** за явним вибором, watcher лишається опущеним —
+> саме той розсинхрон (рука показувала реальні сесії в «стубовому» прогоні) і викрив #267.
 
 Стуб **`TOKENPACE_AWAITING=<N>`** синтезує `N` awaiting-сесій, оминаючи watcher (не потрібні живі
 Claude-сесії), **і** вмикає показ (обходить master-тумблер — лише під стубом), тож фіча видима

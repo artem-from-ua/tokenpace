@@ -202,16 +202,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// in-the-past reset. Unlike `ageTimer` this is non-repeating and fires at a variable instant.
     private var resetTimer: Timer?
 
-    /// The `TOKENPACE_STUB` scenario the app launched with, or `.realNetwork` for a normal run. Read
-    /// once from the environment and mapped through the shared ``StubScenario`` registry (unknown /
-    /// absent value → `.realNetwork`). Seeds ``currentScenario`` and the dropdown's initial selection.
-    private static let launchScenario =
-        StubScenario(rawValue: ProcessInfo.processInfo.environment["TOKENPACE_STUB"] ?? "") ?? .realNetwork
+    /// How `TOKENPACE_STUB` resolved at launch (#267): the scenario, whether it was asked for
+    /// explicitly, and the bogus value if one was passed. Resolution lives in ``StubScenario`` so the
+    /// rules are testable and the valid-id list can't drift from the registry.
+    ///
+    /// An installed `.app` with no env stays live (production's normal mode); a dev build with no env —
+    /// or **any** unrecognized value — gets the frozen `screenshot` frame instead of the real network.
+    private static let launchResolution = StubScenario.resolve(
+        env: ProcessInfo.processInfo.environment["TOKENPACE_STUB"],
+        isAppBundle: LaunchAtLoginController.isAppBundle
+    )
+
+    /// The `TOKENPACE_STUB` scenario the app launched with. Seeds ``currentScenario`` and the
+    /// dropdown's initial selection.
+    private static let launchScenario = launchResolution.scenario
 
     /// The scenario currently driving the data source. Starts at ``launchScenario`` and changes only
     /// via the dev-tools live selector (#187), which tears down and rebuilds the polling engine. Read
     /// by the Quit dev-build tag and the dropdown preselection so both agree on what's live.
     private var currentScenario: StubScenario = AppDelegate.launchScenario
+
+    /// Whether ``currentScenario`` was **deliberately** chosen — a recognized `TOKENPACE_STUB` value, a
+    /// plain `.app` launch, or a pick from the dev-tools dropdown. False when we fell back after a bad
+    /// env value, or when a dev build defaulted to the screenshot frame.
+    ///
+    /// Only the awaiting-input watcher reads this (see ``updateAwaitingInputWatcher``): it scans the
+    /// **live** `~/.claude` trees, so it must never come up on a live network nobody selected — that
+    /// mismatch is what surfaced #267.
+    private var scenarioWasExplicit: Bool = AppDelegate.launchResolution.isExplicit
 
     /// The clock the **visible** render reads. Normally the wall clock, but a date-decoupled stub
     /// (`StubScenario.stubClock`) pins it to a fixed instant so a stubbed frame is reproducible and,
@@ -250,6 +268,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // before the rest of launch depends on it (#71, ADR-0023). Phase 1 is a no-op scaffold that
         // only records the running version.
         runConfigMigrationsIfNeeded()
+
+        // A bogus `TOKENPACE_STUB` no longer falls through to the live network (#267) — say so, naming
+        // the value and every id that would have worked, so the run isn't mistaken for what was asked
+        // for. Silent on every normal path (absent env, or a value the registry recognizes).
+        if let bogus = Self.launchResolution.unknownValue {
+            AppLogger.lifecycle.notice(
+                """
+                dev: unknown TOKENPACE_STUB "\(bogus, privacy: .public)" — running the frozen \
+                \(StubScenario.screenshot.id, privacy: .public) stub instead of the real network. \
+                Available: \(StubScenario.validIDs.joined(separator: ", "), privacy: .public)
+                """
+            )
+        }
 
         // Dev hook (#242): `TOKENPACE_GENERATE_JOURNAL=<days>` writes a synthetic multi-day journal and
         // exits, so a downstream reader can be pointed at it via `TOKENPACE_JOURNAL_FILE`. Bypasses the
@@ -874,6 +905,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard scenario != currentScenario else { return }
         AppLogger.lifecycle.notice("dev: stub scenario → \(scenario.id, privacy: .public)")
         currentScenario = scenario
+        // Picking from the dropdown *is* the explicit choice (#267), so selecting "Real network" here
+        // brings the awaiting-input watcher up even on a dev build — the supported way to exercise the
+        // hand indicator against live sessions.
+        scenarioWasExplicit = true
         updateQuitDevTitle()             // keep the ⌥-Option Quit tag in sync with the live stub
         buildAndRunEngine(for: scenario)
         lastStatusSuccess = nil          // make the status poll due on the next (immediate) tick
@@ -1485,10 +1520,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// reproducible frame, but the watcher reads the *live* `~/.claude` trees — so a screenshot run
     /// would show whatever real sessions happen to be waiting right then. `TOKENPACE_AWAITING=N` stays
     /// the way to exercise the indicator under a stub, with synthetic sessions instead of live ones.
+    ///
+    /// Live alone isn't enough, though: that live network must have been **explicitly** selected
+    /// (``scenarioWasExplicit``) — `TOKENPACE_STUB=real`, a plain `.app`, or the dev-tools dropdown.
+    /// A dev build that merely *ended up* live is precisely the #267 failure, where the hand indicator
+    /// reported the maintainer's real sessions in a run everyone read as stubbed. Deliberately keeping
+    /// the watcher testable on a dev build is why this gates on intent rather than on bundle type.
     private func updateAwaitingInputWatcher() {
         let wantWatcher = PersistedConfig.awaitingInputEnabled
             && awaitingInputStub == nil
             && currentScenario == .realNetwork
+            && scenarioWasExplicit
         guard wantWatcher else {
             awaitingInputWatcher?.setActive(false)
             awaitingInputWatcher = nil
