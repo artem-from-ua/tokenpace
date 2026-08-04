@@ -8,8 +8,13 @@ import TokenPaceKit
 ///
 /// Modeled on ``ColorRole``: a `CaseIterable` registry with computed display metadata. The `rawValue`
 /// of every case is the literal string a user would pass in `TOKENPACE_STUB=…`, so
-/// `StubScenario(rawValue:)` round-trips env compatibility for free. `realNetwork` (`""`) is the
-/// no-stub default: the real usage API over `URLSession.shared`.
+/// `StubScenario(rawValue:)` round-trips env compatibility for free. ``realNetwork`` (`"real"`) is the
+/// no-stub production path: the real usage API over `URLSession.shared`.
+///
+/// Env resolution goes through ``resolve(env:isAppBundle:)`` — **never** `init(rawValue:)` directly.
+/// A bare `init(rawValue:)` cannot tell "nothing was asked for" from "something bogus was asked for",
+/// and collapsing the latter into the live network is exactly the #267 bug: a run meant to be stubbed
+/// silently polled the real API and read the real `~/.claude` trees.
 ///
 /// The `summary` strings are lifted from the inline stub docs in `startPolling` and the
 /// `docs/guides/ui-verification.md` table — keep them in sync with the `StubUsageTransport.Mode`
@@ -18,7 +23,11 @@ enum StubScenario: String, CaseIterable {
 
     /// No stub — the production path: real usage API over the live network, Keychain token, live
     /// refresher. Selecting this from the dropdown tears down the stub pipeline and polls the real API.
-    case realNetwork = ""
+    ///
+    /// Its id is a **non-empty** `"real"` on purpose (#267): while the empty string meant "live", an
+    /// absent `TOKENPACE_STUB` and an explicit request for the live network were indistinguishable, so
+    /// a typo'd id fell through to production data. Live is now something you have to ask for by name.
+    case realNetwork = "real"
 
     case climbing = "1"
     case screenshot = "screenshot"
@@ -39,6 +48,7 @@ enum StubScenario: String, CaseIterable {
     case calmBoth = "calm-both"
     case farBehind = "far-behind"
     case nearZero = "near-zero"
+    case edgeExtremes = "edge-extremes"
     case calmDegraded = "calm-degraded"
     case allGreen = "all-green"
     case creditsActive = "credits-active"
@@ -48,8 +58,74 @@ enum StubScenario: String, CaseIterable {
     case creditsOnset = "credits-onset"
     case resetGrace = "reset-grace"
 
-    /// The env id (`TOKENPACE_STUB` value). `realNetwork` maps to the empty string / absent env.
+    /// The env id (`TOKENPACE_STUB` value), including `"real"` for ``realNetwork``.
     var id: String { rawValue }
+
+    // MARK: - Env resolution (#267)
+
+    /// The outcome of reading `TOKENPACE_STUB`: which scenario to run, whether the choice was made
+    /// **explicitly**, and the bogus value if one was supplied.
+    struct Resolution: Equatable {
+        /// The scenario to drive the data source with.
+        let scenario: StubScenario
+
+        /// Whether this scenario was *asked for* — a recognized `TOKENPACE_STUB` value, or a plain
+        /// `.app` launch with no env at all (production's normal mode). False only when we fell back
+        /// after a bad value, or when a dev build defaulted to the screenshot frame.
+        ///
+        /// Gates the awaiting-input watcher (#259): it reads the **live** `~/.claude` trees, so it must
+        /// never come up on a live network nobody deliberately selected.
+        let isExplicit: Bool
+
+        /// The unrecognized `TOKENPACE_STUB` value that triggered the fallback, or `nil` on every
+        /// normal path. Non-nil means the caller should warn — the run is *not* what was requested.
+        let unknownValue: String?
+    }
+
+    /// Every id a maintainer can actually pass in `TOKENPACE_STUB=…`, in registry order — built from
+    /// `allCases`, so it can never drift from the enum.
+    static var validIDs: [String] {
+        // Debug-only guard on the registry's own shape: an empty or duplicated id makes "absent env"
+        // and "this id" the same string, which is precisely how #267 happened. The unit tests cover the
+        // rule (`StubResolutionTests`) but live in the Kit target and can't see this enum — so the
+        // registry itself is checked here, where it is defined. Compiled out of release builds.
+        assert(StubResolution.idsAreResolvable(allCases.map(\.rawValue)),
+               "StubScenario ids must be non-empty and unique — an empty id resurrects #267")
+        return allCases.map(\.id)
+    }
+
+    /// Map a raw `TOKENPACE_STUB` value onto the scenario to run.
+    ///
+    /// The whole point is that an **unrecognized** value must not resolve to the live network (#267).
+    /// A stubbed run that silently polls production looks stubbed in every visible respect while
+    /// reporting real data, which is worse than failing outright. So a bad value degrades *away* from
+    /// live, onto the frozen ``screenshot`` frame, and says so via `unknownValue`.
+    ///
+    /// The rule itself lives in ``StubResolution`` (pure, unit-tested, ADR-0009); this is the thin
+    /// binding that feeds it the registry's ids and maps the answer back onto a case.
+    ///
+    /// - Parameters:
+    ///   - env: the raw `TOKENPACE_STUB` value; `nil` when the variable is absent entirely. Note that
+    ///     an empty string is *present but bogus* — it is no longer ``realNetwork``'s id.
+    ///   - isAppBundle: whether this is an installed `.app` (`LaunchAtLoginController.isAppBundle`).
+    ///     A production bundle with no env is the one path that stays live by default — otherwise a
+    ///     real user would see a canned frame instead of their own limits.
+    static func resolve(env: String?, isAppBundle: Bool) -> Resolution {
+        let outcome = StubResolution.resolve(
+            env: env,
+            isAppBundle: isAppBundle,
+            liveID: StubScenario.realNetwork.id,
+            fallbackID: StubScenario.screenshot.id,
+            knownIDs: validIDs
+        )
+        // `outcome.id` is always one of `validIDs`, so the lookup cannot fail; fall back to the frozen
+        // frame rather than force-unwrapping — never to the live network.
+        return Resolution(
+            scenario: StubScenario(rawValue: outcome.id) ?? .screenshot,
+            isExplicit: outcome.isExplicit,
+            unknownValue: outcome.unknownValue
+        )
+    }
 
     // MARK: - Display
 
@@ -76,6 +152,7 @@ enum StubScenario: String, CaseIterable {
         case .calmBoth:            return "Pacing · both calm"
         case .farBehind:           return "Pacing · both far behind (blue)"
         case .nearZero:            return "Pacing · near-zero (pill caps)"
+        case .edgeExtremes:        return "Pacing · edge extremes (5h 0 %, 7d 100 %)"
         case .calmDegraded:        return "Calm bars + degraded dot"
         case .allGreen:            return "All services green (⌥ reveals)"
         case .creditsActive:       return "Credits · active (paced)"
@@ -147,6 +224,10 @@ enum StubScenario: String, CaseIterable {
                  + "with barely any time elapsed → a hairline pacing gap. Exercises the min-strip pill "
                  + "geometry: the coloured part must render as a rounded pill flush inside the track "
                  + "(both ends rounded), never a sliver overhanging the track's cap. Menu bar + popup."
+        case .edgeExtremes:
+            return "Both ends of the scale at once: 5h at 0 % and 7d at 100 % on fresh windows. The 7d "
+                 + "bar must fill the track end to end — its caps flush against the track's rounded ends, "
+                 + "with no grey sliver left past the fill — while 5h shows a pill at the very start."
         case .calmDegraded:
             return "Calm bars + a degraded (yellow) service dot: with \"Calm colours\" (#105) off the "
                  + "dot is yellow; turn Calm on and it mutes to white."
@@ -207,6 +288,7 @@ enum StubScenario: String, CaseIterable {
         case .calmBoth:            return StubUsageTransport(mode: .pacing(.calmBoth), now: now)
         case .farBehind:           return StubUsageTransport(mode: .pacing(.farBehind), now: now)
         case .nearZero:            return StubUsageTransport(mode: .pacing(.nearZero), now: now)
+        case .edgeExtremes:        return StubUsageTransport(mode: .pacing(.edgeExtremes), now: now)
         case .calmDegraded:        return StubUsageTransport(mode: .calmDegraded, now: now)
         case .allGreen:            return StubUsageTransport(mode: .allGreen, now: now)
         case .creditsActive:       return StubUsageTransport(mode: .credits(.active), now: now)

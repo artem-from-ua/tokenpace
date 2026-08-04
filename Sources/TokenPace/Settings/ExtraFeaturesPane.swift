@@ -94,6 +94,13 @@ struct ExtraFeaturesPane: View {
                         get: { model.awaitingInputEnabled },
                         set: { model.setAwaitingInputEnabled($0) }))
                     SettingsHint(text: "Shows how many Claude Code sessions are waiting for your reply. Configure where it appears in Appearance.")
+                    // Unlike the stub caveat in the header, this one is unconditional: the feature
+                    // reads Claude Code's private state files (ADR-0066), so the fragility is a
+                    // permanent property of it rather than a state we detect. Declaring it here is
+                    // what we do instead of failing loudly on an unparseable format (#243).
+                    SettingsHint(text: "Experimental. This reads Claude Code's internal files, which are "
+                        + "undocumented and may be changed on Anthropic's side at any time. If that happens, "
+                        + "the count may stop appearing and disappearing properly.", warning: true)
                 }
             } header: {
                 // The watcher is gated on the real network: a stub is a frozen frame, and reading the
