@@ -1,9 +1,19 @@
 ---
 status: accepted
 date: 2026-07-27
+superseded_by: [0069]
 ---
 
 # ADR-0042: Вікно Settings — SwiftUI Form.grouped замість ручного AppKit-малювання
+
+> **Частково переглянуто [ADR-0069](0069-settings-window-height-resizable.md):** клауза §4 про
+> геометрію вікна («857×480 fixed … hidden zoom/miniaturize») більше не чинна — вікно **resizable по
+> висоті** (ширина 857 лишається запіненою), zoom і miniaturize **показані**, зелена кнопка розтягує
+> вертикально, а фрейм персистується з валідацією проти поточної конфігурації екранів. Там-таки
+> з'ясувалося, що `NSHostingController` затирає всі size-межі вікна під час першого layout-проходу,
+> тож пін ширини тримає `windowWillResize`, а не `contentMinSize`/`contentMaxSize`. Решта рішення
+> (SwiftUI `Form.formStyle(.grouped)`, `NavigationSplitView`, `@Observable SettingsModel`, дослівно
+> збережений контракт `AppDelegate.openSettings`) чинна.
 
 ## Контекст
 
