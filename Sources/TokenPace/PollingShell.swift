@@ -367,8 +367,9 @@ actor StubUsageTransport: UsageTransport {
         /// Calm bars + **all-operational** service status (every component green): the usage side mirrors
         /// `.pacing(.calmBoth)` while the status side reports every component `operational`, so
         /// `worstProblem` is `nil` and the popup shows **no** status rows by default. Holding ⌥ Option
-        /// then reveals the four green rows — the one frame that verifies "⌥ reveals statuses even when
-        /// all green". Distinct from every other stub, which leaves the API `degraded_performance`.
+        /// then reveals the four green rows — the frame that verifies "⌥ reveals statuses even when all
+        /// green". Every stub other than `.calmDegraded`, `.staleError` and `.authError` is likewise
+        /// all-operational; this one exists to make the ⌥ reveal the *subject* of a named frame.
         case allGreen
         /// A money-credits ("extra usage") frame for the trailing ¤ icon (#144). Each `CreditsFrame`
         /// pins the 7-day window at 100 % (so `anyBaseLimitExhausted` holds and the icon shows) and
@@ -554,9 +555,14 @@ actor StubUsageTransport: UsageTransport {
         // logical services can monitor (`Claude Code`, `Claude API`, `claude.ai`, `Claude Cowork` —
         // ADR-0024). In `.authError` mode the API, Code, and Cowork are degraded and `claude.ai` has a
         // partial outage (the failure frame) — so with Cowork monitoring on, the popup shows a row per
-        // component (`API`, `Code`, `WEB/Desktop`, `Cowork`), each with its own status. Otherwise only
-        // the API is degraded, everything else operational. The incident is *ignored* (all lines still
-        // come from component.status). Lets the status lines be seen end-to-end without the live page.
+        // component (`API`, `Code`, `WEB/Desktop`, `Cowork`), each with its own status. The incident is
+        // *ignored* (all lines still come from component.status). Lets the status lines be seen
+        // end-to-end without the live page.
+        //
+        // Everything **not** in the handful of status-carrying frames below is all-operational. A stub
+        // exists to isolate one thing; a service dot nobody asked for is noise that leaks into every
+        // pacing/credits/idle screenshot and makes the frames read as if something were wrong. Only the
+        // frames whose *subject* is the status line carry a non-operational component.
         if request.url == StatusClient.endpoint {
             let failing = mode == .authError
             // Calm-degraded frame (#…): exactly one component degraded (the soft yellow state), the
@@ -566,15 +572,9 @@ actor StubUsageTransport: UsageTransport {
             // Stale-error frame (spacing bug): API + Code both **major outage** (the red dots from the
             // reported screenshot), everything else operational.
             let staleError = mode == .staleError
-            // All-green frame: every component operational, so `worstProblem` is `nil` — the popup shows
-            // no status rows unless ⌥ Option is held, which then reveals the four green rows. The one
-            // frame that verifies "⌥ reveals statuses even when all green"; every other stub leaves the
-            // API degraded (below), so this is the only way to see the all-operational rows.
-            let allGreen = mode == .allGreen
             let codeStatus = staleError ? "major_outage"
                 : (failing || calmDegraded) ? "degraded_performance" : "operational"
-            let apiStatus = staleError ? "major_outage"
-                : (calmDegraded || allGreen) ? "operational" : "degraded_performance"
+            let apiStatus = staleError ? "major_outage" : failing ? "degraded_performance" : "operational"
             let webStatus = failing ? "partial_outage" : "operational"
             let coworkStatus = failing ? "degraded_performance" : "operational"
             let body = """
