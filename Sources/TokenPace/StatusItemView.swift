@@ -782,7 +782,8 @@ final class StatusItemView: NSView {
     /// Shares `PopupBarView`'s inset-scale geometry: the span is mapped through the same `minStripWidth/2`
     /// inset and floored to a minimum width, so a near-zero span reads as a rounded "pill" (rounded on
     /// both ends) instead of a hairline, and its cap never overhangs the rounded track — matching the
-    /// popup exactly. `width` is unused now (the map reads `rect.width`); kept for call-site symmetry.
+    /// popup exactly. An end reaching the track's own edge snaps flush to it, so no grey sliver shows
+    /// before the fill. `width` is unused now (the map reads `rect.width`); kept for call-site symmetry.
     private func fillZone(from: Double, to: Double, in rect: NSRect, width: CGFloat, color: NSColor) {
         guard let stripRect = PopupBarView.stripRect(from: from, to: to, in: rect) else { return }
         let r = min(stripRect.width, stripRect.height) / 2

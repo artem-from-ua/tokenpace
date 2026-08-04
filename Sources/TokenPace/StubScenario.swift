@@ -48,6 +48,7 @@ enum StubScenario: String, CaseIterable {
     case calmBoth = "calm-both"
     case farBehind = "far-behind"
     case nearZero = "near-zero"
+    case edgeExtremes = "edge-extremes"
     case calmDegraded = "calm-degraded"
     case allGreen = "all-green"
     case creditsActive = "credits-active"
@@ -151,6 +152,7 @@ enum StubScenario: String, CaseIterable {
         case .calmBoth:            return "Pacing · both calm"
         case .farBehind:           return "Pacing · both far behind (blue)"
         case .nearZero:            return "Pacing · near-zero (pill caps)"
+        case .edgeExtremes:        return "Pacing · edge extremes (5h 0 %, 7d 100 %)"
         case .calmDegraded:        return "Calm bars + degraded dot"
         case .allGreen:            return "All services green (⌥ reveals)"
         case .creditsActive:       return "Credits · active (paced)"
@@ -222,6 +224,10 @@ enum StubScenario: String, CaseIterable {
                  + "with barely any time elapsed → a hairline pacing gap. Exercises the min-strip pill "
                  + "geometry: the coloured part must render as a rounded pill flush inside the track "
                  + "(both ends rounded), never a sliver overhanging the track's cap. Menu bar + popup."
+        case .edgeExtremes:
+            return "Both ends of the scale at once: 5h at 0 % and 7d at 100 % on fresh windows. The 7d "
+                 + "bar must fill the track end to end — its caps flush against the track's rounded ends, "
+                 + "with no grey sliver left past the fill — while 5h shows a pill at the very start."
         case .calmDegraded:
             return "Calm bars + a degraded (yellow) service dot: with \"Calm colours\" (#105) off the "
                  + "dot is yellow; turn Calm on and it mutes to white."
@@ -282,6 +288,7 @@ enum StubScenario: String, CaseIterable {
         case .calmBoth:            return StubUsageTransport(mode: .pacing(.calmBoth), now: now)
         case .farBehind:           return StubUsageTransport(mode: .pacing(.farBehind), now: now)
         case .nearZero:            return StubUsageTransport(mode: .pacing(.nearZero), now: now)
+        case .edgeExtremes:        return StubUsageTransport(mode: .pacing(.edgeExtremes), now: now)
         case .calmDegraded:        return StubUsageTransport(mode: .calmDegraded, now: now)
         case .allGreen:            return StubUsageTransport(mode: .allGreen, now: now)
         case .creditsActive:       return StubUsageTransport(mode: .credits(.active), now: now)
