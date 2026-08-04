@@ -96,6 +96,22 @@ final class PopupBarView: NSView {
         }
     }
 
+    /// Drives the smooth colour transitions (ADR-0070), shared with the menu-bar widget. The
+    /// animation state lives in the animator, **not** here: `PopupViewController.rebuild()` discards
+    /// and recreates every bar view on each update, so anything kept on the view would be lost on
+    /// the very next poll. `nil` renders every colour at its target (the old, instant behaviour).
+    weak var colorAnimator: ColorAnimator?
+
+    /// This bar's identity in the transition registry — `LimitRow.title` for a limit window, or
+    /// `nil` for the credits bar, which has no row and keys on ``TweenKey/credits(surface:part:)``.
+    /// Keyed by name rather than by position because per-model rows come and go, which would
+    /// otherwise hand a vanishing row's in-flight fade to its neighbour.
+    var tweenRow: String?
+
+    /// Pins the coloured strip to this fraction of the track for the `color-cycle` stub, so only the
+    /// colour changes on screen. Mirrors `StatusItemView.frozenStripFraction`; `nil` everywhere else.
+    var frozenStripFraction: Double?
+
     private enum Metrics {
         /// Height of the pacing bar itself (the coloured zones + indicator dot).
         static let barHeight: CGFloat = 6
@@ -225,7 +241,9 @@ final class PopupBarView: NSView {
                 idlePath.fill()
             } else {
                 // The solid idle strip carries the same ambient glow as a pacing strip (#188).
-                let idleColor = Palette.idleBlue
+                // Animated so idle→active reads as a fade (ADR-0070); the glow follows automatically
+                // because it is derived from this same colour.
+                let idleColor = animated(Palette.idleBlue, part: .fill)
                 withGlow(idleColor, radius: Self.idleGlowRadius, strength: Self.idleGlowStrength) {
                     idleColor.setFill()
                     idlePath.fill()
@@ -237,14 +255,9 @@ final class PopupBarView: NSView {
 
         guard let l = bar else { return }
 
-        // Pacing-gap colour.
-        let gapColor: NSColor
-        if l.pacing == .ahead {
-            gapColor = Self.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
-        } else {
-            // Calm side: base 5h/7d bars split green↔blue via behindColor; per-model/credits stay green.
-            gapColor = isBaseLimit ? Self.behindColor(l) : Palette.gapGreen
-        }
+        // Pacing-gap colour, routed through the transition layer so a threshold crossing fades
+        // instead of blinking (ADR-0070).
+        let gapColor = animated(gapColorTarget(l), part: .fill)
 
         // 1. Full-length grey track (rounded), drawn first as the base.
         Self.monochromeGrey.setFill()
@@ -254,8 +267,9 @@ final class PopupBarView: NSView {
         //    the gap `gapStart..gapEnd`; Simple uses a left-anchored ribbon `0..(gapEnd-gapStart)`. A flush
         //    end rounds identically to the grey bar's own cap, so it reads as one continuous rounded edge.
         //    3. The strip carries the ambient glow.
-        let stripFrom = barStyle.popupShowsTimeMarker ? l.gapStart : 0
-        let stripTo = barStyle.popupShowsTimeMarker ? l.gapEnd : (l.gapEnd - l.gapStart)
+        // The `color-cycle` stub pins the strip so only the colour moves (`frozenStripFraction`).
+        let stripFrom = frozenStripFraction != nil ? 0 : (barStyle.popupShowsTimeMarker ? l.gapStart : 0)
+        let stripTo = frozenStripFraction ?? (barStyle.popupShowsTimeMarker ? l.gapEnd : (l.gapEnd - l.gapStart))
         if let stripRect = Self.stripRect(from: stripFrom, to: stripTo, in: rect) {
             let capsule = min(stripRect.width, stripRect.height) / 2
             let stripPath = NSBezierPath(roundedRect: stripRect, xRadius: capsule, yRadius: capsule)
@@ -275,7 +289,10 @@ final class PopupBarView: NSView {
         //    replacing the old transparent slivers. 5. The marker carries a stronger ambient glow.
         // Pixel-snap the marker's centre x so its vertical edges land on whole pixels — a fractional
         // scaled x otherwise smears the thin border across two columns (the "crooked outline").
-        let cx = Self.scaleX(CGFloat(l.timeFraction), in: rect).rounded()
+        // Under the `color-cycle` stub the marker parks at the pinned strip's end, so Pace & Time keeps
+        // its full anatomy (strip + marker) while still holding the geometry still.
+        let markerFraction = frozenStripFraction ?? l.timeFraction
+        let cx = Self.scaleX(CGFloat(markerFraction), in: rect).rounded()
         let cy = rect.midY
         let mw = Metrics.indicatorWidth
         let mh = Metrics.indicatorHeight
@@ -378,11 +395,33 @@ final class PopupBarView: NSView {
     private func indicatorColor(_ l: BarLayout) -> NSColor {
         // The dot uses the exact pacing-bar colours so it reads as the same colour as the gap zone it
         // sits over, not a separate shade. A tie (usage == time) is still on pace → green/blue.
+        let target: NSColor
         if l.usageFraction > l.timeFraction {
-            return Self.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
+            target = Self.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
+        } else {
+            // Calm side: base 5h/7d bars split green↔blue via behindColor; per-model/credits stay green.
+            target = isBaseLimit ? Self.behindColor(l) : Palette.gapGreen
+        }
+        return animated(target, part: .marker)
+    }
+
+    /// This bar's pacing colour for the current state, **before** the transition layer.
+    private func gapColorTarget(_ l: BarLayout) -> NSColor {
+        if l.pacing == .ahead {
+            return Self.aheadColor(usage: l.usageFraction, time: l.timeFraction,
+                                   remainingSeconds: l.remainingSeconds)
         }
         // Calm side: base 5h/7d bars split green↔blue via behindColor; per-model/credits stay green.
         return isBaseLimit ? Self.behindColor(l) : Palette.gapGreen
+    }
+
+    /// Route a colour through the transition layer (ADR-0070), or return it unchanged when no
+    /// animator is attached (the dev-tools preview renders without one).
+    private func animated(_ target: NSColor, part: BarPart) -> NSColor {
+        guard let colorAnimator else { return target }
+        let key: TweenKey = tweenRow.map { .bar(surface: .popup, row: $0, part: part) }
+            ?? .credits(surface: .popup, part: part)
+        return colorAnimator.resolve(key, target: target)
     }
 
     /// The gap/dot colour when **ahead of pace** (`usage > time`), graded by how far ahead — the same
@@ -829,6 +868,20 @@ final class PopupViewController: NSViewController {
             rebuild()
         }
     }
+
+    /// Drives the smooth colour transitions (ADR-0070), shared with the menu-bar widget and owned by
+    /// `AppDelegate`. Handed to each `PopupBarView` and status dot during `rebuild()`, so the
+    /// animation state survives those views being recreated on every update.
+    weak var colorAnimator: ColorAnimator?
+
+    /// Pins the **5-hour** bar's coloured strip to this fraction of its track for the `color-cycle`
+    /// stub, so the only thing moving on screen is the colour. Every other row keeps its real
+    /// geometry, staying a motionless reference beside it. `nil` on every real data path.
+    var frozenStripFraction: Double?
+
+    /// The row the colour walk drives — matched against `LimitRow.title` (`PopupLayout` titles the
+    /// base 5-hour window this way).
+    private let frozenStripRow = "5-hour"
 
     /// Bar presentation style (#224), governing every bar in the popup. Pushed into each `PopupBarView`
     /// during `rebuild()` → `addBar`. Child bars are built fresh on each rebuild, so a change here must
@@ -1499,7 +1552,8 @@ final class PopupViewController: NSViewController {
     /// ``addBar(bar:subdivisions:idle:isLast:)`` that unpacks the row's geometry.
     private func addBar(_ row: LimitRow, isLast: Bool, isBaseLimit: Bool) {
         addBar(bar: row.bar, subdivisions: row.subdivisions, idle: row.sessionIdle,
-               blocked: row.sessionBlocked, isLast: isLast, isBaseLimit: isBaseLimit)
+               blocked: row.sessionBlocked, isLast: isLast, isBaseLimit: isBaseLimit,
+               tweenRow: row.title)
     }
 
     /// Add a pacing bar from raw geometry — shared by the token limit rows and the "Extra usage"
@@ -1508,9 +1562,17 @@ final class PopupViewController: NSViewController {
     /// draws the solid-blue knobless 5h track (#100). When `bar` is `nil` the view draws nothing —
     /// but callers only reach here with a real bar (idle uses the flag, not the layout).
     private func addBar(bar: BarLayout?, subdivisions: Int, idle: Bool, blocked: Bool = false,
-                        isLast: Bool, isBaseLimit: Bool = false) {
+                        isLast: Bool, isBaseLimit: Bool = false, tweenRow: String? = nil) {
         let view = PopupBarView()
         view.bar = bar
+        // Colour-transition wiring (ADR-0070). `tweenRow` is the row's title for a limit window and
+        // nil for the credits bar (which keys on `.credits`); the animator itself is owned by the
+        // app delegate, so the state survives this view being rebuilt on the next update.
+        view.colorAnimator = colorAnimator
+        view.tweenRow = tweenRow
+        // The colour walk only drives the 5-hour row; every other bar keeps its real geometry so it
+        // stays a still reference beside the animated one (ADR-0070).
+        view.frozenStripFraction = tweenRow == frozenStripRow ? frozenStripFraction : nil
         view.subdivisions = subdivisions
         view.idle = idle   // solid-blue knobless track when the 5h window is idle (#100)
         view.blocked = blocked   // grey instead of blue when that idle state is blocked (#158)
@@ -1543,7 +1605,17 @@ final class PopupViewController: NSViewController {
         // here — it is the trailing half, so every status word right-aligns into one column.
         let dot = GlowDotView()
         let dotStatus = status
-        dot.fill = { Self.dotColor(dotStatus) }
+        // The dot's colour is a closure the layer re-reads on every update, so routing it through the
+        // animator here is enough to make a status change fade (ADR-0070). Keyed by component label,
+        // so each service row animates independently; the glow follows the same colour.
+        let animator = colorAnimator
+        let component = label
+        dot.fill = {
+            let target = Self.dotColor(dotStatus)
+            guard let animator else { return target }
+            return animator.resolve(
+                .serviceDot(surface: .popup, component: component), target: target)
+        }
         dot.glowRadius = Self.dotGlowRadius
         dot.glowStrength = Self.dotGlowStrength
         dot.translatesAutoresizingMaskIntoConstraints = false
