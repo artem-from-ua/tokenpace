@@ -417,6 +417,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["TOKENPACE_OPEN_TROUBLESHOOT"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.openTroubleshoot() }
         }
+        // Same for the Insights window (#245) — normally the first dropdown item; auto-open lets the
+        // pilot chart be verified on a fixture/real journal without an AX click.
+        if ProcessInfo.processInfo.environment["TOKENPACE_OPEN_INSIGHTS"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.openInsights() }
+        }
         // Same for the dev colour tuner (#185), normally reached only via ⌥ on the (flag-gated)
         // "Development tools…" item — doubly awkward to script. Requires the `devToolsEnabled`
         // defaults key set too (`ColorStore.devToolsEnabled`).
@@ -915,6 +920,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // token dates) refresh in place each poll (ADR-0020). No-op while the controller is nil.
         troubleshootWC?.render(output)
         journalPoll(output)
+        // Live-refresh an open Insights window **after** the new record is on disk (`journalPoll` above),
+        // so the re-read picks it up. No-op while the window is closed (#245).
+        insightsWC?.render()
         pollStatusIfDue(usageInterval: output.interval)
         pollUpdateIfDue()
         pollArchiveIfDue()

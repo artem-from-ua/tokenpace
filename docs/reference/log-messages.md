@@ -162,6 +162,14 @@ category (the dev `TOKENPACE_GENERATE_JOURNAL` hook).
 | — | `journal` | `.notice` | `journal: generating fixture — <days> days, <n> records` | `generateJournalFixture` (App) — the dev `TOKENPACE_GENERATE_JOURNAL` hook started synthesizing a journal |
 | — | `journal` | `.notice` | `journal: fixture written` | `generateJournalFixture` (App) — the fixture was written; the app then terminates |
 
+## `Sources/TokenPace/JournalStore.swift`
+
+Read side of the usage journal (#245) — resolves the monthly/override files and parses them for the Insights chart.
+
+| Line | Category | Level | Message | When |
+|------|----------|-------|---------|------|
+| — | `journal` | `.debug` | `journal read: skipped <n> unparseable line(s)` | `load()` — the parse tolerated `<n>` corrupt/torn lines (e.g. a half-written tail); the rest were returned. `.debug` (diagnostic, not an error) |
+
 ## `Sources/TokenPace/ShellEnvironment.swift`
 
 Reads a variable from the login shell's rc files for a login-launched app (#37, ADR-0025).
@@ -351,9 +359,9 @@ One log line per interval change. The format is built by
 | `keychain` | 11 | `ClaudeCLIRefresher` (6), `TokenProvider` (4), `PollingEngine` (1) |
 | `ui` | 0 | — (category defined, unused) |
 | `archive` | 5 | `App` (3), `LogArchiver` (2) |
-| `journal` | 6 | `UsageJournal` (4), `App` (2) |
+| `journal` | 7 | `UsageJournal` (4), `App` (2), `JournalStore` (1) |
 
-**Total: 113 log statements** — `.error` ×37, `.notice` ×71, `.info` ×1, `.debug` ×3.
+**Total: 114 log statements** — `.error` ×37, `.notice` ×71, `.info` ×1, `.debug` ×4.
 
 The `journal: enabled set <bool>` toggle line (`SettingsModel`) is a `lifecycle` statement (like the
 other Settings-toggle lines), counted under `lifecycle`; the six `journal`-category statements are the

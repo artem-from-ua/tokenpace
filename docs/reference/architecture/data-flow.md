@@ -199,14 +199,8 @@ Claude Code пише сам:
 
 ```
 awaiting = ~/.claude/sessions/<pid>.json  .status == "waiting"
-        OR (state.json свіжий AND ~/.claude/jobs/<jobId>/state.json .needs != null / .tempo == "blocked")
+        OR ~/.claude/jobs/<jobId>/state.json .needs != null / .tempo == "blocked"
 ```
-
-**Freshness-guard.** `needs`/`tempo` оновлює власний сканер Claude Code, який для worktree-сесій
-розсинхронюється і **заморожує** `state.json` на минулій фазі (`needs:"approve plan"`) → фантомна
-рука, що не гасне. Тому ці дві гілки враховуємо лише коли `state.json.updatedAt` (ISO) не старший за
-`session.statusUpdatedAt` (ms) більш ніж на 60 с; `status == "waiting"` безумовний; недоступний
-timestamp → fail-open. Деталі — ADR-0066 (постскриптум).
 
 - **`AwaitingInputScanner`** (`TokenPaceKit`, pure, stateless) — читає файли (без `JSONDecoder`,
   таргетовані regex), джойнить лише по живих сесіях, повертає **`AwaitingSessions`** (кожна сесія:
@@ -259,13 +253,24 @@ timestamp → fail-open. Деталі — ADR-0066 (постскриптум).
    (`JournalRecord`), плюс resume-маркери на розривах семплування. Пише `UsageJournal` (actor,
    non-blocking); читає назад `JournalReader.parse(_:)`. Деталі типів — рядок «JournalRecord …» у
    [services-and-config.md](services-and-config.md).
-2. **Aggregator (#244)** — чистий `UsageGridAggregator.grid(...)`: `[JournalRecord]` → сітка
-   **днів × годин** для однієї метрики під одним фільтром (5h/7d). Пілотна метрика `sampleDensity`
-   рахує щільність семплів; комірки-розриви (`GridCell.gap`) тримаються окремо від «0 семплів», щоб
-   візуалізація не інтерполювала крізь діри (та сама чесність, що `ServiceStatus.unknown`/ADR-0027).
+2. **Aggregator (#244, переосмислений у #245)** — чистий `UsageGridAggregator.weekHourGrid(...)`:
+   `[JournalRecord]` → сітка **днів тижня × годин** (7×24) для однієї метрики під одним фільтром
+   (5h/7d). Згортає всю історію: усі понеділки складаються в один рядок — сітка відповідає на «коли
+   я зазвичай працюю», а не «як виглядав минулий тиждень». Комірка = **середнє на спостережену
+   годину**; `GridCell.gap` = слот, не спостережений **жодного** разу, і тримається окремо від
+   «дивилися, 0 семплів», щоб візуалізація не інтерполювала крізь діри (та сама чесність, що
+   `ServiceStatus.unknown`/ADR-0027). Календарну `grid(...)` вилучено (ADR-0068).
    AppKit-free, в `TokenPaceKit` — одне місце, яке пілотний чарт і будь-яка пізніша метрика реюзають.
-3. **Window + pilot chart (#245)** — вікно Insights (`InsightsWindowController`, стиль Settings)
-   рендерить сітку агрегатора першим чартом; відкривається з першого dropdown-пункту «Insights…».
+3. **Window + pilot chart (#245, ADR-0068)** — вікно Insights (`InsightsWindowController`, стиль
+   Settings) рендерить сітку агрегатора першим чартом. Read-path: `JournalStore.load()` (shell) списує
+   місячні release/dev-файли (або `TOKENPACE_JOURNAL_FILE`), зливає, парсить `JournalReader` →
+   `[JournalRecord]` → `UsageGridAggregator.weekHourGrid(firstWeekday:2, timeZone:.current)`. Вікно —
+   sidebar дашбордів + деталь (`NavigationSplitView`, як Settings); `InsightsViewModel` (`@Observable`)
+   тримає сітку+фільтр+вибір дашборду; `UsageHeatmapView` (Swift Charts `RectangleMark`) малює heatmap
+   7 днів тижня × 24 год — колір за щільністю (фіксована стеля), «never observed» штрихом (gap ≠ zero),
+   комірки фіксованого розміру (чарт не розтягується). Refresh — on-open
+   (`show()`) і on-poll (`insightsWC?.render()` у `apply` після `journalPoll`), без таймерів.
+   Відкривається з першого dropdown-пункту «Insights…» (або `TOKENPACE_OPEN_INSIGHTS=1`).
 
 Кінцеві consumer-фічі поверх журналу — окремі: unexplained relief (#239), personal service-status
 history (#240), burn-rate vs baseline (#241). Вони читають той самий журнал через `JournalReader`.
