@@ -791,6 +791,29 @@ final class PopupViewController: NSViewController {
         NSFontManager.shared.convert(.systemFont(ofSize: Metrics.textSize), toHaveTrait: .boldFontMask)
     }
 
+    /// The left half of the "Claude" section header: **"Claude"** in the bold ``menuItemFont``, and —
+    /// when a plan label is present (e.g. "Max 5x", from the Keychain rate-limit tier) — a bold `･`
+    /// separator followed by the plan in the *regular* weight of the same size. All three parts share
+    /// ``claudeBrandColor``: the plan reads as part of the same brand mark, distinguished from "Claude"
+    /// by weight, not colour (the plan itself is deliberately **not** bold; the `･` separator is, to
+    /// match "Claude"). Returns a single attributed label so the parts share one baseline.
+    private static func brandTitleLabel(plan: String?) -> NSTextField {
+        let bold: [NSAttributedString.Key: Any] = [.font: menuItemFont, .foregroundColor: claudeBrandColor]
+        let title = NSMutableAttributedString(string: claudeCodeSectionTitle, attributes: bold)
+        if let plan, !plan.isEmpty {
+            // Bold `･` separator (halfwidth katakana middle dot, U+FF65), then the regular-weight plan.
+            title.append(NSAttributedString(string: " ･ ", attributes: bold))
+            title.append(NSAttributedString(
+                string: plan,
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: Metrics.textSize),
+                    .foregroundColor: claudeBrandColor,
+                ]))
+        }
+        let label = NSTextField(labelWithAttributedString: title)
+        return label
+    }
+
     /// Dimmed text colour for supporting numbers/rows ("88% used", "resets in …", "Updated …",
     /// service-status words) — neither `secondaryLabelColor` (too light) nor `tertiaryLabelColor`
     /// (too dark) alone; AppKit has no built-in "in-between" semantic label colour, so this blends the
@@ -872,13 +895,12 @@ final class PopupViewController: NSViewController {
         // the awaiting-input indicator (hand + count) pinned flush right. When there's no awaiting count,
         // fall back to the plain brand-left / age-right split line.
         let sectionHeader: NSView
+        // The brand title — "Claude" plus the plan label ("Max 5x") when present, both in brand colour.
+        let brand = Self.brandTitleLabel(plan: layout.planLabel)
         if let awaiting = layout.awaitingInput {
-            // "Claude  <age>" together on the left. On the right: the summary badge when ⌥ is up;
+            // "Claude Max 5x  <age>" together on the left. On the right: the summary badge when ⌥ is up;
             // nothing when ⌥ is held (the per-project breakdown below supersedes it — but the age
-            // stays put next to "Claude", it does not move to where the badge was). (#233)
-            let brand = NSTextField(labelWithString: Self.claudeCodeSectionTitle)
-            brand.font = Self.menuItemFont
-            brand.textColor = Self.claudeBrandColor
+            // stays put next to the brand title, it does not move to where the badge was). (#233)
             let age = NSTextField(labelWithString: ageString)
             age.font = .systemFont(ofSize: Metrics.textSize)
             age.textColor = Self.dimmedLabelColor
@@ -889,10 +911,10 @@ final class PopupViewController: NSViewController {
             let right: NSView = optionHeld ? NSView() : makeAwaitingBadge(awaiting)
             sectionHeader = addSplitRow(leadingView: leading, rightView: right)
         } else {
-            sectionHeader = addSplitLine(
-                left: Self.claudeCodeSectionTitle, right: ageString,
-                leftFont: Self.menuItemFont, rightFont: .systemFont(ofSize: Metrics.textSize),
-                leftColor: Self.claudeBrandColor, rightColor: Self.dimmedLabelColor)
+            let age = NSTextField(labelWithString: ageString)
+            age.font = .systemFont(ofSize: Metrics.textSize)
+            age.textColor = Self.dimmedLabelColor
+            sectionHeader = addSplitRow(leadingView: brand, rightView: age)
         }
         stack.setCustomSpacing(Metrics.sectionSpacing, after: sectionHeader)
 

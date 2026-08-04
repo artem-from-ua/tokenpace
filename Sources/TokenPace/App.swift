@@ -1531,7 +1531,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // "Far behind" interval: the user's green→blue crossover scale (off→0/no-blue, short→1,
             // medium→2, long→3). `nil` (off) maps to 0.
             behindMultiplier: PersistedConfig.farBehindInterval.multiplier ?? 0)
-            .withAwaitingInput(awaitingInput))   // #233: graft the awaiting-input indicator (right of brand)
+            .withAwaitingInput(awaitingInput)   // #233: graft the awaiting-input indicator (right of brand)
+            // Graft the brand-coloured plan label ("Max 5x") from the Keychain rate-limit tier — a
+            // plan mark, not a secret. `nil` (no tier / unreadable creds) draws just "Claude".
+            .withPlanLabel(claudePlanLabel(rateLimitTier: output.diagnostics?.token?.rateLimitTier)))
     }
 
     /// Set the popup model **and** resize the hosted view to fit. A menu item's hosted view must

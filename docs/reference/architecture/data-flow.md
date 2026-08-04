@@ -221,6 +221,29 @@ awaiting = ~/.claude/sessions/<pid>.json  .status == "waiting"
 
 Повний дизайн каденції/кешу/логування — [awaiting-input-refresh.md](../../design/awaiting-input-refresh.md).
 
+## Plan label у заголовку «Claude»
+
+Праворуч від слова **Claude** (першого рядка попапа) виводиться назва плану підписки — `Claude ･ Max 5x`
+— **фірмовим теракотовим кольором** (`claudeBrand`, `#d97757`; той самий, що й «Claude»). «Claude» і
+роздільник `･` — жирні; сама назва плану — **не** жирна (відрізняється вагою, не кольором).
+
+- **Джерело.** Не з usage-API, а з OAuth-payload у Keychain: поле `rateLimitTier`
+  (напр. `default_claude_max_5x`) на `TokenCredentials` → `TokenDiagnostics` →
+  `output.diagnostics?.token?.rateLimitTier`. Не секрет — лише плановий маркер. `subscriptionType`
+  (`"max"`) **не використовується**: він надлишковий — назва сім'ї плану й множник уже є в `rateLimitTier`.
+- **Мапінг** — `claudePlanLabel(rateLimitTier:)` (`TokenPaceKit`, pure). Це **whitelist, не best-effort**:
+  публічної таблиці tier'ів немає, а сторонні клієнти суперечать одне одному (`default_claude_ai` →
+  «Pro» в одних, «Free» в інших), тож ми розпізнаємо **лише** впевнені форми, а на решту повертаємо
+  `nil` — інакше в бренд-кольорі відрендериться здогад, що читається як баг. Розпізнаємо:
+  - `default_claude_max_<N>x` → `Max <N>x` (патерн: `5x`/`20x`/майбутній `50x`; множник зберігає малу `x`);
+  - `default_claude_pro` → `Pro`;
+  - будь-що інше (`default`, `default_claude_ai`, невідоме, відсутнє) → `nil`.
+- **Рендер.** `nil` → лише «Claude», **без** роздільника `･`. Непорожня мітка графтиться на layout через
+  `PopupLayout.withPlanLabel(_:)` у `render()` — поза usage-`make`, тим самим патерном, що й
+  `withAwaitingInput` (джерело поза usage-снапшотом). `PopupViewController.brandTitleLabel(plan:)` збирає
+  єдиний attributed-лейбл (спільна базова лінія). Обидві гілки заголовка (звичайна / з awaiting-індикатором)
+  використовують той самий лейбл.
+
 ## Компоненти потоку даних
 
 | Компонент | Відповідальність |
