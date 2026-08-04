@@ -97,6 +97,49 @@ struct AwaitingInputScannerTests {
         #expect(fx.count() == 0)
     }
 
+    // MARK: status == "busy" (running a turn — never awaiting)
+
+    /// The post-approval stall: right after a plan is approved the daemon leaves
+    /// `needs:"approve plan"` in the job state while the session runs the next turn, and freezes
+    /// both timestamps together so the freshness guard still sees a "fresh" pair. The session file
+    /// reports the truth (`busy`), which must win over the stale job state.
+    @Test func busySessionWithStaleApprovePlanNeedsDoesNotCount() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "busy", jobId: "job1")
+        fx.job("job1", state: "blocked", tempo: "blocked",
+               needs: "approve plan", updatedAtDaysBeforeNow: 0)   // fresh by the guard's measure
+        #expect(fx.count() == 0)
+    }
+
+    /// Same stall expressed only as `tempo:"blocked"` — also outranked by a `busy` session.
+    @Test func busySessionWithTempoBlockedDoesNotCount() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "busy", jobId: "job1")
+        fx.job("job1", state: "blocked", tempo: "blocked", needs: nil, updatedAtDaysBeforeNow: 0)
+        #expect(fx.count() == 0)
+    }
+
+    /// The `busy` shortcut must not shadow step 1: a session with an *active* prompt reports
+    /// `waiting`, and that is a direct real-time signal which still counts.
+    @Test func waitingStatusWinsOverBusyShortcut() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "waiting", jobId: "job1")
+        fx.job("job1", state: "working", tempo: "active", needs: nil, updatedAtDaysBeforeNow: 0)
+        #expect(fx.count() == 1)
+    }
+
+    /// A `busy` session must not suppress a *different* session that genuinely awaits input.
+    @Test func busySessionDoesNotMaskAnotherAwaitingSession() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "busy", jobId: "job1")
+        fx.job("job1", state: "blocked", tempo: "blocked", needs: "approve plan",
+               updatedAtDaysBeforeNow: 0)
+        fx.session("2", status: "idle", jobId: "job2")
+        fx.job("job2", state: "blocked", tempo: "blocked", needs: "confirm the edit",
+               updatedAtDaysBeforeNow: 0)
+        #expect(fx.count() == 1)
+    }
+
     // MARK: jobs/<id>/state.json rescue (idle session that is actually blocked)
 
     @Test func idleSessionWithNeedsCounts() {
