@@ -23,7 +23,9 @@ private final class ClaudeFixture {
     func session(_ pid: String, status: String, jobId: String? = nil,
                  ageDays: Double = 0, cwd: String = "/repo/app") -> URL {
         let updatedMs = Int((refNow.timeIntervalSince1970 - ageDays * 86_400) * 1000)
-        var s = #"{"pid":\#(pid),"status":"\#(status)","cwd":"\#(cwd)","updatedAt":\#(updatedMs)"#
+        // Both `updatedAt` and `statusUpdatedAt` are set to the same instant, as Claude Code does; the
+        // freshness guard prefers `statusUpdatedAt`, and age math reads `updatedAt`.
+        var s = #"{"pid":\#(pid),"status":"\#(status)","cwd":"\#(cwd)","updatedAt":\#(updatedMs),"statusUpdatedAt":\#(updatedMs)"#
         if let jobId { s += #","jobId":"\#(jobId)""# }
         s += "}"
         let url = home.appendingPathComponent("sessions/\(pid).json")
@@ -32,19 +34,37 @@ private final class ClaudeFixture {
     }
 
     /// Write a `jobs/<jobId>/state.json` file (pretty-printed with spaces, like the daemon writes it).
+    ///
+    /// `updatedAtDaysBeforeNow` sets the ISO `updatedAt` field the freshness guard reads: `nil` omits
+    /// it entirely (guard fails open — the pre-guard behavior most tests exercise), `0` writes
+    /// `refNow`, a positive value writes that many days *before* `refNow` (a stale worktree state).
     func job(_ jobId: String, state: String = "working", tempo: String = "active",
-             needs: String? = nil, originCwd: String? = nil) {
+             needs: String? = nil, originCwd: String? = nil,
+             updatedAtDaysBeforeNow: Double? = nil) {
         let dir = home.appendingPathComponent("jobs/\(jobId)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let needsLine = needs.map { #",\#n  "needs": "\#($0)""# } ?? #",\#n  "needs": null"#
         let originLine = originCwd.map { #",\#n  "originCwd": "\#($0)""# } ?? ""
+        let updatedLine = updatedAtDaysBeforeNow.map {
+            #",\#n  "updatedAt": "\#(Self.iso(daysBeforeNow: $0))""#
+        } ?? ""
         let body = #"""
         {
           "state": "\#(state)",
-          "tempo": "\#(tempo)"\#(needsLine)\#(originLine)
+          "tempo": "\#(tempo)"\#(needsLine)\#(originLine)\#(updatedLine)
         }
         """#
         try? body.write(to: dir.appendingPathComponent("state.json"), atomically: true, encoding: .utf8)
+    }
+
+    /// Format an ISO-8601 `updatedAt` (`…T…:…:….sssZ`) `days` before `refNow`, matching the shape
+    /// Claude Code's daemon emits — so the guard's parser exercises the real format.
+    private static func iso(daysBeforeNow days: Double) -> String {
+        let date = Date(timeIntervalSince1970: refNow.timeIntervalSince1970 - days * 86_400)
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        let c = cal.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        return String(format: "%04d-%02d-%02dT%02d:%02d:%02d.000Z",
+                      c.year!, c.month!, c.day!, c.hour!, c.minute!, c.second!)
     }
 
     /// Write `settings.json` with a `cleanupPeriodDays` value.
@@ -104,6 +124,89 @@ struct AwaitingInputScannerTests {
         let fx = ClaudeFixture()
         fx.session("1", status: "idle", jobId: "ghost")
         #expect(fx.count() == 0)
+    }
+
+    // MARK: freshness guard (stale worktree state.json — the phantom-hand bug)
+
+    /// The core bug: a worktree session whose `state.json` froze on `needs:"approve plan"` hours ago,
+    /// while the session file itself is fresh and idle. The frozen job state must be ignored.
+    @Test func staleStateWithNeedsDoesNotCount() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "idle", jobId: "job1")          // session fresh (age 0)
+        fx.job("job1", state: "blocked", tempo: "blocked",
+               needs: "approve plan", updatedAtDaysBeforeNow: 0.1)   // state ~2.4h old → stale
+        #expect(fx.count() == 0)
+    }
+
+    /// Same freeze but expressed only as `tempo:"blocked"` — also suppressed when stale.
+    @Test func staleStateWithTempoBlockedDoesNotCount() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "idle", jobId: "job1")
+        fx.job("job1", state: "working", tempo: "blocked", needs: nil,
+               updatedAtDaysBeforeNow: 1)                        // a full day stale
+        #expect(fx.count() == 0)
+    }
+
+    /// A genuinely-awaiting session: `state.json` is fresh (same instant as the session), so its
+    /// `needs` is trusted and the session counts.
+    @Test func freshStateWithNeedsCounts() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "idle", jobId: "job1")
+        fx.job("job1", state: "blocked", tempo: "blocked",
+               needs: "confirm the edit", updatedAtDaysBeforeNow: 0)   // fresh
+        #expect(fx.count() == 1)
+    }
+
+    /// `status == "waiting"` is a direct real-time signal (step 1) and must win even when the job
+    /// state is stale — the guard only gates the state-derived step 2.
+    @Test func waitingStatusCountsEvenWithStaleState() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "waiting", jobId: "job1")
+        fx.job("job1", state: "blocked", tempo: "blocked",
+               needs: "approve plan", updatedAtDaysBeforeNow: 2)
+        #expect(fx.count() == 1)
+    }
+
+    /// A small lag (within the tolerance) is normal cross-process skew, not a freeze — still counts.
+    @Test func slightlyLaggingStateStillCounts() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "idle", jobId: "job1")
+        // 30 s ≈ 0.000347 days, under the 60 s tolerance.
+        fx.job("job1", state: "blocked", tempo: "blocked",
+               needs: "approve plan", updatedAtDaysBeforeNow: 30.0 / 86_400)
+        #expect(fx.count() == 1)
+    }
+
+    /// When `state.json` has no `updatedAt` at all, the guard fails open (pre-guard behavior): we
+    /// can't prove staleness, so the signal is trusted. This keeps older/edge state files working.
+    @Test func stateWithoutTimestampFailsOpen() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "idle", jobId: "job1")
+        fx.job("job1", state: "blocked", tempo: "blocked",
+               needs: "approve plan", updatedAtDaysBeforeNow: nil)   // no updatedAt written
+        #expect(fx.count() == 1)
+    }
+
+    // MARK: ISO timestamp parsing (guard internals)
+
+    @Test func parseISOmsWithFractionalSeconds() {
+        // 2026-08-04T01:27:32.234Z → known epoch ms.
+        let ms = AwaitingInputScanner.parseISOms("2026-08-04T01:27:32.234Z")
+        #expect(ms != nil)
+        // Reconstruct expected value independently.
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        let c = DateComponents(year: 2026, month: 8, day: 4, hour: 1, minute: 27, second: 32)
+        let expected = cal.date(from: c)!.timeIntervalSince1970 * 1000 + 234
+        #expect(abs(ms! - expected) < 0.5)
+    }
+
+    @Test func parseISOmsWithoutFractionalSeconds() {
+        #expect(AwaitingInputScanner.parseISOms("2026-08-04T01:27:32Z") != nil)
+    }
+
+    @Test func parseISOmsRejectsGarbage() {
+        #expect(AwaitingInputScanner.parseISOms("not a date") == nil)
+        #expect(AwaitingInputScanner.parseISOms("") == nil)
     }
 
     // MARK: aggregation & edge cases

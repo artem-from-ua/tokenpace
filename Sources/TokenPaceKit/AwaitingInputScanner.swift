@@ -14,9 +14,14 @@ import Foundation
 ///
 /// ```
 /// awaiting = sessions/<pid>.json  .status == "waiting"
-///         OR jobs/<jobId>/state.json .needs  != null
-///         OR jobs/<jobId>/state.json .tempo  == "blocked"
+///         OR (jobs/<jobId>/state.json is fresh AND .needs != null)
+///         OR (jobs/<jobId>/state.json is fresh AND .tempo == "blocked")
 /// ```
+///
+/// The **fresh** qualifier guards against a Claude Code worktree bug where the daemon's own
+/// transcript scanner stalls and freezes `needs`/`tempo` on a past phase; see ``isAwaiting`` and
+/// ``jobStateIsFresh``. Without it a worktree session that finished its approve-plan gate hours ago
+/// would keep advertising a phantom "awaiting input".
 ///
 /// The session list comes from **live** `sessions/*.json` (a handful of ~400-byte files); for each
 /// we take its `jobId` and read **only** `jobs/<jobId>/state.json`, never scanning the whole
@@ -126,6 +131,17 @@ public struct AwaitingInputScanner {
     /// Decides whether a single session (its `sessions/<pid>.json` text) is awaiting input, reading
     /// its matching `jobs/<jobId>/state.json` when the session status alone is inconclusive.
     ///
+    /// **Stale-state guard (worktree bug).** The `needs`/`tempo` fields in `jobs/*/state.json` are
+    /// maintained by Claude Code's own scanner, which tails the session transcript via a stored
+    /// `linkScanPath`. For **worktree** sessions that path is derived from the non-worktree project
+    /// dir and points at a journal that does not exist there, so the scanner never advances and the
+    /// job state **freezes** on whatever phase it last recorded — typically `needs:"approve plan"` +
+    /// `tempo:"blocked"`. The session then keeps working (or goes idle) while `state.json` still
+    /// advertises "awaiting", producing a phantom hand that never clears. We therefore trust the
+    /// job-state signals **only while `state.json` is not meaningfully older than the session file**
+    /// (which the live daemon rewrites on every status flip). A frozen `state.json` is ignored and
+    /// the fresh session `status` wins. See ADR-0066 for the original source-of-truth choice.
+    ///
     /// Internal (not private) so unit tests can exercise the join logic directly on fixture strings.
     func isAwaiting(sessionJSON: String) -> Bool {
         // 1. Direct real-time signal from the session file. Covers an active permission / plan prompt.
@@ -136,12 +152,86 @@ public struct AwaitingInputScanner {
         guard let jobId = firstMatch(Self.reJobID, in: sessionJSON) else { return false }
         guard let state = try? String(contentsOf: jobStateURL(jobId), encoding: .utf8) else { return false }
 
+        // Freshness guard: if the job state is stale relative to the live session file, its
+        // needs/tempo are frozen (worktree bug above) and must not be trusted.
+        guard jobStateIsFresh(sessionJSON: sessionJSON, stateJSON: state) else { return false }
+
         // `needs` present (a non-empty string) is the most precise "awaiting" marker; `tempo` ==
         // "blocked" is the same signal expressed as the coarse state. Either one counts.
         if let needs = firstMatch(Self.reNeeds, in: state), !needs.isEmpty { return true }
         if firstMatch(Self.reTempo, in: state) == "blocked" { return true }
         return false
     }
+
+    /// Whether a job's `state.json` is recent enough that its `needs`/`tempo` reflect the *current*
+    /// phase, rather than a frozen snapshot from a stalled worktree scanner (see ``isAwaiting``).
+    ///
+    /// True unless the job state is clearly older than the session: we compare the session's
+    /// `statusUpdatedAt`/`updatedAt` (ms epoch) against the job state's ISO `updatedAt`, and treat
+    /// the state as stale only when it lags by more than ``Self.staleToleranceMs``. When either
+    /// timestamp is unreadable we **fail open** (return true) — the guard only ever *suppresses* a
+    /// signal we can positively prove is frozen, so a parse gap degrades to the pre-guard behavior
+    /// rather than silently dropping a real awaiting session.
+    func jobStateIsFresh(sessionJSON: String, stateJSON: String) -> Bool {
+        guard let sessionMs = sessionTimestampMs(sessionJSON),
+              let stateMs = firstMatch(Self.reStateUpdatedAtISO, in: stateJSON)
+                  .flatMap(Self.parseISOms) else { return true }
+        return stateMs >= sessionMs - Self.staleToleranceMs
+    }
+
+    /// The session's last-activity epoch (ms), preferring `statusUpdatedAt` (bumped on every status
+    /// change) and falling back to `updatedAt`. `nil` if neither is present/parseable.
+    private func sessionTimestampMs(_ sessionJSON: String) -> Double? {
+        firstMatch(Self.reStatusUpdatedAt, in: sessionJSON).flatMap(Double.init)
+            ?? firstMatch(Self.reUpdatedAt, in: sessionJSON).flatMap(Double.init)
+    }
+
+    /// Slack allowed before a job state counts as stale: the daemon and the session file are written
+    /// by different processes with slightly different cadences, so a small lag is normal and must not
+    /// flip a genuinely-awaiting session to "not awaiting". A frozen worktree state lags by *minutes
+    /// to hours*, far beyond this, so the guard stays decisive. 60 s.
+    private static let staleToleranceMs: Double = 60_000
+
+    /// Parse Claude Code's job-state `updatedAt` (`2026-08-04T01:27:32.234Z`) to epoch milliseconds,
+    /// or `nil`. Uses a fixed-format `DateComponents` parse rather than `ISO8601DateFormatter` — the
+    /// formatter is not `Sendable` (so it can't be a shared `static` under Swift 6 strict
+    /// concurrency), and the format here is a single known shape emitted by the daemon, not arbitrary
+    /// ISO-8601. Fractional seconds are optional; anything that doesn't match returns `nil`.
+    static func parseISOms(_ iso: String) -> Double? {
+        let range = NSRange(iso.startIndex..<iso.endIndex, in: iso)
+        guard let m = reISOParts.firstMatch(in: iso, range: range) else { return nil }
+        func part(_ i: Int) -> Int? {
+            guard let r = Range(m.range(at: i), in: iso) else { return nil }
+            return Int(iso[r])
+        }
+        // Groups: 1=Y 2=M 3=D 4=h 5=m 6=s 7=frac(optional). All the fixed ones are required.
+        guard let y = part(1), let mo = part(2), let d = part(3),
+              let h = part(4), let mi = part(5), let s = part(6) else { return nil }
+        var c = DateComponents()
+        c.year = y; c.month = mo; c.day = d; c.hour = h; c.minute = mi; c.second = s
+        c.timeZone = TimeZone(identifier: "UTC")
+        guard let date = utcCalendar.date(from: c) else { return nil }
+        // Fractional part like ".234" → 234 ms; absent → 0.
+        let frac: Double
+        if let r = Range(m.range(at: 7), in: iso), !iso[r].isEmpty {
+            let digits = iso[r].dropFirst()  // drop the leading "."
+            frac = (Double("0.\(digits)") ?? 0) * 1000
+        } else {
+            frac = 0
+        }
+        return date.timeIntervalSince1970 * 1000 + frac
+    }
+
+    /// `YYYY-MM-DDTHH:MM:SS` with an optional `.fff` fractional part and trailing `Z`.
+    private static let reISOParts =
+        regex(#"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?Z"#)
+
+    /// A UTC `Calendar` for turning the parsed components into a `Date` (Gregorian, no locale drift).
+    private static let utcCalendar: Calendar = {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        return cal
+    }()
 
     // MARK: Field extraction (no JSONDecoder — see type doc)
 
@@ -162,6 +252,13 @@ public struct AwaitingInputScanner {
     private static let reOriginCwd = regex(#""originCwd"\s*:\s*"([^"]*)""#)
     /// `"cleanupPeriodDays": 30` (from `settings.json`) — Claude Code's retention horizon (ADR-0031).
     private static let reCleanupDays = regex(#""cleanupPeriodDays"\s*:\s*(\d+)"#)
+    /// `"statusUpdatedAt":1785808331664` (ms epoch, from `sessions/*.json`) — when the session last
+    /// changed status. Preferred over `updatedAt` for freshness (it moves on every status flip).
+    private static let reStatusUpdatedAt = regex(#""statusUpdatedAt"\s*:\s*(\d+)"#)
+    /// `"updatedAt": "2026-08-04T01:27:32.234Z"` (ISO-8601, from `jobs/*/state.json`) — when the
+    /// daemon last rewrote the job state. Note the **different format** from the session file's
+    /// numeric `updatedAt`; the freshness guard parses both. Absent → treated as infinitely stale.
+    private static let reStateUpdatedAtISO = regex(#""updatedAt"\s*:\s*"([^"]+)""#)
 
     private static func regex(_ pattern: String) -> NSRegularExpression {
         // Patterns are compile-time constants; a failure here is a programmer error, not runtime input.
