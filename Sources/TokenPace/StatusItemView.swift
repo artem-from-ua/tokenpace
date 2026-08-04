@@ -95,9 +95,14 @@ final class StatusItemView: NSView {
         static let barWidth: CGFloat = 34
         /// Height of one pacing bar. Kept slim so the two bars read as separate rows.
         static let barHeight: CGFloat = 5
-        /// Vertical gap between the stacked 5h and 7d bars. Kept just enough to read as two rows
+        /// Vertical gap between the stacked 5h and 7d bars. Wide enough to read as two distinct rows
         /// without spreading the pair out — a tight stack sits more like a single compact widget.
-        static let barGap: CGFloat = 4
+        ///
+        /// Must stay a **whole** number of points: ``halfPointAligned(_:)`` puts the 5h bar on the
+        /// half-point grid the status button needs, and a whole gap carries that alignment down to the
+        /// 7d bar. A fractional gap would leave the lower bar off-grid and blurred again. At 5 pt the
+        /// block is 15 pt tall, leaving symmetric 3.5 pt margins inside the 22 pt item.
+        static let barGap: CGFloat = 5
         /// Horizontal padding inside the item. Kept tight (2 pt) so the item hugs its neighbours
         /// the way native status items do — the menu bar adds its own inter-item spacing on top,
         /// so a wide internal pad reads as an oversized gap to the clock/battery beside us.
@@ -590,6 +595,20 @@ final class StatusItemView: NSView {
         return x + ceil(size.width)
     }
 
+    /// Snap `y` to the nearest **half-point**, the grid a bar edge must sit on to render sharp.
+    ///
+    /// The widget image is drawn into an `NSStatusBarButton` whose frame is centred at a half-point y in
+    /// its status window (`(33 - 22) / 2 = 5.5`, measured on macOS 15). Screen y is therefore
+    /// `image y + 5.5`, so `x.5` inside the image lands on a whole point on screen — and a whole point
+    /// inside the image lands halfway between two, which the compositor antialiases into the blur that
+    /// only the two-bar stack showed. The single-bar branch already sits at 8.5 for the same reason, so
+    /// this makes the stacked pair agree with it rather than changing how one bar looks.
+    ///
+    /// Rounds to the nearest half-point (never by more than 0.25 pt), so the block stays visually centred.
+    private func halfPointAligned(_ y: CGFloat) -> CGFloat {
+        (y - 0.5).rounded() + 0.5
+    }
+
     /// Draw the pacing bars starting at `originX`; the reset label is drawn to their right only when
     /// `reset != nil`. Two layouts by whether the 7-day bar is present:
     /// - **`sevenDay != nil`**: 5h on top, 7d below, the pair vertically centred as one block.
@@ -609,9 +628,16 @@ final class StatusItemView: NSView {
         let barsMaxX = originX + Metrics.barWidth
 
         if let sevenDay {
-            // Two bars stacked, vertically centred as a block.
+            // Two bars stacked, vertically centred as a block, then nudged onto the pixel grid.
+            //
+            // `NSStatusBarButton` sits at a **half-point** y inside its window — its 22 pt frame is
+            // centred in a 33 pt status window, giving `(33 - 22) / 2 = 5.5` (measured, macOS 15). Every
+            // point in this image therefore lands on screen at `y + 5.5`, so a bar edge is only pixel-
+            // aligned when its y *inside the image* is itself a half-point. Two 5 pt bars with a 4 pt gap
+            // centre at a whole 4.0, which becomes a blurred 9.5 on screen; the single-bar branch happens
+            // to sit at 8.5 → a sharp 14.0, which is why only the stacked pair looked fuzzy.
             let blockHeight = Metrics.barHeight * 2 + Metrics.barGap
-            let topY = rect.minY + (rect.height - blockHeight) / 2
+            let topY = halfPointAligned(rect.minY + (rect.height - blockHeight) / 2)
             drawBar(fiveHour, in: NSRect(
                 x: originX, y: topY,
                 width: Metrics.barWidth, height: Metrics.barHeight
