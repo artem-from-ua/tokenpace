@@ -950,8 +950,13 @@ actor StubUsageTransport: UsageTransport {
 struct StubTokenProvider: TokenProviding {
     func currentCredentials(now: Date) throws -> TokenCredentials {
         // A far-future expiry so the engine treats the stub token as valid and the Troubleshoot
-        // window's token section shows a live read/expires pair end-to-end (ADR-0020).
-        TokenCredentials(accessToken: "stub-token", expiresAt: now.addingTimeInterval(8 * 3600))
+        // window's token section shows a live read/expires pair end-to-end (ADR-0020). The plan
+        // fields carry a canned tier so the popup's "Claude <plan>" header (brand-coloured plan label)
+        // is verifiable on any stub — 20x here, distinct from a typical local 5x, so it's clear the
+        // label is data-driven, not hard-coded.
+        TokenCredentials(
+            accessToken: "stub-token", expiresAt: now.addingTimeInterval(8 * 3600),
+            subscriptionType: "max", rateLimitTier: "default_claude_max_20x")
     }
 }
 

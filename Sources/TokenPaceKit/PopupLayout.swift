@@ -184,6 +184,13 @@ public struct PopupLayout: Sendable, Equatable {
     /// independent of the usage snapshot, so it's supplied to `make` rather than derived from it.
     public let awaitingInput: AwaitingSessions?
 
+    /// The short plan label shown in brand colour right after "Claude" in the header (e.g. "Max 5x"),
+    /// or `nil` to draw just "Claude". Derived from the Keychain `rateLimitTier` via
+    /// ``claudePlanLabel(rateLimitTier:)`` — like ``awaitingInput``, it comes from a source outside the
+    /// usage snapshot (the OAuth payload), so the shell grafts it on via ``withPlanLabel(_:)`` rather
+    /// than threading it through `make`.
+    public let planLabel: String?
+
     public init(
         lastUpdateAge: TimeInterval,
         intervalSeconds: TimeInterval,
@@ -192,7 +199,8 @@ public struct PopupLayout: Sendable, Equatable {
         serviceStatus: StatusHealth? = nil,
         credits: CreditsRow? = nil,
         blockingReset: BlockingReset.Choice? = nil,
-        awaitingInput: AwaitingSessions? = nil
+        awaitingInput: AwaitingSessions? = nil,
+        planLabel: String? = nil
     ) {
         self.lastUpdateAge = lastUpdateAge
         self.intervalSeconds = intervalSeconds
@@ -202,6 +210,7 @@ public struct PopupLayout: Sendable, Equatable {
         self.credits = credits
         self.blockingReset = blockingReset
         self.awaitingInput = awaitingInput
+        self.planLabel = planLabel
     }
 
     /// A copy of this layout with the awaiting-input count grafted on, everything else unchanged
@@ -211,7 +220,17 @@ public struct PopupLayout: Sendable, Equatable {
         PopupLayout(
             lastUpdateAge: lastUpdateAge, intervalSeconds: intervalSeconds, rows: rows,
             warning: warning, serviceStatus: serviceStatus, credits: credits,
-            blockingReset: blockingReset, awaitingInput: awaitingInput)
+            blockingReset: blockingReset, awaitingInput: awaitingInput, planLabel: planLabel)
+    }
+
+    /// A copy of this layout with the plan label grafted on, everything else unchanged. The shell
+    /// calls this on the `make(...)` result so the plan label — sourced from the OAuth `rateLimitTier`,
+    /// not the usage snapshot — doesn't have to thread through `make`.
+    public func withPlanLabel(_ planLabel: String?) -> PopupLayout {
+        PopupLayout(
+            lastUpdateAge: lastUpdateAge, intervalSeconds: intervalSeconds, rows: rows,
+            warning: warning, serviceStatus: serviceStatus, credits: credits,
+            blockingReset: blockingReset, awaitingInput: awaitingInput, planLabel: planLabel)
     }
 
     // MARK: make

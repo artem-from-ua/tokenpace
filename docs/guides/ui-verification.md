@@ -164,6 +164,18 @@ TOKENPACE_STUB=screenshot TOKENPACE_DEVTOOLS=1 swift run
     з'являються всі чотири зелені рядки (API, Code, Web/Desktop, Cowork). Це єдиний стуб, що дає
     all-operational статус (решта лишають API `degraded_performance`).
 
+### Plan label поряд із «Claude» у шапці попапа
+
+Праворуч від «Claude» (у бренд-кольорі) виводиться назва плану: `Claude ･ Max 5x` — «Claude» і роздільник
+`･` жирні, назва плану — не жирна, усе теракотове (`claudeBrand`). Джерело — Keychain `rateLimitTier` через
+`claudePlanLabel(rateLimitTier:)` (whitelist: `default_claude_max_<N>x`→`Max <N>x`, `default_claude_pro`→`Pro`,
+решта→нічого). Невідомий/відсутній tier → просто «Claude» **без** роздільника.
+
+- **На стубі:** будь-який `TOKENPACE_STUB=…` (`StubTokenProvider` віддає `default_claude_max_20x`) → у шапці
+  видно `Claude ･ Max 20x`. Навмисно 20x (а не типовий локальний 5x), щоб було видно, що мітка data-driven.
+- **На реальних даних (`swift run` без стубу):** показує ваш справжній план з Keychain (напр. `Claude ･ Max 5x`).
+- **Fallback:** якщо в Keychain невідомий/відсутній `rateLimitTier` — має бути просто «Claude», без крапки.
+
 ### Нотифікація «Back to work!» (#160, ADR-0039)
 
 Системна нотифікація, що спрацьовує на фронті `blocked → unblocked` (ліміт знову дозволяє роботу).
