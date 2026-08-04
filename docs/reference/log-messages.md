@@ -88,7 +88,8 @@ In the tables below, `<…>` marks an interpolated value.
 |------|----------|-------|---------|------|
 | 261 | `lifecycle` | `.info` | `TokenPace status item attached (<version>); live polling started` | `applicationDidFinishLaunching` — after the status item is attached and polling starts |
 | 313 | `lifecycle` | `.notice` | `manual refresh requested (Troubleshoot)` | `forceRefresh()` — the user clicked "Refresh now" in the Troubleshoot window; a `.manualRefresh` signal is sent and the status poll is marked due (ADR-0020) |
-| — | `lifecycle` | `.notice` | `dev: stub scenario → <id>` | `switchScenario(_:)` — the dev-tools live stub selector picked a new data source (`<id>` = the `TOKENPACE_STUB` value, or empty for real network); the polling engine is rebuilt and an immediate poll forced (#187). Dev-only (`devToolsEnabled` defaults key, ADR-0053) |
+| — | `lifecycle` | `.notice` | `dev: stub scenario → <id>` | `switchScenario(_:)` — the dev-tools live stub selector picked a new data source (`<id>` = the `TOKENPACE_STUB` value, `real` for the live network); the polling engine is rebuilt and an immediate poll forced (#187). Dev-only (`devToolsEnabled` defaults key, ADR-0053) |
+| — | `lifecycle` | `.notice` | `dev: unknown TOKENPACE_STUB "<value>" — running the frozen screenshot stub instead of the real network. Available: <ids>` | `applicationDidFinishLaunching` — `TOKENPACE_STUB` was set to something the registry doesn't know, so the run fell back to the frozen `screenshot` frame rather than the live network (#267). `<ids>` is built from `StubScenario.allCases`, so it can't drift. Silent when the variable is absent or valid |
 | 358 | `lifecycle` | `.notice` | `optimistic reset applied, forcing refresh` | `fireOptimisticReset()` — a window's reset boundary passed; the retained snapshot is rolled forward locally (zero usage + next `resets_at`) and rendered immediately (no ⏰), then `.manualRefresh` forces the authoritative poll (#36, ADR-0030) |
 | 421 | `lifecycle` | `.notice` | `config: first run, no prior version (<version>)` | `runConfigMigrationsIfNeeded()` — no `lastRunVersion` stored (fresh install or a pre-persistence build); records the version, no migrations (#71, ADR-0023) |
 | 423 | `lifecycle` | `.notice` | `config: version unchanged (<version>)` | stored `lastRunVersion` equals the running version — nothing to migrate |
@@ -357,13 +358,13 @@ One log line per interval change. The format is built by
 | Category | Calls | Files |
 |----------|-------|-------|
 | `network` | 28 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `UpdateInstaller` (3), `PollingEngine` (2), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
-| `lifecycle` | 62 | `App` (29), `UpdateInstaller` (13), `SettingsWindowController` (10), `PollingShell` (7), `PollingEngine` (2), `ShellEnvironment` (1) |
+| `lifecycle` | 63 | `App` (30), `UpdateInstaller` (13), `SettingsWindowController` (10), `PollingShell` (7), `PollingEngine` (2), `ShellEnvironment` (1) |
 | `keychain` | 11 | `ClaudeCLIRefresher` (6), `TokenProvider` (4), `PollingEngine` (1) |
 | `ui` | 1 | `AppearancePane` (1) |
 | `archive` | 5 | `App` (3), `LogArchiver` (2) |
 | `journal` | 6 | `UsageJournal` (4), `App` (2) |
 
-**Total: 114 log statements** — `.error` ×37, `.notice` ×72, `.info` ×1, `.debug` ×3.
+**Total: 115 log statements** — `.error` ×37, `.notice` ×73, `.info` ×1, `.debug` ×3.
 
 The `journal: enabled set <bool>` toggle line (`SettingsModel`) is a `lifecycle` statement (like the
 other Settings-toggle lines), counted under `lifecycle`; the six `journal`-category statements are the
