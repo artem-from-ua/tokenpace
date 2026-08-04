@@ -204,9 +204,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The `TOKENPACE_STUB` scenario the app launched with, or `.realNetwork` for a normal run. Read
     /// once from the environment and mapped through the shared ``StubScenario`` registry (unknown /
-    /// absent value → `.realNetwork`). Seeds ``currentScenario`` and the dropdown's initial selection,
-    /// plus the Settings model's initial stub state (the dev-tools selector keeps it in sync after that).
-    static let launchScenario =
+    /// absent value → `.realNetwork`). Seeds ``currentScenario`` and the dropdown's initial selection.
+    private static let launchScenario =
         StubScenario(rawValue: ProcessInfo.processInfo.environment["TOKENPACE_STUB"] ?? "") ?? .realNetwork
 
     /// The scenario currently driving the data source. Starts at ``launchScenario`` and changes only
@@ -543,6 +542,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Reflect the latest known update state whenever the window opens (#37).
         settingsWC?.updateAvailability(lastKnownRelease)
+        // Same for the live data source: the model seeds itself from `launchScenario`, but the dev-tools
+        // selector may have switched scenarios since — and any push from `switchScenario` before the
+        // window first opened went to a nil controller. Pull the current value on every open so the
+        // "Stubbed in this development build." hints can never outlive the stub.
+        settingsWC?.updateStubState(active: currentScenario != .realNetwork)
         settingsWC?.show(section: section)
     }
 
