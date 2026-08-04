@@ -199,8 +199,14 @@ Claude Code пише сам:
 
 ```
 awaiting = ~/.claude/sessions/<pid>.json  .status == "waiting"
-        OR ~/.claude/jobs/<jobId>/state.json .needs != null / .tempo == "blocked"
+        OR (state.json свіжий AND ~/.claude/jobs/<jobId>/state.json .needs != null / .tempo == "blocked")
 ```
+
+**Freshness-guard.** `needs`/`tempo` оновлює власний сканер Claude Code, який для worktree-сесій
+розсинхронюється і **заморожує** `state.json` на минулій фазі (`needs:"approve plan"`) → фантомна
+рука, що не гасне. Тому ці дві гілки враховуємо лише коли `state.json.updatedAt` (ISO) не старший за
+`session.statusUpdatedAt` (ms) більш ніж на 60 с; `status == "waiting"` безумовний; недоступний
+timestamp → fail-open. Деталі — ADR-0066 (постскриптум).
 
 - **`AwaitingInputScanner`** (`TokenPaceKit`, pure, stateless) — читає файли (без `JSONDecoder`,
   таргетовані regex), джойнить лише по живих сесіях, повертає **`AwaitingSessions`** (кожна сесія:

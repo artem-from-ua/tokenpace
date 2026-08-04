@@ -51,12 +51,22 @@ JSONL не читати взагалі.**
 ```
 needsInput(session) =
       sessions/<pid>.json.status == "waiting"
-   OR jobs/<jobId>/state.json.needs   != null
-   OR jobs/<jobId>/state.json.tempo   == "blocked"
+   OR (fresh(state.json) AND jobs/<jobId>/state.json.needs != null)
+   OR (fresh(state.json) AND jobs/<jobId>/state.json.tempo == "blocked")
+
+fresh(state.json) =
+      state.json.updatedAt (ISO) >= session.statusUpdatedAt (ms) − 60 с
+      (недоступний timestamp → fail-open: вважаємо свіжим)
 
 working(session)  =  status == "busy"  OR  state.json.state == "working"
 idle/done         =  інакше
 ```
+
+> **Freshness-guard (див. постскриптум нижче).** Гілки `needs`/`tempo` беруться зі `state.json`,
+> який оновлює **власний** сканер Claude Code. Для worktree-сесій цей сканер розсинхронюється і
+> **заморожує** `state.json` на минулій фазі — тож ці дві гілки враховуємо лише коли `state.json`
+> не старший за живий session-файл. `status == "waiting"` (крок 1) — безумовний. Fail-open зберігає
+> дотеперішню поведінку там, де timestamp прочитати не вдалось.
 
 - Джерело переліку — **живі** `sessions/*.json` (їх одиниці). Для кожної беремо `jobId` і зазираємо
   **тільки** в `jobs/<jobId>/state.json` — ніколи не скануємо весь `jobs/` (там десятки-сотні
@@ -139,6 +149,38 @@ screen-locked). Окремого фонового таймера в idle не т
 - **Subagent/fan-out.** `state.json.fan[]`/`inFlight.tasks` — це підагенти всередині job, **не**
   окремі сесії. Не рахувати їх як окремі одиниці «awaiting input»; стан очікування — на рівні
   top-level job.
+
+## Постскриптум: freshness-guard проти замороженого `state.json` (worktree-баг)
+
+Після впровадження виявився конкретний прояв ризику «Стейл-файли» вище, вартий окремого запису, бо
+він давав **фантомну «руку», що не гасне**.
+
+**Симптом.** Worktree-сесія, яка давно пройшла approve-plan (працює далі або вже idle), нескінченно
+рахувалася як «awaiting input». У FleetView Claude Code вона так само лишалася з маркером «Needs
+input», хоча реального очікування не було.
+
+**Першопричина (у Claude Code, не в нас).** Поля `needs`/`tempo` у `jobs/<jobId>/state.json`
+оновлює не сесія, а окремий сканер демона, що дочитує транскрипт із збереженого `linkScanPath`. Для
+worktree-сесій цей шлях деривується з **не-worktree** каталогу проєкту й указує на транскрипт, якого
+там немає (реальний лежить у каталозі з worktree-суфіксом). Сканер ніколи не просувається → `state.json`
+**замерзає** на фазі, яку записав останньою (типово `needs:"approve plan"` + `tempo:"blocked"`).
+Сесія тим часом живе далі, а `state.json` досі рекламує «awaiting».
+
+**Наш фікс — freshness-guard (`AwaitingInputScanner`).** Довіряємо `needs`/`tempo` **лише поки
+`state.json` не помітно старший за живий session-файл** (`sessions/*.json`, який демон переписує на
+кожну зміну статусу). Порівнюємо `session.statusUpdatedAt` (ms epoch) з `state.json.updatedAt`
+(ISO-8601 — **інший формат**, парситься окремо) з толерантністю **60 с** на нормальний
+міжпроцесний лаг. Заморожений стан відстає на хвилини-години, тож guard спрацьовує впевнено, а
+`status == "waiting"` (прямий real-time сигнал) лишається безумовним.
+
+**Fail-open.** Якщо будь-який timestamp не читається — вважаємо стан свіжим (тобто поводимось як до
+guard). Guard **лише пригнічує** доведено-заморожений сигнал; він ніколи не глушить сесію, чию
+несвіжість не може довести. Тож дефект формату деградує до дотеперішньої поведінки, а не мовчазної
+втрати реальних «awaiting».
+
+Обхід на боці демона (виправити `linkScanPath` у `state.json`) можливий, але точковий і нестійкий:
+нова worktree-сесія знову запише хибний шлях. Правильний остаточний фікс — у самому Claude Code
+(деривувати `linkScanPath` з `worktreePath`); guard у нас робить фічу стійкою незалежно від того.
 
 ## Альтернатива: hooks (відкладено)
 
