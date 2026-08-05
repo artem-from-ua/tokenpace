@@ -52,6 +52,30 @@ struct ExtraFeaturesPane: View {
                         .fixedSize()
                     }
                 }
+
+                // #279: the incident age cut-off lives here rather than with the notification
+                // toggles, because it filters what the *popup shows*, not what gets delivered. The
+                // service filter it pairs with is the set of switches directly above — Monitored
+                // services now decides which incidents are yours as well as which rows are drawn.
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Hide incidents older than")
+                        Spacer()
+                        Picker("", selection: Binding(
+                            get: { model.incidentMaxAgeHours },
+                            set: { model.setIncidentMaxAgeHours($0) })) {
+                            Text("12 hours").tag(12)
+                            Text("24 hours").tag(24)
+                            Text("3 days").tag(72)
+                            Text("No limit").tag(0)
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                    SettingsHint(
+                        text: "Some incidents stay open for days after the services behind them "
+                            + "recovered. This keeps those out of the popup.")
+                }
             } header: {
                 // Under a data stub the status page is never fetched — the stub transport answers the
                 // status endpoint too, so the switches below pick between canned components (#187). The
