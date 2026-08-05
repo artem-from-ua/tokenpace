@@ -195,6 +195,21 @@ public struct StatusHealth: Sendable, Equatable {
         StatusHealth(checks: checks(for: config) { _ in .unknown })
     }
 
+    /// The component names a config resolves to — the join key ``IncidentVisibility`` intersects an
+    /// incident's `components[]` against to decide "is this incident mine" (#279).
+    ///
+    /// Derived from ``checks(for:statusOf:)``, the same single source of truth that builds the popup
+    /// rows, rather than re-listing the names: a service added there must never silently fail to
+    /// filter incidents here. `StatusHealthTests` pins the two together for every config permutation.
+    ///
+    /// Matching is by **name**, deliberately — not by the `code`/`id` Statuspage also emits. ADR-0013
+    /// §1 chose names as the single identity axis; a second one would need an id↔name map maintained
+    /// against Anthropic's renames. The accepted cost: a renamed component stops matching, so its
+    /// incidents quietly stop showing (the service line already degrades to `unknown` in that case).
+    public static func monitoredComponentNames(for config: MonitoredServices) -> Set<String> {
+        Set(checks(for: config) { _ in .unknown }.flatMap(\.components).map(\.name))
+    }
+
     /// The single source of truth for **which** services and constituents exist under a config —
     /// shared by ``from(_:config:)`` and ``unknown(for:)``, which differ only in how each
     /// component's status is obtained (`statusOf`: from a summary, vs the constant `.unknown`).
