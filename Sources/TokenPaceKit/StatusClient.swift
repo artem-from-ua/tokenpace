@@ -43,8 +43,8 @@ public enum StatusClient {
     // MARK: decode (pure seam)
 
     /// Decode a 200 body into a ``StatusSummary``. Any `DecodingError` maps to
-    /// ``StatusFetchError/decode``. Unknown keys (`status`, `incidents`, `page`, …) are ignored;
-    /// an absent `components` array decodes to `[]`.
+    /// ``StatusFetchError/decode``. Unknown keys (`status`, `scheduled_maintenances`, `page`, …) are
+    /// ignored; absent `components` / `incidents` arrays decode to `[]`.
     public static func decode(from data: Data) throws -> StatusSummary {
         do {
             return try JSONDecoder().decode(StatusSummary.self, from: data)
