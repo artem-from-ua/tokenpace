@@ -50,9 +50,14 @@ JSONL не читати взагалі.**
 
 ```
 needsInput(session) =
-      sessions/<pid>.json.status == "waiting"
-   OR (status != "busy" AND fresh(state.json) AND jobs/<jobId>/state.json.needs != null)
-   OR (status != "busy" AND fresh(state.json) AND jobs/<jobId>/state.json.tempo == "blocked")
+   alive(session) AND (
+         sessions/<pid>.json.status == "waiting"
+      OR (status != "busy" AND fresh(state.json) AND jobs/<jobId>/state.json.needs != null)
+      OR (status != "busy" AND fresh(state.json) AND jobs/<jobId>/state.json.tempo == "blocked"))
+
+alive(session) =
+      процес із session.pid існує AND його p_starttime == session.procStart
+      (нечитабельний pid/procStart → fail-open: вважаємо живою; див. постскриптум #275)
 
 fresh(state.json) =
       state.json.updatedAt (ISO) >= session.statusUpdatedAt (ms) − 60 с
@@ -309,3 +314,38 @@ let wantWatcher = PersistedConfig.awaitingInputEnabled
 (`TOKENPACE_AWAITING=N` короткозамикає watcher і сканер не виконується).
 
 Для кінцевого користувача не змінюється нічого.
+
+## Постскриптум: «жива сесія» перевіряється за pid, а не припускається (#275)
+
+Формула рішення каже «джойн лише по **живих** сесіях», і так само формулює це docstring сканера. Але
+живість була **припущенням**: сканер брав кожен `sessions/*.json` як є. Насправді файл сесії
+переживає свій процес — його прибирає лише клінап Claude Code за `cleanupPeriodDays` (дефолт 30).
+
+Наслідок: `claude`, убитий або впалий саме тоді, коли на екрані стояв permission-prompt, лишає на
+диску `status:"waiting"`, і переписати його вже нікому. Піднята рука в menu bar не гасне **тижнями** —
+причому вказує на сесію, якої не існує.
+
+Тому формула отримує додатковий кон'юнкт:
+
+```
+awaiting = процес сесії живий
+       AND ( sessions/<pid>.json .status == "waiting"
+          OR (state.json свіжий AND .needs != null / .tempo == "blocked") )
+```
+
+Реалізація — `ProcessLiveness` (`Sources/TokenPaceKit/ProcessLiveness.swift`), ін'єктований seam над
+`sysctl(KERN_PROC_PID)`. Дві умови, обидві обов'язкові:
+
+1. **pid існує** — інакше сесія не здатна оновити власний файл;
+2. **це той самий процес** — ядро перевикористовує pid, тож звіряємо `procStart` із файлу сесії
+   (ctime-рядок у UTC) з ядерним `p_starttime`. Без цього сторонній процес, якому дістався той самий
+   номер, «воскресив» би мертву сесію.
+
+**Fail-open**, як і решта сканера: не читається pid чи `procStart` — сесію рахуємо. Фільтр лише
+прибирає те, що можна **довести** мертвим; прогалина в парсингу має деградувати до попередньої
+поведінки, а не ховати сесію, про яку користувача справді питають.
+
+Це також замінило собою третій терм гейта вотчера («claude running») з
+[awaiting-input-refresh.md](../design/awaiting-input-refresh.md): той гейт мовчав би про всі сесії,
+поки жоден `claude` не запущений, тоді як перевірка за pid прибирає саме мертву сесію — навіть коли
+інші `claude` активні.

@@ -27,6 +27,12 @@ import Foundation
 /// we take its `jobId` and read **only** `jobs/<jobId>/state.json`, never scanning the whole
 /// `jobs/` tree (it holds dozens of *dead* completed-session dirs that would inflate the count).
 ///
+/// **"Live" is enforced, not assumed** (#275). A session file outlives its process: `claude` killed
+/// or crashed while a permission prompt was up leaves `"status":"waiting"` on disk with nothing left
+/// to rewrite it, so the hand would never go down (the file survives until Claude Code's
+/// `cleanupPeriodDays` sweep — 30 days by default). Every session is therefore checked against the
+/// process table through ``ProcessLiveness`` before its status is read; see ``sessionIsLive(_:)``.
+///
 /// **No `JSONDecoder`.** These files are read as raw strings and matched with a few small regexes
 /// on the 3–4 fields we need. `sessions/*.json` is written compact (`"status":"waiting"`);
 /// `jobs/*/state.json` is pretty-printed with spaces (`"needs": "approve plan"`), so the patterns
@@ -46,21 +52,25 @@ import Foundation
 /// lookup degrades gracefully: a missing field / dir / new value is treated as "not awaiting", so
 /// the count never crashes and the feature quietly reads zero rather than misbehaving.
 ///
-/// `claudeHome` and `fileManager` are injectable so a test can point at a fixture tree, mirroring
-/// ``LogArchiver``. A pure value type; `scan()` is side-effect-free and safe to call off the main
-/// thread. (`fileManager` is not `Sendable`, so the struct isn't marked `Sendable` — the shell owns
-/// one instance and calls it from its single refresh path.)
+/// `claudeHome`, `fileManager` and `liveness` are injectable so a test can point at a fixture tree,
+/// mirroring ``LogArchiver``. A pure value type; `scan()` is side-effect-free and safe to call off
+/// the main thread. (`fileManager` is not `Sendable`, so the struct isn't marked `Sendable` — the
+/// shell owns one instance and calls it from its single refresh path.)
 public struct AwaitingInputScanner {
     /// The `~/.claude` directory. Injectable so a test can point at a fixture tree.
     private let claudeHome: URL
     private let fileManager: FileManager
+    /// Process-table lookup behind the dead-session filter (#275). Injectable for tests.
+    private let liveness: ProcessLiveness
 
     public init(
         claudeHome: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude"),
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        liveness: ProcessLiveness = KernelProcessLiveness()
     ) {
         self.claudeHome = claudeHome
         self.fileManager = fileManager
+        self.liveness = liveness
     }
 
     // MARK: Public API
@@ -81,6 +91,7 @@ public struct AwaitingInputScanner {
         var found: [AwaitingSession] = []
         for url in entries where url.pathExtension == "json" {
             guard let raw = try? String(contentsOf: url, encoding: .utf8),
+                  sessionIsLive(raw),
                   isAwaiting(sessionJSON: raw) else { continue }
             found.append(session(from: raw, now: now, cleanupDays: cleanupDays))
         }
@@ -125,6 +136,80 @@ public struct AwaitingInputScanner {
         claudeHome.appendingPathComponent("jobs").appendingPathComponent(jobId)
             .appendingPathComponent("state.json")
     }
+
+    // MARK: Liveness
+
+    /// Whether the `claude` process that owns this session file is still running (#275).
+    ///
+    /// Two conditions, both required:
+    /// 1. **The pid exists.** A session whose process is gone can never update its own file, so a
+    ///    `"status":"waiting"` left behind by a kill/crash would otherwise be counted forever.
+    /// 2. **It is the same process.** Pids are recycled by the kernel, so an unrelated program that
+    ///    happens to land on the recorded pid must not resurrect a dead session. The session file
+    ///    records `procStart`; we compare it against the kernel's `p_starttime`.
+    ///
+    /// **Fail-open**, matching the rest of the scanner: when the pid or `procStart` is missing or
+    /// unparseable we treat the session as live. This filter exists to remove entries we can
+    /// *positively prove* are dead — a parse gap must degrade to the previous behavior (count it)
+    /// rather than silently hiding a session the user really is being asked about.
+    ///
+    /// Internal (not private) so unit tests can exercise it directly on fixture strings.
+    func sessionIsLive(_ sessionJSON: String) -> Bool {
+        guard let pid = firstMatch(Self.rePID, in: sessionJSON).flatMap(Int32.init) else {
+            return true                                   // no pid recorded → cannot disprove
+        }
+        guard let actualStart = liveness.startTime(ofPID: pid) else {
+            return false                                  // no such process → definitively dead
+        }
+        guard let recordedStart = firstMatch(Self.reProcStart, in: sessionJSON)
+            .flatMap(Self.parseProcStart) else {
+            return true                                   // pid alive, start time unknown → keep
+        }
+        // The file truncates to whole seconds while the kernel carries microseconds, and the two are
+        // written by different code paths — so compare with a small tolerance rather than for
+        // equality. A recycled pid starts *much* later than the session it displaced, so this stays
+        // decisive.
+        return abs(actualStart - recordedStart) <= Self.procStartToleranceSeconds
+    }
+
+    /// Slack allowed between the session file's `procStart` and the kernel's `p_starttime`: the file
+    /// value is truncated to whole seconds, so a sub-second difference is expected and must not read
+    /// as a different process. A reused pid belongs to a process started far later than this.
+    private static let procStartToleranceSeconds: Double = 2
+
+    /// Parse the session file's `procStart` (`"Tue Aug  4 22:00:24 2026"`) to epoch seconds, or
+    /// `nil`. This is C `ctime` format — note the **two spaces** before a single-digit day — and it
+    /// is written in **UTC** despite carrying no zone marker (verified against `p_starttime` on
+    /// Claude Code v2.1.220). Parsed by hand with a fixed `DateComponents`, for the same reason
+    /// ``parseISOms`` is: the formatters are not `Sendable`, and this is one known shape rather than
+    /// arbitrary date text.
+    static func parseProcStart(_ text: String) -> Double? {
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let m = reProcStartParts.firstMatch(in: text, range: range) else { return nil }
+        func part(_ i: Int) -> String? {
+            guard let r = Range(m.range(at: i), in: text) else { return nil }
+            return String(text[r])
+        }
+        // Groups: 1=month name 2=day 3=hour 4=minute 5=second 6=year.
+        guard let monthName = part(1), let month = Self.monthNumbers[monthName],
+              let d = part(2).flatMap(Int.init), let h = part(3).flatMap(Int.init),
+              let mi = part(4).flatMap(Int.init), let s = part(5).flatMap(Int.init),
+              let y = part(6).flatMap(Int.init) else { return nil }
+        var c = DateComponents()
+        c.year = y; c.month = month; c.day = d; c.hour = h; c.minute = mi; c.second = s
+        c.timeZone = TimeZone(identifier: "UTC")
+        return utcCalendar.date(from: c)?.timeIntervalSince1970
+    }
+
+    /// `Tue Aug  4 22:00:24 2026` — weekday, month name, day (space-padded), time, year.
+    private static let reProcStartParts =
+        regex(#"^\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$"#)
+
+    /// English month abbreviations as `ctime` emits them (C locale, never localized).
+    private static let monthNumbers: [String: Int] = [
+        "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+        "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+    ]
 
     // MARK: Per-session decision
 
@@ -255,6 +340,12 @@ public struct AwaitingInputScanner {
     private static let reStatus = regex(#""status"\s*:\s*"([a-z]+)""#)
     /// `"jobId":"04c0e8f2"` (compact, from `sessions/*.json`).
     private static let reJobID = regex(#""jobId"\s*:\s*"([^"]+)""#)
+    /// `"pid":1245` (from `sessions/*.json`) — the owning `claude` process. Also the file's own name
+    /// (`1245.json`), but read from the body so a renamed/copied file can't mislead the check.
+    private static let rePID = regex(#""pid"\s*:\s*(\d+)"#)
+    /// `"procStart":"Tue Aug  4 22:00:24 2026"` (from `sessions/*.json`) — when that pid started,
+    /// in UTC. Guards the liveness check against pid reuse; see ``sessionIsLive(_:)``.
+    private static let reProcStart = regex(#""procStart"\s*:\s*"([^"]*)""#)
     /// `"needs": "approve plan"` (spaced, from `jobs/*/state.json`). Absent or `null` → no match.
     private static let reNeeds = regex(#""needs"\s*:\s*"([^"]*)""#)
     /// `"tempo": "blocked"` (spaced, from `jobs/*/state.json`).

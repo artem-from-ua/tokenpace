@@ -4,9 +4,28 @@ import Foundation
 
 private let refNow = Date(timeIntervalSince1970: 1_800_000_000)   // fixed "now" for age math
 
+/// A ``ProcessLiveness`` driven by a fixture table instead of the real process table (#275), so a
+/// test never depends on which pids happen to exist on the machine running it.
+///
+/// `startTimes` maps pid → kernel start time (epoch seconds); an absent pid reads as dead.
+/// ``alwaysAlive`` is the default the fixture uses, so the 30-odd tests written before the liveness
+/// filter existed keep exercising exactly what they were written to exercise.
+private struct StubLiveness: ProcessLiveness {
+    var startTimes: [Int32: Double] = [:]
+    var alwaysAlive = false
+
+    func startTime(ofPID pid: Int32) -> Double? {
+        if alwaysAlive { return startTimes[pid] ?? 0 }
+        return startTimes[pid]
+    }
+}
+
 /// A throwaway `~/.claude`-shaped fixture tree on disk, so the scanner runs against real files.
 private final class ClaudeFixture {
     let home: URL
+    /// Process table backing ``scanner()``. Defaults to "every pid is alive" so tests that predate
+    /// the liveness filter (#275) are unaffected; liveness tests override it explicitly.
+    var liveness = StubLiveness(alwaysAlive: true)
     init() {
         home = FileManager.default.temporaryDirectory
             .appendingPathComponent("tp-awaiting-\(UUID().uuidString)")
@@ -21,12 +40,14 @@ private final class ClaudeFixture {
     /// `updatedAt` to that many days before `refNow`; `cwd` is the project fallback.
     @discardableResult
     func session(_ pid: String, status: String, jobId: String? = nil,
-                 ageDays: Double = 0, cwd: String = "/repo/app") -> URL {
+                 ageDays: Double = 0, cwd: String = "/repo/app",
+                 procStart: String? = nil) -> URL {
         let updatedMs = Int((refNow.timeIntervalSince1970 - ageDays * 86_400) * 1000)
         // Both `updatedAt` and `statusUpdatedAt` are set to the same instant, as Claude Code does; the
         // freshness guard prefers `statusUpdatedAt`, and age math reads `updatedAt`.
         var s = #"{"pid":\#(pid),"status":"\#(status)","cwd":"\#(cwd)","updatedAt":\#(updatedMs),"statusUpdatedAt":\#(updatedMs)"#
         if let jobId { s += #","jobId":"\#(jobId)""# }
+        if let procStart { s += #","procStart":"\#(procStart)""# }
         s += "}"
         let url = home.appendingPathComponent("sessions/\(pid).json")
         try? s.write(to: url, atomically: true, encoding: .utf8)
@@ -74,7 +95,9 @@ private final class ClaudeFixture {
                         atomically: true, encoding: .utf8)
     }
 
-    func scanner() -> AwaitingInputScanner { AwaitingInputScanner(claudeHome: home) }
+    func scanner() -> AwaitingInputScanner {
+        AwaitingInputScanner(claudeHome: home, liveness: liveness)
+    }
     func count() -> Int { scanner().count(now: refNow) }
     func scan() -> AwaitingSessions { scanner().scan(now: refNow) }
 }
@@ -366,5 +389,91 @@ struct AwaitingInputScannerTests {
         #expect(per[0].red == 1 && per[0].orange == 0 && per[0].recent == 1)
         #expect(per[1].projectName == "lib")
         #expect(per[1].orange == 1 && per[1].red == 0 && per[1].recent == 0)
+    }
+
+    // MARK: liveness — dead sessions never count (#275)
+
+    /// The core of #275: `claude` killed while a prompt was on screen leaves `status:"waiting"` on
+    /// disk with nobody left to rewrite it. Before the filter that hand never went down.
+    @Test func deadSessionDoesNotCount() {
+        let fx = ClaudeFixture()
+        fx.liveness = StubLiveness(startTimes: [:])          // process table is empty → pid is gone
+        fx.session("4242", status: "waiting")
+        #expect(fx.count() == 0)
+    }
+
+    @Test func liveSessionCounts() {
+        let fx = ClaudeFixture()
+        fx.liveness = StubLiveness(startTimes: [4242: 1_700_000_000])
+        fx.session("4242", status: "waiting")
+        #expect(fx.count() == 1)
+    }
+
+    /// A dead session must not be resurrected by an unrelated process that the kernel later handed
+    /// the same pid to: the recorded `procStart` and the actual start time disagree.
+    @Test func reusedPIDDoesNotResurrectDeadSession() {
+        let fx = ClaudeFixture()
+        // The live process with this pid started long after the session recorded its own start.
+        fx.liveness = StubLiveness(startTimes: [4242: 1_800_000_000])
+        fx.session("4242", status: "waiting", procStart: "Tue Aug  4 22:00:24 2026")
+        #expect(fx.count() == 0)
+    }
+
+    /// The matching-process case: same pid, and `procStart` agrees with the kernel (to the second).
+    @Test func matchingProcStartCounts() {
+        let fx = ClaudeFixture()
+        // "Tue Aug  4 22:00:24 2026" UTC == 1_785_880_824.
+        fx.liveness = StubLiveness(startTimes: [4242: 1_785_880_824.5])
+        fx.session("4242", status: "waiting", procStart: "Tue Aug  4 22:00:24 2026")
+        #expect(fx.count() == 1)
+    }
+
+    /// Fail-open #1: a live pid whose `procStart` we cannot read still counts — the filter only ever
+    /// removes sessions it can positively prove are dead.
+    @Test func unparseableProcStartFailsOpen() {
+        let fx = ClaudeFixture()
+        fx.liveness = StubLiveness(startTimes: [4242: 1_700_000_000])
+        fx.session("4242", status: "waiting", procStart: "not a date")
+        #expect(fx.count() == 1)
+    }
+
+    /// Fail-open #2: a session file with no `pid` field at all (a format change on Claude Code's
+    /// side) must not silently vanish from the count.
+    @Test func missingPIDFailsOpen() {
+        let fx = ClaudeFixture()
+        fx.liveness = StubLiveness(startTimes: [:])
+        let url = fx.home.appendingPathComponent("sessions/nopid.json")
+        try? #"{"status":"waiting","cwd":"/repo/app","updatedAt":1800000000000}"#
+            .write(to: url, atomically: true, encoding: .utf8)
+        #expect(fx.count() == 1)
+    }
+
+    /// A dead session must not count even when its job state advertises `needs` — the liveness gate
+    /// runs before the status/job-state join, so no branch can smuggle it back in.
+    @Test func deadSessionWithNeedsDoesNotCount() {
+        let fx = ClaudeFixture()
+        fx.liveness = StubLiveness(startTimes: [:])
+        fx.session("4242", status: "idle", jobId: "j1")
+        fx.job("j1", needs: "approve plan", updatedAtDaysBeforeNow: 0)
+        #expect(fx.count() == 0)
+    }
+
+    // MARK: procStart parsing
+
+    @Test func parseProcStartReadsCtimeAsUTC() {
+        // ctime format, and written in UTC despite carrying no zone marker (verified against
+        // `p_starttime` on Claude Code v2.1.220).
+        #expect(AwaitingInputScanner.parseProcStart("Tue Aug  4 22:00:24 2026") == 1_785_880_824)
+    }
+
+    /// Single-digit days are space-padded to two columns by `ctime` ("Aug  4"), double-digit days are
+    /// not ("Jul 28") — the parser has to accept both.
+    @Test func parseProcStartHandlesTwoDigitDay() {
+        #expect(AwaitingInputScanner.parseProcStart("Tue Jul 28 21:26:15 2026") == 1_785_273_975)
+    }
+
+    @Test func parseProcStartRejectsGarbage() {
+        #expect(AwaitingInputScanner.parseProcStart("2026-08-04T22:00:24Z") == nil)
+        #expect(AwaitingInputScanner.parseProcStart("") == nil)
     }
 }

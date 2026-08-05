@@ -16,13 +16,13 @@ TokenPace крутить п'ять періодичних завдань. Цей
 
 | Гейт | Usage API | Статуси сервісів | Awaiting-input | Резервне копіювання | Авто-інсталяція оновлень |
 |---|---|---|---|---|---|
-| **Screen lock / скрінсейвер / display sleep** | ✅ повна зупинка, gated `pausePollingWhenScreenLocked` (default on) | ✅ непрямо | ❌ [#275](https://github.com/artem-from-ua/tokenpace/issues/275) | ✅ непрямо | ✅ непрямо |
-| **System sleep / wake** | ✅ безумовно | ✅ непрямо | ❌ | ✅ непрямо | ✅ непрямо |
+| **Screen lock / скрінсейвер / display sleep** | ✅ повна зупинка, gated `pausePollingWhenScreenLocked` (default on) | ✅ непрямо | ✅ **безумовно** — стрім і таймер знімаються ([#275](https://github.com/artem-from-ua/tokenpace/issues/275)) | ✅ непрямо | ✅ непрямо |
+| **System sleep / wake** | ✅ безумовно | ✅ непрямо | ✅ безумовно (backstop за екранним гейтом) | ✅ непрямо | ✅ непрямо |
 | **On-battery** | ❌ | ❌ | ❌ | ❌ | ✅ **defer** до підключення до мережі |
 | **Low Power Mode** | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Metered network** | ❌ | ❌ | ❌ (мережі не торкається) | ❌ (пише локально) | ✅ **defer** до безлімітного зʼєднання |
 | **Вільне місце на диску** | ❌ | ❌ | ❌ | ❌ | ✅ **defer**, якщо після завантаження лишиться < 5 ГБ |
-| **claude CLI running** | ✅ як каденція: 180 с → 15 хв | ✅ непрямо (розтягується разом) | ❌ | ❌ | ❌ |
+| **claude CLI running** | ✅ як каденція: 180 с → 15 хв | ✅ непрямо (розтягується разом) | ❌ **свідомо** (#275) — без `claude` у деревах ніхто не пише, FSEvents і так мовчить; замість гейта сканер відсіює мертві сесії за pid | ❌ | ❌ |
 | **429 / `Retry-After`** | ✅ hold до вказаного часу | ✅ непрямо + власний floor 5 хв | н/д | н/д | н/д |
 | **Feature toggle** | н/д (завжди ввімкнено) | н/д | `awaitingInputEnabled` (default **off**) | `archiveEnabled` + заданий `archiveDestination` | `automaticUpdateChecks` + `installUpdatesAutomatically` (обидва default **on**, opt-out) |
 | **Власна каденція** | 180 с; 15 хв коли `claude` не запущено; floor 60 с | `max(5 хв, usageInterval)`; при проблемі floor 60 с | FSEvents 0.75 с + safety timer 45 с | раз на 24 год | перевірка раз на 12 год |
@@ -59,23 +59,26 @@ apply -down-> update
 apply -down-> archive
 update -down-> instplan : battery / metered / disk
 
-park -[#red,dashed]-> watcher : **немає звʼязку** (#275)
+park -down-> watcher : стан екрана\n(окремий, негейтований колбек)
 
 note bottom of watcher
-  Єдине завдання поза
-  park-механізмом
+  Власний рушій, але той самий
+  park-механізм (#275)
 end note
 @enduml
 ```
 
-![Гейти періодичних завдань — хто на чому висить](https://www.plantuml.com/plantuml/svg/NPDDQzj048Rl-ok6vEAuiGkb8P13YI4f10e9ACM7ffIrD9Q5LhlBxigkZwKVrrn2VuS93IsfqzvpMlsZZhvSEHTfvzrdPcTUhOwjuyRbcM0sJQJcXcSGgamhYT85RYaG38QEorXW1ubmodFXBl6Z6uaabXdH4D833MERVDYvK48aCZwLSIBnIlP6TYd3m1dasQ3uvd_vU_zxRmUu1QoGRkv8wnCK67E7GwwrMFO-7DLi5NLHJSS4ZhlSdarFSgmWMyLFgRSwedh_gRoAdr8Z4ywIUGVZjR3Lte8dZcOxapftO-x26HgQy7LmEgTz2y_WCidGmCi3A3xLVIzgQikX83I8yeqAq_E9HJClYuoLIQtc8GO2KOzvMZT1rgVTr6OMIPCASI6uhAY4Oaq1OoKFWqWjvE1LuoySmT2MHU4v31TKc3LwYrNM4bL-kFFSqMYibbgWiNLRR5pS5blFwisDtFP7Xqouemkpf5uof0L6j8eIcxQjlzibRJ_YTeRHUqfj_AFCVjy_-3k_zglY1lnFV_kuBgxfVLzyxlUXj_lYy62FCQdet8boJcMWfXlx0VmN_uCk7vKearV-bi8LXG_5DVY__ayf4bPsCQ13xeglvNRndVGrxQx9jGZAwkoOLlJt_0C0)
+![Гейти періодичних завдань — хто на чому висить](https://www.plantuml.com/plantuml/svg/NPFDQjj04CVlUeeXlTYqTg4q578eCII5G241fVXIA6jfh0YjLilkogvlSKjBpptaETmMaS_w6NRVgAELxCe-IEpC_ERhhzMnDaoPCkU1pb8XcM8vH4Kk2u72X6R14HH6Xec4OmU9SSfARYxnindnD14vqH3H2rKGRFFXuABWF1N9gKXIWHz5RwGN8WgDGfOFt7TxPn_iO_y0c0RqI3Tt9EK9SaoOmI6JaYzwduuQrbjTL5ARq31JwhFfIOaUqjxUfpx8cEhzfqflxrCZ5Lsbimx66iVEU7EM6jhjJCZIZ9c9hb3HXk_2qnd5DJo7opH71QyFmIsRkUSDjQDG62b4yRw8ilE9HZMhYumBbMd98WmveXoph1c2fC-wgUqkWZRb_88puQcKR4b64DGy3E9YBWPlMttX28QwBWelOJYdma7hts1UMgBg3tTU6bejQ5mRe9LrrzcgkElSQDO4j-xDVDHamWnTc0NDaYCTCAPJdEfiR_HMDafmI_V5hknVi9LzSDVrqQv8TBlsPcMVw4hTlm1oL_OFFVV4h-rl3r84wBwjxQFzLUVtWq0KDDYaCAR8ePXklm-0_KdKoYtRD7VjlheVxiRNNb6e0b-O8akoVLVAggSUa5MvRtL7uc_j4_IUlNfps2UXOwZx1STqeX_k7m00)
 
 Наслідок: усе, що паркує usage-цикл, автоматично паркує ще три завдання. І навпаки — якщо колись
 відвʼязати статуси або архіватор у власний таймер, разом зникнуть усі park-гейти, які вони зараз
 успадковують безкоштовно.
 
-**Awaiting-input — єдиний виняток.** Він має власні тригери й до park-механізму не підключений
-взагалі, тож працює при замкненому екрані та у сні. Це [#275](https://github.com/artem-from-ua/tokenpace/issues/275).
+**Awaiting-input має власні тригери, але той самий park-механізм** (#275). Він не залежить від
+usage-heartbeat — його будять FSEvents і 45-секундний safety-таймер — проте стан екрана знімає і
+стрім, і таймер. Підключений він не через `.sleep`/`.wake` (той сигнал сам гейтований опцією
+`pausePollingWhenScreenLocked`), а через окремий **негейтований** колбек `ScreenLockObserver`, тож
+пауза діє незалежно від того чекбокса. Деталі — [awaiting-input-refresh.md](../design/awaiting-input-refresh.md).
 
 ## Гейти по одному
 
@@ -150,20 +153,11 @@ download onto an unmetered link, never to gate…».
   постійний фон.
 - **Thermal pressure** — `ProcessInfo.thermalState` не використовується.
 - **User-idle (HID)** — часу без вводу ніде не міряємо. Єдиний проксі «користувача немає» — стан
-  екрана та наявність процесу `claude`.
+  екрана (і, для каденції usage-полла, наявність процесу `claude`).
 - **On-battery / metered для поллінгу** — дані вже зібрані (див. вище), але до каденції не
   підключені. Дешевий важіль, якщо колись постане питання економії трафіку на роздачі.
 
 ## Розходження коду з документацією
-
-[`docs/design/awaiting-input-refresh.md`](../design/awaiting-input-refresh.md) описує гейт
-«feature-enabled AND screen-unlocked AND claude-running» як частину дизайну, і docstring самого
-`AwaitingInputWatcher` повторює це твердження. **У коді реалізована лише перша умова.** Тип підтримує
-потрібний режим через `setActive(_:)`, але єдиний кол-сайт —
-[`App.swift:1721-1744`](../../Sources/TokenPace/App.swift) — вмикає вотчер беззастережно.
-
-Тікет: [#275](https://github.com/artem-from-ua/tokenpace/issues/275). До його закриття вважай
-таблицю вище єдиним достовірним описом, а design-doc — планом.
 
 Дрібніше: docstring [`UpdateInstallPlan`](../../Sources/TokenPaceKit/UpdateInstallPlan.swift) називає
 `autoInstallEnabled` «default-OFF via `PersistedConfig`», хоча фактично ключ

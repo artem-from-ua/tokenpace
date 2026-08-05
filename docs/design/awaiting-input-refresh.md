@@ -7,8 +7,12 @@
 ## Goal
 
 Keep the "N sessions awaiting input" count fresh with **near-zero idle cost** and **no missed
-transitions**, honoring two gates: update **only while Claude Code is running and the screen is
-unlocked**.
+transitions**: update **only while the screen is available** (unlocked, no screensaver, display and
+system awake).
+
+> An earlier draft of this note also gated on "Claude Code is running". That term was **dropped** in
+> #275 — see [Gating](#gating-the-screen-condition) for why, and where the problem it was meant to
+> solve is handled instead.
 
 ## Three moving parts
 
@@ -98,7 +102,7 @@ exist when it started; that's why it's the wrong tool for this directory-of-chur
 
 The watcher is a two-level state machine: an outer **Inactive ↔ Active** gate, and, while Active,
 an inner Idle → Scanning → (Emitting | Idle) loop that processes every FSEvents batch and safety
-tick. The gate = *feature-enabled AND screen-unlocked AND claude-running*.
+tick. The gate = *feature-enabled AND screen-available*.
 
 ```plantuml
 @startuml
@@ -125,36 +129,78 @@ state Active #E8F5E9 {
   Emitting --> Idle
 }
 
-Inactive --> Active : gate TRUE\n(feature & unlocked & claude running)\n/ start stream + timer, catch-up scan
-Active --> Inactive : gate FALSE\n(lock / claude exit / feature off)\n/ stop stream + timer
+Inactive --> Active : gate TRUE\n(feature on & screen available)\n/ start stream + timer, catch-up scan
+Active --> Inactive : gate FALSE\n(lock / screensaver / sleep / feature off)\n/ stop stream + timer
 
 legend right
   |= color |= meaning |
   |<#FDE8E8>| inactive (parked) |
   |<#E8F5E9>| active (watching) |
-  gate = feature-enabled AND screen-unlocked AND claude-running
+  gate = feature-enabled AND screen-available
 endlegend
 @enduml
 ```
 
-![State machine of the awaiting-input watcher: Inactive parks with no stream; Active runs Idle→Scanning→Emitting on each FSEvents batch or safety tick.](https://www.plantuml.com/plantuml/svg/TLHHRzCm47xthpW92QMiKLyewX2R5hfKgeJsG9bue3nuzZMnwjYHuwmWEiIFu1VoIpWdSTOneKfjVFxklk_kk_IgyTpvjjBCAwyHiWDNNfbYRUhMV-PUbEZWpw_VG3YFK75HAeEG53oWu0nMc_mUZMzcjTKQQcS5DWrTJLYpLwRcZbUm2RdlkTWNphP6Bgss3bwivk7p36QTH3T0pkVPF7l3s9TNNo5DBs5jkF3g7XdhvSGp5RlE5_a2Vh07DWRVWZ9I2UwfLAcaH0F9xHgQqXuQCDQNdSmJkB5ZEzIlGrvDGwpXE_JVmQiANMJE1jvyiPhdvyGBC8gK6kaOVgXcNmTSQmpHJPyK0-ugb14RSZU2TpXA79NS1HUs9f7AWIYvAL1E_fCp5XTxI7w-dZS1U79FAdeZDPa43LqaJn1HFa45EUMXDGCZyJTAavvk8WuDcVGiDQ-KzprJdpua4-xaIji2h9P02GOFqwsnPXdGonwSt4nEyUD47zYZLI6OHTUAuCUdZxSvQTmXzwr3U4dAjHLxbFGeD6ybHWicMpE3RkkZDsUz6rCGOT9fMtUJOTaZrycET6ohxCCcq0KAc4K2_AOydQ86kziDNBR-XuenZGND49mgIa_j7YzeOc7bwQ52tatq6EBlXis-FD8o3o8IUbseiqb4z3j8Y7X_27s4LZj4f_WYoahHy3jDSybkhgbFXsZISLOXrZUJ3jDYfBBNogxeY_ue_W80)
+![State machine of the awaiting-input watcher: Inactive parks with no stream; Active runs Idle→Scanning→Emitting on each FSEvents batch or safety tick.](https://www.plantuml.com/plantuml/svg/TLJRQjj047tVhnWe5BcnyKjTdDA4g8uCXfA7kY4FTHysqbXQl9eLkokRKYVq8_g5_PBCwXQdeHWixywPEMVcZ7pblBI-BhNmock4-22LLvIlgAhzdVHfWHR-_lu3ZFC8fKmBHGXHBWCApc2vJlP8taqhepLKrgJe78T6mkqKLTBA4jOXzxDCTxarDMKBeus5DyjP-Bo26PkXxI3ditWMVn3Y-xiVC9bSmefawjKUXMZbz6SkTftCapdy4WzYkFm8YZALIi-b2fLbI13Thi0Lvk20Z2yQcITmCaCxtAz5MOx3dPDRz3_1gn9jpnntlCbyEKlEcHTW49bfv6DuSCss3jYQYEd6Bug1j2LcFJRahbFPu3XnK78VNDXGb2aBQI4fnspqdvoXUBg3wF7zp0NWIPnLj4PgDWaS1w8NY5u-GrDsoaDD7IFpEwLPJpCHYyGclKfDIkLzozIcTycCEmbfauFH6N02uM6y8KEBW5wquEXcT8eV9leWdgqAbt7lMXxy-FRrDc6DMvI-jWY6u2ttPv4zbtkfjBpNEDhG59fzxrqvQtqOGnfcFAchPYOYVcOvsOw6Pnb_MGSYRNZ4qux2oJsRoIUDMF5pKB7TTfoc-eTI28qvJn6ioWlF3HylU6PXwVb7YRAPwJ7SV-fs-_B8wzo9YVY5sV4Qz8Xs2ndHnm-Xdx3U3Q9HVj7BcY25QMGGtrnt3Ko66GdMr2eJL_p5VmnF)
 
-## Gating (the two conditions)
+## Gating (the screen condition)
 
 The gate maps directly onto **stream lifecycle**, not a filter inside a hot loop:
 
 | Transition | Action |
 | --- | --- |
-| screen unlocked **and** `claude` running | start FSEvents stream (from `lastEventId`), arm safety timer, run one catch-up `scan()` |
-| screen locked **or** `claude` exited | stop FSEvents stream, disarm safety timer (no work while parked) |
+| feature on **and** screen available | start FSEvents stream (`sinceNow`), arm safety timer, run one catch-up `scan()` |
+| screen locked / screensaver / display or system asleep | stop FSEvents stream, disarm safety timer (no work while parked) |
+| feature off (toggle, stub, non-live scenario) | as above, **plus** destroy the watcher and clear the count |
 
-Signals already exist in the shell: `NSWorkspace` lock/unlock notifications feed the existing poll
-`SignalGate`, and `ProcessClaudeActivityProbe` (sysctl `KERN_PROC`, `PollingShell.swift:237`) reports
-whether `claude` is running. The Claude-running edge is polled on the existing heartbeat (no new
-timer): when it flips, toggle the stream.
+The full predicate is four terms wide, and only the first is about the screen:
+`awaitingInputEnabled` **AND** no `TOKENPACE_AWAITING` stub **AND** `currentScenario == .realNetwork`
+(explicitly selected — #267) **AND** screen available. `AppDelegate.updateAwaitingInputWatcher()`
+recomputes it; `AwaitingInputWatcher.setActive(_:reason:)` executes it.
 
-> Rationale for stop-on-lock: no point watching files the user can't act on, and it lets a laptop
-> sleep undisturbed. Restart cost is one stream create + one `scan()` — milliseconds.
+**Feature-off and screen-off are deliberately different.** Feature-off destroys the watcher and
+clears the count. A locked screen only *parks* it and **keeps the last count on screen**: the user
+cannot see the menu bar while it is locked, and the catch-up `scan()` on resume either confirms or
+corrects the number. Clearing it would only make the indicator blink on every unlock.
+
+Rationale for stop-on-lock: no point watching files the user can't act on, and it lets a laptop sleep
+undisturbed. Restart cost is one stream create + one `scan()` — milliseconds.
+
+### The signal path (why it is not the poll signal)
+
+`ScreenLockObserver` (`PollingShell.swift`) already watches all three sources — `screenIsLocked` /
+`screenIsUnlocked`, `screensaver.didstart` / `willstop`, and `NSWorkspace.screensDidSleep` /
+`screensDidWake`. But its `.sleep`/`.wake` **poll** signal is gated on
+`pausePollingWhenScreenLocked` (default on, ADR-0032 D5): with that checkbox off it emits nothing.
+
+Riding that signal would therefore silently disable this gate for anyone who turned the checkbox off.
+So the observer has a **second, ungated callback** (`onScreenAvailabilityChanged`) fired *before* the
+preference is consulted, and the watcher rides that one. The asymmetry is intentional: pausing the
+usage poll trades freshness for API quota and is a legitimate user preference, whereas scanning
+sessions the user physically cannot answer has no upside at any setting.
+
+`WorkspaceSleepWake` (system sleep/wake) feeds the same gate as a **backstop**. macOS sleeps the
+display before suspending, so the screen term normally fires first, and nothing runs mid-sleep
+anyway — but notification ordering is not an Apple contract, and `didWake` guarantees a catch-up if a
+display-wake event is ever missed.
+
+### Why there is no "claude is running" term
+
+The original draft had one, and `ProcessClaudeActivityProbe` (sysctl `KERN_PROC`) already exists for
+the poll cadence. It was dropped in #275 after costing it out:
+
+- **Nothing to silence.** With no `claude` alive nothing writes to `~/.claude/sessions|jobs`, so
+  FSEvents is already quiet. The residual cost is one ~0.18 ms scan per 45 s safety tick — less than
+  the timer wakeup that gating it would itself require.
+- **The gate would need its own timer.** Once parked on "claude exited", the watcher's safety timer
+  is disarmed, so nothing is left to notice `claude` coming *back*. That needs a separate re-arm
+  timer live only in that state — real complexity for no measurable saving.
+- **The real bug is elsewhere.** What the term would have masked is a session left in
+  `status:"waiting"` by a killed or crashed `claude`: nothing rewrites that file, so the hand never
+  goes down. That is now fixed at the source — `AwaitingInputScanner` checks each session's pid
+  against the process table (with `procStart` guarding against pid reuse) and drops dead ones. That
+  fix is strictly better: it also clears a stale session while *other* `claude` processes are running,
+  which a process-wide gate could never do.
 
 ## Debounce / merge in `RefreshCoordinator`
 

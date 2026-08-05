@@ -95,6 +95,14 @@ final class WorkspaceSleepWake {
 /// the same `.sleep`/`.wake` signals into the same hub; `SignalHub`'s newest-wins buffer collapses any
 /// overlap (e.g. lock then system-sleep) harmlessly.
 ///
+/// **Two outputs, two different gates** (#275). Besides the config-gated poll signal above, this
+/// observer reports raw screen availability through ``onScreenAvailabilityChanged`` — emitted on
+/// *every* event, **before** the preference is consulted. The awaiting-input watcher rides that
+/// second path: pausing the usage poll is a user preference (it trades freshness for API quota), but
+/// a file watcher over sessions the user physically cannot answer has no upside at any setting, so
+/// its gate is not negotiable. Wiring it to `onSignal` instead would silently disable the watcher's
+/// gate for anyone who turned the checkbox off.
+///
 /// Events observed:
 /// - **Lock/unlock** — `com.apple.screenIsLocked` / `com.apple.screenIsUnlocked` on
 ///   `DistributedNotificationCenter` (the system-wide bus these are posted on).
@@ -104,6 +112,10 @@ final class WorkspaceSleepWake {
 @MainActor
 final class ScreenLockObserver {
     private let onSignal: @Sendable (PollSignal) -> Void
+    /// Raw screen availability (`true` = usable), reported on every event **regardless** of
+    /// ``PersistedConfig/pausePollingWhenScreenLocked`` — see the type doc for why this second path
+    /// exists (#275).
+    private let onScreenAvailabilityChanged: @Sendable (Bool) -> Void
     private var distributedTokens: [NSObjectProtocol] = []
     private var workspaceTokens: [NSObjectProtocol] = []
 
@@ -111,8 +123,12 @@ final class ScreenLockObserver {
     /// Settings toggle needs no restart to take effect.
     private var isEnabled: Bool { PersistedConfig.pausePollingWhenScreenLocked }
 
-    init(onSignal: @escaping @Sendable (PollSignal) -> Void) {
+    init(
+        onSignal: @escaping @Sendable (PollSignal) -> Void,
+        onScreenAvailabilityChanged: @escaping @Sendable (Bool) -> Void = { _ in }
+    ) {
         self.onSignal = onSignal
+        self.onScreenAvailabilityChanged = onScreenAvailabilityChanged
 
         // Lock / unlock / screensaver ride the *distributed* notification center (cross-process bus).
         let distributed = DistributedNotificationCenter.default()
@@ -146,7 +162,11 @@ final class ScreenLockObserver {
     }
 
     /// Park the poll loop (via `.sleep`) if the preference is on; otherwise ignore the event.
+    ///
+    /// The availability callback fires **first**, outside the preference gate — its consumer
+    /// (the awaiting-input watcher) parks unconditionally. See the type doc.
     private func pause(_ reason: String) {
+        onScreenAvailabilityChanged(false)
         guard isEnabled else { return }
         AppLogger.lifecycle.notice("screen-lock-pause: \(reason, privacy: .public), pausing polling")
         onSignal(.sleep)
@@ -154,6 +174,7 @@ final class ScreenLockObserver {
 
     /// Resume the poll loop with one immediate poll (via `.wake`) if the preference is on.
     private func resume(_ reason: String) {
+        onScreenAvailabilityChanged(true)
         guard isEnabled else { return }
         AppLogger.lifecycle.notice("screen-lock-pause: \(reason, privacy: .public), polling immediately")
         onSignal(.wake)
