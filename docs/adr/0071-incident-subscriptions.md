@@ -1,0 +1,372 @@
+---
+status: draft
+date: 2026-08-05
+---
+
+# ADR-0071: Інциденти status.claude.com у попапі та підписка на їхні оновлення
+
+> **Draft.** Зафіксовано за підсумками продуктового інтерв'ю 2026-08-05. Частина рішень свідомо
+> лишена відкритою до живих спостережень — див. [Відкриті питання](#відкриті-питання). Повний
+> контекст, емпіричні таблиці й тестові дані — у
+> [docs/design/incident-subscriptions.md](../design/incident-subscriptions.md).
+
+## Контекст
+
+[ADR-0013](0013-claude-status-line.md) §2 свідомо вирішив **не декодувати `incidents[]` взагалі**:
+стан сервісів визначається виключно `components[].status`. Причина була слушна — компонент і інцидент
+розходяться (реальний кейс: інцидент `major` про призупинення Mythos/Fable, тоді як обидва компоненти
+`operational`), і рядок статусу мав відповідати кольору на самій сторінці Statuspage.
+
+Це рішення **лишається чинним для визначення стану**. Але воно лишає користувача без другої половини
+відповіді: жовта крапка біля `Code` не пояснює, **що саме** зламано, **наскільки надовго** і **коли
+можна повертатися до роботи**. Людина читає «degraded» як «буде повільніше», хоча насправді частина
+функціональності не працює зовсім (кейс, з якого почалася розмова: не працював Claude Science при
+`degraded_performance` на всіх компонентах).
+
+Потрібен окремий шар: інциденти як **контекст** і як **об'єкт підписки** — не як джерело стану.
+
+### Емпірична база
+
+Рішення нижче спираються на виміряні дані, а не на припущення про поведінку Statuspage: 50 інцидентів
+з `GET /api/v2/incidents.json` (2026-07-08 … 2026-08-05) плюс два інциденти, відстежені наживо від
+початку до `resolved` (`f6gkkq6txl7z`, `mgp99sn4ynd4`). Ключові факти:
+
+- **`resolved_at` запізнюється на 6 хв (медіана) … 480 хв (максимум)** відносно моменту, коли
+  компоненти реально повернулись в `operational`. Живий вимір: **66 хвилин**.
+- **Відновлення буває тихим** — компоненти зеленіють **без жодного `incident_update`**
+  (`mgp99sn4ynd4`).
+- **`monitoring_at`** заповнене лише в 28 із 49 інцидентів; **`deliver_notifications`**
+  непослідовний (буває `false` саме на `resolved`); **`impact`** слабо корелює з реальним болем
+  (обидва інциденти 2026-08-05 — `minor`, при 6-годинній деградації).
+- **Апдейтів мало**: у середньому 3.3 на інцидент, максимум 8.
+- **Апдейти редагують заднім числом** (`updated_at` ≠ `created_at`).
+- **Стан компонента не належить інциденту**: при двох одночасних інцидентах обидва показують ті самі
+  уражені компоненти.
+
+## Рішення
+
+### 1. Інциденти декодуються — але лише як контекст і об'єкт підписки
+
+Звужується заборона ADR-0013 §2: `incidents[]` тепер декодується. **Джерелом стану сервісів
+лишається виключно `components[].status`** — жодне поле інциденту (`status`, `impact`,
+`resolved_at`) на стан не впливає.
+
+### 2. ⌥ у попапі перемикає вимір: сервіси ↔ інциденти
+
+За замовчуванням — рядки **компонентів** із проблемним статусом (як зараз). Під ⌥ перелік сервісів
+**замінюється** переліком інцидентів із кольоровими крапочками. Зелені статуси сервісів під ⌥ більше
+не показуються. Якщо активних інцидентів немає — секція під ⌥ зникає повністю.
+
+### 3. Рядок інциденту: назва + вік + статус-посилання
+
+Уражені сервіси **не** показуються — це і є наявний фільтр Monitored Services. Слово-статус
+(`identified`, `monitoring`, …) — посилання на **конкретний** інцидент (`shortlink`).
+
+Побічно розв'язує наявну ваду: сьогодні слово-статус у рядку компонента веде на загальну сторінку, і
+при кількох уражених сервісах виходить кілька однакових посилань у нікуди.
+
+### 4. Компоненти зелені → інцидент ховається
+
+Попап відповідає на «чи можу я зараз працювати». Зелені компоненти = «так»; формально відкритий
+інцидент цього не заперечує.
+
+```plantuml
+@startuml
+title Видимість інциденту в попапі (стан = комбінація «інцидент» × «компоненти»)
+
+skinparam state {
+  BackgroundColor<<hidden>> #F5F5F5
+  BackgroundColor<<shown>> #FFF8E1
+  BackgroundColor<<green>> #E8F5E9
+}
+
+[*] --> NoIncident
+
+state "Інцидентів немає" as NoIncident <<hidden>>
+state "Активний, компоненти НЕ operational" as Active <<shown>>
+state "Активний, компоненти operational" as GreenOpen <<green>>
+
+NoIncident --> Active : новий інцидент\n(components[] → degraded/outage)
+
+Active --> GreenOpen : components[] → operational\n(апдейт АБО тихо)
+GreenOpen --> Active : рецидив або\nінший інцидент уразив ті самі компоненти
+
+Active --> NoIncident : resolved, поки компоненти\nще не позеленіли (рідко)
+GreenOpen --> NoIncident : resolved\n(запізнення 6…480 хв)
+
+note right of Active
+  ЄДИНИЙ стан, у якому рядок
+  інциденту видно (під ⌥).
+  Рядок: назва + вік + статус-лінк
+end note
+
+note right of GreenOpen
+  РІШЕННЯ 4: інцидент **ховається**.
+  Попап відповідає на «чи можу я
+  працювати» — зелені компоненти = «так».
+  Живий кейс: 66 хв у цьому стані
+end note
+
+note bottom of NoIncident
+  Секція під ⌥ зникає повністю —
+  попап не росте дарма
+end note
+@enduml
+```
+
+![Видимість інциденту в попапі](https://www.plantuml.com/plantuml/svg/bLNRJXDX4BxVfvZW3LJma0Z11WXggF567m2uMBjhsT3ktsmNl30cBMZLX50bKF423nSQ4oyiJP6oBIMfBp3_A_H9d9djYR8tfjdqt_upttpppQ6BET_q_8rCsl0TFsq3xc4TQ_GqTLaNz9RU0Lt6SrsKdq_ejAMt0Qk05zYYfu8NkWpZR4hdSvW73EYYYSViXXLT99mIj7-DehGRyFSZ_TurPxJpy0RhxSQ4OUJM7JThUcO6YA9lmmi3uBwPN4zvQiEr7gYqykRcrXpBijs51RYMcEPFb4rkJJqFJHA9sQNRKIOfpmvHbcOJqqjtZPU6iHnRXQcf1NYi7hb9XuBuH4c8Z65nH90owy7icvJm_XYOkI4t6B3i0xp7WFF4AddLyMmIebG0FC83K5dRCtr7kMPQWEybVMVJXdvQ_uav2lUGCt-IjLtegs0OG-HPWcx8EEVO8dn2lz8KA-vuKcMooYMdtF8gT8fxODafpxHiwwRQyCsKJJNj8Z7e870ShdWEiIHWRZA9SwQtWFByW9-1az6liJLX380kSTLvFEaIh7DvAdYChHLNUB-DJ07qDZbLy5GSkAoW2_HEan2fvQLqXYIBWsVdL7hJjYR3AGcubX40nEOTdaZdX8QdTDEGsp9zrsciydIgiUzedf7nMAlJS2JfM-8GLWbcElaVTsPl0GbMfIguYXh6Sr9hFgXdNSLeAl0LxkCXDTqXVeBUG4-IAg1B8Nq-vkcbnacHH-Hca5Tg51WN7ZNex7oVkC7uNtkkqaaiT1KhS9ryo2wWGnYKSNHX2XkoGGB3TYrWogF4-u88DWtbJpmWzaVu6-x4hrOt5kD-uP1wd_SQ1Il5OaBiIs-LXLHgKepmHCP2bZVO6wvZawx-Y2RiUS4TGpjkLt1bTK4dJov3fOmUn7b6P8c3TaD8b6LskJ79ddkz48UP6QcPrA2eTterwDP6bqUrUQfyNsLOdA6rHTZV233ehk91LK2Qf4xX94j9cb5bx-zo7fBYG1nkL4gu9GIePrcUF2-z0Oz5Ej6_oJy0)
+
+### 5. Підписка — виключно opt-in по кліку
+
+Нічого не приходить, доки користувач сам не натиснув. Жодного дефолтного стану, жодного глобального
+тумблера.
+
+Це рішення знімає цілий пласт складності: відпадає задача «вгадати, чи цей інцидент стосується
+користувача». Коли будити просить людина — гадати не треба.
+
+```plantuml
+@startuml
+title Життєвий цикл підписки на інцидент
+
+skinparam state {
+  BackgroundColor<<none>> #F5F5F5
+  BackgroundColor<<live>> #E8F4FD
+  BackgroundColor<<done>> #E8F5E9
+}
+
+[*] --> NotSubscribed : інцидент з'явився\nв unresolved.json
+
+state "Не підписаний" as NotSubscribed <<none>>
+state "Підписаний" as Subscribed <<live>>
+state "Підписка завершена" as Ended <<done>>
+
+NotSubscribed --> Subscribed : клік на іконці\n(єдиний вхід — opt-in)
+Subscribed --> NotSubscribed : Unfollow\n(попап або дія банера)
+
+Subscribed --> Ended : компоненти → operational\n**або** інцидент resolved
+NotSubscribed --> [*] : інцидент закрито\n(жодного банера)
+Ended --> [*]
+
+note right of Subscribed
+  Живе, доки інцидент активний.
+  Має пережити рестарт — інциденти
+  бувають 6+ годин (виміряно 429 хв).
+end note
+
+note bottom of Ended
+  ВІДКРИТЕ ПИТАННЯ #3:
+  який саме перехід завершує підписку
+  і чи лишається «хвіст» після resolved
+end note
+@enduml
+```
+
+![Життєвий цикл підписки на інцидент](https://www.plantuml.com/plantuml/svg/TLJ1JXDH5Ds_hxY1XL25XO8HGXgYmjADSIKkfdJ0aU4zCftYmfYK4WeB8uRKnXW9ngqBXzfABL0Ilk2-N-1BFFTDQMYfcRHzdNVlUUUSU--RByHU51VNGnK7SUWJrxXbotYgNESM_oLRmK-RJualR8qRV87zBRne4PzpGdXtxa8QtCIgh5HXBT0RNkIj4w1ZdzufeiVUyjfgP8ew_yI49fgRqqRxsIoDBaxBComY33PTnCAZnQd5fyCYybqCH4mlpAZtIhtClAA9YImzC_7pOgwm70KvFq-pjqWIdzon-qvWtMxP_INDTIhgo2-OSDFFJxuf60qXZlu87tApNtm2vR1cXBp2m57NmdgvH_z9wyj9fGxDQSDYFa5gdPksPFU4FoSEOa7dNNPgWrBzJCI6FW-aXW1kzyhMvewuOcjBUWpLRe2RuqVmP4Seq5MfIcOZdWZqk1g07dJuXLunOMZU0WlCE_WaV47uEkOESSFMx3vXBHP01oVZQX0nbUDuTlZCWPodrKAhNLKEmCIFl3WmsWkNT2QJOcSojujxNSOXZaY336q7eBN12wtF7T7m1yStGA33lqL07_EKQHTEAMrGjIXOVHsJMRdXELfMXaagTmyM04g6vlRPSdBPnJdx9oNl6oUsYgPpHpR1fkLia3_erp9sIqYL-WpYSKloZ-qsy1Bx4OFyWHxU9P6HbfZ6ND-VeIGbp00aqjJz6R8xN1-VLBxEamZgoigPE3Rheik95kW3hd2Ll_9t_i8_-3FnaLjymfWSyYyQVJ2BA02tqzj3slxC3L2gfTjQDtlQRZkjDxlURWj8ZUokt3EdUBadZeWQcLUw_2by8G5cNAPN4z9EiTChVa_9F5Qut_u1)
+
+### 6. Сигнал відновлення — `components[].status`, не поля інциденту
+
+Не `resolved_at`, не `monitoring_at`, не `affected_components` в апдейтах. Це єдине джерело, що
+покриває всі п'ять спостережених форм відновлення. Апдейти лишаються джерелом **тексту**, не
+тригером.
+
+```plantuml
+@startuml
+title П'ять спостережених форм відновлення — чому сигнал беремо з components[]
+
+skinparam state {
+  BackgroundColor<<broken>> #FDE8E8
+  BackgroundColor<<ok>> #E8F5E9
+  BackgroundColor<<admin>> #F3E8FD
+}
+
+state "Компоненти degraded/outage" as Broken <<broken>>
+state "Компоненти operational" as Green <<ok>>
+state "Інцидент resolved" as Closed <<admin>>
+
+[*] --> Broken
+
+Broken --> Green : (1) апдейт `monitoring`\nз переходом → operational
+Broken --> Green : (2) **тихо** — без жодного апдейту
+Broken --> Green : (3) апдейт `investigating`\nз переходом → operational
+Broken --> Closed : (4) resolved-апдейт,\nщо ДУБЛЮЄ перехід → operational
+Green --> Closed : (5) resolved-апдейт із порожнім\nпереходом (operational → operational)
+
+Closed --> [*]
+Green --> [*] : інцидент лишається\nвідкритим (до 480 хв)
+
+note right of Green
+  **ТРИГЕР БАНЕРА** — цей стан,
+  а не перехід в Closed.
+  Джерело: components[].status
+  із summary.json
+end note
+
+note bottom of Closed
+  НЕ тригер: resolved_at запізнюється
+  на 6 хв (медіана) … 480 хв (макс),
+  живий вимір — 66 хв
+end note
+
+legend right
+  |= форма |= приклад |
+  | (1) | f6gkkq6txl7z 13:08 |
+  | (2) | mgp99sn4ynd4 (тихе) |
+  | (3) | bdr3fq2rkchr |
+  | (4) | f6gkkq6txl7z 14:14 |
+  | (5) | mgp99sn4ynd4 14:34 |
+endlegend
+@enduml
+```
+
+![П'ять спостережених форм відновлення](https://www.plantuml.com/plantuml/svg/dLNTJXDH4BxVfvZWXRG115fgQP0G_dm88BAmoxAskwViReae9kLNJOoW8Z4Q8z74IrFBZmNQyWfpNe4dSURijXIeNdXHe6Tclk-RRyuSHln0zuA2azC2EyYPW5_loXsvBb-3NCCBhCirkOx7ieZ7U4AV6bRa5iXD2XIn2bYM-tX4ftKiuxcAr-GEN1RtGBwWmwhSO9mA7bAaXEU0loAmAjO1VyEySFB2DTt0dvhHD3zhktdTqnqWLO49ppI0KNq-QtcYu1fZ8YUyeQ4vJsHDTtWOxaoEJwGdqkroH9RZ4-d9WOd1Td7TSEmG8a59uzfpubQC7VY9PNFdf9ZweUuhO9YMfnkcSKyK0jqoEq3tOLJ9W2iz_qGGUTFJ0rkuUavLF_HCLSn2cuNRbBnDPXs5PU2PliWjcuQg6Ci9tpIWgLtJfk8pqDqz72dHj4WH7uNm6UZiYm7vVg4WJmborX6k7GZFTgtPQPS6G34r4Bb5UezOELnklslLsnQtFmRnE7V6TV6ucZZFbX5F51BVYKCUSWkzt6WBbhWfqdQNJJ-mBLBmVpeZimWx6MlQsDrAqZNjobSiRm-_urlyZ3zniuM4h_KjWb3mTVo1l-038IZLl2XrygH61rLgvNOVdIqSDpbZcXPnCIrDl4K4pp_3FDTl3UrXHRx4ajpZDQRztI7MS4_FYBd2KsDMPeTakXT8IfbuN46NqBEjnG34GZWSMfru7B_X0Nx4z_W13u2isiKl_2VkHcCdSkeOr4DHmbeN5M49-ExVz1FBaN4zdBF73ufw2ywndhds4lJmHXHyob8k-WN7qRsLdiU-S3NJDO2bHeBdH108XnM7q8nC-e1wBwftXoWopH4zqWDwTNXE34nslRboYIlfaOAKCeJygPAq8yehyN6CUltHj4j5I-JdMaprUq9KPVgSWlfLbVkogCn9XMWjgdEcnL-KqLIw-g3vcX8tVIDfBFoCN2cHPwkSe_Pu5HPILZQxb0gUvEu_XRv4fZVT2FTpsB7oWuE-crnnZIHqHijv76la93Xdpl0I2qlzNdP-qMi4ahUnavc-P2CyS0kRmWaEKnzXDze8_Q3_8Ny0)
+
+### 7. Дедуплікація — по `incident_updates[].id`
+
+Не по факту переходу компонентів (форма непослідовна: `resolved` дублює вже показаний перехід) і не
+по `updated_at` (редагування заднім числом дало б повторний банер зі старим змістом).
+
+### 8. Нотифікації: кольорова крапочка, клік на інцидент, «Unfollow», quiet hours
+
+Перед текстом — кольорова крапочка статусу (та сама візуальна мова, що й попап). Клік відкриває
+сторінку інциденту; окрема дія «Unfollow». Quiet hours — ті самі, що для
+[ADR-0039](0039-back-to-work-notification.md) / [ADR-0050](0050-extra-usage-notification.md).
+
+### 9. Фільтри в Settings: за ураженими сервісами і за віком
+
+### 10. Dev-лог payload-ів у JSONL, запис лише на суттєву зміну
+
+Відбиток = статуси компонентів + набір `incident_updates[].id` + статус інциденту. Вмикається
+чекбоксом у Development tools (#185).
+
+## Розглянуті й відкинуті альтернативи
+
+Зафіксовано, щоб не переглядати ці розвилки повторно.
+
+### A. Глобальний тумблер «нотифікувати про інциденти» замість opt-in по кліку
+
+**Відкинуто.** Аргумент за нього був: підписка на конкретний інцидент вимагає, щоб користувач спершу
+його **помітив**, а головна цінність — дізнатися, коли ти *не* дивишся в попап; плюс «на що
+підписуватись» уже сконфігуровано в Monitored Services.
+
+Причина відмови: тумблер означає нотифікації **без явної згоди на конкретну подію**. Він також тягне
+за собою задачу «вгадати релевантність» — гейт по компонентах, обробку кейсу «інцидент `major`, а
+компоненти зелені», кейсу «інцидент розрісся й тепер зачіпає Claude Code». Явний клік прибирає всю цю
+машинерію разом із класом хибних спрацювань.
+
+### B. Три градації шуму («start & end» / «+ status changes» / «all updates»)
+
+**Відкинуто.** Спершу пропонувалися три рівні як шкала. Виміряно, що це не шкала, а **два різні стани
+голови**, між якими людина перемикається посеред одного інциденту. Крім того, на реальних даних
+різниця між «всі оновлення» і «тільки відновлення» — приблизно **один банер на інцидент** (3.3
+апдейти в середньому; `f6gkkq6txl7z` за 429 хв дав лише один суто текстовий апдейт).
+
+Залишок цієї ідеї — відкрите питання про набір подій (див. нижче), яке вирішується живими
+спостереженнями, а не наперед заданою шкалою.
+
+### C. Перший банер завжди, режим обирається в ньому
+
+**Відкинуто.** Пропонувалося: дефолт — один банер «ось інцидент, він тебе зачіпає», а в ньому дві дії
+(«Follow all updates» / «Only when fixed»). Це все одно нотифікація без згоди — суперечить рішенню 5.
+
+### D. Сигнал відновлення з `resolved_at`
+
+**Відкинуто емпірично.** Медіана запізнення 6 хв, але у 19 із 45 випадків ≥10 хв, у 5 — >60 хв,
+максимум 480 хв. Живий вимір `f6gkkq6txl7z` — 66 хв простою після реального відновлення.
+
+### E. Сигнал відновлення з `monitoring` / `monitoring_at`
+
+**Відкинуто емпірично.** Поле заповнене лише в 28 із 49 інцидентів (у `mgp99sn4ynd4` — `null`), і не
+корелює з позеленінням: у `bdr3fq2rkchr` компоненти зеленіли під статусом `investigating`.
+
+### F. Сигнал відновлення з `affected_components` в апдейтах
+
+**Відкинуто емпірично** — і це скасування проміжного висновку, зробленого після першого інциденту.
+`mgp99sn4ynd4` відновився **тихо**: компоненти позеленіли без жодного апдейту, тож слухач апдейтів
+мовчав би 43 хвилини.
+
+### G. `deliver_notifications` як готовий фільтр шуму
+
+**Відкинуто.** Гіпотеза була, що Anthropic сама маркує варті сповіщення апдейти. Прапорець
+непослідовний: у `bdr3fq2rkchr` він `false` саме на `resolved` — тобто відсіяв би найцінніше; у наших
+двох інцидентів — `true` на всіх шести апдейтах, включно з чисто текстовим.
+
+### H. Інцидент як окремий блок над рядками сервісів
+
+**Відкинуто** на користь ⌥-заміни. Блок над рядками нічого не втрачає, але постійно збільшує попап на
+2–3 рядки; ⌥-заміна лишає дефолтний вигляд недоторканим.
+
+### I. Інцидент замість рядків сервісів **без** ⌥ (постійно)
+
+**Відкинуто.** Під час аутейджа одна людська фраза цінніша за per-component крапки — але грануляція,
+за яку боролися в #89/ADR-0024, зникає для тих, хто саме її й хоче.
+
+### J. Інцидент у рядку компонента (`degraded: models erroring`)
+
+**Відкинуто.** Найкомпактніше, але текст апдейту нікуди не влазить, і при кількох уражених сервісах
+той самий інцидент дублюється в кожному рядку.
+
+### K. Показувати інцидент, коли компоненти вже зелені (як «recovering»)
+
+**Відкинуто** на користь повного приховування (рішення 4). Варіант «recovering · fix deployed 12m ago»
+давав більше контексту, але суперечить головному питанню попапа — «чи можу я працювати».
+
+### L. Показ уражених сервісів у рядку інциденту
+
+**Відкинуто.** Дублює наявний фільтр Monitored Services: якщо інцидент показано, він уже пройшов
+цей фільтр.
+
+### M. Автоматичне стишення після N банерів
+
+**Відкинуто як передчасне.** Ідея: після кількох банерів підряд пропонувати в самому банері «Only tell
+me when it's fixed». На реальних даних потік не є шумним (3.3 апдейти на інцидент), тож проблема, яку
+це розв'язує, поки не спостерігалася.
+
+### N. Кнопка «Retry» / власна детекція «вже працює»
+
+**Відкинуто свідомо.** TokenPace не знає стану сесії Claude Code користувача; фальшиве «вже можна»
+гірше за мовчання.
+
+## Наслідки
+
+**Позитивні.**
+
+- Попап відповідає не лише «чи це Anthropic», а й «що саме та наскільки надовго».
+- Сигнал «вже можна працювати» приходить **у момент реального відновлення**, а не через 6–480 хв.
+- Opt-in-модель знімає задачу вгадування релевантності разом із класом хибних спрацювань.
+- Посилання зі статусу веде на конкретний інцидент, а не на загальну сторінку.
+
+**Ціна.**
+
+- `StatusSummary` перестає бути вузьким одним полем — додається `incidents[]` (ADR-0013 §2 частково
+  переглядається).
+- З'являється **персистований стан підписок**, який має пережити рестарт (інциденти бувають 6+ годин).
+- ⌥ у попапі отримує четверту роль; поведінка секції статусу змінюється для наявних користувачів.
+- Потрібен дебаунс проти блимання компонентів — інакше банери стрибатимуть.
+
+**Ризик, прийнятий свідомо.** ADR-0013 §2 ігнорував інциденти саме тому, що інцидент ≠ поломка
+сценарію користувача (кейс Mythos/Fable). Оскільки підписка тепер явна, цей клас хибних спрацювань
+переноситься на рішення людини: користувач сам бачить інцидент і сам вирішує, чи він його стосується.
+
+## Відкриті питання
+
+Свідомо відкладені до живих спостережень — не вгадувати, а поміряти. **Draft не переходить в
+`accepted`, доки вони не закриті.**
+
+| # | Питання | Чому відкрите |
+|---|---|---|
+| 1 | Кілька одночасних інцидентів: одна кнопка на всі, кожен окремо, чи «лише наявні на момент кліку» | Оцінити доцільність у живих тестах |
+| 2 | Фінальний набір подій для банерів (текстові апдейти / зміни статусу / відновлення / погіршення / формальне закриття) | Оцінити на реальному потоці |
+| 3 | Скільки живе підписка після закриття інциденту; чи переживає рестарт | Потребує дослідження; для цього й потрібен dev-JSONL (рішення 10) |
+| 4 | Чи потрібен дебаунс перед банером «відновлено» і який | Компоненти блимають: 13:08 зелене → 13:51 червоне (через *інший* інцидент) → зелене |
+| 5 | Що робити з `impact` і maintenance | Поки показуємо. Заплановані maintenance корисні, **якщо вікно припадає на active hours** — окрема логіка; `scheduled_maintenances[]` наразі не декодується |
+| 6 | Де живе іконка підписки | Рядок інциденту видно лише під ⌥ → підписатися можна лише утримуючи ⌥. Глибоко захована взаємодія |
+
+## Посилання
+
+- [docs/design/incident-subscriptions.md](../design/incident-subscriptions.md) — повний підсумок
+  інтерв'ю, емпіричні таблиці, опис тестових даних
+- [ADR-0013](0013-claude-status-line.md) — рядок статусу сервісів; частково переглядається (§2)
+- [ADR-0024](0024-configurable-logical-services.md) — конфігуровані логічні сервіси
+- [ADR-0039](0039-back-to-work-notification.md), [ADR-0050](0050-extra-usage-notification.md) —
+  наявні нотифікації, quiet hours
+- [Інцидент f6gkkq6txl7z](https://stspg.io/s2ysk4zxbyy3) — основний кейс
