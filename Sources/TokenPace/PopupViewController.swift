@@ -861,7 +861,9 @@ final class PopupViewController: NSViewController {
     /// dropdown is open). It reveals the on-demand data age ("2m ago") in the "Claude Code" header,
     /// and — once the first status poll has succeeded — the service-status rows: while ⌥ is up they
     /// show only when a component is non-operational, and holding ⌥ reveals **all** components even
-    /// when every one is green (`rebuild()`'s `showStatusRows`).
+    /// when every one is green (`rebuild()`'s `showStatusRows`). It is also the escape hatch for the
+    /// two ``PopupSectionVisibility`` groups: in `.nonCalm` it reveals a calm group, and in
+    /// `.optionOnly` it is the *only* thing that reveals one.
     var optionHeld = false {
         didSet {
             guard isViewLoaded, optionHeld != oldValue else { return }
@@ -898,6 +900,25 @@ final class PopupViewController: NSViewController {
     var showTicks: Bool = true {
         didSet {
             guard isViewLoaded, showTicks != oldValue else { return }
+            rebuild()
+        }
+    }
+
+    /// When the per-model / per-service rows are shown (#211). The gate lives here rather than in
+    /// `PopupLayout` because it depends on ``optionHeld``, which changes while the menu is open and
+    /// without a re-poll. Like `barStyle`, a change rebuilds.
+    var modelLimitsVisibility: PopupSectionVisibility = .nonCalm {
+        didSet {
+            guard isViewLoaded, modelLimitsVisibility != oldValue else { return }
+            rebuild()
+        }
+    }
+
+    /// When the "Extra usage" credits section is shown. Independent of the menu-bar credits icon,
+    /// which keeps its own boolean gate in `PersistedConfig.showExtraUsage`.
+    var extraUsageVisibility: PopupSectionVisibility = .nonCalm {
+        didSet {
+            guard isViewLoaded, extraUsageVisibility != oldValue else { return }
             rebuild()
         }
     }
@@ -1158,7 +1179,19 @@ final class PopupViewController: NSViewController {
         // between sections — the only interior rule in the popup is the one after the title block;
         // sections below it are told apart by the bold per-row title and the `limitSpacing` gap
         // after each bar, not by a line.
+        // The optional per-model group is hidden by *skipping* rows, never by filtering the array:
+        // `layout.blockingReset` keys its `.token(id:)` pick to the full row order, and `isBlockingRow`
+        // matches it against this `index`. Renumbering would paint the red badge on the wrong row.
+        let showPerModel = modelLimitsVisibility.shows(
+            isNonCalm: layout.perModelRowsAreNonCalm, optionHeld: optionHeld)
+        let showCredits = layout.credits != nil && extraUsageVisibility.shows(
+            isNonCalm: layout.creditsIsNonCalm, optionHeld: optionHeld)
+        // Which row ends the visible list — the last one actually drawn, so the "no gap after the last
+        // bar" rule follows what's on screen rather than what the model built.
+        let lastVisibleRowIndex = showPerModel ? layout.rows.count - 1 : layout.perModelRowsStart - 1
+
         for (index, row) in layout.rows.enumerated() {
+            if index >= layout.perModelRowsStart, !showPerModel { continue }
             addTitleStatusLine(title: row.title, status: Self.statusText(row, isBaseLimit: index <= 1))
             // The idle 5-hour row (#100) has **no** second line at all — no "0%", no reset — so it reads
             // as a compact "5-hour  ready to start" (or "waiting for limit reset" when blocked, #158) +
@@ -1173,17 +1206,17 @@ final class PopupViewController: NSViewController {
             // below. If the "Extra usage" block follows, this bar is *not* the last thing in the popup,
             // so it needs the normal inter-section gap; the credits block then owns the tight-to-separator
             // bottom instead.
-            let isLastLimitRow = index == layout.rows.count - 1
+            let isLastLimitRow = index == lastVisibleRowIndex
             // The far-behind blue zone is restricted to the base 5h/7d rows. `PopupLayout.rows`
             // always emits them first (index 0 = 5h, 1 = 7d); everything appended after is a
             // per-model / per-service row and stays green on the calm side.
-            addBar(row, isLast: isLastLimitRow && layout.credits == nil, isBaseLimit: index <= 1)
+            addBar(row, isLast: isLastLimitRow && !showCredits, isBaseLimit: index <= 1)
         }
 
         // The "Extra usage" (money-credits) section (#145), rendered below the limit windows when
-        // credits are active for this snapshot. Two shapes, keyed by whether a cap is set — see
-        // `addCreditsSection`. Absent (`layout.credits == nil`) → nothing is drawn.
-        if let credits = layout.credits {
+        // credits are active for this snapshot **and** the user's visibility mode allows it. Two shapes,
+        // keyed by whether a cap is set — see `addCreditsSection`.
+        if showCredits, let credits = layout.credits {
             addCreditsSection(credits, resetIsBlocking: Self.isBlockingCredits(in: layout))
         }
     }

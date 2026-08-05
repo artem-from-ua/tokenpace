@@ -3,10 +3,10 @@ import Foundation
 // MARK: - AppearancePreset (#215)
 
 /// A named, one-click bundle of every **Appearance** pane setting — the menu-bar widget toggles, the
-/// reset-countdown mode, the bar presentation style, and the dropdown's per-model toggle (#215, #224).
+/// reset-countdown mode, the bar presentation style, and the dropdown's section visibility (#215, #224).
 /// Generalises the single "Reset to defaults" row from #214: `.chill` is the calm, quiet look
 /// (simplified bars), `.workHarder` is `.chill` plus the coloured far-behind blue, `.controlFreak`
-/// turns everything on (dense pacing bars). Applying a preset writes all eleven keys at once via
+/// turns everything on (dense pacing bars). Applying a preset writes all twelve keys at once via
 /// `PersistedConfig.apply(_:)`.
 ///
 /// The preset **values** live here in the kit (not the AppKit/SwiftUI shell) so they are unit-testable
@@ -23,11 +23,12 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
     /// colours (a nudge that you're well under pace) while everything else stays calm. Sits between
     /// `.chill` and `.controlFreak`.
     case workHarder = "workHarder"
-    /// Everything on and loud: calm colours off, all bars/dots/glyphs/credits/per-model rows shown,
-    /// the reset countdown always visible, and the dense **pacing** bars with the time marker (#224).
+    /// Everything on and loud: calm colours off, all bars/dots/glyphs shown, the dropdown's credits and
+    /// per-model sections pinned open (`.always`), the reset countdown always visible, and the dense
+    /// **pacing** bars with the time marker (#224).
     case controlFreak = "controlFreak"
 
-    /// The fixed value set this preset writes to the eleven Appearance keys. Stored in the **as-persisted**
+    /// The fixed value set this preset writes to the twelve Appearance keys. Stored in the **as-persisted**
     /// sense, matching `PersistedConfig` — note `hideCalmSevenDay` is a *hide* flag (the pane shows it
     /// inverted as "Show …"). `pauseHidesBars` is stored as-is (the pane's toggle is not inverted).
     public var values: AppearancePresetValues {
@@ -43,7 +44,10 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 showExtraUsage: true,
                 showServiceStatusDot: true,
                 awaitingInputInMenuBar: false,   // calm look: awaiting hand stays in the popup only
-                showModelSpecificLimits: true,
+                // The dropdown stays quiet too: per-model rows and the credits section appear only
+                // once one of them turns orange/red (⌥ Option still reveals them on demand).
+                modelLimitsVisibility: .nonCalm,
+                extraUsageVisibility: .nonCalm,
                 resetCountdownModeMenuBar: .smart,
                 barStyle: .simple,
                 showTicks: false,   // the quiet look drops the under-bar tick ruler too
@@ -59,7 +63,10 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 showExtraUsage: true,
                 showServiceStatusDot: true,
                 awaitingInputInMenuBar: true,   // work harder: surface the awaiting hand in the menu bar
-                showModelSpecificLimits: true,
+                // Same quiet dropdown as `.chill` — the extra loudness of this preset is in the menu
+                // bar (blue far-behind, ticks), not in permanently expanded popup sections.
+                modelLimitsVisibility: .nonCalm,
+                extraUsageVisibility: .nonCalm,
                 resetCountdownModeMenuBar: .smart,
                 barStyle: .mixed,
                 showTicks: true,
@@ -75,7 +82,9 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 showExtraUsage: true,
                 showServiceStatusDot: true,
                 awaitingInputInMenuBar: true,   // control freak: everything on, incl. the awaiting hand
-                showModelSpecificLimits: true,
+                // Nothing in the dropdown is ever folded away — every row on screen, always.
+                modelLimitsVisibility: .always,
+                extraUsageVisibility: .always,
                 resetCountdownModeMenuBar: .always,
                 barStyle: .pacing,
                 showTicks: true,
@@ -114,7 +123,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
 
 // MARK: - AppearancePresetValues
 
-/// The eleven Appearance-pane values a preset sets, in the same **as-persisted** sense as
+/// The twelve Appearance-pane values a preset sets, in the same **as-persisted** sense as
 /// `PersistedConfig` (`hideCalmSevenDayBar` is the stored *hide* form, not the pane's inverted "Show …";
 /// `pauseHidesBars` is stored as-is).
 public struct AppearancePresetValues: Sendable, Equatable {
@@ -130,7 +139,13 @@ public struct AppearancePresetValues: Sendable, Equatable {
     /// always shows it while the feature is on; this only governs the menu-bar copy. Meaningful only
     /// when the master toggle (`awaitingInputEnabled`, in Extra features) is on.
     public let awaitingInputInMenuBar: Bool
-    public let showModelSpecificLimits: Bool
+    /// When the **dropdown** lists the per-model / per-service 7-day rows (#211). Was a boolean opt-out
+    /// before the tri-state; the calmer presets now use `.nonCalm` so the rows surface only when one of
+    /// them turns orange/red (or ⌥ is held).
+    public let modelLimitsVisibility: PopupSectionVisibility
+    /// When the **dropdown** shows the "Extra usage" credits section. Independent of
+    /// ``showExtraUsage``, which governs the menu-bar credits icon.
+    public let extraUsageVisibility: PopupSectionVisibility
     public let resetCountdownModeMenuBar: ResetCountdownMode
     public let barStyle: BarStyle
     public let showTicks: Bool
@@ -143,7 +158,8 @@ public struct AppearancePresetValues: Sendable, Equatable {
         showExtraUsage: Bool,
         showServiceStatusDot: Bool,
         awaitingInputInMenuBar: Bool,
-        showModelSpecificLimits: Bool,
+        modelLimitsVisibility: PopupSectionVisibility,
+        extraUsageVisibility: PopupSectionVisibility,
         resetCountdownModeMenuBar: ResetCountdownMode,
         barStyle: BarStyle,
         showTicks: Bool,
@@ -155,7 +171,8 @@ public struct AppearancePresetValues: Sendable, Equatable {
         self.showExtraUsage = showExtraUsage
         self.showServiceStatusDot = showServiceStatusDot
         self.awaitingInputInMenuBar = awaitingInputInMenuBar
-        self.showModelSpecificLimits = showModelSpecificLimits
+        self.modelLimitsVisibility = modelLimitsVisibility
+        self.extraUsageVisibility = extraUsageVisibility
         self.resetCountdownModeMenuBar = resetCountdownModeMenuBar
         self.barStyle = barStyle
         self.showTicks = showTicks

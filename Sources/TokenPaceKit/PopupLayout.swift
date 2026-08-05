@@ -175,6 +175,30 @@ public struct PopupLayout: Sendable, Equatable {
     /// Exactly one reset is ever highlighted, even when several limits are simultaneously exhausted.
     public let blockingReset: BlockingReset.Choice?
 
+    /// The index in ``rows`` at which the **per-model / per-service** rows begin — the first row after
+    /// the base `5h`/`7d` pair, i.e. `2` on a normal snapshot. Rows before it are the base limits and
+    /// are never gated; rows from here on are the optional group governed by
+    /// ``PopupSectionVisibility`` (#211). Equal to ``rows``'s count when a snapshot carries no
+    /// per-model windows (empty group).
+    ///
+    /// The group is expressed as an **index** rather than by dropping the rows here because
+    /// `BlockingReset` keys its `.token(id:)` pick to the *full* row order (`0` = 5h, `1` = 7d, then the
+    /// per-model windows) and the view matches it with `id == index`. Filtering in this layer would
+    /// renumber the rows the view enumerates and mis-paint the red blocking-reset badge; the view
+    /// therefore hides rows while keeping their original indices.
+    public let perModelRowsStart: Int
+
+    /// Whether any **per-model / per-service** row is orange or red (`PacingSeverity.isNonCalm`) — the
+    /// "is this group worth attention?" input to ``PopupSectionVisibility/shows(isNonCalm:optionHeld:)``.
+    /// `false` when the group is empty. Computed here (the pure layer) so the view needs no pacing
+    /// knowledge, and recomputed on every poll like the rows themselves.
+    public let perModelRowsAreNonCalm: Bool
+
+    /// Whether the **Extra usage** credits section is orange or red — `credits.bar`'s severity, or
+    /// `false` when there is no credits section or it is unlimited (`bar == nil`, nothing to pace, so
+    /// nothing to be alarmed about).
+    public let creditsIsNonCalm: Bool
+
     /// The Claude Code sessions awaiting user input to advertise flush-right in the "Claude" section
     /// header (#233, ADR-0066), or `nil` to draw nothing. `nil` whenever the feature is off, the count
     /// is `0`, or the watcher isn't running. When non-`nil` (count `≥ 1`) the popup draws a
@@ -199,6 +223,9 @@ public struct PopupLayout: Sendable, Equatable {
         serviceStatus: StatusHealth? = nil,
         credits: CreditsRow? = nil,
         blockingReset: BlockingReset.Choice? = nil,
+        perModelRowsStart: Int? = nil,
+        perModelRowsAreNonCalm: Bool = false,
+        creditsIsNonCalm: Bool = false,
         awaitingInput: AwaitingSessions? = nil,
         planLabel: String? = nil
     ) {
@@ -209,6 +236,11 @@ public struct PopupLayout: Sendable, Equatable {
         self.serviceStatus = serviceStatus
         self.credits = credits
         self.blockingReset = blockingReset
+        // Default: the two base rows come first, so the per-model group starts at 2 — clamped for the
+        // short `rows` a cold start / broken-data layout carries (empty, or fewer than two rows).
+        self.perModelRowsStart = perModelRowsStart ?? min(2, rows.count)
+        self.perModelRowsAreNonCalm = perModelRowsAreNonCalm
+        self.creditsIsNonCalm = creditsIsNonCalm
         self.awaitingInput = awaitingInput
         self.planLabel = planLabel
     }
@@ -220,7 +252,9 @@ public struct PopupLayout: Sendable, Equatable {
         PopupLayout(
             lastUpdateAge: lastUpdateAge, intervalSeconds: intervalSeconds, rows: rows,
             warning: warning, serviceStatus: serviceStatus, credits: credits,
-            blockingReset: blockingReset, awaitingInput: awaitingInput, planLabel: planLabel)
+            blockingReset: blockingReset, perModelRowsStart: perModelRowsStart,
+            perModelRowsAreNonCalm: perModelRowsAreNonCalm, creditsIsNonCalm: creditsIsNonCalm,
+            awaitingInput: awaitingInput, planLabel: planLabel)
     }
 
     /// A copy of this layout with the plan label grafted on, everything else unchanged. The shell
@@ -230,7 +264,9 @@ public struct PopupLayout: Sendable, Equatable {
         PopupLayout(
             lastUpdateAge: lastUpdateAge, intervalSeconds: intervalSeconds, rows: rows,
             warning: warning, serviceStatus: serviceStatus, credits: credits,
-            blockingReset: blockingReset, awaitingInput: awaitingInput, planLabel: planLabel)
+            blockingReset: blockingReset, perModelRowsStart: perModelRowsStart,
+            perModelRowsAreNonCalm: perModelRowsAreNonCalm, creditsIsNonCalm: creditsIsNonCalm,
+            awaitingInput: awaitingInput, planLabel: planLabel)
     }
 
     // MARK: make
@@ -242,24 +278,29 @@ public struct PopupLayout: Sendable, Equatable {
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
     ///   - lastUpdate: Instant of the last successful 200 (→ `lastUpdateAge`). Mock today; real with #13.
     ///   - interval: Current polling interval in seconds (`PollingBackoff.interval`). Mock today.
-    ///   - showModelSpecificLimits: When `false`, omit the per-model rows (`Opus`/`Sonnet`/scoped),
-    ///     keeping only `5h` and `7d` (#211). Defaults to `true`.
+    ///
+    /// The per-model rows are **always** built (#211 → the tri-state `PopupSectionVisibility`): whether
+    /// they are drawn is the view's call, since it depends on the live ⌥ Option state, which changes
+    /// while the menu is open and without a re-poll. ``perModelRowsStart`` and
+    /// ``perModelRowsAreNonCalm`` carry everything the view needs to decide.
     public static func make(
         from snapshot: UsageSnapshot,
         now: Date,
         lastUpdate: Date,
         interval: TimeInterval,
-        showModelSpecificLimits: Bool = true,
         behindMultiplier: Int = 2
     ) -> PopupLayout {
-        let rows = self.rows(from: snapshot, now: now, showModelSpecificLimits: showModelSpecificLimits,
-                             behindMultiplier: behindMultiplier)
+        let rows = self.rows(from: snapshot, now: now, behindMultiplier: behindMultiplier)
+        let credits = self.creditsRow(from: snapshot, now: now)
         return PopupLayout(
             lastUpdateAge: max(0, now.timeIntervalSince(lastUpdate)),
             intervalSeconds: interval,
             rows: rows,
-            credits: self.creditsRow(from: snapshot, now: now),
-            blockingReset: self.blockingReset(from: snapshot, now: now)
+            credits: credits,
+            blockingReset: self.blockingReset(from: snapshot, now: now),
+            perModelRowsStart: min(baseRowCount, rows.count),
+            perModelRowsAreNonCalm: self.groupIsNonCalm(rows),
+            creditsIsNonCalm: credits?.bar?.severity.isNonCalm ?? false
         )
     }
 
@@ -284,15 +325,16 @@ public struct PopupLayout: Sendable, Equatable {
     ///   - serviceStatus: The latest Claude service status (issue #31), or `nil` until the first
     ///     status poll has succeeded (the status loop is independent of the usage poll). Threaded
     ///     through unchanged — the view renders it.
-    ///   - showModelSpecificLimits: When `false`, omit the per-model rows (`Opus`/`Sonnet`/scoped),
-    ///     keeping only `5h` and `7d` (#211). Defaults to `true`.
+    ///
+    /// As in the other overload, the per-model rows are always built; ``perModelRowsStart`` /
+    /// ``perModelRowsAreNonCalm`` / ``creditsIsNonCalm`` let the view apply the user's
+    /// ``PopupSectionVisibility`` against the live ⌥ state (#211).
     public static func make(
         from snapshot: UsageSnapshot?,
         health: UsageHealth,
         now: Date,
         interval: TimeInterval,
         serviceStatus: StatusHealth? = nil,
-        showModelSpecificLimits: Bool = true,
         behindMultiplier: Int = 2
     ) -> PopupLayout {
         let lastUpdateAge = health.lastSuccess.map { max(0, now.timeIntervalSince($0)) } ?? 0
@@ -310,8 +352,7 @@ public struct PopupLayout: Sendable, Equatable {
         }
 
         let rows = snapshot.map {
-            self.rows(from: $0, now: now, showModelSpecificLimits: showModelSpecificLimits,
-                      behindMultiplier: behindMultiplier)
+            self.rows(from: $0, now: now, behindMultiplier: behindMultiplier)
         } ?? []
         // A failing poll surfaces its own reason (with the last known — possibly stale — rows above).
         let warning: FailureReason? = health.isFailing ? health.reason : nil
@@ -324,26 +365,38 @@ public struct PopupLayout: Sendable, Equatable {
             warning: warning,
             serviceStatus: serviceStatus,
             credits: credits,
-            blockingReset: blockingReset
+            blockingReset: blockingReset,
+            perModelRowsStart: min(baseRowCount, rows.count),
+            perModelRowsAreNonCalm: self.groupIsNonCalm(rows),
+            creditsIsNonCalm: credits?.bar?.severity.isNonCalm ?? false
         )
     }
 
     // MARK: - Private
 
-    /// The ordered limit sections for a snapshot: `5h`, `7d`, then — when
-    /// `showModelSpecificLimits` is `true` — any present per-model rows: the legacy top-level
-    /// sub-windows (`Opus`/`Sonnet`, null-safe) followed by the `weekly_scoped` models from
-    /// `limits[]` (e.g. `Fable`, #65; already deduped against the legacy rows by
+    /// The number of **base** limit rows every non-empty layout starts with: `5h` then `7d`. Rows from
+    /// this index on are the optional per-model / per-service group (``perModelRowsStart``), and
+    /// `BlockingReset` keys its `.token(id:)` pick to this same ordering.
+    static let baseRowCount = 2
+
+    /// Whether any row in the per-model group (everything from ``baseRowCount`` on) is orange/red.
+    /// `false` when the snapshot carries no per-model windows.
+    private static func groupIsNonCalm(_ rows: [LimitRow]) -> Bool {
+        rows.dropFirst(baseRowCount).contains { $0.bar.severity.isNonCalm }
+    }
+
+    /// The ordered limit sections for a snapshot: `5h`, `7d`, then any present per-model rows: the
+    /// legacy top-level sub-windows (`Opus`/`Sonnet`, null-safe) followed by the `weekly_scoped` models
+    /// from `limits[]` (e.g. `Fable`, #65; already deduped against the legacy rows by
     /// ``UsageSnapshot/scopedModelWindows``). All per-model rows are paced as `.sevenDay`.
     ///
-    /// - Parameter showModelSpecificLimits: When `false`, the per-model rows are omitted and only
-    ///   the `5h` and `7d` rows remain (the "Show model-specific limits" opt-out, #211). Defaults to
-    ///   `true` so callers that don't care keep the full set.
+    /// The per-model rows are **always** included — visibility is the view's decision (#211, see
+    /// ``PopupSectionVisibility``), and dropping them here would renumber the indices `BlockingReset`
+    /// depends on.
     ///
     /// Shared by both ``make`` overloads.
     private static func rows(
-        from snapshot: UsageSnapshot, now: Date, showModelSpecificLimits: Bool = true,
-        behindMultiplier: Int = 2
+        from snapshot: UsageSnapshot, now: Date, behindMultiplier: Int = 2
     ) -> [LimitRow] {
         // The 5-hour row is the idle placeholder when the window has no active session (#100); every
         // other row is built normally, including the 7-day one (which always exists). When idle is also
@@ -356,16 +409,14 @@ public struct PopupLayout: Sendable, Equatable {
             snapshot.sessionIdle ? idleFiveHourRow(blocked: idleBlocked) : row(title: "5-hour", window: snapshot.fiveHour, as: .fiveHour, now: now, behindMultiplier: behindMultiplier),
             row(title: "7-day", window: snapshot.sevenDay, as: .sevenDay, now: now, behindMultiplier: behindMultiplier),
         ]
-        if showModelSpecificLimits {
-            if let opus = snapshot.sevenDayOpus {
-                rows.append(row(title: "Opus", window: opus, as: .sevenDay, now: now, behindMultiplier: behindMultiplier))
-            }
-            if let sonnet = snapshot.sevenDaySonnet {
-                rows.append(row(title: "Sonnet", window: sonnet, as: .sevenDay, now: now, behindMultiplier: behindMultiplier))
-            }
-            for scoped in snapshot.scopedModelWindows {
-                rows.append(row(title: scoped.name, window: scoped.window, as: .sevenDay, now: now, behindMultiplier: behindMultiplier))
-            }
+        if let opus = snapshot.sevenDayOpus {
+            rows.append(row(title: "Opus", window: opus, as: .sevenDay, now: now, behindMultiplier: behindMultiplier))
+        }
+        if let sonnet = snapshot.sevenDaySonnet {
+            rows.append(row(title: "Sonnet", window: sonnet, as: .sevenDay, now: now, behindMultiplier: behindMultiplier))
+        }
+        for scoped in snapshot.scopedModelWindows {
+            rows.append(row(title: scoped.name, window: scoped.window, as: .sevenDay, now: now, behindMultiplier: behindMultiplier))
         }
         return rows
     }

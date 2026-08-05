@@ -359,6 +359,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popupVC.loadView()   // realise the view so it can be sized before the menu measures it
         popupVC.barStyle = PersistedConfig.barStyle   // apply the saved bar style from launch (#224)
         popupVC.showTicks = PersistedConfig.showTicks   // apply the saved tick-ruler choice from launch (#224)
+        // The dropdown's two section-visibility modes (#211), likewise applied from launch.
+        popupVC.modelLimitsVisibility = PersistedConfig.modelLimitsVisibility
+        popupVC.extraUsageVisibility = PersistedConfig.extraUsageVisibility
         setPopupLayout(PopupLayout.make(
             from: nil, health: coldHealth, now: now, interval: PollingBackoff.defaultInterval))
 
@@ -561,9 +564,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // from the last poll (render reads PersistedConfig.showExtraUsage for the gate).
                 self?.reRenderForCurrentTime()
             }
-            wc.onShowModelSpecificLimitsChange = { [weak self] _ in
-                // Toggling this adds/removes the popup's per-model rows — rebuild from the last poll
-                // (render reads PersistedConfig.showModelSpecificLimits for the gate). #211.
+            wc.onModelLimitsVisibilityChange = { [weak self] mode in
+                // Popup-only (#211): the VC owns the gate because it depends on the live ⌥ state. Its
+                // `didSet` rebuilds, which re-measures the hosted view.
+                self?.popupVC.modelLimitsVisibility = mode
+                self?.reRenderForCurrentTime()
+            }
+            wc.onExtraUsageVisibilityChange = { [weak self] mode in
+                // Popup-only: the menu-bar credits icon keeps its own toggle (`onExtraUsageChange`).
+                self?.popupVC.extraUsageVisibility = mode
                 self?.reRenderForCurrentTime()
             }
             wc.onHideCalmSevenDayChange = { [weak self] _ in
@@ -812,6 +821,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Idempotent per-key migrations that must catch an upgrade from *any* prior version (not gated
         // on the version diff above): merge the pre-#227 pause settings into the unified key.
         PersistedConfig.migratePauseKeysIfNeeded()
+        // …and carry the boolean "Show model & service limits" opt-out onto its tri-state successor.
+        PersistedConfig.migrateModelLimitsVisibilityIfNeeded()
         // Record the running version so the next launch compares against it.
         PersistedConfig.lastRunVersion = current
     }
@@ -1834,9 +1845,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setPopupLayout(PopupLayout.make(
             from: snapshot, health: output.health, now: now, interval: output.interval,
             serviceStatus: lastStatusHealth,
-            // #211: honour the "Show model-specific limits" toggle — false drops the per-model rows
-            // (Opus/Sonnet/scoped), leaving only 5h/7d in the popup.
-            showModelSpecificLimits: PersistedConfig.showModelSpecificLimits,
+            // #211: the per-model rows are always built here; whether they're drawn is the popup VC's
+            // call (it owns the live ⌥ Option state — see `PopupSectionVisibility`).
             // "Far behind" interval: the user's green→blue crossover scale (off→0/no-blue, short→1,
             // medium→2, long→3). `nil` (off) maps to 0.
             behindMultiplier: PersistedConfig.farBehindInterval.multiplier ?? 0)

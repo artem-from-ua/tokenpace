@@ -36,7 +36,8 @@ final class SettingsModel {
     var onFarBehindIntervalChange: ((FarBehindInterval) -> Void)?
     var onServiceDotChange: ((Bool) -> Void)?
     var onExtraUsageChange: ((Bool) -> Void)?
-    var onShowModelSpecificLimitsChange: ((Bool) -> Void)?
+    var onModelLimitsVisibilityChange: ((PopupSectionVisibility) -> Void)?
+    var onExtraUsageVisibilityChange: ((PopupSectionVisibility) -> Void)?
     var onHideCalmSevenDayChange: ((Bool) -> Void)?
     var onPauseHidesBarsChange: ((Bool) -> Void)?
     var onPausePollingChange: ((Bool) -> Void)?
@@ -89,9 +90,12 @@ final class SettingsModel {
     var hideCalmSevenDay = false
     var pauseHidesBars = false
     var showExtraUsage = false
-    /// Whether the popup lists the per-model 7-day limit rows (Opus/Sonnet/scoped, #211). A popup
-    /// concern, not a menu-bar one — shown under the separate "Dropdown" section of the pane.
-    var showModelSpecificLimits = false
+    /// When the popup lists the per-model 7-day limit rows (Opus/Sonnet/scoped, #211). A popup
+    /// concern, not a menu-bar one — shown under the separate "Dropdown Widget" section of the pane.
+    var modelLimitsVisibility: PopupSectionVisibility = .nonCalm
+    /// When the popup shows the "Extra usage" credits section. Separate from ``showExtraUsage``, which
+    /// governs the menu-bar credits icon.
+    var extraUsageVisibility: PopupSectionVisibility = .nonCalm
     var showServiceDot = false
     /// The reset-countdown choice (always / smart / never), shown as a menu picker.
     var resetRadio: ResetRadio = .smart
@@ -239,7 +243,8 @@ final class SettingsModel {
             showExtraUsage: showExtraUsage,
             showServiceStatusDot: showServiceDot,
             awaitingInputInMenuBar: awaitingInputInMenuBar,
-            showModelSpecificLimits: showModelSpecificLimits,
+            modelLimitsVisibility: modelLimitsVisibility,
+            extraUsageVisibility: extraUsageVisibility,
             resetCountdownModeMenuBar: ResetCountdownMode.from(radio: resetRadio),
             barStyle: barStyle,
             showTicks: showTicks,
@@ -327,7 +332,8 @@ final class SettingsModel {
         hideCalmSevenDay = PersistedConfig.hideCalmSevenDayBar
         pauseHidesBars = PersistedConfig.pauseHidesBars
         showExtraUsage = PersistedConfig.showExtraUsage
-        showModelSpecificLimits = PersistedConfig.showModelSpecificLimits
+        modelLimitsVisibility = PersistedConfig.modelLimitsVisibility
+        extraUsageVisibility = PersistedConfig.extraUsageVisibility
         showServiceDot = PersistedConfig.showServiceStatusDot
         resetRadio = PersistedConfig.resetCountdownModeMenuBar.radio
         barStyle = PersistedConfig.barStyle
@@ -418,11 +424,18 @@ final class SettingsModel {
         onExtraUsageChange?(on)
     }
 
-    func setShowModelSpecificLimits(_ on: Bool) {
-        showModelSpecificLimits = on
-        PersistedConfig.showModelSpecificLimits = on
-        AppLogger.lifecycle.notice("model-specific-limits: popup set \(on, privacy: .public)")
-        onShowModelSpecificLimitsChange?(on)
+    func setModelLimitsVisibility(_ mode: PopupSectionVisibility) {
+        modelLimitsVisibility = mode
+        PersistedConfig.modelLimitsVisibility = mode
+        AppLogger.lifecycle.notice("model-specific-limits: popup set \(mode.rawValue, privacy: .public)")
+        onModelLimitsVisibilityChange?(mode)
+    }
+
+    func setExtraUsageVisibility(_ mode: PopupSectionVisibility) {
+        extraUsageVisibility = mode
+        PersistedConfig.extraUsageVisibility = mode
+        AppLogger.lifecycle.notice("extra-usage-section: popup set \(mode.rawValue, privacy: .public)")
+        onExtraUsageVisibilityChange?(mode)
     }
 
     func setShowServiceDot(_ on: Bool) {
@@ -478,7 +491,7 @@ final class SettingsModel {
     }
 
     /// Apply a named Appearance **preset** (#215, #224) — the general form of
-    /// `resetAppearanceToDefaults()`. Writes all eleven keys from the preset's fixed value set, re-syncs
+    /// `resetAppearanceToDefaults()`. Writes all twelve keys from the preset's fixed value set, re-syncs
     /// the model so the controls repaint (the preset segmented control re-lights via `activePreset`),
     /// then fires each pane callback so both surfaces rebuild. The segmented control in `AppearancePane`
     /// calls this.
@@ -513,7 +526,8 @@ final class SettingsModel {
         onHideCalmSevenDayChange?(hideCalmSevenDay)
         onPauseHidesBarsChange?(pauseHidesBars)
         onExtraUsageChange?(showExtraUsage)
-        onShowModelSpecificLimitsChange?(showModelSpecificLimits)
+        onModelLimitsVisibilityChange?(modelLimitsVisibility)
+        onExtraUsageVisibilityChange?(extraUsageVisibility)
         onServiceDotChange?(showServiceDot)
         onResetCountdownModeMenuBarChange?(ResetCountdownMode.from(radio: resetRadio))
         onBarStyleChange?(barStyle)

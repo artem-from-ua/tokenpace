@@ -206,9 +206,10 @@ token itself never is.
 | — | `lifecycle` | `.notice` | `extra-usage-icon: menu-bar set <bool>` | user toggled the "Show extra-usage credits icon" checkbox (#146) |
 | — | `lifecycle` | `.notice` | `hide-calm-7d: menu-bar set <bool>` | user toggled the "Hide 7-day bar when calm" checkbox (#94, ADR-0034) |
 | — | `lifecycle` | `.notice` | `pause-hides-bars: menu-bar set <bool>` | user toggled the "Pause icon hides bars" checkbox — stored as `pauseHidesBars`; when fully blocked the red pause icon is always shown, this only gates whether the pacing bars are hidden beside it (#194, #199, #227; ADR-0063) |
-| — | `lifecycle` | `.notice` | `model-specific-limits: popup set <bool>` | user toggled the "Show model & service limits" checkbox — gates the popup's per-model/per-service rows (Opus/Sonnet/scoped) (#211) |
-| — | `lifecycle` | `.notice` | `appearance settings reset to defaults` | user cleared the Appearance keys (#214); all eleven Appearance keys cleared to their defaults |
-| — | `lifecycle` | `.notice` | `appearance preset applied: <preset>` | user picked an Appearance-pane preset segment (#215, #224); `<preset>` is the raw `AppearancePreset` (`chill`/`workHarder`/`controlFreak`) — sets all eleven Appearance keys at once |
+| — | `lifecycle` | `.notice` | `model-specific-limits: popup set <mode>` | user picked a "Show model & service limits" segment — gates the popup's per-model/per-service rows (Opus/Sonnet/scoped); `<mode>` is the raw `PopupSectionVisibility` (`always`/`nonCalm`/`optionOnly`) (#211) |
+| — | `lifecycle` | `.notice` | `extra-usage-section: popup set <mode>` | user picked a "Show extra usage" segment — gates the popup's paid-credits section; `<mode>` is the raw `PopupSectionVisibility`. Distinct from `extra-usage-icon`, which is the menu-bar glyph (#211) |
+| — | `lifecycle` | `.notice` | `appearance settings reset to defaults` | user cleared the Appearance keys (#214); all twelve Appearance keys cleared to their defaults |
+| — | `lifecycle` | `.notice` | `appearance preset applied: <preset>` | user picked an Appearance-pane preset segment (#215, #224); `<preset>` is the raw `AppearancePreset` (`chill`/`workHarder`/`controlFreak`) — sets all twelve Appearance keys at once |
 | — | `lifecycle` | `.notice` | `screen-lock-pause: setting set <bool>` | user toggled the "Pause polling while the screen is locked" checkbox (#114, ADR-0032) |
 | 439 | `lifecycle` | `.notice` | `update: automatic checks set <bool>` | user toggled the "Check for updates automatically" checkbox (#37) |
 | — | `lifecycle` | `.notice` | `archive: enabled set <bool>` | user toggled the "Archive session logs to a folder" checkbox (#110) |
