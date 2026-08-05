@@ -184,3 +184,23 @@ public enum IncidentVisibility {
         }
     }
 }
+
+// MARK: - EpisodeSubscriptionState
+
+/// What the popup's single subscribe row should say right now (#279).
+///
+/// The subscription is to an **episode** — "something I depend on is broken" — not to a Statuspage
+/// ticket. That follows from how the feature is actually used: a user subscribes when they can see
+/// their own services are down, and they cannot know which of several concurrent incidents is the
+/// one hurting them. So there is one control, covering everything currently wrong, and incidents
+/// opened while it is live are swept in without asking again.
+public enum EpisodeSubscriptionState: Sendable, Equatable {
+    /// Something is wrong and the user has not asked to be told when it clears.
+    case notSubscribed
+    /// The user is following the current episode.
+    case subscribed
+    /// Every active incident has reached `monitoring` — Anthropic has deployed a fix and is watching.
+    /// The episode is over for subscription purposes even though components may still be yellow, so
+    /// the row reports that rather than offering to notify about something already answered.
+    case fixDeployed
+}

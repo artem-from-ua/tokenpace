@@ -191,6 +191,16 @@ public struct PopupLayout: Sendable, Equatable {
     /// than threading it through `make`.
     public let planLabel: String?
 
+    /// The status-page incidents worth showing (#279), already filtered by ``IncidentVisibility``.
+    /// Empty on every ordinary frame. Like ``planLabel`` and ``awaitingInput`` these arrive on the
+    /// status poll's own cadence rather than with the usage snapshot, so the shell grafts them on via
+    /// ``withIncidents(_:)`` instead of threading them through `make`.
+    public let incidents: [VisibleIncident]
+
+    /// What the single subscribe row should show, or `nil` when there is nothing to subscribe to and
+    /// the row is omitted entirely (#279).
+    public let subscription: EpisodeSubscriptionState?
+
     public init(
         lastUpdateAge: TimeInterval,
         intervalSeconds: TimeInterval,
@@ -200,6 +210,8 @@ public struct PopupLayout: Sendable, Equatable {
         credits: CreditsRow? = nil,
         blockingReset: BlockingReset.Choice? = nil,
         awaitingInput: AwaitingSessions? = nil,
+        incidents: [VisibleIncident] = [],
+        subscription: EpisodeSubscriptionState? = nil,
         planLabel: String? = nil
     ) {
         self.lastUpdateAge = lastUpdateAge
@@ -211,6 +223,8 @@ public struct PopupLayout: Sendable, Equatable {
         self.blockingReset = blockingReset
         self.awaitingInput = awaitingInput
         self.planLabel = planLabel
+        self.incidents = incidents
+        self.subscription = subscription
     }
 
     /// A copy of this layout with the awaiting-input count grafted on, everything else unchanged
@@ -220,7 +234,28 @@ public struct PopupLayout: Sendable, Equatable {
         PopupLayout(
             lastUpdateAge: lastUpdateAge, intervalSeconds: intervalSeconds, rows: rows,
             warning: warning, serviceStatus: serviceStatus, credits: credits,
-            blockingReset: blockingReset, awaitingInput: awaitingInput, planLabel: planLabel)
+            blockingReset: blockingReset, awaitingInput: awaitingInput, incidents: incidents,
+            subscription: subscription, planLabel: planLabel)
+    }
+
+    /// A copy of this layout with the status-page incidents grafted on, everything else unchanged
+    /// (#279). Incidents ride the status poll, not the usage poll, so the shell calls this on the
+    /// `make(...)` result exactly as it does for the awaiting-input breakdown.
+    public func withIncidents(_ incidents: [VisibleIncident]) -> PopupLayout {
+        PopupLayout(
+            lastUpdateAge: lastUpdateAge, intervalSeconds: intervalSeconds, rows: rows,
+            warning: warning, serviceStatus: serviceStatus, credits: credits,
+            blockingReset: blockingReset, awaitingInput: awaitingInput, incidents: incidents,
+            subscription: subscription, planLabel: planLabel)
+    }
+
+    /// A copy of this layout with the subscribe row's state grafted on (#279). `nil` omits the row.
+    public func withSubscription(_ subscription: EpisodeSubscriptionState?) -> PopupLayout {
+        PopupLayout(
+            lastUpdateAge: lastUpdateAge, intervalSeconds: intervalSeconds, rows: rows,
+            warning: warning, serviceStatus: serviceStatus, credits: credits,
+            blockingReset: blockingReset, awaitingInput: awaitingInput, incidents: incidents,
+            subscription: subscription, planLabel: planLabel)
     }
 
     /// A copy of this layout with the plan label grafted on, everything else unchanged. The shell
@@ -230,7 +265,8 @@ public struct PopupLayout: Sendable, Equatable {
         PopupLayout(
             lastUpdateAge: lastUpdateAge, intervalSeconds: intervalSeconds, rows: rows,
             warning: warning, serviceStatus: serviceStatus, credits: credits,
-            blockingReset: blockingReset, awaitingInput: awaitingInput, planLabel: planLabel)
+            blockingReset: blockingReset, awaitingInput: awaitingInput, incidents: incidents,
+            subscription: subscription, planLabel: planLabel)
     }
 
     // MARK: make
