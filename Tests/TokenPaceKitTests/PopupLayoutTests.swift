@@ -767,55 +767,79 @@ struct CreditsPacingMonthEndTests {
     }
 }
 
-// MARK: - "Show model-specific limits" gate (#211)
+// MARK: - Section-visibility inputs (#211)
 
-@Suite("PopupLayout showModelSpecificLimits gate")
-struct PopupLayoutModelLimitsGateTests {
+/// The layer split for the dropdown's two optional groups: `PopupLayout` always **builds** them and
+/// reports whether each is worth attention; the view decides whether to **draw** them (it owns the live
+/// ⌥ Option state). These tests cover the model half — the flags and the group's start index.
+@Suite("PopupLayout section-visibility inputs")
+struct PopupLayoutSectionVisibilityTests {
 
     /// A snapshot carrying all three per-model shapes: legacy Opus + Sonnet windows and a
     /// `weekly_scoped` Fable row — so a full render is 5 rows (5h, 7d, Opus, Sonnet, Fable).
-    private func allModelsSnapshot() -> UsageSnapshot {
+    private func allModelsSnapshot(opusUtil: Double = 5) -> UsageSnapshot {
         snapshot(
             fiveHourUtil: 50, sevenDayUtil: 30,
-            opus: (util: 5, resetsIn: 3 * 24 * 3600),
+            opus: (util: opusUtil, resetsIn: 3 * 24 * 3600),
             sonnet: (util: 2, resetsIn: 3 * 24 * 3600),
             limits: [scopedLimit(name: "Fable", percent: 12, resetsIn: 3 * 24 * 3600)]
         )
     }
 
-    @Test func offDropsAllPerModelRows() {
-        let p = PopupLayout.make(
-            from: allModelsSnapshot(), now: now, lastUpdate: now,
-            interval: PollingBackoff.defaultInterval, showModelSpecificLimits: false)
-        #expect(p.rows.count == 2)
-        #expect(p.rows[0].title == "5-hour")
-        #expect(p.rows[1].title == "7-day")
-    }
-
-    @Test func onKeepsAllPerModelRows() {
-        let p = PopupLayout.make(
-            from: allModelsSnapshot(), now: now, lastUpdate: now,
-            interval: PollingBackoff.defaultInterval, showModelSpecificLimits: true)
-        #expect(p.rows.count == 5)
-        #expect(p.rows.map(\.title) == ["5-hour", "7-day", "Opus", "Sonnet", "Fable"])
-    }
-
-    @Test func defaultsToOn() {
-        // The parameter defaults to `true`, so callers that don't pass it keep the full set.
+    /// The per-model rows are always built now — the old boolean gate that dropped them is gone, because
+    /// dropping them here would renumber the indices `BlockingReset` keys its pick to.
+    @Test func perModelRowsAreAlwaysBuilt() {
         let p = layout(from: allModelsSnapshot())
-        #expect(p.rows.count == 5)
+        #expect(p.rows.map(\.title) == ["5-hour", "7-day", "Opus", "Sonnet", "Fable"])
+        #expect(p.perModelRowsStart == 2)
     }
 
-    @Test func healthAwareOverloadHonoursGate() {
-        let health = UsageHealth.healthy(lastSuccess: now)
-        let off = PopupLayout.make(
-            from: allModelsSnapshot(), health: health, now: now,
-            interval: PollingBackoff.defaultInterval, showModelSpecificLimits: false)
-        #expect(off.rows.count == 2)
+    @Test func healthAwareOverloadBuildsThemToo() {
+        let p = PopupLayout.make(
+            from: allModelsSnapshot(), health: .healthy(lastSuccess: now), now: now,
+            interval: PollingBackoff.defaultInterval)
+        #expect(p.rows.count == 5)
+        #expect(p.perModelRowsStart == 2)
+    }
 
-        let on = PopupLayout.make(
-            from: allModelsSnapshot(), health: health, now: now,
-            interval: PollingBackoff.defaultInterval, showModelSpecificLimits: true)
-        #expect(on.rows.count == 5)
+    /// A snapshot with no per-model windows has an empty group: the start index sits at the end of the
+    /// array, so the view's `index >= perModelRowsStart` skip never fires.
+    @Test func emptyGroupStartsPastTheLastRow() {
+        let p = layout(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30))
+        #expect(p.rows.count == 2)
+        #expect(p.perModelRowsStart == 2)
+        #expect(!p.perModelRowsAreNonCalm)
+    }
+
+    /// A cold-start / broken-data layout carries no rows at all; the index is clamped so it can never
+    /// point past the array.
+    @Test func emptyLayoutClampsTheStartIndex() {
+        let p = PopupLayout.make(
+            from: nil, health: .healthy(lastSuccess: now), now: now,
+            interval: PollingBackoff.defaultInterval)
+        #expect(p.rows.isEmpty)
+        #expect(p.perModelRowsStart == 0)
+    }
+
+    /// Calm per-model rows (well under pace) do not flag the group.
+    @Test func calmPerModelRowsAreNotNonCalm() {
+        #expect(!layout(from: allModelsSnapshot()).perModelRowsAreNonCalm)
+    }
+
+    /// An **exhausted** per-model row flags the group — this is what makes `.nonCalm` reveal it.
+    @Test func exhaustedPerModelRowIsNonCalm() {
+        let p = layout(from: allModelsSnapshot(opusUtil: 100))
+        #expect(p.rows[2].bar.severity == .exhausted)
+        #expect(p.perModelRowsAreNonCalm)
+    }
+
+    /// A loud **base** row must not flag the per-model group: the two are gated independently, and the
+    /// base rows are never hidden anyway.
+    @Test func exhaustedBaseRowDoesNotFlagThePerModelGroup() {
+        let p = layout(from: snapshot(
+            fiveHourUtil: 100, sevenDayUtil: 30,
+            opus: (util: 5, resetsIn: 3 * 24 * 3600)))
+        #expect(p.rows[0].bar.severity == .exhausted)
+        #expect(!p.perModelRowsAreNonCalm)
     }
 }

@@ -7,8 +7,9 @@ import Foundation
 @Suite("AppearancePreset value sets")
 struct AppearancePresetTests {
 
-    /// Chill = the calm look: every menu-bar Bool on, per-model rows on, countdown smart, simplified
-    /// bars (#224). Guards against a preset value drifting from the documented matrix.
+    /// Chill = the calm look: every menu-bar Bool on, the dropdown's two sections folded away until
+    /// they turn orange/red, countdown smart, simplified bars (#224). Guards against a preset value
+    /// drifting from the documented matrix.
     @Test func chillIsCalmLook() {
         let v = AppearancePreset.chill.values
         #expect(v.calmColorMode == .yellowGreenBlue)   // greens/yellows AND far-behind blue all mute
@@ -17,7 +18,8 @@ struct AppearancePresetTests {
         #expect(v.showExtraUsage)
         #expect(v.showServiceStatusDot)
         #expect(!v.awaitingInputInMenuBar)   // Chill: awaiting hand stays in the popup only (#233)
-        #expect(v.showModelSpecificLimits)
+        #expect(v.modelLimitsVisibility == .nonCalm)   // quiet dropdown: fold until orange/red (#211)
+        #expect(v.extraUsageVisibility == .nonCalm)
         #expect(v.resetCountdownModeMenuBar == .smart)
         #expect(v.barStyle == .simple)
         #expect(!v.showTicks)   // the quiet look drops the tick ruler
@@ -43,7 +45,8 @@ struct AppearancePresetTests {
         #expect(wh.showServiceStatusDot == chill.showServiceStatusDot)
         #expect(wh.awaitingInputInMenuBar)          // difference 6 — Work harder shows the hand in the menu bar
         #expect(!chill.awaitingInputInMenuBar)      // …Chill keeps it popup-only (#233)
-        #expect(wh.showModelSpecificLimits == chill.showModelSpecificLimits)
+        #expect(wh.modelLimitsVisibility == chill.modelLimitsVisibility)   // both .nonCalm (#211)
+        #expect(wh.extraUsageVisibility == chill.extraUsageVisibility)
         #expect(wh.resetCountdownModeMenuBar == chill.resetCountdownModeMenuBar)
         #expect(wh.farBehindInterval == .medium)   // difference 4 — Chill is .off (no blue)
         #expect(chill.farBehindInterval == .off)
@@ -59,7 +62,9 @@ struct AppearancePresetTests {
         #expect(v.showExtraUsage)
         #expect(v.showServiceStatusDot)
         #expect(v.awaitingInputInMenuBar)   // Control freak: awaiting hand in the menu bar too (#233)
-        #expect(v.showModelSpecificLimits)
+        // Nothing in the dropdown folds away — both sections pinned open (#211).
+        #expect(v.modelLimitsVisibility == .always)
+        #expect(v.extraUsageVisibility == .always)
         #expect(v.resetCountdownModeMenuBar == .always)
         #expect(v.barStyle == .pacing)
         #expect(v.showTicks)
@@ -104,7 +109,8 @@ struct AppearancePresetTests {
             showExtraUsage: chill.showExtraUsage,
             showServiceStatusDot: chill.showServiceStatusDot,
             awaitingInputInMenuBar: chill.awaitingInputInMenuBar,
-            showModelSpecificLimits: chill.showModelSpecificLimits,
+            modelLimitsVisibility: chill.modelLimitsVisibility,
+            extraUsageVisibility: chill.extraUsageVisibility,
             resetCountdownModeMenuBar: chill.resetCountdownModeMenuBar,
             barStyle: .pacing,   // Chill uses .simple → this is off every preset
             showTicks: chill.showTicks,

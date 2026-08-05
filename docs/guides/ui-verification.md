@@ -136,21 +136,52 @@
 > секції — той самий `PopupBarView`, що бари токенів, але **без** засічок-ticks (кредити пейсяться на
 > весь місяць, без під-вікон).
 
-### Тумблер «Show model & service limits» (#211)
+### Видимість секцій дропдауна: «Show model & service limits» і «Show extra usage» (#211)
 
-Settings → Appearance → секція **Dropdown** → «Show model & service limits» (default-**on**). Гейтить
-per-model/per-service рядки попапа (`Opus`/`Sonnet` із legacy-полів + `weekly_scoped`-записи як
-`Fable`/`Mythos`).
-Перевіряй на стубі з per-model лімітами — напр. `screenshot` (має Fable + Mythos):
+Settings → Appearance → секція **Dropdown Widget**. Обидві опції — тристанові
+(`PopupSectionVisibility`), сегменти **Always | Non-calm only | With ⌥ Option**:
+
+| Режим | Поведінка |
+|---|---|
+| `Always` | група видима завжди |
+| `Non-calm only` (дефолт `.chill`/`.workHarder`) | видима, коли хоч один її рядок **помаранчевий або червоний** (`.ahead`/`.exhausted`) — **або** поки утримується ⌥ |
+| `With ⌥ Option` | схована завжди, крім моменту утримання ⌥ |
+
+Перше гейтить per-model/per-service рядки (`Opus`/`Sonnet` із legacy-полів + `weekly_scoped` як
+`Fable`/`Mythos`), друге — секцію **Extra usage**. Синій `far behind` — **не** тривожний
+(`.farBehind` спокійніший за зелений), тому групу не розкриває.
 
 ```sh
-TOKENPACE_STUB=screenshot TOKENPACE_DEVTOOLS=1 swift run
+TOKENPACE_STUB=screenshot TOKENPACE_DEVTOOLS=1 swift run        # Fable 70 % (помаранч) + Mythos 100 % (черв.)
+TOKENPACE_STUB=credits-active TOKENPACE_DEVTOOLS=1 swift run    # секція Extra usage з баром
 ```
 
-- **On** (дефолт): дропдаун показує рядки `Opus`/`Sonnet`/`Fable`/`Mythos` під `5-hour`/`7-day`.
-- Зняти тумблер → дропдаун **одразу** (live callback, без реполу) згортається до лише `5-hour` +
-  `7-day`; повернути → per-model рядки з'являються знову.
-- Стан персиститься: перезапуск застосунку зберігає вибір.
+- `Always` → рядки на місці; утримання ⌥ нічого не змінює.
+- `Non-calm` на стубі з помаранчевим/червоним per-model рядком (`screenshot`) → рядки видимі без ⌥.
+- `Non-calm` → затиснути **⌥ Option** при відкритому меню: група з'являється **живо** (50 мс
+  polling-таймер ADR-0020), попап переміряється; відпустити → зникає.
+- `⌥ Option` → групи немає навіть коли рядок червоний; лише ⌥ її показує.
+- Перемикання застосовується **одразу** (live callback, без реполу) і персиститься між запусками.
+- **Роздільник:** коли Extra usage схована, останній видимий бар не має отримувати зайвий відступ;
+  коли схована per-model група — теж (в'юха рахує «останній рядок» за видимим набором).
+- **Червоний бейдж ресету** (`blockingReset`) має лишатися на своєму рядку в усіх режимах: рядки
+  ховаються пропуском, без перенумерації індексів.
+
+> **Увага при перевірці:** одночасно можуть працювати кілька TokenPace (твій із `/Applications` і
+> дев-збірка). Не клікай статус-айтем через AX за іменем/індексом — влучиш не в ту збірку; шукай
+> процес за **повним шляхом** до бінарника worktree. Дев-збірка пише в окремий домен
+> `com.artem-n.tokenpace.dev`, тож твої реальні налаштування вона не чіпає.
+
+Міграція зі старого булевого тумблера (одноразова, на першому запуску):
+
+```sh
+defaults write com.artem-n.tokenpace showModelSpecificLimits -bool false
+# після запуску: modelLimitsVisibility = optionOnly, старий ключ видалено
+defaults read com.artem-n.tokenpace | grep -i -e modelLimits -e ModelSpecific
+```
+
+Явний `true` → `always`, явний `false` → `optionOnly`, ключа не було → дефолт пресета (`nonCalm`).
+**Не** роби `defaults delete` домену — це зітре реальні налаштування.
 
 ### Хедер «Claude Code» у дропдауні: час оновлення + список сервісів (#227)
 
