@@ -247,6 +247,94 @@ struct SimultaneousIncidentsTests {
     }
 }
 
+// MARK: - The shapes the stubs reproduce
+
+/// Guards the four `TOKENPACE_STUB=incident-*` frames at the level a screenshot cannot: that the
+/// JSON they emit really does decode and gate the way their descriptions claim. `incident-green` is
+/// the one that matters most — "renders nothing" is the failure mode that hides itself.
+@Suite("IncidentVisibility — stub frames decode and gate as described")
+struct IncidentStubFrameTests {
+
+    private func decoded(codeStatus: String, apiStatus: String, stage: String, second: Bool) throws -> StatusSummary {
+        let mirrored = """
+        [{"id":"yyzkbfz2thpt","name":"Claude Code","status":"\(codeStatus)"},\
+        {"id":"k8w3r06qmzrp","name":"Claude API (api.anthropic.com)","status":"\(apiStatus)"}]
+        """
+        var incidents = ["""
+        {"id":"f6gkkq6txl7z","name":"Degraded performance of multiple models","status":"\(stage)",\
+        "impact":"minor","shortlink":"https://stspg.io/s2ysk4zxbyy3",\
+        "started_at":"2026-08-05T11:53:00Z","resolved_at":null,\
+        "incident_updates":[{"id":"upd-1","status":"investigating","body":"We are investigating.",\
+        "created_at":"2026-08-05T11:53:00Z"}],"components":\(mirrored)}
+        """]
+        if second {
+            incidents.append("""
+            {"id":"mgp99sn4ynd4","name":"Elevated errors for Claude Fable 5","status":"investigating",\
+            "impact":"minor","shortlink":"https://stspg.io/m7w8kkf4tlqg",\
+            "started_at":"2026-08-05T13:48:00Z","resolved_at":null,\
+            "incident_updates":[{"id":"upd-b1","status":"investigating","body":"Working on a fix.",\
+            "created_at":"2026-08-05T13:48:00Z"}],"components":\(mirrored)}
+            """)
+        }
+        let body = """
+        {"components":[\
+        {"name":"Claude Code","status":"\(codeStatus)"},\
+        {"name":"Claude API (api.anthropic.com)","status":"\(apiStatus)"},\
+        {"name":"claude.ai","status":"operational"}],\
+        "incidents":[\(incidents.joined(separator: ","))]}
+        """.data(using: .utf8)!
+        return try StatusClient.decode(from: body)
+    }
+
+    @Test func incidentActiveShowsOneRow() throws {
+        let s = try decoded(
+            codeStatus: "degraded_performance", apiStatus: "degraded_performance",
+            stage: "identified", second: false)
+        let visible = IncidentVisibility.visible(in: s, config: .default, now: now)
+        #expect(visible.count == 1)
+        #expect(visible.first?.stage == .identified)
+        #expect(visible.first?.severity == .degraded)
+        #expect(visible.first?.shortlink?.absoluteString == "https://stspg.io/s2ysk4zxbyy3")
+    }
+
+    /// The 66-minute gap, and the highest-value stub: formally `monitoring`, actually fine.
+    @Test func incidentGreenRendersNothing() throws {
+        let s = try decoded(
+            codeStatus: "operational", apiStatus: "operational", stage: "monitoring", second: false)
+        // The incident is present in the payload…
+        #expect(s.incidents.count == 1)
+        // …and both the service dot and the incident section stay empty.
+        #expect(StatusHealth.from(s, config: .default).worstProblem == nil)
+        #expect(IncidentVisibility.visible(in: s, config: .default, now: now).isEmpty)
+    }
+
+    @Test func incidentTwoShowsBothRows() throws {
+        let s = try decoded(
+            codeStatus: "degraded_performance", apiStatus: "degraded_performance",
+            stage: "identified", second: true)
+        let visible = IncidentVisibility.visible(in: s, config: .default, now: now)
+        #expect(visible.map(\.id) == ["f6gkkq6txl7z", "mgp99sn4ynd4"])
+        // Distinct links — the flaw ADR-0071 §3 set out to fix was several identical ones.
+        #expect(Set(visible.compactMap(\.shortlink)).count == 2)
+    }
+
+    /// A silent recovery: the components go green with no new update at all, so the rows must vanish
+    /// on component state alone — an updates-driven listener would have stayed quiet for 43 minutes.
+    @Test func incidentRecoveryVanishesWithoutANewUpdate() throws {
+        let before = try decoded(
+            codeStatus: "degraded_performance", apiStatus: "degraded_performance",
+            stage: "identified", second: false)
+        let after = try decoded(
+            codeStatus: "operational", apiStatus: "operational", stage: "identified", second: false)
+
+        #expect(IncidentVisibility.visible(in: before, config: .default, now: now).count == 1)
+        #expect(IncidentVisibility.visible(in: after, config: .default, now: now).isEmpty)
+        // The update set is unchanged across the transition — that is what "silent" means.
+        #expect(before.incidents.first?.incidentUpdates.map(\.id)
+            == after.incidents.first?.incidentUpdates.map(\.id))
+    }
+}
+
 // MARK: - Anti-drift with the popup rows
 
 @Suite("StatusHealth.monitoredComponentNames")

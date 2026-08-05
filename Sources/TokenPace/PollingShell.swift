@@ -397,6 +397,27 @@ actor StubUsageTransport: UsageTransport {
         /// carries a `spend` + `extra_usage` block covering one credits state (paced / limit-reached /
         /// unlimited). The bodies reuse the exact shapes from `CreditsModelTests`.
         case credits(CreditsFrame)
+        /// A status-page **incident** frame (#279). The usage side is a calm, unremarkable frame in
+        /// every case — the subject is entirely the status endpoint, so nothing else competes for
+        /// attention in the screenshot. See ``IncidentFrame``.
+        case incident(IncidentFrame)
+    }
+
+    /// Which incident shape the status endpoint reports for the `=incident-*` verification stubs
+    /// (#279). Each mirrors a state captured from the live page on 2026-08-05:
+    ///
+    ///  • `.active`   — one incident, monitored components degraded. The baseline: ⌥ Option replaces
+    ///    the service rows with one incident row.
+    ///  • `.green`    — an incident still formally `monitoring` while every component is back to
+    ///    `operational`: the measured 66-minute gap. **Nothing** may render. The most valuable of the
+    ///    four, because "nothing renders" is the failure mode that hides itself.
+    ///  • `.two`      — two simultaneous incidents naming the same degraded components, the real
+    ///    14:00 shape: two rows, one subscribe row (a subscription covers the episode, not a ticket).
+    ///  • `.recovery` — a **silent** recovery driven by the poll counter: degraded for the first two
+    ///    polls, then `operational` with no further update, exactly as `mgp99sn4ynd4` behaved. The
+    ///    one frame where an updates-driven listener would have stayed quiet for 43 minutes.
+    enum IncidentFrame: Equatable {
+        case active, green, two, recovery
     }
 
     /// A money-credits state for the `=credits-*` verification stubs (#144). Each supplies the raw
@@ -571,6 +592,109 @@ actor StubUsageTransport: UsageTransport {
         return nextHour
     }
 
+    // MARK: - Status endpoint body
+
+    /// The canned `summary.json` for this mode.
+    ///
+    /// Covers every component the configurable logical services can monitor (`Claude Code`,
+    /// `Claude API`, `claude.ai`, `Claude Cowork` — ADR-0024), so with Cowork monitoring on the popup
+    /// draws a row per component.
+    ///
+    /// Everything **not** in the handful of status-carrying frames is all-operational with no
+    /// incidents. A stub exists to isolate one thing; a service dot nobody asked for is noise that
+    /// leaks into every pacing/credits/idle screenshot and makes the frame read as if something were
+    /// wrong. Only frames whose *subject* is the status line carry a problem.
+    ///
+    /// The incident shapes are real (#279): `id`, `shortlink`, `started_at`, per-incident
+    /// `components[]` carrying **live** status, and `incident_updates[]` with stable ids — the exact
+    /// fields `IncidentVisibility` and the subscription logic read. The previous placeholder had none
+    /// of them and could not exercise either.
+    private func statusBody() -> Data {
+        // Component statuses. `.authError` degrades everything (its subject is the failure frame);
+        // `.calmDegraded` and `.staleError` each pin their own shape.
+        let failing = mode == .authError
+        let calmDegraded = mode == .calmDegraded
+        let staleError = mode == .staleError
+
+        var codeStatus = staleError ? "major_outage"
+            : (failing || calmDegraded) ? "degraded_performance" : "operational"
+        var apiStatus = staleError ? "major_outage" : failing ? "degraded_performance" : "operational"
+        var webStatus = failing ? "partial_outage" : "operational"
+        let coworkStatus = failing ? "degraded_performance" : "operational"
+
+        var incidents: [String] = []
+
+        if case let .incident(frame) = mode {
+            // `.recovery` is the only time-dependent frame: the components go green from the third
+            // poll on, with **no** accompanying update — the silent recovery. Everything else is a
+            // fixed shape, so a screenshot of it is reproducible.
+            let recovered = frame == .recovery && calls > 2
+            let green = frame == .green || recovered
+
+            codeStatus = green ? "operational" : "degraded_performance"
+            apiStatus = green ? "operational" : "degraded_performance"
+            webStatus = "operational"
+
+            // An incident's `components[]` mirrors live status — that is what the green gate reads.
+            let mirrored = """
+            [{"id":"yyzkbfz2thpt","name":"Claude Code","status":"\(codeStatus)"},\
+            {"id":"k8w3r06qmzrp","name":"Claude API (api.anthropic.com)","status":"\(apiStatus)"}]
+            """
+
+            // A `monitoring` stage on the green frame is the point of it: formally open, actually
+            // fine — the 66-minute gap that must render nothing.
+            let stage = (frame == .green || recovered) ? "monitoring" : "identified"
+            incidents.append("""
+            {"id":"f6gkkq6txl7z","name":"Degraded performance of multiple models",\
+            "status":"\(stage)","impact":"minor","shortlink":"https://stspg.io/s2ysk4zxbyy3",\
+            "created_at":"\(isoStamp(minutesAgo: 127))","started_at":"\(isoStamp(minutesAgo: 127))",\
+            "monitoring_at":null,"resolved_at":null,\
+            "incident_updates":[\
+            {"id":"upd-1","status":"investigating","body":"We are investigating elevated error rates \
+            on requests to multiple Claude models.","created_at":"\(isoStamp(minutesAgo: 127))"},\
+            {"id":"upd-2","status":"identified","body":"We are continuing to work on a fix for this \
+            issue.","created_at":"\(isoStamp(minutesAgo: 41))"}],\
+            "components":\(mirrored)}
+            """)
+
+            if frame == .two {
+                // The real 14:00 shape: a second, younger incident naming the same components — so
+                // the popup must show two rows but still only one subscribe row.
+                incidents.append("""
+                {"id":"mgp99sn4ynd4","name":"Elevated errors for Claude Fable 5, Claude Sonnet 5, \
+                Claude Haiku 4.5, and other models","status":"investigating","impact":"minor",\
+                "shortlink":"https://stspg.io/m7w8kkf4tlqg",\
+                "created_at":"\(isoStamp(minutesAgo: 12))","started_at":"\(isoStamp(minutesAgo: 12))",\
+                "monitoring_at":null,"resolved_at":null,\
+                "incident_updates":[\
+                {"id":"upd-b1","status":"investigating","body":"We have identified the cause of \
+                elevated errors and are working on a fix.","created_at":"\(isoStamp(minutesAgo: 12))"}],\
+                "components":\(mirrored)}
+                """)
+            }
+        }
+
+        return """
+        {"status":{"indicator":"major","description":"Degraded"},\
+        "components":[\
+        {"name":"Claude Code","status":"\(codeStatus)","updated_at":"\(isoStamp(minutesAgo: 127))"},\
+        {"name":"Claude API (api.anthropic.com)","status":"\(apiStatus)","updated_at":"\(isoStamp(minutesAgo: 127))"},\
+        {"name":"claude.ai","status":"\(webStatus)","updated_at":"\(isoStamp(minutesAgo: 12))"},\
+        {"name":"Claude Cowork","status":"\(coworkStatus)","updated_at":"\(isoStamp(minutesAgo: 12))"}],\
+        "incidents":[\(incidents.joined(separator: ","))],\
+        "scheduled_maintenances":[]}
+        """.data(using: .utf8)!
+    }
+
+    /// An ISO-8601 stamp `minutesAgo` before the scenario's clock — so ages render as real durations
+    /// ("2h", "12m") instead of drifting into the past like a hard-coded date would.
+    private func isoStamp(minutesAgo: Int) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.string(from: now().addingTimeInterval(-Double(minutesAgo) * 60))
+    }
+
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         // Status endpoint (#31, #89): a canned summary covering every component the configurable
         // logical services can monitor (`Claude Code`, `Claude API`, `claude.ai`, `Claude Cowork` —
@@ -585,32 +709,9 @@ actor StubUsageTransport: UsageTransport {
         // pacing/credits/idle screenshot and makes the frames read as if something were wrong. Only the
         // frames whose *subject* is the status line carry a non-operational component.
         if request.url == StatusClient.endpoint {
-            let failing = mode == .authError
-            // Calm-degraded frame (#…): exactly one component degraded (the soft yellow state), the
-            // rest operational — so `worstProblem` is `.degraded` and the menu bar draws a **yellow**
-            // service dot, which calm colours then mute to white.
-            let calmDegraded = mode == .calmDegraded
-            // Stale-error frame (spacing bug): API + Code both **major outage** (the red dots from the
-            // reported screenshot), everything else operational.
-            let staleError = mode == .staleError
-            let codeStatus = staleError ? "major_outage"
-                : (failing || calmDegraded) ? "degraded_performance" : "operational"
-            let apiStatus = staleError ? "major_outage" : failing ? "degraded_performance" : "operational"
-            let webStatus = failing ? "partial_outage" : "operational"
-            let coworkStatus = failing ? "degraded_performance" : "operational"
-            let body = """
-            {"status":{"indicator":"major","description":"Degraded"},\
-            "components":[\
-            {"name":"Claude Code","status":"\(codeStatus)"},\
-            {"name":"Claude API (api.anthropic.com)","status":"\(apiStatus)"},\
-            {"name":"claude.ai","status":"\(webStatus)"},\
-            {"name":"Claude Cowork","status":"\(coworkStatus)"}],\
-            "incidents":[{"name":"Stubbed incident","status":"monitoring","impact":"major",\
-            "components":[{"name":"Claude Code"},{"name":"Claude API (api.anthropic.com)"}]}]}
-            """.data(using: .utf8)!
             let response = HTTPURLResponse(
                 url: StatusClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
-            return (body, response)
+            return (statusBody(), response)
         }
 
         // Idle frame (#100, ADR-0027): `five_hour` with `resets_at: null` and **no** `session` entry in
