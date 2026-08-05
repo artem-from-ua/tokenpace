@@ -6,8 +6,8 @@ import TokenPaceKit
 
 /// Keeps the "N sessions awaiting input" count fresh and pushes it to the UI, per
 /// `docs/design/awaiting-input-refresh.md`. Thin platform glue over the pure
-/// ``TokenPaceKit/AwaitingInputScanner`` (which owns the parsing and the mtime cache) — this type
-/// only *drives* scans from two triggers and coalesces them.
+/// ``TokenPaceKit/AwaitingInputScanner`` (which owns the parsing and the liveness filter) — this
+/// type only *drives* scans from two triggers and coalesces them.
 ///
 /// **Triggers.**
 /// - **FSEvents** on `~/.claude/sessions` and `~/.claude/jobs` (recursive, file-level). The OS wakes
@@ -17,8 +17,16 @@ import TokenPaceKit
 ///   FSEvents coalesced away or dropped across sleep/logout.
 ///
 /// **Gating.** The whole watcher only runs while the feature is enabled **and** the screen is
-/// unlocked **and** Claude Code is running. ``setActive(_:)`` starts/stops the FSEvents stream and
-/// the safety timer wholesale — no work while parked. On each (re)start we run one catch-up scan.
+/// available (unlocked, no screensaver, display and system awake — #275).
+/// ``setActive(_:reason:)`` starts/stops the FSEvents stream and the safety timer wholesale — no work
+/// while parked. On each (re)start we run one catch-up scan, so events missed while parked are
+/// reconciled immediately rather than at the next safety tick.
+///
+/// There is deliberately **no "Claude is running" term**, though an earlier draft of the design note
+/// specified one: with no `claude` alive nothing writes to the watched trees, so FSEvents is already
+/// silent and the residual cost is one ~0.18 ms scan per safety tick. Sessions left behind by a
+/// killed `claude` are filtered by ``TokenPaceKit/AwaitingInputScanner``'s liveness check instead,
+/// which fixes the actual user-visible bug (a hand that never goes down) rather than the cost.
 ///
 /// **Quiet by default.** No per-event / per-tick logging on the steady-state path. We log only when
 /// the count actually changes, when the stream starts/stops, or on an error the user could act on.
@@ -71,23 +79,27 @@ final class AwaitingInputWatcher {
     /// Turn the watcher on or off wholesale. `true` starts the FSEvents stream + safety timer and
     /// runs one catch-up scan; `false` tears both down. Idempotent.
     ///
-    /// Call with the AND of: feature-enabled, screen-unlocked, Claude-running. The shell recomputes
-    /// this whenever any input changes (Settings toggle, lock/unlock, Claude appears/exits).
-    func setActive(_ active: Bool) {
+    /// Call with the AND of: feature-enabled and screen-available. The shell recomputes this whenever
+    /// any input changes (Settings toggle, lock/unlock, system sleep/wake) — see
+    /// `AppDelegate.updateAwaitingInputWatcher()`.
+    ///
+    /// - Parameter reason: what moved the gate, for the log line (e.g. `screen locked`).
+    func setActive(_ active: Bool, reason: String) {
         if active {
             guard stream == nil else { return }   // already running
             startStream()
             startSafetyTimer()
-            AppLogger.lifecycle.notice("awaiting-input watcher started")
+            AppLogger.lifecycle.notice("awaiting-input: resumed (\(reason, privacy: .public))")
             scanNow()                             // catch-up scan on (re)start
         } else {
             guard stream != nil || safetyTimer != nil else { return }
             stopStream()
             safetyTimer?.invalidate(); safetyTimer = nil
-            // Forget the last result so the next start re-reports (and the UI, hidden while inactive,
-            // starts clean). We do NOT push .none here — the shell hides the indicator when inactive.
+            // Forget the last result so the next start re-reports. Note this does NOT clear what the
+            // UI shows: on a screen-lock park the shell deliberately keeps the last count on screen
+            // (nobody can see it anyway) and the catch-up scan re-reports on resume.
             lastResult = nil
-            AppLogger.lifecycle.notice("awaiting-input watcher stopped")
+            AppLogger.lifecycle.notice("awaiting-input: parked (\(reason, privacy: .public))")
         }
     }
 

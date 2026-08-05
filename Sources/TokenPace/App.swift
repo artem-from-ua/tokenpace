@@ -83,6 +83,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Screen lock / screensaver / display-sleep observers, feeding `.sleep`/`.wake` into `signals`
     /// when `PersistedConfig.pausePollingWhenScreenLocked` is on (#114).
     private var screenLock: ScreenLockObserver?
+    /// Whether the screen is usable right now — `false` while locked, running a screensaver, or with
+    /// the display asleep. Gates the awaiting-input watcher **unconditionally** (#275): unlike the
+    /// usage poll, there is no setting that makes scanning sessions the user cannot answer useful.
+    /// Fed by ``ScreenLockObserver``'s availability callback, which bypasses the pause preference.
+    private var screenAvailable = true
+    /// `false` between `NSWorkspace.willSleep` and `didWake`.
+    ///
+    /// A **backstop** behind ``screenAvailable``, not a load-bearing condition: macOS puts the
+    /// display to sleep before suspending, so `screensDidSleep` normally arrives first and has
+    /// already parked the watcher, and nothing runs mid-sleep anyway. Kept because notification
+    /// ordering is not an Apple contract and `didWake` guarantees a catch-up if a display-wake event
+    /// is ever missed — the same reason ``WorkspaceSleepWake`` itself is unconditional (ADR-0032 D5).
+    private var systemAwake = true
     /// Connectivity monitor, feeding `.networkRestored` into `signals`.
     private let network = NetworkMonitor()
     /// The running poll loop's consumer task — cancelled on terminate.
@@ -861,15 +874,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sleepWake = WorkspaceSleepWake { [signals, weak self] signal in
             signals.send(signal)
             // Observers fire on the main queue (see WorkspaceSleepWake), so we are on the main actor.
-            MainActor.assumeIsolated { self?.handleParkSignal(signal) }
+            MainActor.assumeIsolated {
+                self?.handleParkSignal(signal)
+                // System sleep also parks the awaiting-input watcher (#275) — a backstop behind the
+                // screen gate below, which normally fires first. See `systemAwake`.
+                self?.systemAwake = (signal != .sleep)
+                self?.updateAwaitingInputWatcher()
+            }
         }
         // Screen lock / screensaver / display-sleep park the loop the same way, gated by the
         // pause-on-screen-lock preference (#114). It emits the same `.sleep`/`.wake`, so it also drives
         // the optimistic-reset timer through the shared handler.
-        screenLock = ScreenLockObserver { [signals, weak self] signal in
-            signals.send(signal)
-            MainActor.assumeIsolated { self?.handleParkSignal(signal) }
-        }
+        //
+        // The second callback carries raw screen availability, *ungated* by that preference, and drives
+        // the awaiting-input watcher (#275) — see `ScreenLockObserver`'s doc for why the two gates differ.
+        screenLock = ScreenLockObserver(
+            onSignal: { [signals, weak self] signal in
+                signals.send(signal)
+                MainActor.assumeIsolated { self?.handleParkSignal(signal) }
+            },
+            onScreenAvailabilityChanged: { [weak self] available in
+                MainActor.assumeIsolated {
+                    self?.screenAvailable = available
+                    self?.updateAwaitingInputWatcher()
+                }
+            })
         network.start { [signals] in signals.send(.networkRestored) }
 
         // Build and run the polling engine for the launch scenario (`TOKENPACE_STUB`, or the real
@@ -1700,9 +1729,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         render(output, at: currentDate())
     }
 
-    /// Bring the awaiting-input watcher in line with the current feature state (#233). Creates the
-    /// watcher lazily when the master toggle is on and drives it via `setActive`; tears it down when
-    /// off. Called at launch and whenever the toggle flips.
+    /// Bring the awaiting-input watcher in line with the current feature state (#233) and screen
+    /// availability (#275). Creates the watcher lazily when the master toggle is on and drives it via
+    /// `setActive`; tears it down when off. Called at launch, whenever the toggle flips, and on every
+    /// lock/unlock and system sleep/wake.
+    ///
+    /// Two kinds of "off", deliberately different: the **feature** being off destroys the watcher and
+    /// clears the count, while a **locked screen** only parks it and keeps the last count for the
+    /// unlock. See the parking branches below.
     ///
     /// The `TOKENPACE_AWAITING` stub short-circuits the watcher entirely — the forced count is read
     /// directly by `awaitingInputForDisplay`, so there's nothing to watch.
@@ -1719,13 +1753,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// reported the maintainer's real sessions in a run everyone read as stubbed. Deliberately keeping
     /// the watcher testable on a dev build is why this gates on intent rather than on bundle type.
     private func updateAwaitingInputWatcher() {
-        let wantWatcher = PersistedConfig.awaitingInputEnabled
+        // The feature itself is off (toggle, stub, or a non-live scenario): there is nothing to watch
+        // and nothing to show, so tear the watcher down and clear the count.
+        let featureWanted = PersistedConfig.awaitingInputEnabled
             && awaitingInputStub == nil
             && currentScenario == .realNetwork
             && scenarioWasExplicit
-        guard wantWatcher else {
-            awaitingInputWatcher?.setActive(false)
-            awaitingInputWatcher = nil
+        guard featureWanted else {
+            if awaitingInputWatcher != nil {
+                awaitingInputWatcher?.setActive(false, reason: "feature off")
+                awaitingInputWatcher = nil
+            }
             awaitingInput = .none
             return
         }
@@ -1737,10 +1775,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             })
             awaitingInputWatcher = watcher
         }
-        // Active whenever the feature is on. FSEvents makes this cheap; a finer gate (pause while the
-        // screen is locked / Claude isn't running, mirroring #114) can be layered on later by calling
-        // `setActive(false/true)` from the lock and claude-activity signals — the watcher supports it.
-        awaitingInputWatcher?.setActive(true)
+        // The screen gate (#275). Parking here keeps the watcher object alive and, deliberately,
+        // keeps the last known count on screen: the user cannot see the menu bar while the screen is
+        // locked, and `setActive(true)` runs a catch-up scan on resume that either confirms or
+        // corrects it. Clearing the count would only make the indicator blink on every unlock.
+        //
+        // Not gated on `claude` running, though the design note once planned it: with no `claude`
+        // alive nothing writes to the watched trees, so FSEvents is already silent and the only cost
+        // is a ~0.18 ms scan per 45 s safety tick — less than the wakeup it would take to gate it.
+        // The real problem that gate would have masked — a killed session leaving `status:"waiting"`
+        // behind forever — is solved properly in `AwaitingInputScanner`'s liveness filter (#275).
+        guard screenAvailable && systemAwake else {
+            awaitingInputWatcher?.setActive(false, reason: screenAvailable ? "system sleep" : "screen locked")
+            return
+        }
+        awaitingInputWatcher?.setActive(true, reason: "screen available")
     }
 
     /// Render a poll result into the menu-bar image and popup model at instant `now`.

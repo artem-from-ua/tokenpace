@@ -259,13 +259,30 @@ The `gh api` subprocess for the maintainer update-check path (#37, ADR-0025); th
 <!-- `Sources/TokenPace/UpdateNotifier.swift` removed in #130 (ADR-0036): no more system notifications;
 the sole update signal is the single dropdown item logged as `update: menu item = …` above. -->
 
+## `Sources/TokenPace/AwaitingInputWatcher.swift`
+
+The "N sessions awaiting input" watcher (#233, ADR-0066). Deliberately quiet: nothing is logged per
+FSEvents batch or per safety tick on the steady-state path — only gate transitions, a real change in
+the count, and an error the user could act on.
+
+`park`/`resume` carry the gate term that moved (#275). `feature off` also destroys the watcher and
+clears the indicator; the screen reasons only park it, keeping the last count for the unlock.
+
+| Line | Category | Level | Message | When |
+|------|----------|-------|---------|------|
+| 92 | `lifecycle` | `.notice` | `awaiting-input: resumed (<reason>)` | `setActive(true, reason:)` — FSEvents stream started, safety timer armed, catch-up scan queued. `<reason>` ∈ {`screen available`} |
+| 102 | `lifecycle` | `.notice` | `awaiting-input: parked (<reason>)` | `setActive(false, reason:)` — stream stopped and timer disarmed. `<reason>` ∈ {`screen locked`, `system sleep`, `feature off`} |
+| 134 | `lifecycle` | `.error` | `awaiting-input: FSEventStreamCreate failed; safety poll only` | watched dirs unresolvable — degrades to the 45 s safety timer alone |
+| 155 | `lifecycle` | `.debug` | `awaiting-input: FSEvents batch of <n> path(s)` | per-batch detail, only under `TOKENPACE_DEVTOOLS` |
+| 191 | `lifecycle` | `.notice` | `awaiting-input <old> → <new> (urgency <u>)` | the scan result changed (count, urgency, or per-project breakdown). `<old>` is `—` on the first scan after a start |
+
 ## `Sources/TokenPace/PollingShell.swift`
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
 | 46 | `lifecycle` | `.notice` | `system will sleep, pausing polling` | `NSWorkspace.willSleepNotification` fired |
 | 52 | `lifecycle` | `.notice` | `system did wake, polling immediately` | `NSWorkspace.didWakeNotification` fired (the loop still re-polls only if the cache is stale — ADR-0032 D6) |
-| 133 | `lifecycle` | `.notice` | `screen-lock-pause: <reason>, pausing polling` | `ScreenLockObserver` — screen locked / screensaver started / display asleep, with `pausePollingWhenScreenLocked` on (#114). `<reason>` ∈ {`screen locked`, `screensaver started`, `display asleep`} |
+| 133 | `lifecycle` | `.notice` | `screen-lock-pause: <reason>, pausing polling` | `ScreenLockObserver` — screen locked / screensaver started / display asleep, with `pausePollingWhenScreenLocked` on (#114). `<reason>` ∈ {`screen locked`, `screensaver started`, `display asleep`}. **Absent when the preference is off** — the awaiting-input watcher still parks then (it rides the ungated availability callback, #275), so its `awaiting-input: parked` line can appear with no `screen-lock-pause` line beside it |
 | 140 | `lifecycle` | `.notice` | `screen-lock-pause: <reason>, polling immediately` | `ScreenLockObserver` — screen unlocked / screensaver stopped / display awake (resume; the loop re-polls only if the cache is stale). `<reason>` ∈ {`screen unlocked`, `screensaver stopped`, `display awake`} |
 | 85 | `lifecycle` | `.notice` | `network monitor started (satisfied=<bool>)` | first `NWPathMonitor` callback (initial reading) |
 | 87 | `lifecycle` | `.notice` | `network restored, polling immediately` | transition to `.satisfied` |
@@ -364,13 +381,17 @@ One log line per interval change. The format is built by
 | Category | Calls | Files |
 |----------|-------|-------|
 | `network` | 28 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `UpdateInstaller` (3), `PollingEngine` (2), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
-| `lifecycle` | 63 | `App` (30), `UpdateInstaller` (13), `SettingsWindowController` (10), `PollingShell` (7), `PollingEngine` (2), `ShellEnvironment` (1) |
-| `keychain` | 11 | `ClaudeCLIRefresher` (6), `TokenProvider` (4), `PollingEngine` (1) |
+| `keychain` | 10 | `ClaudeCLIRefresher` (6), `TokenProvider` (3), `PollingEngine` (1) |
+| `lifecycle` | 103 | `App` (43), `SettingsModel` (27), `UpdateInstaller` (13), `PollingShell` (7), `BackToWorkNotifier` (6), `AwaitingInputWatcher` (5), `ShellEnvironment` (1), `PollingEngine` (1) |
 | `ui` | 1 | `AppearancePane` (1) |
 | `archive` | 5 | `App` (3), `LogArchiver` (2) |
 | `journal` | 6 | `UsageJournal` (4), `App` (2) |
 
-**Total: 115 log statements** — `.error` ×37, `.notice` ×73, `.info` ×1, `.debug` ×3.
+**Total: 153 log statements** — `.error` ×41, `.notice` ×102, `.info` ×7, `.debug` ×3.
+
+> Counts recomputed from the source in #275 (the previous figures had drifted over several releases —
+> `SettingsModel` and `BackToWorkNotifier` were missing entirely). Regenerate with:
+> `grep -rn 'AppLogger\.<category>\.' Sources/ | grep -v AppLogger.swift`.
 
 The `journal: enabled set <bool>` toggle line (`SettingsModel`) is a `lifecycle` statement (like the
 other Settings-toggle lines), counted under `lifecycle`; the six `journal`-category statements are the

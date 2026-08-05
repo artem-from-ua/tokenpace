@@ -695,6 +695,37 @@ TOKENPACE_STUB=1 TOKENPACE_AWAITING=8 TOKENPACE_AWAITING_DAYS=3,28,10,5,25,12,20
 барі, ні в попапі; у dev-tools перемкни «Data source (stub)» на **Real network** → лічильник
 з'являється без рестарту, ⚠️-рядки в Settings зникають; назад на стуб → знову гасне.
 
+#### Гейт на стан екрана (#275)
+
+Стубу немає — потрібні реальне блокування екрана **і** жива сесія, що чекає вводу
+(`TOKENPACE_AWAITING` не годиться: він короткозамикає watcher). `.notice` не пишеться в persistent
+store, тож **лише живий стрім**, піднятий *до* запуску:
+
+```sh
+( log stream --predicate 'subsystem == "com.artem-n.tokenpace"' --level debug > /tmp/tp.log ) &
+sleep 2
+TOKENPACE_DEVTOOLS=1 TOKENPACE_STUB=real swift run
+```
+
+1. Увімкни тумблер → індикатор показує живий лічильник.
+2. Заблокуй екран (⌃⌘Q) → `awaiting-input: parked (screen locked)`; далі, поки замкнено, **жодного**
+   `awaiting-input`-рядка. Індикатор при цьому навмисно **не гасне**.
+3. **Не розблоковуючи**, зміни стан сесії (відповідай в іншій сесії або дай новій заблокуватися) —
+   так FSEvents-подія гарантовано припаде на вікно паузи.
+4. Розблокуй → `awaiting-input: resumed (screen available)`, одразу за ним `awaiting-input N → M`, і
+   menu bar актуальний **без** 45-секундної затримки.
+5. **Безумовність** — головна перевірка: повтори кроки 2–4 з **вимкненим** чекбоксом Settings →
+   General → «Pause usage API polling while the screen is locked». `awaiting-input: parked/resumed`
+   мають бути на місці, а `screen-lock-pause:`-рядків — **жодного** (усе-таки usage-полл на паузу не
+   йде). Це доводить, що вотчер їде окремим негейтованим шляхом.
+6. Системний сон: `pmset sleepnow` → прокинути → `parked (system sleep)` / `resumed (screen available)`.
+
+#### Живучість сесій (#275)
+
+Доведи сесію до стану awaiting, тоді вбий її процес: `kill -9 <pid>` (pid — ім'я файлу в
+`~/.claude/sessions/`). Файл лишається зі `status:"waiting"`, але протягом ≤45 с (safety-тік)
+лічильник має **зменшитись**. До #275 така рука висіла б до 30-денного клінапу.
+
 ### Журнал використання (#242, ADR-0067)
 
 Журнал **не має `TOKENPACE_STUB`-сценарію**: він пише лише на живих реальних даних
