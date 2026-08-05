@@ -191,6 +191,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// actor; it never blocks a poll and swallows any write error. Only writes on the live
     /// `.realNetwork` scenario and when the journal is enabled — both gates are checked at the seam.
     private let usageJournal = UsageJournal()
+    /// The dev-only raw status-payload log (#279). Constructed unconditionally — it is inert until
+    /// `PersistedConfig.statusPayloadLogEnabled` is set from Development tools, and holding it here
+    /// keeps the "last fingerprint" across polls so unchanged payloads never reach the disk.
+    private let statusPayloadLog = StatusPayloadLog()
     /// The result of the last archive sync, retained so the Settings status line can show
     /// "Last archived: … · N files" between runs (#110). `nil` until the first sync completes.
     private(set) var lastArchiveSummary: LogArchiver.Summary?
@@ -1184,10 +1188,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let health: StatusHealth
             let succeeded: Bool
             var fetchedSummary: StatusSummary?
+            var fetchedBody: Data?
             do {
-                let summary = try await StatusClient.fetch(transport: transport)
+                let (summary, body) = try await StatusClient.fetchRaw(transport: transport)
                 health = .from(summary, config: config)
                 fetchedSummary = summary
+                fetchedBody = body
                 succeeded = true
             } catch {
                 // Any failure → honest "unknown" (grey), and don't advance lastStatusSuccess so the
@@ -1206,6 +1212,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let record = JournalRecord.status(from: summary, health: health, now: self.currentDate())
                 let at = self.currentDate()
                 Task { [usageJournal = self.usageJournal] in await usageJournal.appendStatus(record, at: at) }
+            }
+            // Dev payload log (#279, ADR-0071 §10): the raw body, written only when the material
+            // content changed. Same live-only gate as the journal — a stubbed payload in a
+            // troubleshooting capture is worse than no capture at all.
+            if succeeded, let summary = fetchedSummary, let body = fetchedBody,
+               PersistedConfig.statusPayloadLogEnabled, self.currentScenario == .realNetwork {
+                let at = self.currentDate()
+                Task { [log = self.statusPayloadLog] in
+                    if await log.recordIfChanged(body: body, summary: summary, at: at) {
+                        AppLogger.journal.info("status-payload-log: recorded a material change")
+                    }
+                }
             }
             // Re-render with the new status against the retained usage output.
             self.reRenderForCurrentTime()

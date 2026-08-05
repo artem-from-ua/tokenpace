@@ -129,6 +129,9 @@ enum PersistedConfig {
         /// Whether the usage journal records each poll to an append-only JSONL file (#242). Default-off
         /// (opt-in) — writing to disk without asking is a habit we don't start. See the property.
         static let journalEnabled = "journalEnabled"
+        /// Whether raw status-page payloads are logged to a dev-only JSONL (#279, ADR-0071 §10).
+        /// Default-off, dev-tools only — see the property.
+        static let statusPayloadLogEnabled = "statusPayloadLogEnabled"
         /// The Settings window's last frame, `[x, y, width, height]` in screen coordinates (ADR-0069).
         /// See the property.
         static let settingsWindowFrame = "settingsWindowFrame"
@@ -495,6 +498,16 @@ enum PersistedConfig {
     static var journalEnabled: Bool {
         get { defaults.object(forKey: Key.journalEnabled) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.journalEnabled) }
+    }
+
+    /// Whether raw `status.claude.com` payloads are recorded to a dev-only JSONL when their material
+    /// content changes (#279, ADR-0071 §10). **Default-off**, and reachable only from Development
+    /// tools (⌥ + `devToolsEnabled`) — it exists to answer the ADR's deliberately-open questions from
+    /// real traffic, not as a user-facing feature. The payloads are public data, but writing to disk
+    /// without asking is a habit we don't start (same reasoning as ``journalEnabled``).
+    static var statusPayloadLogEnabled: Bool {
+        get { defaults.object(forKey: Key.statusPayloadLogEnabled) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.statusPayloadLogEnabled) }
     }
 
     /// The Settings window's last frame as `[x, y, width, height]` in screen coordinates (ADR-0069),
