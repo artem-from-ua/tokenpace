@@ -70,6 +70,52 @@ date: 2026-08-05
 Попап відповідає на «чи можу я зараз працювати». Зелені компоненти = «так»; формально відкритий
 інцидент цього не заперечує.
 
+```plantuml
+@startuml
+title Видимість інциденту в попапі (стан = комбінація «інцидент» × «компоненти»)
+
+skinparam state {
+  BackgroundColor<<hidden>> #F5F5F5
+  BackgroundColor<<shown>> #FFF8E1
+  BackgroundColor<<green>> #E8F5E9
+}
+
+[*] --> NoIncident
+
+state "Інцидентів немає" as NoIncident <<hidden>>
+state "Активний, компоненти НЕ operational" as Active <<shown>>
+state "Активний, компоненти operational" as GreenOpen <<green>>
+
+NoIncident --> Active : новий інцидент\n(components[] → degraded/outage)
+
+Active --> GreenOpen : components[] → operational\n(апдейт АБО тихо)
+GreenOpen --> Active : рецидив або\nінший інцидент уразив ті самі компоненти
+
+Active --> NoIncident : resolved, поки компоненти\nще не позеленіли (рідко)
+GreenOpen --> NoIncident : resolved\n(запізнення 6…480 хв)
+
+note right of Active
+  ЄДИНИЙ стан, у якому рядок
+  інциденту видно (під ⌥).
+  Рядок: назва + вік + статус-лінк
+end note
+
+note right of GreenOpen
+  РІШЕННЯ 4: інцидент **ховається**.
+  Попап відповідає на «чи можу я
+  працювати» — зелені компоненти = «так».
+  Живий кейс: 66 хв у цьому стані
+end note
+
+note bottom of NoIncident
+  Секція під ⌥ зникає повністю —
+  попап не росте дарма
+end note
+@enduml
+```
+
+![Видимість інциденту в попапі](https://www.plantuml.com/plantuml/svg/bLNRJXDX4BxVfvZW3LJma0Z11WXggF567m2uMBjhsT3ktsmNl30cBMZLX50bKF423nSQ4oyiJP6oBIMfBp3_A_H9d9djYR8tfjdqt_upttpppQ6BET_q_8rCsl0TFsq3xc4TQ_GqTLaNz9RU0Lt6SrsKdq_ejAMt0Qk05zYYfu8NkWpZR4hdSvW73EYYYSViXXLT99mIj7-DehGRyFSZ_TurPxJpy0RhxSQ4OUJM7JThUcO6YA9lmmi3uBwPN4zvQiEr7gYqykRcrXpBijs51RYMcEPFb4rkJJqFJHA9sQNRKIOfpmvHbcOJqqjtZPU6iHnRXQcf1NYi7hb9XuBuH4c8Z65nH90owy7icvJm_XYOkI4t6B3i0xp7WFF4AddLyMmIebG0FC83K5dRCtr7kMPQWEybVMVJXdvQ_uav2lUGCt-IjLtegs0OG-HPWcx8EEVO8dn2lz8KA-vuKcMooYMdtF8gT8fxODafpxHiwwRQyCsKJJNj8Z7e870ShdWEiIHWRZA9SwQtWFByW9-1az6liJLX380kSTLvFEaIh7DvAdYChHLNUB-DJ07qDZbLy5GSkAoW2_HEan2fvQLqXYIBWsVdL7hJjYR3AGcubX40nEOTdaZdX8QdTDEGsp9zrsciydIgiUzedf7nMAlJS2JfM-8GLWbcElaVTsPl0GbMfIguYXh6Sr9hFgXdNSLeAl0LxkCXDTqXVeBUG4-IAg1B8Nq-vkcbnacHH-Hca5Tg51WN7ZNex7oVkC7uNtkkqaaiT1KhS9ryo2wWGnYKSNHX2XkoGGB3TYrWogF4-u88DWtbJpmWzaVu6-x4hrOt5kD-uP1wd_SQ1Il5OaBiIs-LXLHgKepmHCP2bZVO6wvZawx-Y2RiUS4TGpjkLt1bTK4dJov3fOmUn7b6P8c3TaD8b6LskJ79ddkz48UP6QcPrA2eTterwDP6bqUrUQfyNsLOdA6rHTZV233ehk91LK2Qf4xX94j9cb5bx-zo7fBYG1nkL4gu9GIePrcUF2-z0Oz5Ej6_oJy0)
+
 ### 5. Підписка — виключно opt-in по кліку
 
 Нічого не приходить, доки користувач сам не натиснув. Жодного дефолтного стану, жодного глобального
@@ -78,11 +124,101 @@ date: 2026-08-05
 Це рішення знімає цілий пласт складності: відпадає задача «вгадати, чи цей інцидент стосується
 користувача». Коли будити просить людина — гадати не треба.
 
+```plantuml
+@startuml
+title Життєвий цикл підписки на інцидент
+
+skinparam state {
+  BackgroundColor<<none>> #F5F5F5
+  BackgroundColor<<live>> #E8F4FD
+  BackgroundColor<<done>> #E8F5E9
+}
+
+[*] --> NotSubscribed : інцидент з'явився\nв unresolved.json
+
+state "Не підписаний" as NotSubscribed <<none>>
+state "Підписаний" as Subscribed <<live>>
+state "Підписка завершена" as Ended <<done>>
+
+NotSubscribed --> Subscribed : клік на іконці\n(єдиний вхід — opt-in)
+Subscribed --> NotSubscribed : Unfollow\n(попап або дія банера)
+
+Subscribed --> Ended : компоненти → operational\n**або** інцидент resolved
+NotSubscribed --> [*] : інцидент закрито\n(жодного банера)
+Ended --> [*]
+
+note right of Subscribed
+  Живе, доки інцидент активний.
+  Має пережити рестарт — інциденти
+  бувають 6+ годин (виміряно 429 хв).
+end note
+
+note bottom of Ended
+  ВІДКРИТЕ ПИТАННЯ #3:
+  який саме перехід завершує підписку
+  і чи лишається «хвіст» після resolved
+end note
+@enduml
+```
+
+![Життєвий цикл підписки на інцидент](https://www.plantuml.com/plantuml/svg/TLJ1JXDH5Ds_hxY1XL25XO8HGXgYmjADSIKkfdJ0aU4zCftYmfYK4WeB8uRKnXW9ngqBXzfABL0Ilk2-N-1BFFTDQMYfcRHzdNVlUUUSU--RByHU51VNGnK7SUWJrxXbotYgNESM_oLRmK-RJualR8qRV87zBRne4PzpGdXtxa8QtCIgh5HXBT0RNkIj4w1ZdzufeiVUyjfgP8ew_yI49fgRqqRxsIoDBaxBComY33PTnCAZnQd5fyCYybqCH4mlpAZtIhtClAA9YImzC_7pOgwm70KvFq-pjqWIdzon-qvWtMxP_INDTIhgo2-OSDFFJxuf60qXZlu87tApNtm2vR1cXBp2m57NmdgvH_z9wyj9fGxDQSDYFa5gdPksPFU4FoSEOa7dNNPgWrBzJCI6FW-aXW1kzyhMvewuOcjBUWpLRe2RuqVmP4Seq5MfIcOZdWZqk1g07dJuXLunOMZU0WlCE_WaV47uEkOESSFMx3vXBHP01oVZQX0nbUDuTlZCWPodrKAhNLKEmCIFl3WmsWkNT2QJOcSojujxNSOXZaY336q7eBN12wtF7T7m1yStGA33lqL07_EKQHTEAMrGjIXOVHsJMRdXELfMXaagTmyM04g6vlRPSdBPnJdx9oNl6oUsYgPpHpR1fkLia3_erp9sIqYL-WpYSKloZ-qsy1Bx4OFyWHxU9P6HbfZ6ND-VeIGbp00aqjJz6R8xN1-VLBxEamZgoigPE3Rheik95kW3hd2Ll_9t_i8_-3FnaLjymfWSyYyQVJ2BA02tqzj3slxC3L2gfTjQDtlQRZkjDxlURWj8ZUokt3EdUBadZeWQcLUw_2by8G5cNAPN4z9EiTChVa_9F5Qut_u1)
+
 ### 6. Сигнал відновлення — `components[].status`, не поля інциденту
 
 Не `resolved_at`, не `monitoring_at`, не `affected_components` в апдейтах. Це єдине джерело, що
 покриває всі п'ять спостережених форм відновлення. Апдейти лишаються джерелом **тексту**, не
 тригером.
+
+```plantuml
+@startuml
+title П'ять спостережених форм відновлення — чому сигнал беремо з components[]
+
+skinparam state {
+  BackgroundColor<<broken>> #FDE8E8
+  BackgroundColor<<ok>> #E8F5E9
+  BackgroundColor<<admin>> #F3E8FD
+}
+
+state "Компоненти degraded/outage" as Broken <<broken>>
+state "Компоненти operational" as Green <<ok>>
+state "Інцидент resolved" as Closed <<admin>>
+
+[*] --> Broken
+
+Broken --> Green : (1) апдейт `monitoring`\nз переходом → operational
+Broken --> Green : (2) **тихо** — без жодного апдейту
+Broken --> Green : (3) апдейт `investigating`\nз переходом → operational
+Broken --> Closed : (4) resolved-апдейт,\nщо ДУБЛЮЄ перехід → operational
+Green --> Closed : (5) resolved-апдейт із порожнім\nпереходом (operational → operational)
+
+Closed --> [*]
+Green --> [*] : інцидент лишається\nвідкритим (до 480 хв)
+
+note right of Green
+  **ТРИГЕР БАНЕРА** — цей стан,
+  а не перехід в Closed.
+  Джерело: components[].status
+  із summary.json
+end note
+
+note bottom of Closed
+  НЕ тригер: resolved_at запізнюється
+  на 6 хв (медіана) … 480 хв (макс),
+  живий вимір — 66 хв
+end note
+
+legend right
+  |= форма |= приклад |
+  | (1) | f6gkkq6txl7z 13:08 |
+  | (2) | mgp99sn4ynd4 (тихе) |
+  | (3) | bdr3fq2rkchr |
+  | (4) | f6gkkq6txl7z 14:14 |
+  | (5) | mgp99sn4ynd4 14:34 |
+endlegend
+@enduml
+```
+
+![П'ять спостережених форм відновлення](https://www.plantuml.com/plantuml/svg/dLNTJXDH4BxVfvZWXRG115fgQP0G_dm88BAmoxAskwViReae9kLNJOoW8Z4Q8z74IrFBZmNQyWfpNe4dSURijXIeNdXHe6Tclk-RRyuSHln0zuA2azC2EyYPW5_loXsvBb-3NCCBhCirkOx7ieZ7U4AV6bRa5iXD2XIn2bYM-tX4ftKiuxcAr-GEN1RtGBwWmwhSO9mA7bAaXEU0loAmAjO1VyEySFB2DTt0dvhHD3zhktdTqnqWLO49ppI0KNq-QtcYu1fZ8YUyeQ4vJsHDTtWOxaoEJwGdqkroH9RZ4-d9WOd1Td7TSEmG8a59uzfpubQC7VY9PNFdf9ZweUuhO9YMfnkcSKyK0jqoEq3tOLJ9W2iz_qGGUTFJ0rkuUavLF_HCLSn2cuNRbBnDPXs5PU2PliWjcuQg6Ci9tpIWgLtJfk8pqDqz72dHj4WH7uNm6UZiYm7vVg4WJmborX6k7GZFTgtPQPS6G34r4Bb5UezOELnklslLsnQtFmRnE7V6TV6ucZZFbX5F51BVYKCUSWkzt6WBbhWfqdQNJJ-mBLBmVpeZimWx6MlQsDrAqZNjobSiRm-_urlyZ3zniuM4h_KjWb3mTVo1l-038IZLl2XrygH61rLgvNOVdIqSDpbZcXPnCIrDl4K4pp_3FDTl3UrXHRx4ajpZDQRztI7MS4_FYBd2KsDMPeTakXT8IfbuN46NqBEjnG34GZWSMfru7B_X0Nx4z_W13u2isiKl_2VkHcCdSkeOr4DHmbeN5M49-ExVz1FBaN4zdBF73ufw2ywndhds4lJmHXHyob8k-WN7qRsLdiU-S3NJDO2bHeBdH108XnM7q8nC-e1wBwftXoWopH4zqWDwTNXE34nslRboYIlfaOAKCeJygPAq8yehyN6CUltHj4j5I-JdMaprUq9KPVgSWlfLbVkogCn9XMWjgdEcnL-KqLIw-g3vcX8tVIDfBFoCN2cHPwkSe_Pu5HPILZQxb0gUvEu_XRv4fZVT2FTpsB7oWuE-crnnZIHqHijv76la93Xdpl0I2qlzNdP-qMi4ahUnavc-P2CyS0kRmWaEKnzXDze8_Q3_8Ny0)
 
 ### 7. Дедуплікація — по `incident_updates[].id`
 
