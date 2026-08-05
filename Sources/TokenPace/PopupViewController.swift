@@ -2089,17 +2089,21 @@ final class PopupViewController: NSViewController {
 
     /// Like ``duration`` but **never** emits a seconds component — minutes are the finest unit, so
     /// the data-age text stays second-free even just past the minute boundary.
+    ///
+    /// Compound values are written closed-up (`2h7m`, not `2h 7m`): the duration is one quantity, and
+    /// spacing it invites the eye to read two. It matters most in the status rows, where the age sits
+    /// against a `·` separator and a status word — three gaps in a row made the line hard to parse.
     static func durationMinutes(_ seconds: Int) -> String {
         let minutes = seconds / 60
         if minutes < 60 { return "\(minutes)m" }
         let hours = minutes / 60
         if hours < 24 {
             let m = minutes % 60
-            return m == 0 ? "\(hours)h" : "\(hours)h \(m)m"
+            return m == 0 ? "\(hours)h" : "\(hours)h\(m)m"
         }
         let days = hours / 24
         let h = hours % 24
-        return h == 0 ? "\(days)d" : "\(days)d \(h)h"
+        return h == 0 ? "\(days)d" : "\(days)d\(h)h"
     }
 
     // MARK: Warning banner (issue #12)
