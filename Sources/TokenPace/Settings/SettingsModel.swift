@@ -118,9 +118,6 @@ final class SettingsModel {
 
     var backToWorkEnabled = false
     var extraUsageNotifyEnabled = false
-    /// Whether banners for a followed incident episode are delivered (#279). Gates delivery only —
-    /// the user still opts in per episode from the popup.
-    var incidentNotifyEnabled = false
     /// Hide incidents older than this many hours in the popup; `0` = no limit (#279).
     var incidentMaxAgeHours = 0
     var notifyStartMinute = 0
@@ -352,7 +349,6 @@ final class SettingsModel {
 
         backToWorkEnabled = PersistedConfig.backToWorkEnabled
         extraUsageNotifyEnabled = PersistedConfig.extraUsageNotifyEnabled
-        incidentNotifyEnabled = PersistedConfig.incidentNotifyEnabled
         incidentMaxAgeHours = PersistedConfig.incidentMaxAge.map { Int(($0 / 3600).rounded()) } ?? 0
         notifyStartMinute = PersistedConfig.notifyWindowStartMinute
         notifyEndMinute = PersistedConfig.notifyWindowEndMinute
@@ -606,19 +602,6 @@ final class SettingsModel {
         if on {
             // Shares one authorization grant with "Back to work" — request lazily on first enable of
             // either feature, then refresh the hint with the result.
-            onBackToWorkEnabled?({ [weak self] state in self?.applyAuthState(state) })
-        } else {
-            refreshAuthState()
-        }
-    }
-
-    /// Toggle delivery of incident banners (#279). Shares the single authorization grant with the
-    /// other two notifications, requested lazily on first enable.
-    func setIncidentNotify(_ on: Bool) {
-        incidentNotifyEnabled = on
-        PersistedConfig.incidentNotifyEnabled = on
-        AppLogger.lifecycle.notice("incident: notify enabled set \(on, privacy: .public)")
-        if on {
             onBackToWorkEnabled?({ [weak self] state in self?.applyAuthState(state) })
         } else {
             refreshAuthState()

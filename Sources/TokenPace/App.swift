@@ -1228,7 +1228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             now: currentDate())
         PersistedConfig.episodeSubscription = next
 
-        guard !events.isEmpty, PersistedConfig.incidentNotifyEnabled else { return }
+        guard !events.isEmpty else { return }
         guard notificationsAllowedNow() else {
             AppLogger.lifecycle.info("incident: suppressed by quiet hours")
             return
