@@ -350,8 +350,9 @@ actor StubUsageTransport: UsageTransport {
         /// overlay, no ⏰), then the forced refresh lands: from the second poll on the stub returns a
         /// freshly-reset window (0 %, `now + 5h`), mirroring what the real API would report post-reset.
         case optimisticReset
-        /// The reset-boundary idle-grace frame (ADR-0041, ADR-0045): the first two polls return an
-        /// **active** 5h window (mid-window, 40 %), then two polls return the post-reset **empty** body
+        /// The reset-boundary idle-grace frame (ADR-0041, ADR-0045): **one** poll returns an active
+        /// mid-window 5h (30 %, 3 h left) — just enough to arm the grace, which needs an active previous
+        /// window *and* a recent spend — then two polls return the post-reset **empty** body
         /// (`five_hour.resets_at: null`, no `session` limit → the decoder would report
         /// `sessionIdle == true`), then the window is **active again** (a fresh ~5 h window). The grace
         /// gate keeps the 5h bar **non-idle** across the two empty polls, and (ADR-0045) that held bar
@@ -874,16 +875,37 @@ actor StubUsageTransport: UsageTransport {
         if mode == .resetGrace {
             let n = calls
             calls += 1
-            let empty = (n == 2 || n == 3)
+            // ONE arming poll, then straight into the post-reset gap. The grace needs an active previous
+            // window (`prevActive`) plus a recent spend (`utilFresh`) — and the engine counts any
+            // non-zero utilisation on the very first poll as a rise from the implicit zero baseline
+            // (`PollingEngine.swift`, "first poll … counts as a rise"), so a single poll satisfies both.
+            // A longer prelude only delays the frame this scenario exists to show: at the 60 s cadence
+            // floor, two arming polls pushed the grace past the two-minute mark, so opening the popup
+            // early showed the ordinary mid-window bar and never the boundary.
+            let empty = (n == 1 || n == 2)
             let sevenReset = self.resetsAt(inSeconds: 5 * 24 * 3600)
             let fiveBody: String
             if empty {
                 // Post-reset gap: server has no 5h window yet (created by the first token spend).
                 fiveBody = #""five_hour":{"utilization":0.0,"resets_at":null}"#
             } else {
-                // Active window, mid-window (n<2) or freshly reset (n>3).
-                let fiveReset = self.resetsAt(inSeconds: 3 * 3600)
-                let fiveUtil = n < 2 ? 40.0 : 5.0
+                // Active window — the single **pre-reset** arming poll (n == 0) or the **freshly reset**
+                // window (polls 3+).
+                //
+                // The arming poll stays ordinary mid-window (30 %, 3 h left). It is not the subject of
+                // the scenario, and pushing it to the window's last minutes parked the strip hard
+                // against the bar's right edge — which reads as a rendering fault rather than as "about
+                // to reset".
+                //
+                // The reset then moves the clock back to the very start of a new window: a full `now + 5h`
+                // and **0 % used**, which is exactly the frame `suppress` synthesizes and the state this
+                // scenario exists to show — usage 0 AND the time marker at 0, both ends of the pacing gap
+                // sitting on zero. Anything else defeats the point: `now + 3h` reproduced a window that
+                // had already burned 2 h (marker at 40 %), and even a 30 s shave plus a token 5 % used
+                // pushed both off zero.
+                let preReset = n < 1
+                let fiveReset = self.resetsAt(inSeconds: preReset ? 3 * 3600 : 5 * 3600)
+                let fiveUtil = preReset ? 30.0 : 0.0
                 fiveBody = #""five_hour":{"utilization":\#(fiveUtil),"resets_at":"\#(fiveReset)"}"#
             }
             let body = """
