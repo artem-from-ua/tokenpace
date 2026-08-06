@@ -246,3 +246,39 @@ print(severity(0.88, 0.93))   # green/blue
 let f = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
 (s as NSString).size(withAttributes: [.font: f]).width
 ```
+
+## Кожне посилання — гіперпосилання
+
+Стосується всіх артефактів і документів, не лише тих, що містять рендери. **Голий
+`#283` у тексті — це робота, перекладена на читача**: щоб перейти, він має скопіювати
+номер, згадати репозиторій і зібрати URL руками.
+
+Гіперпосиланнями мають бути:
+
+| Що згадується | Куди веде |
+|---|---|
+| Тікет чи PR — `#283` | `https://github.com/artem-from-ua/tokenpace/issues/283` (GitHub редіректить `/issues/` на `/pull/` за потреби) |
+| Коміт — `5ee4820` | `…/commit/5ee4820` |
+| Файл у репозиторії | `…/blob/main/Sources/TokenPace/StatusItemView.swift` |
+| Рядок коду | той самий URL + `#L936` |
+| Документ проєкту | відносний шлях, якщо артефакт лежить у репо; повний URL — якщо ні |
+| ADR | `…/blob/main/docs/adr/0044-dynamic-pacing-threshold.md` |
+| Інший артефакт | його `claude.ai/code/artifact/…` URL |
+
+### Перевірка перед публікацією
+
+Голі згадки легко пропустити — особливо ті, що стоять одразу після тега (`<div>#283`),
+бо вони не потрапляють у наївний пошук «пробіл + решітка».
+
+```python
+import re
+s = open("artifact.html").read()
+body = s.split("</style>", 1)[1]                     # CSS-кольори не рахуємо
+parts = re.split(r"(<a\b[^>]*>.*?</a>)", body, flags=re.S)
+bare = [m.group() for i, p in enumerate(parts) if i % 2 == 0
+        for m in re.finditer(r"#\d{2,4}(?![\da-fA-F])", p)]
+print(bare or "усі згадки клікабельні")
+```
+
+І звірити, що номер у `href` збігається з видимим текстом — заміна регексом легко
+розсинхронізує їх, і посилання поведе не туди, мовчки.
