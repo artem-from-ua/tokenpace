@@ -698,11 +698,20 @@ final class SubscribeRowView: NSView {
 
         addSubview(iconView)
         addSubview(label)
+
+        // The icon is **centred on the status dots' axis**, not flush with the row's leading edge.
+        // Both used to start at x=0, but a 9-pt dot and a 15-pt glyph then have centres 3 pt apart —
+        // enough to read as a misaligned column down the left of the section. Centring on the dot's
+        // midpoint puts the bell directly under them whatever the glyph's own width turns out to be.
+        //
+        // The text then starts where every service/incident name starts (dot width + gap), so the
+        // two columns hold across the whole block.
+        let dotDiameter = PopupViewController.Metrics.statusDotDiameter
+        let gap = PopupViewController.Metrics.statusDotGap
         NSLayoutConstraint.activate([
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            iconView.centerXAnchor.constraint(equalTo: leadingAnchor, constant: dotDiameter / 2),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: 15),
-            label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: PopupViewController.Metrics.statusDotGap),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: dotDiameter + gap),
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
             heightAnchor.constraint(equalToConstant: 20),
