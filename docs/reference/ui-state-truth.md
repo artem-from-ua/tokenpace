@@ -14,6 +14,8 @@
 2. **Прогони стан через модель** — колір і статус обчислюються, а не обираються.
 3. **Звір метрики** з `Metrics` відповідного view.
 4. **Перевір досяжність стану** — див. «Неможливі комбінації» нижче.
+5. **Іконки — справжні SF Symbols**, відрендерені з системи. Не емодзі, не Unicode-замінники,
+   не SVG з бібліотеки — див. нижче.
 
 ## Метрики
 
@@ -50,6 +52,64 @@
 Текст: `NSFont.systemFont(ofSize: dropdownTextSize)` — **жирності немає в жодній половині
 жодного рядка**.
 
+## Іконки — тільки справжні SF Symbols
+
+**Емодзі, Unicode-замінники (`⚡`, `✋`, `❚❚`) і намальовані вручну гліфи в мокапах
+заборонені.** Вони мають іншу ширину, іншу оптичну вагу й іншу форму, ніж те, що намалює
+застосунок — тобто мокап показує неіснуючий інтерфейс, і всі висновки про компонування з
+нього хибні.
+
+Рендерити треба з системи, тими самими параметрами, що й у коді:
+
+```swift
+// mock-symbols.swift — запустити `swift mock-symbols.swift`
+import AppKit
+
+func png(_ name: String, _ colour: NSColor,
+         pt: CGFloat = 11, scale: CGFloat = 4) -> String? {
+    let cfg = NSImage.SymbolConfiguration(pointSize: pt, weight: .semibold)
+    guard let base = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+        .withSymbolConfiguration(cfg) else { return nil }          // ← nil = символу НЕМАЄ
+    let w = base.size.width * scale, h = base.size.height * scale
+    guard let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil, pixelsWide: Int(w), pixelsHigh: Int(h),
+        bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+        colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    let r = NSRect(x: 0, y: 0, width: w, height: h)
+    base.draw(in: r)
+    colour.set()
+    r.fill(using: .sourceAtop)                                     // тонування
+    NSGraphicsContext.restoreGraphicsState()
+    return rep.representation(using: .png, properties: [:])
+        .map { "data:image/png;base64," + $0.base64EncodedString() }
+}
+```
+
+Далі результат вставляється в HTML як `<img src="data:image/png;base64,…">` з розміром у
+пунктах (`width: 12px; height: 15px` для 12×15 pt) — CSP артефактів блокує зовнішні
+хости, тож інший шлях і не працює.
+
+### Що це дає, крім точності
+
+- **`nil` означає, що символу не існує.** Так знайшлося, що `hare.slash` і
+  `hare.fill.slash` відсутні в SF Symbols — і саме тому в Deadline mode обрано `bolt`,
+  який має системну перекреслену пару.
+- **Реальна ширина.** `hare` — 20 pt, `bolt` — 12 pt. На поверхні, де бюджет міряють
+  пунктами, різниця у 8 pt вирішує вибір.
+- **Тонування як у коді.** `contentTintColor` у застосунку = `fill(using: .sourceAtop)`
+  тут, тож колір гліфа в мокапі той самий, що на екрані.
+
+### Параметри, що мають збігатися з кодом
+
+| Параметр | Звідки брати |
+|---|---|
+| `pointSize` | `Metrics.awaitingIconSize` (12), `pauseGlyphSize` (11), `creditsIconSize` (12), `Metrics.textSize` у попапі |
+| `weight` | `.semibold` — так конфігуруються всі наявні гліфи обох поверхонь |
+| колір | роль із `ColorStore`, не довільний відтінок |
+| `scale` | 4× для retina; розмір в HTML лишається в пунктах |
+
 ## Анатомія бару
 
 ### Що малює `.pacing` (Pace & Time)
@@ -69,6 +129,24 @@
 
 Суцільний трек на всю ширину: блакитний (`ready to start`) або сірий (`blocked`).
 **Без зон, без маркера**, тік-лінійка є.
+
+### Маркер часу видає стиль — не забувай його
+
+**Бар без маркера — це `.simple`, а не Pace & Time.** Найчастіша помилка в мокапах:
+підписати рендер «Pace & Time», намалювавши лише кольорову смугу. Маркер — не
+декоративна деталь, а те, що відрізняє один стиль від іншого.
+
+Перед публікацією мокапа з барами:
+
+- у **кожному** барі `.pacing`/`.mixed` є маркер на `timeFraction` — і в меню-барі теж
+  (5 × 9 pt, а не лише 7 × 14 попапа);
+- маркер стоїть на **своїй** частці, не на краю смуги: при `usage > time` він **зліва**
+  від gap, при `usage < time` — **справа**. Обидва бари з маркером ліворуч означають, що
+  геометрія скопійована, а не порахована;
+- усі x проходять через інсет `scaleX`, включно з маркером.
+
+Швидка перевірка: якщо на малюнку два бари й обидва маркери з одного боку — майже напевно
+помилка.
 
 ### Чого не малює ніхто
 
@@ -137,6 +215,7 @@ return (usage - time) < 0.16 * (1 - time) ? .calm : .ahead
 | Комбінація | Чому неможлива |
 |---|---|
 | Pause-гліф **і** символ валюти разом | `blockedPause` вимагає `CreditsPacing.isBlocked` — «немає шляху працювати»; кредити, що покривають ліміт, і є тим шляхом |
+| Вичерпаний ліміт **без жодного** з них | Зворотний бік того самого: при `mainWindowExhausted` стани вичерпні — або `creditsCanCover` (символ валюти), або `isBlocked` (pause-гліф). Порожнього варіанту не буває |
 | 100% кредитів + «well ahead of pace» | `creditsStatusText` при `usage >= 1` повертає `"limit reached"` |
 | 100% кредитів без червоного бейджа ресету | Це стан блокування — бейдж є |
 | Idle 5-hour + другий рядок | `if !row.sessionIdle` — детальної лінії немає |
