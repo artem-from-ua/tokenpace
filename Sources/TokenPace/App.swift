@@ -642,14 +642,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             // The Settings "Try" button (#193): fire the banner on demand, bypassing edge-detection
             // and quiet hours (postBackToWork itself only checks support + authorization).
-            wc.onTryBackToWork = { BackToWorkNotifier.postBackToWork() }
+            // Each preview asks for authorization first. Without it `post` returns silently at its
+            // authorization guard and the button looks broken — which is exactly how this was
+            // reported. The request is a no-op once answered, so repeat presses cost nothing.
+            wc.onTryBackToWork = {
+                BackToWorkNotifier.requestAuthorizationIfNeeded { _ in
+                    BackToWorkNotifier.postBackToWork()
+                }
+            }
             wc.onPreviewIncidents = { [weak self] in self?.previewIncidentBanners() }
             // "Try" for the Extra-Usage banner: build the body from the latest snapshot's spend so the
             // preview shows real amount/limit when available; an empty SpendInfo degrades to the generic
             // line. Bypasses edge-detection and quiet hours, same as back-to-work's Try.
             wc.onTryExtraUsage = { [weak self] in
                 let spend = self?.lastOutput?.snapshot?.spend ?? SpendInfo()
-                BackToWorkNotifier.postExtraUsage(body: ExtraUsageOnset.bannerBody(for: spend))
+                BackToWorkNotifier.requestAuthorizationIfNeeded { _ in
+                    BackToWorkNotifier.postExtraUsage(body: ExtraUsageOnset.bannerBody(for: spend))
+                }
             }
             settingsWC = wc
         }
@@ -1254,6 +1263,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// case quiet hours exist to protect against. Mirrors `tryBackToWork` / `tryExtraUsage`.
     private func previewIncidentBanners() {
         AppLogger.lifecycle.notice("incident: preview (forced) notifications")
+        // Ask for authorization first. Without a subscription there has been no reason to request it
+        // yet, so on a fresh install the three posts below would each hit `post`'s authorization
+        // guard and return silently — the button would look broken. `requestAuthorizationIfNeeded`
+        // is a no-op once the user has answered, so pressing Preview again costs nothing.
+        BackToWorkNotifier.requestAuthorizationIfNeeded { [weak self] _ in
+            self?.postIncidentPreviewBanners()
+        }
+    }
+
+    /// The three preview posts, run after authorization has been settled.
+    private func postIncidentPreviewBanners() {
         postIncidentBanner(.update(
             incidentID: "f6gkkq6txl7z",
             name: "Degraded performance of multiple models",

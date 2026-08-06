@@ -66,9 +66,11 @@ struct NotificationsPane: View {
                             + "— with the amount spent and your limit, if set.")
                 }
 
-                // No on/off switch here, deliberately: an incident subscription is already opt-in
-                // per episode from the popup, so a second switch could only make the feature look
-                // enabled while doing nothing. The row exists to name the feature and to preview it.
+                // The switch is on and disabled, mirroring the always-monitored "Claude API" row in
+                // Extra features. There is nothing to turn off — an incident subscription is already
+                // opt-in per episode from the popup — but omitting the control entirely left the row
+                // visibly short next to its two neighbours and read as an oversight. Shown-on-and-
+                // disabled says "always available" where a missing control says nothing at all.
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("Claude service incidents")
@@ -76,10 +78,15 @@ struct NotificationsPane: View {
                         // Fires all three at once — the update and both endings — because the useful
                         // question is whether they read as distinguishable side by side.
                         Button("Preview") { model.previewIncidentNotifications() }
+                        Toggle("Claude service incidents", isOn: .constant(true))
+                            .labelsHidden()
+                            .disabled(true)
                     }
                     SettingsHint(
                         text: "When Claude services go down, the popup offers to notify you once "
-                            + "they recover — and then tells you what changed until they do.")
+                            + "they recover — and then tells you what changed until they do. "
+                            + "Nothing arrives unless you ask for it there, so there is nothing to "
+                            + "switch off here.")
                 }
 
             }
