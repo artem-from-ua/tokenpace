@@ -350,9 +350,11 @@ actor StubUsageTransport: UsageTransport {
         /// overlay, no ⏰), then the forced refresh lands: from the second poll on the stub returns a
         /// freshly-reset window (0 %, `now + 5h`), mirroring what the real API would report post-reset.
         case optimisticReset
-        /// The reset-boundary idle-grace frame (ADR-0041, ADR-0045): **one** poll returns an active
-        /// mid-window 5h (30 %, 3 h left) — just enough to arm the grace, which needs an active previous
-        /// window *and* a recent spend — then two polls return the post-reset **empty** body
+        /// The reset-boundary idle-grace frame (ADR-0041, ADR-0045). Watch it as a **sequence**, not as a
+        /// single frame: **one** poll returns a 5h window about to expire (92 % used, ~4 min left — its
+        /// strip and time marker correctly pinned near the bar's right edge), which also arms the grace
+        /// (it needs an active previous window *and* a recent spend); then two polls return the
+        /// post-reset **empty** body
         /// (`five_hour.resets_at: null`, no `session` limit → the decoder would report
         /// `sessionIdle == true`), then the window is **active again** (a fresh ~5 h window). The grace
         /// gate keeps the 5h bar **non-idle** across the two empty polls, and (ADR-0045) that held bar
@@ -890,22 +892,19 @@ actor StubUsageTransport: UsageTransport {
                 fiveBody = #""five_hour":{"utilization":0.0,"resets_at":null}"#
             } else {
                 // Active window — the single **pre-reset** arming poll (n == 0) or the **freshly reset**
-                // window (polls 3+).
-                //
-                // The arming poll stays ordinary mid-window (30 %, 3 h left). It is not the subject of
-                // the scenario, and pushing it to the window's last minutes parked the strip hard
-                // against the bar's right edge — which reads as a rendering fault rather than as "about
-                // to reset".
+                // window (polls 3+). This scenario is a *sequence*, so read it as one: the arming poll is
+                // a window about to expire (92 % used, ~4 min left), which is what actually precedes a
+                // reset. Its time marker sitting hard against the bar's right edge is correct, not a
+                // rendering fault — at `time ≈ 0.99` that is where the marker belongs.
                 //
                 // The reset then moves the clock back to the very start of a new window: a full `now + 5h`
-                // and **0 % used**, which is exactly the frame `suppress` synthesizes and the state this
-                // scenario exists to show — usage 0 AND the time marker at 0, both ends of the pacing gap
-                // sitting on zero. Anything else defeats the point: `now + 3h` reproduced a window that
-                // had already burned 2 h (marker at 40 %), and even a 30 s shave plus a token 5 % used
-                // pushed both off zero.
+                // at **0 % used** — exactly the frame `applyIdleGrace`/`suppress` synthesizes, and the
+                // state this scenario exists to show, with usage AND the time marker both on zero. So the
+                // whole run reads as one motion: strip and marker travel to the right edge, the window
+                // resets, and both snap back to zero.
                 let preReset = n < 1
-                let fiveReset = self.resetsAt(inSeconds: preReset ? 3 * 3600 : 5 * 3600)
-                let fiveUtil = preReset ? 30.0 : 0.0
+                let fiveReset = self.resetsAt(inSeconds: preReset ? 4 * 60 : 5 * 3600)
+                let fiveUtil = preReset ? 92.0 : 0.0
                 fiveBody = #""five_hour":{"utilization":\#(fiveUtil),"resets_at":"\#(fiveReset)"}"#
             }
             let body = """
