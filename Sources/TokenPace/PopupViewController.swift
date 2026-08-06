@@ -1994,9 +1994,14 @@ final class PopupViewController: NSViewController {
         row.alignment = .top
         row.spacing = Metrics.statusDotGap
         row.translatesAutoresizingMaskIntoConstraints = false
-        // Nudge the dot onto the first line's optical centre — `alignment: .top` would otherwise sit
-        // it flush with the ascender, reading as slightly high next to lowercase text.
-        dot.topAnchor.constraint(equalTo: row.topAnchor, constant: 5).isActive = true
+        // Centre the dot on the **first line** of the wrapped description, so it sits against the
+        // text exactly as a service row's dot does — those rows get it from `.centerY`, which a
+        // multi-line row cannot use (it would centre on the whole block and drift lower with every
+        // extra line). Derived from the font rather than eyeballed: half the line height less half
+        // the dot. At 13 pt that is 3.5, where a hand-picked 5 sat the dot 1.5 pt low.
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        let dotTop = (lineHeight - Metrics.statusDotDiameter) / 2
+        dot.topAnchor.constraint(equalTo: row.topAnchor, constant: dotTop).isActive = true
 
         stack.addArrangedSubview(row)
         row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
