@@ -76,9 +76,18 @@ enum PersistedConfig {
         /// Whether the menu-bar widget draws the money-credits ("extra usage") icon when credits are
         /// active and a base limit is exhausted (#144). Default-on (opt-out) — see the property.
         static let showExtraUsage = "showExtraUsage"
-        /// Whether the popup shows the per-model 7-day limit rows (`Opus`/`Sonnet`/`weekly_scoped`,
-        /// e.g. `Fable`) below the `5h`/`7d` rows (#211). Default-on (opt-out) — see the property.
-        static let showModelSpecificLimits = "showModelSpecificLimits"
+        /// When the popup shows the per-model 7-day limit rows (`Opus`/`Sonnet`/`weekly_scoped`,
+        /// e.g. `Fable`) below the `5h`/`7d` rows (#211), stored as the raw `PopupSectionVisibility`
+        /// string. Default `.nonCalm` — see the property.
+        static let modelLimitsVisibility = "modelLimitsVisibility"
+        /// When the popup shows the "Extra usage" credits section, stored as the raw
+        /// `PopupSectionVisibility` string. Default `.nonCalm` — see the property. Distinct from
+        /// ``showExtraUsage``, which governs the **menu-bar** credits icon.
+        static let extraUsageVisibility = "extraUsageVisibility"
+        /// Legacy pre-tri-state key (the boolean "Show model & service limits" opt-out), read once by
+        /// ``PersistedConfig/migrateModelLimitsVisibilityIfNeeded()`` to seed
+        /// ``modelLimitsVisibility``, then cleared. Do not read elsewhere.
+        static let legacyShowModelSpecificLimits = "showModelSpecificLimits"
         /// Whether the popup draws the under-bar tick ruler on the pacing bars (#224). Default-on
         /// (opt-out) — see the property.
         static let showTicks = "showTicks"
@@ -354,16 +363,28 @@ enum PersistedConfig {
         set { defaults.set(newValue, forKey: Key.showExtraUsage) }
     }
 
-    /// Whether the **popup** lists the per-model 7-day limit rows — the legacy `Opus`/`Sonnet`
+    /// When the **popup** lists the per-model 7-day limit rows — the legacy `Opus`/`Sonnet`
     /// sub-windows and the `weekly_scoped` models from `limits[]` (e.g. `Fable`, #65) — below the
-    /// `5h`/`7d` rows (#211). Gates ``PopupLayout`` only; the menu-bar widget is unaffected.
-    /// **Default-on** (opt-out): an absent key reads as `true`, so the per-model rows appear out of
-    /// the box. `object(forKey:) as? Bool ?? true` distinguishes "unset" (→ true) from an explicit
-    /// `false` the user chose — `bool(forKey:)` would collapse both to `false` and silently defeat
-    /// the opt-out default.
-    static var showModelSpecificLimits: Bool {
-        get { defaults.object(forKey: Key.showModelSpecificLimits) as? Bool ?? AppearancePreset.defaultValues.showModelSpecificLimits }
-        set { defaults.set(newValue, forKey: Key.showModelSpecificLimits) }
+    /// `5h`/`7d` rows (#211). Governs the popup only; the menu-bar widget is unaffected.
+    ///
+    /// Was a boolean opt-out before the tri-state (`PopupSectionVisibility`): `.always` is the old
+    /// "on", `.optionOnly` the old "off", and the new `.nonCalm` default shows the rows only while one
+    /// of them is orange/red (or ⌥ is held). Existing explicit choices are carried over by
+    /// ``migrateModelLimitsVisibilityIfNeeded()``. An absent or unrecognised value falls back to the
+    /// factory preset's value.
+    static var modelLimitsVisibility: PopupSectionVisibility {
+        get { PopupSectionVisibility(rawValue: defaults.string(forKey: Key.modelLimitsVisibility) ?? "") ?? AppearancePreset.defaultValues.modelLimitsVisibility }
+        set { defaults.set(newValue.rawValue, forKey: Key.modelLimitsVisibility) }
+    }
+
+    /// When the **popup** shows the "Extra usage" money-credits section (`PopupLayout.credits`).
+    /// Governs the popup only — the menu-bar credits icon (¤) keeps its own boolean gate,
+    /// ``showExtraUsage``, because the two surfaces answer different questions: the icon is a
+    /// glanceable badge, this is the detail section the user opened the dropdown to read.
+    /// An absent or unrecognised value falls back to the factory preset's value.
+    static var extraUsageVisibility: PopupSectionVisibility {
+        get { PopupSectionVisibility(rawValue: defaults.string(forKey: Key.extraUsageVisibility) ?? "") ?? AppearancePreset.defaultValues.extraUsageVisibility }
+        set { defaults.set(newValue.rawValue, forKey: Key.extraUsageVisibility) }
     }
 
     /// Whether the **popup** draws the under-bar tick ruler on the pacing bars (#224). Gates
@@ -399,7 +420,8 @@ enum PersistedConfig {
             Key.hideCalmSevenDayBar,
             Key.pauseHidesBars,
             Key.showExtraUsage,
-            Key.showModelSpecificLimits,
+            Key.modelLimitsVisibility,
+            Key.extraUsageVisibility,
             Key.barStyle,
             Key.showTicks,
             Key.farBehindInterval,
@@ -437,6 +459,32 @@ enum PersistedConfig {
         defaults.removeObject(forKey: Key.legacyShowBlockedPause)
     }
 
+    /// One-time upgrade of the boolean "Show model & service limits" opt-out to the tri-state
+    /// ``modelLimitsVisibility`` (#211). The old key answered "show the per-model rows or not"; the new
+    /// one answers "when", so an explicit choice maps onto the two endpoints:
+    ///
+    /// - `true` (rows were always shown) → ``PopupSectionVisibility/always``
+    /// - `false` (rows were hidden) → ``PopupSectionVisibility/optionOnly`` — still hidden, but ⌥ Option
+    ///   now retrieves them on demand. `.nonCalm` would be a louder popup than the user asked for.
+    ///
+    /// Runs on every launch and is idempotent: it does nothing once the new key exists (the legacy key is
+    /// cleared either way). Only an **explicit** legacy value migrates — someone who never touched the
+    /// old toggle gets the new `.nonCalm` default from the getter's preset fallback.
+    ///
+    /// There is no counterpart for the Extra-usage section: it had no popup-side setting before, so
+    /// everyone starts on the preset default.
+    static func migrateModelLimitsVisibilityIfNeeded() {
+        // Already migrated (or new key explicitly set) → nothing to do.
+        guard defaults.object(forKey: Key.modelLimitsVisibility) == nil else {
+            defaults.removeObject(forKey: Key.legacyShowModelSpecificLimits)
+            return
+        }
+        if let legacyShow = defaults.object(forKey: Key.legacyShowModelSpecificLimits) as? Bool {
+            modelLimitsVisibility = legacyShow ? .always : .optionOnly
+        }
+        defaults.removeObject(forKey: Key.legacyShowModelSpecificLimits)
+    }
+
     /// Write every **Appearance**-pane key from a named preset's fixed value set (#215, #224) — the
     /// general form of `resetAppearanceToDefaults()`. Unlike reset (which *removes* keys so getters fall
     /// back to their defaults), this writes explicit values, because a preset can differ from the
@@ -451,7 +499,8 @@ enum PersistedConfig {
         showExtraUsage = v.showExtraUsage
         showServiceStatusDot = v.showServiceStatusDot
         awaitingInputInMenuBar = v.awaitingInputInMenuBar
-        showModelSpecificLimits = v.showModelSpecificLimits
+        modelLimitsVisibility = v.modelLimitsVisibility
+        extraUsageVisibility = v.extraUsageVisibility
         resetCountdownModeMenuBar = v.resetCountdownModeMenuBar
         barStyle = v.barStyle
         showTicks = v.showTicks
@@ -470,7 +519,8 @@ enum PersistedConfig {
             showExtraUsage: showExtraUsage,
             showServiceStatusDot: showServiceStatusDot,
             awaitingInputInMenuBar: awaitingInputInMenuBar,
-            showModelSpecificLimits: showModelSpecificLimits,
+            modelLimitsVisibility: modelLimitsVisibility,
+            extraUsageVisibility: extraUsageVisibility,
             resetCountdownModeMenuBar: resetCountdownModeMenuBar,
             barStyle: barStyle,
             showTicks: showTicks,

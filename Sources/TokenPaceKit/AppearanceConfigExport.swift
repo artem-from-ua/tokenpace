@@ -29,7 +29,8 @@ extension AppearancePresetValues: Codable {
         case hideCalmSevenDayBar        // "Show 7-day bar when calm" (stored inverted, as a *hide* flag)
         case resetCountdownModeMenuBar  // "Show reset countdown"
         case showServiceStatusDot       // "Show service status dot on issues"
-        case showModelSpecificLimits    // "Show model & service limits"
+        case modelLimitsVisibility      // "Show model & service limits"
+        case extraUsageVisibility       // "Show extra usage"
         case showTicks                  // "Show ticks on bars"
     }
 
@@ -47,7 +48,8 @@ extension AppearancePresetValues: Codable {
         try c.encode(hideCalmSevenDayBar, forKey: .hideCalmSevenDayBar)
         try c.encode(resetCountdownModeMenuBar, forKey: .resetCountdownModeMenuBar)
         try c.encode(showServiceStatusDot, forKey: .showServiceStatusDot)
-        try c.encode(showModelSpecificLimits, forKey: .showModelSpecificLimits)
+        try c.encode(modelLimitsVisibility, forKey: .modelLimitsVisibility)
+        try c.encode(extraUsageVisibility, forKey: .extraUsageVisibility)
         try c.encode(showTicks, forKey: .showTicks)
     }
 
@@ -63,7 +65,8 @@ extension AppearancePresetValues: Codable {
             showExtraUsage: try c.decode(Bool.self, forKey: .showExtraUsage),
             showServiceStatusDot: try c.decode(Bool.self, forKey: .showServiceStatusDot),
             awaitingInputInMenuBar: try c.decode(Bool.self, forKey: .awaitingInputInMenuBar),
-            showModelSpecificLimits: try c.decode(Bool.self, forKey: .showModelSpecificLimits),
+            modelLimitsVisibility: try c.decode(PopupSectionVisibility.self, forKey: .modelLimitsVisibility),
+            extraUsageVisibility: try c.decode(PopupSectionVisibility.self, forKey: .extraUsageVisibility),
             resetCountdownModeMenuBar: try c.decode(ResetCountdownMode.self, forKey: .resetCountdownModeMenuBar),
             barStyle: try c.decode(BarStyle.self, forKey: .barStyle),
             showTicks: try c.decode(Bool.self, forKey: .showTicks),
@@ -81,7 +84,7 @@ extension AppearancePresetValues: Codable {
 /// makes answering "what does your setup look like?" one click instead of a screenshot tour.
 ///
 /// Deliberately **Appearance-only**, unlike the full `PersistedConfig` dump proposed in #256: these
-/// eleven keys are pure presentation — no filesystem paths, no account names, no working hours —
+/// twelve keys are pure presentation — no filesystem paths, no account names, no working hours —
 /// so a dump can be pasted into an issue without reading it first. Widening this to other panes
 /// requires a per-key privacy pass first (#256).
 ///
@@ -94,7 +97,7 @@ public enum AppearanceConfigExport {
     /// never disappears from the dump.
     public static let customPresetName = "custom"
 
-    /// Build the clipboard JSON: the app version and active preset as metadata, and the eleven
+    /// Build the clipboard JSON: the app version and active preset as metadata, and the twelve
     /// Appearance values under `appearance` **in pane order** (see the `Codable` extension above).
     ///
     /// No export timestamp on purpose: it would make two dumps of an unchanged config differ, which
@@ -135,7 +138,8 @@ public enum AppearanceConfigExport {
             ("hideCalmSevenDayBar", jsonBool(v.hideCalmSevenDayBar)),
             ("resetCountdownModeMenuBar", jsonString(v.resetCountdownModeMenuBar.rawValue)),
             ("showServiceStatusDot", jsonBool(v.showServiceStatusDot)),
-            ("showModelSpecificLimits", jsonBool(v.showModelSpecificLimits)),
+            ("modelLimitsVisibility", jsonString(v.modelLimitsVisibility.rawValue)),
+            ("extraUsageVisibility", jsonString(v.extraUsageVisibility.rawValue)),
             ("showTicks", jsonBool(v.showTicks)),
         ]
 

@@ -183,12 +183,25 @@ struct AppearancePane: View {
             // #211 — a popup-only option, so it lives in its own "Dropdown Widget" section rather than
             // in "Menu Bar Widget" above (whose toggles all govern the menu-bar widget).
             Section("Dropdown Widget") {
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Show model & service limits", isOn: Binding(
-                        get: { model.showModelSpecificLimits },
-                        set: { model.setShowModelSpecificLimits($0) }))
-                    SettingsHint(text: "Adds per-model or per-service 7-day rows. Off keeps only "
-                        + "5-hour and 7-day base limits.")
+                // No `SettingsHint` under either row: the segment labels ("Always" / "Non-calm only" /
+                // "With ⌥ Option") already say when the group shows, and a hint repeating that would
+                // crowd two rows that sit directly above the plain "Show ticks" toggle.
+                HStack {
+                    Text("Show model & service limits")
+                    Spacer()
+                    SegmentedControl(
+                        segments: Self.visibilitySegments,
+                        active: model.modelLimitsVisibility,
+                        onSelect: { model.setModelLimitsVisibility($0) })
+                }
+
+                HStack {
+                    Text("Show extra usage")
+                    Spacer()
+                    SegmentedControl(
+                        segments: Self.visibilitySegments,
+                        active: model.extraUsageVisibility,
+                        onSelect: { model.setExtraUsageVisibility($0) })
                 }
 
                 Toggle("Show ticks on bars", isOn: Binding(
@@ -198,10 +211,16 @@ struct AppearancePane: View {
         .formStyle(.grouped)
     }
 
+    /// The three ``PopupSectionVisibility`` segments, shared by both Dropdown-Widget rows so they can
+    /// never drift apart. Labels are deliberately terse — three segments plus a full-width row title
+    /// leave no room for prose, which lives in each row's `SettingsHint` instead.
+    private static let visibilitySegments: [SegmentedControl<PopupSectionVisibility>.Segment] =
+        PopupSectionVisibility.allCases.map { .init(value: $0, title: $0.displayName) }
+
     // MARK: Copy config (#257)
 
     /// The copy-to-clipboard button sitting immediately **left of** the preset segmented control:
-    /// it puts the eleven Appearance values (plus the active preset and app version) on the clipboard
+    /// it puts the twelve Appearance values (plus the active preset and app version) on the clipboard
     /// as pretty-printed JSON, so "what does your setup look like?" is one click instead of a
     /// screenshot tour of the pane.
     ///

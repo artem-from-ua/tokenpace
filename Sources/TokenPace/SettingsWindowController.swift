@@ -103,9 +103,14 @@ final class SettingsWindowController: NSWindowController {
         get { model.onExtraUsageChange } set { model.onExtraUsageChange = newValue }
     }
 
-    /// Called when the user toggles "Show model-specific limits" (#211), with the new state.
-    var onShowModelSpecificLimitsChange: ((Bool) -> Void)? {
-        get { model.onShowModelSpecificLimitsChange } set { model.onShowModelSpecificLimitsChange = newValue }
+    /// Called when the user changes when "Show model & service limits" appears (#211), with the new mode.
+    var onModelLimitsVisibilityChange: ((PopupSectionVisibility) -> Void)? {
+        get { model.onModelLimitsVisibilityChange } set { model.onModelLimitsVisibilityChange = newValue }
+    }
+
+    /// Called when the user changes when the dropdown's "Extra usage" section appears, with the new mode.
+    var onExtraUsageVisibilityChange: ((PopupSectionVisibility) -> Void)? {
+        get { model.onExtraUsageVisibilityChange } set { model.onExtraUsageVisibilityChange = newValue }
     }
 
     /// Called when the user toggles "Hide 7-day bar when calm" (#94), with the new state.

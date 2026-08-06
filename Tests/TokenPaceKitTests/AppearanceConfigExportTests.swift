@@ -19,7 +19,8 @@ private let paneOrderedKeys = [
     "hideCalmSevenDayBar",        // "Show 7-day bar when calm"
     "resetCountdownModeMenuBar",  // "Show reset countdown"
     "showServiceStatusDot",       // "Show service status dot on issues"
-    "showModelSpecificLimits",    // "Show model & service limits"
+    "modelLimitsVisibility",      // "Show model & service limits"
+    "extraUsageVisibility",       // "Show extra usage"
     "showTicks",                  // "Show ticks on bars"
 ]
 
@@ -49,7 +50,8 @@ private let customValues = AppearancePresetValues(
     showExtraUsage: false,
     showServiceStatusDot: false,
     awaitingInputInMenuBar: false,
-    showModelSpecificLimits: false,
+    modelLimitsVisibility: .optionOnly,
+    extraUsageVisibility: .always,
     resetCountdownModeMenuBar: .never,
     barStyle: .mixed,
     showTicks: false,
@@ -89,7 +91,7 @@ struct AppearanceConfigExportOrderTests {
     /// Every Appearance value reaches the dump — catches a property added to `AppearancePresetValues`
     /// whose `encode` call was forgotten, which would otherwise drop it silently.
     @Test func everyValueIsExported() {
-        #expect(appearanceKeysInOrder(export(customValues, preset: nil)).count == 11)
+        #expect(appearanceKeysInOrder(export(customValues, preset: nil)).count == 12)
     }
 }
 
@@ -168,13 +170,16 @@ struct AppearancePresetValuesCodableTests {
           "farBehindInterval" : "long", "hideCalmSevenDayBar" : false,
           "pauseHidesBars" : false, "showExtraUsage" : true,
           "showServiceStatusDot" : true, "awaitingInputInMenuBar" : true,
-          "showModelSpecificLimits" : true, "resetCountdownModeMenuBar" : "always" }
+          "modelLimitsVisibility" : "always", "extraUsageVisibility" : "optionOnly",
+          "resetCountdownModeMenuBar" : "always" }
         """
         let decoded = try JSONDecoder().decode(
             AppearancePresetValues.self, from: Data(json.utf8))
         #expect(decoded.barStyle == .simple)
         #expect(decoded.farBehindInterval == .long)
         #expect(decoded.resetCountdownModeMenuBar == .always)
+        #expect(decoded.modelLimitsVisibility == .always)
+        #expect(decoded.extraUsageVisibility == .optionOnly)
         #expect(decoded.showTicks)
     }
 }
