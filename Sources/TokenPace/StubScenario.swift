@@ -58,6 +58,10 @@ enum StubScenario: String, CaseIterable {
     case creditsOnset = "credits-onset"
     case resetGrace = "reset-grace"
     case colorCycle = "color-cycle"
+    case incidentActive = "incident-active"
+    case incidentGreen = "incident-green"
+    case incidentTwo = "incident-two"
+    case incidentRecovery = "incident-recovery"
 
     /// The env id (`TOKENPACE_STUB` value), including `"real"` for ``realNetwork``.
     var id: String { rawValue }
@@ -163,6 +167,10 @@ enum StubScenario: String, CaseIterable {
         case .creditsOnset:        return "Extra Usage Credit onset"
         case .resetGrace:          return "Reset-boundary idle grace"
         case .colorCycle:          return "Colour transitions (frozen bars)"
+        case .incidentActive:      return "Incident · one active (⌥ shows it)"
+        case .incidentGreen:       return "Incident · open but components green"
+        case .incidentTwo:         return "Incident · two at once"
+        case .incidentRecovery:    return "Incident · silent recovery"
         }
     }
 
@@ -261,6 +269,23 @@ enum StubScenario: String, CaseIterable {
                  + "pacing palette — blue → green → yellow → orange → red and back — pausing 5 s on "
                  + "each. Bar geometry is FROZEN (strip pinned at half the track, no time marker), so "
                  + "the only thing moving is the colour. The 7-day bar stays put as a reference."
+        case .incidentActive:
+            return "One active incident affecting Code + API (both degraded). Default view: the two "
+                 + "service rows. Hold \u{2325} Option and the rows are REPLACED by the incident — its name "
+                 + "wrapping across lines with `2h \u{00B7} identified` flush right on the last one."
+        case .incidentGreen:
+            return "An incident still formally open (`monitoring`) while every monitored component is "
+                 + "back to `operational` — the measured 66-minute gap. Nothing about it may render: no "
+                 + "service rows, and \u{2325} Option shows no incident section at all. The highest-value "
+                 + "frame of the four, because \"nothing renders\" is the easy thing to get wrong."
+        case .incidentTwo:
+            return "Two simultaneous incidents listing the same degraded components — the real "
+                 + "2026-08-05 14:00 shape. \u{2325} Option stacks both rows, each with its own dot, age "
+                 + "and link, above ONE subscribe row: a subscription covers the episode, not a ticket."
+        case .incidentRecovery:
+            return "Silent recovery: the first two polls carry a degraded incident with an update, then "
+                 + "the components go `operational` with NO further update — the `mgp99sn4ynd4` case an "
+                 + "updates-driven listener would have missed for 43 minutes. Watch the rows vanish."
         }
     }
 
@@ -308,6 +333,10 @@ enum StubScenario: String, CaseIterable {
         // The colour walk is driven by `AppDelegate`'s own timer overlaying the retained snapshot, so
         // the transport only has to supply a plain, stable frame for it to repaint (ADR-0070).
         case .colorCycle:          return StubUsageTransport(mode: .pacing(.calmBoth), now: now)
+        case .incidentActive:      return StubUsageTransport(mode: .incident(.active), now: now)
+        case .incidentGreen:       return StubUsageTransport(mode: .incident(.green), now: now)
+        case .incidentTwo:         return StubUsageTransport(mode: .incident(.two), now: now)
+        case .incidentRecovery:    return StubUsageTransport(mode: .incident(.recovery), now: now)
         }
     }
 

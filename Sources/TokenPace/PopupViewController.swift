@@ -647,6 +647,106 @@ final class StatusLineLabel: NSTextField {
     }
 }
 
+// MARK: - SubscribeRowView
+
+/// The episode subscribe/unsubscribe row (#279) — an icon carrying the **state** and secondary text
+/// naming the **action**.
+///
+/// That split is deliberate. A bare toggle icon is ambiguous in the Play/Pause way: a struck-through
+/// bell reads equally as "notifications are off" and as "press to turn them off". Pairing a state
+/// icon with an action label removes the ambiguity, and the row is a wide, obvious click target in a
+/// place where a lone glyph would not be.
+///
+/// Implemented as a plain `NSView` with `mouseDown`, not an `NSButton`. The popup is hosted in
+/// `NSMenuItem.view`, where AppKit's control machinery has repeatedly failed this project — the
+/// `.link` handling of `NSTextField` (ADR-0013 §4), native `isAlternate`, and
+/// `addLocalMonitorForEvents` under menu tracking (ADR-0020 §3). `StatusLineLabel` proves `mouseDown`
+/// does arrive, so this follows the technique already known to work here.
+final class SubscribeRowView: NSView {
+
+    /// Invoked on click. The controller owns what a click means; this view only reports it.
+    var onClick: (() -> Void)?
+
+    private let iconView = NSImageView()
+    private let label = NSTextField(labelWithString: "")
+    /// Tracks hover so the row can hint that it is interactive — in a surface with no other controls,
+    /// nothing else signals clickability.
+    private var isHovered = false { didSet { needsDisplay = true } }
+
+    init(symbolName: String, text: String, filled: Bool) {
+        super.init(frame: .zero)
+        wantsLayer = true
+
+        let config = NSImage.SymbolConfiguration(
+            pointSize: PopupViewController.Metrics.textSize, weight: filled ? .semibold : .regular)
+        iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: text)?
+            .withSymbolConfiguration(config)
+        // The icon carries the state, so it takes the full label colour when active and the dimmed
+        // one when not — the same weight the text has in each state.
+        iconView.contentTintColor = filled
+            ? ColorStore.shared.color(.label)
+            : PopupViewController.dimmedLabelColor
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        label.stringValue = text
+        label.font = .systemFont(ofSize: PopupViewController.Metrics.textSize)
+        // Secondary colour throughout: the subject of the popup is the service and incident rows
+        // above, and a call to action must not outweigh them.
+        label.textColor = PopupViewController.dimmedLabelColor
+        label.lineBreakMode = .byTruncatingTail
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(iconView)
+        addSubview(label)
+
+        // The icon is **centred on the status dots' axis**, not flush with the row's leading edge.
+        // Both used to start at x=0, but a 9-pt dot and a 15-pt glyph then have centres 3 pt apart —
+        // enough to read as a misaligned column down the left of the section. Centring on the dot's
+        // midpoint puts the bell directly under them whatever the glyph's own width turns out to be.
+        //
+        // The text then starts where every service/incident name starts (dot width + gap), so the
+        // two columns hold across the whole block.
+        let dotDiameter = PopupViewController.Metrics.statusDotDiameter
+        let gap = PopupViewController.Metrics.statusDotGap
+        NSLayoutConstraint.activate([
+            iconView.centerXAnchor.constraint(equalTo: leadingAnchor, constant: dotDiameter / 2),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: dotDiameter + gap),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            heightAnchor.constraint(equalToConstant: 20),
+        ])
+    }
+
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard isHovered else { return }
+        let inset = bounds.insetBy(dx: -4, dy: -1)
+        NSColor.labelColor.withAlphaComponent(0.08).setFill()
+        NSBezierPath(roundedRect: inset, xRadius: 5, yRadius: 5).fill()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        onClick?()
+    }
+}
+
 // MARK: - PillView
 
 /// A small rounded, layer-backed badge — the blocking-reset badge on a limit row (#158, the exhausted
@@ -857,6 +957,16 @@ final class PopupViewController: NSViewController {
     }
 
 
+    /// Invoked when the subscribe row is clicked. The controller reports the click; `AppDelegate`
+    /// owns what it means (subscribe to the current episode, or stop following it) and persists it.
+    /// A closure rather than a delegate protocol — this is the popup's only outbound action.
+    var onToggleSubscription: (() -> Void)?
+
+    /// The clock the status/incident ages are measured against. Injected (not `Date()` inline) so a
+    /// date-decoupled stub renders the same frame every time, matching how the engine takes its
+    /// `now` — otherwise a screenshot frame would drift with the wall clock.
+    var now: () -> Date = { Date() }
+
     /// Whether ⌥ Option is currently held (ADR-0020's modifier-poll timer feeds this live while the
     /// dropdown is open). It reveals the on-demand data age ("2m ago") in the "Claude Code" header,
     /// and — once the first status poll has succeeded — the service-status rows: while ⌥ is up they
@@ -923,7 +1033,9 @@ final class PopupViewController: NSViewController {
         }
     }
 
-    private enum Metrics {
+    // `fileprivate`, not `private`: `SubscribeRowView` (#279) is a sibling type in this file and
+    // sizes itself from the same metrics, so the two rows cannot drift apart.
+    fileprivate enum Metrics {
         /// Popup width. Sized so the inner content column stays 252 pt once the Control-Center-style card
         /// adds its outer margin (308 − 2·14 card inset − 2·14 inner = 252).
         static let width: CGFloat = 312
@@ -952,6 +1064,11 @@ final class PopupViewController: NSViewController {
         /// rounded edge).
         static let bottomPadding: CGFloat = 12
         static let rowSpacing: CGFloat = 3
+        /// Gap after an incident row (#279). Larger than ``rowSpacing`` because an incident is a
+        /// wrapped block rather than a single line: at 3 pt two incidents run together and read as
+        /// one paragraph. Applied after **every** incident, so the distance between two of them and
+        /// the distance from the last one to the subscribe row are the same.
+        static let incidentRowSpacing: CGFloat = 8
         static let sectionSpacing: CGFloat = 14
         /// Gap **between limit blocks** (after each section's bar) — a touch tighter than
         /// `sectionSpacing` so the limit list reads as a group without the header's larger breathing room.
@@ -1110,7 +1227,15 @@ final class PopupViewController: NSViewController {
         // **only the problematic components** by default and **all** monitored components (the healthy
         // ones for context: `API`, `Code`, `WEB/Desktop`, `Cowork` when enabled) while ⌥ is held.
         let status = layout.serviceStatus
-        let showStatusRows = status != nil && (optionHeld || status?.worstProblem != nil)
+        // The status section shows when something is wrong, when a component recovered within the
+        // last few minutes (so a fix that just landed is not indistinguishable from "nothing ever
+        // happened"), or — under ⌥ — when there are incidents to switch the dimension to. With ⌥ held
+        // and no incidents, there is nothing for that dimension to show, so the section stays away
+        // rather than falling back to the service rows the user was already looking at.
+        let hasRecentRecovery = status?.checks.flatMap(\.components)
+            .contains { Self.isRecentlyRecovered($0, now: now()) } ?? false
+        let showStatusRows = status != nil
+            && (status?.worstProblem != nil || hasRecentRecovery || (optionHeld && !layout.incidents.isEmpty))
         let showAge = optionHeld || layout.lastUpdateAge >= Self.staleAgeThreshold
         let ageString = showAge ? Self.ageText(layout.lastUpdateAge) : ""
         // Header layout (#233): the "Claude" brand title with the "Nm ago" age beside it on the left —
@@ -1152,12 +1277,35 @@ final class PopupViewController: NSViewController {
 
         if showStatusRows, let status {
             var lastRow: NSView?
-            // Default: only the non-operational components. ⌥ Option: every monitored component.
-            let components = status.checks.flatMap(\.components)
-                .filter { optionHeld || $0.status.isProblem }
-            for component in components {
-                lastRow = addServiceStatusRow(label: Self.displayName(component), status: component.status)
+            let now = self.now()
+            if optionHeld, !layout.incidents.isEmpty {
+                // ⌥ switches the **dimension**, not the level of detail (ADR-0071 §2): the service
+                // rows are replaced by the incidents behind them. Green service lines are not shown
+                // here — under ⌥ the question is "what is broken", and a green row does not answer it.
+                for incident in layout.incidents {
+                    let row = addIncidentRow(incident, now: now)
+                    // One gap for the whole block: the same distance between two incidents as
+                    // between the last incident and the subscribe row. The default `rowSpacing`
+                    // alone does not achieve that — a wrapped, multi-line description carries
+                    // trailing line leading that the single-line subscribe row does not, so equal
+                    // spacing values render as visibly unequal gaps.
+                    stack.setCustomSpacing(Metrics.incidentRowSpacing, after: row)
+                    lastRow = row
+                }
+            } else {
+                // Default: only the non-operational components — plus any that went green within the
+                // recovery window, so a fix that just landed is visible rather than leaving a blank
+                // popup that looks identical to "nothing ever happened".
+                let components = status.checks.flatMap(\.components)
+                    .filter { $0.status.isProblem || Self.isRecentlyRecovered($0, now: now) }
+                for component in components {
+                    lastRow = addServiceStatusRow(
+                        label: Self.displayName(component),
+                        status: component.status,
+                        age: component.stateAge(at: now))
+                }
             }
+            if let subscribeRow = addSubscribeRowIfNeeded(layout) { lastRow = subscribeRow }
             if let lastRow { stack.setCustomSpacing(Metrics.sectionSpacing, after: lastRow) }
         }
 
@@ -1630,33 +1778,14 @@ final class PopupViewController: NSViewController {
     /// the link, when present, is handled explicitly by `StatusLineLabel` because `NSTextField`'s
     /// built-in `.link` handling is unreliable inside an `NSMenu`-hosted view.
     @discardableResult
-    private func addServiceStatusRow(label: String, status: ServiceStatus) -> NSView {
+    private func addServiceStatusRow(label: String, status: ServiceStatus, age: TimeInterval? = nil) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
 
         // Leading half: the colour dot (#130) as a glowing layer-backed subview (#188 — re-resolves on a
         // theme flip, unlike a baked image) + the component's display label (e.g. "API"). No status word
         // here — it is the trailing half, so every status word right-aligns into one column.
-        let dot = GlowDotView()
-        let dotStatus = status
-        // The dot's colour is a closure the layer re-reads on every update, so routing it through the
-        // animator here is enough to make a status change fade (ADR-0070). Keyed by component label,
-        // so each service row animates independently; the glow follows the same colour.
-        let animator = colorAnimator
-        let component = label
-        dot.fill = {
-            let target = Self.dotColor(dotStatus)
-            guard let animator else { return target }
-            return animator.resolve(
-                .serviceDot(surface: .popup, component: component), target: target)
-        }
-        dot.glowRadius = Self.dotGlowRadius
-        dot.glowStrength = Self.dotGlowStrength
-        dot.translatesAutoresizingMaskIntoConstraints = false
+        let dot = makeStatusDot(status: status, animatorKey: label)
         dot.toolTip = status == .operational ? "operational" : "issue"
-        NSLayoutConstraint.activate([
-            dot.widthAnchor.constraint(equalToConstant: Metrics.statusDotDiameter),
-            dot.heightAnchor.constraint(equalToConstant: Metrics.statusDotDiameter),
-        ])
         let nameLabel = NSTextField(labelWithString: label)
         nameLabel.font = font
         nameLabel.textColor = ColorStore.shared.color(.label)
@@ -1667,20 +1796,248 @@ final class PopupViewController: NSViewController {
         // Dot flush-left with the rest of the widget's text (no extra leading inset), so the status
         // rows align on the same left edge as "5-hour"/"7-day" and the per-project rows (#233).
 
-        // Trailing half: the status word, pinned flush-right. Operational → plain dimmed text (no link);
-        // otherwise → underlined link colour, opened on click by StatusLineLabel over the word's range.
-        let word = Self.word(status)
-        let isLink = status != .operational
-        let wordAttributed = NSAttributedString(string: word, attributes: isLink
-            ? [.font: font, .foregroundColor: ColorStore.shared.color(.link), .underlineStyle: NSUnderlineStyle.single.rawValue]
-            : [.font: font, .foregroundColor: Self.dimmedLabelColor])
-        let wordLabel = StatusLineLabel(labelWithAttributedString: wordAttributed)
-        if isLink {
-            wordLabel.linkRange = NSRange(location: 0, length: (word as NSString).length)
-            wordLabel.linkURL = StatusHealth.pageURL
-        }
+        // Trailing half, pinned flush-right: how long the component has been in this state, then the
+        // status word. Operational → plain dimmed text (no link); otherwise → underlined link colour,
+        // opened on click by StatusLineLabel over the word's range.
+        //
+        // The word keeps linking to the **general** status page rather than to a specific incident:
+        // a component can be degraded by more than one incident at once (measured — two incidents
+        // named the same four components), so there is no single right target here. The per-incident
+        // link lives on the incident row, where the question "which one" has an answer (ADR-0071 §3).
+        let wordLabel = Self.makeLinkWord(
+            Self.word(status),
+            url: status == .operational ? nil : StatusHealth.pageURL,
+            prefix: age.map { Self.durationMinutes(Int($0)) + " · " })
 
         return addSplitRow(leadingView: leadingLabel, rightView: wordLabel)
+    }
+
+    /// The popup's status dot: a glowing, layer-backed circle whose colour re-resolves through the
+    /// animator on every update (ADR-0070) rather than being baked once — so a status change fades
+    /// and a light/dark flip repaints correctly.
+    ///
+    /// `animatorKey` distinguishes one dot's animation from another's. It used to be the display
+    /// label, which meant two rows sharing a label would also share an animation; the incident rows
+    /// pass their incident id, so each animates on its own.
+    private func makeStatusDot(status: ServiceStatus, animatorKey: String) -> GlowDotView {
+        let dot = GlowDotView()
+        let animator = colorAnimator
+        dot.fill = {
+            let target = Self.dotColor(status)
+            guard let animator else { return target }
+            return animator.resolve(.serviceDot(surface: .popup, component: animatorKey), target: target)
+        }
+        dot.glowRadius = Self.dotGlowRadius
+        dot.glowStrength = Self.dotGlowStrength
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            dot.widthAnchor.constraint(equalToConstant: Metrics.statusDotDiameter),
+            dot.heightAnchor.constraint(equalToConstant: Metrics.statusDotDiameter),
+        ])
+        return dot
+    }
+
+    /// A trailing label whose final word is a clickable link, optionally preceded by dimmed text.
+    ///
+    /// The click is handled explicitly by ``StatusLineLabel``: `NSTextField`'s built-in `.link`
+    /// handling needs first-responder plumbing that does not work inside an `NSMenu`-hosted view
+    /// (ADR-0013 §4). Passing `url: nil` yields plain dimmed text with no link and no hand cursor.
+    private static func makeLinkWord(_ word: String, url: URL?, prefix: String? = nil) -> StatusLineLabel {
+        let font = NSFont.systemFont(ofSize: Metrics.textSize)
+        let attributed = NSMutableAttributedString()
+        if let prefix {
+            attributed.append(NSAttributedString(
+                string: prefix, attributes: [.font: font, .foregroundColor: dimmedLabelColor]))
+        }
+        let wordStart = attributed.length
+        // A linked word takes the link colour; an unlinked one (`operational`) takes the **label**
+        // colour rather than the dimmed one. It is the answer to "can I work", so it should read as
+        // content, not as a footnote — only the age beside it is secondary.
+        attributed.append(NSAttributedString(string: word, attributes: url != nil
+            ? [.font: font, .foregroundColor: ColorStore.shared.color(.link),
+               .underlineStyle: NSUnderlineStyle.single.rawValue]
+            : [.font: font, .foregroundColor: ColorStore.shared.color(.label)]))
+
+        let label = StatusLineLabel(labelWithAttributedString: attributed)
+        if let url {
+            label.linkRange = NSRange(location: wordStart, length: (word as NSString).length)
+            label.linkURL = url
+        }
+        return label
+    }
+
+    /// How long a component keeps its row after going green (#279). Without this the popup snaps from
+    /// "two red rows" to completely blank the instant a fix lands, which reads exactly like "nothing
+    /// was ever wrong" — the one moment a user most wants confirmation that it was, and is over.
+    static let recoveryWindow: TimeInterval = 15 * 60
+
+    /// Whether this component is `operational` but only recently became so — worth one more row.
+    ///
+    /// Leans on `components[].updated_at` (verified to move only on a status change), so the window
+    /// is measured from the actual recovery rather than from when this process happened to notice —
+    /// and therefore survives a relaunch mid-incident.
+    static func isRecentlyRecovered(_ component: ResolvedComponent, now: Date) -> Bool {
+        guard component.status == .operational, let age = component.stateAge(at: now) else { return false }
+        return age < recoveryWindow
+    }
+
+    /// The episode subscribe row, when there is an episode to subscribe to.
+    ///
+    /// Shown in **both** dimensions and always in the same place: the control means the same thing
+    /// with ⌥ held or not, so moving it between the two would read as two different controls. It is
+    /// deliberately absent when nothing is wrong — there is nothing to be notified about, and a dead
+    /// control is worse than none.
+    @discardableResult
+    private func addSubscribeRowIfNeeded(_ layout: PopupLayout) -> NSView? {
+        guard let state = layout.subscription else { return nil }
+        let row = SubscribeRowView(
+            symbolName: Self.subscribeSymbol(state),
+            text: Self.subscribeText(state),
+            filled: state == .subscribed)
+        row.onClick = { [weak self] in self?.onToggleSubscription?() }
+        row.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(row)
+        row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        return row
+    }
+
+    /// The SF Symbol for each subscribe state. It reports the **current state**, never the action a
+    /// click would take: a toggle whose icon shows the action is the Play/Pause ambiguity, where the
+    /// glyph reads equally as "this is the state" and "press for this".
+    static func subscribeSymbol(_ state: EpisodeSubscriptionState) -> String {
+        switch state {
+        case .notSubscribed: return "bell.slash"
+        case .subscribed:    return "bell.fill"
+        // A pulse, not a wrench: `monitoring` means the repair is done and Anthropic is watching, so
+        // a tool icon would say the opposite of what the stage means.
+        case .fixDeployed:   return "waveform.path.ecg"
+        }
+    }
+
+    /// The action text beside the icon. Exhaustive, no `default` — a new state must be worded.
+    static func subscribeText(_ state: EpisodeSubscriptionState) -> String {
+        switch state {
+        case .notSubscribed: return "Notify me when it's fixed"
+        case .subscribed:    return "Following the incidents"
+        case .fixDeployed:   return "Fix deployed · monitoring"
+        }
+    }
+
+    /// One incident row (#279): a severity dot, the incident's description, and `age · stage` set
+    /// flush right **on the description's last line** — dropping to a line of its own when that line
+    /// is too full to share.
+    ///
+    /// The description is the incident's `name`, which is all Statuspage offers: there is no separate
+    /// description field, and the other text it carries (`incident_updates[]`) describes the current
+    /// stage rather than the incident. Measured across 50 real incidents the median is 34 characters
+    /// (one line) and the longest 107 (three), so `maxDescriptionLines` is insurance rather than an
+    /// everyday truncation.
+    ///
+    /// The right-aligned chip is done with a tail-indented paragraph and a right tab stop rather than
+    /// a second view: only text layout can put something on the *last wrapped line* of a paragraph,
+    /// which a stack view cannot express. The stage word is the link, and unlike the service rows it
+    /// points at **this** incident (`shortlink`) — ADR-0071 §3.
+    @discardableResult
+    private func addIncidentRow(_ incident: VisibleIncident, now: Date) -> NSView {
+        let font = NSFont.systemFont(ofSize: Metrics.textSize)
+        let dot = makeStatusDot(status: incident.severity, animatorKey: "incident-\(incident.id)")
+        dot.toolTip = Self.word(incident.severity)
+
+        let meta = Self.incidentMetaText(incident, now: now)
+        let text = NSMutableAttributedString(
+            string: incident.name + "\t",
+            attributes: [.font: font, .foregroundColor: ColorStore.shared.color(.label)])
+
+        let ageAndSeparator = meta.age.map { "\($0) · " } ?? ""
+        if !ageAndSeparator.isEmpty {
+            text.append(NSAttributedString(
+                string: ageAndSeparator, attributes: [.font: font, .foregroundColor: Self.dimmedLabelColor]))
+        }
+        let stageStart = text.length
+        text.append(NSAttributedString(string: meta.stage, attributes: incident.shortlink != nil
+            ? [.font: font, .foregroundColor: ColorStore.shared.color(.link),
+               .underlineStyle: NSUnderlineStyle.single.rawValue]
+            : [.font: font, .foregroundColor: Self.dimmedLabelColor]))
+
+        // A right tab stop at the content's trailing edge pulls everything after the tab flush right;
+        // the description wraps ahead of it and the chip settles on whatever line it lands on.
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: Self.incidentTextWidth)]
+        // Word-wrapping, **not** truncating: a truncating line-break mode in the paragraph style
+        // suppresses wrapping outright, so the description collapsed to a single elided line no
+        // matter what `maximumNumberOfLines` said (measured: 16 pt tall for an 87-character name).
+        // The line cap is enforced by `maximumNumberOfLines`, which still elides the last line.
+        paragraph.lineBreakMode = .byWordWrapping
+        text.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: text.length))
+
+        let label = StatusLineLabel(labelWithAttributedString: text)
+        // `labelWithAttributedString` hands back a single-line field, and `usesSingleLineMode`
+        // silently overrides `maximumNumberOfLines` — so the description would truncate at one line
+        // no matter what the paragraph style said. Clearing it (and giving the cell a wrapping line
+        // break) is what actually lets the text wrap.
+        label.usesSingleLineMode = false
+        label.cell?.wraps = true
+        label.cell?.isScrollable = false
+        label.maximumNumberOfLines = Self.maxIncidentDescriptionLines
+        label.preferredMaxLayoutWidth = Self.incidentTextWidth
+        if let shortlink = incident.shortlink {
+            label.linkRange = NSRange(location: stageStart, length: (meta.stage as NSString).length)
+            label.linkURL = shortlink
+        }
+        label.translatesAutoresizingMaskIntoConstraints = false
+        // Pin the text column so the right tab stop lands where the paragraph style expects; without
+        // a fixed width the field sizes to its content and the chip drifts.
+        label.widthAnchor.constraint(equalToConstant: Self.incidentTextWidth).isActive = true
+
+        let row = NSStackView(views: [dot, label])
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.spacing = Metrics.statusDotGap
+        row.translatesAutoresizingMaskIntoConstraints = false
+        // Centre the dot on the **first line** of the wrapped description, so it sits against the
+        // text exactly as a service row's dot does — those rows get it from `.centerY`, which a
+        // multi-line row cannot use (it would centre on the whole block and drift lower with every
+        // extra line). Derived from the font rather than eyeballed: half the line height less half
+        // the dot. At 13 pt that is 3.5, where a hand-picked 5 sat the dot 1.5 pt low.
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        let dotTop = (lineHeight - Metrics.statusDotDiameter) / 2
+        dot.topAnchor.constraint(equalTo: row.topAnchor, constant: dotTop).isActive = true
+
+        stack.addArrangedSubview(row)
+        row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        return row
+    }
+
+    /// Width available to an incident's text: the content width less the dot and its gap. Also the
+    /// location of the right tab stop the `age · stage` chip aligns to.
+    static var incidentTextWidth: CGFloat {
+        Metrics.contentWidth - Metrics.statusDotDiameter - Metrics.statusDotGap
+    }
+
+    /// How many lines an incident description may occupy before truncating. Three covers the longest
+    /// name in a 50-incident sample (107 characters); beyond that the popup would grow without
+    /// telling the user anything the linked page would not.
+    static let maxIncidentDescriptionLines = 3
+
+    /// The `age · stage` chip's two halves. Age is the **incident's** age (from `started_at`), not
+    /// how long the current stage has lasted; it is `nil` when the start is unknown, in which case the
+    /// row shows the stage alone rather than inventing a duration.
+    static func incidentMetaText(_ incident: VisibleIncident, now: Date) -> (age: String?, stage: String) {
+        (incident.age(at: now).map { durationMinutes(Int($0)) }, stageWord(incident.stage))
+    }
+
+    /// The human word for an incident's workflow stage. Exhaustive, no `default`, so a new case has
+    /// to be worded consciously — the same discipline as ``word(_:)``. An unrecognised stage renders
+    /// the server's own string rather than hiding the row.
+    static func stageWord(_ stage: IncidentStage) -> String {
+        switch stage {
+        case .investigating:    return "investigating"
+        case .identified:       return "identified"
+        case .monitoring:       return "monitoring"
+        case .resolved:         return "resolved"
+        case .postmortem:       return "postmortem"
+        case .unknown(let raw): return raw
+        }
     }
 
     /// AppKit colour for one service status — the popup's indicator palette. Appearance-aware
@@ -1793,17 +2150,21 @@ final class PopupViewController: NSViewController {
 
     /// Like ``duration`` but **never** emits a seconds component — minutes are the finest unit, so
     /// the data-age text stays second-free even just past the minute boundary.
-    private static func durationMinutes(_ seconds: Int) -> String {
+    ///
+    /// Compound values are written closed-up (`2h7m`, not `2h 7m`): the duration is one quantity, and
+    /// spacing it invites the eye to read two. It matters most in the status rows, where the age sits
+    /// against a `·` separator and a status word — three gaps in a row made the line hard to parse.
+    static func durationMinutes(_ seconds: Int) -> String {
         let minutes = seconds / 60
         if minutes < 60 { return "\(minutes)m" }
         let hours = minutes / 60
         if hours < 24 {
             let m = minutes % 60
-            return m == 0 ? "\(hours)h" : "\(hours)h \(m)m"
+            return m == 0 ? "\(hours)h" : "\(hours)h\(m)m"
         }
         let days = hours / 24
         let h = hours % 24
-        return h == 0 ? "\(days)d" : "\(days)d \(h)h"
+        return h == 0 ? "\(days)d" : "\(days)d\(h)h"
     }
 
     // MARK: Warning banner (issue #12)

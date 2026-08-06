@@ -89,10 +89,23 @@ public struct ResolvedComponent: Sendable, Equatable {
     public let name: String
     /// The semantic status of this component.
     public let status: ServiceStatus
+    /// When this component last changed status, from `components[].updated_at` — so the popup can
+    /// show how long it has been degraded, or how recently it recovered (#279).
+    ///
+    /// `nil` when the API omitted it or it would not parse; the row then shows no age rather than a
+    /// made-up one. Taken from the API rather than measured locally on purpose: a self-measured clock
+    /// would reset on relaunch, in the middle of outages that run for hours.
+    public let changedAt: Date?
 
-    public init(name: String, status: ServiceStatus) {
+    public init(name: String, status: ServiceStatus, changedAt: Date? = nil) {
         self.name = name
         self.status = status
+        self.changedAt = changedAt
+    }
+
+    /// How long this component has held its current status at `now`, or `nil` when unknown.
+    public func stateAge(at now: Date) -> TimeInterval? {
+        changedAt.map { max(0, now.timeIntervalSince($0)) }
     }
 }
 
@@ -182,8 +195,10 @@ public struct StatusHealth: Sendable, Equatable {
     /// defaulting to operational (ADR-0013 §1). Every other component in the array is ignored.
     public static func from(_ summary: StatusSummary, config: MonitoredServices) -> StatusHealth {
         StatusHealth(checks: checks(for: config) { name in
-            summary.components.first(where: { $0.name == name })
-                .map { ServiceStatus(rawAPIValue: $0.status) } ?? .unknown
+            guard let component = summary.components.first(where: { $0.name == name }) else {
+                return (.unknown, nil)
+            }
+            return (ServiceStatus(rawAPIValue: component.status), ResetClock.parse(component.updatedAt))
         })
     }
 
@@ -192,7 +207,22 @@ public struct StatusHealth: Sendable, Equatable {
     /// monitored. Depends on the config (which services/components exist), so it is a function, not
     /// a `static let`.
     public static func unknown(for config: MonitoredServices) -> StatusHealth {
-        StatusHealth(checks: checks(for: config) { _ in .unknown })
+        StatusHealth(checks: checks(for: config) { _ in (.unknown, nil) })
+    }
+
+    /// The component names a config resolves to — the join key ``IncidentVisibility`` intersects an
+    /// incident's `components[]` against to decide "is this incident mine" (#279).
+    ///
+    /// Derived from ``checks(for:statusOf:)``, the same single source of truth that builds the popup
+    /// rows, rather than re-listing the names: a service added there must never silently fail to
+    /// filter incidents here. `StatusHealthTests` pins the two together for every config permutation.
+    ///
+    /// Matching is by **name**, deliberately — not by the `code`/`id` Statuspage also emits. ADR-0013
+    /// §1 chose names as the single identity axis; a second one would need an id↔name map maintained
+    /// against Anthropic's renames. The accepted cost: a renamed component stops matching, so its
+    /// incidents quietly stop showing (the service line already degrades to `unknown` in that case).
+    public static func monitoredComponentNames(for config: MonitoredServices) -> Set<String> {
+        Set(checks(for: config) { _ in (.unknown, nil) }.flatMap(\.components).map(\.name))
     }
 
     /// The single source of truth for **which** services and constituents exist under a config —
@@ -204,25 +234,28 @@ public struct StatusHealth: Sendable, Equatable {
     /// cowork mode.
     private static func checks(
         for config: MonitoredServices,
-        statusOf: (String) -> ServiceStatus
+        statusOf: (String) -> (status: ServiceStatus, changedAt: Date?)
     ) -> [ServiceCheck] {
+        func component(_ name: String) -> ResolvedComponent {
+            let resolved = statusOf(name)
+            return ResolvedComponent(name: name, status: resolved.status, changedAt: resolved.changedAt)
+        }
         var checks: [ServiceCheck] = [
             ServiceCheck(id: .claudeAPI, components: [
-                ResolvedComponent(name: claudeAPIComponentName, status: statusOf(claudeAPIComponentName)),
+                component(claudeAPIComponentName),
             ]),
         ]
         if config.claudeCodeEnabled {
             checks.append(ServiceCheck(id: .claudeCode, components: [
-                ResolvedComponent(name: claudeCodeComponentName, status: statusOf(claudeCodeComponentName)),
+                component(claudeCodeComponentName),
             ]))
         }
         if config.webDesktopEnabled {
             var components = [
-                ResolvedComponent(name: claudeWebComponentName, status: statusOf(claudeWebComponentName)),
+                component(claudeWebComponentName),
             ]
             if config.webDesktopMode == .chatAndCowork {
-                components.append(
-                    ResolvedComponent(name: claudeCoworkComponentName, status: statusOf(claudeCoworkComponentName)))
+                components.append(component(claudeCoworkComponentName))
             }
             checks.append(ServiceCheck(id: .webDesktop, components: components))
         }

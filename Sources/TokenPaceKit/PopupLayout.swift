@@ -215,6 +215,16 @@ public struct PopupLayout: Sendable, Equatable {
     /// than threading it through `make`.
     public let planLabel: String?
 
+    /// The status-page incidents worth showing (#279), already filtered by ``IncidentVisibility``.
+    /// Empty on every ordinary frame. Like ``planLabel`` and ``awaitingInput`` these arrive on the
+    /// status poll's own cadence rather than with the usage snapshot, so the shell grafts them on via
+    /// ``withIncidents(_:)`` instead of threading them through `make`.
+    public let incidents: [VisibleIncident]
+
+    /// What the single subscribe row should show, or `nil` when there is nothing to subscribe to and
+    /// the row is omitted entirely (#279).
+    public let subscription: EpisodeSubscriptionState?
+
     public init(
         lastUpdateAge: TimeInterval,
         intervalSeconds: TimeInterval,
@@ -227,6 +237,8 @@ public struct PopupLayout: Sendable, Equatable {
         perModelRowsAreNonCalm: Bool = false,
         creditsIsNonCalm: Bool = false,
         awaitingInput: AwaitingSessions? = nil,
+        incidents: [VisibleIncident] = [],
+        subscription: EpisodeSubscriptionState? = nil,
         planLabel: String? = nil
     ) {
         self.lastUpdateAge = lastUpdateAge
@@ -243,30 +255,57 @@ public struct PopupLayout: Sendable, Equatable {
         self.creditsIsNonCalm = creditsIsNonCalm
         self.awaitingInput = awaitingInput
         self.planLabel = planLabel
+        self.incidents = incidents
+        self.subscription = subscription
+    }
+
+    /// A copy of this layout with **one** field replaced, everything else carried over.
+    ///
+    /// Every `with*` helper below routes through here. They used to reconstruct the whole value by
+    /// hand, which is a standing trap: the compiler cannot tell a dropped field from an intentional
+    /// omission, so a field added by one branch and a helper touched by another merge cleanly into
+    /// a layout that silently loses data. One copy point means adding a field is one edit.
+    private func copy(
+        awaitingInput: AwaitingSessions?? = nil,
+        incidents: [VisibleIncident]? = nil,
+        subscription: EpisodeSubscriptionState?? = nil,
+        planLabel: String?? = nil
+    ) -> PopupLayout {
+        PopupLayout(
+            lastUpdateAge: lastUpdateAge, intervalSeconds: intervalSeconds, rows: rows,
+            warning: warning, serviceStatus: serviceStatus, credits: credits,
+            blockingReset: blockingReset, perModelRowsStart: perModelRowsStart,
+            perModelRowsAreNonCalm: perModelRowsAreNonCalm, creditsIsNonCalm: creditsIsNonCalm,
+            awaitingInput: awaitingInput ?? self.awaitingInput,
+            incidents: incidents ?? self.incidents,
+            subscription: subscription ?? self.subscription,
+            planLabel: planLabel ?? self.planLabel)
     }
 
     /// A copy of this layout with the awaiting-input count grafted on, everything else unchanged
     /// (#233). The shell calls this on the `make(...)` result so the awaiting indicator — sourced
     /// from `AwaitingInputWatcher`, not the usage snapshot — doesn't have to thread through `make`.
     public func withAwaitingInput(_ awaitingInput: AwaitingSessions?) -> PopupLayout {
-        PopupLayout(
-            lastUpdateAge: lastUpdateAge, intervalSeconds: intervalSeconds, rows: rows,
-            warning: warning, serviceStatus: serviceStatus, credits: credits,
-            blockingReset: blockingReset, perModelRowsStart: perModelRowsStart,
-            perModelRowsAreNonCalm: perModelRowsAreNonCalm, creditsIsNonCalm: creditsIsNonCalm,
-            awaitingInput: awaitingInput, planLabel: planLabel)
+        copy(awaitingInput: .some(awaitingInput))
+    }
+
+    /// A copy of this layout with the status-page incidents grafted on, everything else unchanged
+    /// (#279). Incidents ride the status poll, not the usage poll, so the shell calls this on the
+    /// `make(...)` result exactly as it does for the awaiting-input breakdown.
+    public func withIncidents(_ incidents: [VisibleIncident]) -> PopupLayout {
+        copy(incidents: incidents)
+    }
+
+    /// A copy of this layout with the subscribe row's state grafted on (#279). `nil` omits the row.
+    public func withSubscription(_ subscription: EpisodeSubscriptionState?) -> PopupLayout {
+        copy(subscription: .some(subscription))
     }
 
     /// A copy of this layout with the plan label grafted on, everything else unchanged. The shell
     /// calls this on the `make(...)` result so the plan label — sourced from the OAuth `rateLimitTier`,
     /// not the usage snapshot — doesn't have to thread through `make`.
     public func withPlanLabel(_ planLabel: String?) -> PopupLayout {
-        PopupLayout(
-            lastUpdateAge: lastUpdateAge, intervalSeconds: intervalSeconds, rows: rows,
-            warning: warning, serviceStatus: serviceStatus, credits: credits,
-            blockingReset: blockingReset, perModelRowsStart: perModelRowsStart,
-            perModelRowsAreNonCalm: perModelRowsAreNonCalm, creditsIsNonCalm: creditsIsNonCalm,
-            awaitingInput: awaitingInput, planLabel: planLabel)
+        copy(planLabel: .some(planLabel))
     }
 
     // MARK: make

@@ -7,9 +7,32 @@ Troubleshoot.
 ## Статус сервісів Claude (#31)
 
 Другий, незалежний від usage потік: на кожен `PollOutput`, коли `StatusCadence.isDue` (інтервал =
-`max(5 хв, usage-інтервал)`), агент ходить у `status.claude.com/api/v2/summary.json`, декодує лише
-`components[]`, зводить у логічні сервіси (`MonitoredServices`) і малює по рядку на монітований
-компонент у popup — **лише** коли є проблема. Найсерйозніша проблема → одна крапка в menu bar.
+`max(5 хв, usage-інтервал)`), агент ходить у `status.claude.com/api/v2/summary.json`, декодує
+`components[]` та `incidents[]`, зводить перші в логічні сервіси (`MonitoredServices`) і малює по
+рядку на монітований компонент у popup — коли є проблема або компонент позеленів менш ніж 15 хв тому.
+Найсерйозніша проблема → одна крапка в menu bar.
+
+**Стан сервісів визначають виключно `components[].status`** — жодне поле інциденту на нього не
+впливає (ADR-0013 §2 лишається чинним; ADR-0071 §1 його лише звужує). Кожен рядок несе вік свого
+стану з `components[].updated_at`: поле зсувається рівно на зміні статусу, тож вік береться з API й
+переживає рестарт посеред аварії, на відміну від власного лічильника.
+
+## Інциденти й підписка на епізод (#279, ADR-0071)
+
+Надбудова над попереднім потоком: інциденти як **контекст** і **об'єкт підписки**, ніколи як джерело
+стану. Той самий `summary.json` уже несе `incidents[]` цілком (разом із їхніми `components[]` і
+`incident_updates[]`), тож другий ендпоінт не потрібен.
+
+`IncidentVisibility` фільтрує чотирма кроками: закриті → геть; ті, чиї компоненти не перетинаються з
+моніторенимиs → геть; ті, чиї моніторені компоненти вже зелені → геть (виміряна щілина між
+позеленінням і `resolved` — 6 хв медіана, до 480 хв); старші за налаштований поріг → геть.
+
+У попапі **⌥ перемикає вимір**: рядки сервісів замінюються рядками інцидентів (опис + `вік · стадія`
+справа в останньому рядку, стадія — посилання на конкретний інцидент). Підписка — **одна на епізод**,
+а не на тікет: користувач підписується, коли бачить, що його сервіси лежать, і не може знати, який із
+кількох інцидентів його зачіпає. Епізод завершується, коли всі моніторені компоненти зелені **або**
+всі активні інциденти перейшли в `monitoring`; обидва переходи проходять дебаунс, бо компоненти
+блимають. Дедуплікація подій — по `incident_updates[].id`.
 
 ## Вікно Troubleshoot (ADR-0020)
 
@@ -22,9 +45,13 @@ live-оновленням щополу: update interval + токен (read/expir
 
 | Компонент | Відповідальність |
 |---|---|
-| **StatusHealth / StatusSummary** | Чисте ядро статусу сервісів (#31, #89; `TokenPaceKit`). `StatusSummary` парсить **лише** `components[]` — `incidents`/`status` навмисно НЕ декодуються (ADR-0013), тож «відомі виключення» не шумлять. `ServiceStatus` мапить сирий рядок → семантику (+ `severity`/`isProblem`). `StatusHealth` — колекція **логічних сервісів** `checks: [ServiceCheck]` (ADR-0024): кожен = `ServiceID` + `coworkEnabled` + `[ResolvedComponent]` + computed `status` = worst-of-N. `worstProblem` → найсерйозніший стан усіх увімкнених (сигнатура `ServiceStatus?` збережена). ADR-0013, ADR-0024 |
+| **StatusHealth / StatusSummary** | Чисте ядро статусу сервісів (#31, #89; `TokenPaceKit`). `StatusSummary` парсить `components[]` (з `updated_at` — вік стану) **і** `incidents[]` (#279): останні — окремий контекстний шар, що на стан сервісів не впливає (ADR-0071 §1 звужує ADR-0013 §2). `status`/`scheduled_maintenances[]` і далі не декодуються. `ServiceStatus` мапить сирий рядок → семантику (+ `severity`/`isProblem`). `StatusHealth` — колекція **логічних сервісів** `checks: [ServiceCheck]` (ADR-0024): кожен = `ServiceID` + `coworkEnabled` + `[ResolvedComponent]` + computed `status` = worst-of-N. `worstProblem` → найсерйозніший стан усіх увімкнених (сигнатура `ServiceStatus?` збережена). ADR-0013, ADR-0024 |
 | **MonitoredServices** | Чистий Codable value-конфіг «які логічні сервіси моніторити» (#89, ADR-0024): `claudeCodeEnabled`/`webDesktopEnabled` + `WebDesktopMode` (`chatOnly`/`chatAndCowork`). `Claude API` завжди-on, не конфігурується. Forward-compat декод (невідомий режим → `.chatOnly`). `static default` = обидва on, `chatOnly` |
 | **StatusClient** | HTTP-seam status-ендпоінта (`TokenPaceKit`), дзеркало `UsageClient`: чисті `buildRequest()` (обов'язковий `User-Agent`, без auth) / `decode(from:)` окремо від `fetch(transport:)`. Будь-який збій → `StatusFetchError` → shell робить `StatusHealth.unknown` — **не** ескалює usage 429-backoff. ADR-0013 |
+| **IncidentVisibility** | Чистий гейт «які інциденти показувати» (#279, `TokenPaceKit`): відкидає закриті, чужі (перетин `components[].name` із `StatusHealth.monitoredComponentNames`), уже зелені та застарілі. Дає `VisibleIncident` — назву, стадію (`IncidentStage`), severity (worst-of лише по **моніторених** компонентах, щоб колір ішов з компонентів), `shortlink`, вік і набір `updateIDs`. ADR-0071 §4, §9 |
+| **EpisodeSubscription / EpisodeEvaluator** | Чиста модель підписки на епізод (#279, `TokenPaceKit`): персистований стан (`isFollowing`, `seenUpdateIDs`, дебаунс-якір) + `evaluate(...)`, що з (попередній стан, поточний пол) дає банери й новий стан. Уся логіка нотифікацій тестується без моків `UNUserNotificationCenter` — той самий розкол, що `WorkAvailability` + `NotificationSchedule`. ADR-0071 §5–§7 |
+| **StatusPayloadFingerprint / StatusPayloadLog** | Відбиток «суттєвої» частини payload-а (відсортовані статуси компонентів + `id`/стадія/набір `update.id` кожного інциденту) і dev-JSONL, що пише сирі тіла лише на зміну відбитка. Інструмент для закриття відкритих питань ADR-0071 живим трафіком. ADR-0071 §10 |
+| **IncidentNotificationDelegate** | `UNUserNotificationCenterDelegate` (shell): клік по банеру відкриває сторінку інциденту, дія «Unfollow» гасить підписку. **Не** `@MainActor` — UN викликає делегат на власній черзі, і `@MainActor`-код там дає `dispatch_assert_queue` (той самий трап, що описаний у `BackToWorkNotifier`) |
 | **StatusCadence** | Чистий seam ввічливої частоти (`TokenPaceKit`): `interval = max(floor, usageInterval)`. Без власного таймера — хантажиться з usage-tick. **Дві підлоги:** `floor` = 5 хв (все operational); `problemFloor` = 60 с (щойно є проблема). ADR-0013 |
 
 ## Persistence, міграція, Settings, архіватор
@@ -33,7 +60,7 @@ live-оновленням щополу: update interval + токен (read/expir
 |---|---|
 | **PersistedConfig** | Перший persistence-шар (#71, ADR-0023) — тонка `@MainActor`-обгортка над `UserDefaults.standard`. Фаза 1 почалась з `lastRunVersion`; шов розширено ключами: `calmMenuBarColors` (#105), `resetCountdownModeMenuBar` (#103), `showServiceStatusDot` (#31), `showExtraUsage` (default-ON, #144/#146 — **меню-барна** іконка ¤), видимість секцій дропдауна
 (`modelLimitsVisibility` / `extraUsageVisibility`, raw `PopupSectionVisibility`, default `.nonCalm`,
-#211/ADR-0072 — попап; перший мігрує з булевого `showModelSpecificLimits`), monitored services (#89), `automaticUpdateChecks` (#37), архіватор (`archiveEnabled`/`archiveDestination`/`lastArchiveSync`, #110), нотифікація «Back to work!» (`backToWorkEnabled` default-OFF / `notifyWindowStartMinute` / `notifyWindowEndMinute` / `notifySuppressDays` / внутрішній `backToWorkWasBlocked`, #160), журнал використання (`journalEnabled` default-OFF, #242/ADR-0067), геометрія вікна Settings (`settingsWindowFrame` = `[x,y,w,h]`, ADR-0069 — єдиний ключ *системного* штибу тут; свідомий виняток із межі 0023, бо значення треба **провалідувати до застосування**, а `setFrameAutosaveName` відновлює фрейм раніше, ніж це можливо). Рішення про міграцію — у чистому `MigrationPlan`. ADR-0023, 0069 |
+#211/ADR-0072 — попап; перший мігрує з булевого `showModelSpecificLimits`), monitored services (#89), `automaticUpdateChecks` (#37), архіватор (`archiveEnabled`/`archiveDestination`/`lastArchiveSync`, #110), нотифікація «Back to work!» (`backToWorkEnabled` default-OFF / `notifyWindowStartMinute` / `notifyWindowEndMinute` / `notifySuppressDays` / внутрішній `backToWorkWasBlocked`, #160), журнал використання (`journalEnabled` default-OFF, #242/ADR-0067), інциденти (`episodeSubscription` — JSON-блоб підписки на епізод, що **має пережити рестарт**, бо інциденти тривають годинами; `incidentNotifyEnabled` default-OFF; `incidentMaxAgeHours`; dev-only `statusPayloadLogEnabled`, #279/ADR-0071), геометрія вікна Settings (`settingsWindowFrame` = `[x,y,w,h]`, ADR-0069 — єдиний ключ *системного* штибу тут; свідомий виняток із межі 0023, бо значення треба **провалідувати до застосування**, а `setFrameAutosaveName` відновлює фрейм раніше, ніж це можливо). Рішення про міграцію — у чистому `MigrationPlan`. ADR-0023, 0069 |
 | **MigrationPlan** | Чистий предикат on-launch міграції конфігу (#71, ADR-0023): `transition(stored:current:)` → `firstRun`/`unchanged`/`upgraded(from:to:)`. Порівняння — рядкова нерівність (каркас); повний SemVer-compare відкладено. Реюз у Фазі 2 |
 | **LaunchAtLogin / LaunchAtLoginController** | Чисте ядро (#14): `Status` — framework-free дзеркало `SMAppService.Status` + предикати `shouldAttemptRegister` (opt-out на `.notRegistered` **і** `.notFound`, #69). Shell-glue над `SMAppService.mainApp`: `enable()`/`disable()`, `isAppBundle` (гейт opt-out auto-register лише на `.app`, #69). ADR-0012, ADR-0018 |
 | **WorkAvailability / NotificationSchedule / SuppressDays / BackToWorkNotifier** | Нотифікація «Back to work!» (#160, ADR-0039). Чисте ядро в `TokenPaceKit`: `WorkAvailability.canWork(_:)` — предикат «чи можна працювати» (реюз `CreditsPacing.anyBaseLimitExhausted`+`isSpending`); `NotificationSchedule.isAllowed(...)` — quiet-hours гейт (AND вікна годин і suppress-дня; wrap через опівніч; **Правило A** — день прив'язаний до відкриття вікна) + `windowLengthMinutes`; `SuppressDays` — String-enum (never/friSat/satSun) з forward-compatible decode. Shell: `AppDelegate.apply` детектить фронт `blocked→unblocked` через персистований `PersistedConfig.backToWorkWasBlocked` (переживає рестарт і toggle off→on; трекінг завжди, постинг лише за enabled); `BackToWorkNotifier` — тонка `UNUserNotificationCenter`-обгортка (лениза авторизація при першому вмиканні, `.app`-only). ADR-0039 |

@@ -260,8 +260,12 @@ struct StatusHealthWorstProblemTests {
 struct StatusIncidentsIgnoredTests {
 
     /// A real-shape summary where the tracked components are `operational` but an active `major`
-    /// incident lists some (the Mythos/Fable suspension case). Decoding it and mapping must yield
-    /// operational states — incidents are not decoded, so they cannot change the lines.
+    /// incident lists some (the Mythos/Fable suspension case).
+    ///
+    /// Since #279 the incident **is** decoded — so this is now the stronger claim: even with an
+    /// `incidents[]` in hand, carrying `major` impact and naming both components, service state
+    /// still comes solely from `components[].status` (ADR-0013 §2, which ADR-0071 §1 narrows but
+    /// does not repeal).
     @Test func operationalDespiteActiveMajorIncident() throws {
         let json = """
         {"page":{"name":"Claude"},
@@ -271,15 +275,21 @@ struct StatusIncidentsIgnoredTests {
            {"name":"Claude API (api.anthropic.com)","status":"operational"},
            {"name":"Claude Code","status":"operational"}],
          "incidents":[
-           {"name":"We've suspended access to Claude Mythos 5 and Claude Fable 5",
+           {"id":"mythosfable01","name":"We've suspended access to Claude Mythos 5 and Claude Fable 5",
             "status":"monitoring","impact":"major",
-            "components":[{"name":"Claude API (api.anthropic.com)"},{"name":"Claude Code"}]}],
+            "components":[
+              {"name":"Claude API (api.anthropic.com)","status":"operational"},
+              {"name":"Claude Code","status":"operational"}]}],
          "scheduled_maintenances":[]}
         """.data(using: .utf8)!
 
         let summary = try StatusClient.decode(from: json)
         let health = StatusHealth.from(summary, config: .default)
 
+        // The incident is present and severe…
+        #expect(summary.incidents.count == 1)
+        #expect(summary.incidents.first?.impact == "major")
+        // …and every service line is still green.
         #expect(health.worstProblem == nil)
         #expect(check(.claudeCode, in: health)?.status == .operational)
         #expect(check(.claudeAPI, in: health)?.status == .operational)

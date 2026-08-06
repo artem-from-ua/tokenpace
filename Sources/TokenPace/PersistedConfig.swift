@@ -138,6 +138,17 @@ enum PersistedConfig {
         /// Whether the usage journal records each poll to an append-only JSONL file (#242). Default-off
         /// (opt-in) — writing to disk without asking is a habit we don't start. See the property.
         static let journalEnabled = "journalEnabled"
+        /// Whether raw status-page payloads are logged to a dev-only JSONL (#279, ADR-0071 §10).
+        /// Default-off, dev-tools only — see the property.
+        static let statusPayloadLogEnabled = "statusPayloadLogEnabled"
+        /// The user's subscription to the current status-page episode (#279), as a JSON blob. See
+        /// the property.
+        static let episodeSubscription = "episodeSubscription"
+        /// Whether banners fire for an episode the user is following (#279). Default-off (opt-in) —
+        /// see the property.
+        static let incidentNotifyEnabled = "incidentNotifyEnabled"
+        /// Hide incidents older than this many hours; `0` means no limit (#279, ADR-0071 §9).
+        static let incidentMaxAgeHours = "incidentMaxAgeHours"
         /// The Settings window's last frame, `[x, y, width, height]` in screen coordinates (ADR-0069).
         /// See the property.
         static let settingsWindowFrame = "settingsWindowFrame"
@@ -545,6 +556,63 @@ enum PersistedConfig {
     static var journalEnabled: Bool {
         get { defaults.object(forKey: Key.journalEnabled) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.journalEnabled) }
+    }
+
+    /// The user's subscription to the current status-page episode (#279), or the empty state when
+    /// they are not following anything.
+    ///
+    /// Persisted rather than held in memory because incidents run for hours — the live measurement
+    /// was 429 minutes — so a subscription that did not survive a relaunch would routinely be lost
+    /// mid-outage, which is precisely when it matters. A JSON blob for the same reason
+    /// ``monitoredServices`` is one: it is a small record with sub-state, and a decode failure
+    /// degrades to "not following" rather than corrupting anything.
+    static var episodeSubscription: EpisodeSubscription {
+        get {
+            guard let data = defaults.data(forKey: Key.episodeSubscription),
+                  let decoded = try? JSONDecoder().decode(EpisodeSubscription.self, from: data)
+            else { return .none }
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            defaults.set(data, forKey: Key.episodeSubscription)
+        }
+    }
+
+    /// Whether banners fire for the episode the user is following (#279). **Default-off** (opt-in).
+    ///
+    /// This gates *delivery*, not subscription: the user still has to follow an episode explicitly
+    /// from the popup. It is deliberately not the "notify me about incidents" global switch ADR-0071
+    /// rejected (alternative A) — with this on and nothing followed, nothing is ever delivered.
+    static var incidentNotifyEnabled: Bool {
+        get { defaults.object(forKey: Key.incidentNotifyEnabled) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.incidentNotifyEnabled) }
+    }
+
+    /// Hide incidents older than this (#279, ADR-0071 §9), or `nil` for no limit.
+    ///
+    /// Exists because the page keeps "zombies" open for days — the sample held one for 2741 minutes —
+    /// and a two-day-old incident says nothing about whether work is possible right now. Stored in
+    /// hours; `0` means no limit, so an unset key reads as "no limit" rather than "hide everything".
+    static var incidentMaxAge: TimeInterval? {
+        get {
+            let hours = defaults.object(forKey: Key.incidentMaxAgeHours) as? Int ?? 0
+            return hours > 0 ? TimeInterval(hours) * 3600 : nil
+        }
+        set {
+            let hours = newValue.map { Int(($0 / 3600).rounded()) } ?? 0
+            defaults.set(hours, forKey: Key.incidentMaxAgeHours)
+        }
+    }
+
+    /// Whether raw `status.claude.com` payloads are recorded to a dev-only JSONL when their material
+    /// content changes (#279, ADR-0071 §10). **Default-off**, and reachable only from Development
+    /// tools (⌥ + `devToolsEnabled`) — it exists to answer the ADR's deliberately-open questions from
+    /// real traffic, not as a user-facing feature. The payloads are public data, but writing to disk
+    /// without asking is a habit we don't start (same reasoning as ``journalEnabled``).
+    static var statusPayloadLogEnabled: Bool {
+        get { defaults.object(forKey: Key.statusPayloadLogEnabled) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.statusPayloadLogEnabled) }
     }
 
     /// The Settings window's last frame as `[x, y, width, height]` in screen coordinates (ADR-0069),

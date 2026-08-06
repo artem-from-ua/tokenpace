@@ -43,8 +43,8 @@ public enum StatusClient {
     // MARK: decode (pure seam)
 
     /// Decode a 200 body into a ``StatusSummary``. Any `DecodingError` maps to
-    /// ``StatusFetchError/decode``. Unknown keys (`status`, `incidents`, `page`, …) are ignored;
-    /// an absent `components` array decodes to `[]`.
+    /// ``StatusFetchError/decode``. Unknown keys (`status`, `scheduled_maintenances`, `page`, …) are
+    /// ignored; absent `components` / `incidents` arrays decode to `[]`.
     public static func decode(from data: Data) throws -> StatusSummary {
         do {
             return try JSONDecoder().decode(StatusSummary.self, from: data)
@@ -62,6 +62,18 @@ public enum StatusClient {
     /// - Parameter transport: Injected for testing; defaults to `URLSession.shared`. Reuses the
     ///   ``UsageTransport`` seam (same `data(for:)` signature) — no second protocol needed.
     public static func fetch(transport: UsageTransport = URLSession.shared) async throws -> StatusSummary {
+        try await fetchRaw(transport: transport).summary
+    }
+
+    /// Like ``fetch(transport:)`` but also hands back the **verbatim** response body, for the dev
+    /// payload log (ADR-0071 §10) which records raw JSON rather than a re-encoded digest — the point
+    /// of that log is to study exactly what the server sent.
+    ///
+    /// ``fetch(transport:)`` is expressed in terms of this, so there is one implementation of the
+    /// request/response handling and existing callers are untouched.
+    public static func fetchRaw(
+        transport: UsageTransport = URLSession.shared
+    ) async throws -> (summary: StatusSummary, body: Data) {
         let request = buildRequest()
 
         let data: Data
@@ -82,8 +94,9 @@ public enum StatusClient {
         switch http.statusCode {
         case 200:
             let summary = try decode(from: data)
-            AppLogger.network.notice("status 200 ok components=\(summary.components.count, privacy: .public)")
-            return summary
+            AppLogger.network.notice(
+                "status 200 ok components=\(summary.components.count, privacy: .public) incidents=\(summary.incidents.count, privacy: .public)")
+            return (summary, data)
         default:
             // The status page carries no secrets and no per-status meaning beyond "not 200" for our
             // purposes — both map to `.decode` (→ `StatusHealth.unknown`), so we do not model

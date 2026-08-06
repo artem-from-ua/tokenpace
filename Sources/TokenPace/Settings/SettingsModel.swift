@@ -118,6 +118,11 @@ final class SettingsModel {
 
     var backToWorkEnabled = false
     var extraUsageNotifyEnabled = false
+    /// Whether banners for a followed incident episode are delivered (#279). Gates delivery only —
+    /// the user still opts in per episode from the popup.
+    var incidentNotifyEnabled = false
+    /// Hide incidents older than this many hours in the popup; `0` = no limit (#279).
+    var incidentMaxAgeHours = 0
     var notifyStartMinute = 0
     var notifyEndMinute = 0
     var suppressDays: SuppressDays = .never
@@ -347,6 +352,8 @@ final class SettingsModel {
 
         backToWorkEnabled = PersistedConfig.backToWorkEnabled
         extraUsageNotifyEnabled = PersistedConfig.extraUsageNotifyEnabled
+        incidentNotifyEnabled = PersistedConfig.incidentNotifyEnabled
+        incidentMaxAgeHours = PersistedConfig.incidentMaxAge.map { Int(($0 / 3600).rounded()) } ?? 0
         notifyStartMinute = PersistedConfig.notifyWindowStartMinute
         notifyEndMinute = PersistedConfig.notifyWindowEndMinute
         suppressDays = PersistedConfig.notifySuppressDays
@@ -603,6 +610,29 @@ final class SettingsModel {
         } else {
             refreshAuthState()
         }
+    }
+
+    /// Toggle delivery of incident banners (#279). Shares the single authorization grant with the
+    /// other two notifications, requested lazily on first enable.
+    func setIncidentNotify(_ on: Bool) {
+        incidentNotifyEnabled = on
+        PersistedConfig.incidentNotifyEnabled = on
+        AppLogger.lifecycle.notice("incident: notify enabled set \(on, privacy: .public)")
+        if on {
+            onBackToWorkEnabled?({ [weak self] state in self?.applyAuthState(state) })
+        } else {
+            refreshAuthState()
+        }
+    }
+
+    /// Set the popup's incident age cut-off (#279). `0` means no limit.
+    func setIncidentMaxAgeHours(_ hours: Int) {
+        incidentMaxAgeHours = hours
+        PersistedConfig.incidentMaxAge = hours > 0 ? TimeInterval(hours) * 3600 : nil
+        AppLogger.lifecycle.notice("incident: max age set \(hours, privacy: .public)h")
+        // Reuse the monitored-services callback: the app re-resolves the status (and with it the
+        // visible incidents) on that signal, which is exactly what a changed age cut-off needs.
+        commitMonitoredServices()
     }
 
     func setNotifyWindow(start: Int, end: Int) {

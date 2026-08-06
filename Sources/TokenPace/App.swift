@@ -1,4 +1,5 @@
 import AppKit
+import UserNotifications
 import TokenPaceKit
 
 @main
@@ -191,6 +192,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// actor; it never blocks a poll and swallows any write error. Only writes on the live
     /// `.realNetwork` scenario and when the journal is enabled — both gates are checked at the seam.
     private let usageJournal = UsageJournal()
+    /// The dev-only raw status-payload log (#279). Constructed unconditionally — it is inert until
+    /// `PersistedConfig.statusPayloadLogEnabled` is set from Development tools, and holding it here
+    /// keeps the "last fingerprint" across polls so unchanged payloads never reach the disk.
+    private let statusPayloadLog = StatusPayloadLog()
+    /// The incidents the last successful status poll deemed visible (#279). Retained like
+    /// `lastStatusHealth` so a re-render between polls (⌥ pressed, a usage tick) keeps showing them
+    /// instead of blanking the section.
+    private var lastVisibleIncidents: [VisibleIncident] = []
+    /// Routes taps on incident banners (#279). Held for the process's lifetime — `UNUserNotificationCenter`
+    /// keeps only a weak reference to its delegate, so letting this go would silently stop routing.
+    private lazy var incidentNotificationDelegate = IncidentNotificationDelegate(
+        onUnfollowed: { [weak self] in self?.reRenderForCurrentTime() })
     /// The result of the last archive sync, retained so the Settings status line can show
     /// "Last archived: … · N files" between runs (#110). `nil` until the first sync completes.
     private(set) var lastArchiveSummary: LogArchiver.Summary?
@@ -297,6 +310,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // before the rest of launch depends on it (#71, ADR-0023). Phase 1 is a no-op scaffold that
         // only records the running version.
         runConfigMigrationsIfNeeded()
+
+        // #279: the notification delegate and the incident category must be in place before this
+        // method returns. A banner that *launched* the app is handed to the delegate immediately, so
+        // one installed later would arrive with nothing listening — the tap would be lost.
+        //
+        // Gated on `isSupported`: on a bare `swift run` there is no bundle, and merely *touching*
+        // `UNUserNotificationCenter.current()` raises `bundleProxyForCurrentProcess is nil` and kills
+        // the process at launch. Every other call in `BackToWorkNotifier` is behind the same guard for
+        // this reason; these two were the first to reach the centre from outside it.
+        if BackToWorkNotifier.isSupported {
+            UNUserNotificationCenter.current().delegate = incidentNotificationDelegate
+            BackToWorkNotifier.registerCategories()
+        }
+        popupVC.onToggleSubscription = { [weak self] in self?.toggleEpisodeSubscription() }
+        // The popup measures status/incident ages against the **scenario's** clock, not the wall
+        // clock: a date-decoupled stub freezes time, and mixing the two made a stub's "2h" render as
+        // "203d 11h" — the gap between the frozen frame and today.
+        popupVC.now = { [weak self] in self?.currentDate() ?? Date() }
 
         // A bogus `TOKENPACE_STUB` no longer falls through to the live network (#267) — say so, naming
         // the value and every id that would have worked, so the run isn't mistaken for what was asked
@@ -1175,6 +1206,100 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    // MARK: - Episode subscription (#279)
+
+    /// What the popup's single subscribe row should show right now, or `nil` to omit it.
+    private func currentSubscriptionState() -> EpisodeSubscriptionState? {
+        EpisodeEvaluator.rowState(
+            incidents: lastVisibleIncidents,
+            subscription: PersistedConfig.episodeSubscription)
+    }
+
+    /// Fold the latest poll into the episode subscription: persist the new state **unconditionally**,
+    /// post banners only when the user is following, notifications are enabled, and quiet hours allow.
+    ///
+    /// The unconditional persist is the same discipline as `detectBackToWorkEdge`: state that only
+    /// advances while a toggle is on will either replay an old edge or miss a new one the moment the
+    /// toggle flips.
+    private func advanceEpisodeSubscription() {
+        let (events, next) = EpisodeEvaluator.evaluate(
+            subscription: PersistedConfig.episodeSubscription,
+            incidents: lastVisibleIncidents,
+            now: currentDate())
+        PersistedConfig.episodeSubscription = next
+
+        guard !events.isEmpty, PersistedConfig.incidentNotifyEnabled else { return }
+        guard notificationsAllowedNow() else {
+            AppLogger.lifecycle.info("incident: suppressed by quiet hours")
+            return
+        }
+        for event in events {
+            postIncidentBanner(event)
+        }
+    }
+
+    /// Post one banner for an episode event. The quiet-hours and enablement gates are the caller's;
+    /// this only turns an event into words.
+    private func postIncidentBanner(_ event: EpisodeEvent) {
+        switch event {
+        case let .update(incidentID, name, body, severity):
+            BackToWorkNotifier.postIncident(
+                title: "\(Self.severityDot(severity)) \(name)",
+                body: body,
+                incidentID: incidentID)
+        case let .ended(reason):
+            // The two endings are different claims and must not be worded the same. Components green
+            // is "you can work"; a deployed fix is "they say it should be fixed" — overstating the
+            // second is exactly the false all-clear this feature exists to avoid.
+            switch reason {
+            case .componentsGreen:
+                BackToWorkNotifier.postIncident(
+                    title: "🟢 Claude is back",
+                    body: "The services you monitor are operational again.",
+                    incidentID: nil)
+            case .fixDeployed:
+                BackToWorkNotifier.postIncident(
+                    title: "🟡 Fix deployed",
+                    body: "Anthropic has deployed a fix and is monitoring for recovery.",
+                    incidentID: nil)
+            }
+        }
+    }
+
+    /// A coloured dot for the banner title. `UNNotificationContent` has no colour indicator of its
+    /// own, so the popup's visual language is carried by an emoji — simpler and more reliable than a
+    /// generated `UNNotificationAttachment` image (ADR-0071 §8 / design §7).
+    private static func severityDot(_ status: ServiceStatus) -> String {
+        switch status {
+        case .operational:      return "🟢"
+        case .degraded:         return "🟡"
+        case .partialOutage:    return "🟠"
+        case .majorOutage:      return "🔴"
+        case .underMaintenance: return "🔵"
+        case .unknown:          return "⚪"
+        }
+    }
+
+    /// Toggle the episode subscription from the popup's subscribe row.
+    ///
+    /// Subscribing seeds the seen-update set with everything already on screen, so the click cannot
+    /// immediately notify about text the user is looking at.
+    private func toggleEpisodeSubscription() {
+        let current = PersistedConfig.episodeSubscription
+        if current.isFollowing {
+            PersistedConfig.episodeSubscription = EpisodeEvaluator.unfollow()
+            AppLogger.lifecycle.info("incident: unfollowed the episode")
+        } else {
+            PersistedConfig.episodeSubscription = EpisodeEvaluator.follow(incidents: lastVisibleIncidents)
+            AppLogger.lifecycle.info(
+                "incident: followed the episode incidents=\(self.lastVisibleIncidents.count, privacy: .public)")
+            // Asking to be notified is the first moment authorization is actually needed — requesting
+            // it at launch would prompt users who never turn the feature on (#160's rule).
+            BackToWorkNotifier.requestAuthorizationIfNeeded { _ in }
+        }
+        reRenderForCurrentTime()
+    }
+
     /// Fetch the Claude status page when `StatusCadence` says it is due — riding the usage poll's
     /// heartbeat with a 5-min politeness floor (`max(floor, usageInterval)`), so it never hammers a
     /// third-party page even when the usage cadence is fast or thrashing on 429.
@@ -1195,10 +1320,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let health: StatusHealth
             let succeeded: Bool
             var fetchedSummary: StatusSummary?
+            var fetchedBody: Data?
             do {
-                let summary = try await StatusClient.fetch(transport: transport)
+                let (summary, body) = try await StatusClient.fetchRaw(transport: transport)
                 health = .from(summary, config: config)
                 fetchedSummary = summary
+                fetchedBody = body
                 succeeded = true
             } catch {
                 // Any failure → honest "unknown" (grey), and don't advance lastStatusSuccess so the
@@ -1209,6 +1336,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, !Task.isCancelled else { return }
             self.lastStatusHealth = health
             if succeeded { self.lastStatusSuccess = Date() }
+            // #279: recompute which incidents are worth showing, then fold the poll into the episode
+            // subscription. A failed poll leaves the previous list in place — an unreachable status
+            // page is not evidence that an incident ended.
+            if succeeded, let summary = fetchedSummary {
+                self.lastVisibleIncidents = IncidentVisibility.visible(
+                    in: summary, config: config, now: self.currentDate(),
+                    maxAge: PersistedConfig.incidentMaxAge)
+                self.advanceEpisodeSubscription()
+            }
             // Journal the successful status poll as its own data sample (#242) — same live-only /
             // enabled gates as the usage seam. Status rides a separate cadence, so it does **not** run
             // the usage gap detector; it is an independent sample in the shared file.
@@ -1217,6 +1353,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let record = JournalRecord.status(from: summary, health: health, now: self.currentDate())
                 let at = self.currentDate()
                 Task { [usageJournal = self.usageJournal] in await usageJournal.appendStatus(record, at: at) }
+            }
+            // Dev payload log (#279, ADR-0071 §10): the raw body, written only when the material
+            // content changed. Same live-only gate as the journal — a stubbed payload in a
+            // troubleshooting capture is worse than no capture at all.
+            if succeeded, let summary = fetchedSummary, let body = fetchedBody,
+               PersistedConfig.statusPayloadLogEnabled, self.currentScenario == .realNetwork {
+                let at = self.currentDate()
+                Task { [log = self.statusPayloadLog] in
+                    if await log.recordIfChanged(body: body, summary: summary, at: at) {
+                        AppLogger.journal.info("status-payload-log: recorded a material change")
+                    }
+                }
             }
             // Re-render with the new status against the retained usage output.
             self.reRenderForCurrentTime()
@@ -1851,6 +1999,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // medium→2, long→3). `nil` (off) maps to 0.
             behindMultiplier: PersistedConfig.farBehindInterval.multiplier ?? 0)
             .withAwaitingInput(awaitingInput)   // #233: graft the awaiting-input indicator (right of brand)
+            // #279: graft the incidents (⌥ swaps the service rows for them) and the state of the one
+            // subscribe row. Both ride the status poll, not this usage poll, so they are grafted for
+            // the same reason the awaiting-input breakdown is.
+            .withIncidents(lastVisibleIncidents)
+            .withSubscription(currentSubscriptionState())
             // Graft the brand-coloured plan label ("Max 5x") from the Keychain rate-limit tier — a
             // plan mark, not a secret. `nil` (no tier / unreadable creds) draws just "Claude".
             .withPlanLabel(claudePlanLabel(rateLimitTier: output.diagnostics?.token?.rateLimitTier)))

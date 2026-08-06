@@ -100,9 +100,53 @@ enum BackToWorkNotifier {
              title: "Now using Extra Usage Credit", body: body)
     }
 
+    /// Post an incident banner for the episode the user is following (#279).
+    ///
+    /// Unlike the other two, this one is **actionable**: it carries the `INCIDENT` category so the
+    /// banner offers "Unfollow", and `incidentID` in `userInfo` so a click opens that incident's page
+    /// rather than the generic status page. `nil` means the event is not about one specific incident
+    /// (the episode ended), and a click then just brings the app forward.
+    static func postIncident(title: String, body: String, incidentID: String?) {
+        post(kind: "incident", idPrefix: "incident", title: title, body: body,
+             category: incidentCategoryIdentifier,
+             userInfo: incidentID.map { [incidentIDKey: $0] } ?? [:])
+    }
+
+    /// Category identifier for incident banners — carries the `Unfollow` action.
+    static let incidentCategoryIdentifier = "INCIDENT"
+    /// Action identifier for the banner's `Unfollow` button.
+    static let unfollowActionIdentifier = "UNFOLLOW"
+    /// `userInfo` key holding the incident id a banner refers to.
+    static let incidentIDKey = "incidentID"
+
+    /// Register the incident category, so its banners show an `Unfollow` button.
+    ///
+    /// Must run before `applicationDidFinishLaunching` returns, together with setting the centre's
+    /// delegate: a notification that *launched* the app is delivered to the delegate immediately, and
+    /// one registered later would arrive with nothing listening.
+    static func registerCategories() {
+        guard isSupported else { return }
+        let unfollow = UNNotificationAction(
+            identifier: unfollowActionIdentifier, title: "Unfollow", options: [])
+        center.setNotificationCategories([
+            UNNotificationCategory(
+                identifier: incidentCategoryIdentifier,
+                actions: [unfollow],
+                intentIdentifiers: [],
+                options: []),
+        ])
+    }
+
     /// Shared authorization-gated post. Runs entirely on UN's own queue (nothing here touches
     /// `@MainActor` state); a fresh identifier per call so successive edges each surface their own banner.
-    private static func post(kind: String, idPrefix: String, title: String, body: String) {
+    private static func post(
+        kind: String,
+        idPrefix: String,
+        title: String,
+        body: String,
+        category: String? = nil,
+        userInfo: [String: Any] = [:]
+    ) {
         guard isSupported else { return }
         center.getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized
@@ -114,6 +158,8 @@ enum BackToWorkNotifier {
             content.title = title
             content.body = body
             content.sound = .default
+            if let category { content.categoryIdentifier = category }
+            content.userInfo = userInfo
             let request = UNNotificationRequest(
                 identifier: "\(idPrefix)-\(UUID().uuidString)",
                 content: content,

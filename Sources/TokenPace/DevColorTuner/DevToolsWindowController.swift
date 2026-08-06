@@ -112,6 +112,12 @@ final class DevToolsWindowController: NSWindowController {
     private let copyHexButton = NSButton(title: "Copy HEX", target: nil, action: nil)
     private let resetButton = NSButton(title: "Reset", target: nil, action: nil)
     private let resetAllButton = NSButton(title: "Reset all", target: nil, action: nil)
+    /// Toggles the raw status-payload JSONL (#279, ADR-0071 §10) — the instrument for answering the
+    /// ADR's deliberately-open questions from real traffic rather than guesswork.
+    private let payloadLogCheckbox = NSButton(
+        checkboxWithTitle: "Log status payloads (JSONL)", target: nil, action: nil)
+    private let revealPayloadLogButton = NSButton(
+        title: "Reveal in Finder", target: nil, action: nil)
     private var editorControls: [NSControl] = []
 
     /// A live preview of the menu-bar dropdown, shown in a separate always-on-top window that opens with
@@ -363,7 +369,22 @@ final class DevToolsWindowController: NSWindowController {
         resetAllButton.action = #selector(resetAll)
         resetAllButton.translatesAutoresizingMaskIntoConstraints = false
 
-        for view in [stubTitleLabel, stubPopUp, stubSummaryLabel, sortControl, scroll, detail, resetAllButton] {
+        payloadLogCheckbox.target = self
+        payloadLogCheckbox.action = #selector(payloadLogToggled)
+        payloadLogCheckbox.state = PersistedConfig.statusPayloadLogEnabled ? .on : .off
+        payloadLogCheckbox.toolTip =
+            "Append each materially-changed status.claude.com response to a JSONL file "
+            + "(ADR-0071 §10). Live network only; unchanged payloads are not written."
+        payloadLogCheckbox.translatesAutoresizingMaskIntoConstraints = false
+
+        revealPayloadLogButton.bezelStyle = .rounded
+        revealPayloadLogButton.controlSize = .small
+        revealPayloadLogButton.target = self
+        revealPayloadLogButton.action = #selector(revealPayloadLog)
+        revealPayloadLogButton.translatesAutoresizingMaskIntoConstraints = false
+
+        for view in [stubTitleLabel, stubPopUp, stubSummaryLabel, payloadLogCheckbox, revealPayloadLogButton,
+                     sortControl, scroll, detail, resetAllButton] {
             content.addSubview(view)
         }
 
@@ -380,7 +401,15 @@ final class DevToolsWindowController: NSWindowController {
             stubSummaryLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: Metrics.padding),
             stubSummaryLabel.widthAnchor.constraint(equalToConstant: Metrics.listWidth),
 
-            sortControl.topAnchor.constraint(equalTo: stubSummaryLabel.bottomAnchor, constant: 12),
+            payloadLogCheckbox.topAnchor.constraint(equalTo: stubSummaryLabel.bottomAnchor, constant: 12),
+            payloadLogCheckbox.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: Metrics.padding),
+            payloadLogCheckbox.widthAnchor.constraint(lessThanOrEqualToConstant: Metrics.listWidth),
+
+            revealPayloadLogButton.topAnchor.constraint(equalTo: payloadLogCheckbox.bottomAnchor, constant: 4),
+            revealPayloadLogButton.leadingAnchor.constraint(
+                equalTo: content.leadingAnchor, constant: Metrics.padding + 18),
+
+            sortControl.topAnchor.constraint(equalTo: revealPayloadLogButton.bottomAnchor, constant: 12),
             sortControl.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: Metrics.padding),
             sortControl.widthAnchor.constraint(equalToConstant: Metrics.listWidth),
 
@@ -796,6 +825,33 @@ final class DevToolsWindowController: NSWindowController {
         guard let scenario = stubPopUp.selectedItem?.representedObject as? StubScenario else { return }
         stubSummaryLabel.stringValue = scenario.summary
         onStubChange?(scenario)
+    }
+
+    /// Flip the raw status-payload log (#279). Takes effect on the next status poll — no restart —
+    /// because the poll reads the flag each time rather than caching it.
+    @objc private func payloadLogToggled(_ sender: NSButton) {
+        let enabled = sender.state == .on
+        PersistedConfig.statusPayloadLogEnabled = enabled
+        AppLogger.journal.info("status-payload-log: enabled set \(enabled, privacy: .public)")
+    }
+
+    /// Reveal this month's payload log, or the containing folder when nothing has been written yet
+    /// (the log only appears once a material change has been captured, so "no file" is the normal
+    /// state right after enabling it).
+    @objc private func revealPayloadLog() {
+        let directory = UsageJournal.defaultDirectory
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM"
+        let suffix = UsageJournal.runningFromApplications ? "" : "-dev"
+        let file = directory.appendingPathComponent(
+            "status-payloads\(suffix)-\(formatter.string(from: Date())).jsonl")
+
+        if FileManager.default.fileExists(atPath: file.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([file])
+        } else {
+            NSWorkspace.shared.open(directory)
+        }
     }
 
     @objc private func sliderMoved(_ sender: NSSlider) {

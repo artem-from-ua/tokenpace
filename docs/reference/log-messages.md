@@ -17,7 +17,7 @@ unified logging) — see [`Sources/TokenPaceKit/AppLogger.swift`](../../Sources/
   - `lifecycle` — app launch, launch-at-login, sleep/wake, network up/down, polling-interval changes.
   - `ui` — menu-bar rendering diagnostics (defined, currently unused).
   - `archive` — session-log archiver: sync start/finish, file/byte counts, failures (ADR-0030). File paths only at `.debug` (they contain project names).
-  - `journal` — usage journal (#242, ADR-0067): append-write failures, fixture generation. Percentages only, never a token.
+  - `journal` — usage journal (#242, ADR-0067) and the dev status-payload JSONL (#279, ADR-0071 §10): append-write failures, fixture generation. Percentages only, never a token.
 
 ## Collecting logs — methods & gotchas
 
@@ -142,6 +142,10 @@ In the tables below, `<…>` marks an interpolated value.
 | — | `archive` | `.error` | `archive: sync failed — <error>` | `performArchiveSync` — the sync threw (e.g. destination unwritable); marker not advanced, retried next heartbeat (#110) |
 | — | `lifecycle` | `.info` | `back-to-work: suppressed by quiet hours` | `maybePostBackToWork` — a blocked→unblocked edge fired but the current time is outside the allowed-hours window or on a suppressed weekday, so nothing is posted (#160, ADR-0039) |
 | — | `lifecycle` | `.info` | `extra-usage: suppressed by quiet hours` | `maybePostExtraUsage` — a not-spending→spending-on-credits edge fired but the current time is outside the shared allowed-hours window or on a suppressed weekday, so nothing is posted |
+| — | `lifecycle` | `.info` | `incident: suppressed by quiet hours` | `advanceEpisodeSubscription` — a followed episode produced an event but the current time is outside the shared allowed-hours window or on a suppressed weekday, so no banner is posted (#279, ADR-0071 §8) |
+| — | `lifecycle` | `.info` | `incident: followed the episode incidents=<n>` | `toggleEpisodeSubscription` — the user clicked the popup's subscribe row; `<n>` is how many incidents the episode covered at that moment (#279) |
+| — | `lifecycle` | `.info` | `incident: unfollowed the episode` | `toggleEpisodeSubscription` — the user clicked the row again to stop following |
+| — | `journal` | `.info` | `status-payload-log: recorded a material change` | `pollStatusIfDue` (App) — the status payload differed from the last written line and was appended to the dev JSONL (#279, ADR-0071 §10) |
 
 ## `Sources/TokenPace/LogArchiver.swift`
 
@@ -168,6 +172,31 @@ category (the dev `TOKENPACE_GENERATE_JOURNAL` hook).
 | — | `journal` | `.error` | `journal write() failed: errno=<errno>` | `appendLocked` — a `write()` returned ≤ 0 mid-line |
 | — | `journal` | `.notice` | `journal: generating fixture — <days> days, <n> records` | `generateJournalFixture` (App) — the dev `TOKENPACE_GENERATE_JOURNAL` hook started synthesizing a journal |
 | — | `journal` | `.notice` | `journal: fixture written` | `generateJournalFixture` (App) — the fixture was written; the app then terminates |
+
+## `Sources/TokenPace/StatusPayloadLog.swift`
+
+Dev-only JSONL of raw `status.claude.com` payloads (#279, ADR-0071 §10), written only when the
+material content changes. Mirrors `UsageJournal`'s error discipline exactly — every failure is
+logged and swallowed, because a diagnostic log that can break the app it diagnoses is worth nothing.
+The "recorded a material change" line is emitted from `App.swift` under the same `journal` category,
+and the enable/disable line from `DevToolsWindowController.swift`.
+
+| Line | Category | Level | Message | When |
+|------|----------|-------|---------|------|
+| — | `journal` | `.error` | `status-payload-log: write failed <error>` | `writeLine` — the line could not be serialised or the directory could not be prepared; the sample is dropped, the poll continues |
+| — | `journal` | `.error` | `status-payload-log: open failed errno=<errno>` | `appendLocked` — `open()` on the payload file failed |
+| — | `journal` | `.error` | `status-payload-log: lock failed errno=<errno>` | `appendLocked` — `flock(LOCK_EX)` failed; the line is dropped rather than risk an interleaved write |
+| — | `journal` | `.error` | `status-payload-log: write() failed errno=<errno>` | `appendLocked` — a `write()` returned ≤ 0 mid-line |
+| — | `journal` | `.info` | `status-payload-log: enabled set <bool>` | `payloadLogToggled` (DevTools) — the Development-tools checkbox was flipped; takes effect on the next status poll |
+
+## `Sources/TokenPace/IncidentNotificationDelegate.swift`
+
+Routes taps on incident banners (#279). Runs on `UNUserNotificationCenter`'s own queue, **not** the
+main actor — see the type doc for why touching `@MainActor` state from here traps.
+
+| Line | Category | Level | Message | When |
+|------|----------|-------|---------|------|
+| — | `lifecycle` | `.info` | `incident: unfollowed from a banner action` | `unfollow` — the user pressed the banner's "Unfollow" button; the subscription is cleared and the popup re-renders |
 
 ## `Sources/TokenPace/ShellEnvironment.swift`
 
@@ -220,6 +249,8 @@ token itself never is.
 | — | `lifecycle` | `.notice` | `back-to-work: suppress set <raw>` | user picked a "Suppress notifications on" radio; `<raw>` is the raw `SuppressDays` (#160) |
 | — | `lifecycle` | `.notice` | `back-to-work: try (forced) notification` | user pressed the Settings "Try" button, forcing a `postBackToWork` that bypasses edge-detection and quiet hours (#193) |
 | — | `lifecycle` | `.notice` | `extra-usage: notify enabled set <bool>` | user toggled the "Switching to Extra Usage" notification switch |
+| — | `lifecycle` | `.notice` | `incident: notify enabled set <bool>` | user toggled the "Claude service incidents" notification switch; gates delivery only — episodes are still followed per-incident from the popup (#279) |
+| — | `lifecycle` | `.notice` | `incident: max age set <n>h` | user changed "Hide incidents older than" in Extra features; `0` means no limit (#279, ADR-0071 §9) |
 | — | `lifecycle` | `.notice` | `extra-usage: try (forced) notification` | user pressed the "Switching to Extra Usage" Settings "Try" button, forcing a `postExtraUsage` that bypasses edge-detection and quiet hours |
 
 ## `Sources/TokenPace/Settings/AppearancePane.swift`
@@ -305,10 +336,10 @@ clears the indicator; the screen reasons only park it, keeping the last count fo
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
 | 52 | `network` | `.error` | `status decode failed` | `decode(from:)` — JSON `DecodingError` |
-| 72 | `network` | `.error` | `status request transport error: <error>` | `transport.data(for:)` threw |
-| 78 | `network` | `.error` | `status response not HTTP` | response was not `HTTPURLResponse` |
-| 85 | `network` | `.notice` | `status 200 ok components=<count>` | HTTP 200; logs component count |
-| 91 | `network` | `.error` | `status request failed: HTTP <statusCode>` | non-200 status |
+| 84 | `network` | `.error` | `status request transport error: <error>` | `transport.data(for:)` threw |
+| 90 | `network` | `.error` | `status response not HTTP` | response was not `HTTPURLResponse` |
+| 97 | `network` | `.notice` | `status 200 ok components=<count> incidents=<n>` | HTTP 200; logs the component count and, since #279, the number of incidents the payload carried |
+| 104 | `network` | `.error` | `status request failed: HTTP <statusCode>` | non-200 status |
 
 ## `Sources/TokenPaceKit/GitHubRelease.swift`
 
@@ -381,22 +412,25 @@ One log line per interval change. The format is built by
 
 | Category | Calls | Files |
 |----------|-------|-------|
-| `network` | 28 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `UpdateInstaller` (3), `PollingEngine` (2), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
-| `keychain` | 10 | `ClaudeCLIRefresher` (6), `TokenProvider` (3), `PollingEngine` (1) |
-| `lifecycle` | 103 | `App` (43), `SettingsModel` (27), `UpdateInstaller` (13), `PollingShell` (7), `BackToWorkNotifier` (6), `AwaitingInputWatcher` (5), `ShellEnvironment` (1), `PollingEngine` (1) |
+| `network` | 29 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `UpdateInstaller` (3), `PollingEngine` (2), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
+| `keychain` | 12 | `ClaudeCLIRefresher` (6), `TokenProvider` (3), `PollingEngine` (1) |
+| `lifecycle` | 109 | `App` (46), `SettingsModel` (29), `UpdateInstaller` (13), `PollingShell` (7), `BackToWorkNotifier` (6), `AwaitingInputWatcher` (5), `ShellEnvironment` (1), `PollingEngine` (1), `IncidentNotificationDelegate` (1) |
 | `ui` | 1 | `AppearancePane` (1) |
 | `archive` | 5 | `App` (3), `LogArchiver` (2) |
-| `journal` | 6 | `UsageJournal` (4), `App` (2) |
+| `journal` | 12 | `UsageJournal` (4), `StatusPayloadLog` (4), `App` (3), `DevToolsWindowController` (1) |
 
-**Total: 153 log statements** — `.error` ×41, `.notice` ×102, `.info` ×7, `.debug` ×3.
+**Total: 168 log statements** — `.error` ×46, `.notice` ×104, `.info` ×13, `.debug` ×5.
 
 > Counts recomputed from the source in #275 (the previous figures had drifted over several releases —
 > `SettingsModel` and `BackToWorkNotifier` were missing entirely). Regenerate with:
 > `grep -rn 'AppLogger\.<category>\.' Sources/ | grep -v AppLogger.swift`.
 
 The `journal: enabled set <bool>` toggle line (`SettingsModel`) is a `lifecycle` statement (like the
-other Settings-toggle lines), counted under `lifecycle`; the six `journal`-category statements are the
-four `UsageJournal` write-failure lines plus the two `App` fixture-generation lines.
+other Settings-toggle lines), counted under `lifecycle`. The twelve `journal`-category statements are
+the four `UsageJournal` write-failure lines, the four `StatusPayloadLog` ones that mirror them, the
+three in `App` (two fixture-generation lines plus the payload-log "recorded a material change"), and
+the Development-tools toggle in `DevToolsWindowController` — the first `journal` statement at
+`.info` rather than `.error`/`.notice`.
 
 The `five_hour idle …` / `window active again` pair is one call site (`sessionIdleTransition`) that
 emits one of two strings; it is counted once under `PollingEngine` network. The
