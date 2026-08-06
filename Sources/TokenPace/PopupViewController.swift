@@ -372,6 +372,26 @@ final class PopupBarView: NSView {
         return NSRect(x: sx0, y: rect.minY, width: sx1 - sx0, height: rect.height)
     }
 
+    /// The min-width pill for a **degenerate** (zero-length) span at fraction `f` — the shape
+    /// ``stripRect(from:to:in:)`` produces for a hair-thin span, but for a span of exactly zero, where it
+    /// returns `nil` instead. Same ``minStripWidth`` floor and same end-snapping, so a 0 % strip and a
+    /// 0.3 %-strip are indistinguishable rather than one of them vanishing.
+    ///
+    /// Needed because `usage == time == 0` is a real, recurring state, not a rounding artefact: after
+    /// every 5-hour reset `PollingEngine.applyIdleGrace`/`suppress` (ADR-0041, ADR-0045) hold a "ready"
+    /// frame of 0 % against `resets_at = now + 5h` until the first token spend lands.
+    static func pillRect(at f: Double, in rect: NSRect) -> NSRect? {
+        let msw = minStripWidth(rect)
+        let c = scaleX(CGFloat(f), in: rect)
+        var sx0 = c - msw / 2
+        var sx1 = c + msw / 2
+        let band = rect.height / 2
+        if sx0 - rect.minX <= band { sx0 = rect.minX }
+        if rect.maxX - sx1 <= band { sx1 = rect.maxX }
+        guard sx1 > sx0 else { return nil }
+        return NSRect(x: sx0, y: rect.minY, width: sx1 - sx0, height: rect.height)
+    }
+
     /// Draw the under-bar tick ruler: vertical teeth at each interior window boundary
     /// (`k / subdivisions` for `k` in `1 ..< subdivisions`), pixel-snapped on x. No-op when
     /// `subdivisions < 2` (nothing to subdivide).

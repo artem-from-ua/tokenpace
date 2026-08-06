@@ -783,9 +783,18 @@ final class StatusItemView: NSView {
         // `frozenStripFraction`. The *style* still decides whether a marker follows, so Pace & Time
         // keeps its full anatomy under the stub instead of collapsing into Simple.
         if !barStyle.menuBarShowsTimeMarker {
+            // A **zero-length** ribbon still has to read as "zero", not as an empty track. Without a time
+            // marker this branch is the bar's only mark, so `stripRect`'s degenerate-span `nil` would
+            // leave the widget completely blank — which is exactly what the reset boundary produces:
+            // `applyIdleGrace`/`suppress` (ADR-0041, ADR-0045) render 0 % against a freshly rolled
+            // `resets_at = now + 5h`, i.e. `usage == time == 0`, so `gapEnd - gapStart` is *exactly* 0
+            // for the first ticks of every new 5-hour window. A 1-minute-old window already draws the
+            // min-width pill, so flooring the span here keeps 0 looking like 0 instead of blinking the
+            // bar off. Pace & Time is deliberately excluded: there an empty gap means "dead on pace" and
+            // the marker already carries the position.
             let ribbon = frozenStrip(for: bar) ?? (l.gapEnd - l.gapStart)
             fillZone(from: 0, to: ribbon, in: rect, width: w,
-                     color: calmedGapColor(l, window: bar.window))
+                     color: calmedGapColor(l, window: bar.window), floorEmptyToPill: true)
             NSGraphicsContext.restoreGraphicsState()
             return
         }
@@ -882,8 +891,15 @@ final class StatusItemView: NSView {
     /// both ends) instead of a hairline, and its cap never overhangs the rounded track — matching the
     /// popup exactly. An end reaching the track's own edge snaps flush to it, so no grey sliver shows
     /// before the fill. `width` is unused now (the map reads `rect.width`); kept for call-site symmetry.
-    private func fillZone(from: Double, to: Double, in rect: NSRect, width: CGFloat, color: NSColor) {
-        guard let stripRect = PopupBarView.stripRect(from: from, to: to, in: rect) else { return }
+    /// `floorEmptyToPill` keeps an **exactly empty** span visible as the same min-width pill a hair-thin
+    /// span already draws — used by the markerless (Simple/Mixed) ribbon, where the strip is the bar's
+    /// only mark and `nil` would blank the widget. Off by default so Pace & Time's empty gap stays empty.
+    private func fillZone(from: Double, to: Double, in rect: NSRect, width: CGFloat, color: NSColor,
+                          floorEmptyToPill: Bool = false) {
+        let span = floorEmptyToPill && to <= from
+            ? PopupBarView.pillRect(at: from, in: rect)
+            : PopupBarView.stripRect(from: from, to: to, in: rect)
+        guard let stripRect = span else { return }
         let r = min(stripRect.width, stripRect.height) / 2
         color.setFill()
         NSBezierPath(roundedRect: stripRect, xRadius: r, yRadius: r).fill()
