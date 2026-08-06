@@ -160,6 +160,11 @@ final class SettingsWindowController: NSWindowController {
         get { model.onTryExtraUsage } set { model.onTryExtraUsage = newValue }
     }
 
+    /// Preview every incident banner at once (#279).
+    var onPreviewIncidents: (() -> Void)? {
+        get { model.onPreviewIncidents } set { model.onPreviewIncidents = newValue }
+    }
+
     /// Provides the last archive summary for the status line (#110).
     var archiveSummaryProvider: (() -> LogArchiver.Summary?)? {
         get { model.archiveSummaryProvider } set { model.archiveSummaryProvider = newValue }

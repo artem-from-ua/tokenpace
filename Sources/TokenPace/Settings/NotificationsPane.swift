@@ -66,6 +66,22 @@ struct NotificationsPane: View {
                             + "— with the amount spent and your limit, if set.")
                 }
 
+                // No on/off switch here, deliberately: an incident subscription is already opt-in
+                // per episode from the popup, so a second switch could only make the feature look
+                // enabled while doing nothing. The row exists to name the feature and to preview it.
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Claude service incidents")
+                        Spacer()
+                        // Fires all three at once — the update and both endings — because the useful
+                        // question is whether they read as distinguishable side by side.
+                        Button("Preview") { model.previewIncidentNotifications() }
+                    }
+                    SettingsHint(
+                        text: "When Claude services go down, the popup offers to notify you once "
+                            + "they recover — and then tells you what changed until they do.")
+                }
+
             }
 
             // The allowed-hours window and weekend-suppress apply to every notification — a separate

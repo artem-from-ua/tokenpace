@@ -55,6 +55,9 @@ final class SettingsModel {
     /// Fire the "Switching to Extra Usage" notification immediately from its Settings "Try" button —
     /// the shell reads the latest snapshot's spend for the amount/limit body (ADR-0050).
     var onTryExtraUsage: (() -> Void)?
+    /// Fire one of every incident banner on demand, for the "Preview" button beside the incident
+    /// hint (#279).
+    var onPreviewIncidents: (() -> Void)?
     var archiveSummaryProvider: (() -> LogArchiver.Summary?)?
 
     // MARK: Selection (dev hook)
@@ -593,6 +596,13 @@ final class SettingsModel {
     func tryExtraUsage() {
         AppLogger.lifecycle.notice("extra-usage: try (forced) notification")
         onTryExtraUsage?()
+    }
+
+    /// Show every incident banner the app can produce, from the Settings "Preview" button. Unlike
+    /// the other two previews this fires **three** notifications — the update, the fix-deployed
+    /// ending and the recovered ending — because judging their wording means seeing them together.
+    func previewIncidentNotifications() {
+        onPreviewIncidents?()
     }
 
     func setExtraUsageNotify(_ on: Bool) {

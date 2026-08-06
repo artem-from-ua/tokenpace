@@ -643,6 +643,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // The Settings "Try" button (#193): fire the banner on demand, bypassing edge-detection
             // and quiet hours (postBackToWork itself only checks support + authorization).
             wc.onTryBackToWork = { BackToWorkNotifier.postBackToWork() }
+            wc.onPreviewIncidents = { [weak self] in self?.previewIncidentBanners() }
             // "Try" for the Extra-Usage banner: build the body from the latest snapshot's spend so the
             // preview shows real amount/limit when available; an empty SpendInfo degrades to the generic
             // line. Bypasses edge-detection and quiet hours, same as back-to-work's Try.
@@ -1236,6 +1237,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for event in events {
             postIncidentBanner(event)
         }
+    }
+
+    /// Post one of every incident banner the app can produce, for the Settings "Preview" button.
+    ///
+    /// Routed through ``postIncidentBanner(_:)`` rather than composing the text here, so the preview
+    /// is the real thing: a wording change cannot drift out of sync with what the preview shows, and
+    /// the emoji severity dot, the tap-through link and the `Unfollow` action all get exercised.
+    ///
+    /// The three are genuinely distinct messages rather than variants — an update carries the
+    /// incident's own text and links to it, while the two endings make different claims ("you can
+    /// work" versus "they say it is fixed"). Seeing them together is the point: it is the only way to
+    /// judge whether that pair reads as distinguishable at a glance.
+    ///
+    /// Delivered unconditionally, bypassing quiet hours: the user pressed a button, which is not the
+    /// case quiet hours exist to protect against. Mirrors `tryBackToWork` / `tryExtraUsage`.
+    private func previewIncidentBanners() {
+        AppLogger.lifecycle.notice("incident: preview (forced) notifications")
+        postIncidentBanner(.update(
+            incidentID: "f6gkkq6txl7z",
+            name: "Degraded performance of multiple models",
+            body: "We are continuing to work on a fix for this issue.",
+            severity: .degraded))
+        postIncidentBanner(.ended(reason: .fixDeployed))
+        postIncidentBanner(.ended(reason: .componentsGreen))
     }
 
     /// Post one banner for an episode event. The quiet-hours and enablement gates are the caller's;
