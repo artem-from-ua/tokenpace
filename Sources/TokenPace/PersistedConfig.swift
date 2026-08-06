@@ -144,9 +144,6 @@ enum PersistedConfig {
         /// The user's subscription to the current status-page episode (#279), as a JSON blob. See
         /// the property.
         static let episodeSubscription = "episodeSubscription"
-        /// Whether banners fire for an episode the user is following (#279). Default-off (opt-in) —
-        /// see the property.
-        static let incidentNotifyEnabled = "incidentNotifyEnabled"
         /// Hide incidents older than this many hours; `0` means no limit (#279, ADR-0071 §9).
         static let incidentMaxAgeHours = "incidentMaxAgeHours"
         /// The Settings window's last frame, `[x, y, width, height]` in screen coordinates (ADR-0069).
@@ -577,16 +574,6 @@ enum PersistedConfig {
             guard let data = try? JSONEncoder().encode(newValue) else { return }
             defaults.set(data, forKey: Key.episodeSubscription)
         }
-    }
-
-    /// Whether banners fire for the episode the user is following (#279). **Default-off** (opt-in).
-    ///
-    /// This gates *delivery*, not subscription: the user still has to follow an episode explicitly
-    /// from the popup. It is deliberately not the "notify me about incidents" global switch ADR-0071
-    /// rejected (alternative A) — with this on and nothing followed, nothing is ever delivered.
-    static var incidentNotifyEnabled: Bool {
-        get { defaults.object(forKey: Key.incidentNotifyEnabled) as? Bool ?? false }
-        set { defaults.set(newValue, forKey: Key.incidentNotifyEnabled) }
     }
 
     /// Hide incidents older than this (#279, ADR-0071 §9), or `nil` for no limit.

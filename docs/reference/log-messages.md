@@ -249,7 +249,6 @@ token itself never is.
 | — | `lifecycle` | `.notice` | `back-to-work: suppress set <raw>` | user picked a "Suppress notifications on" radio; `<raw>` is the raw `SuppressDays` (#160) |
 | — | `lifecycle` | `.notice` | `back-to-work: try (forced) notification` | user pressed the Settings "Try" button, forcing a `postBackToWork` that bypasses edge-detection and quiet hours (#193) |
 | — | `lifecycle` | `.notice` | `extra-usage: notify enabled set <bool>` | user toggled the "Switching to Extra Usage" notification switch |
-| — | `lifecycle` | `.notice` | `incident: notify enabled set <bool>` | user toggled the "Claude service incidents" notification switch; gates delivery only — episodes are still followed per-incident from the popup (#279) |
 | — | `lifecycle` | `.notice` | `incident: max age set <n>h` | user changed "Hide incidents older than" in Extra features; `0` means no limit (#279, ADR-0071 §9) |
 | — | `lifecycle` | `.notice` | `extra-usage: try (forced) notification` | user pressed the "Switching to Extra Usage" Settings "Try" button, forcing a `postExtraUsage` that bypasses edge-detection and quiet hours |
 

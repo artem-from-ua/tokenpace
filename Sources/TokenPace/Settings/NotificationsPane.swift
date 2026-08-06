@@ -66,26 +66,6 @@ struct NotificationsPane: View {
                             + "— with the amount spent and your limit, if set.")
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Claude service incidents")
-                        Spacer()
-                        Toggle("Claude service incidents", isOn: Binding(
-                            get: { model.incidentNotifyEnabled },
-                            set: { model.setIncidentNotify($0) }))
-                        .labelsHidden()
-                        .disabled(!model.backToWorkMasterEnabled)
-                    }
-                    // This wording carries weight. The switch looks exactly like the global "notify me
-                    // about incidents" toggle that was considered and rejected — so the hint has to say
-                    // plainly that nothing arrives until you follow an episode from the popup, or it
-                    // will be read as broken when a real outage passes in silence.
-                    SettingsHint(
-                        text: "Only for incidents you choose to follow: when Claude services are down, "
-                            + "the popup offers to notify you once they recover. This switch just lets "
-                            + "those notifications through.")
-                }
-
             }
 
             // The allowed-hours window and weekend-suppress apply to every notification — a separate
