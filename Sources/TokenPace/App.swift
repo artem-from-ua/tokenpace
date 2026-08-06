@@ -642,13 +642,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             // The Settings "Try" button (#193): fire the banner on demand, bypassing edge-detection
             // and quiet hours (postBackToWork itself only checks support + authorization).
-            wc.onTryBackToWork = { BackToWorkNotifier.postBackToWork() }
+            // Each preview asks for authorization first. Without it `post` returns silently at its
+            // authorization guard and the button looks broken — which is exactly how this was
+            // reported. The request is a no-op once answered, so repeat presses cost nothing.
+            wc.onTryBackToWork = {
+                BackToWorkNotifier.requestAuthorizationIfNeeded { _ in
+                    BackToWorkNotifier.postBackToWork()
+                }
+            }
+            wc.onPreviewIncidents = { [weak self] in self?.previewIncidentBanners() }
             // "Try" for the Extra-Usage banner: build the body from the latest snapshot's spend so the
             // preview shows real amount/limit when available; an empty SpendInfo degrades to the generic
             // line. Bypasses edge-detection and quiet hours, same as back-to-work's Try.
             wc.onTryExtraUsage = { [weak self] in
                 let spend = self?.lastOutput?.snapshot?.spend ?? SpendInfo()
-                BackToWorkNotifier.postExtraUsage(body: ExtraUsageOnset.bannerBody(for: spend))
+                BackToWorkNotifier.requestAuthorizationIfNeeded { _ in
+                    BackToWorkNotifier.postExtraUsage(body: ExtraUsageOnset.bannerBody(for: spend))
+                }
             }
             settingsWC = wc
         }
@@ -1236,6 +1246,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for event in events {
             postIncidentBanner(event)
         }
+    }
+
+    /// Post one of every incident banner the app can produce, for the Settings "Preview" button.
+    ///
+    /// Routed through ``postIncidentBanner(_:)`` rather than composing the text here, so the preview
+    /// is the real thing: a wording change cannot drift out of sync with what the preview shows, and
+    /// the emoji severity dot, the tap-through link and the `Unfollow` action all get exercised.
+    ///
+    /// The three are genuinely distinct messages rather than variants — an update carries the
+    /// incident's own text and links to it, while the two endings make different claims ("you can
+    /// work" versus "they say it is fixed"). Seeing them together is the point: it is the only way to
+    /// judge whether that pair reads as distinguishable at a glance.
+    ///
+    /// Delivered unconditionally, bypassing quiet hours: the user pressed a button, which is not the
+    /// case quiet hours exist to protect against. Mirrors `tryBackToWork` / `tryExtraUsage`.
+    private func previewIncidentBanners() {
+        AppLogger.lifecycle.notice("incident: preview (forced) notifications")
+        // Ask for authorization first. Without a subscription there has been no reason to request it
+        // yet, so on a fresh install the three posts below would each hit `post`'s authorization
+        // guard and return silently — the button would look broken. `requestAuthorizationIfNeeded`
+        // is a no-op once the user has answered, so pressing Preview again costs nothing.
+        BackToWorkNotifier.requestAuthorizationIfNeeded { [weak self] _ in
+            self?.postIncidentPreviewBanners()
+        }
+    }
+
+    /// The three preview posts, run after authorization has been settled.
+    private func postIncidentPreviewBanners() {
+        postIncidentBanner(.update(
+            incidentID: "f6gkkq6txl7z",
+            name: "Degraded performance of multiple models",
+            body: "We are continuing to work on a fix for this issue.",
+            severity: .degraded))
+        postIncidentBanner(.ended(reason: .fixDeployed))
+        postIncidentBanner(.ended(reason: .componentsGreen))
     }
 
     /// Post one banner for an episode event. The quiet-hours and enablement gates are the caller's;

@@ -145,6 +145,7 @@ In the tables below, `<…>` marks an interpolated value.
 | — | `lifecycle` | `.info` | `incident: suppressed by quiet hours` | `advanceEpisodeSubscription` — a followed episode produced an event but the current time is outside the shared allowed-hours window or on a suppressed weekday, so no banner is posted (#279, ADR-0071 §8) |
 | — | `lifecycle` | `.info` | `incident: followed the episode incidents=<n>` | `toggleEpisodeSubscription` — the user clicked the popup's subscribe row; `<n>` is how many incidents the episode covered at that moment (#279) |
 | — | `lifecycle` | `.info` | `incident: unfollowed the episode` | `toggleEpisodeSubscription` — the user clicked the row again to stop following |
+| — | `lifecycle` | `.notice` | `incident: preview (forced) notifications` | `previewIncidentBanners` — the Settings "Preview" button; posts one of every incident banner at once, bypassing quiet hours (#279) |
 | — | `journal` | `.info` | `status-payload-log: recorded a material change` | `pollStatusIfDue` (App) — the status payload differed from the last written line and was appended to the dev JSONL (#279, ADR-0071 §10) |
 
 ## `Sources/TokenPace/LogArchiver.swift`
@@ -413,12 +414,12 @@ One log line per interval change. The format is built by
 |----------|-------|-------|
 | `network` | 29 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `UpdateInstaller` (3), `PollingEngine` (2), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
 | `keychain` | 12 | `ClaudeCLIRefresher` (6), `TokenProvider` (3), `PollingEngine` (1) |
-| `lifecycle` | 109 | `App` (46), `SettingsModel` (29), `UpdateInstaller` (13), `PollingShell` (7), `BackToWorkNotifier` (6), `AwaitingInputWatcher` (5), `ShellEnvironment` (1), `PollingEngine` (1), `IncidentNotificationDelegate` (1) |
+| `lifecycle` | 110 | `App` (47), `SettingsModel` (29), `UpdateInstaller` (13), `PollingShell` (7), `BackToWorkNotifier` (6), `AwaitingInputWatcher` (5), `ShellEnvironment` (1), `PollingEngine` (1), `IncidentNotificationDelegate` (1) |
 | `ui` | 1 | `AppearancePane` (1) |
 | `archive` | 5 | `App` (3), `LogArchiver` (2) |
 | `journal` | 12 | `UsageJournal` (4), `StatusPayloadLog` (4), `App` (3), `DevToolsWindowController` (1) |
 
-**Total: 168 log statements** — `.error` ×46, `.notice` ×104, `.info` ×13, `.debug` ×5.
+**Total: 169 log statements** — `.error` ×46, `.notice` ×105, `.info` ×13, `.debug` ×5.
 
 > Counts recomputed from the source in #275 (the previous figures had drifted over several releases —
 > `SettingsModel` and `BackToWorkNotifier` were missing entirely). Regenerate with:
