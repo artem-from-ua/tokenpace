@@ -80,12 +80,14 @@ public struct ColorTween: Sendable, Equatable {
     /// glitch, short enough that a colour change still feels immediate. Not user-configurable —
     /// there is no Settings option for it by design.
     ///
-    /// Tuned live, in two steps: 0.45 s → 0.7 s → 1.0 s. At the shorter lengths the adjacent pacing
-    /// hues (green→yellow especially) are close enough that the fade was over before the eye
-    /// registered it had started — which reads as the very snap this exists to remove. The bar is
-    /// ambient, glanced at rather than watched, so it can afford a transition long enough to be
-    /// unmistakably *a transition*; there is no interaction waiting on it to finish.
-    public static let defaultDuration: TimeInterval = 1.0
+    /// Tuned live: 0.45 s → 0.7 s → 1.0 s → 0.8 s. At the shortest lengths the adjacent pacing hues
+    /// (green→yellow especially) are close enough that the fade was over before the eye registered
+    /// it had started — which reads as the very snap this exists to remove. The bar is ambient,
+    /// glanced at rather than watched, so it can afford a transition long enough to be unmistakably
+    /// *a transition*; there is no interaction waiting on it to finish. 1.0 s proved slightly
+    /// languid once the high-contrast blue→`calmWhite` mute became easy to trigger from Settings, so
+    /// it settled back to 0.8 s — still unmistakably a fade, with less lag on a deliberate toggle.
+    public static let defaultDuration: TimeInterval = 0.8
 
     public init(from: RGBA, to: RGBA, startedAt: Date,
                 duration: TimeInterval = ColorTween.defaultDuration, touchedAt: Date? = nil) {
@@ -98,11 +100,26 @@ public struct ColorTween: Sendable, Equatable {
 
     /// Linear time progress in `[0, 1]` — **not** eased. A non-positive `duration` reports `1`
     /// (instantly finished) rather than dividing by zero.
+    ///
+    /// Sampling exactly at `startedAt + duration` must report a clean `1`, and plain division does
+    /// not guarantee that: a round-trip through `Date` does not preserve a fractional interval
+    /// exactly. Measured, `t0.addingTimeInterval(0.8).timeIntervalSince(t0)` returns
+    /// `0.7999999523162842` — short by ~6·10⁻⁸ (2⁻²⁴, i.e. single-precision resolution), so the
+    /// quotient lands just under 1. A duration of exactly 1.0 happened to hide this; 0.8 does not.
+    /// Left unhandled the tween stays forever "almost done": the colour sits a hair off its target
+    /// and the frame timer never tears down. Snapping anything within `endEpsilon` of the end to 1
+    /// fixes it for any duration and is imperceptible — 10⁻⁶ of a second-long fade.
     public func progress(at now: Date) -> Double {
         guard duration > 0 else { return 1 }
         let elapsed = now.timeIntervalSince(startedAt)
-        return min(1, max(0, elapsed / duration))
+        let raw = elapsed / duration
+        return raw >= 1 - Self.endEpsilon ? 1 : max(0, raw)
     }
+
+    /// Slack allowed when deciding a transition has reached its end — see ``progress(at:)``. Two
+    /// orders of magnitude above the ~6·10⁻⁸ error measured there, and still far below one frame at
+    /// any plausible rate, so it can never shorten a fade perceptibly.
+    private static let endEpsilon: Double = 1e-6
 
     /// Whether the transition has run its course at `now` (progress reached 1).
     public func isFinished(at now: Date) -> Bool { progress(at: now) >= 1 }
@@ -239,7 +256,16 @@ public struct ColorTweenSet: Sendable, Equatable {
     /// is not the same as "everything alive". A set-based prune would let one surface's pass evict
     /// the other's keys. Age is immune to that: anything still on screen is re-touched every time
     /// it draws, and only genuinely absent elements go quiet long enough to expire.
-    public mutating func pruneStale(at now: Date, staleAfter: TimeInterval = 5) {
+    ///
+    /// **The default must exceed the app's slowest redraw cadence.** "Untouched" only stands in for
+    /// "absent" if a *present* element is guaranteed to have drawn recently — and the widget
+    /// deliberately does not repaint on a tick, so between polls its floor is the 30 s age timer
+    /// (`AppDelegate`). The old 5 s default therefore emptied the registry for 25 s out of every 30:
+    /// a still-visible bar was pruned, and the next colour change hit the "first sight of this key"
+    /// branch above and adopted its target outright (`duration: 0`) instead of fading. That is why
+    /// the *first* calm-mode toggle after a pause snapped while rapid repeats animated. 45 s clears
+    /// the 30 s tick with margin and still bounds the registry.
+    public mutating func pruneStale(at now: Date, staleAfter: TimeInterval = 45) {
         tweens = tweens.filter { now.timeIntervalSince($0.value.touchedAt) <= staleAfter }
     }
 

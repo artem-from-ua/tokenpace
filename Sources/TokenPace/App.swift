@@ -557,7 +557,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             wc.onInstallUpdateNow = { [weak self] in self?.installUpdateNow() }
             wc.onCalmColorModeChange = { [weak self] mode in
                 self?.statusView?.calmColorMode = mode
-                self?.refreshStatusImage()   // pure colour change — no layout/width rebuild needed
+                // Go through the normal render path, not a bare `refreshStatusImage()`. Muting an
+                // accent to `calmWhite` (and back) is exactly the kind of jump ADR-0070 fades, but a
+                // tween can only start against a *fresh* frame clock: `beginFrame()` — the one place
+                // `ColorAnimator.frameTime` advances — lives in `render(_:at:)`. Snapshotting straight
+                // from here dated the new tween to the last poll's instant, so it was already past
+                // its 450 ms duration when `scheduleFramesIfNeeded()` tested it and no timer ever
+                // started — the colour snapped. Also repaints the popup, which mutes alongside.
+                //
+                // Before the first poll lands there is no `lastOutput` to re-render from, so that
+                // call is a no-op — fall back to the bare snapshot to keep the cold-start widget
+                // honouring the toggle. Nothing is animating that early anyway.
+                if self?.lastOutput == nil { self?.refreshStatusImage() }
+                else { self?.reRenderForCurrentTime() }
             }
             wc.onResetCountdownModeMenuBarChange = { [weak self] _ in
                 // The mode changes the layout (which countdown to draw), not just a colour — rebuild
