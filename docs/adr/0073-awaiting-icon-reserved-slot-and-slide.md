@@ -51,8 +51,14 @@ let awaitingInset = showAwaitingInMenuBar ? awaitingIconWidth() + Metrics.awaiti
 
 ### 1. Слот резервується з опції, а не з даних
 
-`reservesAwaitingSlot` = `PersistedConfig.awaitingInputInMenuBar`, і від неї рахується `awaitingInset`
-в `itemWidth(for:)`. Малювання гліфа лишається за наявністю лічильника.
+`reservesAwaitingSlot` = `awaitingInputEnabled && awaitingInputInMenuBar`, і від неї рахується
+`awaitingInset` в `itemWidth(for:)`. Малювання гліфа лишається за наявністю лічильника.
+
+**Обидва тумблери обов'язкові.** Вимикання master'а «Show sessions awaiting input» (Extra features)
+лише *дизейблить* Appearance-опцію — її збережене значення лишається `true`. Умова, яку це рішення
+замінило, покривала той випадок **через дані** (`layout?.awaitingInput` завжди `nil`, поки master
+вимкнено), тож саме тому master доводиться називати явно, щойно резервування перестало дивитись на
+дані. Інакше ≈18 pt лишалися б зайнятими під фічу, вимкнену повністю.
 
 Це змінює **значення наявного перемикача**: «Show awaiting-input icon in the menu bar» тепер означає
 «резервувати слот», а не «іконка присутня цієї секунди». Нового налаштування не додано — воно було б
