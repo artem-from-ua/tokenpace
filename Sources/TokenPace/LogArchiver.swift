@@ -40,6 +40,17 @@ struct LogArchiver {
     enum ArchiveError: Error {
         /// The destination is unset, unwritable, or could not be created.
         case destinationUnavailable
+        /// Copying the planned files would leave less than ``ArchiveSpacePlan/minFreeBytesAfterCopy``
+        /// free on the destination volume, so the run refused **before** writing anything (#306).
+        ///
+        /// Modelled as an error rather than a `Summary` field on purpose: the shell only advances the
+        /// `lastArchiveSync` marker on `.success`, so a blocked run stays due and retries by itself.
+        /// A field on `Summary` would land in the success branch and advance the marker — exactly the
+        /// "records a failure as a success" bug this gate exists to prevent.
+        ///
+        /// Unlike the battery gate this is a **block**, not a silent defer: a full disk does not fix
+        /// itself, so the Settings pane names the reason. Carries both figures for the log line.
+        case insufficientSpace(needBytes: Int64, freeBytes: Int64)
     }
 
     private let claudeHome: URL
@@ -53,18 +64,31 @@ struct LogArchiver {
         self.fileManager = fileManager
     }
 
+    /// One root's phase-1 scan, holding everything the later phases need so each tree is walked
+    /// exactly once. A root whose source is gone is represented with empty `sourceEntries`/`toCopy`,
+    /// which folds to the same totals the old dedicated early-continue produced.
+    private struct RootPlan {
+        let sourceRoot: URL
+        let destRoot: URL
+        let sourceEntries: [ArchiveEntry]
+        let destEntries: [ArchiveEntry]
+        let toCopy: [ArchiveEntry]
+    }
+
     /// Mirror the allow-listed roots into `destination`, copying only new/changed files and never
     /// deleting. Returns how much was copied. Throws ``ArchiveError/destinationUnavailable`` if the
-    /// destination cannot be prepared.
+    /// destination cannot be prepared, or ``ArchiveError/insufficientSpace(needBytes:freeBytes:)`` if
+    /// the copy would run the destination volume below the free-space floor.
+    ///
+    /// Runs in three phases (#306). The scan is separated from the copying so the space gate judges
+    /// the **whole run** rather than whichever root it happens to reach first: gating per root could
+    /// copy two roots and then refuse the third, leaving the archive half-updated — the worst of both
+    /// outcomes. Nothing is written before the gate has passed.
     func sync(to destination: URL) throws -> Summary {
         try ensureDirectory(destination)
 
-        var copied = 0
-        var bytes: Int64 = 0
-        var totalInArchive = 0
-        var totalBytesInArchive: Int64 = 0
-
-        for root in Self.sourceRoots {
+        // Phase 1 — scan every root and build the complete plan before copying a single byte.
+        let plans = Self.sourceRoots.map { root -> RootPlan in
             let sourceRoot = claudeHome.appendingPathComponent(root)
             let destRoot = destination.appendingPathComponent(root)
 
@@ -72,9 +96,8 @@ struct LogArchiver {
             // Code has fully pruned still contributes its archived files to the total.
             let destEntries = scan(destRoot)
             guard fileManager.fileExists(atPath: sourceRoot.path) else {
-                totalInArchive += destEntries.count
-                totalBytesInArchive += destEntries.reduce(0) { $0 + $1.size }
-                continue
+                return RootPlan(sourceRoot: sourceRoot, destRoot: destRoot,
+                                sourceEntries: [], destEntries: destEntries, toCopy: [])
             }
 
             let sourceEntries = scan(sourceRoot)
@@ -83,9 +106,33 @@ struct LogArchiver {
             AppLogger.archive.debug(
                 "archive root \(root, privacy: .public): \(sourceEntries.count, privacy: .public) source files, \(toCopy.count, privacy: .public) to copy")
 
-            for entry in toCopy {
-                let from = sourceRoot.appendingPathComponent(entry.relativePath)
-                let to = destRoot.appendingPathComponent(entry.relativePath)
+            return RootPlan(sourceRoot: sourceRoot, destRoot: destRoot,
+                            sourceEntries: sourceEntries, destEntries: destEntries, toCopy: toCopy)
+        }
+
+        // Phase 2 — the free-space gate, once, against the combined plan. The volume read stays here
+        // rather than being injected from the main actor: `volumeAvailableCapacityForImportantUsage`
+        // can block while an external disk spins up, and this already runs off the main thread.
+        // An unreadable volume reads as `.max` (fail-open, mirroring `?? .max` on the update path) so
+        // a diagnostic glitch can never wedge backups permanently.
+        let plannedBytes = plans.reduce(Int64(0)) { $0 + $1.toCopy.reduce(Int64(0)) { $0 + $1.size } }
+        let freeBytes = DiskSpace.availableBytes(forVolumeContaining: destination)
+            .map(Int64.init) ?? .max
+        if case let .blockedInsufficientSpace(need, free) =
+            ArchiveSpacePlan.verdict(plannedBytes: plannedBytes, freeBytes: freeBytes) {
+            throw ArchiveError.insufficientSpace(needBytes: need, freeBytes: free)
+        }
+
+        // Phase 3 — copy, then fold the per-root totals exactly as before.
+        var copied = 0
+        var bytes: Int64 = 0
+        var totalInArchive = 0
+        var totalBytesInArchive: Int64 = 0
+
+        for plan in plans {
+            for entry in plan.toCopy {
+                let from = plan.sourceRoot.appendingPathComponent(entry.relativePath)
+                let to = plan.destRoot.appendingPathComponent(entry.relativePath)
                 do {
                     try copyReplacing(from: from, to: to)
                     copied += 1
@@ -100,9 +147,10 @@ struct LogArchiver {
             // Files now in the archive for this root = the union of what was already mirrored (incl.
             // pruned-in-source files) and every source file (all present after the copies above). Size
             // per file prefers the source (freshly copied, current) and falls back to the archived
-            // copy for pruned-in-source files.
-            let sourceByPath = Dictionary(sourceEntries.map { ($0.relativePath, $0.size) }, uniquingKeysWith: { a, _ in a })
-            var sizeByPath = Dictionary(destEntries.map { ($0.relativePath, $0.size) }, uniquingKeysWith: { a, _ in a })
+            // copy for pruned-in-source files. With empty `sourceEntries` this folds to the archived
+            // count/size, matching the pruned-root case exactly.
+            let sourceByPath = Dictionary(plan.sourceEntries.map { ($0.relativePath, $0.size) }, uniquingKeysWith: { a, _ in a })
+            var sizeByPath = Dictionary(plan.destEntries.map { ($0.relativePath, $0.size) }, uniquingKeysWith: { a, _ in a })
             sizeByPath.merge(sourceByPath) { _, source in source }
             totalInArchive += sizeByPath.count
             totalBytesInArchive += sizeByPath.values.reduce(0, +)

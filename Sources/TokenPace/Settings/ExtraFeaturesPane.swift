@@ -100,13 +100,20 @@ struct ExtraFeaturesPane: View {
                         }
                     }
 
-                    LabeledContent {
-                        Button("Archive Now") { model.archiveNow() }
-                            .disabled(model.archiveDestination == nil)
-                    } label: {
-                        Text(model.archiveStatusText)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        LabeledContent {
+                            Button("Archive Now") { model.archiveNow() }
+                                .disabled(model.archiveDestination == nil)
+                        } label: {
+                            Text(model.archiveStatusText)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        // Why a backup isn't happening (#306). Both hints vanish when their string is
+                        // empty, so no conditional is needed. The space line warns — a full disk needs
+                        // the user to act; the battery line stays neutral, because it clears itself.
+                        SettingsHint(text: model.archiveSpaceHint, warning: true)
+                        SettingsHint(text: model.archiveBatteryHint)
                     }
                 }
             }

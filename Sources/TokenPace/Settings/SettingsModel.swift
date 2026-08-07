@@ -136,6 +136,11 @@ final class SettingsModel {
     private(set) var archiveDestination: String?
     private(set) var archiveStatusText = ""
 
+    /// Whether the last archive run refused for lack of free space (#306), pushed by the shell after
+    /// each run. Seeded from the stub so a forced verification state survives the first push.
+    private(set) var archiveSpaceBlock: ArchiveSpaceVerdict =
+        SettingsModel.forcedArchiveGate?.space ?? .proceed
+
     // MARK: Insights — usage journal (#242)
 
     /// Whether the usage journal records each poll to an append-only JSONL file. Default-off (opt-in).
@@ -212,6 +217,30 @@ final class SettingsModel {
             }
         }
         return reasons.isEmpty ? nil : reasons
+    }()
+
+    /// Forced archive gates for live verification of the Sessions-backup hints (#306), from
+    /// `TOKENPACE_FAKE_ARCHIVE_GATE=battery,space` (either, both, in any order). Like
+    /// `TOKENPACE_FAKE_DEFERRAL` it never writes UserDefaults, and it exists because the real gates
+    /// need an unplugged laptop and a genuinely full destination volume to reproduce. `nil` for a
+    /// normal run; unknown tokens are ignored.
+    ///
+    /// It forces only the **display**: the poll still runs and "Archive Now" still archives, matching
+    /// `TOKENPACE_FAKE_DEFERRAL` (which doesn't block a real install either). A stub that also broke
+    /// the feature would make the button untestable in the same run.
+    static let forcedArchiveGate: (battery: Bool, space: ArchiveSpaceVerdict)? = {
+        guard let raw = ProcessInfo.processInfo.environment["TOKENPACE_FAKE_ARCHIVE_GATE"], !raw.isEmpty
+        else { return nil }
+        let tokens = Set(raw.split(separator: ",").map {
+            $0.trimmingCharacters(in: .whitespaces).lowercased()
+        })
+        // Plausible figures, so the forced state reads like a real one in the log line beside it.
+        let space: ArchiveSpaceVerdict = tokens.contains("space")
+            ? .blockedInsufficientSpace(needBytes: 12_000_000_000, freeBytes: 3_000_000_000)
+            : .proceed
+        let battery = tokens.contains("battery")
+        guard battery || space != .proceed else { return nil }
+        return (battery, space)
     }()
 
     // MARK: Computed enablement (was the scattered imperative `updateX Availability()` methods)
@@ -307,6 +336,36 @@ final class SettingsModel {
     /// blocks it. Wording comes from the kit so it stays testable; the view supplies the icon and dot.
     var deferralExplanation: String? {
         UpdateDeferralReason.pendingExplanation(for: deferralReasons)
+    }
+
+    /// The ⚠️ line explaining a backup blocked for lack of disk space (#306), or `""` when nothing
+    /// blocks it — the empty-string idiom, so `SettingsHint` renders nothing at all.
+    var archiveSpaceHint: String {
+        ArchiveSpacePlan.blockedExplanation(for: archiveSpaceBlock) ?? ""
+    }
+
+    /// Whether the daily backup is currently held back by the battery gate (#306).
+    ///
+    /// Read live rather than pushed: that gate lives in `pollArchiveIfDue` and returns before the
+    /// archiver runs, so there is no outcome that could carry it back. `@Observable` will not
+    /// re-render when the power state changes, and that is accepted — the line refreshes on the next
+    /// `refreshArchiveStatus()` (window open, toggle, finished sync). **Don't** "fix" this with an
+    /// IOKit notification observer: a neutral hint lagging a few seconds is not worth a new
+    /// subscription lifecycle in this model.
+    var archiveOnBattery: Bool {
+        if let forced = SettingsModel.forcedArchiveGate { return forced.battery }
+        return archiveEnabled && archiveDestination != nil && !PowerSource.isOnACPower
+    }
+
+    /// The neutral (no ⚠️) line explaining a battery-deferred backup, or `""`.
+    ///
+    /// Suppressed while a space block is showing. Unlike `UpdateDeferralReason.pendingExplanation`,
+    /// which joins every clause because all of them must be cleared, these two are not peers: a full
+    /// disk is a hard stop and the battery is a soft one, so showing both would imply that plugging in
+    /// helps — which it does not.
+    var archiveBatteryHint: String {
+        guard archiveSpaceHint.isEmpty, archiveOnBattery else { return "" }
+        return "Backup will resume when you plug in."
     }
 
     /// Whether "Update Now" can do anything — a known release, and a real `.app` to replace. The
@@ -725,6 +784,13 @@ final class SettingsModel {
     /// verification isn't overwritten by the real (unblocked) environment on the next check.
     func updateDeferral(_ reasons: [UpdateDeferralReason]) {
         deferralReasons = SettingsModel.forcedDeferralReasons ?? reasons
+    }
+
+    /// Reflect the last archive run's low-space verdict (#306). A forced value from
+    /// `TOKENPACE_FAKE_ARCHIVE_GATE` wins, so a real (unblocked) run can't wipe the state being
+    /// verified — the same contract as `updateDeferral`.
+    func updateArchiveBlock(_ verdict: ArchiveSpaceVerdict) {
+        archiveSpaceBlock = SettingsModel.forcedArchiveGate?.space ?? verdict
     }
 
     /// Reflect the current archive state (#110): destination + the "Last archived …" status line.
