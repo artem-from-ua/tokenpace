@@ -18,10 +18,10 @@ TokenPace крутить п'ять періодичних завдань. Цей
 |---|---|---|---|---|---|
 | **Screen lock / скрінсейвер / display sleep** | ✅ повна зупинка, gated `pausePollingWhenScreenLocked` (default on) | ✅ непрямо | ✅ **безумовно** — стрім і таймер знімаються ([#275](https://github.com/artem-from-ua/tokenpace/issues/275)) | ✅ непрямо | ✅ непрямо |
 | **System sleep / wake** | ✅ безумовно | ✅ непрямо | ✅ безумовно (backstop за екранним гейтом) | ✅ непрямо | ✅ непрямо |
-| **On-battery** | ❌ | ❌ | ❌ | ❌ | ✅ **defer** до підключення до мережі |
+| **On-battery** | ❌ | ❌ | ❌ | ✅ **defer** до підключення до мережі ([#306](https://github.com/artem-from-ua/tokenpace/issues/306)) | ✅ **defer** до підключення до мережі |
 | **Low Power Mode** | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Metered network** | ❌ | ❌ | ❌ (мережі не торкається) | ❌ (пише локально) | ✅ **defer** до безлімітного зʼєднання |
-| **Вільне місце на диску** | ❌ | ❌ | ❌ | ❌ | ✅ **defer**, якщо після завантаження лишиться < 5 ГБ |
+| **Вільне місце на диску** | ❌ | ❌ | ❌ | ✅ **блок** із попередженням, якщо після копіювання лишиться < 5 ГБ ([#306](https://github.com/artem-from-ua/tokenpace/issues/306)) | ✅ **defer**, якщо після завантаження лишиться < 5 ГБ |
 | **claude CLI running** | ✅ як каденція: 180 с → 15 хв | ✅ непрямо (розтягується разом) | ❌ **свідомо** (#275) — без `claude` у деревах ніхто не пише, FSEvents і так мовчить; замість гейта сканер відсіює мертві сесії за pid | ❌ | ❌ |
 | **429 / `Retry-After`** | ✅ hold до вказаного часу | ✅ непрямо + власний floor 5 хв | н/д | н/д | н/д |
 | **Feature toggle** | н/д (завжди ввімкнено) | н/д | `awaitingInputEnabled` (default **off**) | `archiveEnabled` + заданий `archiveDestination` | `automaticUpdateChecks` + `installUpdatesAutomatically` (обидва default **on**, opt-out) |
@@ -29,7 +29,8 @@ TokenPace крутить п'ять періодичних завдань. Цей
 
 Позначки: ✅ — гейт діє; ✅ непрямо — власного таймера немає, завдання успадковує паузу від
 usage-циклу; ❌ — гейт відсутній у коді; **defer** — не пропуск, а відкладення до наступного
-heartbeat, коли умови покращаться.
+heartbeat, коли умови покращаться; **блок** — те саме відкладення, але користувачеві **показують
+причину** (умова сама не мине).
 
 ## Чому половина колонок каже «непрямо»
 
@@ -51,6 +52,7 @@ component "AwaitingInputWatcher\n(FSEvents + Timer 45 с)" as watcher
 
 component "ScreenLockObserver\nWorkspaceSleepWake" as park
 component "UpdateInstallPlan" as instplan
+component "ArchiveSpacePlan" as spaceplan
 
 park -down-> engine : .sleep / .wake
 engine -down-> apply : PollOutput
@@ -58,6 +60,7 @@ apply -down-> status
 apply -down-> update
 apply -down-> archive
 update -down-> instplan : battery / metered / disk
+archive -down-> spaceplan : disk (блок)
 
 park -down-> watcher : стан екрана\n(окремий, негейтований колбек)
 
@@ -65,10 +68,16 @@ note bottom of watcher
   Власний рушій, але той самий
   park-механізм (#275)
 end note
+
+note right of archive
+  Батарея — тихий defer
+  просто в pollArchiveIfDue,
+  без чистого типу (#306)
+end note
 @enduml
 ```
 
-![Гейти періодичних завдань — хто на чому висить](https://www.plantuml.com/plantuml/svg/NPFDQjj04CVlUeeXlTYqTg4q578eCII5G241fVXIA6jfh0YjLilkogvlSKjBpptaETmMaS_w6NRVgAELxCe-IEpC_ERhhzMnDaoPCkU1pb8XcM8vH4Kk2u72X6R14HH6Xec4OmU9SSfARYxnindnD14vqH3H2rKGRFFXuABWF1N9gKXIWHz5RwGN8WgDGfOFt7TxPn_iO_y0c0RqI3Tt9EK9SaoOmI6JaYzwduuQrbjTL5ARq31JwhFfIOaUqjxUfpx8cEhzfqflxrCZ5Lsbimx66iVEU7EM6jhjJCZIZ9c9hb3HXk_2qnd5DJo7opH71QyFmIsRkUSDjQDG62b4yRw8ilE9HZMhYumBbMd98WmveXoph1c2fC-wgUqkWZRb_88puQcKR4b64DGy3E9YBWPlMttX28QwBWelOJYdma7hts1UMgBg3tTU6bejQ5mRe9LrrzcgkElSQDO4j-xDVDHamWnTc0NDaYCTCAPJdEfiR_HMDafmI_V5hknVi9LzSDVrqQv8TBlsPcMVw4hTlm1oL_OFFVV4h-rl3r84wBwjxQFzLUVtWq0KDDYaCAR8ePXklm-0_KdKoYtRD7VjlheVxiRNNb6e0b-O8akoVLVAggSUa5MvRtL7uc_j4_IUlNfps2UXOwZx1STqeX_k7m00)
+![Гейти періодичних завдань — хто на чому висить](https://www.plantuml.com/plantuml/svg/NPJVQXD15CRlzoaEzIR19efQXLv80wrG45hOIcu4cMmcoPBPsMLtDZ5tYSNgdIZYSwILq3QjyHLcNi4dyPlPJPha8c7EcTyvt_cpkmUPOgdA8-5b_L0cB6KH1N6Kn99BvQkHu9JoG37P5NmDQVCEouKwunzLGuHT6O6c07yyzRnLFEsSnaA4idiakw7axsMbaOrauAkKiwXcBlIDdkkxwWwnZBX3rcCRINB81UyonUiiISIeyc6_O9srZYQGyHLJUNRSESovWp9dRrFlaZRoFL2vixUfHXhqmi4QnWh7Hdb35YhqTYoJN3MP2deyHOTl_AC1xZDwJ6TXn5DwiKTcKjGzBAYD2Vb1ohby6mVzarR6qu5DqepJVfQmWFk2ywJ9-aKH67r_FRJiHQ9J8Ku5auuAOISmDcejolTjpXNe51pfsSnKQyT3MNjTReBsgPvPUNf2zI5Ay4h_4dDB06LNV98h3C4hN4kWNC2civptfdCvtU9ovLvs0f4MKtYqHgWbuZZmDaxjCEjxPUY3wB8f15c0AlfIt-c5dbUtsYoN0SvCp2SzrNz8p_JSZErHJx5A6mLpfk_neDxk4jmp_Hk_M_0BVUL0t12UuWL4BcqyP6IC9bgnKd54SMUrTIBz0zJKJCemCpRdvglvvN9FSJKZbnWt4zXE5L6swXgicVbi5S5VwtkgF7hsQg-AfRJ9wfMgQTZjAIkw72b4lqCI_TbEp3VwD_vfLMwGpDQ05xaexI_k5suI2z9NjFqMx5h6DdXDvWkY7OXXB5moH9-ZekTFNwvLT80JFYp_0G00)
 
 Наслідок: усе, що паркує usage-цикл, автоматично паркує ще три завдання. І навпаки — якщо колись
 відвʼязати статуси або архіватор у власний таймер, разом зникнуть усі park-гейти, які вони зараз
@@ -103,7 +112,12 @@ Gated опцією `pausePollingWhenScreenLocked` (default **on**), яка чи�
 
 ### On-battery, metered network, вільне місце
 
-Три гейти, які має **тільки** авто-інсталяція оновлень. Вони живуть у чистому
+Гейти середовища має **авто-інсталяція оновлень** (усі три) і **резервне копіювання** (два з трьох —
+батарея й вільне місце; мережі воно не торкається, бо пише локально).
+
+#### Оновлення
+
+Три гейти живуть у чистому
 [`UpdateInstallPlan.decide`](../../Sources/TokenPaceKit/UpdateInstallPlan.swift) і застосовуються в
 такому порядку (перший спрацьований виграє):
 
@@ -131,6 +145,34 @@ download onto an unmetered link, never to gate…».
 
 Ручний «Install now» обходить power/metered (користувач попросив явно), але **не** free-space —
 жоден намір не робить безпечним заповнення диска.
+
+#### Резервне копіювання ([#306](https://github.com/artem-from-ua/tokenpace/issues/306))
+
+Два гейти з різною семантикою — і це головне, що варто про них знати.
+
+**Батарея — тихий defer.** `guard PowerSource.isOnACPower` у `pollArchiveIfDue`
+([`App.swift`](../../Sources/TokenPace/App.swift)), **після** перевірки каденції: інакше відʼєднаний
+Mac писав би в лог щополу (180 с), а не лише коли синк реально настав. Маркер `lastArchiveSync` не
+рухається, стан не персиститься — щойно шнур на місці, наступний heartbeat синкає сам. Обґрунтування
+те саме, що й для оновлень, лише сильніше: оновлення качає ~10 МБ, а перший синк архіву копіює **всю**
+теку сесій (сотні МБ і більше).
+
+**Вільне місце — блок із попередженням.** Живе в чистому
+[`ArchiveSpacePlan.verdict`](../../Sources/TokenPaceKit/ArchiveSpacePlan.swift): якщо після копіювання
+лишиться < 5 ГБ (той самий поріг, що й `UpdateInstallPlan.minFreeBytesAfterDownload` — одна обіцянка
+замість двох чисел), `LogArchiver.sync` кидає `insufficientSpace` **до того, як щось записати**. На
+відміну від батареї це не тихо: повний диск сам не розсмокчеться, тож у Settings зʼявляється ⚠-рядок.
+
+Щоб гейт судив **прогін цілком**, `sync` спершу сканує всі три корені в сукупний план і аж тоді
+важить — інакше він міг би скопіювати два корені й відмовити на третьому, лишивши архів
+напівоновленим. План на **нуль** байтів завжди проходить: нічого копіювати — нічим і заповнити диск.
+
+Вільне місце міряється **на томі призначення** (`forVolumeContaining:` архівної теки), а не на
+системному: архів зазвичай на зовнішньому диску. Нечитабельний том читається як `.max` — fail-open,
+як `?? .max` в оновленнях: збій діагностики не має вимикати бекап назавжди.
+
+Ручний «Archive Now» обходить **батарею** (користувач попросив явно), але **не** місце — та сама межа,
+що й в оновленнях.
 
 ### claude CLI running
 
