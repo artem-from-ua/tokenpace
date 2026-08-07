@@ -1,40 +1,5 @@
 import Foundation
 
-// MARK: - TimeToReset
-
-/// How the countdown to a single limit reset should be displayed.
-///
-/// A discriminated result so the rendering layer (`StatusItemView`, issue #10) owns the
-/// presentation and the logic layer owns none of the glyphs. Tests assert on the case and
-/// its associated value, not on a fully styled UI string.
-///
-/// The two cases map to the SPEC time bands ("Поведінка агента — час"), with two deliberate
-/// divergences from `statusline.sh` (see ADR-0006):
-/// - ``absolute(_:)`` replaces statusline's coarse `~Nh`/`~Nd` for far-off resets.
-/// - ``relative(_:)`` adds a sub-minute band (`"<1m"`) that statusline does not have.
-///
-/// There is no longer a distinct "reset now / unknown" case (the old `.resetNow`, removed in #167 /
-/// ADR-0043): a window past its boundary is rolled forward before formatting
-/// (``ResetClock/optimisticReset(_:now:)``, applied on every render), and a **missing/unparseable**
-/// `resets_at` is now surfaced as the menu bar's ⚠️ error state (via ``MenuBarLayout/ResetSelection``),
-/// not as a fabricated countdown.
-public enum TimeToReset: Sendable, Equatable {
-    /// Reset is **more than 90 minutes** away: show the absolute wall-clock time,
-    /// already formatted to the injected `Locale`/`TimeZone` (e.g. `"5:30 PM"` for a
-    /// 12-hour locale, `"17:30"` for a 24-hour locale). DST is applied by Foundation.
-    case absolute(String)
-
-    /// Reset is **within (0, 90] minutes** (or a degenerate ≤ 0 remnant): a compact relative duration
-    /// — `"1h10m"`, `"45m"`, `"1h"`, or `"<1m"` for anything under a minute. No spaces, no zero-padding,
-    /// no seconds band (the menu bar re-renders on a ~30 s cadence, so a per-second countdown would jump
-    /// raggedly — #36 follow-up).
-    ///
-    /// Also reused by ``ResetClock/timeToResetCompactDays(resetsAt:now:locale:timeZone:)`` to carry a
-    /// **compact day count** (`"4d"`, `"1d"`) for the menu-bar idle countdown to a far 7-day reset —
-    /// the view renders the string verbatim, so no new case is needed for that band.
-    case relative(String)
-}
-
 // MARK: - NearestReset
 
 /// The limit window whose reset comes first, plus its instant.
@@ -64,27 +29,22 @@ public struct NearestReset: Sendable, Equatable {
 /// | bash function | Swift entry point |
 /// |---|---|
 /// | `parse_reset_epoch` | ``parse(_:)`` |
-/// | `format_time_remaining` | ``timeToReset(resetsAt:now:locale:timeZone:)`` |
+/// | `format_time_remaining` | ``timeToReset(resetsAt:now:)`` |
 /// | (nearest-of-two selection, inline in statusline) | ``nearestReset(fiveHour:sevenDay:)`` |
 ///
-/// ## Divergences from statusline (ADR-0006)
-/// `format_time_remaining` only ever prints a **relative** duration. TokenPace instead:
-/// - shows the **absolute** local `hh:mm` when the reset is > 90 minutes away;
-/// - uses a flat **90-minute** absolute/relative threshold (not statusline's per-window
-///   2h / 48h `threshold_hours`);
-/// - drops trailing zero minutes (`2h`, not `2h0m`), rounds to the nearest minute, and renders any
-///   sub-minute remainder as `"<1m"` rather than a seconds value (#36 follow-up — the menu bar's
-///   ~30 s re-render cadence makes a per-second countdown jump raggedly);
+/// ## Divergences from statusline (ADR-0006, superseded by ADR-0074)
+/// `format_time_remaining` prints a relative duration with per-window `threshold_hours` (2 h / 48 h)
+/// and a coarse `~Nh`/`~Nd` far band. TokenPace instead:
+/// - uses **one** single-unit, nearest-rounded duration everywhere (``relativeRounded``) — no
+///   per-window thresholds, and no absolute wall-clock band on the menu bar (#284, ADR-0069). The
+///   clock survives only as the popup's trailing qualifier (`"20h at 03:00"`, ``resetLine``);
+/// - renders any sub-minute remainder as `"<1m"` rather than a seconds value (#36 follow-up — the
+///   menu bar's ~30 s re-render cadence makes a per-second countdown jump raggedly);
 /// - has no "reset now / unknown" state: a past-boundary window is rolled forward before formatting,
 ///   and a missing/unparseable `resets_at` becomes the menu bar's ⚠️ error state (#167, ADR-0043).
 public enum ResetClock {
 
     // MARK: parse
-
-    /// The 90-minute boundary, in seconds. Reset farther away → absolute; at or nearer
-    /// (but still in the future) → relative. The comparison is strict `>` (see
-    /// ``timeToReset(resetsAt:now:locale:timeZone:)``), so exactly 90 minutes is relative.
-    private static let absoluteThreshold: TimeInterval = 90 * 60
 
     /// Parse the API `resets_at` string into an absolute `Date`.
     ///
@@ -172,92 +132,37 @@ public enum ResetClock {
 
     // MARK: timeToReset
 
-    /// Render the countdown to a single reset instant.
+    /// The menu bar's reset countdown: **one single-unit, nearest-rounded duration for every
+    /// distance** — `"<1m"`, `"45m"`, `"1h"`, `"5h"`, `"4d"`.
     ///
-    /// **Divergent port of `format_time_remaining`** (`statusline.sh` lines 221–263). The
-    /// band boundaries (ADR-0006):
+    /// Thin wrapper over ``relativeRounded(resetsAt:now:)`` — the *same* function that produces the
+    /// numeric core of the popup's ``resetLine(resetsAt:now:locale:timeZone:)``, so one reset instant
+    /// renders the same number on both surfaces in the same minute. The popup differs only by its
+    /// appended qualifier (`"5h at 20:40"` vs the menu bar's bare `"5h"`).
     ///
-    /// | remaining            | statusline                          | TokenPace (this fn)             |
-    /// |----------------------|-------------------------------------|--------------------------------|
-    /// | `≤ 0`                | `⏰`                                 | `"<1m"` — degenerate only (see below) |
-    /// | `(0, 60) s`          | (n/a — bash floors to `0m`)         | `"<1m"` — sub-minute, no seconds |
-    /// | `[60 s, 90 min]`     | `"\(h)h\(m)m"` / `"\(m)m"`          | same, rounded to nearest minute, trailing `0m` dropped |
-    /// | `> 90 min`           | coarse `~Nh` / `~Nd`                | ``TimeToReset/absolute(_:)`` — **new** |
+    /// **The 90-minute absolute/relative threshold is gone** (#284, ADR-0074, superseding ADR-0006).
+    /// It used to switch the label to a wall-clock `"20:40"` past 90 minutes, which made the two
+    /// surfaces disagree about the same reset, and made the item jump 6 pt wide as a reset crossed the
+    /// band (`1h29m` 37.2 pt → `20:40` 31.3 pt — the "label crossing a format band" cause named in
+    /// #283). Without the threshold the format never changes: only the unit does (`m` → `h` → `d`),
+    /// and the widest label anywhere narrows to 23.6 pt (`"10m"`).
     ///
-    /// A **non-positive** `remaining` no longer has its own state: the render pipeline rolls any
-    /// window past its boundary forward before formatting (`ResetClock.optimisticReset`, applied on
-    /// every render — #167, ADR-0043), so a reset "at or past now" cannot reach here in the normal
-    /// flow. On genuinely degenerate input it falls through to `"<1m"` ("about to reset") rather than
-    /// a removed `.resetNow` — the same string the old glyph-free state rendered.
+    /// The wall-clock anchor survives in the popup, where there is room for it — and `"20:40"` on the
+    /// menu bar was never complete anyway, since it did not say *which day*.
     ///
-    /// Boundary: strict `>` 90 min → absolute; **exactly 90 min → relative** (`1h30m`), since
-    /// near the cap the live `Nh Nm` countdown is more useful than a static clock.
-    ///
-    /// **Relative arithmetic** (see `relativeString`): the menu bar re-renders on a ~30 s cadence, so a
-    /// per-second countdown would jump in ragged steps. Instead sub-minute → `"<1m"` (no seconds band),
-    /// and `[60 s, 90 min]` rounds to the **nearest** whole minute (matching the popup's `relativeRounded`
-    /// so the two never disagree), then drops a zero `m` (`"\(h)h"`) or zero `h` (`"\(m)m"`), else
-    /// `"\(h)h\(m)m"`.
-    ///
-    /// **Absolute branch** (no statusline analog): format `resetsAt` as wall-clock `hh:mm`
-    /// in the injected `timeZone` (Foundation applies DST automatically), honoring the
-    /// injected `locale`'s 12h/24h convention via `setLocalizedDateFormatFromTemplate("jmm")`
-    /// (`j` is the locale's hour-cycle skeleton). SPEC "Час ресету — локальний час пристрою".
+    /// A **non-positive** `remaining` has no state of its own: the render pipeline rolls any window
+    /// past its boundary forward before formatting (`ResetClock.optimisticReset`, applied on every
+    /// render — #167, ADR-0043), so a reset "at or past now" cannot reach here in the normal flow. On
+    /// genuinely degenerate input `relativeRounded` returns `nil` and this falls back to `"<1m"`
+    /// ("about to reset") rather than a removed `.resetNow`.
     ///
     /// - Parameters:
     ///   - resetsAt: The reset instant (typically ``NearestReset/resetsAt``).
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
-    ///   - locale: Drives 12h vs 24h in the absolute branch. Default `.current`.
-    ///   - timeZone: Wall-clock zone + DST source for the absolute branch. Default `.current`.
-    public static func timeToReset(
-        resetsAt: Date,
-        now: Date,
-        locale: Locale = .current,
-        timeZone: TimeZone = .current
-    ) -> TimeToReset {
-        let remaining = resetsAt.timeIntervalSince(now)
-        if remaining <= 0 { return .relative("<1m") }   // degenerate (see doc): about-to-reset, no own state
-        if remaining > absoluteThreshold {
-            return .absolute(absoluteString(for: resetsAt, locale: locale, timeZone: timeZone))
-        }
-        return .relative(relativeString(seconds: Int(remaining))) // truncate toward zero
-    }
-
-    // MARK: timeToResetCompactDays (menu-bar idle variant, #100)
-
-    /// The menu-bar countdown when the 5-hour window is idle and the label falls back to the
-    /// **7-day** reset (``UsageSnapshot/sessionIdle``): like ``timeToReset(resetsAt:now:locale:timeZone:)``,
-    /// but a reset **24 h or more** away renders as a compact `"Nd"` day count (`"4d"`) instead of an
-    /// absolute wall-clock time, which for a reset days out is more legible than a bare `"20:40"`.
-    ///
-    /// Bands:
-    /// - `≥ 24 h`  → ``TimeToReset/relative(_:)`` carrying ``relativeRounded(resetsAt:now:)``'s value,
-    ///   which at ≥ 24 h is always its nearest-**day** branch (`"4d"`, `"1d"`) — the *same* arithmetic
-    ///   the popup uses for a far reset, so the menu bar and popup never disagree by a day.
-    /// - `< 24 h`  → delegates verbatim to ``timeToReset(resetsAt:now:locale:timeZone:)`` (absolute
-    ///   `"20:40"` above 90 min, the relative `"45m"` bands below, `"<1m"` at ≤ 0).
-    ///
-    /// No new ``TimeToReset`` cases: the day count rides in ``TimeToReset/relative(_:)`` and the view
-    /// renders it verbatim. `relativeRounded` returns `nil` only for a non-positive remaining, which the
-    /// `≥ 24 h` guard already excludes — but if it ever did, we fall through to `timeToReset`
-    /// (→ `.relative("<1m")`) rather than force-unwrap.
-    ///
-    /// - Parameters:
-    ///   - resetsAt: The 7-day reset instant (from ``parse(_:)``).
-    ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
-    ///   - locale: Drives 12h vs 24h in the `< 24 h` absolute sub-branch. Default `.current`.
-    ///   - timeZone: Wall-clock zone + DST source for that sub-branch. Default `.current`.
-    public static func timeToResetCompactDays(
-        resetsAt: Date,
-        now: Date,
-        locale: Locale = .current,
-        timeZone: TimeZone = .current
-    ) -> TimeToReset {
-        let remaining = resetsAt.timeIntervalSince(now)
-        if remaining >= 24 * 3_600, let days = relativeRounded(resetsAt: resetsAt, now: now) {
-            return .relative(days)   // ≥ 24 h ⇒ relativeRounded is always its "Nd" nearest-day branch
-        }
-        return timeToReset(resetsAt: resetsAt, now: now, locale: locale, timeZone: timeZone)
+    /// - Returns: A ready-to-draw label. No `locale`/`timeZone`: a bare duration is locale-invariant
+    ///   (they were only ever needed by the removed wall-clock branch).
+    public static func timeToReset(resetsAt: Date, now: Date) -> String {
+        relativeRounded(resetsAt: resetsAt, now: now) ?? "<1m"
     }
 
     // MARK: resetDisplay (convenience)
@@ -267,36 +172,34 @@ public enum ResetClock {
     /// view without re-deriving the same selection + formatting logic.
     ///
     /// Returns `nil` only when **neither** string parses. `which` tells the caller which
-    /// limit drives the countdown (for the accompanying bar/label). `now`/`locale`/`timeZone`
-    /// are threaded to ``timeToReset(resetsAt:now:locale:timeZone:)``.
+    /// limit drives the countdown (for the accompanying bar/label).
     ///
     /// - Parameters:
     ///   - fiveHourResetsAt: Raw `five_hour.resets_at` (may be `nil`).
     ///   - sevenDayResetsAt: Raw `seven_day.resets_at` (may be `nil`).
     ///   - now: Current instant.
-    ///   - locale: Drives 12h vs 24h. Default `.current`.
-    ///   - timeZone: Wall-clock zone + DST source. Default `.current`.
     public static func resetDisplay(
         fiveHourResetsAt: String?,
         sevenDayResetsAt: String?,
-        now: Date,
-        locale: Locale = .current,
-        timeZone: TimeZone = .current
-    ) -> (which: LimitWindow, display: TimeToReset)? {
+        now: Date
+    ) -> (which: LimitWindow, display: String)? {
         guard let nearest = nearestReset(
             fiveHour: parse(fiveHourResetsAt),
             sevenDay: parse(sevenDayResetsAt)
         ) else { return nil }
-        let display = timeToReset(resetsAt: nearest.resetsAt, now: now, locale: locale, timeZone: timeZone)
-        return (nearest.window, display)
+        return (nearest.window, timeToReset(resetsAt: nearest.resetsAt, now: now))
     }
 
-    // MARK: - Popup countdown (relative-always + bounded absolute)
+    // MARK: - Shared countdown core (both surfaces)
 
-    /// A **single-unit, rounded** relative countdown for the popup's reset line (#11, #38):
-    /// one of `"1m"`, `"20m"`, `"3h"`, `"3d"` — the unit picked by how far off the reset is, the
-    /// magnitude **rounded to the nearest** unit. Used as the numeric core of ``resetLine`` and,
-    /// via ``timeToResetCompactDays(resetsAt:now:locale:timeZone:)``, of the menu-bar idle countdown.
+    /// A **single-unit, rounded** relative countdown (#11, #38): one of `"1m"`, `"20m"`, `"3h"`,
+    /// `"3d"` — the unit picked by how far off the reset is, the magnitude **rounded to the nearest**
+    /// unit.
+    ///
+    /// **The single source of the number on both surfaces** (#284, ADR-0074): the numeric core of the
+    /// popup's ``resetLine(resetsAt:now:locale:timeZone:)`` and the whole of the menu bar's
+    /// ``timeToReset(resetsAt:now:)``. That shared origin is what guarantees one reset instant reads
+    /// the same in the bar and in the popup at the same time — the popup only appends a qualifier.
     ///
     /// Bands (remaining time → output):
     /// - `≤ 0`          → `nil` (reset now/past — the caller renders a stale signal)
@@ -368,23 +271,6 @@ public enum ResetClock {
     }
 
     // MARK: - Private formatting
-
-    /// Compact relative duration for a strictly-positive `seconds` remaining (≤ 90 min).
-    /// See ``timeToReset(resetsAt:now:locale:timeZone:)`` for the band rules.
-    ///
-    /// The menu bar re-renders only on a ~30 s cadence, so a per-second countdown would jump in coarse,
-    /// ragged steps (`12s` then straight to a new window). Instead it shows **whole minutes, rounded to
-    /// the nearest** — matching the popup's `relativeRounded` so the two never disagree — and anything
-    /// under a minute reads as **`"<1m"`** ("about to reset"), never a seconds value.
-    private static func relativeString(seconds: Int) -> String {
-        if seconds < 60 { return "<1m" }                       // sub-minute → "<1m", no seconds band
-        let totalMins = Int((Double(seconds) / 60).rounded())  // nearest whole minute
-        let hours = totalMins / 60
-        let mins  = totalMins % 60
-        if hours == 0 { return "\(mins)m" }   // < 1 h → minutes only
-        if mins == 0  { return "\(hours)h" }  // exact hour(s) → drop trailing 0m
-        return "\(hours)h\(mins)m"
-    }
 
     /// Absolute wall-clock `hh:mm` for `date`, locale-aware (12/24h) and DST-correct via
     /// `timeZone`. A fresh `DateFormatter` per call: it depends on the injected

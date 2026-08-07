@@ -101,7 +101,7 @@ public enum MenuBarMode: Sendable, Equatable {
     ///   - reset: The formatted countdown to the blocking reset.
     ///   - which: Which window drives it (`.fiveHour` for a 5h-cadence reset, `.sevenDay` for a
     ///     7-day-cadence or credits/monthly reset) — decides the label format and mirrors `ResetToShow`.
-    case blockedReset(reset: TimeToReset, which: LimitWindow)
+    case blockedReset(reset: String, which: LimitWindow)
     /// Error state: a ⚠️ glyph, optionally with the last known bars beside it.
     ///
     /// All associated values are `nil` together (⚠️ only) or all non-`nil` together (⚠️ + bars) —
@@ -113,7 +113,7 @@ public enum MenuBarMode: Sendable, Equatable {
     ///   - sevenDay: The last known 7-day bar, or `nil`.
     ///   - reset: The last known nearest-reset countdown, or `nil`.
     ///   - which: Which window drove `reset`, or `nil`.
-    case error(fiveHour: BarView?, sevenDay: BarView?, reset: TimeToReset?, which: LimitWindow?)
+    case error(fiveHour: BarView?, sevenDay: BarView?, reset: String?, which: LimitWindow?)
 }
 
 // MARK: - ResetToShow
@@ -123,9 +123,11 @@ public enum MenuBarMode: Sendable, Equatable {
 /// means "draw no countdown".
 public struct ResetToShow: Sendable, Equatable {
     public let which: LimitWindow
-    public let display: TimeToReset
+    /// The ready-to-draw countdown, e.g. `"45m"` / `"5h"` / `"4d"` — one format for every distance
+    /// since #284 (ADR-0074), shared with the popup via ``ResetClock/relativeRounded(resetsAt:now:)``.
+    public let display: String
 
-    public init(which: LimitWindow, display: TimeToReset) {
+    public init(which: LimitWindow, display: String) {
         self.which = which
         self.display = display
     }
@@ -285,8 +287,8 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// - the 5h bar is built ``BarView/idle`` `= true` (inert `usage 0 / time 0` layout; the view draws
     ///   a solid-blue knobless track — **no** synthesized `now + 5h` phantom reset, the bug this fixes);
     /// - the reset label switches to the **7-day** reset via
-    ///   ``ResetClock/timeToResetCompactDays(resetsAt:now:locale:timeZone:)`` (`"4d"` when ≥ 24 h,
-    ///   `"20:40"` when nearer), with `which == .sevenDay`.
+    ///   ``ResetClock/timeToReset(resetsAt:now:)`` (`"4d"` when days out, `"20h"` / `"45m"` when
+    ///   nearer — one format for every distance since #284), with `which == .sevenDay`.
     ///
     /// - Parameters:
     ///   - snapshot: A decoded usage poll (`UsageClient`/#9).
@@ -356,9 +358,10 @@ public struct MenuBarLayout: Sendable, Equatable {
             let resetToShow: ResetToShow?
             if blocked, let choice = BlockingReset.forBlocked(snapshot: snapshot, now: now) {
                 // Every blocking candidate in the idle state is a long (7-day-cadence or monthly)
-                // window — the 5h window is gone — so format it with the compact-days variant.
-                let text = ResetClock.timeToResetCompactDays(resetsAt: choice.resetsAt, now: now)
-                resetToShow = ResetToShow(which: .sevenDay, display: text)
+                // window — the 5h window is gone — so `which` is `.sevenDay`.
+                resetToShow = ResetToShow(
+                    which: .sevenDay,
+                    display: ResetClock.timeToReset(resetsAt: choice.resetsAt, now: now))
             } else {
                 // The idle 5h passes `fiveResetsAt: nil` deliberately (no 5h window) with `.calm`
                 // severity, so it is never the *chosen* window; a broken 7-day date was already caught
@@ -566,20 +569,19 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// fabricated countdown.
     ///
     /// Delegates the *which reset* decision to ``BlockingReset/forBlocked(snapshot:now:)`` (shared with
-    /// the popup's red badge and the idle-blocked bar, so all three agree), then formats it exactly like
-    /// ``selectReset``'s chosen window: a **5h** reset (`.token(id: 0, …)` — index `0` is the 5h row) as
-    /// a live `H:MM` countdown, every longer window (7d, per-model, or credits/monthly) as the
-    /// compact-days variant. `which` mirrors that split so the view knows the label format.
+    /// the popup's red badge and the idle-blocked bar, so all three agree), then formats it with the
+    /// single ``ResetClock/timeToReset(resetsAt:now:)`` format — one shape for every window since #284
+    /// (ADR-0074), so no per-window branch is needed here any more.
+    ///
+    /// `which` still distinguishes a **5h** reset (`.token(id: 0, …)` — index `0` is the 5h row) from
+    /// every longer window (7d, per-model, or credits/monthly): it no longer selects a label format,
+    /// but it tells the view which limit the countdown belongs to.
     private static func blockedResetMode(for snapshot: UsageSnapshot, now: Date) -> MenuBarMode? {
         guard let choice = BlockingReset.forBlocked(snapshot: snapshot, now: now) else { return nil }
-        // Only the 5h window (popup row index 0) resets on the 5-hour cadence; 7d / per-model / credits
-        // are all long windows formatted in compact days.
         let isFiveHour: Bool = { if case .token(0, _) = choice { return true } else { return false } }()
-        let which: LimitWindow = isFiveHour ? .fiveHour : .sevenDay
-        let text = isFiveHour
-            ? ResetClock.timeToReset(resetsAt: choice.resetsAt, now: now)
-            : ResetClock.timeToResetCompactDays(resetsAt: choice.resetsAt, now: now)
-        return .blockedReset(reset: text, which: which)
+        return .blockedReset(
+            reset: ResetClock.timeToReset(resetsAt: choice.resetsAt, now: now),
+            which: isFiveHour ? .fiveHour : .sevenDay)
     }
 
     /// One `BarView` for a window, combining its bar geometry and its exhausted flag
@@ -619,8 +621,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     static func selectReset(
         fiveSeverity: PacingSeverity, fiveResetsAt: Date?,
         sevenSeverity: PacingSeverity, sevenResetsAt: Date?,
-        now: Date, mode: ResetCountdownMode,
-        locale: Locale = .current, timeZone: TimeZone = .current
+        now: Date, mode: ResetCountdownMode
     ) -> ResetSelection {
         if mode == .never { return .hide }
 
@@ -631,14 +632,12 @@ public struct MenuBarLayout: Sendable, Equatable {
         let fiveNoisy = fiveSeverity == .ahead || fiveSeverity == .exhausted
         let sevenNoisy = sevenSeverity == .ahead || sevenSeverity == .exhausted
 
-        // Format a chosen window's reset (5h → live countdown; 7d → compact-days variant). A chosen
+        // Format a chosen window's reset — one format for both windows since #284 (ADR-0074). A chosen
         // window with no valid instant is a data error, not a countdown.
         func display(_ window: LimitWindow, _ resetsAt: Date?) -> ResetSelection {
             guard let at = resetsAt else { return .dataError(window) }
-            let text = window == .sevenDay
-                ? ResetClock.timeToResetCompactDays(resetsAt: at, now: now, locale: locale, timeZone: timeZone)
-                : ResetClock.timeToReset(resetsAt: at, now: now, locale: locale, timeZone: timeZone)
-            return .show(ResetToShow(which: window, display: text))
+            return .show(ResetToShow(
+                which: window, display: ResetClock.timeToReset(resetsAt: at, now: now)))
         }
         // A "nearest/latest of two calm-ish windows" pick: no window to show → hide (not an error —
         // this branch is only reached when neither window is individually blocking).
