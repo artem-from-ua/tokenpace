@@ -402,8 +402,9 @@ Settings → Notifications → **Preview** біля «Claude service incidents»
 - **Bar style** (`Pressure | Mixed | Progress`): «Pressure» — стрічка від лівого краю без маркера на
   обох поверхнях, довжиною `pressureLength` = `|u − t| / (1 − t)` (шкала `[now .. reset]`);
   «Progress» — gap + маркер часу в шкалі вікна; «Mixed» — Pressure у menu bar, Progress у дропдауні.
-  Перевір **обидві** поверхні (клікни значок для дропдауна). Кейси в коді лишились
-  `.simple`/`.mixed`/`.pacing` — див. [ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md).
+  Перевір **обидві** поверхні (клікни значок для дропдауна). Кейси й збережені значення перейменовано
+  разом з UI (`progress`/`mixed`/`pressure`), старі мігруються при старті —
+  див. [ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md).
 - **Calm non-critical colors** (`Off | Yellow + Green | + Blue`): що мутиться в білий (orange/red завжди
   кольорові). «+ Blue» **disabled** коли Far behind = «Less blue, please!» (клік → popover причини).
 - **Far behind pace interval** (`1h/1d | 2h/2d | 3h/3d | Less blue, please!`): поріг green→blue; «Less

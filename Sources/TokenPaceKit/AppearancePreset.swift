@@ -49,7 +49,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 modelLimitsVisibility: .nonCalm,
                 extraUsageVisibility: .nonCalm,
                 resetCountdownModeMenuBar: .smart,
-                barStyle: .simple,
+                barStyle: .pressure,
                 showTicks: false,   // the quiet look drops the under-bar tick ruler too
                 farBehindInterval: .off)   // …and no blue far-behind zone
         case .workHarder:
@@ -86,7 +86,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 modelLimitsVisibility: .always,
                 extraUsageVisibility: .always,
                 resetCountdownModeMenuBar: .always,
-                barStyle: .pacing,
+                barStyle: .progress,
                 showTicks: true,
                 farBehindInterval: .medium)
         }

@@ -56,18 +56,16 @@ struct AppearancePane: View {
             // colour, but on different scales — Progress marks positions in the window, Pressure measures
             // the gap against the time left. "Far behind pace interval": how big a surplus turns the
             // behind side blue.
-            // The case names are the pre-#307 ones (`.simple`/`.pacing`) — see `BarStyle` for why the
-            // raw values were kept when the UI names changed.
-            Section {
+                        Section {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("Bar style")
                         Spacer()
                         SegmentedControl(
                             segments: [
-                                .init(value: BarStyle.simple, title: "Pressure"),
+                                .init(value: BarStyle.pressure, title: "Pressure"),
                                 .init(value: BarStyle.mixed, title: "Mixed"),
-                                .init(value: BarStyle.pacing, title: "Progress"),
+                                .init(value: BarStyle.progress, title: "Progress"),
                             ],
                             active: model.barStyle,
                             onSelect: { model.setBarStyle($0) })

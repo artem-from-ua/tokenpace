@@ -11,7 +11,8 @@ superseded_by: [0076]
 > маркера більше **не** дорівнює ширині пейсинг-gap (`gapEnd − gapStart`) — вона рахується в
 > перенормованій шкалі `[now .. reset]` (`BarLayout.pressureLength`), а тіки під нею мітять чверті
 > часу, що лишився, а не частки вікна. UI-назви теж змінились: «Pace & Time» → **Progress**,
-> «Pace» → **Pressure** (enum-кейси й `rawValue` лишились ті самі). Решта цього запису — per-surface
+> «Pace» → **Pressure**; перейменовано й enum-кейси з `rawValue` (`.pacing` → `.progress`, `.simple` →
+> `.pressure`), старі значення мігруються на старті. Решта цього запису — per-surface
 > вибір, `CalmColorMode`, `FarBehindInterval`, `showTicks`, пресети — чинна.
 
 > Частково витісняє [ADR-0061](0061-far-behind-blue-pacing-zone.md): behind-поріг більше не

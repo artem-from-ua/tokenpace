@@ -96,14 +96,24 @@ Menu bar floor-ив нульову стрічку до пігулки від с�
 `popupUsesPressureScale` (інверсія прапорців маркера), щоб малювачі не виводили його щоразу
 з заперечення.
 
-### Назви в UI — змінені, enum-кейси — ні
+### Назви — змінені всюди, зі справжньою міграцією
 
-`Pace & Time` → **Progress**, `Pace` → **Pressure**; `Mixed` лишився. Кейси `.pacing`/`.mixed`/
-`.simple` і їхні `rawValue` **не** перейменовані навмисно: і `PersistedConfig.barStyle`, і
-`BarStyle.init(from:)` мовчки ковтають невідомий raw із fallback у дефолт, тож перейменування без
-міграції тихо скинуло б кожного користувача, який обрав не дефолт. Ціна — розбіжність «кейс у коді
-vs назва в UI», погашена doc-коментарем у `BarStyle.swift` і мапінгом у
-[log-messages.md](../reference/log-messages.md).
+`Pace & Time` → **Progress**, `Pace` → **Pressure**; `Mixed` лишився. Перейменовано **і** UI-назви,
+**і** enum-кейси, **і** `rawValue`: `.pacing` → `.progress` (`"pacing"` → `"progress"`), `.simple` →
+`.pressure` (`"simple"` → `"pressure"`).
+
+Розбіжність «кейс у коді vs назва в UI» — постійний податок на читання коду й логів, тож її не
+лишаємо. Але сам по собі перейменований `rawValue` **тихо скидає** налаштування: і
+`PersistedConfig.barStyle`, і `BarStyle.init(from:)` резолвлять невідомий raw у дефолт без помилки.
+Тому рена́ме йде в парі з двома захистами:
+
+- **`PersistedConfig.migrateBarStyleIfNeeded()`** — переписує збережене значення на старті, **до**
+  першого читання. Ідемпотентна, не чіпає відсутній ключ (щоб фолбек на пресет далі працював).
+- **`BarStyle.legacyRawValues`** + legacy-гілка в `init(from:)` — щоб конфіг, **експортований**
+  старішим білдом ([#257](https://github.com/artem-from-ua/tokenpace/issues/257)), імпортувався
+  правильно, а не з'їдався forward-compatible фолбеком.
+
+Обидва читають **одну** таблицю, тож не можуть розійтися в тому, що означав `"simple"`.
 
 **Progress названо так, бо це збігається з тим, як бар уже читають.**
 [#254](https://github.com/artem-from-ua/tokenpace/issues/254) §3 задокументував, що горизонтальний

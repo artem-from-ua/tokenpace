@@ -79,8 +79,8 @@ final class PopupBarView: NSView {
     /// Bar presentation style (#224). ``BarStyle/pacing`` draws the gap + time-indicator marker + gap
     /// dividers; ``BarStyle/simple`` draws a left-anchored ribbon coloured by the pacing state and keeps
     /// the under-bar tick ruler, but no marker or dividers. Pushed in from `PopupViewController.addBar`.
-    /// Mirror of `StatusItemView.barStyle` — keep the two draw paths in sync. Default `.pacing`.
-    var barStyle: BarStyle = .pacing {
+    /// Mirror of `StatusItemView.barStyle` — keep the two draw paths in sync. Default `.progress`.
+    var barStyle: BarStyle = .progress {
         didSet {
             guard barStyle != oldValue else { return }
             needsDisplay = true
@@ -1046,7 +1046,7 @@ final class PopupViewController: NSViewController {
     /// Bar presentation style (#224), governing every bar in the popup. Pushed into each `PopupBarView`
     /// during `rebuild()` → `addBar`. Child bars are built fresh on each rebuild, so a change here must
     /// rebuild (not just redraw) to reach them — mirrors `optionHeld`. Default `.pacing`.
-    var barStyle: BarStyle = .pacing {
+    var barStyle: BarStyle = .progress {
         didSet {
             guard isViewLoaded, barStyle != oldValue else { return }
             rebuild()

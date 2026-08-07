@@ -175,7 +175,7 @@ struct AppearancePresetValuesCodableTests {
         """
         let decoded = try JSONDecoder().decode(
             AppearancePresetValues.self, from: Data(json.utf8))
-        #expect(decoded.barStyle == .simple)
+        #expect(decoded.barStyle == .pressure)
         #expect(decoded.farBehindInterval == .long)
         #expect(decoded.resetCountdownModeMenuBar == .always)
         #expect(decoded.modelLimitsVisibility == .always)

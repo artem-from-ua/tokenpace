@@ -7,21 +7,22 @@ import Foundation
 @Suite("BarStyle")
 struct BarStyleTests {
 
-    /// Three styles ship; the raw values are stable identifiers persisted in UserDefaults.
+    /// Three styles ship; the raw values are persisted in UserDefaults. They were renamed in #307
+    /// alongside the UI names — see `decodesLegacyRawValues` for the pre-#307 raws.
     @Test func casesAndRawValues() {
-        #expect(BarStyle.allCases == [.pacing, .mixed, .simple])
-        #expect(BarStyle.pacing.rawValue == "pacing")
+        #expect(BarStyle.allCases == [.progress, .mixed, .pressure])
+        #expect(BarStyle.progress.rawValue == "progress")
         #expect(BarStyle.mixed.rawValue == "mixed")
-        #expect(BarStyle.simple.rawValue == "simple")
+        #expect(BarStyle.pressure.rawValue == "pressure")
     }
 
-    /// Per-surface marker helpers: `.pacing` marks both, `.simple` marks neither, `.mixed` marks only
-    /// the dropdown (pace-only menu bar).
+    /// Per-surface marker helpers: `.progress` marks both, `.pressure` marks neither, `.mixed` marks
+    /// only the dropdown (Pressure menu bar).
     @Test func perSurfaceMarkers() {
-        #expect(BarStyle.pacing.menuBarShowsTimeMarker)
-        #expect(BarStyle.pacing.popupShowsTimeMarker)
-        #expect(!BarStyle.simple.menuBarShowsTimeMarker)
-        #expect(!BarStyle.simple.popupShowsTimeMarker)
+        #expect(BarStyle.progress.menuBarShowsTimeMarker)
+        #expect(BarStyle.progress.popupShowsTimeMarker)
+        #expect(!BarStyle.pressure.menuBarShowsTimeMarker)
+        #expect(!BarStyle.pressure.popupShowsTimeMarker)
         #expect(!BarStyle.mixed.menuBarShowsTimeMarker)   // Pressure in the menu bar
         #expect(BarStyle.mixed.popupShowsTimeMarker)      // Progress in the dropdown
     }
@@ -36,26 +37,52 @@ struct BarStyleTests {
             #expect(style.popupUsesPressureScale == !style.popupShowsTimeMarker, "\(style)")
         }
         // Spelled out per case, so a future edit to either flag has to face both names.
-        #expect(BarStyle.simple.menuBarUsesPressureScale)
-        #expect(BarStyle.simple.popupUsesPressureScale)
+        #expect(BarStyle.pressure.menuBarUsesPressureScale)
+        #expect(BarStyle.pressure.popupUsesPressureScale)
         #expect(BarStyle.mixed.menuBarUsesPressureScale)    // Pressure in the compact menu bar…
         #expect(!BarStyle.mixed.popupUsesPressureScale)     // …Progress in the roomier dropdown
-        #expect(!BarStyle.pacing.menuBarUsesPressureScale)
-        #expect(!BarStyle.pacing.popupUsesPressureScale)
+        #expect(!BarStyle.progress.menuBarUsesPressureScale)
+        #expect(!BarStyle.progress.popupUsesPressureScale)
     }
 
     /// A known raw value round-trips through `Codable`.
     @Test func decodesKnownRawValue() throws {
-        let data = Data(#""simple""#.utf8)
+        let data = Data(#""pressure""#.utf8)
         let style = try JSONDecoder().decode(BarStyle.self, from: data)
-        #expect(style == .simple)
+        #expect(style == .pressure)
     }
 
     /// Forward-compatible decode: an unrecognised raw string (a newer build's value) falls back to
-    /// `.pacing` — the shipped behaviour — instead of throwing, so an older build never trips.
-    @Test func decodesUnknownRawValueToPacing() throws {
+    /// `.progress` — the shipped behaviour — instead of throwing, so an older build never trips.
+    @Test func decodesUnknownRawValueToProgress() throws {
         let data = Data(#""ribbon-3d""#.utf8)
         let style = try JSONDecoder().decode(BarStyle.self, from: data)
-        #expect(style == .pacing)
+        #expect(style == .progress)
+    }
+
+    /// The pre-#307 raws decode to the cases that replaced them, **not** to the unknown-value
+    /// fallback. This is what keeps an appearance config exported by an older build importable: without
+    /// it `"simple"` (Pace) would land on `.progress` — silently turning a marker-less bar into a
+    /// marked one, the exact loss the rename had to avoid.
+    @Test func decodesLegacyRawValues() throws {
+        let cases: [(String, BarStyle)] = [
+            ("pacing", .progress),   // was "Pace & Time"
+            ("simple", .pressure),   // was "Pace"
+            ("mixed", .mixed),       // unchanged by #307
+        ]
+        for (raw, expected) in cases {
+            let style = try JSONDecoder().decode(BarStyle.self, from: Data("\"\(raw)\"".utf8))
+            #expect(style == expected, "\(raw)")
+        }
+    }
+
+    /// The legacy table covers exactly the two renamed cases — `"mixed"` is absent because it still
+    /// decodes through `rawValue`. Pins the table against a future edit that adds a stale entry.
+    @Test func legacyTableCoversOnlyTheRenamedCases() {
+        #expect(BarStyle.legacyRawValues == ["pacing": .progress, "simple": .pressure])
+        // Every legacy raw maps to a case whose *current* raw differs — otherwise the entry is dead.
+        for (raw, style) in BarStyle.legacyRawValues {
+            #expect(style.rawValue != raw, "\(raw)")
+        }
     }
 }

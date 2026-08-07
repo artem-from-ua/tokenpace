@@ -166,7 +166,7 @@ public struct BarLayout: Sendable, Equatable {
     ///   to the minimum pill (`PopupBarView.pillRect`), so "dead on pace" reads as a mark rather
     ///   than an empty track.
     ///
-    /// Only the marker-less **Pressure** presentation uses this; **Progress** (`BarStyle.pacing`)
+    /// Only the marker-less **Pressure** presentation uses this; **Progress** (`BarStyle.progress`)
     /// keeps drawing `gapStart..gapEnd` on the window scale, where its time marker is meaningful.
     /// A marker is impossible here — on this track it would sit at zero forever.
     public var pressureLength: Double {

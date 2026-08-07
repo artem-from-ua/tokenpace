@@ -140,7 +140,7 @@ idle-рядок навмисно компактний — це економія 
 |---|---|---|
 | Місячний cap на витрати | Користувач у білінгу Anthropic | `spend.limit: null` → рядок кредитів згортається в чистий лічильник без бару й вердикту |
 | Видимість 7-денного бару | `hideCalmSevenDayBar`, дефолт-увімкнено | Спокійний 7d бар прихований |
-| Стиль бару | `BarStyle` — pacing / mixed / simple (UI: Progress / Mixed / Pressure) | Маркер часу є або немає — і разом із ним змінюється шкала: Progress міряє в частках вікна, Pressure — проти часу, що лишився, тож **ширина несе терміновість** ([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md)) |
+| Стиль бару | `BarStyle` — progress / mixed / pressure | Маркер часу є або немає — і разом із ним змінюється шкала: Progress міряє в частках вікна, Pressure — проти часу, що лишився, тож **ширина несе терміновість** ([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md)) |
 | Спокійні кольори | `CalmColorMode` | Приглушення насиченості |
 | Секції попапа | `PopupSectionVisibility` — always / nonCalm / optionOnly | Per-model і кредити |
 

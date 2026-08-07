@@ -63,8 +63,8 @@ final class StatusItemView: NSView {
     /// Bar presentation style (#224). ``BarStyle/pacing`` draws the current gap + time-indicator
     /// marker; ``BarStyle/simple`` draws a left-anchored ribbon coloured by the pacing state, with no
     /// marker. Render-only (the bar occupies the same rect either way), so a redraw is all that's
-    /// needed. Kept in sync with the popup's own `barStyle` — see `PopupBarView`. Default `.pacing`.
-    var barStyle: BarStyle = .pacing {
+    /// needed. Kept in sync with the popup's own `barStyle` — see `PopupBarView`. Default `.progress`.
+    var barStyle: BarStyle = .progress {
         didSet {
             guard barStyle != oldValue else { return }
             needsDisplay = true

@@ -17,17 +17,10 @@ import Foundation
 ///   A time marker is impossible here: on this track it would sit at zero forever.
 ///
 /// The three cases pick which presentation each surface uses:
-/// - ``simple`` — **Pressure** on both surfaces (no marker anywhere).
+/// - ``pressure`` — **Pressure** on both surfaces (no marker anywhere).
 /// - ``mixed`` — **Pressure** in the menu bar, **Progress** in the dropdown (the marker appears only
 ///   where there's room for it).
-/// - ``pacing`` — **Progress** on both surfaces (marker everywhere; the shipped pre-#224 look).
-///
-/// **The case names predate the UI names and deliberately still differ from them** (#307): the raw
-/// strings below are persisted in `UserDefaults` and in the exported appearance JSON, and both
-/// decode paths fall back *silently* on an unknown raw — renaming them would quietly reset every
-/// user who picked anything but the default. So `.simple` is presented as **Pressure** and
-/// `.pacing` as **Progress**; `docs/reference/log-messages.md` carries the same mapping for
-/// `bar-style: set <raw>`.
+/// - ``progress`` — **Progress** on both surfaces (marker everywhere; the shipped pre-#224 look).
 ///
 /// This is a **render-only** distinction: it changes how each bar is *drawn*, never the underlying
 /// `BarLayout`, `PacingSeverity`, or which bars are shown. The Kit stays UI-free — the shell reads this
@@ -35,11 +28,15 @@ import Foundation
 /// helpers below (mirrors how `calmColors` reaches the render layer).
 ///
 /// Stored raw-string in `UserDefaults` with a forward-compatible decode so a newer build's value never
-/// makes an older build fail — an unknown raw falls back to ``pacing`` (the shipped behaviour).
+/// makes an older build fail — an unknown raw falls back to ``progress`` (the shipped behaviour).
+/// The pre-#307 raws (`"pacing"`/`"simple"`) are migrated in `PersistedConfig.migrateBarStyleIfNeeded`;
+/// they must **not** be silently swallowed by that fallback, which is why the migration runs before
+/// any read.
 public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
     /// **Progress** on both surfaces: a grey track, a coloured pacing gap between the used edge and the
     /// time edge, and a "you are here" time-indicator marker. The shipped behaviour before #224.
-    case pacing = "pacing"
+    /// Raw value was `"pacing"` before #307.
+    case progress = "progress"
     /// **Pressure** in the menu bar, **Progress** in the dropdown (#224). The compact menu-bar bar drops
     /// the marker; the roomier dropdown keeps it.
     case mixed = "mixed"
@@ -47,16 +44,16 @@ public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
     /// edge** whose length is ``BarLayout/pressureLength`` — the gap measured against the time left
     /// before the reset — coloured by the pacing state (far-behind blue → calm green → yellow →
     /// orange → red). The colour *is* the "what state am I in" answer and the width is how urgent it
-    /// is, with no marker to correlate against.
-    case simple = "simple"
+    /// is, with no marker to correlate against. Raw value was `"simple"` before #307.
+    case pressure = "pressure"
 
     /// Whether the **menu-bar** widget draws the time-indicator marker (Progress) vs the left-anchored
-    /// ribbon (Pressure). Only ``pacing`` marks the menu bar.
-    public var menuBarShowsTimeMarker: Bool { self == .pacing }
+    /// ribbon (Pressure). Only ``progress`` marks the menu bar.
+    public var menuBarShowsTimeMarker: Bool { self == .progress }
 
     /// Whether the **dropdown popup** draws the time-indicator marker (Progress) vs the ribbon
-    /// (Pressure). ``pacing`` and ``mixed`` both mark the popup; ``simple`` does not.
-    public var popupShowsTimeMarker: Bool { self != .simple }
+    /// (Pressure). ``progress`` and ``mixed`` both mark the popup; ``pressure`` does not.
+    public var popupShowsTimeMarker: Bool { self != .pressure }
 
     /// Whether the **menu-bar** bar is measured on the renormalised `[now .. reset]` track
     /// (``BarLayout/pressureLength``) instead of the window scale (#307).
@@ -73,11 +70,28 @@ public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
     /// quarters of the time remaining instead.
     public var popupUsesPressureScale: Bool { !popupShowsTimeMarker }
 
-    /// Forward-compatible decode: an unrecognised raw string falls back to ``pacing`` (the default,
-    /// i.e. the shipped behaviour) instead of throwing. Mirrors `ResetCountdownMode`'s unknown
-    /// philosophy.
+    /// The pre-#307 raw values, mapped to the cases that replaced them. `"mixed"` is unchanged and so
+    /// is absent here.
+    ///
+    /// Read by both the `Codable` decode below (exported appearance JSON written by an older build,
+    /// and shared configs) and `PersistedConfig.migrateBarStyleIfNeeded` (the stored `UserDefaults`
+    /// value). Keeping the mapping in one place means the two can never disagree about what
+    /// `"simple"` meant.
+    public static let legacyRawValues: [String: BarStyle] = [
+        "pacing": .progress,
+        "simple": .pressure,
+    ]
+
+    /// Decode with legacy support *before* the forward-compatible fallback (#307): a `"pacing"` /
+    /// `"simple"` raw written by an older build maps to the case that replaced it, rather than being
+    /// swallowed by the unknown-value fallback. Without this, importing a pre-#307 config would
+    /// silently turn `Pace` into `Progress` — the exact trap the rename had to avoid.
+    ///
+    /// An unrecognised raw still falls back to ``progress`` (the default, i.e. the shipped behaviour)
+    /// instead of throwing, so a *newer* build's value never makes an older one fail. Mirrors
+    /// `ResetCountdownMode`'s unknown philosophy.
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
-        self = BarStyle(rawValue: raw) ?? .pacing
+        self = BarStyle(rawValue: raw) ?? BarStyle.legacyRawValues[raw] ?? .progress
     }
 }

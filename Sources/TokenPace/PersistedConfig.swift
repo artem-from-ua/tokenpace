@@ -482,11 +482,34 @@ enum PersistedConfig {
         defaults.removeObject(forKey: Key.legacyShowModelSpecificLimits)
     }
 
+    /// Rewrite a pre-#307 `barStyle` **value** to the case that replaced it: `"pacing"` → `.progress`,
+    /// `"simple"` → `.pressure` (`"mixed"` is unchanged). See `BarStyle.legacyRawValues`.
+    ///
+    /// Unlike the two migrations above this one keeps the **same key** and only changes the stored
+    /// string, because #307 renamed the cases rather than replacing the setting.
+    ///
+    /// **Why it is not optional.** `barStyle`'s getter resolves an unrecognised raw to the preset
+    /// default, silently. Without this pass every user who chose `Pace` or kept the default `Mixed`…
+    /// — well, `mixed` still resolves, but `pacing`/`simple` would not, so those users would be
+    /// quietly moved to whatever the active preset says, with no error and no trace. That silent
+    /// reset is the whole reason the rename needed a migration.
+    ///
+    /// Runs on every launch and is idempotent: a value that already matches a current case is left
+    /// alone, and an absent key stays absent so the getter's preset fallback still applies.
+    static func migrateBarStyleIfNeeded() {
+        guard let raw = defaults.string(forKey: Key.barStyle) else { return }  // never set → preset default
+        guard BarStyle(rawValue: raw) == nil else { return }                   // already a current case
+        guard let migrated = BarStyle.legacyRawValues[raw] else { return }     // unknown → getter's fallback
+        defaults.set(migrated.rawValue, forKey: Key.barStyle)
+        AppLogger.lifecycle.notice(
+            "bar-style: migrated \(raw, privacy: .public) → \(migrated.rawValue, privacy: .public)")
+    }
+
     /// Write every **Appearance**-pane key from a named preset's fixed value set (#215, #224) — the
     /// general form of `resetAppearanceToDefaults()`. Unlike reset (which *removes* keys so getters fall
     /// back to their defaults), this writes explicit values, because a preset can differ from the
     /// factory defaults (e.g. `.controlFreak` turns calm off; `.chill` opts into `.simple` bars while
-    /// the shipped `barStyle` default is `.pacing`). The caller re-syncs the model and re-applies the
+    /// the shipped `barStyle` default is `.progress`). The caller re-syncs the model and re-applies the
     /// values to the widget.
     static func apply(_ preset: AppearancePreset) {
         let v = preset.values
