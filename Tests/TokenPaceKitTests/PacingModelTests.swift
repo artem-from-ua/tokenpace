@@ -213,6 +213,111 @@ struct BarLayoutTests {
     }
 }
 
+// MARK: - Ribbon length (#307)
+
+/// The marker-less bar's ribbon length across the reachable state space, on **both** scales.
+///
+/// The states are the thirteen surveyed in #307's working artefact — the same `(t, u)` pairs whose
+/// rendered widths the proposal was measured on. Keeping them in one table lets the two scales be
+/// compared row by row:
+///
+/// - **window scale** (`gapEnd - gapStart` = `|u − t|`) — what the marker-less bar drew before #307.
+/// - **remaining scale** (``BarLayout/pressureLength`` = `|u − t| / (1 − t)`) — what it draws now.
+///
+/// `minPillFraction` is the renderer's floor expressed as a fraction of the bar: `minStripWidth`
+/// is ¾ of the bar height (3.75 pt at the menu bar's 5 pt) against a 34 pt track ⇒ ~11 %. It is
+/// duplicated here as a plain constant because the geometry that enforces it lives in the AppKit
+/// target, which has no tests — see #307. A state below this floor renders as the minimum pill,
+/// i.e. indistinguishable from every other state below it.
+@Suite("BarLayout ribbon length")
+struct RibbonLengthTests {
+
+    /// One surveyed state: window-elapsed percent, utilisation percent, and a label matching the
+    /// artefact's row so a failure names the state a human recognises.
+    private struct State {
+        let name: String
+        let timePct: Double
+        let utilPct: Double
+    }
+
+    /// The renderer inflates anything narrower than this to the minimum pill (~11 % of the track).
+    private static let minPillFraction = 0.11
+
+    private static let states: [State] = [
+        .init(name: "Deep behind",       timePct: 80, utilPct: 30),
+        .init(name: "Behind, early",     timePct: 20, utilPct: 5),
+        .init(name: "Behind, mid",       timePct: 50, utilPct: 35),
+        .init(name: "Behind, late",      timePct: 90, utilPct: 70),
+        .init(name: "Mildly behind",     timePct: 60, utilPct: 50),
+        .init(name: "Dead on pace",      timePct: 55, utilPct: 55),
+        .init(name: "Mild lead, early",  timePct: 30, utilPct: 38),
+        .init(name: "Mild lead, late",   timePct: 82, utilPct: 86),
+        .init(name: "Ahead, mid-window", timePct: 50, utilPct: 70),
+        .init(name: "Ahead, late",       timePct: 82, utilPct: 90),
+        .init(name: "Ahead, very late",  timePct: 93, utilPct: 97),
+        .init(name: "Exhausted, early",  timePct: 10, utilPct: 100),
+        .init(name: "Exhausted",         timePct: 70, utilPct: 100),
+    ]
+
+    private static func layout(_ s: State) -> BarLayout {
+        let resetsAt = now + (1.0 - s.timePct / 100) * 18_000
+        return PacingModel.barLayout(
+            utilization: s.utilPct, resetsAt: resetsAt, now: now, window: .fiveHour)
+    }
+
+    private static func state(_ name: String) -> State {
+        states.first { $0.name == name }!
+    }
+
+    /// The window scale, pinned state by state. This is the behaviour #307 replaces for the
+    /// marker-less bar; `Progress` (`.pacing`) still draws its gap on exactly these numbers, so
+    /// these expectations must keep holding after the change.
+    @Test func windowScaleWidthsPerState() {
+        let expected: [String: Double] = [
+            "Deep behind": 0.50, "Behind, early": 0.15, "Behind, mid": 0.15,
+            "Behind, late": 0.20, "Mildly behind": 0.10, "Dead on pace": 0.00,
+            "Mild lead, early": 0.08, "Mild lead, late": 0.04, "Ahead, mid-window": 0.20,
+            "Ahead, late": 0.08, "Ahead, very late": 0.04, "Exhausted, early": 0.90,
+            "Exhausted": 0.30,
+        ]
+        for s in Self.states {
+            let l = Self.layout(s)
+            #expect(abs((l.gapEnd - l.gapStart) - expected[s.name]!) < 1e-9, "\(s.name)")
+        }
+    }
+
+    /// ~21 % of the reachable state space renders as the minimum pill on the window scale. Among
+    /// the surveyed states five do: "almost exactly on pace" and "three points from exhaustion"
+    /// draw the same mark. This is the defect #307 was filed against.
+    @Test func windowScaleCollapsesFiveStatesIntoTheMinimumPill() {
+        let collapsed = Self.states.filter { s in
+            let l = Self.layout(s)
+            let width = l.gapEnd - l.gapStart
+            return width > 0 && width < Self.minPillFraction
+        }.map(\.name)
+        #expect(collapsed.sorted() == [
+            "Ahead, late", "Ahead, very late", "Mild lead, early", "Mild lead, late", "Mildly behind",
+        ])
+    }
+
+    /// Walking the ahead-group by increasing severity gives `8 → 4 → 20 → 8 → 4`: a wider bar does
+    /// not mean a worse state, so width cannot be trusted at a glance.
+    @Test func windowScaleIsNonMonotonicAcrossTheAheadGroup() {
+        let widths = Self.aheadGroup.map { name -> Double in
+            let l = Self.layout(Self.state(name))
+            return l.gapEnd - l.gapStart
+        }
+        // Not ascending — and the sharpest state ends up narrowest of all.
+        #expect(widths != widths.sorted())
+        #expect(widths.last! < widths.first!)
+    }
+
+    /// The ahead group in order of increasing severity (later window, larger lead).
+    private static let aheadGroup = [
+        "Mild lead, early", "Mild lead, late", "Ahead, mid-window", "Ahead, late", "Ahead, very late",
+    ]
+}
+
 // MARK: - blockIndex
 
 @Suite("PacingModel.blockIndex")
