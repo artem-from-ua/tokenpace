@@ -157,14 +157,47 @@ struct LogArchiver {
 
     // MARK: - Copy helpers
 
-    /// Copy `from` to `to`, creating parent directories and atomically replacing any existing copy
-    /// (a grown `.jsonl` overwrites the shorter mirrored version).
+    /// Copy `from` to `to`, creating parent directories and replacing any existing copy **atomically**
+    /// — a grown `.jsonl` overwrites the shorter mirrored version without the archive ever being left
+    /// without one (#306).
+    ///
+    /// This used to remove the destination and then copy, which opened a window where the previously
+    /// archived copy was already gone and the new one had not landed. On a full disk the copy failed
+    /// exactly there, so the archive silently lost a file it was often the *last* holder of — the
+    /// worst possible failure mode for an accumulate-only store that exists to outlive Claude Code's
+    /// 30-day cleanup.
+    ///
+    /// `replaceItemAt` **moves** its `withItemAt:` argument and consumes it, so `from` — a real log
+    /// under `~/.claude` — must never be passed to it directly. Hence the staging copy, which is
+    /// written beside the destination so the swap is a same-volume rename rather than a cross-volume
+    /// copy that could fail partway (the archive typically lives on an external disk). The staging
+    /// name is dotted because ``scan(_:)`` uses `.skipsHiddenFiles`: a staging file orphaned by a
+    /// crash can never be counted as an archived file nor re-copied.
+    ///
+    /// It costs the destination twice one file's size for the duration of the swap; that is
+    /// comfortably inside the 5 GB headroom the space gate reserves against the whole run.
     private func copyReplacing(from: URL, to: URL) throws {
-        try ensureDirectory(to.deletingLastPathComponent())
-        if fileManager.fileExists(atPath: to.path) {
-            try fileManager.removeItem(at: to)
+        let parent = to.deletingLastPathComponent()
+        try ensureDirectory(parent)
+
+        // Nothing to replace — a plain copy of a new path is already all-or-nothing.
+        guard fileManager.fileExists(atPath: to.path) else {
+            try fileManager.copyItem(at: from, to: to)
+            return
         }
-        try fileManager.copyItem(at: from, to: to)
+
+        let staged = parent.appendingPathComponent(".tokenpace-staging-\(UUID().uuidString)")
+        try fileManager.copyItem(at: from, to: staged)
+        do {
+            // `copyItem` preserves the source's modification date and `replaceItemAt` moves that very
+            // file into place, so the archived copy keeps the source mtime — which is what
+            // `ArchiveSyncPlan.filesToCopy` compares against. Losing it would silently re-copy every
+            // file on every run.
+            _ = try fileManager.replaceItemAt(to, withItemAt: staged)
+        } catch {
+            try? fileManager.removeItem(at: staged)   // swap failed → don't leak the staging file
+            throw error
+        }
     }
 
     private func ensureDirectory(_ url: URL) throws {
