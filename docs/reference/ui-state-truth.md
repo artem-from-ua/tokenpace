@@ -28,11 +28,19 @@
 | `hPadding` | 2 |
 | `labelGap` | 5 |
 | `awaitingIconSize` + gap | 12 + 6 |
+| `awaitingSlideTravel` | 22 (= `height`) |
 | `pauseGlyphSize` + gap | 11 + 3 |
 | `creditsIconSize` + gap | 12 + 4 |
 | `statusDotDiameter` + gap | 6 + 4 |
 
 Шрифт лейбла — `NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)`.
+
+**Слот awaiting-долоні резервується з опції, а не з даних** ([#283](https://github.com/artem-from-ua/cc-timer/issues/283),
+[ADR-0073](../adr/0073-awaiting-icon-reserved-slot-and-slide.md)): `awaitingIconSize + gap` входить у
+ширину віджета, поки ввімкнена Appearance-опція, **незалежно від того, чи хтось чекає вводу зараз**.
+Малюючи меню-бар у мокапі, не прибирай це місце разом з іконкою — інакше сусідні елементи стануть не
+там, де їх покаже застосунок. Сам гліф їде по Y на `awaitingSlideTravel` (з обрізанням по слоту), тож
+проміжний кадр — це **обрізана** долоня біля нижньої межі, а не зменшена або напівпрозора.
 
 ### Попап — `PopupBarView.Metrics`
 
