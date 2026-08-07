@@ -406,7 +406,7 @@ Settings → Notifications → **Preview** біля «Claude service incidents»
   blue» вимикає синій зовсім (на `far-behind` стубі бари стають зеленими).
 - **Show ticks on bars** (Dropdown Widget): вмикає/вимикає під-барову шкалу засічок у попапі (menu bar
   засічок не має).
-- **Release notes** лінк в About праворуч від версії — **лише в нотаризованому `.app`** (у `swift run`
+- **release notes** лінк в About праворуч від версії — **лише в нотаризованому `.app`** (у `swift run`
   його немає; це очікувано).
 
 ### Вигляд попапа (#188 — плашка + напівпрозоре тло + бари з glow)
@@ -497,7 +497,7 @@ locked».
 Панель має дві секції:
 
 - **Секція 1 (identity):** `Source code` · `Version` (просто номер, без лінка) · *(опційно)* рядок
-  🔵 **New version available: X.Y.Z** з **Release notes** (лінк на `…/releases/tag/vX.Y.Z`) ліворуч
+  🔵 **New version available: X.Y.Z** з **release notes** (лінк на `…/releases/tag/vX.Y.Z`) ліворуч
   біля тексту й **Download** (веб-реліз) праворуч.
 - **Секція 2 (behaviour):** `Check for updates periodically` (+ Check Now) · `Install updates
   automatically` · *(опційно)* рядок 🔴 **Update to version X.Y.Z failed during `<стадія>`.** +

@@ -173,7 +173,7 @@ final class SettingsModel {
     let inAppBundle = LaunchAtLoginController.isAppBundle
     let versionText = SettingsModel.makeVersionText()
     /// The GitHub release tag of the **installed** version (`vX.Y.Z`) — used by the About pane's
-    /// "Release notes" link beside the version (#224). Shown only in a real `.app` bundle (`inAppBundle`);
+    /// "release notes" link beside the version (#224). Shown only in a real `.app` bundle (`inAppBundle`);
     /// a dev build has no published release to point at.
     let currentVersionTag = "v\(TokenPaceKit.version)"
 
