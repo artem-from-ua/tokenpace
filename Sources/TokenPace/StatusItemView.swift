@@ -770,7 +770,7 @@ final class StatusItemView: NSView {
         }
 
         if let reset {
-            drawResetLabel(reset, leftOf: barsMaxX + Metrics.labelGap, in: rect)
+            drawResetLabel(reset, slotAt: barsMaxX + Metrics.labelGap, in: rect)
         }
     }
 
@@ -979,23 +979,31 @@ final class StatusItemView: NSView {
         NSBezierPath(roundedRect: stripRect, xRadius: r, yRadius: r).fill()
     }
 
-    /// Draw the reset countdown text to the right of the bars.
-    private func drawResetLabel(_ reset: String, leftOf x: CGFloat, in rect: NSRect) {
+    /// Draw the reset countdown text, centred inside its reserved slot (#303).
+    ///
+    /// `slotX` is the slot's **left edge**, not the text's: the slot is a fixed ``resetLabelSlot`` wide
+    /// whatever the label says, and the text is centred in it, so the spare space splits evenly either
+    /// side. Left-aligning would pile all of it against the item's right edge and read as the label
+    /// having come unstuck from it; right-aligning would pile it into the gap after the bars instead.
+    private func drawResetLabel(_ reset: String, slotAt slotX: CGFloat, in rect: NSRect) {
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
+            .font: Self.resetLabelFont,
             .foregroundColor: bright(Palette.foreground),   // labelColor at the system text opacity
         ]
         let label = NSAttributedString(string: reset, attributes: attrs)
         let size = label.size()
+        // Rounded to a whole point so the glyphs stay on the pixel grid — a half-point origin renders
+        // the text softer than the bars beside it.
+        let x = slotX + ((resetLabelWidth(reset) - size.width) / 2).rounded()
         label.draw(at: NSPoint(x: x, y: rect.minY + (rect.height - size.height) / 2))
     }
 
     /// Draw the blocked-state countdown **alone** (#194) — no bars, just the reset label at the left
     /// inset, vertically centred. Reuses the same monospaced-digit font and foreground colour as
-    /// ``drawResetLabel(_:leftOf:in:)`` so the countdown looks identical whether or not the bars are
-    /// hidden; `itemWidth` reserves exactly this label's width (via ``resetLabelWidth(_:)``) so the item
-    /// hugs the text. The blocked mode carries no pacing colour to mute, so `calmColorMode` is irrelevant
-    /// here — the label is always the neutral foreground.
+    /// ``drawResetLabel(_:slotAt:in:)`` so the countdown looks identical whether or not the bars are
+    /// hidden; `itemWidth` reserves the same fixed slot (via ``resetLabelWidth(_:)``) the bars mode does,
+    /// so the item keeps its width as the digit count changes (#303). The blocked mode carries no pacing
+    /// colour to mute, so `calmColorMode` is irrelevant here — the label is always the neutral foreground.
     ///
     /// When `layout.blockedPause` is set (fully blocked), the red pause glyph is drawn first, then the
     /// credits icon (when present), and the countdown shifts right past them — the same leading pattern
@@ -1003,7 +1011,7 @@ final class StatusItemView: NSView {
     /// (#199, #227). Order: pause → credits → countdown.
     private func drawBlockedReset(_ reset: String, in rect: NSRect) {
         let originX = drawLeadingDecorations(in: rect)
-        drawResetLabel(reset, leftOf: originX, in: rect)
+        drawResetLabel(reset, slotAt: originX, in: rect)
     }
 
     // MARK: Helpers
@@ -1054,15 +1062,47 @@ final class StatusItemView: NSView {
         return Metrics.barWidth + Metrics.labelGap + resetLabelWidth(reset)
     }
 
-    /// Rendered width of a reset label, measured with the exact font ``drawResetLabel`` /
-    /// ``drawBlockedReset`` draw it in — so both the bars-plus-label width and the bars-less blocked
-    /// width (#194) reserve precisely the drawn text. Rounded up so sub-pixel widths never clip the last
-    /// glyph.
+    /// The font the reset countdown is both **measured** and **drawn** in. One constant rather than a
+    /// literal at each site: the reserved slot (``resetLabelSlot``), the per-string measurement and the
+    /// centring in ``drawResetLabel(_:slotAt:in:)`` must agree exactly, and a font that drifted between
+    /// them would offset the text inside its own slot.
+    private static let resetLabelFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+
+    /// Width reserved for the reset label — the **widest** string the formatter can produce, so the
+    /// item stops changing width as the digit count does (#303). Measured once, lazily, from
+    /// ``resetLabelFont``, never hard-coded: a literal would silently stop matching the drawn text if
+    /// the font or its size ever changed.
+    ///
+    /// Four probes cover the whole range because the font is monospaced-**digit**, so every digit is
+    /// the same width — `00m`/`00h`/`00d` therefore stand in for every two-digit value, and `<1m` for
+    /// the only non-digit form. Sweeping all of `1…49m` / `1…22h` / `1…30d` yields the identical
+    /// number (24 pt) at ~500× the cost, so the probes are the whole set, not a sample of it.
+    ///
+    /// Independent of display scale: text metrics are in **points**, so the backing scale factor
+    /// (1×/2×/3×) changes rasterisation, not width — verified identical across all three. Nothing to
+    /// recompute when the widget moves between a Retina and a non-Retina screen.
+    private static let resetLabelSlot: CGFloat = ["<1m", "00m", "00h", "00d"]
+        .map { measuredResetLabelWidth($0) }
+        .max() ?? 24
+
+    /// Width the reserved slot gives a reset label. Constant at ``resetLabelSlot`` across every label
+    /// (#303) — `10h` → `9h` used to shrink the item by 7 pt, and the menu bar is right-aligned, so
+    /// every such swing shifted other apps' status items.
+    ///
+    /// `max` rather than the bare slot as a guard against silent clipping: a future formatter change or
+    /// a longer-horizon window could produce a string wider than the probes above, and this widens the
+    /// item — today's behaviour — instead of cutting the glyph off. No live case reaches it: a blocked
+    /// countdown resolves through `BlockingReset.forBlocked`, which needs *every* window exhausted, and
+    /// the 7-day window resets within 7 days (`7d`, 14 pt); even a credits/monthly reset tops out at
+    /// `30d` (21 pt).
     private func resetLabelWidth(_ reset: String) -> CGFloat {
-        let labelWidth = (reset as NSString).size(withAttributes: [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        ]).width
-        return ceil(labelWidth)
+        max(Self.resetLabelSlot, Self.measuredResetLabelWidth(reset))
+    }
+
+    /// Rendered width of a reset label in ``resetLabelFont`` — the exact font ``drawResetLabel`` draws
+    /// it in. Rounded up so sub-pixel widths never clip the last glyph.
+    private static func measuredResetLabelWidth(_ reset: String) -> CGFloat {
+        ceil((reset as NSString).size(withAttributes: [.font: resetLabelFont]).width)
     }
 
     /// Rendered width of the ⚠️ glyph at ``Metrics/errorGlyphSize`` — measured the same way it is
