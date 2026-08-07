@@ -52,7 +52,7 @@ superseded_by: [0076]
 `popupShowsTimeMarker`, щоб `StatusItemView` і `PopupBarView` не розсинхронились.
 
 > ⚠️ **Витіснено [ADR-0076](0076-pressure-scale-for-marker-less-bar.md).** Довжина стрічки більше не
-> дорівнює `gapEnd − gapStart` — це `BarLayout.pressureLength` = `|u − t| / (1 − t)`, тож кольору в
+> дорівнює `gapEnd − gapStart` — це `BarLayout.pressureLength` = `(r + k − 1)/k`, тож кольору в
 > ній **не** стільки ж, скільки в Progress: вона ширша саме там, де стан гостріший.
 
 ### 2. `CalmColorMode` — що приглушено (замість двох bool)

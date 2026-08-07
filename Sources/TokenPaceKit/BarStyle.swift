@@ -12,9 +12,10 @@ import Foundation
 /// - **Progress** draws on the **window** scale — two positional marks on one track: the marker at
 ///   `timeFraction`, and the capsule's far edge, which is always `usageFraction`.
 /// - **Pressure** draws on the **remaining** scale — ``BarLayout/pressureLength``
-///   (`|u − t| / (1 − t)`), where `0` is now and `1` is the reset. The length answers "how much of
-///   the time I have left would this gap consume", so width carries the same urgency the colour does.
-///   A time marker is impossible here: on this track it would sit at zero forever.
+///   (`(r + k − 1)/k`, `r = (u − t)/(1 − t)`), whose zero sits left of `t`. Width alone encodes
+///   severity there, at fixed positions: 20 % is exactly on pace, 32.8 % is where yellow turns
+///   orange, 100 % is exhausted. A time marker is impossible: on this track it would sit at zero
+///   forever, which is also why the popup's tick ruler marks 20 % instead of window fractions.
 ///
 /// The three cases pick which presentation each surface uses:
 /// - ``pressure`` — **Pressure** on both surfaces (no marker anywhere).
