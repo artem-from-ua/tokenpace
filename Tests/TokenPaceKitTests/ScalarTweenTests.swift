@@ -220,6 +220,16 @@ struct ScalarTweenSetTests {
         #expect(!set.isAnimating(at: t0))
     }
 
+    /// A zero duration makes a *changed* target land instantly and ask for no frames — the shape
+    /// Reduce Motion relies on (System Settings → Accessibility → Display). The glyph still appears
+    /// and disappears; it simply stops travelling to get there, and no frame timer is ever started.
+    @Test func zeroDurationSwitchesWithoutAnimating() {
+        var set = ScalarTweenSet()
+        set.update(key, target: 0, at: t0)
+        #expect(set.update(key, target: 1, at: t0, duration: 0) == 1)
+        #expect(!set.isAnimating(at: t0))
+    }
+
     /// An empty registry animates nothing — an idle app runs no frame loop at all.
     @Test func emptySetIsNotAnimating() {
         let set = ScalarTweenSet()
