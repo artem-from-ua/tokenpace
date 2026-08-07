@@ -183,10 +183,23 @@ final class SettingsWindowController: NSWindowController {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0,
                                 width: Metrics.contentWidth, height: Metrics.defaultContentHeight),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            // `.fullSizeContentView` is what makes the transparent title bar actually read as System
+            // Settings' rather than as a hole: without it the content stops below the bar, so the
+            // strip above the sidebar draws the *window's* background (measured 40,40,40) while the
+            // sidebar's vibrancy below it is 70,70,70 — a visible seam right where the traffic lights
+            // sit. With it, the split view runs the full height and the sidebar material continues
+            // behind them, exactly as in System Settings.
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false)
+        // System Settings' chrome: no text in the title bar, and the bar itself transparent so the
+        // sidebar's material runs up behind the traffic lights instead of stopping at a separate grey
+        // strip (#156 §2). The pane's name is not lost — it moves into the detail pane's toolbar, which
+        // is where System Settings shows it too. `title` still carries the app name for the places
+        // AppKit reads it without drawing it (the Window menu, Mission Control, Accessibility).
         window.title = "TokenPace Settings"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
         window.level = .floating               // float above other apps from a menu-bar app (ADR-0012 §6)
         window.isReleasedWhenClosed = false    // keep the controller alive so re-opening reuses it
         // Zoom means "as tall as the screen" here, not "as large as the screen" — see

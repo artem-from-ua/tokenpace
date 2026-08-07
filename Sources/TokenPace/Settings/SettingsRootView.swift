@@ -43,7 +43,10 @@ struct SettingsRootView: View {
             // suppress the automatic sidebar toggle so only the fixed split shows.
             .toolbar(removing: .sidebarToggle)
         } detail: {
-            detailPane
+            VStack(alignment: .leading, spacing: 0) {
+                paneTitle
+                detailPane
+            }
         }
         .frame(minWidth: minWidth, maxWidth: .infinity, minHeight: minHeight, maxHeight: .infinity)
     }
@@ -60,6 +63,28 @@ struct SettingsRootView: View {
         // SwiftUI's default Label gap is ~half the System Settings sidebar gap; set it explicitly.
         .labelStyle(SidebarLabelStyle(gap: model.sidebarIcons.chipLabelGap))
         .tag(section)
+    }
+
+    /// The current pane's name, at the top of the detail column — HIG's "update the window's title to
+    /// reflect the currently visible pane" (#156 §2), placed where System Settings places it.
+    ///
+    /// It is a view in the column rather than a `ToolbarItem`, and both toolbar placements were tried
+    /// first: `.navigation` puts the title in the split view's *shared* leading area, i.e. above the
+    /// **sidebar** next to the traffic lights, and `.principal` centres it across the whole window —
+    /// neither is where System Settings draws it, and a trailing `Spacer` does not push a principal
+    /// item leading (it shrinks to its intrinsic width). Owning the row here gives the leading edge
+    /// exactly, at the cost of scrolling with the pane instead of staying pinned — acceptable while
+    /// the title is the only thing in that row, and revisited if #156 §2's follow-up adds the ‹ ›
+    /// history buttons that would need to stay put.
+    ///
+    /// The 20 pt leading inset lines the title up with the grouped `Form`'s card edge below it, and
+    /// the window's own title bar is hidden and transparent so nothing else occupies this strip.
+    private var paneTitle: some View {
+        Text(model.selection.title)
+            .font(.system(size: 15, weight: .bold))
+            .padding(.leading, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 2)
     }
 
     @ViewBuilder
