@@ -906,6 +906,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PersistedConfig.migratePauseKeysIfNeeded()
         // …and carry the boolean "Show model & service limits" opt-out onto its tri-state successor.
         PersistedConfig.migrateModelLimitsVisibilityIfNeeded()
+        // …and rewrite the pre-#307 bar-style values, whose cases were renamed with the UI (Pace &
+        // Time → Progress, Pace → Pressure). Must run before anything reads `barStyle`, or the
+        // getter resolves the stale raw to the preset default and the choice is silently lost.
+        PersistedConfig.migrateBarStyleIfNeeded()
         // Record the running version so the next launch compares against it.
         PersistedConfig.lastRunVersion = current
     }

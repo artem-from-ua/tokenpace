@@ -21,7 +21,7 @@ struct AppearancePresetTests {
         #expect(v.modelLimitsVisibility == .nonCalm)   // quiet dropdown: fold until orange/red (#211)
         #expect(v.extraUsageVisibility == .nonCalm)
         #expect(v.resetCountdownModeMenuBar == .smart)
-        #expect(v.barStyle == .simple)
+        #expect(v.barStyle == .pressure)
         #expect(!v.showTicks)   // the quiet look drops the tick ruler
         #expect(v.farBehindInterval == .off)   // …and no blue far-behind zone
     }
@@ -35,8 +35,8 @@ struct AppearancePresetTests {
         #expect(chill.calmColorMode == .yellowGreenBlue)
         #expect(wh.showTicks)          // difference 2 — ticks on for every preset but Chill
         #expect(!chill.showTicks)
-        #expect(wh.barStyle == .mixed) // difference 3 — mixed bars (Chill is .simple)
-        #expect(chill.barStyle == .simple)
+        #expect(wh.barStyle == .mixed) // difference 3 — mixed bars (Chill is .pressure)
+        #expect(chill.barStyle == .pressure)
         #expect(!wh.pauseHidesBars)    // difference 5 — Work harder keeps the bars beside the pause icon
         #expect(chill.pauseHidesBars)  // …Chill hides them (icon only)
         // The rest matches Chill.
@@ -66,7 +66,7 @@ struct AppearancePresetTests {
         #expect(v.modelLimitsVisibility == .always)
         #expect(v.extraUsageVisibility == .always)
         #expect(v.resetCountdownModeMenuBar == .always)
-        #expect(v.barStyle == .pacing)
+        #expect(v.barStyle == .progress)
         #expect(v.showTicks)
     }
 
@@ -112,7 +112,7 @@ struct AppearancePresetTests {
             modelLimitsVisibility: chill.modelLimitsVisibility,
             extraUsageVisibility: chill.extraUsageVisibility,
             resetCountdownModeMenuBar: chill.resetCountdownModeMenuBar,
-            barStyle: .pacing,   // Chill uses .simple → this is off every preset
+            barStyle: .progress, // Chill uses .pressure → this is off every preset
             showTicks: chill.showTicks,
             farBehindInterval: chill.farBehindInterval)
         #expect(AppearancePreset.matching(custom) == nil)

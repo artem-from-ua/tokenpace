@@ -213,6 +213,265 @@ struct BarLayoutTests {
     }
 }
 
+// MARK: - Ribbon length (#307)
+
+/// The marker-less bar's ribbon length across the reachable state space, on **both** scales.
+///
+/// The states are the thirteen surveyed in #307's working artefact — the same `(t, u)` pairs whose
+/// rendered widths the proposal was measured on. Keeping them in one table lets the two scales be
+/// compared row by row:
+///
+/// - **window scale** (`gapEnd - gapStart` = `|u − t|`) — what the marker-less bar drew before #307.
+/// - **remaining scale** (``BarLayout/pressureLength`` = `|u − t| / (1 − t)`) — what it draws now.
+///
+/// `minPillFraction` is the renderer's floor expressed as a fraction of the bar: `minStripWidth`
+/// is ¾ of the bar height (3.75 pt at the menu bar's 5 pt) against a 34 pt track ⇒ ~11 %. It is
+/// duplicated here as a plain constant because the geometry that enforces it lives in the AppKit
+/// target, which has no tests — see #307. A state below this floor renders as the minimum pill,
+/// i.e. indistinguishable from every other state below it.
+@Suite("BarLayout ribbon length")
+struct RibbonLengthTests {
+
+    /// One surveyed state: window-elapsed percent, utilisation percent, and a label matching the
+    /// artefact's row so a failure names the state a human recognises.
+    private struct State {
+        let name: String
+        let timePct: Double
+        let utilPct: Double
+    }
+
+    /// The renderer inflates anything narrower than this to the minimum pill (~11 % of the track).
+    private static let minPillFraction = 0.11
+
+    private static let states: [State] = [
+        .init(name: "Deep behind",       timePct: 80, utilPct: 30),
+        .init(name: "Behind, early",     timePct: 20, utilPct: 5),
+        .init(name: "Behind, mid",       timePct: 50, utilPct: 35),
+        .init(name: "Behind, late",      timePct: 90, utilPct: 70),
+        .init(name: "Mildly behind",     timePct: 60, utilPct: 50),
+        .init(name: "Dead on pace",      timePct: 55, utilPct: 55),
+        .init(name: "Mild lead, early",  timePct: 30, utilPct: 38),
+        .init(name: "Mild lead, late",   timePct: 82, utilPct: 86),
+        .init(name: "Ahead, mid-window", timePct: 50, utilPct: 70),
+        .init(name: "Ahead, late",       timePct: 82, utilPct: 90),
+        .init(name: "Ahead, very late",  timePct: 93, utilPct: 97),
+        .init(name: "Exhausted, early",  timePct: 10, utilPct: 100),
+        .init(name: "Exhausted",         timePct: 70, utilPct: 100),
+    ]
+
+    private static func layout(_ s: State) -> BarLayout {
+        let resetsAt = now + (1.0 - s.timePct / 100) * 18_000
+        return PacingModel.barLayout(
+            utilization: s.utilPct, resetsAt: resetsAt, now: now, window: .fiveHour)
+    }
+
+    private static func state(_ name: String) -> State {
+        states.first { $0.name == name }!
+    }
+
+    /// The window scale, pinned state by state. This is the behaviour #307 replaces for the
+    /// marker-less bar; `Progress` (`.pacing`) still draws its gap on exactly these numbers, so
+    /// these expectations must keep holding after the change.
+    @Test func windowScaleWidthsPerState() {
+        let expected: [String: Double] = [
+            "Deep behind": 0.50, "Behind, early": 0.15, "Behind, mid": 0.15,
+            "Behind, late": 0.20, "Mildly behind": 0.10, "Dead on pace": 0.00,
+            "Mild lead, early": 0.08, "Mild lead, late": 0.04, "Ahead, mid-window": 0.20,
+            "Ahead, late": 0.08, "Ahead, very late": 0.04, "Exhausted, early": 0.90,
+            "Exhausted": 0.30,
+        ]
+        for s in Self.states {
+            let l = Self.layout(s)
+            #expect(abs((l.gapEnd - l.gapStart) - expected[s.name]!) < 1e-9, "\(s.name)")
+        }
+    }
+
+    /// ~21 % of the reachable state space renders as the minimum pill on the window scale. Among
+    /// the surveyed states five do: "almost exactly on pace" and "three points from exhaustion"
+    /// draw the same mark. This is the defect #307 was filed against.
+    @Test func windowScaleCollapsesFiveStatesIntoTheMinimumPill() {
+        let collapsed = Self.states.filter { s in
+            let l = Self.layout(s)
+            let width = l.gapEnd - l.gapStart
+            return width > 0 && width < Self.minPillFraction
+        }.map(\.name)
+        #expect(collapsed.sorted() == [
+            "Ahead, late", "Ahead, very late", "Mild lead, early", "Mild lead, late", "Mildly behind",
+        ])
+    }
+
+    /// Walking the ahead-group by increasing severity gives `8 → 4 → 20 → 8 → 4`: a wider bar does
+    /// not mean a worse state, so width cannot be trusted at a glance.
+    @Test func windowScaleIsNonMonotonicAcrossTheAheadGroup() {
+        let widths = Self.aheadGroup.map { name -> Double in
+            let l = Self.layout(Self.state(name))
+            return l.gapEnd - l.gapStart
+        }
+        // Not ascending — and the sharpest state ends up narrowest of all.
+        #expect(widths != widths.sorted())
+        #expect(widths.last! < widths.first!)
+    }
+
+    /// The ahead group in order of increasing severity (later window, larger lead).
+    private static let aheadGroup = [
+        "Mild lead, early", "Mild lead, late", "Ahead, mid-window", "Ahead, late", "Ahead, very late",
+    ]
+
+    // MARK: - The remaining scale (#307)
+
+    /// The renormalised scale, pinned state by state — the counterpart of
+    /// ``windowScaleWidthsPerState``. Five of the thirteen collapse to zero: every state calmer than
+    /// `t − (1 − t)·(k − 1)` sits left of the ribbon's zero.
+    @Test func remainingScaleWidthsPerState() {
+        let expected: [String: Double] = [
+            "Deep behind": 0.00,       // computed −1.80 — left of zero
+            "Behind, early": 0.05,
+            "Behind, mid": 0.00,       // computed −0.04 — left of zero
+            "Behind, late": 0.00,      // computed −1.40 — left of zero
+            "Mildly behind": 0.00,
+            "Dead on pace": 0.20,      // u == t is the fixed on-pace position
+            "Mild lead, early": 0.2914,
+            "Mild lead, late": 0.3778,
+            "Ahead, mid-window": 0.52,
+            "Ahead, late": 5.0 / 9,    // 0.5556
+            "Ahead, very late": 0.6571,
+            "Exhausted, early": 1.00,
+            "Exhausted": 1.00,
+        ]
+        for s in Self.states {
+            #expect(abs(Self.layout(s).pressureLength - expected[s.name]!) < 1e-3, "\(s.name)")
+        }
+    }
+
+    /// The defect from ``windowScaleIsNonMonotonicAcrossTheAheadGroup``, fixed: walking the
+    /// ahead-group by increasing severity now gives a strictly widening bar, so width can be
+    /// trusted at a glance.
+    @Test func remainingScaleIsMonotonicAcrossTheAheadGroup() {
+        let widths = Self.aheadGroup.map { Self.layout(Self.state($0)).pressureLength }
+        #expect(widths == widths.sorted())
+        #expect(zip(widths, widths.dropFirst()).allSatisfy { $0 < $1 })   // strictly, no ties
+    }
+
+    /// What the renderer's floor swallows on this scale, stated honestly.
+    ///
+    /// The scale is **continuous through zero**, so unlike the window scale there is no clean
+    /// "nothing lands in `(0, minPill)`" guarantee: a state just above the ribbon's zero has a
+    /// hair-thin width and floors to the same pill as zero itself. That is correct — those states
+    /// *are* essentially no pressure — but it means the pill covers a band, not a point.
+    ///
+    /// What matters is where the band ends: every state the model calls **`.ahead`** (the ones that
+    /// ask for an action) is far clear of it, so the floor never swallows an urgent state. That is
+    /// the defect ``windowScaleCollapsesFiveStatesIntoTheMinimumPill`` records for the old scale,
+    /// where "three points from exhaustion" drew the minimum pill.
+    @Test func theFloorOnlySwallowsCalmStates() {
+        for timePct in stride(from: 1.0, through: 98.0, by: 1) {
+            for utilPct in stride(from: 0.0, through: 99.0, by: 1) {
+                let l = Self.layout(.init(name: "grid", timePct: timePct, utilPct: utilPct))
+                guard l.pressureLength < Self.minPillFraction else { continue }
+                // Anything the floor swallows must be calm — never `.ahead`.
+                #expect(l.severity != .ahead, "t=\(timePct) u=\(utilPct) → \(l.pressureLength)")
+            }
+        }
+    }
+
+    /// **The severity bands are fixed positions on the bar**, identical at any point in the window —
+    /// the property that makes width alone readable as a state. `u == t` is always 20 %, and the
+    /// yellow→orange crossover always 32.8 %. Checked against the live `aheadThreshold`, not a
+    /// copied constant, so a change to the colour rule fails here rather than drifting silently.
+    @Test func severityThresholdsSitAtFixedWidths() {
+        for timePct in [0.0, 10, 30, 50, 82, 93, 99] {
+            let t = timePct / 100
+            let onPace = Self.layout(.init(name: "tie", timePct: timePct, utilPct: timePct))
+            #expect(abs(onPace.pressureLength - 0.20) < 1e-9, "on-pace at t=\(timePct)")
+
+            let threshold = PacingModel.aheadThreshold(timeFraction: t)
+            let atOrange = Self.layout(
+                .init(name: "orange", timePct: timePct, utilPct: (t + threshold) * 100))
+            #expect(abs(atOrange.pressureLength - 0.328) < 1e-9, "orange boundary at t=\(timePct)")
+        }
+    }
+
+    /// **Signed, not absolute** — the property that decided #307 against the earlier `|u − t|` form.
+    ///
+    /// Trace an early burst followed by silence: usage frozen at 40 % while the window elapses. The
+    /// ribbon must decay to zero and *stay* there. Under `|u − t| / (1 − t)` it instead bottoms out
+    /// at `u == t` and climbs back to a full bar — the calmest state of the session drawing the
+    /// loudest geometry.
+    @Test func pressureDecaysAndDoesNotReboundWhenSpendingStops() {
+        let widths = [20.0, 30, 40, 50, 60, 70, 85].map {
+            Self.layout(.init(name: "frozen", timePct: $0, utilPct: 40)).pressureLength
+        }
+        // Monotonically non-increasing, and it ends at zero rather than rebounding.
+        #expect(zip(widths, widths.dropFirst()).allSatisfy { $0 >= $1 }, "\(widths)")
+        #expect(widths.first! > 0)
+        #expect(widths.last! == 0)
+    }
+
+    /// Width alone determines the colour: the bands tile without overlap. Anything the model calls
+    /// `.ahead` (orange) is wider than the yellow band's top; anything at or behind pace is at or
+    /// under the fixed on-pace position. Swept over the reachable grid.
+    @Test func widthBandsDoNotOverlapAcrossTheGrid() {
+        for timePct in stride(from: 1.0, through: 98.0, by: 1) {
+            for utilPct in stride(from: 0.0, through: 99.0, by: 1) {
+                let l = Self.layout(.init(name: "grid", timePct: timePct, utilPct: utilPct))
+                if utilPct <= timePct {
+                    #expect(l.pressureLength <= 0.20 + 1e-9, "calm t=\(timePct) u=\(utilPct)")
+                }
+                // The 20-min end-of-window override forces orange without a matching lead, so it is
+                // excluded: this is about the dynamic threshold's own geometry.
+                if l.severity == .ahead, l.remainingSeconds > PacingModel.pacingOrangeOverrideSeconds {
+                    #expect(l.pressureLength >= 0.328 - 1e-9, "ahead t=\(timePct) u=\(utilPct)")
+                }
+            }
+        }
+    }
+
+    /// `u >= 1` is a full bar for any `t`: red never shrinks. On the window scale these same two
+    /// states differ (90 % vs 30 %) — a shrinking red bar that reads as "the problem is easing"
+    /// while work is just as blocked.
+    @Test func exhaustedAlwaysFillsTheBar() {
+        for timePct in [0.0, 10, 50, 70, 99] {
+            let l = Self.layout(.init(name: "exhausted", timePct: timePct, utilPct: 100))
+            #expect(l.pressureLength == 1.0, "t=\(timePct)")
+        }
+    }
+
+    /// `t = 1` (reset due or past) would divide by zero. There is no time left to press against, so
+    /// the bar is full whatever the usage — never NaN or infinity.
+    @Test func resetDueDoesNotDivideByZero() {
+        for util in [0.0, 40, 100] {
+            let l = PacingModel.barLayout(
+                utilization: util, resetsAt: now - 1, now: now, window: .fiveHour)
+            #expect(l.timeFraction == 1.0)
+            #expect(l.pressureLength == 1.0, "u=\(util)")
+        }
+    }
+
+    /// `usage == time` is the **fixed on-pace position**, 20 % — not zero. Zero belongs to states
+    /// calmer than that, and means "no pressure" rather than "dead on pace"; the distinction matters
+    /// because the renderers floor zero to a pill, so reading it as the tie would mislabel the mark.
+    @Test func deadOnPaceIsTheFixedOnPacePosition() {
+        for pct in [0.0, 25, 55, 90, 99] {
+            let l = Self.layout(.init(name: "tie", timePct: pct, utilPct: pct))
+            #expect(abs(l.pressureLength - 0.20) < 1e-9, "t=u=\(pct)")
+        }
+    }
+
+    /// Everything calmer than the ribbon's zero collapses onto it. The zero sits at
+    /// `t − (1 − t)·(k − 1)`, so at `t = 50 %` it is `u = 37.5 %`: below that the bar is the pill,
+    /// above it the ribbon grows. This is the deliberate cost of #307 — 79 % of calm states share
+    /// one mark, because on the calm side the action is carried by the colour.
+    @Test func calmStatesBelowTheZeroCollapseOntoIt() {
+        let k = PacingModel.pressureScaleCoefficient
+        let t = 0.50
+        let zeroAt = t - (1 - t) * (k - 1)          // 0.375
+        for (util, expectZero) in [(20.0, true), (37.0, true), (37.5, true), (38.0, false), (45.0, false)] {
+            let l = Self.layout(.init(name: "calm", timePct: t * 100, utilPct: util))
+            #expect((l.pressureLength == 0) == expectZero, "u=\(util) (zero at \(zeroAt * 100) %)")
+        }
+    }
+}
+
 // MARK: - blockIndex
 
 @Suite("PacingModel.blockIndex")

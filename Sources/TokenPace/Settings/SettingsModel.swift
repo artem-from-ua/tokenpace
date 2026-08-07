@@ -104,7 +104,7 @@ final class SettingsModel {
     var resetRadio: ResetRadio = .smart
     /// The bar presentation style (pacing / simple), shown as a segmented control (#224). Governs
     /// both the menu-bar widget and the dropdown popup.
-    var barStyle: BarStyle = .pacing
+    var barStyle: BarStyle = .progress
     /// Whether the popup draws the under-bar tick ruler on the pacing bars (#224). A popup concern,
     /// shown under the "Dropdown Widget" section.
     var showTicks = false

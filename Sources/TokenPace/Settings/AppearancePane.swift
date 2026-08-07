@@ -50,29 +50,33 @@ struct AppearancePane: View {
                 }
             }
 
-            // Bar presentation style (#224) + far-behind (green→blue) threshold (#224) — both govern the
-            // pacing bars across BOTH surfaces, so they share one header-less section rather than sitting
-            // in two adjacent bordered cards. "Bar style": both modes show pacing by colour, "Pace & Time"
-            // also marks where you are in the window. "Far behind pace interval": how big a surplus turns
-            // the behind side blue.
-            Section {
+            // Bar presentation style (#224, rescaled in #307) + far-behind (green→blue) threshold (#224) —
+            // both govern the pacing bars across BOTH surfaces, so they share one header-less section
+            // rather than sitting in two adjacent bordered cards. "Bar style": both modes show pacing by
+            // colour, but on different scales — Progress marks positions in the window, Pressure measures
+            // the gap against the time left. "Far behind pace interval": how big a surplus turns the
+            // behind side blue.
+                        Section {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("Bar style")
                         Spacer()
                         SegmentedControl(
                             segments: [
-                                .init(value: BarStyle.simple, title: "Pace"),
+                                .init(value: BarStyle.pressure, title: "Pressure"),
                                 .init(value: BarStyle.mixed, title: "Mixed"),
-                                .init(value: BarStyle.pacing, title: "Pace & Time"),
+                                .init(value: BarStyle.progress, title: "Progress"),
                             ],
                             active: model.barStyle,
                             onSelect: { model.setBarStyle($0) })
                     }
-                    SettingsHint(text: "*Pace* shows a color ribbon from the left; *Pace & Time* adds "
-                        + "the time marker. Both use the same state color and ribbon size.")
-                    SettingsHint(text: "*Mixed* keeps the compact menu-bar bar as *Pace* and shows "
-                        + "*Pace & Time* in the dropdown.")
+                    SettingsHint(text: "*Progress* puts two marks on the window: where you are in "
+                        + "time, and how much you have spent.")
+                    SettingsHint(text: "*Pressure* grows as you get ahead of pace and shrinks back "
+                        + "as time catches up. The tick marks exactly on pace; a full bar means the "
+                        + "limit is spent.")
+                    SettingsHint(text: "*Mixed* — *Pressure* on the menu bar and *Progress* in the "
+                        + "dropdown.")
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
