@@ -245,6 +245,13 @@ final class PopupBarView: NSView {
             // Animated so idle→active reads as a fade (ADR-0070); the glow follows automatically
             // because it is derived from this same colour.
             let idleColor = blocked ? Self.monochromeGrey : animated(Palette.idleBlue, part: .fill)
+            // Under Pressure the mark is a pill, so the grey track has to go down first — exactly as
+            // the pacing path does. Without it the pill hangs in empty space while every neighbouring
+            // row shows a track. Progress fills the whole width, so there the fill *is* the track.
+            if barStyle.popupUsesPressureScale {
+                Self.monochromeGrey.setFill()
+                NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner).fill()
+            }
             let idleShape = barStyle.popupUsesPressureScale
                 ? Self.pillRect(at: 0, in: rect)
                 : rect

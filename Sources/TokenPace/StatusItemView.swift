@@ -840,11 +840,19 @@ final class StatusItemView: NSView {
             // Animated like any other bar colour, so idle→active (blue→green) and the blocked grey
             // swap fade rather than snap.
             let fill = animated(idleTarget, window: bar.window, part: .fill)
+            let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
             if barStyle.menuBarUsesPressureScale {
                 // Zero pressure — the same pill `fillZone(floorEmptyToPill:)` draws for a zero ribbon.
+                // The grey track goes down first, exactly as the pacing path does: without it the pill
+                // would hang in empty space while every neighbouring bar shows a track.
+                Palette.unusedGrey.setFill()
+                path.fill()
+                NSGraphicsContext.saveGraphicsState()
+                path.addClip()
                 fillZone(from: 0, to: 0, in: rect, width: rect.width, color: fill, floorEmptyToPill: true)
+                NSGraphicsContext.restoreGraphicsState()
             } else {
-                let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
+                // Progress fills the whole track, so the fill *is* the track — no separate base needed.
                 fill.setFill()
                 path.fill()
                 // Progress keeps its identifying mark: the marker at `timeFraction` = 0.
