@@ -9,7 +9,7 @@ import Foundation
 /// collapses them to the handful of distinctions the popup actually explains, while keeping the
 /// **payload** the view needs to build a sentence (the HTTP status/body). It is localisation-free —
 /// the human sentence is assembled in `PopupViewController` (the localisation seam), like
-/// `PacingState`/`TimeToReset` (ADR-0009).
+/// `PacingState`/`LimitIndicator` (ADR-0009).
 ///
 /// The `init(_:)` maps are exhaustive `switch`es with **no `default`**: a new `TokenError`/
 /// `UsageError` case must break the build so it is consciously mapped, never silently bucketed

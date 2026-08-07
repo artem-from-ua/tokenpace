@@ -265,11 +265,13 @@ struct MenuBarLayoutIdleTests {
             Issue.record("expected a countdown in .always mode"); return
         }
         #expect(r.which == .sevenDay)
-        #expect(r.display == .relative("4d"))
+        #expect(r.display == "4d")
     }
 
-    @Test func idleResetWithin24hIsAbsolute() {
-        // 7-day reset < 24 h out → absolute wall-clock time (not a day count). Both bars calm, so
+    @Test func idleResetWithin24hIsHours() {
+        // 7-day reset < 24 h out → an hours count, not a day count. Formerly asserted the absolute
+        // wall-clock branch; since #284 (ADR-0074) the menu bar has one format, so this now pins the
+        // **unit** (and that the idle path still routes to the 7-day window). Both bars calm, so
         // `.always` is needed to surface the countdown.
         let layout = MenuBarLayout.make(
             from: idleSnapshot(sevenDayResetsIn: 5 * 3600), now: now, resetMode: .always)
@@ -277,10 +279,7 @@ struct MenuBarLayoutIdleTests {
             Issue.record("expected a countdown in .always mode"); return
         }
         #expect(r.which == .sevenDay)
-        let expected = ResetClock.timeToResetCompactDays(
-            resetsAt: now.addingTimeInterval(5 * 3600), now: now)
-        #expect(r.display == expected)
-        if case .absolute = r.display {} else { Issue.record("expected .absolute, got \(r.display)") }
+        #expect(r.display == "5h")
     }
 
     @Test func idleWithActiveSevenDayBrokenResetIsError() {
@@ -337,7 +336,7 @@ struct MenuBarLayoutIdleTests {
         guard let e = expanded(layout) else { return }
         #expect(e.five.blocked)
         guard let r = e.resetToShow else { Issue.record("blocked idle must show a countdown"); return }
-        #expect(r.display == .relative("4d"))   // 7d reset 4 days out, compact-days
+        #expect(r.display == "4d")   // 7d reset 4 days out, compact-days
     }
 
     @Test func idleNotBlockedWhenCreditsCover() {
@@ -363,7 +362,7 @@ struct MenuBarLayoutIdleTests {
         #expect(e.five.blocked)
         guard let r = e.resetToShow else { Issue.record("blocked idle must show a countdown"); return }
         // 7-day reset is 4 days out; the credits month-end is weeks away, so 7d is the blocking reset.
-        #expect(r.display == .relative("4d"))
+        #expect(r.display == "4d")
     }
 
     @Test func idleSnapshotStalePhaseCarriesIdleBar() {
@@ -610,7 +609,7 @@ struct MenuBarLayoutSelectResetTests {
         MenuBarLayout.selectReset(
             fiveSeverity: five, fiveResetsAt: fiveAt,
             sevenSeverity: seven, sevenResetsAt: sevenAt,
-            now: now, mode: mode, timeZone: TimeZone(identifier: "UTC")!)
+            now: now, mode: mode)
     }
 
     /// The `ResetToShow` from a `.show(_:)` outcome, else `nil` — so `.which`/`.display` assertions
@@ -926,7 +925,7 @@ struct MenuBarLayoutCreditsTests {
 struct MenuBarLayoutPauseHidesBarsTests {
 
     /// Pull the associated values out of a `.blockedReset` mode, or fail the test.
-    private func blocked(_ layout: MenuBarLayout) -> (reset: TimeToReset, which: LimitWindow)? {
+    private func blocked(_ layout: MenuBarLayout) -> (reset: String, which: LimitWindow)? {
         guard case let .blockedReset(reset, which) = layout.mode else {
             Issue.record("expected .blockedReset, got \(layout.mode)")
             return nil
@@ -942,18 +941,17 @@ struct MenuBarLayoutPauseHidesBarsTests {
         let layout = MenuBarLayout.make(from: snap, now: now, pauseHidesBars: true)
         guard let b = blocked(layout) else { return }
         #expect(b.which == .sevenDay)
-        #expect(b.reset == .relative("3d"))   // 7d reset 3 days out, compact-days
+        #expect(b.reset == "3d")   // 7d reset 3 days out, compact-days
     }
 
     @Test func fiveHourExhaustedAloneUsesFiveHourReset() {
-        // Only the 5h window is exhausted (7d has quota) → the 5h reset drives the countdown, formatted
-        // as a live H:MM countdown rather than compact-days.
+        // Only the 5h window is exhausted (7d has quota) → the 5h reset drives the countdown, so the
+        // label counts the 2 hours to *that* reset rather than the days to the 7-day one.
         let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 40, fiveHourResetsIn: 2 * 3600)
         let layout = MenuBarLayout.make(from: snap, now: now, pauseHidesBars: true)
         guard let b = blocked(layout) else { return }
         #expect(b.which == .fiveHour)
-        // A 2-hour-out reset formats as an absolute wall-clock time, not a "Nd" relative string.
-        if case .relative = b.reset { Issue.record("expected an absolute 5h countdown, got \(b.reset)") }
+        #expect(b.reset == "2h")
     }
 
     @Test func sevenDayExhaustedAloneUsesSevenDayReset() {
@@ -962,7 +960,7 @@ struct MenuBarLayoutPauseHidesBarsTests {
         let layout = MenuBarLayout.make(from: snap, now: now, pauseHidesBars: true)
         guard let b = blocked(layout) else { return }
         #expect(b.which == .sevenDay)
-        #expect(b.reset == .relative("2d"))
+        #expect(b.reset == "2d")
     }
 
     @Test func keepsBarsWhenOff() {
@@ -992,7 +990,7 @@ struct MenuBarLayoutPauseHidesBarsTests {
         let layout = MenuBarLayout.make(
             from: snap, now: now, resetMode: .never, pauseHidesBars: true)
         guard let b = blocked(layout) else { return }
-        #expect(b.reset == .relative("3d"))
+        #expect(b.reset == "3d")
     }
 
     @Test func keepsBarsWhenCreditsCover() {
@@ -1017,7 +1015,7 @@ struct MenuBarLayoutPauseHidesBarsTests {
         let layout = MenuBarLayout.make(from: snap, now: now, pauseHidesBars: true)
         guard let b = blocked(layout) else { return }
         #expect(b.which == .sevenDay)
-        #expect(b.reset == .relative("4d"))   // idle 7d reset 4 days out
+        #expect(b.reset == "4d")   // idle 7d reset 4 days out
     }
 
     @Test func brokenResetFallsBackToNormalPath() {

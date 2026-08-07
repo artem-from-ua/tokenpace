@@ -106,104 +106,94 @@ struct NearestResetTests {
     }
 }
 
-// MARK: - timeToReset (relative band)
+// MARK: - timeToReset (one format for every distance, #284/ADR-0074)
 
-/// One table row: `offset` seconds from `now` → expected `TimeToReset`.
+/// One table row: `offset` seconds from `now` → expected label.
 struct RelCase: Sendable {
     let offset: TimeInterval
-    let want: TimeToReset
+    let want: String
 }
 
-@Suite("ResetClock.timeToReset.relative")
+@Suite("ResetClock.timeToReset")
 struct RelativeTests {
 
     private static let cases: [RelCase] = [
         // sub-minute (0, 60) → "<1m", no seconds band (menu bar re-renders on ~30 s, #36 follow-up)
-        RelCase(offset: 1,                 want: .relative("<1m")),
-        RelCase(offset: 40,                want: .relative("<1m")),
-        RelCase(offset: 59,                want: .relative("<1m")),
+        RelCase(offset: 1,                 want: "<1m"),
+        RelCase(offset: 40,                want: "<1m"),
+        RelCase(offset: 59,                want: "<1m"),
         // minute boundary at exactly 60 s
-        RelCase(offset: 60,                want: .relative("1m")),
-        // minutes only (h == 0)
-        RelCase(offset: 45 * 60,           want: .relative("45m")),
-        RelCase(offset: 89 * 60,           want: .relative("1h29m")),
-        // exact hour(s) → trailing 0m dropped
-        RelCase(offset: 60 * 60,           want: .relative("1h")),
-        // hours + minutes
-        RelCase(offset: 60 * 60 + 60,      want: .relative("1h1m")),
-        RelCase(offset: 70 * 60,           want: .relative("1h10m")),
-        // rounds to the nearest minute: 1h10m59s → 1h11m (not truncated to 1h10m)
-        RelCase(offset: 70 * 60 + 59,      want: .relative("1h11m")),
-        // rounds down: 1h10m20s → 1h10m
-        RelCase(offset: 70 * 60 + 20,      want: .relative("1h10m")),
+        RelCase(offset: 60,                want: "1m"),
+        // minutes, rounded to the nearest
+        RelCase(offset: 10 * 60,           want: "10m"),
+        RelCase(offset: 45 * 60,           want: "45m"),
+        RelCase(offset: 20 * 60 + 40,      want: "21m"),   // rounds up
+        RelCase(offset: 20 * 60 + 20,      want: "20m"),   // rounds down
+        // the minutes band ends at 50 min, so nothing ever prints "60m"
+        RelCase(offset: 49 * 60,           want: "49m"),
+        RelCase(offset: 55 * 60,           want: "1h"),
+        // hours — a single unit, never "1h29m" (the old combined form died with the threshold)
+        RelCase(offset: 60 * 60,           want: "1h"),
+        RelCase(offset: 89 * 60,           want: "1h"),
+        // the old 90-minute threshold is gone: nothing changes shape across it, only the unit
+        RelCase(offset: 90 * 60,           want: "2h"),
+        RelCase(offset: 91 * 60,           want: "2h"),
+        RelCase(offset: 4 * 3600 + 41 * 60, want: "5h"),
+        // the hours band ends at 23 h, so nothing ever prints "24h"
+        RelCase(offset: 22 * 3600,         want: "22h"),
+        RelCase(offset: 23 * 3600 + 59 * 60, want: "1d"),
+        // days
+        RelCase(offset: 24 * 3600,         want: "1d"),
+        RelCase(offset: 4 * 86_400,        want: "4d"),
+        RelCase(offset: 3 * 86_400 + 18 * 3600, want: "4d"),
     ]
 
     @Test(arguments: RelativeTests.cases)
-    func relative(_ c: RelCase) {
+    func label(_ c: RelCase) {
         let got = ResetClock.timeToReset(resetsAt: now + c.offset, now: now)
         #expect(got == c.want, "offset \(c.offset)s expected \(c.want), got \(got)")
     }
 
-    @Test func exactlyTwoHoursDropsZeroMinutes() {
-        // 2h is still > 90 min → absolute, NOT relative. Verify the relative formatter's
-        // "drop 0m" rule separately at an hour value that stays inside the relative band:
-        // covered by the 1h case above. Here assert 2h takes the absolute branch.
-        let got = ResetClock.timeToReset(resetsAt: now + 2 * 60 * 60, now: now,
-                                         locale: Locale(identifier: "en_GB"),
-                                         timeZone: TimeZone(identifier: "UTC")!)
-        if case .absolute = got { } else { Issue.record("expected .absolute for 2h, got \(got)") }
+    /// The invariant #284 exists for: the bar's label and the popup's numeric core are the same
+    /// string for the same instant, across every band. The popup differs only by its qualifier.
+    @Test(arguments: [10.0 * 60, 45 * 60, 89 * 60, 91 * 60, 4 * 3600 + 41 * 60,
+                      23 * 3600, 4 * 86_400, 15 * 86_400] as [TimeInterval])
+    func menuBarAgreesWithPopupNumber(_ offset: TimeInterval) {
+        let at = now + offset
+        let bar = ResetClock.timeToReset(resetsAt: at, now: now)
+        guard let popupNumber = ResetClock.relativeRounded(resetsAt: at, now: now),
+              let popupLine = ResetClock.resetLine(resetsAt: at, now: now,
+                                                   locale: Locale(identifier: "en_GB"),
+                                                   timeZone: TimeZone(identifier: "UTC")!)
+        else { Issue.record("expected a popup line at \(offset)s"); return }
+        #expect(bar == popupNumber)
+        // The popup line leads with that very number (bare, or followed by a qualifier).
+        #expect(popupLine == bar || popupLine.hasPrefix("\(bar) "))
     }
 
     @Test func resetExactlyNowIsAboutToReset() {
-        // No `.resetNow` state: a non-positive remaining falls through to `.relative("<1m")` — the
-        // render pipeline rolls a past-boundary window forward before this can surface (#167).
-        #expect(ResetClock.timeToReset(resetsAt: now, now: now) == .relative("<1m"))
+        // No `.resetNow` state: a non-positive remaining falls back to "<1m" — the render pipeline
+        // rolls a past-boundary window forward before this can surface (#167).
+        #expect(ResetClock.timeToReset(resetsAt: now, now: now) == "<1m")
     }
 
     @Test func resetInPastIsAboutToReset() {
-        #expect(ResetClock.timeToReset(resetsAt: now - 1, now: now) == .relative("<1m"))
+        #expect(ResetClock.timeToReset(resetsAt: now - 1, now: now) == "<1m")
     }
 }
 
-// MARK: - timeToReset (absolute/relative boundary)
+// MARK: - Wall-clock formatting (locale + DST), exercised through the popup's `resetLine`
 
-@Suite("ResetClock.timeToReset.boundary")
-struct BoundaryTests {
-
-    // 24-hour locale + fixed UTC zone so the boundary assertions don't depend on environment.
-    private static let loc = Locale(identifier: "en_GB")
-    private static let tz  = TimeZone(identifier: "UTC")!
-
-    private static func band(_ offset: TimeInterval) -> TimeToReset {
-        ResetClock.timeToReset(resetsAt: now + offset, now: now, locale: loc, timeZone: tz)
-    }
-
-    @Test func justUnderNinetyIsRelative() {
-        #expect(BoundaryTests.band(89 * 60) == .relative("1h29m"))
-    }
-
-    @Test func exactlyNinetyIsRelative() {
-        // Strict `>` threshold: exactly 90 min stays relative (`1h30m`).
-        #expect(BoundaryTests.band(90 * 60) == .relative("1h30m"))
-    }
-
-    @Test func oneSecondPastNinetyIsAbsolute() {
-        if case .absolute = BoundaryTests.band(90 * 60 + 1) { } else {
-            Issue.record("expected .absolute at 90min+1s")
-        }
-    }
-
-    @Test func justOverNinetyIsAbsolute() {
-        if case .absolute = BoundaryTests.band(91 * 60) { } else {
-            Issue.record("expected .absolute at 91min")
-        }
-    }
-}
-
-// MARK: - timeToReset (absolute band: locale + DST)
-
-@Suite("ResetClock.timeToReset.absolute")
-struct AbsoluteTests {
+/// The wall-clock formatter (`ResetClock.absoluteString`) is private and, since #284 (ADR-0074), no
+/// longer reachable from the menu bar — the popup's ``ResetClock/resetLine(resetsAt:now:locale:timeZone:)``
+/// is now its **only** caller, as the trailing `"at <clock>"` qualifier of a `≤ 24 h` reset.
+///
+/// These cases moved here from the deleted `timeToReset.absolute` suite when the menu bar dropped its
+/// absolute band. They are **not** redundant with `ResetLineTests.clockRespectsLocaleHourCycle`, which
+/// only asserts "gb differs from us": these pin the actual rendered hour, including both sides of a DST
+/// transition — the project's only coverage of that.
+@Suite("ResetClock.resetLine.clock")
+struct ResetLineClockTests {
 
     /// Build the expected wall-clock string with an identically-configured `DateFormatter`,
     /// so the assertion pins "matches Foundation under this locale/zone" without hardcoding
@@ -216,16 +206,17 @@ struct AbsoluteTests {
         return f.string(from: ResetClock.ceilToMinute(date))   // mirror the production ceil-to-minute
     }
 
-    /// Far-future reset (well over 90 min) so we are unambiguously in the absolute band.
-    /// 2026-06-21T17:30:00Z.
+    /// 2026-06-21T17:30:00Z. Rendered from a `now` 4 h earlier, so it lands in `resetLine`'s
+    /// `≤ 24 h` band and therefore carries the `"at <clock>"` qualifier.
     private static let resetsAt = Date(timeIntervalSince1970: 1_781_026_200)
+    private static var now: Date { resetsAt - 4 * 60 * 60 }
 
     @Test func twelveHourLocaleShowsMeridiem() {
         let tz = TimeZone(identifier: "America/New_York")!
         let loc = Locale(identifier: "en_US")
-        let got = ResetClock.timeToReset(resetsAt: Self.resetsAt, now: now, locale: loc, timeZone: tz)
-        guard case let .absolute(s) = got else { Issue.record("expected .absolute, got \(got)"); return }
-        #expect(s == AbsoluteTests.expected(Self.resetsAt, loc, tz))
+        guard let s = ResetClock.resetLine(resetsAt: Self.resetsAt, now: Self.now, locale: loc, timeZone: tz)
+        else { Issue.record("expected a line"); return }
+        #expect(s.hasSuffix(ResetLineClockTests.expected(Self.resetsAt, loc, tz)))
         // 17:30 UTC → 13:30 EDT (-4 in June) → "1:30 PM" in en_US.
         #expect(s.localizedCaseInsensitiveContains("PM"))
         #expect(s.contains("1:30"))
@@ -234,9 +225,9 @@ struct AbsoluteTests {
     @Test func twentyFourHourLocaleHasNoMeridiem() {
         let tz = TimeZone(identifier: "Europe/London")!
         let loc = Locale(identifier: "en_GB")
-        let got = ResetClock.timeToReset(resetsAt: Self.resetsAt, now: now, locale: loc, timeZone: tz)
-        guard case let .absolute(s) = got else { Issue.record("expected .absolute, got \(got)"); return }
-        #expect(s == AbsoluteTests.expected(Self.resetsAt, loc, tz))
+        guard let s = ResetClock.resetLine(resetsAt: Self.resetsAt, now: Self.now, locale: loc, timeZone: tz)
+        else { Issue.record("expected a line"); return }
+        #expect(s.hasSuffix(ResetLineClockTests.expected(Self.resetsAt, loc, tz)))
         // 17:30 UTC → 18:30 BST in London.
         #expect(s.contains("18:30"))
         #expect(!s.localizedCaseInsensitiveContains("AM"))
@@ -246,9 +237,9 @@ struct AbsoluteTests {
     @Test func ukrainianLocaleIs24Hour() {
         let tz = TimeZone(identifier: "Europe/Kyiv")!
         let loc = Locale(identifier: "uk_UA")
-        let got = ResetClock.timeToReset(resetsAt: Self.resetsAt, now: now, locale: loc, timeZone: tz)
-        guard case let .absolute(s) = got else { Issue.record("expected .absolute, got \(got)"); return }
-        #expect(s == AbsoluteTests.expected(Self.resetsAt, loc, tz))
+        guard let s = ResetClock.resetLine(resetsAt: Self.resetsAt, now: Self.now, locale: loc, timeZone: tz)
+        else { Issue.record("expected a line"); return }
+        #expect(s.hasSuffix(ResetLineClockTests.expected(Self.resetsAt, loc, tz)))
         // 17:30 UTC → 20:30 in Kyiv (EEST, +3 in June).
         #expect(s.contains("20:30"))
     }
@@ -262,10 +253,8 @@ struct AbsoluteTests {
         let est = Date(timeIntervalSince1970: 1_772_949_600)
         let tz = TimeZone(identifier: "America/New_York")!
         let loc = Locale(identifier: "en_GB")
-        // Use est itself as `now`-relative far-future: pass a `now` well before it.
-        let got = ResetClock.timeToReset(resetsAt: est, now: est - 3 * 60 * 60, locale: loc, timeZone: tz)
-        guard case let .absolute(s) = got else { Issue.record("expected .absolute, got \(got)"); return }
-        #expect(s.contains("01:00"))
+        let s = ResetClock.resetLine(resetsAt: est, now: est - 3 * 60 * 60, locale: loc, timeZone: tz)
+        #expect(s?.contains("01:00") == true)
     }
 
     @Test func dstDaylightTimeOffset() {
@@ -273,9 +262,8 @@ struct AbsoluteTests {
         let edt = Date(timeIntervalSince1970: 1_772_956_800)
         let tz = TimeZone(identifier: "America/New_York")!
         let loc = Locale(identifier: "en_GB")
-        let got = ResetClock.timeToReset(resetsAt: edt, now: edt - 3 * 60 * 60, locale: loc, timeZone: tz)
-        guard case let .absolute(s) = got else { Issue.record("expected .absolute, got \(got)"); return }
-        #expect(s.contains("04:00"))
+        let s = ResetClock.resetLine(resetsAt: edt, now: edt - 3 * 60 * 60, locale: loc, timeZone: tz)
+        #expect(s?.contains("04:00") == true)
     }
 }
 
@@ -288,26 +276,24 @@ struct ResetDisplayTests {
     // Reference "now" for this suite: 2026-06-21T05:30:00Z.
     private static let ref = Date(timeIntervalSince1970: 1_782_019_800)
 
-    @Test func picksNearestAndFormatsRelative() {
-        // 5h resets in ~45 min, 7d in ~6 days → 5h is nearest, relative band.
+    @Test func picksNearestAndFormatsMinutes() {
+        // 5h resets in ~45 min, 7d in ~6 days → 5h is nearest.
         let five  = "2026-06-21T06:15:00.123456+00:00" // ref + 45 min
         let seven = "2026-06-27T05:30:00+00:00"
         let got = ResetClock.resetDisplay(fiveHourResetsAt: five, sevenDayResetsAt: seven, now: Self.ref)
         #expect(got?.which == .fiveHour)
-        #expect(got?.display == .relative("45m"))
+        #expect(got?.display == "45m")
     }
 
-    @Test func picksNearestAndFormatsAbsolute() {
-        // Both far off; 7d sooner than a (hypothetical) far 5h → absolute band.
+    @Test func picksNearestWhenBothAreHoursOut() {
+        // Both far off; 7d sooner than the 5h → 7d wins. Formerly the "absolute band" case; since
+        // #284 the distance no longer changes the shape, so this pins the *selection* instead.
         let five  = "2026-06-21T10:00:00+00:00"  // ref + 4.5 h
         let seven = "2026-06-21T08:00:00+00:00"  // ref + 2.5 h, nearer
         let got = ResetClock.resetDisplay(
-            fiveHourResetsAt: five, sevenDayResetsAt: seven, now: Self.ref,
-            locale: Locale(identifier: "en_GB"), timeZone: TimeZone(identifier: "UTC")!)
+            fiveHourResetsAt: five, sevenDayResetsAt: seven, now: Self.ref)
         #expect(got?.which == .sevenDay)
-        guard case .absolute = got?.display else {
-            Issue.record("expected .absolute, got \(String(describing: got?.display))"); return
-        }
+        #expect(got?.display == "3h")            // 2.5 h rounds to the nearest hour
     }
 
     @Test func oneUnparseableFallsBackToOther() {
@@ -549,16 +535,20 @@ struct CeilToMinuteTests {
 
     /// End-to-end: two near-simultaneous API resets (`…:59:59` and the next `…:00:00`) render as the
     /// SAME wall-clock minute, the bug the user reported (`08:59` vs `09:00`).
+    ///
+    /// Asserted through the popup's `resetLine` since #284 (ADR-0074) — the menu bar no longer renders
+    /// a clock, so the popup's `"at <clock>"` qualifier is the only surface where this can regress.
     @Test func adjacentResetsCollapseToSameMinute() {
         let utc = TimeZone(identifier: "UTC")!
         let gb = Locale(identifier: "en_GB")
-        let nowEarly = Date(timeIntervalSince1970: 1_781_000_000)   // well before, so absolute band
-        // 06:59:59 and 07:00:00 on the same far-future day.
+        // 06:59:59 and 07:00:00 on the same day.
         let a = ResetClock.parse("2026-06-23T06:59:59.013864+00:00")!
         let b = ResetClock.parse("2026-06-23T07:00:00.013870+00:00")!
-        guard case let .absolute(sa) = ResetClock.timeToReset(resetsAt: a, now: nowEarly, locale: gb, timeZone: utc),
-              case let .absolute(sb) = ResetClock.timeToReset(resetsAt: b, now: nowEarly, locale: gb, timeZone: utc)
-        else { Issue.record("expected absolute band"); return }
+        // 3 h earlier → inside resetLine's `≤ 24 h` band, so both lines carry the clock qualifier.
+        let nowEarly = a.addingTimeInterval(-3 * 60 * 60)
+        guard let sa = ResetClock.resetLine(resetsAt: a, now: nowEarly, locale: gb, timeZone: utc),
+              let sb = ResetClock.resetLine(resetsAt: b, now: nowEarly, locale: gb, timeZone: utc)
+        else { Issue.record("expected a line"); return }
         #expect(sa == sb, "adjacent resets should render the same minute, got \(sa) vs \(sb)")
         #expect(sa.contains("07:00"))
     }
@@ -601,44 +591,11 @@ struct NextResetTests {
     }
 }
 
-// MARK: - timeToResetCompactDays (menu-bar idle countdown, #100)
-
-@Suite("ResetClock.timeToResetCompactDays")
-struct TimeToResetCompactDaysTests {
-    private let now = Date(timeIntervalSince1970: 1_000_000)
-    private func at(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(seconds) }
-    private let utc = TimeZone(identifier: "UTC")!
-    private let gb = Locale(identifier: "en_GB")   // 24-hour
-
-    @Test func atLeastTwentyFourHoursIsDayCount() {
-        // ≥ 24 h → the compact "Nd" day count (reusing relativeRounded's nearest-day branch).
-        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(4 * 86_400), now: now) == .relative("4d"))
-    }
-
-    @Test func exactlyTwentyFourHoursIsOneDay() {
-        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(24 * 3_600), now: now) == .relative("1d"))
-    }
-
-    @Test func daysRoundToNearest() {
-        // 3d18h → 4d, same arithmetic as the popup (never disagrees by a day).
-        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(3 * 86_400 + 18 * 3_600), now: now) == .relative("4d"))
-    }
-
-    @Test func justUnderTwentyFourHoursIsAbsolute() {
-        // 23h59m < 24 h → delegates to timeToReset → the absolute wall-clock branch (> 90 min).
-        let reset = ResetClock.timeToResetCompactDays(
-            resetsAt: at(23 * 3_600 + 59 * 60), now: now, locale: gb, timeZone: utc)
-        if case .absolute = reset {} else { Issue.record("expected .absolute, got \(reset)") }
-    }
-
-    @Test func within90MinutesIsRelative() {
-        // 45 min < 24 h → the existing relative band, verbatim.
-        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(45 * 60), now: now) == .relative("45m"))
-    }
-
-    @Test func pastIsAboutToReset() {
-        // No `.resetNow`: past/now delegates to timeToReset, which yields `.relative("<1m")` (#167).
-        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(-60), now: now) == .relative("<1m"))
-        #expect(ResetClock.timeToResetCompactDays(resetsAt: at(0), now: now) == .relative("<1m"))
-    }
-}
+// MARK: - timeToResetCompactDays — merged into `timeToReset` (#284, ADR-0074)
+//
+// The compact-days variant (#100) existed only because `timeToReset` switched to a wall-clock string
+// past 90 minutes, which read badly for a reset days out — so the idle 7-day countdown needed its own
+// entry point that forced `relativeRounded`'s day branch instead. With the threshold gone, plain
+// `timeToReset` *is* `relativeRounded`, so the two collapsed into one function and the separate suite
+// disappeared with it. Its cases live on in `RelativeTests.cases` above: `4d`, `1d`, `3d18h → 4d`,
+// `23h59m → 1d`, `45m`, and `<1m` for a past reset.

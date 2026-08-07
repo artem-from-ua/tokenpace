@@ -682,7 +682,7 @@ final class StatusItemView: NSView {
 
     // MARK: Expanded
 
-    private func drawExpanded(fiveHour: BarView, sevenDay: BarView?, reset: TimeToReset?, in rect: NSRect) {
+    private func drawExpanded(fiveHour: BarView, sevenDay: BarView?, reset: String?, in rect: NSRect) {
         // Leading decorations first (#199, #227): the red pause glyph (when blocked) then the credits
         // icon (when present), each shifting the bars right past it — the same leading pattern the ⚠️
         // error state uses. Order: pause → credits → bars.
@@ -735,7 +735,7 @@ final class StatusItemView: NSView {
     /// error phase always passes a non-nil `sevenDay` (the 7-day bar is diagnostic there, never
     /// hidden) and a non-nil `reset`; in the normal expanded mode `nil` `reset` means the countdown
     /// was dropped per the selection table (ADR-0029).
-    private func drawBars(fiveHour: BarView, sevenDay: BarView?, reset: TimeToReset?,
+    private func drawBars(fiveHour: BarView, sevenDay: BarView?, reset: String?,
                           originX: CGFloat, in rect: NSRect) {
         // Right edge of the bar column (same `barWidth` for one or two bars) — where the reset label
         // starts. The item width does not change when the 7-day bar is hidden (only the vertical
@@ -778,7 +778,7 @@ final class StatusItemView: NSView {
 
     /// Draw the error state: the ⚠️ glyph at the left, and — during the 30–60 min stale phase —
     /// the last known bars + reset beside it (all bars `nil` past 60 min / cold start → glyph alone).
-    private func drawError(fiveHour: BarView?, sevenDay: BarView?, reset: TimeToReset?, in rect: NSRect) {
+    private func drawError(fiveHour: BarView?, sevenDay: BarView?, reset: String?, in rect: NSRect) {
         let glyphRight = drawErrorGlyph(in: rect)
         if let fiveHour, let sevenDay, let reset {
             drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset,
@@ -980,13 +980,12 @@ final class StatusItemView: NSView {
     }
 
     /// Draw the reset countdown text to the right of the bars.
-    private func drawResetLabel(_ reset: TimeToReset, leftOf x: CGFloat, in rect: NSRect) {
-        let text = resetText(reset)
+    private func drawResetLabel(_ reset: String, leftOf x: CGFloat, in rect: NSRect) {
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
             .foregroundColor: bright(Palette.foreground),   // labelColor at the system text opacity
         ]
-        let label = NSAttributedString(string: text, attributes: attrs)
+        let label = NSAttributedString(string: reset, attributes: attrs)
         let size = label.size()
         label.draw(at: NSPoint(x: x, y: rect.minY + (rect.height - size.height) / 2))
     }
@@ -1002,23 +1001,12 @@ final class StatusItemView: NSView {
     /// credits icon (when present), and the countdown shifts right past them — the same leading pattern
     /// the bars use in ``drawExpanded``, so the pause icon appears whether or not the bars are hidden
     /// (#199, #227). Order: pause → credits → countdown.
-    private func drawBlockedReset(_ reset: TimeToReset, in rect: NSRect) {
+    private func drawBlockedReset(_ reset: String, in rect: NSRect) {
         let originX = drawLeadingDecorations(in: rect)
         drawResetLabel(reset, leftOf: originX, in: rect)
     }
 
     // MARK: Helpers
-
-    /// Map the reset countdown to its display string. Both cases already carry a ready-to-draw string
-    /// (`ResetClock` formats them). There is no longer a "reset now / unknown" case: a window past its
-    /// boundary is rolled forward before formatting, and a missing/unparseable `resets_at` becomes the
-    /// ⚠️ error state upstream (#167, ADR-0043) — so this never has to invent an about-to-reset glyph.
-    private func resetText(_ reset: TimeToReset) -> String {
-        switch reset {
-        case let .absolute(s): return s
-        case let .relative(s): return s
-        }
-    }
 
     /// The item width for a given layout — narrow for the glyph-only error/cold-start case, wider for
     /// the bars + label, widest for the ⚠️ + stale-bars phase (the glyph adds its own width). Driven
@@ -1061,7 +1049,7 @@ final class StatusItemView: NSView {
     /// expanded and error-with-bars widths so they stay in sync with
     /// ``drawBars(fiveHour:sevenDay:reset:originX:in:)``. A `nil` `reset` omits the label (and its
     /// leading gap), so the item hugs just the bars (ADR-0029); the error path always passes non-nil.
-    private func barsBlockWidth(reset: TimeToReset?) -> CGFloat {
+    private func barsBlockWidth(reset: String?) -> CGFloat {
         guard let reset else { return Metrics.barWidth }
         return Metrics.barWidth + Metrics.labelGap + resetLabelWidth(reset)
     }
@@ -1070,8 +1058,8 @@ final class StatusItemView: NSView {
     /// ``drawBlockedReset`` draw it in — so both the bars-plus-label width and the bars-less blocked
     /// width (#194) reserve precisely the drawn text. Rounded up so sub-pixel widths never clip the last
     /// glyph.
-    private func resetLabelWidth(_ reset: TimeToReset) -> CGFloat {
-        let labelWidth = (resetText(reset) as NSString).size(withAttributes: [
+    private func resetLabelWidth(_ reset: String) -> CGFloat {
+        let labelWidth = (reset as NSString).size(withAttributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         ]).width
         return ceil(labelWidth)

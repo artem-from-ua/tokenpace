@@ -530,6 +530,13 @@ actor StubUsageTransport: UsageTransport {
         /// snap tests a band rather than equality.
         case edgeExtremes
 
+        /// **Mid-band** frame (#284, ADR-0074): 5h ahead-of-pace (orange, so a countdown is shown at
+        /// all) with its reset **4 h 41 min** out — squarely inside the 90 min – 24 h range that used
+        /// to render as a wall-clock `"20:40"` and now reads `"5h"`. That band had no stub of its own,
+        /// yet it is exactly where the label changed most visibly, so this is the frame to eyeball when
+        /// checking that the bar and the popup print the same number.
+        case midBandReset
+
         /// (fiveUtil, sevenUtil, fiveResetSeconds, sevenResetSeconds).
         var values: (five: Double, seven: Double, fiveIn: TimeInterval, sevenIn: TimeInterval) {
             switch self {
@@ -547,6 +554,9 @@ actor StubUsageTransport: UsageTransport {
             // Fresh windows (almost the whole window left) → timeFraction ≈ 0, so the gap is
             // `[0, usage]` and the 7d bar at 100 % fills the track end to end.
             case .edgeExtremes:       return (0, 100, 17_950, 604_000)
+            // 4 h 41 min to the 5h reset: the ticket's own example (`20:40` → `5h`). Usage 50 vs the
+            // ~6 % elapsed of a 5-hour window → well ahead of pace → orange, so the countdown shows.
+            case .midBandReset:       return (50, 20, 4 * 3600 + 41 * 60, 5 * 24 * 3600)
             }
         }
     }
@@ -723,7 +733,7 @@ actor StubUsageTransport: UsageTransport {
         // `weekly_scoped` row keeps a normal per-model section on screen. Mirrors the live "no active
         // session" body shape (Body A) verbatim.
         if mode == .idle {
-            let sevenReset = self.resetsAt(inSeconds: 4.2 * 24 * 3600)   // ≥ 24 h → "4d" via timeToResetCompactDays
+            let sevenReset = self.resetsAt(inSeconds: 4.2 * 24 * 3600)   // ≥ 24 h → "4d" via timeToReset
             let body = """
             {"five_hour":{"utilization":0.0,"resets_at":null},\
             "seven_day":{"utilization":31.0,"resets_at":"\(sevenReset)"},\
