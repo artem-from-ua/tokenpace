@@ -72,11 +72,11 @@ struct AppearancePane: View {
                     }
                     SettingsHint(text: "*Progress* puts two marks on the window: where you are in "
                         + "time, and how much you have spent.")
-                    SettingsHint(text: "*Pressure* fills the bar as your spending closes on the time "
-                        + "left before the reset — a full bar means the gap is wider than the time "
-                        + "remaining.")
-                    SettingsHint(text: "*Mixed* keeps the compact menu-bar bar as *Pressure* and shows "
-                        + "*Progress* in the dropdown.")
+                    SettingsHint(text: "*Pressure* grows as you get ahead of pace and shrinks back "
+                        + "as time catches up. The tick marks exactly on pace; a full bar means the "
+                        + "limit is spent.")
+                    SettingsHint(text: "*Mixed* — *Pressure* on the menu bar and *Progress* in the "
+                        + "dropdown.")
                 }
 
                 VStack(alignment: .leading, spacing: 4) {

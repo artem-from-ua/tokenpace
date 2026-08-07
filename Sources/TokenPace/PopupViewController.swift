@@ -2205,8 +2205,15 @@ final class PopupViewController: NSViewController {
 
     // MARK: - Pure text formatters (the localisation seam)
 
-    /// The per-limit detail line's **left**-aligned half: `"20%"` — the bare utilisation percentage.
-    static func usedText(_ row: LimitRow) -> String { percent(row.utilization) }
+    /// The per-limit detail line's **left**-aligned half: `"20% used"`.
+    ///
+    /// The qualifier earns its place under #307: on the **Pressure** scale the capsule's far edge is
+    /// no longer `usageFraction` — the ribbon measures pressure against the time left, not the level
+    /// spent — so this number is the only place the quota consumed is stated. Paired with the reset
+    /// on the right, the line reads "how much is gone ↔ when it comes back".
+    ///
+    /// Token rows only; the credits section has its own `creditsAmountText` (money, not a percentage).
+    static func usedText(_ row: LimitRow) -> String { "\(percent(row.utilization)) used" }
 
     /// The per-limit detail line's **right**-aligned half: the unified reset line
     /// (`ResetClock.resetLine`) — `"20h at 03:00"` for a near reset, `"5d on Friday"` /
