@@ -184,6 +184,14 @@ final class StatusItemView: NSView {
         /// Gap between the awaiting-input icon and the element to its right (pause / credits / bars).
         /// A touch wider than the other decoration gaps so the hand doesn't crowd the next element.
         static let awaitingIconGap: CGFloat = 6
+        /// How far below its resting position the awaiting hand sits when fully hidden (ADR-0073).
+        ///
+        /// The full item height rather than the measured symbol height: the ~13 pt glyph is centred
+        /// in a 22 pt row, so the distance from its resting top edge to the row's bottom is ≈17.5 pt
+        /// at most. 22 clears that with margin — anything short leaves a sliver of the fingertips
+        /// parked at the bottom edge, reading as a stray mark rather than an absent icon — and it is
+        /// one constant instead of a number derived from whatever SF Symbols reports today.
+        static let awaitingSlideTravel: CGFloat = height
     }
 
     // MARK: Colour mapping (system semantic colours → NSColor)
@@ -405,10 +413,19 @@ final class StatusItemView: NSView {
     /// content** consistent across both modes (#199, #227).
     private func drawLeadingDecorations(in rect: NSRect) -> CGFloat {
         var originX = rect.minX + Metrics.hPadding
-        // #233: the awaiting-input hand is the **first** leading element (left of pause/credits/bars),
-        // drawn only when the count is present and the "show in menu bar" option is on.
-        if showAwaitingInMenuBar {
-            originX = drawAwaitingIcon(atX: originX, in: rect) + Metrics.awaitingIconGap
+        // #233: the awaiting-input hand is the **first** leading element (left of pause/credits/bars).
+        //
+        // The origin advances whenever the **slot** is reserved, not whenever the glyph is drawn
+        // (#283) — the two conditions differ while nothing is waiting. Advancing only when the glyph
+        // is present would put the reserved width to the *right* of everything instead of to the left
+        // of it, so the bars would still shift on every change and the reservation would buy nothing.
+        //
+        // The step is the measured reserve (`awaitingIconWidth()`), the same number `itemWidth(for:)`
+        // adds — never the drawn symbol's own width, so slot and glyph cannot drift apart by a
+        // sub-pixel.
+        if reservesAwaitingSlot {
+            drawAwaitingIcon(atX: originX, in: rect)
+            originX += awaitingIconWidth() + Metrics.awaitingIconGap
         }
         if layout?.blockedPause == true {
             originX = drawPauseGlyph(atX: originX, in: rect) + Metrics.pauseGlyphGap
@@ -419,14 +436,19 @@ final class StatusItemView: NSView {
         return originX
     }
 
-    /// Whether the awaiting-input hand should be drawn in the menu bar right now: the layout carries a
-    /// count (feature on + ≥ 1 session) **and** the "show in menu bar" Appearance option is on (#233).
-    /// The `TOKENPACE_AWAITING` stub only forces the *count* (upstream, so no live sessions are
-    /// needed); it must **not** bypass the Appearance option here, so toggling "Show in menu bar" hides
-    /// the hand under the stub exactly as it does with real data.
-    private var showAwaitingInMenuBar: Bool {
-        layout?.awaitingInput != nil && PersistedConfig.awaitingInputInMenuBar
-    }
+    /// Whether the hand's **slot** is reserved — driven by the Appearance option alone, deliberately
+    /// ignoring whether anything is waiting right now (#283).
+    ///
+    /// The menu bar is right-aligned, so every width change shifts everything to its left, including
+    /// other apps' status items. Of the five data-dependent addends in ``itemWidth(for:)`` the hand
+    /// is the only high-frequency one — it toggles dozens of times a day, during ordinary work, and
+    /// carries no news about the widget's own layout. The other four fire once or twice per 5-hour
+    /// window and at the exact moment the user is already looking at the widget for that reason, so
+    /// their jump explains itself and stays as it is.
+    ///
+    /// This changes what the existing toggle means: "Show in menu bar" reserves the slot rather than
+    /// describing what is on screen this second. Users who keep the indicator off pay nothing.
+    private var reservesAwaitingSlot: Bool { PersistedConfig.awaitingInputInMenuBar }
 
     /// Draw the small service-status dot at the **right edge** of `rect`, vertically centred — the
     /// trailing element of the widget. `hPadding` keeps it off the very edge, matching the bars'
@@ -442,32 +464,75 @@ final class StatusItemView: NSView {
 
     // MARK: Awaiting-input icon (#233)
 
-    /// Draw the `hand.raised` awaiting-input indicator at **leading** `x`, vertically centred on
-    /// `rect`, and return its right-edge x so the caller can place the next element beside it — the
+    /// Draw the `hand.raised` awaiting-input indicator in the reserved slot at **leading** `x` — the
     /// **first** leading decoration (before pause/credits/bars). Bare icon, no count (the count lives
-    /// in the popup). Neutral menu-bar foreground so it reads like the other decorations without
-    /// stealing pacing colours. Returns `x` unchanged if `hand.raised` can't be built.
-    @discardableResult
-    private func drawAwaitingIcon(atX x: CGFloat, in rect: NSRect) -> CGFloat {
+    /// in the popup).
+    ///
+    /// Draws nothing when the glyph is fully hidden; the caller advances the origin by the reserved
+    /// width regardless (#283), so this returns nothing to place the next element by.
+    ///
+    /// The glyph slides in from below the widget's bottom edge and back down out of it (ADR-0073),
+    /// clipped to its own slot. Its position comes from a presence factor the animator interpolates:
+    /// 0 fully hidden, 1 at rest.
+    private func drawAwaitingIcon(atX x: CGFloat, in rect: NSRect) {
         // Tint by urgency (soonest deletion across all awaiting sessions): red < 7d left, orange
         // < 15d, neutral otherwise (#233/#234). accent(...) for the coloured states so they read at
         // the same weight as the pause/credits glyphs; bright(label) for neutral.
+        //
+        // A hand on its way *out* has no urgency left in the layout — the count is already gone — so
+        // it would grey out halfway down. The animator remembers the last one it was drawn with.
+        let urgency: AwaitingUrgency
+        if let live = layout?.awaitingInput?.urgency {
+            urgency = live
+            colorAnimator?.noteAwaitingUrgency(live)
+        } else {
+            urgency = colorAnimator?.lastAwaitingUrgency ?? .neutral
+        }
         let tint: NSColor
-        switch layout?.awaitingInput?.urgency ?? .neutral {
+        switch urgency {
         case .red:     tint = accent(.systemRed)
         case .orange:  tint = accent(.systemOrange)
         case .neutral: tint = bright(NSColor.labelColor)
         }
+
+        // Presence target: the glyph belongs on screen exactly when the layout carries a count
+        // (feature on + ≥ 1 session). The Appearance option is already accounted for — this method
+        // only runs inside the reserved slot — which is what keeps the `TOKENPACE_AWAITING` stub
+        // honest: it forces the *count* upstream, so toggling "Show in menu bar" still hides the hand
+        // under the stub exactly as it does with real data.
+        //
+        // Resolved on **every** frame the slot exists, including those where nothing is waiting
+        // (target 0) — that is what keeps the key alive so a departing hand can animate out at all.
+        // See `ColorAnimator.resolve(_:target:)`; skipping this call when the count is nil silently
+        // kills the exit animation and lets the key be pruned.
+        let target: Double = layout?.awaitingInput != nil ? 1 : 0
+        let presence = colorAnimator?.resolve(.awaitingIcon(surface: .menuBar), target: target) ?? target
+        guard presence > 0 else { return }
+
         let config = NSImage.SymbolConfiguration(pointSize: Metrics.awaitingIconSize, weight: .semibold)
             .applying(.init(paletteColors: [tint]))
         guard let symbol = NSImage(
             systemSymbolName: "hand.raised", accessibilityDescription: "sessions awaiting input")?
-            .withSymbolConfiguration(config) else { return x }
+            .withSymbolConfiguration(config) else { return }
         let size = symbol.size
-        let drawRect = NSRect(x: x, y: rect.midY - size.height / 2, width: size.width, height: size.height)
+
+        // This view is `isFlipped` (and `snapshotImage()` locks focus flipped to match), so y grows
+        // **downward**: adding the offset pushes the glyph down, out through the bottom edge. The one
+        // place in this file where flippedness changes a sign. (`respectFlipped: true` below only
+        // un-mirrors the symbol's own content; it does not move `drawRect`.)
+        let restY = rect.midY - size.height / 2
+        let offset = (1 - presence) * Metrics.awaitingSlideTravel
+        let drawRect = NSRect(x: x, y: restY + offset, width: size.width, height: size.height)
+
+        // Clip to the slot, not to `rect`: the bottom edge is where the glyph disappears, and the
+        // side edges keep a symbol wider than its measured reserve from ever bleeding onto the pause
+        // glyph. `addClip` intersects, so any clip the status button installed still holds.
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: NSRect(x: x, y: rect.minY,
+                                  width: awaitingIconWidth(), height: rect.height)).addClip()
         symbol.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1,
                     respectFlipped: true, hints: nil)
-        return x + size.width
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     // MARK: Money-credits icon (issue #144)
@@ -958,9 +1023,10 @@ final class StatusItemView: NSView {
         // Leading red pause glyph (#199, #227) reserves its width + gap in both bars modes, mirroring the
         // origin shift in `drawLeadingDecorations`; zero when not fully blocked.
         let pauseInset = (layout?.blockedPause == true) ? pauseGlyphWidth() + Metrics.pauseGlyphGap : 0
-        // Awaiting-input hand (#233) is the first leading element in the bars modes when the count is
-        // present and the "show in menu bar" option is on; zero otherwise. Mirrors drawLeadingDecorations.
-        let awaitingInset = showAwaitingInMenuBar ? awaitingIconWidth() + Metrics.awaitingIconGap : 0
+        // Awaiting-input hand (#233) is the first leading element in the bars modes. Reserved from the
+        // **option alone**, not from the live count (#283), so the widget keeps its width as sessions
+        // start and stop waiting. Mirrors the origin advance in `drawLeadingDecorations`.
+        let awaitingInset = reservesAwaitingSlot ? awaitingIconWidth() + Metrics.awaitingIconGap : 0
         // Leading decorations in the bars modes: awaiting hand → pause glyph → credits icon.
         let leadingInset = awaitingInset + pauseInset + creditsInset
         switch layout?.mode {
