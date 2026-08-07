@@ -357,7 +357,11 @@ final class SettingsModel {
         return archiveEnabled && archiveDestination != nil && !PowerSource.isOnACPower
     }
 
-    /// The neutral (no ⚠️) line explaining a battery-deferred backup, or `""`.
+    /// The ⚠️ line explaining a battery-deferred backup, or `""`.
+    ///
+    /// Carries a warning icon like every other hint that reports something holding a feature back —
+    /// the icon-less style is for describing what a control *does*, not for reporting a blocked state.
+    /// That the battery clears itself changes the wording ("will resume"), not the icon.
     ///
     /// Suppressed while a space block is showing. Unlike `UpdateDeferralReason.pendingExplanation`,
     /// which joins every clause because all of them must be cleared, these two are not peers: a full

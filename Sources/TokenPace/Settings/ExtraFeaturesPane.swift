@@ -110,10 +110,11 @@ struct ExtraFeaturesPane: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         // Why a backup isn't happening (#306). Both hints vanish when their string is
-                        // empty, so no conditional is needed. The space line warns — a full disk needs
-                        // the user to act; the battery line stays neutral, because it clears itself.
+                        // empty, so no conditional is needed. Both carry ⚠️: a hint that reports a
+                        // condition holding the feature back is a warning, whatever clears it — the
+                        // neutral (icon-less) style is reserved for describing what a control does.
                         SettingsHint(text: model.archiveSpaceHint, warning: true)
-                        SettingsHint(text: model.archiveBatteryHint)
+                        SettingsHint(text: model.archiveBatteryHint, warning: true)
                     }
                 }
             }
