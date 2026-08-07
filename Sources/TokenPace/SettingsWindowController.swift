@@ -200,6 +200,20 @@ final class SettingsWindowController: NSWindowController {
         window.title = "TokenPace Settings"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        // System Settings' title bar is taller than a plain window's, which is what puts its traffic
+        // lights where they are: measured off the reference screenshot, its red light sits at
+        // (25.75, 25.75) pt from the window origin, against (13.5, 13.5) pt for a bare titled window —
+        // the same ~12 pt up-and-left offset in both axes. An empty toolbar is what buys that height:
+        // AppKit lays the lights out against the titlebar+toolbar area, so attaching one moves them
+        // down and in without any manual positioning (there is no API to place them directly).
+        //
+        // `.unified` is the style that lands on the measured target: it puts the lights at
+        // (25.75, 25.75) pt, matching System Settings exactly, where `.unifiedCompact` reaches only
+        // (18.75, 18.75). The toolbar holds no items — the pane title is drawn by the detail column
+        // itself (see `SettingsRootView.paneTitle`), not here.
+        let toolbar = NSToolbar(identifier: "TokenPaceSettingsToolbar")
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
         window.level = .floating               // float above other apps from a menu-bar app (ADR-0012 §6)
         window.isReleasedWhenClosed = false    // keep the controller alive so re-opening reuses it
         // Zoom means "as tall as the screen" here, not "as large as the screen" — see
