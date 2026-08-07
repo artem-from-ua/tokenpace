@@ -1,7 +1,8 @@
 import AppKit
 import TokenPaceKit
 
-/// Drives the smooth colour transitions of the pacing bars and service dots on both surfaces.
+/// Drives the widget's smooth transitions — the colour of the pacing bars and service dots on both
+/// surfaces, and the awaiting-input hand's slide in and out of the menu bar.
 ///
 /// The pacing palette is a set of **step functions**: the moment `usageFraction` crosses a threshold
 /// the gap colour jumps green→yellow→orange→red (or green↔blue). When usage sits near a boundary,
@@ -29,13 +30,33 @@ final class ColorAnimator {
     ///
     /// 30, not 60: every menu-bar frame is a full `snapshotImage()` (lock focus → draw the whole
     /// widget → unlock → hand the button a new `NSImage`), which is markedly more expensive than
-    /// compositing a layer. Across a 450 ms transition that is ~14 frames — plenty for a *colour*
-    /// fade, which has no moving edge whose stepping the eye could catch. Raise this if a live check
-    /// ever shows banding.
+    /// compositing a layer. Across a 0.8 s transition that is ~24 frames.
+    ///
+    /// That is comfortable for a *colour* fade, which has no moving edge to stitch. Motion does have
+    /// one (ADR-0073: the awaiting hand slides ~18 pt), so the figure was re-checked rather than
+    /// inherited: ~24 frames over ~18 pt is ~0.75 pt per frame, and smoothstep puts the fastest
+    /// phase in the middle where stepping is least legible. Doubling the rate would double the
+    /// number of full snapshots for a decoration that comes and goes dozens of times a day — the
+    /// opposite of the energy policy ADR-0070 already narrowed once. Raise this if a live check ever
+    /// shows banding or stepping; it is one constant.
     private static let framesPerSecond: Double = 30
 
-    /// Every in-flight transition, keyed by element identity.
+    /// Every in-flight colour transition, keyed by element identity.
     private var tweens = ColorTweenSet()
+
+    /// Every in-flight scalar transition — today only the awaiting hand's presence (ADR-0073). A
+    /// second registry rather than a widened first one: `ColorTweenSet` speaks `RGBA`, and a
+    /// presence has no colour.
+    private var scalars = ScalarTweenSet()
+
+    /// The urgency the awaiting hand was last drawn with.
+    ///
+    /// A hand sliding *out* has no urgency to read: the count is already gone from the layout, so
+    /// `layout?.awaitingInput?.urgency` reports `.neutral` and a red hand would turn grey halfway
+    /// down. The draw site notes the urgency while the count is present and reads this back once it
+    /// is not. Bookkeeping that belongs to the animation, like ``frameTime`` — and kept off the view
+    /// for the same reason the tweens are (ADR-0070: views have no identity across frames).
+    private(set) var lastAwaitingUrgency: AwaitingUrgency = .neutral
 
     /// The frame timer — non-nil exactly while something is animating.
     private var timer: Timer?
@@ -52,9 +73,41 @@ final class ColorAnimator {
     /// The clock, injectable for testing/stubs. Defaults to the wall clock.
     private let now: () -> Date
 
+    /// Whether the system asks UI to avoid animating movement (System Settings → Accessibility →
+    /// Display → Reduce motion). Read live rather than cached at launch, so flipping the switch
+    /// takes effect on the next frame without a relaunch — the property is cheap, and the widget
+    /// resolves it a handful of times per redraw at most.
+    ///
+    /// Scope is **motion only**: a slide becomes an instant appearance. Colour fades keep running,
+    /// because the setting is about movement — Apple's own wording is "UI should avoid large
+    /// animations, especially those that simulate the third dimension" — and a cross-fade has
+    /// nothing moving in it. Reduce Motion is not a request for a static menu bar; the pacing
+    /// colours would still change, just abruptly, which is the very flicker ADR-0070 removed.
+    var prefersReducedMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    /// The duration a motion tween should use right now: the shipped 0.8 s, or 0 when the system
+    /// asks for reduced motion — which makes ``ScalarTween`` record an already-finished transition,
+    /// so the glyph simply appears and disappears and no frame timer is ever started.
+    private var motionDuration: TimeInterval {
+        prefersReducedMotion ? 0 : ScalarTween.defaultDuration
+    }
+
     init(now: @escaping () -> Date = { Date() }) {
         self.now = now
         self.frameTime = now()
+        // Turning Reduce Motion **on** mid-slide must not leave the hand parked halfway: land every
+        // in-flight motion at once. (Turning it off needs nothing — the next change simply animates.)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.prefersReducedMotion else { return }
+                    self.scalars.finishAll()
+                    self.onFrame?()
+                }
+            }
     }
 
     // MARK: - Drawing entry point
@@ -78,6 +131,32 @@ final class ColorAnimator {
         return blended.nsColor
     }
 
+    /// The presence factor for `key` this frame — 0 fully hidden, 1 fully in place (ADR-0073).
+    ///
+    /// **Call this on every frame in which the element's slot exists, including the frames where the
+    /// element itself is absent** (`target: 0`). That is the invariant the whole feature rests on,
+    /// and it buys two things:
+    ///
+    /// - an element that disappears from the data still has a live key, so it can animate *out* —
+    ///   the draw site is the only thing that knows it was there a frame ago;
+    /// - the key keeps being touched, so `pruneStale` never evicts it while its slot is on screen.
+    ///   An evicted key would take the "first sight" branch on its return and snap into place — the
+    ///   same class of bug as the 5 s → 45 s stale threshold (ADR-0070).
+    ///
+    /// Once the value has settled the tween is finished, no frames are requested, and the widget is
+    /// idle again — so the unconditional call costs nothing when nothing is moving.
+    func resolve(_ key: ScalarTweenKey, target: Double) -> Double {
+        let value = scalars.update(key, target: target, at: frameTime, duration: motionDuration)
+        scheduleFramesIfNeeded()
+        return value
+    }
+
+    /// Record the urgency the awaiting hand is being drawn with — see ``lastAwaitingUrgency``. Call
+    /// only while the count is present; the departing hand reads the stored value back.
+    func noteAwaitingUrgency(_ urgency: AwaitingUrgency) {
+        lastAwaitingUrgency = urgency
+    }
+
     // MARK: - Frame lifecycle
 
     /// Open a frame: pin "now", expire elements that have gone off screen, and drop the timer if
@@ -92,7 +171,14 @@ final class ColorAnimator {
     func beginFrame() {
         frameTime = now()
         tweens.pruneStale(at: frameTime)
-        if !tweens.isAnimating(at: frameTime) { stopTimer() }
+        scalars.pruneStale(at: frameTime)
+        if !isAnimating { stopTimer() }
+    }
+
+    /// Whether either registry still needs frames. The timer is shared, so it lives while *either*
+    /// a colour is fading or something is sliding, and dies only when both have settled.
+    private var isAnimating: Bool {
+        tweens.isAnimating(at: frameTime) || scalars.isAnimating(at: frameTime)
     }
 
     // MARK: - Snapping (cases where interpolating would be wrong)
@@ -107,6 +193,7 @@ final class ColorAnimator {
     /// - **data-source switch** (stub change) — the old and new worlds are unrelated.
     func finishAll() {
         tweens.finishAll()
+        scalars.finishAll()
         stopTimer()
     }
 
@@ -114,6 +201,9 @@ final class ColorAnimator {
     /// adopts its colour outright rather than holding the previous one.
     func reset() {
         tweens.removeAll()
+        scalars.removeAll()
+        // The new world's hand must appear at its own presence, not slide in from the old one's.
+        lastAwaitingUrgency = .neutral
         stopTimer()
     }
 
@@ -121,7 +211,7 @@ final class ColorAnimator {
 
     /// Start the frame timer if a transition is running and it is not already going.
     private func scheduleFramesIfNeeded() {
-        guard timer == nil, tweens.isAnimating(at: frameTime) else { return }
+        guard timer == nil, isAnimating else { return }
         // `.common` run-loop mode is mandatory: the popup is an `NSMenuItem.view` inside an `NSMenu`,
         // which runs a modal tracking run loop while open. A timer in `.default` would be starved
         // exactly when the dropdown is visible — the surface where the fade is most obvious.

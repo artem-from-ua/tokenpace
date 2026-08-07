@@ -132,6 +132,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return AwaitingSessions(sessions)
     }()
 
+    /// Verification stub: `TOKENPACE_AWAITING_CYCLE=<seconds>` makes the forced count alternate
+    /// between `TOKENPACE_AWAITING`'s value and zero on that period, so the hand's slide in and out
+    /// (ADR-0073) can actually be watched.
+    ///
+    /// A knob on the existing stub rather than a `StubScenario` case, for two reasons: the slide has
+    /// to be checked against every data world it can share the widget with (bars, `blockedReset`, the
+    /// pause glyph), which a scenario would pin to one; and `_DAYS`/`_PROJECTS` keep working, so the
+    /// "a red hand stays red on the way out" case stays reachable. Verification only.
+    private let awaitingCycleInterval: TimeInterval? = {
+        let env = ProcessInfo.processInfo.environment
+        guard let seconds = env["TOKENPACE_AWAITING_CYCLE"].flatMap(Double.init), seconds > 0
+        else { return nil }
+        return seconds
+    }()
+
+    /// Which half of the awaiting cycle is showing. Flipped by ``awaitingCycleTimer``.
+    private var awaitingCycleOn = true
+    /// Drives ``awaitingCycleInterval``. Non-nil only under that stub.
+    private var awaitingCycleTimer: Timer?
+
     /// The awaiting-input result to render, or `nil` to hide the indicator. `nil` unless the feature is
     /// enabled **and** at least one session is waiting.
     ///
@@ -139,7 +159,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// indicator can be verified with a plain `swift run` without toggling settings or running live
     /// Claude sessions (verification-only; a real build has no such env var). See ui-verification.md.
     private var awaitingInputForDisplay: AwaitingSessions? {
-        if let stub = awaitingInputStub { return stub.count >= 1 ? stub : nil }
+        if let stub = awaitingInputStub {
+            // The cycle stub blanks the count on its off phase, which is what the hand animates out of.
+            if awaitingCycleInterval != nil && !awaitingCycleOn { return nil }
+            return stub.count >= 1 ? stub : nil
+        }
         guard PersistedConfig.awaitingInputEnabled else { return nil }
         return awaitingInput.count >= 1 ? awaitingInput : nil
     }
@@ -643,6 +667,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             wc.onAwaitingInputAppearanceChange = { [weak self] in
                 // #233: an awaiting-input appearance option changed (left-of-pause placement) — just
                 // re-render from the last poll; no watcher restart needed.
+                //
+                // `reRenderForCurrentTime()`, not a bare `refreshStatusImage()`, and #283 leans on
+                // that: toggling this option reserves or frees the hand's slot, and the frame that
+                // does so must go through `render(_:at:)` because only that advances
+                // `ColorAnimator.frameTime`. With a stale clock the presence tween would be dated to
+                // the last poll's instant, read as already finished, and never start (ADR-0070).
                 self?.reRenderForCurrentTime()
             }
             wc.onArchiveNow = { [weak self] in self?.performArchiveSync(userInitiated: true) }
@@ -921,6 +951,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ageTimer?.invalidate()
         resetTimer?.invalidate()
         colorCycleTimer?.invalidate()
+        awaitingCycleTimer?.invalidate()
         colorAnimator.finishAll()      // stop the transition frame timer (ADR-0070)
         sleepWake?.stop()
         screenLock?.stop()
@@ -971,6 +1002,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // engine is rebuilt.
         buildAndRunEngine(for: currentScenario)
         updateColorCycle(for: currentScenario)   // arm the colour walk when launched under that stub
+        startAwaitingCycleIfRequested()          // and the awaiting-input walk (ADR-0073)
 
         // Re-render on a fixed cadence so time-derived text ages without waiting for the next poll:
         // the popup's "Last update" line ("just now" → "1m ago") and the menu bar's stale ⚠️
@@ -1864,6 +1896,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .updateFailed: return PopupViewController.dotColor(.majorOutage)     // red
         default:            return PopupViewController.dotColor(.underMaintenance) // blue
         }
+    }
+
+    // MARK: - Awaiting-input cycle stub (ADR-0073)
+
+    /// Arm the awaiting-input walk when `TOKENPACE_AWAITING_CYCLE` is set.
+    ///
+    /// Like the colour walk this cannot ride on polling — the cadence floor is 60 s, far too slow to
+    /// inspect a 0.8 s slide — so it runs on its own timer and simply flips which half of the cycle
+    /// ``awaitingInputForDisplay`` reports. No usage API is touched.
+    private func startAwaitingCycleIfRequested() {
+        guard let interval = awaitingCycleInterval, awaitingInputStub != nil else { return }
+        AppLogger.lifecycle.notice("dev: awaiting-input cycle stub armed")
+        // `.common` run-loop mode so the walk keeps stepping while the dropdown is open — an `NSMenu`
+        // runs a modal tracking loop that would starve a `.default` timer.
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.awaitingCycleOn.toggle()
+                // `reRenderForCurrentTime()`, never a bare `refreshStatusImage()`: only `render(_:at:)`
+                // advances `ColorAnimator.frameTime`, and a stale clock dates the new tween to the last
+                // poll's instant, where it reads as already finished and never animates (ADR-0070).
+                self.reRenderForCurrentTime()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        awaitingCycleTimer = timer
     }
 
     // MARK: - Colour-cycle stub (ADR-0070)
