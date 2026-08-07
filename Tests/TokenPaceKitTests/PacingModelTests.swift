@@ -316,6 +316,110 @@ struct RibbonLengthTests {
     private static let aheadGroup = [
         "Mild lead, early", "Mild lead, late", "Ahead, mid-window", "Ahead, late", "Ahead, very late",
     ]
+
+    // MARK: - The remaining scale (#307)
+
+    /// The renormalised scale, pinned state by state — the counterpart of
+    /// ``windowScaleWidthsPerState``. Two states clip: their surplus exceeds the time remaining.
+    @Test func remainingScaleWidthsPerState() {
+        let expected: [String: Double] = [
+            "Deep behind": 1.00,      // computed 2.50 — clipped
+            "Behind, early": 0.1875,
+            "Behind, mid": 0.30,
+            "Behind, late": 1.00,     // computed 2.00 — clipped
+            "Mildly behind": 0.25,
+            "Dead on pace": 0.00,
+            "Mild lead, early": 0.1143,
+            "Mild lead, late": 0.2222,
+            "Ahead, mid-window": 0.40,
+            "Ahead, late": 0.4444,
+            "Ahead, very late": 0.5714,
+            "Exhausted, early": 1.00,
+            "Exhausted": 1.00,
+        ]
+        for s in Self.states {
+            #expect(abs(Self.layout(s).pressureLength - expected[s.name]!) < 1e-4, "\(s.name)")
+        }
+    }
+
+    /// The defect from ``windowScaleIsNonMonotonicAcrossTheAheadGroup``, fixed: walking the
+    /// ahead-group by increasing severity now gives a strictly widening bar, so width can be
+    /// trusted at a glance.
+    @Test func remainingScaleIsMonotonicAcrossTheAheadGroup() {
+        let widths = Self.aheadGroup.map { Self.layout(Self.state($0)).pressureLength }
+        #expect(widths == widths.sorted())
+        #expect(zip(widths, widths.dropFirst()).allSatisfy { $0 < $1 })   // strictly, no ties
+    }
+
+    /// The defect from ``windowScaleCollapsesFiveStatesIntoTheMinimumPill``, fixed: no state lands
+    /// in the dead band `(0, minPill)` where the renderer would inflate it to the shared pill. Zero
+    /// still means zero — that one is floored deliberately.
+    @Test func remainingScaleLeavesNoStateUnderTheMinimumPill() {
+        for s in Self.states {
+            let width = Self.layout(s).pressureLength
+            #expect(width == 0 || width >= Self.minPillFraction, "\(s.name) → \(width)")
+        }
+    }
+
+    /// `u >= 1` collapses to `(1 − t)/(1 − t) = 1` for any `t`: red always draws a full bar. On the
+    /// window scale these same two states differ (90 % vs 30 %) — a shrinking red bar that reads as
+    /// "the problem is easing" while work is just as blocked.
+    @Test func exhaustedAlwaysFillsTheBar() {
+        for timePct in [0.0, 10, 50, 70, 99] {
+            let l = Self.layout(.init(name: "exhausted", timePct: timePct, utilPct: 100))
+            #expect(l.pressureLength == 1.0, "t=\(timePct)")
+        }
+    }
+
+    /// `t = 1` (reset due or past) would divide by zero. No time is left, so any non-zero gap fills
+    /// the bar, and an exact tie stays zero — never NaN or infinity.
+    @Test func resetDueDoesNotDivideByZero() {
+        let gap = PacingModel.barLayout(utilization: 40, resetsAt: now - 1, now: now, window: .fiveHour)
+        #expect(gap.timeFraction == 1.0)
+        #expect(gap.pressureLength == 1.0)
+
+        // `u == t == 1`: the tie rule alone would say zero, but the limit is exhausted and the reset
+        // is due — the emptiest possible bar at the loudest possible moment. Exhaustion wins.
+        let tie = PacingModel.barLayout(utilization: 100, resetsAt: now - 1, now: now, window: .fiveHour)
+        #expect(tie.pressureLength == 1.0)
+
+        let empty = PacingModel.barLayout(utilization: 0, resetsAt: now - 1, now: now, window: .fiveHour)
+        #expect(empty.pressureLength == 1.0) // gap of 1 against no time left
+    }
+
+    /// `usage == time` is exactly zero on both scales — the state both renderers floor to the
+    /// minimum pill so "dead on pace" reads as a mark rather than an empty track.
+    @Test func deadOnPaceIsExactlyZero() {
+        for pct in [0.0, 25, 55, 90] {
+            let l = Self.layout(.init(name: "tie", timePct: pct, utilPct: pct))
+            #expect(l.pressureLength == 0.0, "t=u=\(pct)")
+        }
+    }
+
+    /// Below the clip the calm side is twice as sensitive as the window scale: at `t = 50 %`,
+    /// surpluses of 5/10/20/30 pp read as 10/20/40/60 % instead of 5/10/20/30 %.
+    @Test func calmSideIsTwiceAsSensitiveBelowTheClip() {
+        for (surplus, expected) in [(5.0, 0.10), (10.0, 0.20), (20.0, 0.40), (30.0, 0.60)] {
+            let l = Self.layout(.init(name: "calm", timePct: 50, utilPct: 50 - surplus))
+            #expect(abs(l.pressureLength - expected) < 1e-9, "surplus \(surplus)")
+        }
+    }
+
+    /// The scale is a linear function of the expression that decides the colour: dividing the
+    /// orange threshold `(u − t) < 0.16 · (1 − t)` by `(1 − t)` turns it into `length < 0.16`.
+    /// So the ribbon reaches 16 % of the bar exactly when the colour turns orange — width and
+    /// colour stop disagreeing. Verified against the live threshold, not a copied constant.
+    @Test func sixteenPercentIsTheOrangeCrossoverAtAnyPoint() {
+        for timePct in [10.0, 30, 50, 82, 93] {
+            let t = timePct / 100
+            let threshold = PacingModel.aheadThreshold(timeFraction: t)
+            // A lead one part in 10 000 under the threshold is still calm; at the threshold it is orange.
+            let justUnder = Self.layout(.init(name: "under", timePct: timePct, utilPct: (t + threshold) * 100 - 0.01))
+            let atOrOver = Self.layout(.init(name: "over", timePct: timePct, utilPct: (t + threshold) * 100 + 0.01))
+            #expect(justUnder.pressureLength < 0.16, "t=\(timePct)")
+            #expect(atOrOver.pressureLength >= 0.16, "t=\(timePct)")
+        }
+    }
 }
 
 // MARK: - blockIndex

@@ -22,8 +22,26 @@ struct BarStyleTests {
         #expect(BarStyle.pacing.popupShowsTimeMarker)
         #expect(!BarStyle.simple.menuBarShowsTimeMarker)
         #expect(!BarStyle.simple.popupShowsTimeMarker)
-        #expect(!BarStyle.mixed.menuBarShowsTimeMarker)   // pace-only in the menu bar
-        #expect(BarStyle.mixed.popupShowsTimeMarker)      // pace & time in the dropdown
+        #expect(!BarStyle.mixed.menuBarShowsTimeMarker)   // Pressure in the menu bar
+        #expect(BarStyle.mixed.popupShowsTimeMarker)      // Progress in the dropdown
+    }
+
+    /// Per-surface scale helpers (#307): a surface draws the renormalised Pressure ribbon exactly
+    /// when it draws no time marker. The two are one decision — a marker cannot live on the
+    /// `[now .. reset]` track, where it would sit at zero forever — so the invariant is pinned here
+    /// rather than left for each renderer to re-derive from a negated flag.
+    @Test func perSurfacePressureScaleIsTheInverseOfTheMarker() {
+        for style in BarStyle.allCases {
+            #expect(style.menuBarUsesPressureScale == !style.menuBarShowsTimeMarker, "\(style)")
+            #expect(style.popupUsesPressureScale == !style.popupShowsTimeMarker, "\(style)")
+        }
+        // Spelled out per case, so a future edit to either flag has to face both names.
+        #expect(BarStyle.simple.menuBarUsesPressureScale)
+        #expect(BarStyle.simple.popupUsesPressureScale)
+        #expect(BarStyle.mixed.menuBarUsesPressureScale)    // Pressure in the compact menu bar…
+        #expect(!BarStyle.mixed.popupUsesPressureScale)     // …Progress in the roomier dropdown
+        #expect(!BarStyle.pacing.menuBarUsesPressureScale)
+        #expect(!BarStyle.pacing.popupUsesPressureScale)
     }
 
     /// A known raw value round-trips through `Codable`.

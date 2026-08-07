@@ -137,6 +137,48 @@ public struct BarLayout: Sendable, Equatable {
     /// Right edge of the gap zone = `max(usageFraction, timeFraction)`.
     public var gapEnd: Double   { max(usageFraction, timeFraction) }
 
+    /// The **Pressure** ribbon's length: the pacing gap renormalised onto the `[now .. reset]`
+    /// track, so `0` is now and `1` is the reset (#307).
+    ///
+    ///     length = |u − t| / (1 − t)
+    ///
+    /// Read it as "how much of the time I have left would this gap consume". The denominator is
+    /// the fraction of the window still ahead, so a lead of 4 points with 7 % of the window left
+    /// is a *wide* ribbon (57 %), not the near-invisible 4 % the window scale produces.
+    ///
+    /// The denominator is not arbitrary. The orange threshold is `(u − t) < 0.16 · (1 − t)`
+    /// (``PacingModel/aheadThreshold(timeFraction:)``); divide both sides by `(1 − t)` and it
+    /// becomes `length < 0.16`. The geometry is therefore a linear function of the very expression
+    /// that decides the colour — width and colour stop disagreeing.
+    ///
+    /// Clipped at `1` only: a surplus larger than the time remaining draws a full bar, and the
+    /// exact multiple ("twice more than I can spend" vs "three times") is not a decision.
+    ///
+    /// Edge cases:
+    /// - **`u >= 1` (exhausted)** collapses to `(1 − t)/(1 − t) = 1` for any `t` — red always draws
+    ///   a full bar. Deliberate: a shrinking red bar reads as "the problem is easing" while work is
+    ///   still blocked. Time-to-reset is carried by the countdown, the pause glyph and `pauseHidesBars`.
+    /// - **`t = 1`** (reset due/past) would divide by zero. No time is left, so any non-zero gap is
+    ///   a full bar. The exhausted check above runs first, so `u == t == 1` is a full bar too —
+    ///   without it the tie would collapse to `0` and a blocked limit would draw the *emptiest*
+    ///   bar at the exact moment the reset is due.
+    /// - **`u == t`** (below exhaustion) is exactly `0`. Both renderers floor a zero-length ribbon
+    ///   to the minimum pill (`PopupBarView.pillRect`), so "dead on pace" reads as a mark rather
+    ///   than an empty track.
+    ///
+    /// Only the marker-less **Pressure** presentation uses this; **Progress** (`BarStyle.pacing`)
+    /// keeps drawing `gapStart..gapEnd` on the window scale, where its time marker is meaningful.
+    /// A marker is impossible here — on this track it would sit at zero forever.
+    public var pressureLength: Double {
+        // Exhausted first: `u >= 1` is a full bar at any `t`, including `t == 1` where the ratio
+        // below is undefined and the `u == t` tie would otherwise read as zero.
+        if usageFraction >= 1 { return 1 }
+        let gap = abs(usageFraction - timeFraction)
+        let remaining = 1 - timeFraction
+        guard remaining > 0 else { return gap > 0 ? 1 : 0 }
+        return min(1, gap / remaining)
+    }
+
     /// The bar's pacing **severity** — a three-way grading of the rendered gap colour, computed
     /// AppKit-free from the raw fractions. This is the single Kit-side source that both the
     /// "calm" muting (#105) and the reset-countdown selection (#103, ADR-0028/0029) read.

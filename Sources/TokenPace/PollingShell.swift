@@ -537,6 +537,20 @@ actor StubUsageTransport: UsageTransport {
         /// checking that the bar and the popup print the same number.
         case midBandReset
 
+        /// **Pressure-scale** frame (#307): the two states that separate the renormalised ribbon from
+        /// the window-scale one, side by side on the same screen.
+        ///
+        /// - **5h** — `t ≈ 93 %, u = 97 %`: three points from exhaustion with 7 % of the window left.
+        ///   The window scale feeds the renderer 4 % of the bar, below `minStripWidth`, so the most
+        ///   urgent state draws the smallest mark the widget can produce. On the remaining scale it is
+        ///   **57 %** — the sharpest state finally reads as the widest.
+        /// - **7d** — `t ≈ 80 %, u = 30 %`: a surplus larger than the time left. Computes to 250 % and
+        ///   **clips** to a full bar, the case that proves the clip is reached rather than theoretical.
+        ///
+        /// Switch Bar style across Pressure / Mixed / Progress on this frame: Progress must be
+        /// pixel-identical to its pre-#307 rendering, Pressure visibly wider on the 5h row.
+        case pressureSweep
+
         /// (fiveUtil, sevenUtil, fiveResetSeconds, sevenResetSeconds).
         var values: (five: Double, seven: Double, fiveIn: TimeInterval, sevenIn: TimeInterval) {
             switch self {
@@ -557,6 +571,9 @@ actor StubUsageTransport: UsageTransport {
             // 4 h 41 min to the 5h reset: the ticket's own example (`20:40` → `5h`). Usage 50 vs the
             // ~6 % elapsed of a 5-hour window → well ahead of pace → orange, so the countdown shows.
             case .midBandReset:       return (50, 20, 4 * 3600 + 41 * 60, 5 * 24 * 3600)
+            // #307: 5h at t≈93 % (18 000 × 0.07 = 1260 s left) with u=97 → 4 % on the window scale,
+            // 57 % on the remaining one. 7d at t≈80 % (604 800 × 0.2 left) with u=30 → clips.
+            case .pressureSweep:      return (97, 30, 1_260, 120_960)
             }
         }
     }

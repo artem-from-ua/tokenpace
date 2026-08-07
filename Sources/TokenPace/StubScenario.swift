@@ -48,6 +48,7 @@ enum StubScenario: String, CaseIterable {
     case midBandReset = "mid-band-reset"
     case calmBoth = "calm-both"
     case farBehind = "far-behind"
+    case pressureSweep = "pressure-sweep"
     case nearZero = "near-zero"
     case edgeExtremes = "edge-extremes"
     case calmDegraded = "calm-degraded"
@@ -158,6 +159,7 @@ enum StubScenario: String, CaseIterable {
         case .midBandReset:        return "Pacing · reset 4 h 41 m out (mid band)"
         case .calmBoth:            return "Pacing · both calm"
         case .farBehind:           return "Pacing · both far behind (blue)"
+        case .pressureSweep:       return "Pacing · Pressure scale (sharp 5h + clipped 7d)"
         case .nearZero:            return "Pacing · near-zero (pill caps)"
         case .edgeExtremes:        return "Pacing · edge extremes (5h 0 %, 7d 100 %)"
         case .calmDegraded:        return "Calm bars + degraded dot"
@@ -235,6 +237,12 @@ enum StubScenario: String, CaseIterable {
         case .farBehind:
             return "Both base bars far behind pace (ADR-0061): a big surplus past the behind-threshold "
                  + "→ blue. Turn \"Work harder\" on with Calm colours to keep the blue coloured."
+        case .pressureSweep:
+            return "Pressure scale (#307): 5h three points from exhaustion with 7 % of the window left "
+                 + "— 4 % of the bar on the old window scale (below the min pill), 57 % on the "
+                 + "remaining scale. 7d has a surplus wider than the time left, so it clips to a full "
+                 + "bar. Switch Bar style across Pressure / Mixed / Progress: Progress must look "
+                 + "exactly as before, Pressure visibly wider on the 5h row."
         case .nearZero:
             return "Near-zero fill on fresh windows: tiny usage (5h 0 %, 7d 4 %, Fable/Mythos ~1–4 %) "
                  + "with barely any time elapsed → a hairline pacing gap. Exercises the min-strip pill "
@@ -327,6 +335,7 @@ enum StubScenario: String, CaseIterable {
         case .midBandReset:        return StubUsageTransport(mode: .pacing(.midBandReset), now: now)
         case .calmBoth:            return StubUsageTransport(mode: .pacing(.calmBoth), now: now)
         case .farBehind:           return StubUsageTransport(mode: .pacing(.farBehind), now: now)
+        case .pressureSweep:       return StubUsageTransport(mode: .pacing(.pressureSweep), now: now)
         case .nearZero:            return StubUsageTransport(mode: .pacing(.nearZero), now: now)
         case .edgeExtremes:        return StubUsageTransport(mode: .pacing(.edgeExtremes), now: now)
         case .calmDegraded:        return StubUsageTransport(mode: .calmDegraded, now: now)

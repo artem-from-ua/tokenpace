@@ -263,14 +263,25 @@ final class PopupBarView: NSView {
         Self.monochromeGrey.setFill()
         NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner).fill()
 
-        // 2. Coloured strip laid exactly over its span, both ends fully rounded (capsule). Pace & Time uses
-        //    the gap `gapStart..gapEnd`; Simple uses a left-anchored ribbon `0..(gapEnd-gapStart)`. A flush
-        //    end rounds identically to the grey bar's own cap, so it reads as one continuous rounded edge.
+        // 2. Coloured strip laid exactly over its span, both ends fully rounded (capsule). Progress uses
+        //    the gap `gapStart..gapEnd` on the window scale; Pressure uses a left-anchored ribbon
+        //    `0..pressureLength` on the renormalised `[now..reset]` scale (#307). A flush end rounds
+        //    identically to the grey bar's own cap, so it reads as one continuous rounded edge.
         //    3. The strip carries the ambient glow.
-        // The `color-cycle` stub pins the strip so only the colour moves (`frozenStripFraction`).
+        // The `color-cycle` stub pins the strip so only the colour moves (`frozenStripFraction`); it
+        // overrides the length, so the stub is unaffected by the rescale.
         let stripFrom = frozenStripFraction != nil ? 0 : (barStyle.popupShowsTimeMarker ? l.gapStart : 0)
-        let stripTo = frozenStripFraction ?? (barStyle.popupShowsTimeMarker ? l.gapEnd : (l.gapEnd - l.gapStart))
-        if let stripRect = Self.stripRect(from: stripFrom, to: stripTo, in: rect) {
+        let stripTo = frozenStripFraction ?? (barStyle.popupShowsTimeMarker ? l.gapEnd : l.pressureLength)
+        // A **zero-length** Pressure ribbon still has to read as "zero", not as an empty track: with no
+        // marker the ribbon is this bar's only mark, and `stripRect` returns nil for a degenerate span.
+        // `usage == time` is a real recurring state (every 5-hour reset renders 0 % against a freshly
+        // rolled `resets_at`), so floor it to the pill — mirroring `StatusItemView`'s
+        // `fillZone(floorEmptyToPill:)`, which has always done this in the menu bar. Progress is
+        // deliberately excluded: there an empty gap means "dead on pace" and the marker carries the
+        // position.
+        let span = Self.stripRect(from: stripFrom, to: stripTo, in: rect)
+            ?? (barStyle.popupUsesPressureScale ? Self.pillRect(at: stripFrom, in: rect) : nil)
+        if let stripRect = span {
             let capsule = min(stripRect.width, stripRect.height) / 2
             let stripPath = NSBezierPath(roundedRect: stripRect, xRadius: capsule, yRadius: capsule)
             withGlow(gapColor, radius: Self.gapGlowRadius, strength: Self.gapGlowStrength) {
@@ -392,18 +403,35 @@ final class PopupBarView: NSView {
         return NSRect(x: sx0, y: rect.minY, width: sx1 - sx0, height: rect.height)
     }
 
-    /// Draw the under-bar tick ruler: vertical teeth at each interior window boundary
-    /// (`k / subdivisions` for `k` in `1 ..< subdivisions`), pixel-snapped on x. No-op when
-    /// `subdivisions < 2` (nothing to subdivide).
+    /// The fractions the tick ruler marks — chosen by the bar's **scale**, not by the data (#307).
+    ///
+    /// - **Progress** marks each interior window boundary (`k / subdivisions`): the hour lines of a
+    ///   5-hour window, the day lines of a 7-day one. Those are real positions on the window scale,
+    ///   and the time marker lands among them.
+    /// - **Pressure** draws on the renormalised `[now .. reset]` track, where window subdivisions
+    ///   have no position at all — an hour boundary is not at a fixed fraction of the time remaining.
+    ///   Quarters of that remaining time are what the track actually measures, so mark those.
+    ///
+    /// Keyed off `barStyle` alone: `drawTicks` also runs for the **idle** bar, which has no
+    /// `BarLayout` to consult.
+    private var tickFractions: [CGFloat] {
+        if barStyle.popupUsesPressureScale { return [0.25, 0.5, 0.75] }
+        guard subdivisions >= 2 else { return [] }
+        return (1 ..< subdivisions).map { CGFloat($0) / CGFloat(subdivisions) }
+    }
+
+    /// Draw the under-bar tick ruler: vertical teeth at each fraction in ``tickFractions``,
+    /// pixel-snapped on x. No-op when there is nothing to mark.
     private func drawTicks(in barRect: NSRect) {
-        guard showTicks, subdivisions >= 2 else { return }   // #224 — tick ruler opt-out
+        guard showTicks else { return }                    // #224 — tick ruler opt-out
+        let fractions = tickFractions
+        guard !fractions.isEmpty else { return }
         let top = barRect.maxY + Metrics.tickGap           // flipped: just below the bar
         let bottom = top + Metrics.tickLength
         Palette.tick.setFill()
         // Rounded (capsule) teeth — corner = half the width so the ends read soft, not blocky.
         let corner = Metrics.tickWidth / 2
-        for k in 1 ..< subdivisions {
-            let f = CGFloat(k) / CGFloat(subdivisions)
+        for f in fractions {
             // Pixel-snap the tooth's centre so it stays crisp at @1x and @2x. Mapped through the same
             // inset scale as the coloured strip / marker so the ruler stays aligned with them (#…).
             let cx = Self.scaleX(f, in: barRect).rounded()

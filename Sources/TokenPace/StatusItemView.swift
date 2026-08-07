@@ -848,25 +848,27 @@ final class StatusItemView: NSView {
         NSGraphicsContext.saveGraphicsState()
         path.addClip()
 
-        // Simple style (#224): a left-anchored ribbon coloured by the SAME pacing state colour a
-        // `.pacing` gap would use (`calmedGapColor` — carries calm-muting / work-harder too), with no
-        // time-indicator marker. The ribbon's LENGTH equals the pacing gap's width (`gapEnd - gapStart`)
-        // but is always anchored at the left edge, so the same amount of colour appears as in
-        // Pace & Time, just without a time position. Mirror of `PopupBarView.draw`'s simple branch.
+        // Pressure style (#224, rescaled in #307): a left-anchored ribbon coloured by the SAME pacing
+        // state colour a Progress gap would use (`calmedGapColor` — carries calm-muting / work-harder
+        // too), with no time-indicator marker. The ribbon's LENGTH is `BarLayout.pressureLength` —
+        // the gap measured against the time left before the reset, NOT the window-scale gap width
+        // Progress draws. So the two styles no longer show the same amount of colour: Pressure is
+        // wider exactly where the state is more urgent. Mirror of `PopupBarView.draw`'s Pressure branch.
         // The `color-cycle` stub pins the strip's length so only the colour moves — see
-        // `frozenStripFraction`. The *style* still decides whether a marker follows, so Pace & Time
-        // keeps its full anatomy under the stub instead of collapsing into Simple.
+        // `frozenStripFraction`; it overrides the length, so the stub is unaffected by the rescale.
+        // The *style* still decides whether a marker follows, so Progress keeps its full anatomy under
+        // the stub instead of collapsing into Pressure.
         if !barStyle.menuBarShowsTimeMarker {
             // A **zero-length** ribbon still has to read as "zero", not as an empty track. Without a time
             // marker this branch is the bar's only mark, so `stripRect`'s degenerate-span `nil` would
             // leave the widget completely blank — which is exactly what the reset boundary produces:
             // `applyIdleGrace`/`suppress` (ADR-0041, ADR-0045) render 0 % against a freshly rolled
-            // `resets_at = now + 5h`, i.e. `usage == time == 0`, so `gapEnd - gapStart` is *exactly* 0
+            // `resets_at = now + 5h`, i.e. `usage == time == 0`, so `pressureLength` is *exactly* 0
             // for the first ticks of every new 5-hour window. A 1-minute-old window already draws the
             // min-width pill, so flooring the span here keeps 0 looking like 0 instead of blinking the
-            // bar off. Pace & Time is deliberately excluded: there an empty gap means "dead on pace" and
+            // bar off. Progress is deliberately excluded: there an empty gap means "dead on pace" and
             // the marker already carries the position.
-            let ribbon = frozenStrip(for: bar) ?? (l.gapEnd - l.gapStart)
+            let ribbon = frozenStrip(for: bar) ?? l.pressureLength
             fillZone(from: 0, to: ribbon, in: rect, width: w,
                      color: calmedGapColor(l, window: bar.window), floorEmptyToPill: true)
             NSGraphicsContext.restoreGraphicsState()
