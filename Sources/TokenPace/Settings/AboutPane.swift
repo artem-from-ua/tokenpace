@@ -50,7 +50,9 @@ struct AboutPane: View {
                         .buttonStyle(.link)
                 }
                 LabeledContent("Version") {
-                    HStack(spacing: 10) {
+                    // Same spacing as the availability row below, so the two "release notes" links
+                    // sit at a matching distance from their version numbers.
+                    HStack(spacing: 6) {
                         Text(model.versionText).foregroundStyle(.secondary)
                         // A "release notes" link for the installed version, shown only in a real
                         // `.app` bundle (a dev build has no published release to point at) — #224.
