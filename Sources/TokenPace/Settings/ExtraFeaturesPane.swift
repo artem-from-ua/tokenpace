@@ -100,13 +100,21 @@ struct ExtraFeaturesPane: View {
                         }
                     }
 
-                    LabeledContent {
-                        Button("Archive Now") { model.archiveNow() }
-                            .disabled(model.archiveDestination == nil)
-                    } label: {
-                        Text(model.archiveStatusText)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        LabeledContent {
+                            Button("Archive Now") { model.archiveNow() }
+                                .disabled(model.archiveDestination == nil)
+                        } label: {
+                            Text(model.archiveStatusText)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        // Why a backup isn't happening (#306). Both hints vanish when their string is
+                        // empty, so no conditional is needed. Both carry ⚠️: a hint that reports a
+                        // condition holding the feature back is a warning, whatever clears it — the
+                        // neutral (icon-less) style is reserved for describing what a control does.
+                        SettingsHint(text: model.archiveSpaceHint, warning: true)
+                        SettingsHint(text: model.archiveBatteryHint, warning: true)
                     }
                 }
             }

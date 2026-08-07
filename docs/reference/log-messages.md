@@ -139,7 +139,9 @@ In the tables below, `<…>` marks an interpolated value.
 | — | `lifecycle` | `.error` | `update-install: did not complete (<outcome>) — signal item remains` | `AppDelegate` — the install ended in a failure outcome; the speculative "what's new" is cleared and the single dropdown item carries the signal (#123/#124/#130) |
 | — | `archive` | `.notice` | `archive: sync starting (userInitiated=<bool>)` | `performArchiveSync` — an archive sync begins (daily heartbeat or "Archive now"); #110, ADR-0031 |
 | — | `archive` | `.notice` | `archive: sync ok — <n> updated, <bytes> bytes, <total> files / <totalBytes> bytes in archive` | `performArchiveSync` — the sync finished; the `lastArchiveSync` marker is advanced (#110). `<total>`/`<totalBytes>` count the whole archive incl. source-pruned files |
-| — | `archive` | `.error` | `archive: sync failed — <error>` | `performArchiveSync` — the sync threw (e.g. destination unwritable); marker not advanced, retried next heartbeat (#110) |
+| — | `archive` | `.error` | `archive: sync failed — <error>` | `performArchiveSync` — the sync threw (e.g. destination unwritable); marker not advanced, retried next heartbeat (#110). Low disk space is handled by its own row below, not here |
+| — | `archive` | `.notice` | `archive: deferred reason=on-battery` | `pollArchiveIfDue` — a sync was due but the Mac is unplugged; marker not advanced, re-evaluated next heartbeat. Logged only while a sync is genuinely due, not every heartbeat. Bypassed by "Archive Now" (#306) |
+| — | `archive` | `.notice` | `archive: blocked reason=insufficient-space need=<bytes> free=<bytes>` | `performArchiveSync` — copying would leave < 5 GB free on the destination volume, so the run wrote nothing; marker not advanced, and Settings shows a ⚠️ line. `.notice`, not `.error`: a designed refusal would otherwise be the one archive line visible to a plain `log show`, dressing a normal full disk up as a fault. Not bypassed by "Archive Now" (#306) |
 | — | `lifecycle` | `.info` | `back-to-work: suppressed by quiet hours` | `maybePostBackToWork` — a blocked→unblocked edge fired but the current time is outside the allowed-hours window or on a suppressed weekday, so nothing is posted (#160, ADR-0039) |
 | — | `lifecycle` | `.info` | `extra-usage: suppressed by quiet hours` | `maybePostExtraUsage` — a not-spending→spending-on-credits edge fired but the current time is outside the shared allowed-hours window or on a suppressed weekday, so nothing is posted |
 | — | `lifecycle` | `.info` | `incident: suppressed by quiet hours` | `advanceEpisodeSubscription` — a followed episode produced an event but the current time is outside the shared allowed-hours window or on a suppressed weekday, so no banner is posted (#279, ADR-0071 §8) |
@@ -417,10 +419,10 @@ One log line per interval change. The format is built by
 | `keychain` | 12 | `ClaudeCLIRefresher` (6), `TokenProvider` (3), `PollingEngine` (1) |
 | `lifecycle` | 110 | `App` (47), `SettingsModel` (29), `UpdateInstaller` (13), `PollingShell` (7), `BackToWorkNotifier` (6), `AwaitingInputWatcher` (5), `ShellEnvironment` (1), `PollingEngine` (1), `IncidentNotificationDelegate` (1) |
 | `ui` | 1 | `AppearancePane` (1) |
-| `archive` | 5 | `App` (3), `LogArchiver` (2) |
+| `archive` | 7 | `App` (5), `LogArchiver` (2) |
 | `journal` | 12 | `UsageJournal` (4), `StatusPayloadLog` (4), `App` (3), `DevToolsWindowController` (1) |
 
-**Total: 169 log statements** — `.error` ×46, `.notice` ×105, `.info` ×13, `.debug` ×5.
+**Total: 173 log statements** — `.error` ×46, `.notice` ×109, `.info` ×13, `.debug` ×5.
 
 > Counts recomputed from the source in #275 (the previous figures had drifted over several releases —
 > `SettingsModel` and `BackToWorkNotifier` were missing entirely). Regenerate with:

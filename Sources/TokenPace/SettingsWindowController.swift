@@ -328,6 +328,13 @@ final class SettingsWindowController: NSWindowController {
         model.refreshArchiveStatus()
     }
 
+    /// Reflect whether the last archive run refused for lack of free space (#306). Carries its
+    /// payload, unlike ``updateArchiveStatus()`` — this state lives only in memory, so the model has
+    /// nothing to pull it from. Safe to call while the window is closed.
+    func updateArchiveBlock(_ verdict: ArchiveSpaceVerdict) {
+        model.updateArchiveBlock(verdict)
+    }
+
     /// Reflect the live data source after the dev-tools stub selector switches scenarios (#187), so the
     /// ⚠️ "Stubbed in this development build." hints appear/disappear without reopening the window.
     /// Safe to call while the window is closed.

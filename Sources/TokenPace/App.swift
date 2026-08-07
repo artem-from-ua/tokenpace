@@ -231,6 +231,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The result of the last archive sync, retained so the Settings status line can show
     /// "Last archived: … · N files" between runs (#110). `nil` until the first sync completes.
     private(set) var lastArchiveSummary: LogArchiver.Summary?
+    /// Whether the last archive run refused for lack of free space (#306). Kept here — like
+    /// `installBlockers` — so a Settings window opened *after* the refusal still starts from the
+    /// current state; not persisted, because the next run re-derives it.
+    private var archiveSpaceBlock: ArchiveSpaceVerdict = .proceed
     /// Whether the `gh` path is enabled, resolved once (lazily) from `TOKENPACE_GH_AUTH`. Checked in
     /// `ProcessInfo` first (terminal / `launchctl setenv` launches), then — since a login-launched app
     /// sees no shell env — from the login shell's `~/.zshrc`/`~/.zprofile` via `ShellEnvironment`. The
@@ -709,6 +713,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // evaluation, which usually predates the window.
         settingsWC?.updateAvailability(lastKnownRelease)
         settingsWC?.updateDeferral(installBlockers)
+        // Same reasoning for the archiver's low-space refusal (#306): it is decided during a sync,
+        // which almost always predates the window being opened.
+        settingsWC?.updateArchiveBlock(archiveSpaceBlock)
         // Same for the live data source: the model seeds itself from `launchScenario`, but the dev-tools
         // selector may have switched scenarios since — and any push from `switchScenario` before the
         // window first opened went to a nil controller. Pull the current value on every open so the
@@ -1518,6 +1525,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func pollArchiveIfDue() {
         guard PersistedConfig.archiveEnabled, PersistedConfig.archiveDestination != nil else { return }
         guard ArchiveCadence.isDue(lastSync: PersistedConfig.lastArchiveSync, now: Date()) else { return }
+        // Silent defer on battery (#306): mirroring a session-log tree is a far heavier drain than the
+        // ~10 MB update we already hold back, and the first sync copies the whole archive. The marker
+        // is not advanced, so the run stays due and starts by itself once the adapter is back — no
+        // state to persist. Placed after the cadence check so an unplugged Mac logs only while a sync
+        // is genuinely due, not on every 180 s heartbeat. A manual "Archive Now" reaches
+        // `performArchiveSync` directly and bypasses this deliberately: the user asked.
+        guard PowerSource.isOnACPower else {
+            AppLogger.archive.notice("archive: deferred reason=on-battery")
+            return
+        }
         performArchiveSync(userInitiated: false)
     }
 
@@ -1544,16 +1561,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .success(let summary):
                 PersistedConfig.lastArchiveSync = Date()
                 self.lastArchiveSummary = summary
+                self.setArchiveSpaceBlock(.proceed)
                 AppLogger.archive.notice(
                     "archive: sync ok — \(summary.copied, privacy: .public) updated, \(summary.bytes, privacy: .public) bytes, \(summary.totalInArchive, privacy: .public) files / \(summary.totalBytesInArchive, privacy: .public) bytes in archive")
                 self.settingsWC?.updateArchiveStatus()
+            case .failure(LogArchiver.ArchiveError.insufficientSpace(let need, let free)):
+                // A designed refusal, not a fault: the run wrote nothing, the marker stays put, and
+                // Settings names the reason (#306). `.notice` rather than `.error` on purpose — an
+                // `.error` here would be the one archive line visible to a plain `log show`, dressing
+                // up a normal full-disk state as a malfunction.
+                self.setArchiveSpaceBlock(.blockedInsufficientSpace(needBytes: need, freeBytes: free))
+                AppLogger.archive.notice(
+                    "archive: blocked reason=insufficient-space need=\(need, privacy: .public) free=\(free, privacy: .public)")
+                self.settingsWC?.updateArchiveStatus()
             case .failure(let error):
                 // Don't advance the marker → next heartbeat retries.
+                self.setArchiveSpaceBlock(.proceed)
                 AppLogger.archive.error(
                     "archive: sync failed — \(error.localizedDescription, privacy: .public)")
                 self.settingsWC?.updateArchiveStatus()
             }
         }
+    }
+
+    /// Record the low-space verdict of the last archive run and mirror it into Settings (#306).
+    /// Kept in one place so the field and the pushed value can never drift apart — unlike the archive
+    /// status line, this state has no `PersistedConfig` for the model to pull from, so it must be
+    /// pushed with its payload.
+    private func setArchiveSpaceBlock(_ verdict: ArchiveSpaceVerdict) {
+        archiveSpaceBlock = verdict
+        settingsWC?.updateArchiveBlock(verdict)
     }
 
     /// Choose the fetch path: the `gh` subprocess when `TOKENPACE_GH_AUTH` is set (maintainers, so a
