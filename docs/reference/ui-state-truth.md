@@ -35,9 +35,13 @@
 
 Шрифт лейбла — `NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)`.
 
-**Слот awaiting-долоні резервується з опції, а не з даних** ([#283](https://github.com/artem-from-ua/cc-timer/issues/283),
+**Слот awaiting-долоні резервується з опцій, а не з даних** ([#283](https://github.com/artem-from-ua/cc-timer/issues/283),
 [ADR-0073](../adr/0073-awaiting-icon-reserved-slot-and-slide.md)): `awaitingIconSize + gap` входить у
-ширину віджета, поки ввімкнена Appearance-опція, **незалежно від того, чи хтось чекає вводу зараз**.
+ширину віджета, поки ввімкнені **обидва** тумблери — master «Show sessions awaiting input» (Extra
+features) **і** «Show awaiting-input icon in the menu bar» (Appearance), — **незалежно від того, чи
+хтось чекає вводу зараз**. Обидва обов'язкові: вимикання master'а лише *дизейблить* другий тумблер, а
+його збережене значення лишається `true`, тож перевірка самої лише Appearance-опції тримала б ≈18 pt
+під вимкнену фічу.
 Малюючи меню-бар у мокапі, не прибирай це місце разом з іконкою — інакше сусідні елементи стануть не
 там, де їх покаже застосунок. Сам гліф їде по Y на `awaitingSlideTravel` (з обрізанням по слоту), тож
 проміжний кадр — це **обрізана** долоня біля нижньої межі, а не зменшена або напівпрозора.

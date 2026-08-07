@@ -448,7 +448,16 @@ final class StatusItemView: NSView {
     ///
     /// This changes what the existing toggle means: "Show in menu bar" reserves the slot rather than
     /// describing what is on screen this second. Users who keep the indicator off pay nothing.
-    private var reservesAwaitingSlot: Bool { PersistedConfig.awaitingInputInMenuBar }
+    ///
+    /// **Both** flags, not just the placement one. Turning the Extra-features master off only
+    /// *disables* the Appearance toggle — its stored value stays `true` — so reading the placement
+    /// flag alone would keep ≈18 pt reserved for a feature the user has switched off entirely. The
+    /// condition this replaced happened to cover that case through the data (`awaitingInput` is
+    /// always nil while the master is off), which is exactly why it needs restating now that the
+    /// reservation no longer looks at the data.
+    private var reservesAwaitingSlot: Bool {
+        PersistedConfig.awaitingInputEnabled && PersistedConfig.awaitingInputInMenuBar
+    }
 
     /// Draw the small service-status dot at the **right edge** of `rect`, vertically centred — the
     /// trailing element of the widget. `hPadding` keeps it off the very edge, matching the bars'
