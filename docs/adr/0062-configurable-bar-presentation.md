@@ -1,10 +1,18 @@
 ---
-status: accepted
+status: superseded
 date: 2026-08-02
 supersedes: []
+superseded_by: [0076]
 ---
 
 # ADR-0062: Конфігурована подача пейсинг-барів — Bar style, Calm-режим, поріг far-behind
+
+> **Частково витіснений [ADR-0076](0076-pressure-scale-for-marker-less-bar.md)** (#307): стрічка без
+> маркера більше **не** дорівнює ширині пейсинг-gap (`gapEnd − gapStart`) — вона рахується в
+> перенормованій шкалі `[now .. reset]` (`BarLayout.pressureLength`), а тіки під нею мітять чверті
+> часу, що лишився, а не частки вікна. UI-назви теж змінились: «Pace & Time» → **Progress**,
+> «Pace» → **Pressure** (enum-кейси й `rawValue` лишились ті самі). Решта цього запису — per-surface
+> вибір, `CalmColorMode`, `FarBehindInterval`, `showTicks`, пресети — чинна.
 
 > Частково витісняє [ADR-0061](0061-far-behind-blue-pacing-zone.md): behind-поріг більше не
 > **фіксованої** ширини (тепер конфігурований через `FarBehindInterval`), а bool-опція «Work harder»
@@ -41,6 +49,10 @@ supersedes: []
 (`gapEnd − gapStart`), тим самим семантичним кольором стану. Тобто стільки ж кольору, як у Pace & Time,
 але без часової позначки. Розгалуження в малювачах — через `BarStyle.menuBarShowsTimeMarker` /
 `popupShowsTimeMarker`, щоб `StatusItemView` і `PopupBarView` не розсинхронились.
+
+> ⚠️ **Витіснено [ADR-0076](0076-pressure-scale-for-marker-less-bar.md).** Довжина стрічки більше не
+> дорівнює `gapEnd − gapStart` — це `BarLayout.pressureLength` = `|u − t| / (1 − t)`, тож кольору в
+> ній **не** стільки ж, скільки в Progress: вона ширша саме там, де стан гостріший.
 
 ### 2. `CalmColorMode` — що приглушено (замість двох bool)
 
