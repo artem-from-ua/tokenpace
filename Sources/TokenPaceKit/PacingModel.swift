@@ -137,46 +137,61 @@ public struct BarLayout: Sendable, Equatable {
     /// Right edge of the gap zone = `max(usageFraction, timeFraction)`.
     public var gapEnd: Double   { max(usageFraction, timeFraction) }
 
-    /// The **Pressure** ribbon's length: the pacing gap renormalised onto the `[now .. reset]`
-    /// track, so `0` is now and `1` is the reset (#307).
+    /// The **Pressure** ribbon's length: how hard spending is pressing against the time left (#307).
     ///
-    ///     length = |u − t| / (1 − t)
+    ///     r      = (u − t) / (1 − t)          // signed lead, in units of the time remaining
+    ///     length = (r + k − 1) / k            // k = pressureScaleCoefficient
     ///
-    /// Read it as "how much of the time I have left would this gap consume". The denominator is
-    /// the fraction of the window still ahead, so a lead of 4 points with 7 % of the window left
-    /// is a *wide* ribbon (57 %), not the near-invisible 4 % the window scale produces.
+    /// The ribbon's zero sits `(1 − t) · (k − 1)` to the **left** of `t`, and the ribbon runs from
+    /// there to `u` — **signed, never absolute**. Clipped to `[0, 1]`.
     ///
-    /// The denominator is not arbitrary. The orange threshold is `(u − t) < 0.16 · (1 − t)`
-    /// (``PacingModel/aheadThreshold(timeFraction:)``); divide both sides by `(1 − t)` and it
-    /// becomes `length < 0.16`. The geometry is therefore a linear function of the very expression
-    /// that decides the colour — width and colour stop disagreeing.
+    /// **Width alone encodes severity.** Because the expression is linear in `r`, and the colour
+    /// thresholds are themselves conditions on `r` (the orange one is `(u − t) < 0.16 · (1 − t)`,
+    /// i.e. `r < 0.16` — see ``PacingModel/aheadThreshold(timeFraction:)``), the severity bands
+    /// become **fixed positions on the bar, identical at any point in the window**:
     ///
-    /// Clipped at `1` only: a surplus larger than the time remaining draws a full bar, and the
-    /// exact multiple ("twice more than I can spend" vs "three times") is not a decision.
+    /// | colour | width |
+    /// |---|---|
+    /// | blue (far behind) | `0` |
+    /// | green (on pace or behind) | `0 – 0.20` |
+    /// | yellow (mild lead) | `0.208 – 0.328` |
+    /// | orange (ahead) | `0.328 – 0.992` |
+    /// | red (exhausted) | `1` |
+    ///
+    /// So `0.20` *is* "exactly on pace" (`u == t`) and `0.328` *is* where yellow turns orange — at
+    /// 10:00 and at 14:00 alike. `PopupBarView` marks the first of those with its single tick.
+    ///
+    /// **Why signed rather than `|u − t|`.** An absolute value cannot tell "ahead" from "behind":
+    /// it bottoms out at `u == t` and then climbs back. Trace an early burst followed by silence
+    /// (`u` frozen at 40 %) — `|u − t|/(1 − t)` gives `25 % → 0 % → 50 % → 100 %`, ending on a full
+    /// bar for the calmest state of the session. This form gives `40 % → 20 % → 0 % → 0 %`: the
+    /// pressure decays to nothing and stays there, which is what actually happened.
+    ///
+    /// **Zero means "no pressure", not "dead on pace".** Roughly 40 % of the reachable state space
+    /// (79 % of calm states) lands on `0` and renders as the minimum pill — every state calmer than
+    /// `t − (1 − t)·(k − 1)`. That is the deliberate trade: on the calm side the action is carried
+    /// by the colour (green "do nothing" vs blue "you can push"), and gradation *within* "do
+    /// nothing" maps to no different action.
     ///
     /// Edge cases:
-    /// - **`u >= 1` (exhausted)** collapses to `(1 − t)/(1 − t) = 1` for any `t` — red always draws
-    ///   a full bar. Deliberate: a shrinking red bar reads as "the problem is easing" while work is
-    ///   still blocked. Time-to-reset is carried by the countdown, the pause glyph and `pauseHidesBars`.
-    /// - **`t = 1`** (reset due/past) would divide by zero. No time is left, so any non-zero gap is
-    ///   a full bar. The exhausted check above runs first, so `u == t == 1` is a full bar too —
-    ///   without it the tie would collapse to `0` and a blocked limit would draw the *emptiest*
-    ///   bar at the exact moment the reset is due.
-    /// - **`u == t`** (below exhaustion) is exactly `0`. Both renderers floor a zero-length ribbon
-    ///   to the minimum pill (`PopupBarView.pillRect`), so "dead on pace" reads as a mark rather
-    ///   than an empty track.
+    /// - **`u >= 1` (exhausted)** is a full bar at any `t`. Deliberate: a shrinking red bar reads as
+    ///   "the problem is easing" while work is still blocked. Time-to-reset is carried by the
+    ///   countdown, the pause glyph and `pauseHidesBars`.
+    /// - **`t = 1`** (reset due/past) would divide by zero. No time is left to press against, so the
+    ///   bar is full — including the `u == t == 1` tie, which the exhausted check above catches first.
     ///
     /// Only the marker-less **Pressure** presentation uses this; **Progress** (`BarStyle.progress`)
     /// keeps drawing `gapStart..gapEnd` on the window scale, where its time marker is meaningful.
     /// A marker is impossible here — on this track it would sit at zero forever.
     public var pressureLength: Double {
         // Exhausted first: `u >= 1` is a full bar at any `t`, including `t == 1` where the ratio
-        // below is undefined and the `u == t` tie would otherwise read as zero.
+        // below is undefined.
         if usageFraction >= 1 { return 1 }
-        let gap = abs(usageFraction - timeFraction)
         let remaining = 1 - timeFraction
-        guard remaining > 0 else { return gap > 0 ? 1 : 0 }
-        return min(1, gap / remaining)
+        guard remaining > 0 else { return 1 }   // reset due: no time left to press against
+        let r = (usageFraction - timeFraction) / remaining
+        let k = PacingModel.pressureScaleCoefficient
+        return min(1, max(0, (r + k - 1) / k))
     }
 
     /// The bar's pacing **severity** — a three-way grading of the rendered gap colour, computed
@@ -318,6 +333,22 @@ public enum PacingModel {
     public static func limitIndicator(utilization: Double) -> LimitIndicator {
         Int(max(0, utilization)) == 100 ? .critical : .neutral   // truncation toward zero == floor for x ≥ 0
     }
+
+    // MARK: Pressure scale
+
+    /// How far left of `timeFraction` the **Pressure** ribbon's zero sits, in multiples of the time
+    /// remaining: the zero is at `t − (1 − t)·(k − 1)`. See ``BarLayout/pressureLength``.
+    ///
+    /// **`1.25`, and not larger.** The coefficient sets how much of the bar the calm side gets, and
+    /// therefore how wide the yellow band is: yellow spans `(0.16 … 0.328)` of the bar at `k = 1.25`,
+    /// which on the 34 pt menu-bar track is **3.9 pt** — just clear of the 3.75 pt `minStripWidth`
+    /// floor, so it can hold a position distinguishable from orange. At `k = 2` the same band is
+    /// 2.4 pt: below the floor, so yellow and orange would render as the same pill and the colour
+    /// would be the only thing separating them — reintroducing the very defect #307 set out to fix.
+    ///
+    /// A constant rather than a setting: it is not a taste knob but the thing that makes the width
+    /// bands legible, and a user-chosen value could silently collapse two of them.
+    public static let pressureScaleCoefficient: Double = 1.25
 
     // MARK: ahead-of-pace threshold
 

@@ -239,10 +239,11 @@ enum StubScenario: String, CaseIterable {
                  + "→ blue. Turn \"Work harder\" on with Calm colours to keep the blue coloured."
         case .pressureSweep:
             return "Pressure scale (#307): 5h three points from exhaustion with 7 % of the window left "
-                 + "— 4 % of the bar on the old window scale (below the min pill), 57 % on the "
-                 + "remaining scale. 7d has a surplus wider than the time left, so it clips to a full "
-                 + "bar. Switch Bar style across Pressure / Mixed / Progress: Progress must look "
-                 + "exactly as before, Pressure visibly wider on the 5h row."
+                 + "— 4 % of the bar on the old window scale (below the min pill), 66 % now. 7d sits in "
+                 + "the yellow band at 29 %, so the two rows show yellow and orange holding clearly "
+                 + "different widths. Switch Bar style across Pressure / Mixed / Progress: Progress "
+                 + "must look exactly as before, Pressure visibly wider on the 5h row; the popup's "
+                 + "Pressure bars carry one tick at 20 % (exactly on pace)."
         case .nearZero:
             return "Near-zero fill on fresh windows: tiny usage (5h 0 %, 7d 4 %, Fable/Mythos ~1–4 %) "
                  + "with barely any time elapsed → a hairline pacing gap. Exercises the min-strip pill "

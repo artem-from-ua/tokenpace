@@ -817,21 +817,39 @@ final class StatusItemView: NSView {
     /// base zones (used + future/unused) share the solid ``PopupBarView/monochromeGrey`` with the popup,
     /// so the menu-bar bars read identically; only the pacing gap and dot carry colour.
     private func drawBar(_ bar: BarView, in rect: NSRect) {
-        // Idle 5h bar (#100, ADR-0027): a solid blue track, no pacing zones, no time-indicator dot —
-        // "no active session, full quota available". The bar's `layout`/`indicator` are inert here.
-        // In calm mode (#105) the soft idle blue mutes to white.
+        // Idle 5h bar (#100, ADR-0027): no pacing zones — "no active session, full quota available".
+        // The bar's `layout`/`indicator` are inert here.
+        //
+        // The shape follows the **style**, so idle cannot be mistaken for a pacing state (#307):
+        // - **Progress** — the solid track plus the time marker parked at the left edge (`timeFraction`
+        //   is 0: the window has just rolled). Without the marker a Progress idle bar looks exactly
+        //   like a Pressure bar reading "full pressure".
+        // - **Pressure** — the minimum pill, the shape any zero-length ribbon draws. Idle *is* zero
+        //   pressure on the renormalised track, so filling the whole bar would be the loudest mark
+        //   for the calmest state. Mirror of `PopupBarView.draw`'s idle branch.
         if bar.idle {
             // Idle bar fill (#100/#158): blocked → base track grey; ready+calm → quiet neutral;
             // ready+normal → the "ready to start" blue.
-            let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
+            //
+            // Calm uses the same `calmWhite` neutral as every muted pacing bar, not a dimmer tone of
+            // its own (#307): idle sitting quieter than the calm bars beside it made the "nothing is
+            // happening" state read as "something is wrong with this bar".
             let idleTarget: NSColor = bar.blocked
                 ? Palette.unusedGrey
-                : (calmColorMode.mutesCalm ? Palette.idleCalmGrey : accent(Palette.idleBlue))
+                : (calmColorMode.mutesCalm ? Palette.calmWhite : accent(Palette.idleBlue))
             // Animated like any other bar colour, so idle→active (blue→green) and the blocked grey
             // swap fade rather than snap.
             let fill = animated(idleTarget, window: bar.window, part: .fill)
-            fill.setFill()
-            path.fill()
+            if barStyle.menuBarUsesPressureScale {
+                // Zero pressure — the same pill `fillZone(floorEmptyToPill:)` draws for a zero ribbon.
+                fillZone(from: 0, to: 0, in: rect, width: rect.width, color: fill, floorEmptyToPill: true)
+            } else {
+                let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
+                fill.setFill()
+                path.fill()
+                // Progress keeps its identifying mark: the marker at `timeFraction` = 0.
+                drawTimeMarker(at: 0, colour: fill, in: rect)
+            }
             return
         }
 
@@ -890,10 +908,21 @@ final class StatusItemView: NSView {
         NSGraphicsContext.restoreGraphicsState()
 
         // Time-indicator marker at timeFraction (drawn on top, unclipped so it stands proud).
-        // A slim, lightly-rounded vertical bar rather than a dot — reads as a crisp position tick.
-        // Filled with this state's pacing-gap colour, ringed with `separatorColor` so it separates
-        // cleanly over the coloured zone on both light and dark bars.
-        let cx = PopupBarView.scaleX(CGFloat(frozen ?? l.timeFraction), in: rect)
+        // The marker takes the EXACT colour of this state's pacing gap (`calmedGapColor`) — one tone
+        // per pacing status, so the "you are here" tick reads as the same colour as the zone it marks.
+        drawTimeMarker(at: frozen ?? l.timeFraction,
+                       colour: calmedGapColor(l, window: bar.window, part: .marker),
+                       in: rect)
+    }
+
+    /// The time-indicator marker: a slim, lightly-rounded vertical bar rather than a dot — reads as a
+    /// crisp position tick, standing proud of the bar on both sides.
+    ///
+    /// Factored out because **idle draws it too** (#307): under Progress the marker is what identifies
+    /// the style, so an idle bar without it is indistinguishable from a Pressure bar at full pressure.
+    /// There `fraction` is 0 — the window has just rolled, so no time has elapsed.
+    private func drawTimeMarker(at fraction: Double, colour: NSColor, in rect: NSRect) {
+        let cx = PopupBarView.scaleX(CGFloat(fraction), in: rect)
         let cy = rect.midY
         let mw = Metrics.tickWidth
         let mh = Metrics.tickHeight
@@ -912,9 +941,7 @@ final class StatusItemView: NSView {
         Palette.unusedGrey.setFill()
         NSRect(x: markerRect.minX, y: rect.minY, width: markerRect.width, height: rect.height).fill()
         NSGraphicsContext.restoreGraphicsState()
-        // The marker takes the EXACT colour of this state's pacing gap (`calmedGapColor`) — one tone
-        // per pacing status, so the "you are here" tick reads as the same colour as the zone it marks.
-        calmedGapColor(l, window: bar.window, part: .marker).setFill()
+        colour.setFill()
         marker.fill()
         // Edge outline only where the marker overlaps the bar (`quaternaryLabelColor`): two short vertical
         // strokes down the marker's left and right edges, clipped to the bar's height — the parts of the

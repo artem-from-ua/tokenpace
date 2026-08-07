@@ -229,27 +229,44 @@ final class PopupBarView: NSView {
         let rect = NSRect(
             x: bounds.minX, y: bounds.minY + overhang, width: bounds.width, height: Metrics.barHeight)
 
-        // Idle 5h bar (#100, ADR-0027): a solid blue track + the under-bar tick ruler, but no pacing
-        // zones and no time-indicator dot ("no active session, full quota available"). Rendered before
-        // the pacing path so the (inert, zeroed) `bar` layout is never consulted.
+        // Idle 5h bar (#100, ADR-0027): no pacing zones, "no active session, full quota available".
+        // Rendered before the pacing path so the (inert, zeroed) `bar` layout is never consulted.
+        //
+        // The shape follows the **style**, so idle cannot be mistaken for a pacing state (#307):
+        // - **Progress** — the solid track, plus the time marker parked at the left edge. Idle means
+        //   the window has just rolled, so `timeFraction` is 0 and the marker belongs at zero. Without
+        //   it a Progress idle bar is indistinguishable from a Pressure bar reading "full pressure".
+        // - **Pressure** — the minimum pill, the same shape any zero-length ribbon draws. On the
+        //   renormalised track idle *is* zero pressure, so a full-width fill would be the loudest
+        //   possible mark for the calmest possible state.
         if idle {
-            let idlePath = NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner)
             // Blocked idle (#158) → grey (no path to start); otherwise the "ready to start" blue.
             // Grey (blocked) is an already-translucent neutral — leave it; only the blue hue is tinted (#188).
-            if blocked {
-                Self.monochromeGrey.setFill()
-                idlePath.fill()
-            } else {
-                // The solid idle strip carries the same ambient glow as a pacing strip (#188).
-                // Animated so idle→active reads as a fade (ADR-0070); the glow follows automatically
-                // because it is derived from this same colour.
-                let idleColor = animated(Palette.idleBlue, part: .fill)
-                withGlow(idleColor, radius: Self.idleGlowRadius, strength: Self.idleGlowStrength) {
+            // Animated so idle→active reads as a fade (ADR-0070); the glow follows automatically
+            // because it is derived from this same colour.
+            let idleColor = blocked ? Self.monochromeGrey : animated(Palette.idleBlue, part: .fill)
+            let idleShape = barStyle.popupUsesPressureScale
+                ? Self.pillRect(at: 0, in: rect)
+                : rect
+            if let idleShape {
+                let corner = barStyle.popupUsesPressureScale
+                    ? min(idleShape.width, idleShape.height) / 2      // capsule, like any pill
+                    : Metrics.corner
+                let idlePath = NSBezierPath(roundedRect: idleShape, xRadius: corner, yRadius: corner)
+                if blocked {
                     idleColor.setFill()
                     idlePath.fill()
+                } else {
+                    // The idle strip carries the same ambient glow as a pacing strip (#188).
+                    withGlow(idleColor, radius: Self.idleGlowRadius, strength: Self.idleGlowStrength) {
+                        idleColor.setFill()
+                        idlePath.fill()
+                    }
                 }
             }
             drawTicks(in: rect)
+            // Progress keeps its identifying mark even here: the marker sits at `timeFraction` = 0.
+            if barStyle.popupShowsTimeMarker { drawTimeMarker(at: 0, colour: idleColor, in: rect) }
             return
         }
 
@@ -295,37 +312,44 @@ final class PopupBarView: NSView {
         // Simple style (#224): no time marker — the ribbon above already conveys pacing by colour + length.
         if !barStyle.popupShowsTimeMarker { return }
 
-        // 4. Time-indicator marker at `timeFraction`: a slim rounded vertical bar filled with the pacing
-        //    colour, with a border in the grey-track tone (blended 85 %) that separates it from the strip —
-        //    replacing the old transparent slivers. 5. The marker carries a stronger ambient glow.
-        // Pixel-snap the marker's centre x so its vertical edges land on whole pixels — a fractional
-        // scaled x otherwise smears the thin border across two columns (the "crooked outline").
-        // Under the `color-cycle` stub the marker parks at the pinned strip's end, so Pace & Time keeps
+        // 4. Time-indicator marker at `timeFraction`. 5. It carries a stronger ambient glow.
+        // Under the `color-cycle` stub the marker parks at the pinned strip's end, so Progress keeps
         // its full anatomy (strip + marker) while still holding the geometry still.
-        let markerFraction = frozenStripFraction ?? l.timeFraction
-        let cx = Self.scaleX(CGFloat(markerFraction), in: rect).rounded()
+        drawTimeMarker(at: frozenStripFraction ?? l.timeFraction, colour: indicatorColor(l), in: rect)
+    }
+
+    /// The time-indicator marker: a slim rounded vertical bar in `colour`, with a border in the
+    /// grey-track tone that separates it from the strip underneath.
+    ///
+    /// Factored out because **idle draws it too** (#307): under Progress the marker is the mark that
+    /// identifies the style, so an idle bar without it would read as a Pressure bar at full pressure.
+    /// There `fraction` is 0 — the window has just rolled, so no time has elapsed.
+    ///
+    /// Pixel-snaps the centre x so the vertical edges land on whole pixels; a fractional scaled x
+    /// otherwise smears the thin border across two columns (the "crooked outline").
+    private func drawTimeMarker(at fraction: Double, colour: NSColor, in rect: NSRect) {
+        let cx = Self.scaleX(CGFloat(fraction), in: rect).rounded()
         let cy = rect.midY
         let mw = Metrics.indicatorWidth
         let mh = Metrics.indicatorHeight
         let markerRect = NSRect(x: cx - mw / 2, y: cy - mh / 2, width: mw, height: mh)
         let marker = NSBezierPath(
             roundedRect: markerRect, xRadius: Metrics.indicatorCorner, yRadius: Metrics.indicatorCorner)
-        let markerColor = indicatorColor(l)
         // Border as a filled frame (not a centred stroke, which straddles the edge and reads crooked on a
         // 6-pt marker): fill the outer rounded rect in the grey-track-toned border colour, then fill an
         // inset rounded rect in the marker colour on top — leaving a crisp `bw`-wide even border. The whole
         // thing carries the ambient glow.
         let bw: CGFloat = 1
-        let border = (Self.monochromeGrey.blended(withFraction: 0.4, of: markerColor) ?? Self.monochromeGrey)
+        let border = (Self.monochromeGrey.blended(withFraction: 0.4, of: colour) ?? Self.monochromeGrey)
             .withAlphaComponent(0.9)
         let innerRect = markerRect.insetBy(dx: bw, dy: bw)
         let inner = NSBezierPath(roundedRect: innerRect,
                                  xRadius: max(0, Metrics.indicatorCorner - bw),
                                  yRadius: max(0, Metrics.indicatorCorner - bw))
-        withGlow(markerColor, radius: Self.markerGlowRadius, strength: Self.markerGlowStrength) {
+        withGlow(colour, radius: Self.markerGlowRadius, strength: Self.markerGlowStrength) {
             border.setFill()
             marker.fill()
-            markerColor.setFill()
+            colour.setFill()
             inner.fill()
         }
     }
@@ -410,12 +434,19 @@ final class PopupBarView: NSView {
     ///   and the time marker lands among them.
     /// - **Pressure** draws on the renormalised `[now .. reset]` track, where window subdivisions
     ///   have no position at all — an hour boundary is not at a fixed fraction of the time remaining.
-    ///   Quarters of that remaining time are what the track actually measures, so mark those.
+    ///   What *is* fixed there is where the severity bands meet, so mark the one that matters:
+    ///   **0.20 is exactly on pace** (`u == t`), at any point in the window (#307,
+    ///   ``TokenPaceKit/BarLayout/pressureLength``). A ribbon short of the tick means headroom, past
+    ///   it means a lead. One tooth, not a ruler — the other boundary (0.328, yellow→orange) is
+    ///   already carried by the colour change, and a second tooth 4 pt away would read as noise.
+    ///
+    /// The menu bar gets no tick at all: a lone vertical tooth on a 34 pt bar is exactly what the
+    /// Progress time marker looks like, so the two styles would stop being distinguishable there.
     ///
     /// Keyed off `barStyle` alone: `drawTicks` also runs for the **idle** bar, which has no
     /// `BarLayout` to consult.
     private var tickFractions: [CGFloat] {
-        if barStyle.popupUsesPressureScale { return [0.25, 0.5, 0.75] }
+        if barStyle.popupUsesPressureScale { return [0.20] }
         guard subdivisions >= 2 else { return [] }
         return (1 ..< subdivisions).map { CGFloat($0) / CGFloat(subdivisions) }
     }
