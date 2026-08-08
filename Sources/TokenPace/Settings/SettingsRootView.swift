@@ -83,7 +83,25 @@ struct SettingsRootView: View {
         Text(model.selection.title)
             .font(.system(size: 15, weight: .bold))
             .padding(.leading, 20)
-            .padding(.top, 14)
+            // Both offsets are negative because the `.unified` toolbar reserves a strip at the top of
+            // the detail column that nothing draws in — it exists only to place the traffic lights
+            // (`SettingsWindowController`) and carries no items, so it is dead space to be reclaimed.
+            //
+            // Measured side by side against a System Settings window in the same screenshot (the only
+            // way to compare two windows' vertical rhythm without cross-shot scaling errors):
+            //
+            //           title rows   first card top   gap under title
+            //   system    36…54          82               28 pt
+            //   before    70…86         144               58 pt   (no compensation)
+            //
+            // `.top` lifts the title to the system's y=36. Applied to the title alone — pulling the
+            // whole column drags the `Form` with it, and cancelling the toolbar's full inset hides the
+            // title under the title bar (both measured).
+            //
+            // The gap *below* the title is left alone: a negative `.bottom` here does not pull the
+            // `Form` up, it pushes the title down past it (measured — the title landed at y=102,
+            // below the card at y=72). Closing that gap needs the `Form`'s own top inset, not this row.
+            .padding(.top, -35)
             .padding(.bottom, 2)
     }
 
