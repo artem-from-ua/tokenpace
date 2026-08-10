@@ -145,13 +145,15 @@ final class SettingsToolbarController: NSObject, NSToolbarItemValidation {
             let enabled = item?.isEnabled ?? true
             // Guarded: this runs on every validation pass, and re-assigning the same values makes
             // AppKit repaint the button, which shows up as a flicker under the pointer.
-            guard button.isEnabled != enabled || button.isBordered != enabled else { continue }
+            guard button.isEnabled != enabled || !button.isBordered else { continue }
             button.isEnabled = enabled
-            // Only an arrow that leads somewhere gets a bezel: `showsBorderOnlyWhileMouseInside`
-            // reveals the backing on hover regardless of `isEnabled`, and no macOS toolbar
-            // highlights a disabled button.
-            button.isBordered = enabled
-            button.showsBorderOnlyWhileMouseInside = enabled
+            // **Both** buttons are bordered, enabled or not: a bezel changes the button's metrics
+            // (measured — 15×20 without it against 40×40 with it), so bordering only the active one
+            // left the two chevrons visibly different sizes. `showsBorderOnlyWhileMouseInside` keeps
+            // the bezel invisible until hovered, and AppKit does not draw a hover bezel on a
+            // disabled button, so the plate still appears on the active arrow only.
+            button.isBordered = true
+            button.showsBorderOnlyWhileMouseInside = true
             button.bezelStyle = .toolbar
         }
     }
