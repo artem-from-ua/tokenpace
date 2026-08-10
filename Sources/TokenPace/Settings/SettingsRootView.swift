@@ -117,13 +117,31 @@ private struct SidebarChip: View {
     let symbol: String
     let tint: Color
     var metrics: SidebarIconMetrics
+    /// Sidebar labels are vibrant, so the material dims them automatically when the window resigns
+    /// key — but the chip is a flat tint that never participates in vibrancy, so it kept full color
+    /// in an inactive window. System Settings dims the two chip layers separately: the tinted
+    /// capsule drops to ~half strength (α ≈ 0.5 against the sidebar background), while the glyph is
+    /// redrawn in a solid neutral gray — 0x909090 per Digital Color Meter on an inactive System
+    /// Settings window — rather than composited white-over-tint, which would leave it tinted.
+    @Environment(\.appearsActive) private var appearsActive
 
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: metrics.symbol, weight: .regular))
-            .foregroundStyle(.white)
+            .foregroundStyle(appearsActive ? Color.white : Metrics.inactiveGlyph)
             .frame(width: metrics.chip, height: metrics.chip)
             // Fixed 5 pt corner radius, matching the previous AppKit ChipView (System Settings' chip).
-            .background(tint, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .background(
+                tint.opacity(appearsActive ? 1 : Metrics.inactiveTintAlpha),
+                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+            )
+    }
+
+    private enum Metrics {
+        /// Glyph color in an inactive window, measured with Digital Color Meter (sRGB) on System
+        /// Settings in dark mode.
+        static let inactiveGlyph = Color(.sRGB, white: 0x90 / 255.0, opacity: 1)
+        /// Capsule tint opacity in an inactive window; matches System Settings' ~half-strength dim.
+        static let inactiveTintAlpha: Double = 0.5
     }
 }
