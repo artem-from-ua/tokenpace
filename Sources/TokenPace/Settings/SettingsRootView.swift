@@ -86,6 +86,9 @@ struct SettingsRootView: View {
         case .appearance:        AppearancePane(model: model)
         case .notifications:     NotificationsPane(model: model)
         case .extraFeatures:     ExtraFeaturesPane(model: model)
+        // Scroll-test filler rows (`TOKENPACE_SIDEBAR_FILLER`) have no pane of their own; they exist
+        // only to make the sidebar long enough to scroll.
+        default:                 Text(model.selection.title).foregroundStyle(.secondary)
         }
     }
 }

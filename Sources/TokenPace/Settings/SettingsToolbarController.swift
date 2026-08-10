@@ -38,35 +38,21 @@ import AppKit
 /// starts at x=639, the back button at x=921, so the arrows sit 282 pt in — just past the 276 pt
 /// column divider. The bar itself is 52 pt tall.
 @MainActor
-final class SettingsToolbarController: NSObject {
+final class SettingsToolbarController: NSObject, NSToolbarItemValidation {
 
     private enum Metrics {
-        /// Extra leading space before the back chevron.
+        /// Size handed to each chevron item, which is what the toolbar sizes the button from.
         ///
-        /// **Not** the AX figure (the system's button sits 282 pt from the window's left edge): a
-        /// toolbar attached to a `NavigationSplitView` already indents its first item past the
-        /// sidebar, so this is only the remainder on top of that. Tuned against the render — 282
-        /// stacked on the built-in offset and pushed the arrows to the middle of the pane.
-        static let arrowsInset: CGFloat = 14
-        /// Distance between the two chevrons. The AX dump reads 40 (961 − 921), which renders far too
-        /// wide: those frames are the buttons' hit areas, not the glyphs. Measured against a rendered
-        /// System Settings header instead, anchored on where the *detail column* starts (not on the
-        /// divider line, whose antialiased edge reads a pixel off between the two windows).
-        static let arrowSpacing: CGFloat = 31.5
-        /// Sub-point nudge applied inside the chevron stack, for the last pixel of alignment that
-        /// `arrowsInset` cannot reach — see the note where it is applied.
-        static let arrowsNudge: CGFloat = 0.5
-        /// Vertical nudge for the chevrons, applied through `ChevronButton.alignmentRectInsets`.
+        /// 45 is what puts the hover plate on the system's 33×28: the plate renders 12 pt narrower
+        /// than the item (measured — 43.5 gave a 31 pt plate, visibly clipped on its leading edge
+        /// against System Settings' side by side).
         ///
-        /// Uncompensated the glyphs sat 2 px (@2x) below the system's — rows 38–65 against 36–64 —
-        /// and the ordinary levers do nothing here: the toolbar centres its item in the bar, so a
-        /// stack `edgeInsets` and a taller frame were both measured and were both no-ops. Only the
-        /// alignment rect moves them, and only from the bottom edge (a top inset was no-op too).
-        static let arrowsLift: CGFloat = -2
-        /// Gap from the forward chevron to the pane title. Lands the title on x=176 against the
-        /// system's 177; 10 pt overshoots to 178 and there is nothing in between, so the closer of the
-        /// two is used (AX reads 38 here — again a hit area, not the glyph).
-        static let titleGap: CGFloat = 9.5
+        /// The same width also sets the glyph spacing, and the two cannot both be exact: the plate
+        /// trails the item by 12 pt while the spacing tracks it nearly 1:1, so matching the plate
+        /// leaves the pair 1.5 pt wider apart than the system's 36.25. A 2 pt error on the plate
+        /// reads as a clipped edge; 1.5 pt of extra spacing does not.
+        static let chevronItemSize = NSSize(width: 45, height: 34)
+
         /// Baseline lift for the title, in points, for the one pixel of vertical alignment left over
         /// once the glyph box matched the system's in width (measured: rows 41–62 against 40–61).
         ///
@@ -74,19 +60,11 @@ final class SettingsToolbarController: NSObject {
         /// item vertically in the bar, so neither `edgeInsets` nor a half-point on the spacer moved
         /// the label at all — both were measured and left the glyphs on the same rows.
         static let titleLift: CGFloat = 0.5
-        /// Toolbar height, which is also what lifts the traffic lights onto the System Settings
-        /// position — the reason the (previously empty) toolbar was added at all.
-        static let barHeight: CGFloat = 52
-        /// Inset AppKit already applies before a toolbar's first item; subtracted from the leading
-        /// spacer so the chevrons land on `arrowsInset` rather than that much further right.
-        static let firstItemInset: CGFloat = 12
     }
 
     private enum ItemID {
-        /// An empty spacer as wide as the sidebar, so the items that follow start at the detail
-        /// column rather than over the traffic lights.
-        static let leadingPad = NSToolbarItem.Identifier("TokenPaceSettingsLeadingPad")
-        static let navigation = NSToolbarItem.Identifier("TokenPaceSettingsNavigation")
+        static let back = NSToolbarItem.Identifier("TokenPaceSettingsBack")
+        static let forward = NSToolbarItem.Identifier("TokenPaceSettingsForward")
         static let title = NSToolbarItem.Identifier("TokenPaceSettingsPaneTitle")
     }
 
@@ -95,31 +73,16 @@ final class SettingsToolbarController: NSObject {
     /// Invoked when › is clicked.
     var onForward: (() -> Void)?
 
-    /// A toolbar chevron. The only reason for the subclass is `alignmentRectInsets`: the toolbar
-    /// centres its item vertically in the bar, so the glyphs rendered 2 px (@2x) below the system's
-    /// and neither a stack `edgeInsets` nor a taller frame moved them — both were measured, both were
-    /// no-ops. Claiming a bottom inset makes the button's *alignment* rect shorter at the foot than
-    /// its drawn bounds, so centring the alignment rect lifts what is drawn.
-    ///
-    /// System Settings also shows a rounded backing under a chevron on hover (measured off theirs:
-    /// 33×28 pt, ~5 pt corner). Not implemented here yet, and deliberately not half-implemented: the
-    /// button sizes itself to the glyph (13×18 pt), anything drawn beyond that is clipped by the
-    /// enclosing stack, and growing the button pushes the whole header sideways — the spacer that
-    /// positions the chevrons clamps at zero width, so the shift cannot be cancelled. Doing it
-    /// properly means laying the toolbar out as one custom view with constraints instead of
-    /// spacer items.
-    private final class ChevronButton: NSButton {
+    /// The two navigation items, kept so `update(...)` can flip their enablement. The toolbar owns
+    /// the buttons inside them.
+    private var backItem: NSToolbarItem?
+    private var forwardItem: NSToolbarItem?
 
-        override var alignmentRectInsets: NSEdgeInsets {
-            NSEdgeInsets(top: 0, left: 0, bottom: Metrics.arrowsLift, right: 0)
-        }
-
-
-
-    }
-
-    private let backButton = ChevronButton()
-    private let forwardButton = ChevronButton()
+    /// What the history currently allows. The toolbar asks for this on every window update through
+    /// `validateToolbarItem(_:)` — see there for why the state has to live here rather than on the
+    /// items.
+    private var canGoBack = false
+    private var canGoForward = false
     private let titleLabel = NSTextField(labelWithString: "")
 
     /// The hosting window, for reading its key state when tinting the chevrons. Weak — the window
@@ -128,7 +91,6 @@ final class SettingsToolbarController: NSObject {
 
     override init() {
         super.init()
-        configureButtons()
         configureTitle()
     }
 
@@ -143,103 +105,94 @@ final class SettingsToolbarController: NSObject {
         window.toolbar = toolbar
         window.toolbarStyle = .unified
         self.window = window
-        applyChevronTint()
+    }
+
+    /// The toolbar's own validation hook: it asks on every window update, which is what makes the
+    /// answer stick where a direct `isEnabled` write does not.
+    func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
+        // Validation is also where the bezel has to be re-applied: answering here makes the toolbar
+        // rebuild the button, and a rebuilt one comes back `isBordered = false` — which is how the
+        // hover backing disappeared once validation started driving the enablement. Scheduled rather
+        // than done inline, because the button does not exist yet at the moment we answer.
+        DispatchQueue.main.async { [weak self] in self?.enableChevronHoverBacking() }
+        switch item.itemIdentifier {
+        case ItemID.back: return canGoBack
+        case ItemID.forward: return canGoForward
+        default: return true
+        }
+    }
+
+    /// Turn on the hover backing for the buttons the toolbar generated for ‹ ›.
+    ///
+    /// An `NSToolbarItem` with an image builds its own `NSToolbarButton`, but that button ships
+    /// `isBordered = false` at 15×20 — a bare glyph — so nothing highlights under the pointer. Asking
+    /// it for a bezel shown only while the mouse is inside gives the rounded backing System Settings
+    /// has, and the button resizes itself to 40×40, which is exactly what the Accessibility dump
+    /// reads off System Settings' own back/forward buttons.
+    ///
+    /// Has to happen after the toolbar has built its views, and again whenever it rebuilds them —
+    /// `NSToolbarItem.view` stays nil for generated buttons, so the button is reached by walking the
+    /// titlebar's view tree.
+    func enableChevronHoverBacking() {
+        guard let themeFrame = window?.contentView?.superview else { return }
+        // Ordered left to right, so the first button is ‹ and the second ›, and each can be matched
+        // to the item whose enablement it should mirror.
+        var buttons: [NSButton] = []
+        func collect(_ view: NSView) {
+            if let button = view as? NSButton,
+               String(describing: type(of: view)).contains("NSToolbarButton") {
+                buttons.append(button)
+            }
+            view.subviews.forEach(collect)
+        }
+        collect(themeFrame)
+        buttons.sort { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX }
+
+        for (button, item) in zip(buttons, [backItem, forwardItem]) {
+            // The item's enablement is re-applied to its button directly. Setting it on the
+            // `NSToolbarItem` alone does not stick: the toolbar rebuilds its buttons, and a rebuilt
+            // one comes back enabled — logged as `isEnabled` flipping from false to true between two
+            // passes — which is why a greyed-out arrow rendered at full strength and still lit up
+            // under the pointer.
+            let enabled = item?.isEnabled ?? true
+            // Guarded: this runs on every validation pass, and re-assigning the same values makes
+            // AppKit repaint the button, which shows up as a flicker under the pointer.
+            guard button.isEnabled != enabled || !button.isBordered else { continue }
+            button.isEnabled = enabled
+            // **Both** buttons are bordered, enabled or not: a bezel changes the button's metrics
+            // (measured — 15×20 without it against 40×40 with it), so bordering only the active one
+            // left the two chevrons visibly different sizes. `showsBorderOnlyWhileMouseInside` keeps
+            // the bezel invisible until hovered, and AppKit does not draw a hover bezel on a
+            // disabled button, so the plate still appears on the active arrow only.
+            button.isBordered = true
+            button.showsBorderOnlyWhileMouseInside = true
+            button.bezelStyle = .toolbar
+        }
     }
 
     /// Reflect the current pane and what the history buttons can reach.
     func update(title: String, canGoBack: Bool, canGoForward: Bool) {
-        titleLabel.attributedStringValue = NSAttributedString(
-            string: title,
-            attributes: [.font: titleLabel.font as Any,
-                         .foregroundColor: titleLabel.textColor as Any,
-                         .baselineOffset: Metrics.titleLift])
-        backButton.isEnabled = canGoBack
-        forwardButton.isEnabled = canGoForward
-        applyChevronTint()
-    }
-
-    /// Tint the chevrons for the window's current key state.
-    ///
-    /// Applied through the symbol's `paletteColors` rather than `contentTintColor`, which a borderless
-    /// toolbar button ignores — with it the glyph rendered at 106 over the bar's 40 background (an
-    /// alpha of 0.307, matching no semantic colour) regardless of what was set.
-    ///
-    /// Re-applied on every key-state change because a symbol configuration holds a **resolved** colour:
-    /// nothing repaints it when the window resigns key, which is how the chevrons ended up staying
-    /// bright at 164 while the pane title beside them correctly dimmed to 105.
-    private func applyChevronTint() {
-        let isKey = window?.isKeyWindow ?? false
-        for button in [backButton, forwardButton] {
-            // Full strength only when the arrow leads somewhere *and* the window is key; every other
-            // combination is the muted grey, which is how System Settings draws them (verified on a
-            // freshly-opened window, where both arrows are disabled).
-            //
-            // The key state has to be read explicitly: a symbol's palette colour is resolved once, so
-            // nothing re-dims it when the window changes state — `refreshTint()` re-applies it from
-            // the window delegate.
-            let tint = button.isEnabled && isKey ? Self.enabledChevronGrey : Self.dimmedChevronGrey
-            button.symbolConfiguration = Self.chevronMetrics.applying(.init(paletteColors: [tint]))
+        // Every write is guarded, because this runs on **any** model change, not just a navigation
+        // one: `observeToolbarState` re-arms `withObservationTracking` on each fire, so toggling an
+        // unrelated setting lands here too. Re-assigning the same title or enablement makes AppKit
+        // rebuild the item, which cancels the hover highlight mid-render — the flicker under the
+        // pointer (#312).
+        if titleLabel.stringValue != title {
+            titleLabel.attributedStringValue = NSAttributedString(
+                string: title,
+                attributes: [.font: titleLabel.font as Any,
+                             .foregroundColor: titleLabel.textColor as Any,
+                             .baselineOffset: Metrics.titleLift])
         }
-    }
-
-    /// Chevron greys for the two enabled states, matched to System Settings' rendered pixels.
-    ///
-    /// An ADR-0040 exception, so here is the derivation. A symbol's palette colour does not reach the
-    /// screen unchanged — AppKit applies its own dimming — and, separately, an **alpha** in that
-    /// palette is ignored outright (measured: `NSColor(white: 1, alpha: 0.626)` rendered identically
-    /// to the semantic colour it replaced). So neither picking a semantic label colour by name nor
-    /// dialling its alpha lands on the target; only an opaque grey does.
-    ///
-    /// Targets, measured off System Settings' own chevrons over the bar's 40 background:
-    ///
-    /// - **148** when the arrow leads somewhere and the window is key;
-    /// - **94** otherwise — a disabled arrow, or a background window. System Settings draws both of
-    ///   those the same, verified on a freshly-opened window (no history, so both arrows disabled).
-    ///
-    /// These render 149 and 90, with the muted glyph covering 554 lit pixels against the system's 557.
-    ///
-    /// `.quaternaryLabelColor` was tried for the muted case and is far too dark here: it rendered
-    /// *below* the 40 background, so the arrows disappeared entirely rather than reading as muted.
-    /// (Dark appearance; the light-mode pair is still to be measured.)
-    private static let enabledChevronGrey = NSColor(white: 0.58, alpha: 1)
-    private static let dimmedChevronGrey = NSColor(white: 0.64, alpha: 1)
-
-    /// Size and weight of the chevron glyphs, kept apart from the colour so `applyChevronTint` can
-    /// re-apply the palette without disturbing the geometry.
-    ///
-    /// Matched pixel-for-pixel against the system's: both render 17×29 px (@2x) with a 6 px stroke.
-    /// `.large` scale carries the size — a bare point size overshot (16 pt reached 35 px tall) — and
-    /// `.semibold`/`pointSize: 14` were each measured and rejected for thinning or inflating the glyph.
-    private static let chevronMetrics = NSImage.SymbolConfiguration(
-        pointSize: 13, weight: .medium, scale: .large)
-
-    /// Re-tint after the window's key state changes. Called from `SettingsWindowController`'s
-    /// `windowDidBecomeKey`/`windowDidResignKey` — the window has a delegate implementing those, and a
-    /// delegate takes the callback *instead of* the matching notification reaching other observers, so
-    /// an observer registered here would never fire (measured: the tint stayed at the inactive value).
-    func refreshTint() { applyChevronTint() }
-
-    private func configureButtons() {
-        for (button, symbol, label, action) in [
-            (backButton, "chevron.backward", "Back", #selector(goBack)),
-            (forwardButton, "chevron.forward", "Forward", #selector(goForward)),
-        ] {
-            // Not a template image: a template hands the tint to AppKit, and on a borderless toolbar
-            // button AppKit ignores `contentTintColor` and paints its own disabled grey. Measured, the
-            // glyph came out at 106 over the bar's 40 background — an alpha of 0.307, which matches no
-            // semantic colour at all — where the system's sits at 94 (alpha 0.251). Colouring the
-            // symbol directly, via `paletteColors`, is what actually takes effect (see
-            // `applyChevronTint`, which re-applies it on every key-state change).
-            //
-            // Geometry is already exact and must not move: compared pixel-for-pixel against the
-            // system's chevron, both are 17×29 px with a 6 px stroke, so only the colour differed.
-            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-            button.isBordered = false
-            button.bezelStyle = .toolbar
-            button.target = self
-            button.action = action
-            button.setAccessibilityLabel(label)
-        }
+        self.canGoBack = canGoBack
+        self.canGoForward = canGoForward
+        // Writing `isEnabled` on the items does not hold: the toolbar validates its visible items on
+        // every window update and a standard item answers by asking its target, so anything set by
+        // hand is overwritten moments later (measured — both chevrons settled at `isEnabled = true`
+        // however often it was re-applied, which is why a greyed-out arrow rendered at full strength
+        // and still lit up under the pointer). `validateToolbarItem(_:)` is where that answer comes
+        // from, so the state lives here and the toolbar reads it.
+        window?.toolbar?.validateVisibleItems()
     }
 
     private func configureTitle() {
@@ -273,7 +226,7 @@ extension SettingsToolbarController: NSToolbarDelegate {
     /// right corner (measured), while System Settings keeps them at the left of the detail column.
     /// `ItemID.leadingPad` supplies the sidebar-width offset that puts them there.
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [ItemID.leadingPad, ItemID.navigation, ItemID.title]
+        [.sidebarTrackingSeparator, ItemID.back, ItemID.forward, ItemID.title]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -284,38 +237,45 @@ extension SettingsToolbarController: NSToolbarDelegate {
                  itemForItemIdentifier identifier: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         switch identifier {
-        case ItemID.leadingPad:
+        case ItemID.back, ItemID.forward:
+            // No `view`: an `NSToolbarItem` given only an image and an action builds its **own**
+            // button, and the toolbar then draws it as a system toolbar button — including the
+            // rounded hover highlight, at the system's size, with the system's timing. Supplying a
+            // custom view is what opted us out of all of that and forced every plate metric, fill
+            // colour and tracking area to be reproduced by hand (and the hand-drawn plate ended up
+            // invisible: `.quaternarySystemFill` renders 240 over the bar's 247).
+            //
+            // `isNavigational` is what these two are: AppKit reserves it for back/forward pairs and
+            // positions them accordingly.
             let item = NSToolbarItem(itemIdentifier: identifier)
-            let spacer = NSView()
-            spacer.translatesAutoresizingMaskIntoConstraints = false
-            // Width = distance from the window's left edge to the back chevron, minus the inset the
-            // toolbar already applies to its first item.
-            spacer.widthAnchor.constraint(
-                equalToConstant: Metrics.arrowsInset - Metrics.firstItemInset).isActive = true
-            spacer.heightAnchor.constraint(equalToConstant: 1).isActive = true
-            item.view = spacer
-            return item
-        case ItemID.navigation:
-            let item = NSToolbarItem(itemIdentifier: identifier)
-            let stack = NSStackView(views: [backButton, forwardButton])
-            stack.orientation = .horizontal
-            stack.spacing = Metrics.arrowSpacing - backButton.intrinsicContentSize.width
-            // The final pixel of horizontal placement comes from here, not from `arrowsInset`: the
-            // spacer's width lands the *stack* on a whole pixel, so 14.4 pt and 14.75 pt rendered at
-            // 48 and 50 with nothing in between. An inset inside the stack shifts the glyphs within
-            // an already-placed frame, which is what reaches the odd pixel.
-            stack.edgeInsets = NSEdgeInsets(top: 0, left: Metrics.arrowsNudge, bottom: 0, right: 0)
-            item.view = stack
+            let isBack = identifier == ItemID.back
+            let symbol = NSImage(
+                systemSymbolName: isBack ? "chevron.backward" : "chevron.forward",
+                accessibilityDescription: isBack ? "Back" : "Forward")
+            // Template, so AppKit tints the glyph itself — that is what makes a disabled arrow read
+            // as greyed out. Without it the symbol carries its own colour and both arrows render
+            // identically whatever `isEnabled` says (verified: the items and their buttons had the
+            // right enablement while the glyphs looked the same).
+            symbol?.isTemplate = true
+            item.image = symbol
+            item.label = isBack ? "Back" : "Forward"
+            item.paletteLabel = item.label
+            item.isNavigational = true
+            // The bezel tracks the button's width less 6 pt (measured: a 40 pt button bezels at 34,
+            // a 44 pt one at 38), and the toolbar sizes the button from the item. 39 lands the plate
+            // on the 33 pt System Settings draws — ours came out 28 wide before this.
+            item.minSize = Metrics.chevronItemSize
+            item.maxSize = Metrics.chevronItemSize
+            item.target = self
+            item.action = isBack ? #selector(goBack) : #selector(goForward)
+            if isBack { backItem = item } else { forwardItem = item }
             return item
         case ItemID.title:
+            // The label is the item's view directly. It used to be wrapped in a stack whose
+            // `edgeInsets` supplied a leading gap, which existed to clear a hand-positioned chevron
+            // pair; the toolbar spaces its own items now.
             let item = NSToolbarItem(itemIdentifier: identifier)
-            // Wrapped in a stack with a leading spacer rather than positioned directly: a toolbar
-            // item has no leading-inset knob, and without the gap the title butts up against the
-            // forward chevron (measured at x=157 against the system's 178).
-            let stack = NSStackView(views: [titleLabel])
-            stack.orientation = .horizontal
-            stack.edgeInsets = NSEdgeInsets(top: 0, left: Metrics.titleGap, bottom: 0, right: 0)
-            item.view = stack
+            item.view = titleLabel
             return item
         default:
             return nil
