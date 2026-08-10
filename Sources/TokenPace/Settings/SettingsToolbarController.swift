@@ -43,12 +43,15 @@ final class SettingsToolbarController: NSObject, NSToolbarItemValidation {
     private enum Metrics {
         /// Size handed to each chevron item, which is what the toolbar sizes the button from.
         ///
-        /// 43.5 balances the two things this width drives, both measured on the rendered header
-        /// against System Settings: the glyph pitch (36.25 pt there) and the hover plate (33×28).
-        /// They cannot both be exact — the plate comes out 12 pt narrower than the item while the
-        /// pitch tracks it almost 1:1 — so this lands the pitch on the system's and leaves the plate
-        /// 1.5 pt narrow, which is the less visible of the two errors.
-        static let chevronItemSize = NSSize(width: 43.5, height: 34)
+        /// 45 is what puts the hover plate on the system's 33×28: the plate renders 12 pt narrower
+        /// than the item (measured — 43.5 gave a 31 pt plate, visibly clipped on its leading edge
+        /// against System Settings' side by side).
+        ///
+        /// The same width also sets the glyph spacing, and the two cannot both be exact: the plate
+        /// trails the item by 12 pt while the spacing tracks it nearly 1:1, so matching the plate
+        /// leaves the pair 1.5 pt wider apart than the system's 36.25. A 2 pt error on the plate
+        /// reads as a clipped edge; 1.5 pt of extra spacing does not.
+        static let chevronItemSize = NSSize(width: 45, height: 34)
 
         /// Baseline lift for the title, in points, for the one pixel of vertical alignment left over
         /// once the glyph box matched the system's in width (measured: rows 41–62 against 40–61).
