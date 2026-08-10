@@ -65,7 +65,7 @@ final class SettingsToolbarController: NSObject {
         /// Leading shift for the chevron row, cancelling the offset a plate-sized button introduces:
         /// its leading edge starts further left than the old bezel's, which moved the glyphs 10.5 pt
         /// right of their measured columns (x 616.5 and 689.5 @2x). Negative pulls left.
-        static let arrowsPlatePull: CGFloat = -10.5
+        static let arrowsPlatePull: CGFloat = -10.0
         /// Vertical nudge for the chevrons, applied through `ChevronButton.alignmentRectInsets`.
         ///
         /// Uncompensated the glyphs sat 2 px (@2x) below the system's — rows 38–65 against 36–64 —
@@ -79,6 +79,8 @@ final class SettingsToolbarController: NSObject {
         /// frame). Left to itself a `.toolbar` button sizes its bezel to 22.5×20, visibly smaller than
         /// the system's.
         static let chevronPlateSize = NSSize(width: 33, height: 28)
+        /// Corner radius of that plate, measured off System Settings' (#312).
+        static let chevronPlateCornerRadius: CGFloat = 5
         /// Rendered size of a chevron glyph under `chevronMetrics`, measured: 17×29 px @2x. Not read
         /// off the button, which reports three different answers depending on when it is asked —
         /// `NSImage(systemSymbolName:)` gives the unconfigured symbol (10×14), and the button gives
@@ -139,22 +141,31 @@ final class SettingsToolbarController: NSObject {
     /// equal to the overhang on every side, leaving an alignment rect the size of the glyph. The
     /// layout keeps placing a 13×18 box exactly where it always did, while the frame around it is big
     /// enough to draw a 33×28 plate.
-    /// A toolbar chevron.
+    /// A toolbar chevron, with the rounded backing System Settings shows under it on hover.
     ///
-    /// The hover backing System Settings shows under these arrows is the button's **own bezel**,
-    /// asked for with `showsBorderOnlyWhileMouseInside` — the system mechanism ADR-0040 requires and
-    /// the one `system-settings-parity.md` already names for borderless-at-rest buttons. An earlier
-    /// pass drew the plate by hand (tracking area, `mouseEntered`, a rounded fill in `draw`) and
-    /// hardcoded its 33×28 size, corner radius and fill colour; all of that is the system's to decide.
+    /// Drawn by hand rather than with `showsBorderOnlyWhileMouseInside`, which looks like the right
+    /// system mechanism and was measured twice as the wrong fit: the `.toolbar` bezel is a **fixed
+    /// 20 pt tall** regardless of the button's size (raising the button to 34 pt only pads around
+    /// it) against the system's 28, no other bezel style reaches 28 either — `badge`/`inline` stop
+    /// at 24 and change the shape — and AppKit fades its bezel in on a timer, where System Settings'
+    /// backing appears the instant the pointer arrives.
     ///
-    /// `alignmentRectInsets` still carries `arrowsLift`: the toolbar centres its item vertically in
-    /// the bar and the glyphs rendered 2 px (@2x) below the system's, while a stack `edgeInsets` and
-    /// a taller frame were both measured and were both no-ops. A shorter alignment rect at the foot
-    /// lifts what is drawn.
+    /// So the plate's size, corner radius and fill are stated here, from the measurements in #312:
+    /// 33×28 pt, ~5 pt corner, `.quaternarySystemFill`.
     private final class ChevronButton: NSButton {
 
-        /// The plate's size, so the system bezel matches System Settings' rather than hugging the
-        /// glyph. This is the alignment rect, so it is also what the layout positions.
+        /// Drawn only while the pointer is inside, with no animation — the system's does not fade.
+        private var isHovered = false {
+            didSet { if isHovered != oldValue { needsDisplay = true } }
+        }
+
+        /// Clicking an arrow can disable it under a stationary pointer — returning to the first pane
+        /// greys out ‹ while the cursor is still on it. No mouse event follows, so without repainting
+        /// here the plate would linger under an arrow that leads nowhere.
+        override var isEnabled: Bool {
+            didSet { if isEnabled != oldValue && isHovered { needsDisplay = true } }
+        }
+
         override var intrinsicContentSize: NSSize { Metrics.chevronPlateSize }
 
         /// The lift is mirrored top and bottom so it moves the glyph without shortening the plate:
@@ -163,6 +174,35 @@ final class SettingsToolbarController: NSObject {
         override var alignmentRectInsets: NSEdgeInsets {
             NSEdgeInsets(top: -Metrics.arrowsLift, left: 0,
                          bottom: Metrics.arrowsLift, right: 0)
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            trackingAreas.forEach(removeTrackingArea)
+            // `.inVisibleRect` keeps the area glued to the button as the toolbar lays it out; a fixed
+            // `rect:` goes stale after the first pass and the hover stops registering.
+            // `.activeAlways`, not `.activeInKeyWindow`: a toolbar item view lives in the titlebar's
+            // own view tree, and with the latter the button never received `mouseEntered` even with
+            // the app frontmost and the window main (measured).
+            addTrackingArea(NSTrackingArea(
+                rect: .zero,
+                options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                owner: self))
+        }
+
+        override func mouseEntered(with event: NSEvent) { isHovered = true }
+        override func mouseExited(with event: NSEvent) { isHovered = false }
+
+        /// A disabled arrow gets no plate — hovering a greyed-out chevron leaves System Settings' bar
+        /// unchanged too.
+        override func draw(_ dirtyRect: NSRect) {
+            if isHovered && isEnabled {
+                NSColor.quaternarySystemFill.setFill()
+                NSBezierPath(roundedRect: bounds,
+                             xRadius: Metrics.chevronPlateCornerRadius,
+                             yRadius: Metrics.chevronPlateCornerRadius).fill()
+            }
+            super.draw(dirtyRect)
         }
     }
 
@@ -286,11 +326,13 @@ final class SettingsToolbarController: NSObject {
             // (#312), and the mechanism ADR-0040 calls for instead of drawing a plate by hand.
             // `isBordered = false` removes the bezel outright, leaving the flag nothing to reveal,
             // which is why the arrows previously had no backing at all.
-            button.isBordered = true
-            button.showsBorderOnlyWhileMouseInside = true
-            // `.toolbar` is the style whose bezel is the flat, evenly-filled rounded plate System
-            // Settings shows. `.shadowlessSquare` was tried while chasing the plate's size and is
-            // wrong here: it draws a square, gradient-filled bezel with a hard outline.
+            // Borderless, with the plate drawn in `ChevronButton.draw`. `showsBorderOnlyWhileMouseInside`
+            // was the obvious system mechanism and is the wrong fit here, measured twice: the
+            // `.toolbar` bezel is a **fixed 20 pt tall** whatever the button's size (raising the
+            // button to 34 pt only pads around it), against the system's 28, and no other bezel style
+            // reaches 28 either — `badge`/`inline` top out at 24 and change the shape. AppKit also
+            // fades its bezel in on a timer, where System Settings' backing appears instantly.
+            button.isBordered = false
             button.bezelStyle = .toolbar
             button.target = self
             button.action = action
