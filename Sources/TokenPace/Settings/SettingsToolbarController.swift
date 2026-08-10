@@ -187,9 +187,15 @@ extension SettingsToolbarController: NSToolbarDelegate {
             // positions them accordingly.
             let item = NSToolbarItem(itemIdentifier: identifier)
             let isBack = identifier == ItemID.back
-            item.image = NSImage(
+            let symbol = NSImage(
                 systemSymbolName: isBack ? "chevron.backward" : "chevron.forward",
                 accessibilityDescription: isBack ? "Back" : "Forward")
+            // Template, so AppKit tints the glyph itself — that is what makes a disabled arrow read
+            // as greyed out. Without it the symbol carries its own colour and both arrows render
+            // identically whatever `isEnabled` says (verified: the items and their buttons had the
+            // right enablement while the glyphs looked the same).
+            symbol?.isTemplate = true
+            item.image = symbol
             item.label = isBack ? "Back" : "Forward"
             item.paletteLabel = item.label
             item.isNavigational = true
