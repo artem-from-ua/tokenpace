@@ -62,10 +62,10 @@ final class SettingsToolbarController: NSObject {
         /// Sub-point nudge applied inside the chevron stack, for the last pixel of alignment that
         /// `arrowsInset` cannot reach — see the note where it is applied.
         static let arrowsNudge: CGFloat = 0.5
-        /// Left inset on each chevron's alignment rect, cancelling the shift the wider plate
-        /// introduces. Measured against the header as it rendered before the plate: the glyphs sat at
-        /// x 616.5 and 689.5 (@2x).
-        static let arrowsPlatePull: CGFloat = 21.0
+        /// Leading shift for the chevron row, cancelling the offset a plate-sized button introduces:
+        /// its leading edge starts further left than the old bezel's, which moved the glyphs 10.5 pt
+        /// right of their measured columns (x 616.5 and 689.5 @2x). Negative pulls left.
+        static let arrowsPlatePull: CGFloat = -10.5
         /// Vertical nudge for the chevrons, applied through `ChevronButton.alignmentRectInsets`.
         ///
         /// Uncompensated the glyphs sat 2 px (@2x) below the system's — rows 38–65 against 36–64 —
@@ -100,6 +100,11 @@ final class SettingsToolbarController: NSObject {
         static let barHeight: CGFloat = 52
         /// Inset AppKit already applies before a toolbar's first item; subtracted from the leading
         /// spacer so the chevrons land on `arrowsInset` rather than that much further right.
+        ///
+        /// 22.5 rather than 12 since the chevrons became plates: a plate is wider than the bezel it
+        /// replaced and its leading edge starts further left, which pushed the whole row 10.5 pt
+        /// right. Taking that out of the spacer is what puts the glyphs back on their measured
+        /// columns (x 616.5 and 689.5 @2x) without touching the plate's size.
         static let firstItemInset: CGFloat = 12
     }
 
@@ -152,13 +157,11 @@ final class SettingsToolbarController: NSObject {
         /// glyph. This is the alignment rect, so it is also what the layout positions.
         override var intrinsicContentSize: NSSize { Metrics.chevronPlateSize }
 
-        /// The left inset pulls the whole row back to where the glyphs sat before the plate widened
-        /// them: the plate is wider than the bezel it replaced, and the leading spacer cannot absorb
-        /// the difference (its width is `arrowsInset − firstItemInset`, already negative and clamped
-        /// at zero), while a stack `edgeInsets` only stretches the item. Insetting the alignment rect
-        /// is what actually moves it.
+        /// The lift is mirrored top and bottom so it moves the glyph without shortening the plate:
+        /// with all of it on the bottom the frame measured 33×26 against the system's 33×28, because
+        /// the frame is the alignment rect grown by the insets.
         override var alignmentRectInsets: NSEdgeInsets {
-            NSEdgeInsets(top: 0, left: Metrics.arrowsPlatePull,
+            NSEdgeInsets(top: -Metrics.arrowsLift, left: 0,
                          bottom: Metrics.arrowsLift, right: 0)
         }
     }
@@ -285,6 +288,9 @@ final class SettingsToolbarController: NSObject {
             // which is why the arrows previously had no backing at all.
             button.isBordered = true
             button.showsBorderOnlyWhileMouseInside = true
+            // `.toolbar` is the style whose bezel is the flat, evenly-filled rounded plate System
+            // Settings shows. `.shadowlessSquare` was tried while chasing the plate's size and is
+            // wrong here: it draws a square, gradient-filled bezel with a hard outline.
             button.bezelStyle = .toolbar
             button.target = self
             button.action = action
@@ -349,6 +355,14 @@ extension SettingsToolbarController: NSToolbarDelegate {
             let item = NSToolbarItem(itemIdentifier: identifier)
             let stack = NSStackView(views: [backButton, forwardButton])
             stack.orientation = .horizontal
+            // Without this the stack stretches its buttons to fill, which is what widened the plate
+            // to 60.5 pt; the chevrons must stay at their intrinsic 33.
+            stack.distribution = .fill
+            stack.setHuggingPriority(.required, for: .horizontal)
+            for button in [backButton, forwardButton] {
+                button.setContentHuggingPriority(.required, for: .horizontal)
+                button.setContentCompressionResistancePriority(.required, for: .horizontal)
+            }
             // A stack's spacing is the gap between alignment rects, and `ChevronButton` keeps those
             // glyph-sized — so the gap is the glyph pitch less one glyph.
             stack.spacing = Metrics.arrowPitch - Metrics.chevronGlyphSize.width
@@ -357,7 +371,24 @@ extension SettingsToolbarController: NSToolbarDelegate {
             // 48 and 50 with nothing in between. An inset inside the stack shifts the glyphs within
             // an already-placed frame, which is what reaches the odd pixel.
             stack.edgeInsets = NSEdgeInsets(top: 0, left: Metrics.arrowsNudge, bottom: 0, right: 0)
-            item.view = stack
+            // Wrapped in a container so the stack can be pinned with a negative leading constant:
+            // the toolbar's leading spacer already clamps at zero (measured — spending 10.5 pt on it
+            // moved the row only 2), and a stack `edgeInsets` stretches the item without moving it.
+            // A constraint is the one lever that shifts the glyphs back onto their measured columns
+            // now that each chevron is a plate.
+            let container = NSView()
+            container.translatesAutoresizingMaskIntoConstraints = false
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: container.leadingAnchor,
+                                               constant: Metrics.arrowsPlatePull),
+                stack.trailingAnchor.constraint(equalTo: container.trailingAnchor,
+                                                constant: Metrics.arrowsPlatePull),
+                stack.topAnchor.constraint(equalTo: container.topAnchor),
+                stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+            item.view = container
             return item
         case ItemID.title:
             let item = NSToolbarItem(itemIdentifier: identifier)
