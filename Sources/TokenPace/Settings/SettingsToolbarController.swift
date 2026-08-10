@@ -41,17 +41,6 @@ import AppKit
 final class SettingsToolbarController: NSObject {
 
     private enum Metrics {
-        /// Extra leading space before the back chevron.
-        ///
-        /// **Not** the AX figure (the system's button sits 282 pt from the window's left edge): a
-        /// toolbar attached to a `NavigationSplitView` already indents its first item past the
-        /// sidebar, so this is only the remainder on top of that. Tuned against the render — 282
-        /// stacked on the built-in offset and pushed the arrows to the middle of the pane.
-        static let arrowsInset: CGFloat = 14
-        /// Gap from the forward chevron to the pane title. Lands the title on x=176 against the
-        /// system's 177; 10 pt overshoots to 178 and there is nothing in between, so the closer of the
-        /// two is used (AX reads 38 here — again a hit area, not the glyph).
-        static let titleGap: CGFloat = 9.5
         /// Baseline lift for the title, in points, for the one pixel of vertical alignment left over
         /// once the glyph box matched the system's in width (measured: rows 41–62 against 40–61).
         ///
@@ -59,23 +48,9 @@ final class SettingsToolbarController: NSObject {
         /// item vertically in the bar, so neither `edgeInsets` nor a half-point on the spacer moved
         /// the label at all — both were measured and left the glyphs on the same rows.
         static let titleLift: CGFloat = 0.5
-        /// Toolbar height, which is also what lifts the traffic lights onto the System Settings
-        /// position — the reason the (previously empty) toolbar was added at all.
-        static let barHeight: CGFloat = 52
-        /// Inset AppKit already applies before a toolbar's first item; subtracted from the leading
-        /// spacer so the chevrons land on `arrowsInset` rather than that much further right.
-        ///
-        /// 22.5 rather than 12 since the chevrons became plates: a plate is wider than the bezel it
-        /// replaced and its leading edge starts further left, which pushed the whole row 10.5 pt
-        /// right. Taking that out of the spacer is what puts the glyphs back on their measured
-        /// columns (x 616.5 and 689.5 @2x) without touching the plate's size.
-        static let firstItemInset: CGFloat = 12
     }
 
     private enum ItemID {
-        /// An empty spacer as wide as the sidebar, so the items that follow start at the detail
-        /// column rather than over the traffic lights.
-        static let leadingPad = NSToolbarItem.Identifier("TokenPaceSettingsLeadingPad")
         static let back = NSToolbarItem.Identifier("TokenPaceSettingsBack")
         static let forward = NSToolbarItem.Identifier("TokenPaceSettingsForward")
         static let title = NSToolbarItem.Identifier("TokenPaceSettingsPaneTitle")
@@ -163,7 +138,7 @@ extension SettingsToolbarController: NSToolbarDelegate {
     /// right corner (measured), while System Settings keeps them at the left of the detail column.
     /// `ItemID.leadingPad` supplies the sidebar-width offset that puts them there.
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [ItemID.leadingPad, ItemID.back, ItemID.forward, ItemID.title]
+        [.sidebarTrackingSeparator, ItemID.back, ItemID.forward, ItemID.title]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -174,17 +149,6 @@ extension SettingsToolbarController: NSToolbarDelegate {
                  itemForItemIdentifier identifier: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         switch identifier {
-        case ItemID.leadingPad:
-            let item = NSToolbarItem(itemIdentifier: identifier)
-            let spacer = NSView()
-            spacer.translatesAutoresizingMaskIntoConstraints = false
-            // Width = distance from the window's left edge to the back chevron, minus the inset the
-            // toolbar already applies to its first item.
-            spacer.widthAnchor.constraint(
-                equalToConstant: Metrics.arrowsInset - Metrics.firstItemInset).isActive = true
-            spacer.heightAnchor.constraint(equalToConstant: 1).isActive = true
-            item.view = spacer
-            return item
         case ItemID.back, ItemID.forward:
             // No `view`: an `NSToolbarItem` given only an image and an action builds its **own**
             // button, and the toolbar then draws it as a system toolbar button — including the
@@ -208,14 +172,11 @@ extension SettingsToolbarController: NSToolbarDelegate {
             if isBack { backItem = item } else { forwardItem = item }
             return item
         case ItemID.title:
+            // The label is the item's view directly. It used to be wrapped in a stack whose
+            // `edgeInsets` supplied a leading gap, which existed to clear a hand-positioned chevron
+            // pair; the toolbar spaces its own items now.
             let item = NSToolbarItem(itemIdentifier: identifier)
-            // Wrapped in a stack with a leading spacer rather than positioned directly: a toolbar
-            // item has no leading-inset knob, and without the gap the title butts up against the
-            // forward chevron (measured at x=157 against the system's 178).
-            let stack = NSStackView(views: [titleLabel])
-            stack.orientation = .horizontal
-            stack.edgeInsets = NSEdgeInsets(top: 0, left: Metrics.titleGap, bottom: 0, right: 0)
-            item.view = stack
+            item.view = titleLabel
             return item
         default:
             return nil
