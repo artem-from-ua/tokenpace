@@ -484,15 +484,9 @@ extension SettingsWindowController: NSWindowDelegate {
     /// pass has run, so this is where the pin reliably sticks. See `pinSizeBounds()`.
     func windowDidBecomeKey(_ notification: Notification) {
         pinSizeBounds()
-        // The toolbar's chevrons are tinted from a *resolved* colour, so nothing repaints them when
-        // the key state flips — see `SettingsToolbarController.applyChevronTint`. Driven from the
-        // delegate rather than a `NotificationCenter` observer because this method already exists:
-        // a delegate that implements `windowDidBecomeKey` receives the callback instead of the
-        // notification firing to separate observers, so an observer here would simply never run.
-        toolbarController.refreshTint()
+        // No chevron re-tint here any more: the ‹ › are plain `NSToolbarItem`s now, so the toolbar
+        // owns their buttons and dims them with the window itself (#312).
     }
-
-    func windowDidResignKey(_ notification: Notification) { toolbarController.refreshTint() }
 
     func windowDidResize(_ notification: Notification) { persistFrame() }
 
