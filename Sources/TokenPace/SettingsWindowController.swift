@@ -313,12 +313,8 @@ final class SettingsWindowController: NSWindowController {
         // out, and a reopened window may have rebuilt it. Once more on the next turn of the run loop,
         // because the first pass can land before the columns have their final width.
         mergeSidebarTitlebarStrip()
-        toolbarController.enableChevronHoverBacking()
         DispatchQueue.main.async { [weak self] in
             self?.mergeSidebarTitlebarStrip()
-            // Again next turn: the toolbar builds its buttons lazily, so the first pass can run
-            // before they exist (#312).
-            self?.toolbarController.enableChevronHoverBacking()
         }
     }
 
