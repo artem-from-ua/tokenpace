@@ -48,31 +48,6 @@ final class SettingsToolbarController: NSObject {
         /// sidebar, so this is only the remainder on top of that. Tuned against the render — 282
         /// stacked on the built-in offset and pushed the arrows to the middle of the pane.
         static let arrowsInset: CGFloat = 14
-        /// Chevron spacing, as the stack applies it: the gap is `arrowPitch − glyph width`, and the
-        /// glyphs then render 36.5 pt apart centre-to-centre (73 px @2x, measured off the header).
-        ///
-        /// The AX dump reads 40 (961 − 921) — those frames are the buttons' hit areas, not the glyphs.
-        /// The constant used to read 31.5 and was applied as
-        /// `spacing = 31.5 − intrinsicContentSize.width`, where that width was the button's
-        /// **unconfigured** symbol (10 pt) rather than the 13 pt it draws; the number that reached
-        /// the layout was 21.5, so 31.5 never described anything on screen. Subtracting the real
-        /// glyph width needs this to be 34.5 to land on the same render — verified by measuring the
-        /// glyphs before and after (both at x 616.5 and 689.5 @2x).
-        static let arrowPitch: CGFloat = 14.5
-        /// Sub-point nudge applied inside the chevron stack, for the last pixel of alignment that
-        /// `arrowsInset` cannot reach — see the note where it is applied.
-        static let arrowsNudge: CGFloat = 0.5
-        /// Leading shift for the chevron row, cancelling the offset a plate-sized button introduces:
-        /// its leading edge starts further left than the old bezel's, which moved the glyphs 10.5 pt
-        /// right of their measured columns (x 616.5 and 689.5 @2x). Negative pulls left.
-        static let arrowsPlatePull: CGFloat = -10.0
-        /// Vertical nudge for the chevrons, applied through `ChevronButton.alignmentRectInsets`.
-        ///
-        /// Uncompensated the glyphs sat 2 px (@2x) below the system's — rows 38–65 against 36–64 —
-        /// and the ordinary levers do nothing here: the toolbar centres its item in the bar, so a
-        /// stack `edgeInsets` and a taller frame were both measured and were both no-ops. Only the
-        /// alignment rect moves them, and only from the bottom edge (a top inset was no-op too).
-        static let arrowsLift: CGFloat = -2
         /// Gap from the forward chevron to the pane title. Lands the title on x=176 against the
         /// system's 177; 10 pt overshoots to 178 and there is nothing in between, so the closer of the
         /// two is used (AX reads 38 here — again a hit area, not the glyph).
@@ -111,24 +86,6 @@ final class SettingsToolbarController: NSObject {
     /// Invoked when › is clicked.
     var onForward: (() -> Void)?
 
-    /// A toolbar chevron: the glyph, plus the rounded backing System Settings shows under it while the
-    /// pointer is inside.
-    ///
-    /// `alignmentRectInsets` does two jobs here, and the second is what makes the backing possible.
-    ///
-    /// The toolbar centres its item vertically in the bar, and the glyphs rendered 2 px (@2x) below
-    /// the system's; neither a stack `edgeInsets` nor a taller frame moved them (both measured, both
-    /// no-ops), so `arrowsLift` claims a bottom inset — a shorter alignment rect at the foot lifts
-    /// what is drawn.
-    ///
-    /// The backing then needs the button to be `chevronPlateSize` (33×28) rather than glyph-sized
-    /// (13×18), because a parent clips whatever a view draws past its bounds. Growing the frame is
-    /// what broke this four times: the header's spacer is `arrowsInset − firstItemInset` wide and
-    /// already clamps at zero, so nothing downstream can cancel the shift. The way through is that
-    /// **Auto Layout positions the alignment rect, not the frame** — so the button claims insets
-    /// equal to the overhang on every side, leaving an alignment rect the size of the glyph. The
-    /// layout keeps placing a 13×18 box exactly where it always did, while the frame around it is big
-    /// enough to draw a 33×28 plate.
     /// The two navigation items, kept so `update(...)` can flip their enablement. The toolbar owns
     /// the buttons inside them.
     private var backItem: NSToolbarItem?
@@ -159,13 +116,20 @@ final class SettingsToolbarController: NSObject {
 
     /// Reflect the current pane and what the history buttons can reach.
     func update(title: String, canGoBack: Bool, canGoForward: Bool) {
-        titleLabel.attributedStringValue = NSAttributedString(
-            string: title,
-            attributes: [.font: titleLabel.font as Any,
-                         .foregroundColor: titleLabel.textColor as Any,
-                         .baselineOffset: Metrics.titleLift])
-        backItem?.isEnabled = canGoBack
-        forwardItem?.isEnabled = canGoForward
+        // Every write is guarded, because this runs on **any** model change, not just a navigation
+        // one: `observeToolbarState` re-arms `withObservationTracking` on each fire, so toggling an
+        // unrelated setting lands here too. Re-assigning the same title or enablement makes AppKit
+        // rebuild the item, which cancels the hover highlight mid-render — the flicker under the
+        // pointer (#312).
+        if titleLabel.stringValue != title {
+            titleLabel.attributedStringValue = NSAttributedString(
+                string: title,
+                attributes: [.font: titleLabel.font as Any,
+                             .foregroundColor: titleLabel.textColor as Any,
+                             .baselineOffset: Metrics.titleLift])
+        }
+        if backItem?.isEnabled != canGoBack { backItem?.isEnabled = canGoBack }
+        if forwardItem?.isEnabled != canGoForward { forwardItem?.isEnabled = canGoForward }
     }
 
     private func configureTitle() {
