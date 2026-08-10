@@ -58,10 +58,14 @@ final class SettingsToolbarController: NSObject {
         /// the layout was 21.5, so 31.5 never described anything on screen. Subtracting the real
         /// glyph width needs this to be 34.5 to land on the same render — verified by measuring the
         /// glyphs before and after (both at x 616.5 and 689.5 @2x).
-        static let arrowPitch: CGFloat = 34.5
+        static let arrowPitch: CGFloat = 14.5
         /// Sub-point nudge applied inside the chevron stack, for the last pixel of alignment that
         /// `arrowsInset` cannot reach — see the note where it is applied.
         static let arrowsNudge: CGFloat = 0.5
+        /// Left inset on each chevron's alignment rect, cancelling the shift the wider plate
+        /// introduces. Measured against the header as it rendered before the plate: the glyphs sat at
+        /// x 616.5 and 689.5 (@2x).
+        static let arrowsPlatePull: CGFloat = 21.0
         /// Vertical nudge for the chevrons, applied through `ChevronButton.alignmentRectInsets`.
         ///
         /// Uncompensated the glyphs sat 2 px (@2x) below the system's — rows 38–65 against 36–64 —
@@ -69,23 +73,17 @@ final class SettingsToolbarController: NSObject {
         /// stack `edgeInsets` and a taller frame were both measured and were both no-ops. Only the
         /// alignment rect moves them, and only from the bottom edge (a top inset was no-op too).
         static let arrowsLift: CGFloat = -2
-        /// The hover backing under a chevron, measured off System Settings': 33×28 pt, ~5 pt corner.
-        ///
-        /// This is the button's frame. A glyph-sized button cannot show a backing — a parent clips
-        /// whatever a view draws past its bounds — so the button becomes the plate, and
-        /// `ChevronButton.alignmentRectInsets` hands the layout a glyph-sized box back, which is what
-        /// keeps the header from shifting.
+        /// The hover backing, measured off System Settings': 33×28 pt. Asked for as the button's
+        /// `intrinsicContentSize` — which states the **alignment rect**, and the system's bezel fills
+        /// exactly that (verified: a 33×28 intrinsic yields a 33×28 alignment rect inside a 35×31
+        /// frame). Left to itself a `.toolbar` button sizes its bezel to 22.5×20, visibly smaller than
+        /// the system's.
         static let chevronPlateSize = NSSize(width: 33, height: 28)
-        static let chevronPlateCornerRadius: CGFloat = 5
         /// Rendered size of a chevron glyph under `chevronMetrics`, measured: 17×29 px @2x. Not read
         /// off the button, which reports three different answers depending on when it is asked —
         /// `NSImage(systemSymbolName:)` gives the unconfigured symbol (10×14), and the button gives
         /// 10×9 before `applyChevronTint` attaches the configuration and 12.5×9 after.
         static let chevronGlyphSize = NSSize(width: 13, height: 18)
-        /// How far the plate overhangs its glyph on each side — the inset that keeps the alignment
-        /// rect glyph-sized while the frame carries the plate.
-        static let chevronPlateInsetX = (chevronPlateSize.width - chevronGlyphSize.width) / 2
-        static let chevronPlateInsetY = (chevronPlateSize.height - chevronGlyphSize.height) / 2
         /// Gap from the forward chevron to the pane title. Lands the title on x=176 against the
         /// system's 177; 10 pt overshoots to 178 and there is nothing in between, so the closer of the
         /// two is used (AX reads 38 here — again a hit area, not the glyph).
@@ -136,67 +134,32 @@ final class SettingsToolbarController: NSObject {
     /// equal to the overhang on every side, leaving an alignment rect the size of the glyph. The
     /// layout keeps placing a 13×18 box exactly where it always did, while the frame around it is big
     /// enough to draw a 33×28 plate.
+    /// A toolbar chevron.
+    ///
+    /// The hover backing System Settings shows under these arrows is the button's **own bezel**,
+    /// asked for with `showsBorderOnlyWhileMouseInside` — the system mechanism ADR-0040 requires and
+    /// the one `system-settings-parity.md` already names for borderless-at-rest buttons. An earlier
+    /// pass drew the plate by hand (tracking area, `mouseEntered`, a rounded fill in `draw`) and
+    /// hardcoded its 33×28 size, corner radius and fill colour; all of that is the system's to decide.
+    ///
+    /// `alignmentRectInsets` still carries `arrowsLift`: the toolbar centres its item vertically in
+    /// the bar and the glyphs rendered 2 px (@2x) below the system's, while a stack `edgeInsets` and
+    /// a taller frame were both measured and were both no-ops. A shorter alignment rect at the foot
+    /// lifts what is drawn.
     private final class ChevronButton: NSButton {
 
-        /// The plate is drawn only while the pointer is inside. Not animated: System Settings' backing
-        /// appears and disappears without a fade.
-        private var isHovered = false {
-            didSet { if isHovered != oldValue { needsDisplay = true } }
-        }
+        /// The plate's size, so the system bezel matches System Settings' rather than hugging the
+        /// glyph. This is the alignment rect, so it is also what the layout positions.
+        override var intrinsicContentSize: NSSize { Metrics.chevronPlateSize }
 
-        /// Clicking an arrow can disable it under a stationary pointer — going back to the first pane
-        /// greys out ‹ while the cursor is still on it. No mouse event follows, so without repainting
-        /// here the plate would linger under an arrow that leads nowhere.
-        override var isEnabled: Bool {
-            didSet { if isEnabled != oldValue && isHovered { needsDisplay = true } }
-        }
-
-        /// The **glyph's** size, not the plate's: `intrinsicContentSize` describes the alignment rect,
-        /// and the insets below are added around it to make the frame. Measured — with the plate size
-        /// here the frame came out 53×38 (33 + 2×10, 28 + 2×5) and the arrows drifted by the overhang.
-        override var intrinsicContentSize: NSSize { Metrics.chevronGlyphSize }
-
-        /// The overhang on each side, plus `arrowsLift` at the foot as before. What Auto Layout sees
-        /// is therefore still a glyph-sized box in the same place; only the drawn frame grew.
+        /// The left inset pulls the whole row back to where the glyphs sat before the plate widened
+        /// them: the plate is wider than the bezel it replaced, and the leading spacer cannot absorb
+        /// the difference (its width is `arrowsInset − firstItemInset`, already negative and clamped
+        /// at zero), while a stack `edgeInsets` only stretches the item. Insetting the alignment rect
+        /// is what actually moves it.
         override var alignmentRectInsets: NSEdgeInsets {
-            // The lift is split across both edges so the plate keeps its measured 28 pt height:
-            // putting all of it on the bottom shortened the frame to 26 (measured), since the frame
-            // is the alignment rect grown by the insets.
-            NSEdgeInsets(top: Metrics.chevronPlateInsetY - Metrics.arrowsLift,
-                         left: Metrics.chevronPlateInsetX,
-                         bottom: Metrics.chevronPlateInsetY + Metrics.arrowsLift,
-                         right: Metrics.chevronPlateInsetX)
-        }
-
-        override func updateTrackingAreas() {
-            super.updateTrackingAreas()
-            trackingAreas.forEach(removeTrackingArea)
-            // `.inVisibleRect` keeps the area glued to the button as the toolbar lays it out; a fixed
-            // `rect:` goes stale after the first pass and the hover stops registering.
-            addTrackingArea(NSTrackingArea(
-                rect: .zero,
-                // `.activeAlways`, not `.activeInKeyWindow`: the toolbar's item views live in the
-                // titlebar's own view tree, which does not count as the key window's content for
-                // tracking purposes — with `.activeInKeyWindow` the button never received
-                // `mouseEntered` even with the app frontmost and the window main (measured).
-                options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-                owner: self))
-        }
-
-        override func mouseEntered(with event: NSEvent) { isHovered = true }
-        override func mouseExited(with event: NSEvent) { isHovered = false }
-
-
-        /// A disabled arrow gets no backing — hovering a greyed-out chevron leaves System Settings'
-        /// bar unchanged too.
-        override func draw(_ dirtyRect: NSRect) {
-            if isHovered && isEnabled {
-                NSColor.quaternarySystemFill.setFill()
-                NSBezierPath(roundedRect: bounds,
-                             xRadius: Metrics.chevronPlateCornerRadius,
-                             yRadius: Metrics.chevronPlateCornerRadius).fill()
-            }
-            super.draw(dirtyRect)
+            NSEdgeInsets(top: 0, left: Metrics.arrowsPlatePull,
+                         bottom: Metrics.arrowsLift, right: 0)
         }
     }
 
@@ -316,7 +279,12 @@ final class SettingsToolbarController: NSObject {
             // Geometry is already exact and must not move: compared pixel-for-pixel against the
             // system's chevron, both are 17×29 px with a 6 px stroke, so only the colour differed.
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-            button.isBordered = false
+            // Bordered, but the bezel only shows under the pointer — the system's own hover backing
+            // (#312), and the mechanism ADR-0040 calls for instead of drawing a plate by hand.
+            // `isBordered = false` removes the bezel outright, leaving the flag nothing to reveal,
+            // which is why the arrows previously had no backing at all.
+            button.isBordered = true
+            button.showsBorderOnlyWhileMouseInside = true
             button.bezelStyle = .toolbar
             button.target = self
             button.action = action
