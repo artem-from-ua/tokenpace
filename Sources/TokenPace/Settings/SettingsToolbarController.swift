@@ -98,6 +98,11 @@ final class SettingsToolbarController: NSObject, NSToolbarItemValidation {
     /// The toolbar's own validation hook: it asks on every window update, which is what makes the
     /// answer stick where a direct `isEnabled` write does not.
     func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
+        // Validation is also where the bezel has to be re-applied: answering here makes the toolbar
+        // rebuild the button, and a rebuilt one comes back `isBordered = false` — which is how the
+        // hover backing disappeared once validation started driving the enablement. Scheduled rather
+        // than done inline, because the button does not exist yet at the moment we answer.
+        DispatchQueue.main.async { [weak self] in self?.enableChevronHoverBacking() }
         switch item.itemIdentifier {
         case ItemID.back: return canGoBack
         case ItemID.forward: return canGoForward
@@ -138,6 +143,9 @@ final class SettingsToolbarController: NSObject, NSToolbarItemValidation {
             // passes — which is why a greyed-out arrow rendered at full strength and still lit up
             // under the pointer.
             let enabled = item?.isEnabled ?? true
+            // Guarded: this runs on every validation pass, and re-assigning the same values makes
+            // AppKit repaint the button, which shows up as a flicker under the pointer.
+            guard button.isEnabled != enabled || button.isBordered != enabled else { continue }
             button.isEnabled = enabled
             // Only an arrow that leads somewhere gets a bezel: `showsBorderOnlyWhileMouseInside`
             // reveals the backing on hover regardless of `isEnabled`, and no macOS toolbar
