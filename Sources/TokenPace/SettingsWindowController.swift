@@ -246,6 +246,39 @@ final class SettingsWindowController: NSWindowController {
         pinSizeBounds()
     }
 
+    /// Merge the strip AppKit lays over the sidebar's titlebar area into the sidebar itself, so the
+    /// two stop showing a seam between them (#312).
+    ///
+    /// `NavigationSplitView` puts a `.titlebar`-material `NSVisualEffectView` above **each** column —
+    /// over the sidebar it measures exactly the sidebar's width by the titlebar's height, sitting on
+    /// top of the column's own `.sidebar` material. Both follow the window's active state, but they
+    /// are different materials, so they dim by different amounts: the moment the window stops being
+    /// key — or is dragged, which repaints them — their boundary shows up as a horizontal line right
+    /// under the traffic lights. System Settings has no such line.
+    ///
+    /// Every cheaper lever was measured and leaves the strip in place: `.unifiedCompact`,
+    /// `titlebarAppearsTransparent`, `titlebarSeparatorStyle = .none`,
+    /// `.ignoresSafeArea(.container, .top)`, `.toolbarBackground(.hidden)` — and it is still there
+    /// with **no toolbar at all**, which is what proves `NavigationSplitView` creates it rather than
+    /// our toolbar. Giving that strip the sidebar's own material is what removes the boundary, since
+    /// there is then only one material to dim.
+    ///
+    /// Re-applied whenever the SwiftUI tree may have rebuilt it (see `show()`); a no-op once it holds.
+    private func mergeSidebarTitlebarStrip() {
+        guard let window, let themeFrame = window.contentView?.superview else { return }
+        let sidebarWidth = model.sidebarIcons.sidebarWidth
+        func merge(_ view: NSView) {
+            if let effect = view as? NSVisualEffectView, effect.material == .titlebar {
+                // Width identifies it: the sidebar's strip matches the column, the detail column's
+                // strip is far wider and must keep its titlebar material.
+                let widthInWindow = effect.convert(effect.bounds, to: nil).width
+                if abs(widthInWindow - sidebarWidth) < 1 { effect.material = .sidebar }
+            }
+            view.subviews.forEach(merge)
+        }
+        merge(themeFrame)
+    }
+
     /// Show or re-focus the window. Re-syncs every field from `PersistedConfig`/the system into the
     /// model, brings the app forward, and centres it on the first display of a session. Calling this
     /// while the window is already on screen just focuses it.
@@ -276,6 +309,11 @@ final class SettingsWindowController: NSWindowController {
             model.selection = section
         }
         observeToolbarState()
+        // After the tree is on screen: the strip does not exist until SwiftUI has laid the split view
+        // out, and a reopened window may have rebuilt it. Once more on the next turn of the run loop,
+        // because the first pass can land before the columns have their final width.
+        mergeSidebarTitlebarStrip()
+        DispatchQueue.main.async { [weak self] in self?.mergeSidebarTitlebarStrip() }
     }
 
     /// Keep the toolbar's title and ‹ › enablement in step with the model.
