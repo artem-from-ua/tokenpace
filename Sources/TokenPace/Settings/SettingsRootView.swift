@@ -43,7 +43,17 @@ struct SettingsRootView: View {
             // suppress the automatic sidebar toggle so only the fixed split shows.
             .toolbar(removing: .sidebarToggle)
         } detail: {
+            // No header row here: the ‹ › buttons and the pane name live in the window's toolbar,
+            // where System Settings keeps them (`SettingsToolbarController`). The column therefore
+            // starts straight at the `Form`, whose own top inset is left at the system default — the
+            // negative offsets this used to need existed only to cancel the strip an empty toolbar
+            // reserved above the old header row.
             detailPane
+                // The grouped `Form` opens with more headroom than System Settings leaves: measured
+                // pixel-for-pixel against a real VPN pane at the same size, its first card starts at
+                // y=52 pt where ours started at 72. `.contentMargins` is the supported way to
+                // override a scrollable's own inset.
+                .contentMargins(.top, Metrics.formTopMargin, for: .scrollContent)
         }
         .frame(minWidth: minWidth, maxWidth: .infinity, minHeight: minHeight, maxHeight: .infinity)
     }
@@ -60,6 +70,12 @@ struct SettingsRootView: View {
         // SwiftUI's default Label gap is ~half the System Settings sidebar gap; set it explicitly.
         .labelStyle(SidebarLabelStyle(gap: model.sidebarIcons.chipLabelGap))
         .tag(section)
+    }
+
+    private enum Metrics {
+        /// Top inset for the grouped `Form`, replacing its default. Measured against the system's VPN
+        /// pane: its first card's top edge sits at y=52 pt, ours at 72, so this removes the extra 20.
+        static let formTopMargin: CGFloat = -20
     }
 
     @ViewBuilder

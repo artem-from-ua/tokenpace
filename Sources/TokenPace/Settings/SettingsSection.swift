@@ -25,8 +25,11 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         [.extraFeatures],
     ]
 
-    /// The sidebar row title (also the pane's `Form` context; the window title stays the static
-    /// "TokenPace Settings", ADR-0035 — HIG's per-pane title is a separate open item, #156 §2).
+    /// The sidebar row title, which is also the title shown in the detail pane's toolbar (#156 §2 —
+    /// HIG: "Update the window's title to reflect the currently visible pane"). The window's own
+    /// title bar carries no text of its own — the name is drawn as a toolbar item beside the ‹ ›
+    /// buttons, where System Settings draws it (`SettingsToolbarController`), retiring ADR-0035's
+    /// static "TokenPace Settings" window title.
     var title: String {
         switch self {
         case .about: return "About"
