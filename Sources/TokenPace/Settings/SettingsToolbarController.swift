@@ -38,7 +38,7 @@ import AppKit
 /// starts at x=639, the back button at x=921, so the arrows sit 282 pt in — just past the 276 pt
 /// column divider. The bar itself is 52 pt tall.
 @MainActor
-final class SettingsToolbarController: NSObject {
+final class SettingsToolbarController: NSObject, NSToolbarItemValidation {
 
     private enum Metrics {
         /// Baseline lift for the title, in points, for the one pixel of vertical alignment left over
@@ -65,6 +65,12 @@ final class SettingsToolbarController: NSObject {
     /// the buttons inside them.
     private var backItem: NSToolbarItem?
     private var forwardItem: NSToolbarItem?
+
+    /// What the history currently allows. The toolbar asks for this on every window update through
+    /// `validateToolbarItem(_:)` — see there for why the state has to live here rather than on the
+    /// items.
+    private var canGoBack = false
+    private var canGoForward = false
     private let titleLabel = NSTextField(labelWithString: "")
 
     /// The hosting window, for reading its key state when tinting the chevrons. Weak — the window
@@ -89,6 +95,16 @@ final class SettingsToolbarController: NSObject {
         self.window = window
     }
 
+    /// The toolbar's own validation hook: it asks on every window update, which is what makes the
+    /// answer stick where a direct `isEnabled` write does not.
+    func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
+        switch item.itemIdentifier {
+        case ItemID.back: return canGoBack
+        case ItemID.forward: return canGoForward
+        default: return true
+        }
+    }
+
     /// Turn on the hover backing for the buttons the toolbar generated for ‹ ›.
     ///
     /// An `NSToolbarItem` with an image builds its own `NSToolbarButton`, but that button ships
@@ -102,17 +118,34 @@ final class SettingsToolbarController: NSObject {
     /// titlebar's view tree.
     func enableChevronHoverBacking() {
         guard let themeFrame = window?.contentView?.superview else { return }
-        func walk(_ view: NSView) {
+        // Ordered left to right, so the first button is ‹ and the second ›, and each can be matched
+        // to the item whose enablement it should mirror.
+        var buttons: [NSButton] = []
+        func collect(_ view: NSView) {
             if let button = view as? NSButton,
-               String(describing: type(of: view)).contains("NSToolbarButton"),
-               !button.isBordered {
-                button.isBordered = true
-                button.showsBorderOnlyWhileMouseInside = true
-                button.bezelStyle = .toolbar
+               String(describing: type(of: view)).contains("NSToolbarButton") {
+                buttons.append(button)
             }
-            view.subviews.forEach(walk)
+            view.subviews.forEach(collect)
         }
-        walk(themeFrame)
+        collect(themeFrame)
+        buttons.sort { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX }
+
+        for (button, item) in zip(buttons, [backItem, forwardItem]) {
+            // The item's enablement is re-applied to its button directly. Setting it on the
+            // `NSToolbarItem` alone does not stick: the toolbar rebuilds its buttons, and a rebuilt
+            // one comes back enabled — logged as `isEnabled` flipping from false to true between two
+            // passes — which is why a greyed-out arrow rendered at full strength and still lit up
+            // under the pointer.
+            let enabled = item?.isEnabled ?? true
+            button.isEnabled = enabled
+            // Only an arrow that leads somewhere gets a bezel: `showsBorderOnlyWhileMouseInside`
+            // reveals the backing on hover regardless of `isEnabled`, and no macOS toolbar
+            // highlights a disabled button.
+            button.isBordered = enabled
+            button.showsBorderOnlyWhileMouseInside = enabled
+            button.bezelStyle = .toolbar
+        }
     }
 
     /// Reflect the current pane and what the history buttons can reach.
@@ -129,8 +162,15 @@ final class SettingsToolbarController: NSObject {
                              .foregroundColor: titleLabel.textColor as Any,
                              .baselineOffset: Metrics.titleLift])
         }
-        if backItem?.isEnabled != canGoBack { backItem?.isEnabled = canGoBack }
-        if forwardItem?.isEnabled != canGoForward { forwardItem?.isEnabled = canGoForward }
+        self.canGoBack = canGoBack
+        self.canGoForward = canGoForward
+        // Writing `isEnabled` on the items does not hold: the toolbar validates its visible items on
+        // every window update and a standard item answers by asking its target, so anything set by
+        // hand is overwritten moments later (measured — both chevrons settled at `isEnabled = true`
+        // however often it was re-applied, which is why a greyed-out arrow rendered at full strength
+        // and still lit up under the pointer). `validateToolbarItem(_:)` is where that answer comes
+        // from, so the state lives here and the toolbar reads it.
+        window?.toolbar?.validateVisibleItems()
     }
 
     private func configureTitle() {
