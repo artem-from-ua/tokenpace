@@ -89,6 +89,32 @@ final class SettingsToolbarController: NSObject {
         self.window = window
     }
 
+    /// Turn on the hover backing for the buttons the toolbar generated for ‹ ›.
+    ///
+    /// An `NSToolbarItem` with an image builds its own `NSToolbarButton`, but that button ships
+    /// `isBordered = false` at 15×20 — a bare glyph — so nothing highlights under the pointer. Asking
+    /// it for a bezel shown only while the mouse is inside gives the rounded backing System Settings
+    /// has, and the button resizes itself to 40×40, which is exactly what the Accessibility dump
+    /// reads off System Settings' own back/forward buttons.
+    ///
+    /// Has to happen after the toolbar has built its views, and again whenever it rebuilds them —
+    /// `NSToolbarItem.view` stays nil for generated buttons, so the button is reached by walking the
+    /// titlebar's view tree.
+    func enableChevronHoverBacking() {
+        guard let themeFrame = window?.contentView?.superview else { return }
+        func walk(_ view: NSView) {
+            if let button = view as? NSButton,
+               String(describing: type(of: view)).contains("NSToolbarButton"),
+               !button.isBordered {
+                button.isBordered = true
+                button.showsBorderOnlyWhileMouseInside = true
+                button.bezelStyle = .toolbar
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(themeFrame)
+    }
+
     /// Reflect the current pane and what the history buttons can reach.
     func update(title: String, canGoBack: Bool, canGoForward: Bool) {
         // Every write is guarded, because this runs on **any** model change, not just a navigation
