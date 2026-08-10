@@ -48,6 +48,9 @@ final class SettingsWindowController: NSWindowController {
     /// callbacks always have somewhere to write — see the type doc).
     private let model = SettingsModel()
 
+    /// The window's toolbar — ‹ › plus the pane name, System Settings' own header (#156 §2).
+    private let toolbarController = SettingsToolbarController()
+
     // MARK: Public callbacks (the AppDelegate contract — forwarded into the model, unchanged surface)
 
     /// Called when the user changes the monitored-services selection (#89), with the new config.
@@ -199,21 +202,13 @@ final class SettingsWindowController: NSWindowController {
         // AppKit reads it without drawing it (the Window menu, Mission Control, Accessibility).
         window.title = "TokenPace Settings"
         window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        // System Settings' title bar is taller than a plain window's, which is what puts its traffic
-        // lights where they are: measured off the reference screenshot, its red light sits at
-        // (25.75, 25.75) pt from the window origin, against (13.5, 13.5) pt for a bare titled window —
-        // the same ~12 pt up-and-left offset in both axes. An empty toolbar is what buys that height:
-        // AppKit lays the lights out against the titlebar+toolbar area, so attaching one moves them
-        // down and in without any manual positioning (there is no API to place them directly).
-        //
-        // `.unified` is the style that lands on the measured target: it puts the lights at
-        // (25.75, 25.75) pt, matching System Settings exactly, where `.unifiedCompact` reaches only
-        // (18.75, 18.75). The toolbar holds no items — the pane title is drawn by the detail column
-        // itself (see `SettingsRootView.paneTitle`), not here.
-        let toolbar = NSToolbar(identifier: "TokenPaceSettingsToolbar")
-        window.toolbar = toolbar
-        window.toolbarStyle = .unified
+        // NOT transparent any more. While the toolbar was empty, transparency was what let the
+        // sidebar's material run up behind the traffic lights. Now the toolbar carries the ‹ › and the
+        // pane name, and a transparent bar has no surface of its own — scrolled content passed
+        // straight through it and collided with the header text. Opaque, the bar gets the system's own
+        // toolbar material: content blurs *under* it rather than through it, which is what System
+        // Settings does.
+        window.titlebarAppearsTransparent = false
         window.level = .floating               // float above other apps from a menu-bar app (ADR-0012 §6)
         window.isReleasedWhenClosed = false    // keep the controller alive so re-opening reuses it
         // Zoom means "as tall as the screen" here, not "as large as the screen" — see
@@ -227,6 +222,15 @@ final class SettingsWindowController: NSWindowController {
         // plus `WindowFrameValidator` give us "read → validate → apply once" instead (see `show()`).
         self.init(window: window)
         window.delegate = self                 // zoom shape + frame persistence (below); `delegate` is weak
+        // The toolbar carries the ‹ › history buttons and the pane's name, as System Settings' does
+        // (verified over the Accessibility API — see `SettingsToolbarController`), and its height is
+        // also what lifts the traffic lights onto the system's measured (25.75, 25.75) pt position.
+        // Both jobs, one bar: while it stood empty, its reserved strip was dead space that the detail
+        // column had to cancel out with negative offsets. Installed after `self.init` because the
+        // callbacks capture `self`.
+        toolbarController.onBack = { [weak self] in self?.model.goBack() }
+        toolbarController.onForward = { [weak self] in self?.model.goForward() }
+        toolbarController.install(on: window)
         let hosting = NSHostingController(
             rootView: SettingsRootView(model: model,
                                        minWidth: Metrics.contentWidth,
@@ -270,6 +274,22 @@ final class SettingsWindowController: NSWindowController {
         if let raw = ProcessInfo.processInfo.environment["TOKENPACE_SETTINGS_SECTION"],
            let idx = Int(raw), let section = SettingsSection(rawValue: idx) {
             model.selection = section
+        }
+        observeToolbarState()
+    }
+
+    /// Keep the toolbar's title and ‹ › enablement in step with the model.
+    ///
+    /// `withObservationTracking` fires once per change, so the continuation re-arms itself: the
+    /// selection moves whenever the user picks a sidebar row, which is SwiftUI's write, not ours —
+    /// there is no single call site to hook instead.
+    private func observeToolbarState() {
+        withObservationTracking {
+            toolbarController.update(title: model.currentPaneTitle,
+                                     canGoBack: model.canGoBack,
+                                     canGoForward: model.canGoForward)
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.observeToolbarState() }
         }
     }
 
@@ -424,7 +444,17 @@ extension SettingsWindowController: NSWindowDelegate {
 
     /// SwiftUI's first layout pass wipes the size bounds; by the time the window takes key focus that
     /// pass has run, so this is where the pin reliably sticks. See `pinSizeBounds()`.
-    func windowDidBecomeKey(_ notification: Notification) { pinSizeBounds() }
+    func windowDidBecomeKey(_ notification: Notification) {
+        pinSizeBounds()
+        // The toolbar's chevrons are tinted from a *resolved* colour, so nothing repaints them when
+        // the key state flips — see `SettingsToolbarController.applyChevronTint`. Driven from the
+        // delegate rather than a `NotificationCenter` observer because this method already exists:
+        // a delegate that implements `windowDidBecomeKey` receives the callback instead of the
+        // notification firing to separate observers, so an observer here would simply never run.
+        toolbarController.refreshTint()
+    }
+
+    func windowDidResignKey(_ notification: Notification) { toolbarController.refreshTint() }
 
     func windowDidResize(_ notification: Notification) { persistFrame() }
 

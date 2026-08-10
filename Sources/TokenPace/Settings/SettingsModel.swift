@@ -63,7 +63,53 @@ final class SettingsModel {
     // MARK: Selection (dev hook)
 
     /// The section the root view should show. Seeded once from `TOKENPACE_SETTINGS_SECTION` on `show()`.
-    var selection: SettingsSection = .about
+    ///
+    /// Every write records the previous pane in ``backStack``, which is what makes the toolbar's ‹ ›
+    /// buttons work: they walk the history of *visited panes*, exactly like a browser's, rather than
+    /// descending into subpages (the tree is flat and stays that way). Writes coming from ``goBack()``
+    /// / ``goForward()`` are excluded — replaying history must not itself become history, or ‹ would
+    /// never reach further than one step.
+    var selection: SettingsSection = .about {
+        didSet {
+            guard selection != oldValue, !isReplayingHistory else { return }
+            history.visit(selection)
+        }
+    }
+
+    /// Back/forward over the panes the user has visited — what the toolbar's ‹ › buttons walk. The
+    /// rules (a new pick clears the forward branch, a replay records nothing) live in the kit, where
+    /// they are unit-tested; this class only keeps `selection` and the history in step.
+    private var history = NavigationHistory<SettingsSection>(current: .about)
+
+    /// Set while ``goBack()``/``goForward()`` write `selection`, so the `didSet` above can tell a
+    /// history replay from a user's own pick — replaying must not itself become history.
+    private var isReplayingHistory = false
+
+    /// The title the toolbar shows — the current pane's name.
+    var currentPaneTitle: String { selection.title }
+
+    var canGoBack: Bool { history.canGoBack }
+    var canGoForward: Bool { history.canGoForward }
+
+    /// Step back to the previously visited pane.
+    func goBack() {
+        guard history.canGoBack else { return }
+        history.goBack()
+        applyHistorySelection()
+    }
+
+    /// Step forward to the most recently popped pane.
+    func goForward() {
+        guard history.canGoForward else { return }
+        history.goForward()
+        applyHistorySelection()
+    }
+
+    private func applyHistorySelection() {
+        isReplayingHistory = true
+        selection = history.current
+        isReplayingHistory = false
+    }
 
     /// Whether a data stub (`TOKENPACE_STUB`, or the dev-tools selector) is driving the app rather than
     /// the real network. Owned by the shell, which pushes the live value on every `openSettings` and

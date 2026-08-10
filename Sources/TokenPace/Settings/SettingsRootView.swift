@@ -43,10 +43,17 @@ struct SettingsRootView: View {
             // suppress the automatic sidebar toggle so only the fixed split shows.
             .toolbar(removing: .sidebarToggle)
         } detail: {
-            VStack(alignment: .leading, spacing: 0) {
-                paneTitle
-                detailPane
-            }
+            // No header row here: the ‹ › buttons and the pane name live in the window's toolbar,
+            // where System Settings keeps them (`SettingsToolbarController`). The column therefore
+            // starts straight at the `Form`, whose own top inset is left at the system default — the
+            // negative offsets this used to need existed only to cancel the strip an empty toolbar
+            // reserved above the old header row.
+            detailPane
+                // The grouped `Form` opens with more headroom than System Settings leaves: measured
+                // pixel-for-pixel against a real VPN pane at the same size, its first card starts at
+                // y=52 pt where ours started at 72. `.contentMargins` is the supported way to
+                // override a scrollable's own inset.
+                .contentMargins(.top, Metrics.formTopMargin, for: .scrollContent)
         }
         .frame(minWidth: minWidth, maxWidth: .infinity, minHeight: minHeight, maxHeight: .infinity)
     }
@@ -65,44 +72,10 @@ struct SettingsRootView: View {
         .tag(section)
     }
 
-    /// The current pane's name, at the top of the detail column — HIG's "update the window's title to
-    /// reflect the currently visible pane" (#156 §2), placed where System Settings places it.
-    ///
-    /// It is a view in the column rather than a `ToolbarItem`, and both toolbar placements were tried
-    /// first: `.navigation` puts the title in the split view's *shared* leading area, i.e. above the
-    /// **sidebar** next to the traffic lights, and `.principal` centres it across the whole window —
-    /// neither is where System Settings draws it, and a trailing `Spacer` does not push a principal
-    /// item leading (it shrinks to its intrinsic width). Owning the row here gives the leading edge
-    /// exactly, at the cost of scrolling with the pane instead of staying pinned — acceptable while
-    /// the title is the only thing in that row, and revisited if #156 §2's follow-up adds the ‹ ›
-    /// history buttons that would need to stay put.
-    ///
-    /// The 20 pt leading inset lines the title up with the grouped `Form`'s card edge below it, and
-    /// the window's own title bar is hidden and transparent so nothing else occupies this strip.
-    private var paneTitle: some View {
-        Text(model.selection.title)
-            .font(.system(size: 15, weight: .bold))
-            .padding(.leading, 20)
-            // Both offsets are negative because the `.unified` toolbar reserves a strip at the top of
-            // the detail column that nothing draws in — it exists only to place the traffic lights
-            // (`SettingsWindowController`) and carries no items, so it is dead space to be reclaimed.
-            //
-            // Measured side by side against a System Settings window in the same screenshot (the only
-            // way to compare two windows' vertical rhythm without cross-shot scaling errors):
-            //
-            //           title rows   first card top   gap under title
-            //   system    36…54          82               28 pt
-            //   before    70…86         144               58 pt   (no compensation)
-            //
-            // `.top` lifts the title to the system's y=36. Applied to the title alone — pulling the
-            // whole column drags the `Form` with it, and cancelling the toolbar's full inset hides the
-            // title under the title bar (both measured).
-            //
-            // The gap *below* the title is left alone: a negative `.bottom` here does not pull the
-            // `Form` up, it pushes the title down past it (measured — the title landed at y=102,
-            // below the card at y=72). Closing that gap needs the `Form`'s own top inset, not this row.
-            .padding(.top, -35)
-            .padding(.bottom, 2)
+    private enum Metrics {
+        /// Top inset for the grouped `Form`, replacing its default. Measured against the system's VPN
+        /// pane: its first card's top edge sits at y=52 pt, ours at 72, so this removes the extra 20.
+        static let formTopMargin: CGFloat = -20
     }
 
     @ViewBuilder

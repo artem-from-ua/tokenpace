@@ -27,16 +27,12 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
 
     /// The sidebar row title, which is also the title shown in the detail pane's toolbar (#156 §2 —
     /// HIG: "Update the window's title to reflect the currently visible pane"). The window's own
-    /// title bar carries no text: it is transparent and the title is hidden, so the traffic lights
-    /// sit over the sidebar exactly as in System Settings (ADR-0035's static "TokenPace Settings"
-    /// window title is retired by that move).
-    ///
-    /// About is named "About TokenPace" — the app name belongs on the one pane that identifies the
-    /// app (version, updates), and with the window title gone it is the only place the full name
-    /// still appears.
+    /// title bar carries no text of its own — the name is drawn as a toolbar item beside the ‹ ›
+    /// buttons, where System Settings draws it (`SettingsToolbarController`), retiring ADR-0035's
+    /// static "TokenPace Settings" window title.
     var title: String {
         switch self {
-        case .about: return "About TokenPace"
+        case .about: return "About"
         case .general: return "General"
         case .appearance: return "Appearance"
         case .notifications: return "Notifications"
