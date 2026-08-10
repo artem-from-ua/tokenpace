@@ -41,6 +41,10 @@ import AppKit
 final class SettingsToolbarController: NSObject, NSToolbarItemValidation {
 
     private enum Metrics {
+        /// Size handed to each chevron item. The bezel AppKit draws inside it is 6 pt narrower, which
+        /// puts the hover plate on the 33×28 pt measured off System Settings.
+        static let chevronItemSize = NSSize(width: 45, height: 34)
+
         /// Baseline lift for the title, in points, for the one pixel of vertical alignment left over
         /// once the glyph box matched the system's in width (measured: rows 41–62 against 40–61).
         ///
@@ -249,6 +253,11 @@ extension SettingsToolbarController: NSToolbarDelegate {
             item.label = isBack ? "Back" : "Forward"
             item.paletteLabel = item.label
             item.isNavigational = true
+            // The bezel tracks the button's width less 6 pt (measured: a 40 pt button bezels at 34,
+            // a 44 pt one at 38), and the toolbar sizes the button from the item. 39 lands the plate
+            // on the 33 pt System Settings draws — ours came out 28 wide before this.
+            item.minSize = Metrics.chevronItemSize
+            item.maxSize = Metrics.chevronItemSize
             item.target = self
             item.action = isBack ? #selector(goBack) : #selector(goForward)
             if isBack { backItem = item } else { forwardItem = item }
