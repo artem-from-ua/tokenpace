@@ -41,6 +41,17 @@ import AppKit
 final class SettingsToolbarController: NSObject, NSToolbarItemValidation {
 
     private enum Metrics {
+        /// Size handed to each chevron item, which is what the toolbar sizes the button from.
+        ///
+        /// 45 is what puts the hover plate on the system's 33×28: the plate renders 12 pt narrower
+        /// than the item (measured — 43.5 gave a 31 pt plate, visibly clipped on its leading edge
+        /// against System Settings' side by side).
+        ///
+        /// The same width also sets the glyph spacing, and the two cannot both be exact: the plate
+        /// trails the item by 12 pt while the spacing tracks it nearly 1:1, so matching the plate
+        /// leaves the pair 1.5 pt wider apart than the system's 36.25. A 2 pt error on the plate
+        /// reads as a clipped edge; 1.5 pt of extra spacing does not.
+        static let chevronItemSize = NSSize(width: 45, height: 34)
 
         /// Baseline lift for the title, in points, for the one pixel of vertical alignment left over
         /// once the glyph box matched the system's in width (measured: rows 41–62 against 40–61).
@@ -253,11 +264,8 @@ extension SettingsToolbarController: NSToolbarDelegate {
             // The bezel tracks the button's width less 6 pt (measured: a 40 pt button bezels at 34,
             // a 44 pt one at 38), and the toolbar sizes the button from the item. 39 lands the plate
             // on the 33 pt System Settings draws — ours came out 28 wide before this.
-            // No `minSize`/`maxSize`: left alone the toolbar builds a 40×40 button and spaces the
-            // pair 36.0 pt apart, which is the system's own figure (measured 36.5 off System
-            // Settings). Forcing a width was what pushed them to 43 — and trimming one item to
-            // compensate only made its plate smaller than the other's, since the plate is sized
-            // from the item.
+            item.minSize = Metrics.chevronItemSize
+            item.maxSize = Metrics.chevronItemSize
             item.target = self
             item.action = isBack ? #selector(goBack) : #selector(goForward)
             if isBack { backItem = item } else { forwardItem = item }
