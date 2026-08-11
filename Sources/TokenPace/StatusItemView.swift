@@ -151,6 +151,12 @@ final class StatusItemView: NSView {
         static let tickCorner: CGFloat = 1.5
         /// Width of the dark ring around the time-indicator marker.
         static let tickStroke: CGFloat = 1
+        /// Width of the **Gauge** centre tick (#326) — the permanent mark for the zero the ribbon
+        /// grows out of. Deliberately a fifth of ``tickWidth``, and drawn *under* the track in the
+        /// neutral tick tone rather than over it in the pacing colour, so a lone vertical mark on a
+        /// 34 pt bar cannot be mistaken for the Progress time marker: only its ends show, it never
+        /// moves, and it carries no colour.
+        static let centreTickWidth: CGFloat = 1
         /// Corner radius of each bar.
         static let barCorner: CGFloat = 1.5
         /// Point size of the ⚠️ error glyph (`exclamationmark.triangle.fill`). Tuned to read at the
@@ -842,6 +848,13 @@ final class StatusItemView: NSView {
             // swap fade rather than snap.
             let fill = animated(idleTarget, window: bar.window, part: .fill)
             let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
+            // Gauge's zero is the centre, so its idle pill sits there rather than at the left edge —
+            // the same "grey track + zero pill" shape ADR-0078 fixes for every style, drawn on this
+            // style's own scale. Its centre tick goes down first, under the track, exactly as the
+            // pacing path does: the tick is drawn in *every* state, which is what makes the zero
+            // findable at all.
+            let idleZero = barStyle.menuBarScale == .centred ? 0.5 : 0.0
+            if barStyle.menuBarScale == .centred { drawCentreTick(in: rect) }
             // Zero pressure — the same pill `fillZone(floorEmptyToPill:)` draws for a zero ribbon.
             // The grey track goes down first, exactly as the pacing path does: without it the pill
             // would hang in empty space while every neighbouring bar shows a track.
@@ -849,7 +862,8 @@ final class StatusItemView: NSView {
             path.fill()
             NSGraphicsContext.saveGraphicsState()
             path.addClip()
-            fillZone(from: 0, to: 0, in: rect, width: rect.width, color: fill, floorEmptyToPill: true)
+            fillZone(from: idleZero, to: idleZero, in: rect, width: rect.width, color: fill,
+                     floorEmptyToPill: true)
             NSGraphicsContext.restoreGraphicsState()
             // Progress keeps its identifying mark: the marker at `timeFraction` = 0, drawn over the pill.
             if barStyle.menuBarShowsTimeMarker { drawTimeMarker(at: 0, colour: fill, in: rect) }
@@ -858,6 +872,10 @@ final class StatusItemView: NSView {
 
         let l = bar.layout
         let w = rect.width
+
+        // Gauge's centre tick goes down BEFORE the track (#326): the track then covers its middle and
+        // only the ends stand proud, which is what keeps it from reading as a Progress time marker.
+        if barStyle.menuBarScale == .centred { drawCentreTick(in: rect) }
 
         // Whole-bar rounded grey track (drawn first; the gap paints over it). Both flanks of the gap —
         // the used head and the future/unused tail — are this one tone, so they read identical.
@@ -879,6 +897,23 @@ final class StatusItemView: NSView {
         // `frozenStripFraction`; it overrides the length, so the stub is unaffected by the rescale.
         // The *style* still decides whether a marker follows, so Progress keeps its full anatomy under
         // the stub instead of collapsing into Pressure.
+        // Gauge (#326, ADR-0079): the ribbon runs from the bar's CENTRE to `0.5 + offset/2`, so its
+        // direction carries ahead-vs-behind and its length carries by how much. Same colour source as
+        // every other style — this changes the geometry, never the verdict. The floor applies for the
+        // same reason it does on the Pressure branch, but about the centre: `u == t` is a real,
+        // recurring state (and the exact one this style is built to show as "on pace"), so a
+        // degenerate span becomes a centred pill rather than a blank track. `pinsStart` stays off:
+        // both edges here are data, and the floor must grow symmetrically about the zero — pinning
+        // would shove the pill off-centre and make "dead on pace" read as a small lead.
+        if barStyle.menuBarScale == .centred {
+            let offset = frozenStrip(for: bar).map { $0 * 2 - 1 } ?? l.gaugeOffset
+            let far = 0.5 + offset / 2
+            fillZone(from: min(0.5, far), to: max(0.5, far), in: rect, width: w,
+                     color: calmedGapColor(l, window: bar.window), floorEmptyToPill: true)
+            NSGraphicsContext.restoreGraphicsState()
+            return
+        }
+
         if !barStyle.menuBarShowsTimeMarker {
             // A **zero-length** ribbon still has to read as "zero", not as an empty track. Without a time
             // marker this branch is the bar's only mark, so `stripRect`'s degenerate-span `nil` would
@@ -919,6 +954,29 @@ final class StatusItemView: NSView {
         drawTimeMarker(at: frozen ?? l.timeFraction,
                        colour: calmedGapColor(l, window: bar.window, part: .marker),
                        in: rect)
+    }
+
+    /// The **Gauge** centre tick (#326, ADR-0079): a permanent 1 pt vertical mark at the bar's
+    /// midpoint, in the neutral tick tone, drawn **under** the track so only its protruding ends
+    /// show.
+    ///
+    /// Deliberately *not* built on ``drawTimeMarker(at:colour:in:)`` despite the similar shape — the
+    /// semantics are opposite, and every difference here is doing work. That marker is data (it moves
+    /// with `timeFraction`, takes the pacing colour, and sits on top with a `.copy` reset and flanking
+    /// outline); this is a fixed rule of the scale. Drawing it under the track in grey at a fifth the
+    /// width is what stops a lone vertical mark on a 34 pt bar from reading as Progress's marker —
+    /// the objection that kept ticks out of the menu bar entirely under Pressure (see
+    /// `PopupBarView.tickFractions`). It is drawn in **every** Gauge state, idle included: a direction
+    /// needs something to be a direction from.
+    private func drawCentreTick(in rect: NSRect) {
+        let cx = PopupBarView.scaleX(0.5, in: rect).rounded()
+        let w = Metrics.centreTickWidth
+        let h = Metrics.tickHeight
+        // `indicatorRing` — the same neutral role that outlines the Progress marker against the bar.
+        // Reused deliberately: this tick is scale furniture, not data, so it should read in the tone
+        // the widget already uses for "structure", never in a pacing colour.
+        Palette.indicatorStroke.setFill()
+        NSRect(x: cx - w / 2, y: rect.midY - h / 2, width: w, height: h).fill()
     }
 
     /// The time-indicator marker: a slim, lightly-rounded vertical bar rather than a dot — reads as a

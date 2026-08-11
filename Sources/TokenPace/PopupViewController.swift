@@ -251,7 +251,10 @@ final class PopupBarView: NSView {
             // hangs in empty space while every neighbouring row shows a track.
             Self.monochromeGrey.setFill()
             NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner).fill()
-            if let idleShape = Self.pillRect(at: 0, in: rect) {
+            // Gauge's zero is the centre, so its idle pill sits there (ADR-0078's shape, drawn on this
+            // style's own scale). The centre tick itself comes from `drawTicks` below — in the popup
+            // the ruler already sits under the bar, so no separate under-track mark is needed.
+            if let idleShape = Self.pillRect(at: barStyle.popupScale == .centred ? 0.5 : 0, in: rect) {
                 let corner = min(idleShape.width, idleShape.height) / 2      // capsule, like any pill
                 let idlePath = NSBezierPath(roundedRect: idleShape, xRadius: corner, yRadius: corner)
                 if blocked {
@@ -289,8 +292,24 @@ final class PopupBarView: NSView {
         //    3. The strip carries the ambient glow.
         // The `color-cycle` stub pins the strip so only the colour moves (`frozenStripFraction`); it
         // overrides the length, so the stub is unaffected by the rescale.
-        let stripFrom = frozenStripFraction != nil ? 0 : (barStyle.popupShowsTimeMarker ? l.gapStart : 0)
-        let stripTo = frozenStripFraction ?? (barStyle.popupShowsTimeMarker ? l.gapEnd : l.pressureLength)
+        // Gauge (#326, ADR-0079) measures from the bar's CENTRE — the span is `0.5 .. 0.5 + offset/2`
+        // taken in whichever order the sign puts them, so the ribbon's direction carries ahead vs
+        // behind. The other two scales are unchanged: Progress the window-scale gap, Pressure the
+        // left-anchored ribbon.
+        let gaugeFar = 0.5 + (frozenStripFraction.map { $0 * 2 - 1 } ?? l.gaugeOffset) / 2
+        let stripFrom: Double
+        let stripTo: Double
+        switch barStyle.popupScale {
+        case .window:
+            stripFrom = frozenStripFraction != nil ? 0 : l.gapStart
+            stripTo = frozenStripFraction ?? l.gapEnd
+        case .remaining:
+            stripFrom = 0
+            stripTo = frozenStripFraction ?? l.pressureLength
+        case .centred:
+            stripFrom = min(0.5, gaugeFar)
+            stripTo = max(0.5, gaugeFar)
+        }
         // A **zero-length** Pressure ribbon still has to read as "zero", not as an empty track: with no
         // marker the ribbon is this bar's only mark, and `stripRect` returns nil for a degenerate span.
         // `usage == time` is a real recurring state (every 5-hour reset renders 0 % against a freshly
@@ -300,9 +319,13 @@ final class PopupBarView: NSView {
         // position.
         // Progress pins the strip's start: its left edge is `usage`, so the min-width floor and the
         // flush-to-track snap must not drag it leftwards into the "already spent" zone (#323).
+        // The pill floor applies to both marker-less scales: Pressure floors its zero at the left edge,
+        // Gauge floors its zero at the centre (`stripFrom == 0.5` there, since a degenerate span has
+        // both ends on the zero). `pinsStart` stays exclusive to Progress — on the centred scale both
+        // edges are data and the floor must grow symmetrically about the zero.
         let span = Self.stripRect(from: stripFrom, to: stripTo, in: rect,
-                                  pinsStart: frozenStripFraction == nil && barStyle.popupShowsTimeMarker)
-            ?? (barStyle.popupUsesPressureScale ? Self.pillRect(at: stripFrom, in: rect) : nil)
+                                  pinsStart: frozenStripFraction == nil && barStyle.popupScale == .window)
+            ?? (barStyle.popupScale == .window ? nil : Self.pillRect(at: stripFrom, in: rect))
         if let stripRect = span {
             let capsule = min(stripRect.width, stripRect.height) / 2
             let stripPath = NSBezierPath(roundedRect: stripRect, xRadius: capsule, yRadius: capsule)
@@ -469,16 +492,27 @@ final class PopupBarView: NSView {
     ///   ``TokenPaceKit/BarLayout/pressureLength``). A ribbon short of the tick means headroom, past
     ///   it means a lead. One tooth, not a ruler — the other boundary (0.328, yellow→orange) is
     ///   already carried by the colour change, and a second tooth 4 pt away would read as noise.
+    /// - **Gauge** draws on the centred scale, whose one landmark is the zero the ribbon grows out of:
+    ///   **0.5**. Again one tooth. Ticks at ±50 % of each half were considered and dropped — they
+    ///   would mark nothing the scale defines, and the direction the ribbon leaves the centre in is
+    ///   the reading, not its distance along a ruler (#326, ADR-0079).
     ///
-    /// The menu bar gets no tick at all: a lone vertical tooth on a 34 pt bar is exactly what the
-    /// Progress time marker looks like, so the two styles would stop being distinguishable there.
+    /// Under Pressure the menu bar gets no tick at all: a lone vertical tooth on a 34 pt bar is
+    /// exactly what the Progress time marker looks like, so the two styles would stop being
+    /// distinguishable there. Gauge's menu-bar centre tick escapes that objection by construction
+    /// rather than by omission — a fifth the width, in the neutral tick tone, drawn *under* the track
+    /// so only its ends show, and never moving (`StatusItemView.drawCentreTick`).
     ///
     /// Keyed off `barStyle` alone: `drawTicks` also runs for the **idle** bar, which has no
     /// `BarLayout` to consult.
     private var tickFractions: [CGFloat] {
-        if barStyle.popupUsesPressureScale { return [0.20] }
-        guard subdivisions >= 2 else { return [] }
-        return (1 ..< subdivisions).map { CGFloat($0) / CGFloat(subdivisions) }
+        switch barStyle.popupScale {
+        case .remaining: return [0.20]
+        case .centred: return [0.5]
+        case .window:
+            guard subdivisions >= 2 else { return [] }
+            return (1 ..< subdivisions).map { CGFloat($0) / CGFloat(subdivisions) }
+        }
     }
 
     /// Draw the under-bar tick ruler: vertical teeth at each fraction in ``tickFractions``,

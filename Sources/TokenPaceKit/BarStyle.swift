@@ -1,14 +1,40 @@
 import Foundation
 
+// MARK: - BarScale (#326)
+
+/// Which **scale** a bar is measured on — the geometry underneath a ``BarStyle``, named explicitly
+/// rather than derived from whether a marker is drawn (#326, ADR-0079).
+///
+/// Until Gauge there were two scales and exactly one bit told them apart, so "no marker" and
+/// "remaining scale" were one decision (`menuBarUsesPressureScale == !menuBarShowsTimeMarker`).
+/// A third scale breaks that identity: Gauge has no marker either, yet it is not Pressure. The
+/// implication that survives is one-directional and still worth naming — **a time marker is only
+/// meaningful on ``window``** — so the marker flags are now *derived from* the scale rather than
+/// the reverse, and the renderers branch on the scale itself.
+public enum BarScale: String, Sendable, Equatable, CaseIterable {
+    /// Fractions of the **window**: `0` is the window's start, `1` its reset. Two positional marks
+    /// live here — the time marker at `timeFraction` and the capsule's far edge at `usageFraction`
+    /// — so this is the only scale on which a marker means anything.
+    case window
+    /// Fractions of the **time remaining**, left-anchored: ``BarLayout/pressureLength``.
+    case remaining
+    /// Fractions of the time remaining, **signed about the bar's centre**:
+    /// ``BarLayout/gaugeOffset``. Zero is the middle; the ribbon grows right when ahead of pace and
+    /// left when behind.
+    case centred
+}
+
 // MARK: - BarStyle (#224)
 
 /// How the pacing bars are **presented** — chosen by the user via a segmented control in Settings →
 /// Appearance. The presentation can differ **per surface** (menu-bar widget vs dropdown popup): a bar
 /// is drawn either as **Progress** (grey track + coloured gap + a "you are here" time-indicator
-/// marker) or as **Pressure** (a left-anchored colour ribbon, no marker). Both carry the *same*
-/// pacing state colour, so they never disagree on "what state am I in".
+/// marker), as **Pressure** (a left-anchored colour ribbon, no marker), or as **Gauge** (a ribbon
+/// growing either way from the centre, no marker). All of them carry the *same* pacing state colour,
+/// so they never disagree on "what state am I in".
 ///
-/// The two presentations differ in **scale**, not only in whether time is marked (#307):
+/// The presentations differ in **scale** (``BarScale``), not only in whether time is marked (#307,
+/// #326):
 /// - **Progress** draws on the **window** scale — two positional marks on one track: the marker at
 ///   `timeFraction`, and the capsule's far edge, which is always `usageFraction`.
 /// - **Pressure** draws on the **remaining** scale — ``BarLayout/pressureLength``
@@ -16,11 +42,17 @@ import Foundation
 ///   severity there, at fixed positions: 20 % is exactly on pace, 32.8 % is where yellow turns
 ///   orange, 100 % is exhausted. A time marker is impossible: on this track it would sit at zero
 ///   forever, which is also why the popup's tick ruler marks 20 % instead of window fractions.
+/// - **Gauge** draws on the **centred** scale — ``BarLayout/gaugeOffset`` (`clamp(r/k, −1, +1)`,
+///   `k` on the ahead half only). Same numerator as Pressure, zero moved to the middle, so the
+///   ribbon's *direction* says ahead-or-behind and its length says by how much. This is the only
+///   scale that renders the underpace half at all: Pressure's `max(0, …)` flattens every calm state
+///   onto one minimum pill, and a surplus you will not get to spend is exactly what that discards.
 ///
-/// The three cases pick which presentation each surface uses:
+/// The four cases pick which presentation each surface uses:
 /// - ``pressure`` — **Pressure** on both surfaces (no marker anywhere).
 /// - ``mixed`` — **Pressure** in the menu bar, **Progress** in the dropdown (the marker appears only
 ///   where there's room for it).
+/// - ``gauge`` — **Gauge** on both surfaces (no marker anywhere; a permanent centre tick instead).
 /// - ``progress`` — **Progress** on both surfaces (marker everywhere; the shipped pre-#224 look).
 ///
 /// This is a **render-only** distinction: it changes how each bar is *drawn*, never the underlying
@@ -47,29 +79,44 @@ public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
     /// orange → red). The colour *is* the "what state am I in" answer and the width is how urgent it
     /// is, with no marker to correlate against. Raw value was `"simple"` before #307.
     case pressure = "pressure"
+    /// **Gauge** on both surfaces (#326): a colour ribbon anchored to the bar's **centre**, growing
+    /// **right** when spending is ahead of pace and **left** when it is behind, its signed length
+    /// ``BarLayout/gaugeOffset``. A permanent centre tick marks the zero — without it the direction
+    /// would have nothing to be a direction *from*. No time marker: like Pressure, this scale has no
+    /// position for one.
+    case gauge = "gauge"
 
-    /// Whether the **menu-bar** widget draws the time-indicator marker (Progress) vs the left-anchored
-    /// ribbon (Pressure). Only ``progress`` marks the menu bar.
-    public var menuBarShowsTimeMarker: Bool { self == .progress }
+    /// Which scale the **menu-bar** bar is measured on (#326). The renderers branch on this rather
+    /// than on a negated marker flag, because three scales no longer fit in one bit.
+    public var menuBarScale: BarScale {
+        switch self {
+        case .progress: return .window
+        case .mixed, .pressure: return .remaining
+        case .gauge: return .centred
+        }
+    }
 
-    /// Whether the **dropdown popup** draws the time-indicator marker (Progress) vs the ribbon
-    /// (Pressure). ``progress`` and ``mixed`` both mark the popup; ``pressure`` does not.
-    public var popupShowsTimeMarker: Bool { self != .pressure }
+    /// Which scale the **dropdown popup**'s bar is measured on (#326). Also decides the tick ruler's
+    /// fractions: window subdivisions mean nothing off the window scale, so `PopupBarView` marks the
+    /// one landmark each other scale does have — 20 % (exactly on pace) on ``BarScale/remaining``,
+    /// the centre on ``BarScale/centred``.
+    public var popupScale: BarScale {
+        switch self {
+        case .progress, .mixed: return .window
+        case .pressure: return .remaining
+        case .gauge: return .centred
+        }
+    }
 
-    /// Whether the **menu-bar** bar is measured on the renormalised `[now .. reset]` track
-    /// (``BarLayout/pressureLength``) instead of the window scale (#307).
-    ///
-    /// Exactly the inverse of ``menuBarShowsTimeMarker``, and that is the point: "no marker" and
-    /// "remaining scale" are one decision, not two that could drift apart. A marker cannot coexist
-    /// with this scale — it would sit at zero forever — so naming the implication here keeps the two
-    /// renderers from each re-deriving it from a negated flag.
-    public var menuBarUsesPressureScale: Bool { !menuBarShowsTimeMarker }
+    /// Whether the **menu-bar** widget draws the time-indicator marker. Derived from the scale, not
+    /// the other way round: a marker only has a position on ``BarScale/window`` — on either of the
+    /// others it would sit at zero forever.
+    public var menuBarShowsTimeMarker: Bool { menuBarScale == .window }
 
-    /// Whether the **dropdown popup**'s bar is measured on the renormalised `[now .. reset]` track
-    /// (``BarLayout/pressureLength``) instead of the window scale (#307). Also decides the tick
-    /// ruler's fractions: window subdivisions mean nothing on this track, so `PopupBarView` marks
-    /// quarters of the time remaining instead.
-    public var popupUsesPressureScale: Bool { !popupShowsTimeMarker }
+    /// Whether the **dropdown popup** draws the time-indicator marker. Same derivation as
+    /// ``menuBarShowsTimeMarker``: ``progress`` and ``mixed`` mark the popup, ``pressure`` and
+    /// ``gauge`` do not.
+    public var popupShowsTimeMarker: Bool { popupScale == .window }
 
     /// The pre-#307 raw values, mapped to the cases that replaced them. `"mixed"` is unchanged and so
     /// is absent here.

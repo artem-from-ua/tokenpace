@@ -7,13 +7,15 @@ import Foundation
 @Suite("BarStyle")
 struct BarStyleTests {
 
-    /// Three styles ship; the raw values are persisted in UserDefaults. They were renamed in #307
-    /// alongside the UI names — see `decodesLegacyRawValues` for the pre-#307 raws.
+    /// Four styles ship; the raw values are persisted in UserDefaults. Three were renamed in #307
+    /// alongside the UI names — see `decodesLegacyRawValues` for the pre-#307 raws. `gauge` is new in
+    /// #326 and has no legacy raw, so it is absent from that table by construction.
     @Test func casesAndRawValues() {
-        #expect(BarStyle.allCases == [.progress, .mixed, .pressure])
+        #expect(BarStyle.allCases == [.progress, .mixed, .pressure, .gauge])
         #expect(BarStyle.progress.rawValue == "progress")
         #expect(BarStyle.mixed.rawValue == "mixed")
         #expect(BarStyle.pressure.rawValue == "pressure")
+        #expect(BarStyle.gauge.rawValue == "gauge")
     }
 
     /// Per-surface marker helpers: `.progress` marks both, `.pressure` marks neither, `.mixed` marks
@@ -27,22 +29,39 @@ struct BarStyleTests {
         #expect(BarStyle.mixed.popupShowsTimeMarker)      // Progress in the dropdown
     }
 
-    /// Per-surface scale helpers (#307): a surface draws the renormalised Pressure ribbon exactly
-    /// when it draws no time marker. The two are one decision — a marker cannot live on the
-    /// `[now .. reset]` track, where it would sit at zero forever — so the invariant is pinned here
-    /// rather than left for each renderer to re-derive from a negated flag.
-    @Test func perSurfacePressureScaleIsTheInverseOfTheMarker() {
+    /// Per-surface scale helpers (#307, restated for three scales in #326): a time marker is
+    /// meaningful on the **window** scale and nowhere else — on either renormalised track it would
+    /// sit at a fixed spot forever. Until Gauge that implication was an equivalence and one bit told
+    /// the two scales apart; a third marker-less scale breaks the reverse direction, so what is
+    /// pinned now is the surviving one-way rule, with the scale itself as the source.
+    @Test func theTimeMarkerIsExactlyTheWindowScale() {
         for style in BarStyle.allCases {
-            #expect(style.menuBarUsesPressureScale == !style.menuBarShowsTimeMarker, "\(style)")
-            #expect(style.popupUsesPressureScale == !style.popupShowsTimeMarker, "\(style)")
+            #expect(style.menuBarShowsTimeMarker == (style.menuBarScale == .window), "\(style)")
+            #expect(style.popupShowsTimeMarker == (style.popupScale == .window), "\(style)")
         }
-        // Spelled out per case, so a future edit to either flag has to face both names.
-        #expect(BarStyle.pressure.menuBarUsesPressureScale)
-        #expect(BarStyle.pressure.popupUsesPressureScale)
-        #expect(BarStyle.mixed.menuBarUsesPressureScale)    // Pressure in the compact menu bar…
-        #expect(!BarStyle.mixed.popupUsesPressureScale)     // …Progress in the roomier dropdown
-        #expect(!BarStyle.progress.menuBarUsesPressureScale)
-        #expect(!BarStyle.progress.popupUsesPressureScale)
+    }
+
+    /// The per-surface scale of every case, spelled out — the table the renderers branch on.
+    @Test func perSurfaceScales() {
+        #expect(BarStyle.progress.menuBarScale == .window)
+        #expect(BarStyle.progress.popupScale == .window)
+        #expect(BarStyle.mixed.menuBarScale == .remaining)   // Pressure in the compact menu bar…
+        #expect(BarStyle.mixed.popupScale == .window)        // …Progress in the roomier dropdown
+        #expect(BarStyle.pressure.menuBarScale == .remaining)
+        #expect(BarStyle.pressure.popupScale == .remaining)
+        #expect(BarStyle.gauge.menuBarScale == .centred)     // the centred scale is both-surfaces
+        #expect(BarStyle.gauge.popupScale == .centred)
+    }
+
+    /// Gauge is the only case on the centred scale, and it carries no marker on either surface —
+    /// the pair of facts that makes its centre tick load-bearing rather than decorative (#326).
+    @Test func onlyGaugeIsCentredAndItIsMarkerLess() {
+        for style in BarStyle.allCases where style != .gauge {
+            #expect(style.menuBarScale != .centred, "\(style)")
+            #expect(style.popupScale != .centred, "\(style)")
+        }
+        #expect(!BarStyle.gauge.menuBarShowsTimeMarker)
+        #expect(!BarStyle.gauge.popupShowsTimeMarker)
     }
 
     /// A known raw value round-trips through `Codable`.

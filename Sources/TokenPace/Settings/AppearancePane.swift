@@ -65,6 +65,7 @@ struct AppearancePane: View {
                             segments: [
                                 .init(value: BarStyle.pressure, title: "Pressure"),
                                 .init(value: BarStyle.mixed, title: "Mixed"),
+                                .init(value: BarStyle.gauge, title: "Gauge"),
                                 .init(value: BarStyle.progress, title: "Progress"),
                             ],
                             active: model.barStyle,
@@ -77,6 +78,9 @@ struct AppearancePane: View {
                         + "limit is spent.")
                     SettingsHint(text: "*Mixed* — *Pressure* on the menu bar and *Progress* in the "
                         + "dropdown.")
+                    SettingsHint(text: "*Gauge* starts from the middle: it grows right as you get "
+                        + "ahead of pace and left as you fall behind, so the quota you are not "
+                        + "getting to spend shows up too.")
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
