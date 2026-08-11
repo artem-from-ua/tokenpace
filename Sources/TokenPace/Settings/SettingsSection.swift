@@ -84,20 +84,47 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         case .general: return "gear"
         case .appearance: return "menubar.rectangle"
         case .notifications: return "bell.badge.fill"
-        case .extraFeatures: return "puzzlepiece.extension.fill"
+        case .extraFeatures: return "puzzlepiece.extension"
         default: return "circle.dashed"
         }
     }
 
-    /// Tint of the sidebar icon chip, matching the corresponding System Settings pane colour (#156).
-    var tint: Color {
+    /// Capsule gradient endpoints of the sidebar icon chip, matching System Settings (#156).
+    /// The system capsules are baked icon artwork, not dynamic colors — each pane has its own
+    /// hand-picked dark→light pair (the spread ranges from ~25% toward white for blue/green up to
+    /// ~61% for gray, so no single formula derives one end from the other), and the artwork does
+    /// not change between light and dark mode. Every pair below was measured with Digital Color
+    /// Meter (sRGB) on a real System Settings sidebar; `dark` sits at the capsule's bottom-right,
+    /// `light` at its top-left.
+    var tint: CapsuleTint {
         switch self {
-        case .about: return .blue
-        case .general: return .gray
-        case .appearance: return .green
-        case .notifications: return .red
-        case .extraFeatures: return .orange
-        default: return .secondary
+        case .about: return CapsuleTint(dark: 0x0D81FA, light: 0x41A6FF)
+        case .general: return CapsuleTint(dark: 0x5E5E5F, light: 0xC0C0C4)
+        case .appearance: return CapsuleTint(dark: 0x2ED149, light: 0x63E977)
+        case .notifications: return CapsuleTint(dark: 0xFB4439, light: 0xFB7A71)
+        case .extraFeatures: return CapsuleTint(dark: 0x5E5CE6, light: 0x8C8AFB)
+        default: return CapsuleTint(dark: 0x5E5E5F, light: 0xC0C0C4)
         }
+    }
+}
+
+/// The two measured endpoints of a sidebar capsule's gradient (see `SettingsSection.tint`).
+struct CapsuleTint {
+    let dark: Color
+    let light: Color
+
+    init(dark: UInt32, light: UInt32) {
+        self.dark = Self.color(dark)
+        self.light = Self.color(light)
+    }
+
+    private static func color(_ hex: UInt32) -> Color {
+        Color(
+            .sRGB,
+            red: Double((hex >> 16) & 0xFF) / 255.0,
+            green: Double((hex >> 8) & 0xFF) / 255.0,
+            blue: Double(hex & 0xFF) / 255.0,
+            opacity: 1
+        )
     }
 }
