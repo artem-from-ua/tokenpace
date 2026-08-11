@@ -115,7 +115,7 @@ private struct SidebarLabelStyle: LabelStyle {
 /// via `SidebarIconMetrics` (no single hardcoded size).
 private struct SidebarChip: View {
     let symbol: String
-    let tint: Color
+    let tint: CapsuleTint
     var metrics: SidebarIconMetrics
     /// Sidebar labels are vibrant, so the material dims them automatically when the window resigns
     /// key — but the chip is a flat tint that never participates in vibrancy, so it kept full color
@@ -129,12 +129,32 @@ private struct SidebarChip: View {
         Image(systemName: symbol)
             .font(.system(size: metrics.symbol, weight: .regular))
             .foregroundStyle(appearsActive ? Color.white : Metrics.inactiveGlyph)
+            // The system artwork's glyph carries a hairline dark edge that separates it from the
+            // tint (visible as a thin gray outline hugging the glyph, strongest below it); a
+            // sub-point shadow reproduces it.
+            .shadow(color: Metrics.glyphEdge, radius: Metrics.glyphEdgeRadius, y: Metrics.glyphEdgeOffset)
             .frame(width: metrics.chip, height: metrics.chip)
             // Fixed 5 pt corner radius, matching the previous AppKit ChipView (System Settings' chip).
             .background(
-                tint.opacity(appearsActive ? 1 : Metrics.inactiveTintAlpha),
+                capsuleStyle,
                 in: RoundedRectangle(cornerRadius: 5, style: .continuous)
             )
+    }
+
+    /// System Settings capsules are not flat: a gradient runs from the measured `tint.dark` at the
+    /// bottom-right up to the measured `tint.light` at the top-left (see `SettingsSection.tint` for
+    /// the per-pane Digital Color Meter values). The axis is tilted off vertical toward the
+    /// top-left corner, but shallower than the full 45° diagonal. The inactive window keeps the
+    /// same gradient at the dimmed opacity.
+    private var capsuleStyle: AnyShapeStyle {
+        let gradient = LinearGradient(
+            colors: [tint.light, tint.dark],
+            startPoint: Metrics.gradientLightPoint,
+            endPoint: Metrics.gradientDarkPoint
+        )
+        return appearsActive
+            ? AnyShapeStyle(gradient)
+            : AnyShapeStyle(gradient.opacity(Metrics.inactiveTintAlpha))
     }
 
     private enum Metrics {
@@ -143,5 +163,14 @@ private struct SidebarChip: View {
         static let inactiveGlyph = Color(.sRGB, white: 0x90 / 255.0, opacity: 1)
         /// Capsule tint opacity in an inactive window; matches System Settings' ~half-strength dim.
         static let inactiveTintAlpha: Double = 0.5
+        /// Gradient axis: light at the top-left, dark at the bottom-right — tilted off vertical,
+        /// but shallower than the corner-to-corner 45° diagonal.
+        static let gradientLightPoint = UnitPoint(x: 0.25, y: 0)
+        static let gradientDarkPoint = UnitPoint(x: 0.75, y: 1)
+        /// The glyph's hairline dark edge (screenshot pixels dip ~10–25% below the capsule
+        /// gradient in a 1–2 device-pixel ring under the glyph).
+        static let glyphEdge = Color.black.opacity(0.25)
+        static let glyphEdgeRadius: CGFloat = 0.5
+        static let glyphEdgeOffset: CGFloat = 0.5
     }
 }
