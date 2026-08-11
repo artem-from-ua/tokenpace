@@ -276,7 +276,9 @@ timestamp → fail-open. Деталі — ADR-0066 (постскриптум).
    візуалізація не інтерполювала крізь діри (та сама чесність, що `ServiceStatus.unknown`/ADR-0027).
    AppKit-free, в `TokenPaceKit` — одне місце, яке пілотний чарт і будь-яка пізніша метрика реюзають.
 3. **Window + pilot chart (#245)** — вікно Insights (`InsightsWindowController`, стиль Settings)
-   рендерить сітку агрегатора першим чартом; відкривається з першого dropdown-пункту «Insights…».
+   рендерить сітку агрегатора першим чартом; відкривається з першого dropdown-пункту «Insights…» —
+   але сам пункт (і роздільник під ним) наразі закоментований в `App.swift`, доки вікно порожнє;
+   контролер і дія `openInsights` лишаються на місці, повернення = розкоментувати блок.
 
 Кінцеві consumer-фічі поверх журналу — окремі: unexplained relief (#239), personal service-status
 history (#240), burn-rate vs baseline (#241). Вони читають той самий журнал через `JournalReader`.

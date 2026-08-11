@@ -935,8 +935,10 @@ Usage history** увімкнено) — синтетичний стуб у жу�
 
 - **Тумблер:** Settings → **Extra features** → секція «Usage history» → «Record usage history»
   (default-off); під ним read-only «Location» (шлях у Application Support) із кнопкою «Open in Finder».
-  Перегляд даних — окреме вікно **«Insights»**, що відкривається з **першого пункту dropdown-меню
-  «Insights…»** (у #242 — каркас-placeholder; наповнюють агрегатор #244 і вікно+пілотний чарт #245).
+  Перегляд даних — окреме вікно **«Insights»**; його пункт **«Insights…»** у dropdown-меню (разом із
+  роздільником після нього) **тимчасово закоментовано** в `App.swift`, бо показувати там поки нічого:
+  вікно лишається каркасом-placeholder (#242), доки не сядуть агрегатор #244 і пілотний чарт #245.
+  Тож у dropdown цього пункту зараз немає — перевіряти нічого, повернути = розкоментувати блок.
 - **Живий запис:** підніми лог-стрім **першим** (`log stream --predicate 'subsystem ==
   "com.artem-n.tokenpace"' --level debug`), тоді `swift run TokenPace` (без стуба) з увімкненим
   тумблером → файл `~/Library/Application Support/com.artem-n.tokenpace/usage-journal-dev-YYYY-MM.jsonl`
