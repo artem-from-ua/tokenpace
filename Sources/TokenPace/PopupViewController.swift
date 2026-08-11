@@ -431,21 +431,28 @@ final class PopupBarView: NSView {
             if pinsStart {
                 // Grow rightwards only — the left edge is `usage` and must not drift under the marker.
                 sx1 = sx0 + msw
-            } else if let anchor {
-                // Gauge (#326): grow the floored pill about the SCALE's zero, not about the span's own
-                // midpoint. The span is `0.5 .. 0.5 ± offset/2`, so its midpoint drifts off-centre as
-                // the offset grows — centring there detaches the pill from the centre tick and leaves a
-                // sliver of bare track between them, which reads as "the ribbon starts past zero" when
-                // the whole style says it starts AT zero. Anchoring keeps the pill straddling the tick
-                // by half its width in either direction, exactly as it does at `offset == 0`.
-                let c = scaleX(CGFloat(anchor), in: rect)
-                sx0 = c - msw / 2
-                sx1 = c + msw / 2
+            } else if anchor != nil {
+                // Handled below — the anchored overlap covers the degenerate case too, so there is
+                // nothing to widen here: growing about the span's own midpoint first would only move
+                // the very edge the overlap then has to put back.
             } else {
                 let c = (sx0 + sx1) / 2
                 sx0 = c - msw / 2
                 sx1 = c + msw / 2
             }
+        }
+        // Gauge (#326): the end that sits ON the zero overlaps it by half the pill's width, in whichever
+        // direction the ribbon runs. Without this the strip merely *begins* at `scaleX(0.5)` and its
+        // rounded cap curves away from there, while the centre tick is *centred* on the same x — so the
+        // colour visibly retreats from the tick by a cap's radius, in mirror image on each side (a
+        // right-running ribbon pulls away rightwards, a left-running one leftwards). Overlapping makes
+        // the ribbon read as growing OUT OF the zero rather than starting near it, and it subsumes the
+        // min-width floor: a degenerate span becomes exactly the centred pill, which is what it was.
+        if let anchor {
+            let c = scaleX(CGFloat(anchor), in: rect)
+            let half = msw / 2
+            if sx0 >= c - half { sx0 = c - half }        // ribbon runs right: extend back over the zero
+            if sx1 <= c + half { sx1 = c + half }        // ribbon runs left: extend forward over it
         }
         // Snap an end that lands within the reserved cap band flush to the track. `scaleX` insets the
         // 0..100 % scale by `bs` on each side so a cap never overhangs the rounded track — but at the
