@@ -173,11 +173,48 @@ struct CompactMoneyEdgeCaseTests {
         #expect(CompactMoney.capText(money(0)) == "$0")
     }
 
-    /// A real but tiny spend keeps its digits: money has moved, and rounding it to `$0` would claim
+    /// A real but tiny spend is never shown as `$0`: money has moved, and the line must not claim
     /// otherwise. The zero case is keyed to the **integer** minor units, not to what rounding produces.
     @Test func aTinySpendIsNotTreatedAsZero() {
         #expect(CompactMoney.text(Money(amountMinor: 1, currency: "USD", exponent: 2)) == "$0.01")
-        #expect(CompactMoney.text(Money(amountMinor: 4, currency: "USD", exponent: 3)) == "$0.00")
+        #expect(CompactMoney.text(Money(amountMinor: 4, currency: "USD", exponent: 3)) != "$0")
+    }
+
+    /// A spend below the smallest unit the line shows reads `<$0.01` — not `$0.00` (which would claim
+    /// nothing was spent) and not a rounded-up `$0.01` (which would overstate it 25×).
+    @Test func subCentSpendReadsAsBelowTheSmallestUnit() {
+        #expect(CompactMoney.text(Money(amountMinor: 4, currency: "USD", exponent: 3)) == "<$0.01")
+        #expect(CompactMoney.text(Money(amountMinor: 4, currency: "EUR", exponent: 4)) == "<€0.01")
+    }
+
+    /// Exactly one cent is representable, so it prints plainly — the threshold is *below*, not *at*.
+    @Test func exactlyOneCentIsNotBelowTheThreshold() {
+        #expect(CompactMoney.text(Money(amountMinor: 1, currency: "USD", exponent: 2)) == "$0.01")
+        #expect(CompactMoney.text(Money(amountMinor: 10, currency: "USD", exponent: 3)) == "$0.01")
+    }
+
+    /// The threshold is the smallest unit *this line* shows, not a hard-coded cent. A whole-unit
+    /// currency (`exponent: 0`) can express nothing below `¥1`, so any non-zero amount is already at or
+    /// above the threshold and prints plainly — the guard never fires.
+    @Test func wholeUnitCurrencyHasNothingBelowItsThreshold() {
+        #expect(CompactMoney.text(Money(amountMinor: 1, currency: "JPY", exponent: 0)) == "¥1")
+        #expect(CompactMoney.text(Money(amountMinor: 214, currency: "JPY", exponent: 0)) == "¥214")
+    }
+
+    /// An `exponent` finer than the currency's convention means those digits *are* representable, so
+    /// they print rather than tripping the threshold: `¥0.4` is an honest rendering, not a sub-unit one.
+    @Test func aFinerExponentPrintsItsDigits() {
+        #expect(CompactMoney.text(Money(amountMinor: 4, currency: "JPY", exponent: 1)) == "¥0.4")
+    }
+
+    /// An unknown currency keeps the ISO-code fallback under the threshold too.
+    @Test func unknownCurrencyBelowThreshold() {
+        #expect(CompactMoney.text(Money(amountMinor: 4, currency: "UAH", exponent: 3)) == "<0.01 UAH")
+    }
+
+    /// Zero is still zero — the threshold applies only to amounts that are genuinely non-zero.
+    @Test func zeroDoesNotUseTheThreshold() {
+        #expect(CompactMoney.text(Money(amountMinor: 0, currency: "USD", exponent: 3)) == "$0")
     }
 
     /// A negative amount (a refund/credit adjustment) picks its rung by magnitude, sign intact.

@@ -18,9 +18,9 @@ import Foundation
 /// | `120400` | `$120K`   |
 ///
 /// Two entry points, for the two halves of the credits line: ``text(_:)`` for the **spend** (a moving
-/// value on the ladder, bar one case — an untouched `$0` shows no cents) and ``capText(_:)`` for the
-/// **cap** (a constant, which drops a zero fraction throughout — `€15`, not `€15.0`). The ladder is
-/// shared; only trailing zeros differ.
+/// value on the ladder, bar two cases — an untouched `$0` shows no cents, and a spend below the
+/// smallest shown unit reads `<$0.01`) and ``capText(_:)`` for the **cap** (a constant, which drops a
+/// zero fraction throughout — `€15`, not `€15.0`). The ladder is shared; only trailing zeros differ.
 ///
 /// Lives in the Kit — not on the AppKit view controller — so it is unit-testable, the same reason
 /// ``ExtraUsageOnset/moneyText(_:)`` keeps its copy of the exact formatter here (that one is a
@@ -39,10 +39,37 @@ public enum CompactMoney {
     public static func text(_ money: Money) -> String {
         // Nothing spent yet reads as `$0`, not `$0.00`: at exactly zero the cents are not precision but
         // padding, and the resting line is trying to be narrow. The test is on the **integer** minor
-        // units, so a real but tiny spend keeps its digits — `$0.004` is `$0.00`, never `$0`, because
-        // money has moved and the line must not claim otherwise.
+        // units, so "no money has moved" and "some money has moved" never look alike.
         guard money.amountMinor != 0 else { return text(money, dropsZeroFraction: true) }
+        // A spend too small for the line's own precision reads `<$0.01` rather than `$0.00`, which would
+        // claim nothing was spent. Rounding *up* to `$0.01` was the alternative and is worse: it
+        // overstates the amount (25× at $0.0004) on a line whose whole job is reporting money.
+        if let floor = belowSmallestShown(money) { return floor }
         return text(money, dropsZeroFraction: false)
+    }
+
+    /// `"<$0.01"` when `money` is a **non-zero** amount that the ladder would render as all zeros — or
+    /// `nil` when it renders honestly on its own.
+    ///
+    /// The threshold is the smallest unit this line actually *shows*, not a hard-coded cent: at
+    /// `exponent: 2` that is `0.01`, and for a whole-unit currency (JPY) it is `¥1`, so the string reads
+    /// `<¥1`. Unreachable with today's payloads — every captured `Money` is `exponent: 2`, whose
+    /// smallest non-zero value is exactly `$0.01` — and kept as a guard for a finer-grained schema,
+    /// where the alternative is a line that reads `$0.00` while money is being spent.
+    static func belowSmallestShown(_ money: Money) -> String? {
+        let digits = min(max(0, money.exponent), 2)   // what the sub-1 rung of the ladder would print
+        let smallest = pow(10, -Double(digits))       // 0.01 at 2 digits, 1 at 0 digits
+        let value = Double(money.amountMinor) / pow(10, Double(money.exponent))
+        guard abs(value) < smallest else { return nil }
+        let rendered = isKnownCurrency(money.currency)
+            ? currencyFormatted(smallest, code: money.currency, digits: digits)
+            : nil
+        guard let text = rendered else {
+            let amount = String(format: "%.\(digits)f", smallest)
+            let code = money.currency.isEmpty ? "" : " \(money.currency.uppercased())"
+            return "<\(amount)\(code)"
+        }
+        return "<\(text)"
     }
 
     /// The compact rendering of a **cap** — the ladder above, but a whole amount drops its zero
