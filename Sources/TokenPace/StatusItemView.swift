@@ -911,7 +911,10 @@ final class StatusItemView: NSView {
         let frozen = frozenStrip(for: bar)
         let gapFrom = frozen != nil ? 0 : l.gapStart
         let gapTo = frozen ?? l.gapEnd
-        fillZone(from: gapFrom, to: gapTo, in: rect, width: w, color: gapColor)
+        // The gap's left edge is `usage` — pinned, so a gap narrower than the min-width floor grows
+        // rightwards instead of bleeding colour back over the already-spent zone (#323). Not applied
+        // under the stub, whose pinned `0…frozen` span is a ribbon from the origin.
+        fillZone(from: gapFrom, to: gapTo, in: rect, width: w, color: gapColor, pinsStart: frozen == nil)
 
         NSGraphicsContext.restoreGraphicsState()
 
@@ -1005,11 +1008,13 @@ final class StatusItemView: NSView {
     /// `floorEmptyToPill` keeps an **exactly empty** span visible as the same min-width pill a hair-thin
     /// span already draws — used by the markerless (Simple/Mixed) ribbon, where the strip is the bar's
     /// only mark and `nil` would blank the widget. Off by default so Pace & Time's empty gap stays empty.
+    /// `pinsStart` forwards to ``PopupBarView/stripRect(from:to:in:pinsStart:)`` and is set by the
+    /// Progress gap, whose left edge is `usage` and so must not drift leftwards under the marker (#323).
     private func fillZone(from: Double, to: Double, in rect: NSRect, width: CGFloat, color: NSColor,
-                          floorEmptyToPill: Bool = false) {
+                          floorEmptyToPill: Bool = false, pinsStart: Bool = false) {
         let span = floorEmptyToPill && to <= from
             ? PopupBarView.pillRect(at: from, in: rect)
-            : PopupBarView.stripRect(from: from, to: to, in: rect)
+            : PopupBarView.stripRect(from: from, to: to, in: rect, pinsStart: pinsStart)
         guard let stripRect = span else { return }
         let r = min(stripRect.width, stripRect.height) / 2
         color.setFill()
