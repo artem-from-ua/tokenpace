@@ -50,6 +50,7 @@ enum StubScenario: String, CaseIterable {
     case farBehind = "far-behind"
     case pressureSweep = "pressure-sweep"
     case gaugeSweep = "gauge-sweep"
+    case barExtremes = "bar-extremes"
     case nearZero = "near-zero"
     case edgeExtremes = "edge-extremes"
     case calmDegraded = "calm-degraded"
@@ -163,6 +164,7 @@ enum StubScenario: String, CaseIterable {
         case .farBehind:           return "Pacing · both far behind (blue)"
         case .pressureSweep:       return "Pacing · Pressure scale (sharp 5h + clipped 7d)"
         case .gaugeSweep:          return "Pacing · Gauge scale (full-left 5h + short-right 7d)"
+        case .barExtremes:         return "Pacing · fill extremes (full blue 5h + 1 % green 7d)"
         case .nearZero:            return "Pacing · near-zero (pill caps)"
         case .edgeExtremes:        return "Pacing · edge extremes (5h 0 %, 7d 100 %)"
         case .calmDegraded:        return "Calm bars + degraded dot"
@@ -248,6 +250,15 @@ enum StubScenario: String, CaseIterable {
                  + "different widths. Switch Bar style across Pressure / Mixed / Progress: Progress "
                  + "must look exactly as before, Pressure visibly wider on the 5h row; the popup's "
                  + "Pressure bars carry one tick at 20 % (exactly on pace)."
+        case .barExtremes:
+            return "Both ends of the fill range at once, for judging the strip's CORNER RADIUS "
+                 + "(#326). 5h: a 75 pp surplus (t = 80 %, u = 5 %) — far past the far-behind "
+                 + "threshold, so blue, and under Gauge it fills the entire left half. 7d: a hair of "
+                 + "a lead (t = 30 %, u = 31.25 %) → 1.4 % of the ahead half, floored to the minimum "
+                 + "pill. Check: the strip's corners match the grey track's (1.5 pt) on BOTH rows — "
+                 + "a full strip must not bulge past the track's own corners, and the tiny one must "
+                 + "not read as a capsule lozenge sitting on a rectangle. Worth a pass in every Bar "
+                 + "style: the radius is shared by all four."
         case .gaugeSweep:
             return "Gauge scale (#326): one row each side of the centre. 5h sits deep behind pace "
                  + "(t = 90 %, u = 70 %) — a surplus twice the time left, so the left half is FULL; "
@@ -355,6 +366,7 @@ enum StubScenario: String, CaseIterable {
         case .farBehind:           return StubUsageTransport(mode: .pacing(.farBehind), now: now)
         case .pressureSweep:       return StubUsageTransport(mode: .pacing(.pressureSweep), now: now)
         case .gaugeSweep:          return StubUsageTransport(mode: .pacing(.gaugeSweep), now: now)
+        case .barExtremes:         return StubUsageTransport(mode: .pacing(.barExtremes), now: now)
         case .nearZero:            return StubUsageTransport(mode: .pacing(.nearZero), now: now)
         case .edgeExtremes:        return StubUsageTransport(mode: .pacing(.edgeExtremes), now: now)
         case .calmDegraded:        return StubUsageTransport(mode: .calmDegraded, now: now)

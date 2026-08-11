@@ -1076,7 +1076,12 @@ final class StatusItemView: NSView {
             ? PopupBarView.pillRect(at: from, in: rect)
             : PopupBarView.stripRect(from: from, to: to, in: rect, pinsStart: pinsStart)
         guard let stripRect = span else { return }
-        let r = min(stripRect.width, stripRect.height) / 2
+        // The strip takes the TRACK's corner radius, not a capsule's. `min(w,h)/2` rounds a 5 pt-tall
+        // strip to 2.5 pt — visibly rounder than the `barCorner` 1.5 pt track it sits in, so a full-width
+        // ribbon bulged past the track's own corners and a short one read as a lozenge on a rectangle.
+        // Two shapes in one bar should share one corner. The popup keeps its capsule: there the bar is
+        // 6 pt and the strip genuinely is a pill (`PopupBarView.draw`).
+        let r = min(Metrics.barCorner, min(stripRect.width, stripRect.height) / 2)
         color.setFill()
         NSBezierPath(roundedRect: stripRect, xRadius: r, yRadius: r).fill()
     }

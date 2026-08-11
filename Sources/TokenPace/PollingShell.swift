@@ -584,6 +584,18 @@ actor StubUsageTransport: UsageTransport {
         /// Pressure and Gauge, and only Gauge draws anything at all on the 5h row.
         case gaugeSweep
 
+        /// **Corner-radius / extreme-fill** frame (#326): the two ends of the fill range on one
+        /// screen, which is where the strip's corner rounding is judged.
+        ///
+        /// - **5h** — `t = 80 %, u = 5 %`: a 75 pp surplus, far past the medium far-behind threshold
+        ///   (2 h of 5 h = 40 pp), so the bar is **blue** and, under Gauge, fills its whole left half
+        ///   (`r = −3.75`, clamped). A full-length strip is the only state where the strip's corners
+        ///   meet the track's own, so it is the state that shows whether the two radii agree.
+        /// - **7d** — `t = 30 %, u = 31.25 %`: a hair of a lead → `+1.4 %` of the ahead half, i.e. far
+        ///   under `minStripWidth`, floored to the minimum pill. That is the opposite end: the
+        ///   smallest mark the widget can draw, where an over-rounded strip reads as a lozenge.
+        case barExtremes
+
         /// (fiveUtil, sevenUtil, fiveResetSeconds, sevenResetSeconds).
         var values: (five: Double, seven: Double, fiveIn: TimeInterval, sevenIn: TimeInterval) {
             switch self {
@@ -611,6 +623,7 @@ actor StubUsageTransport: UsageTransport {
             // `pressureScaleCoefficient` at 1.25.
             case .pressureSweep:      return (97, 38, 1_260, 423_360)
             case .gaugeSweep:         return (70, 38, 1_800, 423_360)
+            case .barExtremes:        return (5, 31.25, 3_600, 423_360)
             }
         }
     }
