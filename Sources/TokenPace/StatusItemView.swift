@@ -915,7 +915,8 @@ final class StatusItemView: NSView {
             let offset = frozenStrip(for: bar).map { $0 * 2 - 1 } ?? l.gaugeOffset
             let far = 0.5 + offset / 2
             fillZone(from: min(0.5, far), to: max(0.5, far), in: rect, width: w,
-                     color: calmedGapColor(l, window: bar.window), floorEmptyToPill: true)
+                     color: calmedGapColor(l, window: bar.window), floorEmptyToPill: true,
+                     anchoredAt: 0.5)
             NSGraphicsContext.restoreGraphicsState()
             return
         }
@@ -1071,10 +1072,12 @@ final class StatusItemView: NSView {
     /// `pinsStart` forwards to ``PopupBarView/stripRect(from:to:in:pinsStart:)`` and is set by the
     /// Progress gap, whose left edge is `usage` and so must not drift leftwards under the marker (#323).
     private func fillZone(from: Double, to: Double, in rect: NSRect, width: CGFloat, color: NSColor,
-                          floorEmptyToPill: Bool = false, pinsStart: Bool = false) {
+                          floorEmptyToPill: Bool = false, pinsStart: Bool = false,
+                          anchoredAt anchor: Double? = nil) {
         let span = floorEmptyToPill && to <= from
-            ? PopupBarView.pillRect(at: from, in: rect)
-            : PopupBarView.stripRect(from: from, to: to, in: rect, pinsStart: pinsStart)
+            ? PopupBarView.pillRect(at: anchor ?? from, in: rect)
+            : PopupBarView.stripRect(from: from, to: to, in: rect, pinsStart: pinsStart,
+                                     anchoredAt: anchor)
         guard let stripRect = span else { return }
         // The strip takes the TRACK's corner radius, not a capsule's. `min(w,h)/2` rounds a 5 pt-tall
         // strip to 2.5 pt — visibly rounder than the `barCorner` 1.5 pt track it sits in, so a full-width

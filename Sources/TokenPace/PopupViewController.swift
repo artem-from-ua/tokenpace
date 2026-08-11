@@ -324,7 +324,8 @@ final class PopupBarView: NSView {
         // both ends on the zero). `pinsStart` stays exclusive to Progress — on the centred scale both
         // edges are data and the floor must grow symmetrically about the zero.
         let span = Self.stripRect(from: stripFrom, to: stripTo, in: rect,
-                                  pinsStart: frozenStripFraction == nil && barStyle.popupScale == .window)
+                                  pinsStart: frozenStripFraction == nil && barStyle.popupScale == .window,
+                                  anchoredAt: barStyle.popupScale == .centred ? 0.5 : nil)
             ?? (barStyle.popupScale == .window ? nil : Self.pillRect(at: stripFrom, in: rect))
         if let stripRect = span {
             let capsule = min(stripRect.width, stripRect.height) / 2
@@ -420,7 +421,8 @@ final class PopupBarView: NSView {
     /// With the pin the floor grows the strip to the **right** and the left snap is skipped, so the strip
     /// starts exactly at `usage`. A gap wider than the floor is untouched either way. Pressure's ribbon
     /// leaves the pin off: that span genuinely starts at the track's origin.
-    static func stripRect(from: Double, to: Double, in rect: NSRect, pinsStart: Bool = false) -> NSRect? {
+    static func stripRect(from: Double, to: Double, in rect: NSRect, pinsStart: Bool = false,
+                          anchoredAt anchor: Double? = nil) -> NSRect? {
         var sx0 = scaleX(CGFloat(from), in: rect)
         var sx1 = scaleX(CGFloat(to), in: rect)
         guard sx1 > sx0 else { return nil }
@@ -429,6 +431,16 @@ final class PopupBarView: NSView {
             if pinsStart {
                 // Grow rightwards only — the left edge is `usage` and must not drift under the marker.
                 sx1 = sx0 + msw
+            } else if let anchor {
+                // Gauge (#326): grow the floored pill about the SCALE's zero, not about the span's own
+                // midpoint. The span is `0.5 .. 0.5 ± offset/2`, so its midpoint drifts off-centre as
+                // the offset grows — centring there detaches the pill from the centre tick and leaves a
+                // sliver of bare track between them, which reads as "the ribbon starts past zero" when
+                // the whole style says it starts AT zero. Anchoring keeps the pill straddling the tick
+                // by half its width in either direction, exactly as it does at `offset == 0`.
+                let c = scaleX(CGFloat(anchor), in: rect)
+                sx0 = c - msw / 2
+                sx1 = c + msw / 2
             } else {
                 let c = (sx0 + sx1) / 2
                 sx0 = c - msw / 2
