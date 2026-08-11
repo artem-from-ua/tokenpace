@@ -194,6 +194,52 @@ public struct BarLayout: Sendable, Equatable {
         return min(1, max(0, (r + k - 1) / k))
     }
 
+    /// The **Gauge** ribbon's signed offset from the bar's **centre** (#326, ADR-0079).
+    ///
+    ///     r      = (u − t) / (1 − t)          // the same signed lead ``pressureLength`` uses
+    ///     offset = clamp(r / k, −1, +1)       // k = pressureScaleCoefficient on the ahead half only
+    ///
+    /// Same numerator, same denominator, zero moved to the middle. The ribbon runs from the centre
+    /// to `centre + offset · (width/2)`: **right** when spending is ahead of pace, **left** when it
+    /// is behind.
+    ///
+    /// **Why `k` applies only to the right.** `k` exists to keep the *ahead* bands wide enough to
+    /// tell apart on a 34 pt track (see ``PacingModel/pressureScaleCoefficient``). Dividing the
+    /// ahead half by it reproduces every ``pressureLength`` landmark at exactly half its distance —
+    /// 20 %, 32.8 % and 100 % of the Pressure bar become 0 %, 10 % and 80 % of the *right half* — so
+    /// the two styles never disagree about the ahead side. The behind half has no such bands to
+    /// separate (it is one green/blue range), so it takes `r` raw and spends its resolution on the
+    /// quantity that actually varies there: the surplus.
+    ///
+    /// **Both halves measure against the same thing — the time left before the reset.**
+    /// `offset = −1` means the surplus equals *all* of it: you could not spend it even if you tried.
+    /// At `t = 90 %, u = 70 %` the surplus (20 pp) is twice the time left (10 pp), so the left half
+    /// is full. Algebraically the left half saturates whenever `u ≤ 2t − 1` — impossible before
+    /// `t = 50 %`, then increasingly common. That flatness late in the window mirrors (on the other
+    /// side) the flatness ``pressureLength`` has near its start, and says something true: late on,
+    /// most surpluses genuinely are larger than the time left to spend them.
+    ///
+    /// **`u == t` is exactly `0` here**, not the `0.20` ``pressureLength`` gives it. The two are not
+    /// in conflict: on the Pressure scale zero is shifted left of `t` and "dead on pace" sits a fifth
+    /// of the way along; on this one, `t` *is* the zero. The renderers floor a degenerate ribbon to a
+    /// centred pill so it reads as "on pace", not as an empty track.
+    ///
+    /// Edge cases match ``pressureLength`` exactly — `u >= 1` is `+1` at any `t` (checked first, so
+    /// `t == 1` never divides by zero), and a due reset (`t = 1`) is `+1` for any `u`.
+    ///
+    /// Only ``BarStyle/gauge`` uses this; it is a **render-only** alternative geometry, and carries
+    /// no colour of its own — the same `(u, t)` yields the same ``severity`` in all four styles.
+    public var gaugeOffset: Double {
+        // Exhausted first, for the same reason `pressureLength` does it: `u >= 1` is the full ahead
+        // half at any `t`, including `t == 1` where the ratio below is undefined.
+        if usageFraction >= 1 { return 1 }
+        let remaining = 1 - timeFraction
+        guard remaining > 0 else { return 1 }   // reset due: no time left to press against
+        let r = (usageFraction - timeFraction) / remaining
+        let k = PacingModel.pressureScaleCoefficient
+        return min(1, max(-1, r >= 0 ? r / k : r))
+    }
+
     /// The bar's pacing **severity** — a three-way grading of the rendered gap colour, computed
     /// AppKit-free from the raw fractions. This is the single Kit-side source that both the
     /// "calm" muting (#105) and the reset-countdown selection (#103, ADR-0028/0029) read.

@@ -151,7 +151,18 @@ final class StatusItemView: NSView {
         static let tickCorner: CGFloat = 1.5
         /// Width of the dark ring around the time-indicator marker.
         static let tickStroke: CGFloat = 1
-        /// Corner radius of each bar.
+        /// Width of the **Gauge** centre tick (#326) — the permanent mark for the zero the ribbon
+        /// grows out of. Deliberately a fifth of ``tickWidth``, and drawn *under* the track in the
+        /// neutral tick tone rather than over it in the pacing colour, so a lone vertical mark on a
+        /// 34 pt bar cannot be mistaken for the Progress time marker: only its ends show, it never
+        /// moves, and it carries no colour.
+        static let centreTickWidth: CGFloat = 1
+        /// How far the transparent gutter under a yellow strip extends past it on each side (#326).
+        /// 1.25 pt against this 5 pt bar — the popup's 1.5 pt scaled to the shorter track.
+        static let yellowGutter: CGFloat = 1.25
+        /// Corner radius of each bar — **and** of the coloured strip drawn over it (`fillZone` clamps
+        /// to this rather than rounding a capsule, #326). The value itself is the shipped 1.5;
+        /// only the strip's sharing of it is new.
         static let barCorner: CGFloat = 1.5
         /// Point size of the ⚠️ error glyph (`exclamationmark.triangle.fill`). Tuned to read at the
         /// same weight as the idle `*` and the bars block.
@@ -223,6 +234,12 @@ final class StatusItemView: NSView {
         /// Ring around the time-indicator marker so it stays distinct over any coloured zone —
         /// `.separatorColor`, so the ring flips with the bar (dark ring on a light bar and vice versa).
         static var indicatorStroke: NSColor { ColorStore.shared.color(.indicatorRing) }
+        /// The **Gauge** centre tick (#326) — `secondaryLabelColor` by default, brighter than both the
+        /// marker's `indicatorRing` and the popup ruler's `tick`. It gets its own role because it
+        /// carries more weight than either: it is the only fixed landmark on the centred scale, and
+        /// the direction the ribbon leaves it in *is* the reading. A dimmer tone made the zero hard to
+        /// locate on the 34 pt bar, and everything the style says is relative to it.
+        static var centreTick: NSColor { ColorStore.shared.color(.centreTick) }
         /// The neutral grey track of a menu-bar bar — the whole-bar background, i.e. BOTH the `used`
         /// head and the future/unused tail on either side of the coloured pacing gap. `labelColor` at
         /// 22 % alpha, so both flanks read identical and the track "breathes" with the wallpaper like a
@@ -842,6 +859,13 @@ final class StatusItemView: NSView {
             // swap fade rather than snap.
             let fill = animated(idleTarget, window: bar.window, part: .fill)
             let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
+            // Gauge's zero is the centre, so its idle pill sits there rather than at the left edge —
+            // the same "grey track + zero pill" shape ADR-0078 fixes for every style, drawn on this
+            // style's own scale. Its centre tick goes down first, under the track, exactly as the
+            // pacing path does: the tick is drawn in *every* state, which is what makes the zero
+            // findable at all.
+            let idleZero = barStyle.menuBarScale == .centred ? 0.5 : 0.0
+            if barStyle.menuBarScale == .centred { drawCentreTick(in: rect) }
             // Zero pressure — the same pill `fillZone(floorEmptyToPill:)` draws for a zero ribbon.
             // The grey track goes down first, exactly as the pacing path does: without it the pill
             // would hang in empty space while every neighbouring bar shows a track.
@@ -849,7 +873,8 @@ final class StatusItemView: NSView {
             path.fill()
             NSGraphicsContext.saveGraphicsState()
             path.addClip()
-            fillZone(from: 0, to: 0, in: rect, width: rect.width, color: fill, floorEmptyToPill: true)
+            fillZone(from: idleZero, to: idleZero, in: rect, width: rect.width, color: fill,
+                     floorEmptyToPill: true)
             NSGraphicsContext.restoreGraphicsState()
             // Progress keeps its identifying mark: the marker at `timeFraction` = 0, drawn over the pill.
             if barStyle.menuBarShowsTimeMarker { drawTimeMarker(at: 0, colour: fill, in: rect) }
@@ -858,6 +883,10 @@ final class StatusItemView: NSView {
 
         let l = bar.layout
         let w = rect.width
+
+        // Gauge's centre tick goes down BEFORE the track (#326): the track then covers its middle and
+        // only the ends stand proud, which is what keeps it from reading as a Progress time marker.
+        if barStyle.menuBarScale == .centred { drawCentreTick(in: rect) }
 
         // Whole-bar rounded grey track (drawn first; the gap paints over it). Both flanks of the gap —
         // the used head and the future/unused tail — are this one tone, so they read identical.
@@ -879,6 +908,24 @@ final class StatusItemView: NSView {
         // `frozenStripFraction`; it overrides the length, so the stub is unaffected by the rescale.
         // The *style* still decides whether a marker follows, so Progress keeps its full anatomy under
         // the stub instead of collapsing into Pressure.
+        // Gauge (#326, ADR-0079): the ribbon runs from the bar's CENTRE to `0.5 + offset/2`, so its
+        // direction carries ahead-vs-behind and its length carries by how much. Same colour source as
+        // every other style — this changes the geometry, never the verdict. The floor applies for the
+        // same reason it does on the Pressure branch, but about the centre: `u == t` is a real,
+        // recurring state (and the exact one this style is built to show as "on pace"), so a
+        // degenerate span becomes a centred pill rather than a blank track. `pinsStart` stays off:
+        // both edges here are data, and the floor must grow symmetrically about the zero — pinning
+        // would shove the pill off-centre and make "dead on pace" read as a small lead.
+        if barStyle.menuBarScale == .centred {
+            let offset = frozenStrip(for: bar).map { $0 * 2 - 1 } ?? l.gaugeOffset
+            let far = 0.5 + offset / 2
+            fillZone(from: min(0.5, far), to: max(0.5, far), in: rect, width: w,
+                     color: calmedGapColor(l, window: bar.window), floorEmptyToPill: true,
+                     anchoredAt: 0.5)
+            NSGraphicsContext.restoreGraphicsState()
+            return
+        }
+
         if !barStyle.menuBarShowsTimeMarker {
             // A **zero-length** ribbon still has to read as "zero", not as an empty track. Without a time
             // marker this branch is the bar's only mark, so `stripRect`'s degenerate-span `nil` would
@@ -919,6 +966,30 @@ final class StatusItemView: NSView {
         drawTimeMarker(at: frozen ?? l.timeFraction,
                        colour: calmedGapColor(l, window: bar.window, part: .marker),
                        in: rect)
+    }
+
+    /// The **Gauge** centre tick (#326, ADR-0079): a permanent 1 pt vertical mark at the bar's
+    /// midpoint, in the neutral tick tone, drawn **under** the track so only its protruding ends
+    /// show.
+    ///
+    /// Deliberately *not* built on ``drawTimeMarker(at:colour:in:)`` despite the similar shape — the
+    /// semantics are opposite, and every difference here is doing work. That marker is data (it moves
+    /// with `timeFraction`, takes the pacing colour, and sits on top with a `.copy` reset and flanking
+    /// outline); this is a fixed rule of the scale. Drawing it under the track in grey at a fifth the
+    /// width is what stops a lone vertical mark on a 34 pt bar from reading as Progress's marker —
+    /// the objection that kept ticks out of the menu bar entirely under Pressure (see
+    /// `PopupBarView.tickFractions`). It is drawn in **every** Gauge state, idle included: a direction
+    /// needs something to be a direction from.
+    private func drawCentreTick(in rect: NSRect) {
+        let cx = PopupBarView.scaleX(0.5, in: rect).rounded()
+        let w = Metrics.centreTickWidth
+        let h = Metrics.tickHeight
+        // Neutral `centreTick` (secondaryLabelColor) — never a pacing colour: this is scale furniture,
+        // not data. Its own role rather than the marker's ring or the popup ruler's tick, both of
+        // which sit dimmer: those only ever separate or annotate shapes that are already visible,
+        // whereas this is the sole landmark the whole reading is relative to.
+        Palette.centreTick.setFill()
+        NSRect(x: cx - w / 2, y: rect.midY - h / 2, width: w, height: h).fill()
     }
 
     /// The time-indicator marker: a slim, lightly-rounded vertical bar rather than a dot — reads as a
@@ -994,6 +1065,25 @@ final class StatusItemView: NSView {
             .bar(surface: .menuBar, row: window.id, part: part), target: target)
     }
 
+    /// Whether this strip is rendering the **yellow** (mild-lead) pacing colour, and so wants the
+    /// transparent gutter beneath it (#326).
+    ///
+    /// Returns `false` outright under calm colours: `mutesCalm` folds yellow into `calmWhite`, so there
+    /// is no yellow left to rescue and cutting the track would only punch a hole under a neutral strip.
+    /// Otherwise the *rendered* colour is compared against the live `.yellow` role — it has already been
+    /// through the animator, so a mid-transition frame correctly counts as not-yet-yellow. Both sides
+    /// are converted into one colour space first; a dynamic catalogue colour never compares equal to a
+    /// resolved one directly.
+    private func isYellow(_ colour: NSColor) -> Bool {
+        guard !calmColorMode.mutesCalm else { return false }
+        guard let a = colour.usingColorSpace(.sRGB),
+              let b = ColorStore.shared.color(.yellow).usingColorSpace(.sRGB) else { return false }
+        let tolerance = 0.02
+        return abs(a.redComponent - b.redComponent) < tolerance
+            && abs(a.greenComponent - b.greenComponent) < tolerance
+            && abs(a.blueComponent - b.blueComponent) < tolerance
+    }
+
     /// Fill the coloured strip spanning the fraction range `[from, to)` of a bar as a rounded capsule.
     /// Shares `PopupBarView`'s inset-scale geometry: the span is mapped through the same `minStripWidth/2`
     /// inset and floored to a minimum width, so a near-zero span reads as a rounded "pill" (rounded on
@@ -1006,12 +1096,36 @@ final class StatusItemView: NSView {
     /// `pinsStart` forwards to ``PopupBarView/stripRect(from:to:in:pinsStart:)`` and is set by the
     /// Progress gap, whose left edge is `usage` and so must not drift leftwards under the marker (#323).
     private func fillZone(from: Double, to: Double, in rect: NSRect, width: CGFloat, color: NSColor,
-                          floorEmptyToPill: Bool = false, pinsStart: Bool = false) {
+                          floorEmptyToPill: Bool = false, pinsStart: Bool = false,
+                          anchoredAt anchor: Double? = nil) {
         let span = floorEmptyToPill && to <= from
-            ? PopupBarView.pillRect(at: from, in: rect)
-            : PopupBarView.stripRect(from: from, to: to, in: rect, pinsStart: pinsStart)
+            ? PopupBarView.pillRect(at: anchor ?? from, in: rect)
+            : PopupBarView.stripRect(from: from, to: to, in: rect, pinsStart: pinsStart,
+                                     anchoredAt: anchor)
         guard let stripRect = span else { return }
-        let r = min(stripRect.width, stripRect.height) / 2
+        // The strip takes the TRACK's corner radius, not a capsule's. `min(w,h)/2` rounds a 5 pt-tall
+        // strip to 2.5 pt — visibly rounder than the `barCorner` 1.5 pt track it sits in, so a full-width
+        // ribbon bulged past the track's own corners and a short one read as a lozenge on a rectangle.
+        // Two shapes in one bar should share one corner. The popup keeps its capsule: there the bar is
+        // 6 pt and the strip genuinely is a pill (`PopupBarView.draw`).
+        let r = min(Metrics.barCorner, min(stripRect.width, stripRect.height) / 2)
+        // Knock a transparent gutter out of the grey track under a **yellow** strip (#326), mirroring
+        // the popup: yellow is the one pacing colour close enough in luminance to the track to lose its
+        // edge against it, so the wallpaper is let through on either side to separate the two. Narrower
+        // here (1.25 pt) than the popup's 1.5, in proportion to the shorter 5 pt bar.
+        //
+        // `.clear` with `.copy` REPLACES the track's pixels rather than blending over them — plain
+        // `.sourceOver` of a clear colour is a no-op. `drawBar` has already clipped to the rounded bar,
+        // so the cut cannot escape it; the state is saved anyway so `.copy` never leaks into the fill.
+        if isYellow(color) {
+            let gutter = stripRect.insetBy(dx: -Metrics.yellowGutter, dy: 0)
+            let gr = min(r, min(gutter.width, gutter.height) / 2)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current?.compositingOperation = .copy
+            NSColor.clear.setFill()
+            NSBezierPath(roundedRect: gutter, xRadius: gr, yRadius: gr).fill()
+            NSGraphicsContext.restoreGraphicsState()
+        }
         color.setFill()
         NSBezierPath(roundedRect: stripRect, xRadius: r, yRadius: r).fill()
     }

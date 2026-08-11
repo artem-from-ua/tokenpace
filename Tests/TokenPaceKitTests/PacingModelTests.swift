@@ -225,7 +225,8 @@ struct BarLayoutTests {
 /// - **remaining scale** (``BarLayout/pressureLength`` = `|u − t| / (1 − t)`) — what it draws now.
 ///
 /// `minPillFraction` is the renderer's floor expressed as a fraction of the bar: `minStripWidth`
-/// is ¾ of the bar height (3.75 pt at the menu bar's 5 pt) against a 34 pt track ⇒ ~11 %. It is
+/// is ¾ of the bar height less 1 pt (2.75 pt at the menu bar's 5 pt, #326) against a 34 pt track
+/// ⇒ ~8.1 %. It is
 /// duplicated here as a plain constant because the geometry that enforces it lives in the AppKit
 /// target, which has no tests — see #307. A state below this floor renders as the minimum pill,
 /// i.e. indistinguishable from every other state below it.
@@ -240,8 +241,9 @@ struct RibbonLengthTests {
         let utilPct: Double
     }
 
-    /// The renderer inflates anything narrower than this to the minimum pill (~11 % of the track).
-    private static let minPillFraction = 0.11
+    /// The renderer inflates anything narrower than this to the minimum pill (~8.1 % of the track:
+    /// `minStripWidth` 2.75 pt / `barWidth` 34 pt).
+    private static let minPillFraction = 2.75 / 34
 
     private static let states: [State] = [
         .init(name: "Deep behind",       timePct: 80, utilPct: 30),
@@ -286,17 +288,21 @@ struct RibbonLengthTests {
         }
     }
 
-    /// ~21 % of the reachable state space renders as the minimum pill on the window scale. Among
-    /// the surveyed states five do: "almost exactly on pace" and "three points from exhaustion"
+    /// A chunk of the reachable state space renders as the minimum pill on the window scale. Among
+    /// the surveyed states four do: "almost exactly on pace" and "three points from exhaustion"
     /// draw the same mark. This is the defect #307 was filed against.
-    @Test func windowScaleCollapsesFiveStatesIntoTheMinimumPill() {
+    ///
+    /// Was five until #326 narrowed `minStripWidth` by 1 pt: "Mildly behind" (a 10 pp gap) now clears
+    /// the floor at 8.1 % where it did not at 11 %. The narrower floor swallows strictly less, so this
+    /// list can only ever shrink — an entry reappearing here means the floor grew again.
+    @Test func windowScaleCollapsesFourStatesIntoTheMinimumPill() {
         let collapsed = Self.states.filter { s in
             let l = Self.layout(s)
             let width = l.gapEnd - l.gapStart
             return width > 0 && width < Self.minPillFraction
         }.map(\.name)
         #expect(collapsed.sorted() == [
-            "Ahead, late", "Ahead, very late", "Mild lead, early", "Mild lead, late", "Mildly behind",
+            "Ahead, late", "Ahead, very late", "Mild lead, early", "Mild lead, late",
         ])
     }
 
@@ -468,6 +474,168 @@ struct RibbonLengthTests {
         for (util, expectZero) in [(20.0, true), (37.0, true), (37.5, true), (38.0, false), (45.0, false)] {
             let l = Self.layout(.init(name: "calm", timePct: t * 100, utilPct: util))
             #expect((l.pressureLength == 0) == expectZero, "u=\(util) (zero at \(zeroAt * 100) %)")
+        }
+    }
+}
+
+// MARK: - gaugeOffset (#326)
+
+/// The **centred** scale: the same signed lead `pressureLength` measures, with zero moved to the
+/// bar's middle so the underpace half renders at all (ADR-0079). The states are the same surveyed
+/// set `RibbonLengthTests` uses, so the two scales can be compared row by row.
+@Suite("BarLayout gauge offset")
+struct GaugeOffsetTests {
+
+    private struct State {
+        let name: String
+        let timePct: Double
+        let utilPct: Double
+    }
+
+    private static let states: [State] = [
+        .init(name: "Deep behind",       timePct: 80, utilPct: 30),
+        .init(name: "Behind, early",     timePct: 20, utilPct: 5),
+        .init(name: "Behind, mid",       timePct: 50, utilPct: 35),
+        .init(name: "Behind, late",      timePct: 90, utilPct: 70),
+        .init(name: "Mildly behind",     timePct: 60, utilPct: 50),
+        .init(name: "Dead on pace",      timePct: 55, utilPct: 55),
+        .init(name: "Mild lead, early",  timePct: 30, utilPct: 38),
+        .init(name: "Mild lead, late",   timePct: 82, utilPct: 86),
+        .init(name: "Ahead, mid-window", timePct: 50, utilPct: 70),
+        .init(name: "Ahead, late",       timePct: 82, utilPct: 90),
+        .init(name: "Ahead, very late",  timePct: 93, utilPct: 97),
+        .init(name: "Exhausted, early",  timePct: 10, utilPct: 100),
+        .init(name: "Exhausted",         timePct: 70, utilPct: 100),
+    ]
+
+    private static func layout(_ s: State) -> BarLayout {
+        let resetsAt = now + (1.0 - s.timePct / 100) * 18_000
+        return PacingModel.barLayout(
+            utilization: s.utilPct, resetsAt: resetsAt, now: now, window: .fiveHour)
+    }
+
+    private static let aheadGroup = [
+        "Mild lead, early", "Mild lead, late", "Ahead, mid-window", "Ahead, late", "Ahead, very late",
+    ]
+
+    /// The offset of each surveyed state, pinned. Negatives are behind pace (ribbon left of centre),
+    /// positives ahead (right). Note the two states the shipped scales cannot separate — "Deep
+    /// behind" and "Behind, late" both saturate at `−1` here, but they at least reach the edge
+    /// instead of collapsing onto the same minimum pill as "Dead on pace".
+    @Test func gaugeOffsetsPerState() {
+        let expected: [String: Double] = [
+            "Deep behind":       -1.0,      // r = −2.5, clamped
+            "Behind, early":     -0.1875,
+            "Behind, mid":       -0.30,
+            "Behind, late":      -1.0,      // r = −2, clamped: the surplus is twice the time left
+            "Mildly behind":     -0.25,
+            "Dead on pace":       0.0,      // the centre — not Pressure's 0.20
+            "Mild lead, early":   0.0914,
+            "Mild lead, late":    0.1778,
+            "Ahead, mid-window":  0.32,
+            "Ahead, late":        0.3556,
+            "Ahead, very late":   0.4571,
+            "Exhausted, early":   1.0,
+            "Exhausted":          1.0,
+        ]
+        for s in Self.states {
+            let got = Self.layout(s).gaugeOffset
+            #expect(abs(got - expected[s.name]!) < 1e-3, "\(s.name): \(got)")
+        }
+    }
+
+    /// `u >= 1` fills the whole ahead half at any `t` — the same first-checked rule
+    /// `pressureLength` has, so a spent limit never shrinks back as the reset approaches.
+    @Test func exhaustedAlwaysFillsTheRightHalf() {
+        for pct in [0.0, 10, 50, 70, 99] {
+            let l = Self.layout(.init(name: "spent", timePct: pct, utilPct: 100))
+            #expect(l.gaugeOffset == 1.0, "t=\(pct)")
+        }
+    }
+
+    /// The left half saturates when the surplus reaches the time remaining, i.e. `u <= 2t − 1`.
+    /// Impossible before `t = 50 %`, then increasingly common — the trade-off ADR-0079 accepts,
+    /// mirroring Pressure's flatness near the *start* of a window.
+    ///
+    /// Tested with a tolerance rather than `== −1`: `2t − 1` is not exactly representable (`1 − 0.9`
+    /// is `0.09999999999999998`), so a state sitting *on* the boundary lands a few ulps short of the
+    /// clamp. That is a property of the boundary, not of the formula — either side of it by any
+    /// visible margin behaves as stated, and a sub-ulp difference is thousandths of a point on screen.
+    @Test func deepSurplusFillsTheLeftHalf() {
+        for (timePct, utilPct, expectFull) in [
+            (90.0, 70.0, true),     // surplus 20 pp vs 10 pp left — twice over
+            (90.0, 79.0, true),     // just past the boundary
+            (90.0, 85.0, false),    // inside it
+            (70.0, 40.0, true),
+            (40.0, 0.0, false),     // before t = 50 % the left half cannot saturate at all
+        ] {
+            let o = Self.layout(.init(name: "surplus", timePct: timePct, utilPct: utilPct)).gaugeOffset
+            #expect((o <= -1.0 + 1e-9) == expectFull, "t=\(timePct) u=\(utilPct): \(o)")
+        }
+    }
+
+    /// The acceptance criterion from #326: switching Pressure ↔ Gauge must never change what the
+    /// **ahead** side says. Same ordering, same monotonicity — `k` divides that half by a constant,
+    /// so each landmark simply lands at half its Pressure distance, measured from the centre.
+    @Test func aheadHalfMatchesPressureOrdering() {
+        let rows = Self.aheadGroup.map { name -> (String, Double, Double) in
+            let l = Self.layout(Self.states.first { $0.name == name }!)
+            return (name, l.pressureLength, l.gaugeOffset)
+        }
+        #expect(rows.map(\.2) == rows.map(\.2).sorted())            // monotonic, like Pressure's
+        for (name, pressure, gauge) in rows {
+            #expect(gauge > 0, "\(name) is an ahead state")
+            // Pressure is `r/k + (k−1)/k`, Gauge is `r/k` — the same term, shifted by the constant
+            // that puts Pressure's on-pace at 0.20.
+            #expect(abs((pressure - gauge) - 0.20) < 1e-9, "\(name): \(pressure) vs \(gauge)")
+        }
+    }
+
+    /// `u == t` is the **centre**, at any point in the window. Where Pressure gives the tie a fixed
+    /// 20 % (its zero sits left of `t`), here `t` *is* the zero — the renderers floor the degenerate
+    /// span to a centred pill so it still reads as a mark rather than an empty track.
+    @Test func deadOnPaceIsTheCentre() {
+        for pct in [0.0, 25, 55, 90, 99] {
+            let l = Self.layout(.init(name: "tie", timePct: pct, utilPct: pct))
+            #expect(abs(l.gaugeOffset) < 1e-9, "t=u=\(pct)")
+        }
+    }
+
+    /// A due reset (`t = 1`) would divide by zero; the guard makes it the full ahead half whatever
+    /// the usage — never NaN or infinity. Mirrors `pressureLength`'s own guard.
+    @Test func resetDueDoesNotDivideByZero() {
+        for util in [0.0, 40, 100] {
+            let l = PacingModel.barLayout(
+                utilization: util, resetsAt: now - 1, now: now, window: .fiveHour)
+            #expect(l.gaugeOffset == 1.0, "u=\(util)")
+        }
+    }
+
+    /// Across the whole reachable grid the offset stays inside `[−1, +1]` and is never NaN — the
+    /// renderers map it straight onto half the track, so an out-of-range value would draw outside
+    /// the bar.
+    @Test func offsetStaysInRange() {
+        for timePct in stride(from: 1.0, through: 98.0, by: 1.0) {
+            for utilPct in stride(from: 0.0, through: 99.0, by: 1.0) {
+                let o = Self.layout(.init(name: "grid", timePct: timePct, utilPct: utilPct)).gaugeOffset
+                #expect(!o.isNaN, "t=\(timePct) u=\(utilPct)")
+                #expect(o >= -1.0 && o <= 1.0, "t=\(timePct) u=\(utilPct): \(o)")
+            }
+        }
+    }
+
+    /// The sign is the reading: behind pace goes left, ahead goes right, the tie is neither. Pinned
+    /// across the grid because the whole style rests on it — a sign error would invert every verdict
+    /// while leaving lengths plausible.
+    @Test func signFollowsPacing() {
+        for timePct in stride(from: 1.0, through: 98.0, by: 1.0) {
+            for utilPct in stride(from: 0.0, through: 99.0, by: 1.0) {
+                let l = Self.layout(.init(name: "grid", timePct: timePct, utilPct: utilPct))
+                let o = l.gaugeOffset
+                if utilPct > timePct { #expect(o > 0, "t=\(timePct) u=\(utilPct)") }
+                else if utilPct < timePct { #expect(o < 0, "t=\(timePct) u=\(utilPct)") }
+                else { #expect(o == 0, "t=\(timePct) u=\(utilPct)") }
+            }
         }
     }
 }

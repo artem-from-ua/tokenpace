@@ -566,6 +566,36 @@ actor StubUsageTransport: UsageTransport {
         /// pixel-identical to its pre-#307 rendering, Pressure visibly wider on the 5h row.
         case pressureSweep
 
+        /// **Gauge-scale** frame (#326, ADR-0079): one row on each side of the centre, so the style's
+        /// whole point — that the ribbon has a *direction* — is visible on one screen.
+        ///
+        /// - **5h** — `t = 90 %, u = 70 %`: a 20 pp surplus with 10 % of the window left, i.e. twice
+        ///   as much quota as there is time to spend it in. `r = −2` clamps to `−1`, so the **left
+        ///   half is full**. Every shipped style renders this state as the minimum pill: on the
+        ///   window scale the gap is 20 % but reads as "behind" only by the marker's position, and on
+        ///   the Pressure scale `max(0, …)` flattens it to zero outright. This is the state the style
+        ///   exists for.
+        /// - **7d** — `t = 30 %, u = 38 %`: the same mild lead `pressure-sweep` uses, which puts a
+        ///   short ribbon to the **right** of centre (`+7.2 %` here vs 29 % of the Pressure bar — the
+        ///   ahead half is the same ordering at half the distance). Paired with the 5h row it shows
+        ///   the two directions at once.
+        ///
+        /// Switch Bar style across all four on this frame: the ahead side must not move between
+        /// Pressure and Gauge, and only Gauge draws anything at all on the 5h row.
+        case gaugeSweep
+
+        /// **Corner-radius / extreme-fill** frame (#326): the two ends of the fill range on one
+        /// screen, which is where the strip's corner rounding is judged.
+        ///
+        /// - **5h** — `t = 80 %, u = 5 %`: a 75 pp surplus, far past the medium far-behind threshold
+        ///   (2 h of 5 h = 40 pp), so the bar is **blue** and, under Gauge, fills its whole left half
+        ///   (`r = −3.75`, clamped). A full-length strip is the only state where the strip's corners
+        ///   meet the track's own, so it is the state that shows whether the two radii agree.
+        /// - **7d** — `t = 30 %, u = 31.25 %`: a hair of a lead → `+1.4 %` of the ahead half, i.e. far
+        ///   under `minStripWidth`, floored to the minimum pill. That is the opposite end: the
+        ///   smallest mark the widget can draw, where an over-rounded strip reads as a lozenge.
+        case barExtremes
+
         /// (fiveUtil, sevenUtil, fiveResetSeconds, sevenResetSeconds).
         var values: (five: Double, seven: Double, fiveIn: TimeInterval, sevenIn: TimeInterval) {
             switch self {
@@ -592,6 +622,8 @@ actor StubUsageTransport: UsageTransport {
             // (20.8–32.8 %): the pair proves yellow and orange stay separable, which is what pins
             // `pressureScaleCoefficient` at 1.25.
             case .pressureSweep:      return (97, 38, 1_260, 423_360)
+            case .gaugeSweep:         return (70, 38, 1_800, 423_360)
+            case .barExtremes:        return (5, 31.25, 3_600, 423_360)
             }
         }
     }
