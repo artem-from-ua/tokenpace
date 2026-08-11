@@ -115,7 +115,10 @@ final class PopupBarView: NSView {
     private enum Metrics {
         /// Height of the pacing bar itself (the coloured zones + indicator dot).
         static let barHeight: CGFloat = 6
-        static let corner: CGFloat = 2
+        /// Corner radius of the track **and** of the coloured strip laid over it (#326). Narrowed from
+        /// 2, and now shared: the strip used to round as a capsule (`min(w,h)/2` = 3), so the two
+        /// shapes stacked in one bar carried different corners — the same mismatch the menu bar had.
+        static let corner: CGFloat = 1.5
         /// Width of the time-indicator marker — a slim vertical bar, narrower than the old dot so it
         /// reads as a crisp position tick rather than a blob.
         static let indicatorWidth: CGFloat = 7
@@ -255,7 +258,9 @@ final class PopupBarView: NSView {
             // style's own scale). The centre tick itself comes from `drawTicks` below — in the popup
             // the ruler already sits under the bar, so no separate under-track mark is needed.
             if let idleShape = Self.pillRect(at: barStyle.popupScale == .centred ? 0.5 : 0, in: rect) {
-                let corner = min(idleShape.width, idleShape.height) / 2      // capsule, like any pill
+                // Same corner as the track and every other strip (#326) — idle is a zero-length ribbon,
+                // so it must not be shaped differently from one.
+                let corner = min(Metrics.corner, min(idleShape.width, idleShape.height) / 2)
                 let idlePath = NSBezierPath(roundedRect: idleShape, xRadius: corner, yRadius: corner)
                 if blocked {
                     idleColor.setFill()
@@ -328,7 +333,8 @@ final class PopupBarView: NSView {
                                   anchoredAt: barStyle.popupScale == .centred ? 0.5 : nil)
             ?? (barStyle.popupScale == .window ? nil : Self.pillRect(at: stripFrom, in: rect))
         if let stripRect = span {
-            let capsule = min(stripRect.width, stripRect.height) / 2
+            // The track's corner, not a capsule's (#326) — two shapes in one bar share one corner.
+            let capsule = min(Metrics.corner, min(stripRect.width, stripRect.height) / 2)
             let stripPath = NSBezierPath(roundedRect: stripRect, xRadius: capsule, yRadius: capsule)
             withGlow(gapColor, radius: Self.gapGlowRadius, strength: Self.gapGlowStrength) {
                 gapColor.setFill()
@@ -386,9 +392,19 @@ final class PopupBarView: NSView {
     // MARK: - Inset scale (min-strip geometry)
 
     /// The minimum width of the coloured strip — so a near-zero span renders as a rounded "pill"
-    /// (a short capsule with fully-rounded ends) rather than a hairline sliver. Set to ¾ of the bar
-    /// height, i.e. slightly shorter than a full circle (whose diameter would be the height).
-    static func minStripWidth(_ rect: NSRect) -> CGFloat { 0.75 * rect.height }
+    /// (a short capsule with fully-rounded ends) rather than a hairline sliver.
+    ///
+    /// Was a flat ¾ of the bar height; **narrowed by 1 pt** (#326) so the smallest mark reads as a
+    /// mark rather than a blob. That makes the pill 2.75 pt on the 5 pt menu-bar track and 3.5 pt on
+    /// the 6 pt popup one — no longer a fixed ratio of the height, which is deliberate: the floor
+    /// exists to keep a tiny span *visible*, and visibility does not scale with the bar the way its
+    /// corner radius does.
+    ///
+    /// This is the single knob for the whole inset geometry, not just the floor: ``scaleX`` insets the
+    /// 0..1 scale by half of it at each end, so every fraction on both surfaces — strips, pills, the
+    /// time marker, the tick ruler and Gauge's centre tick — shifts with this number, and all of them
+    /// stay aligned with each other because they read it from here.
+    static func minStripWidth(_ rect: NSRect) -> CGFloat { 0.75 * rect.height - 1 }
 
     /// Map a fraction `f ∈ [0,1]` to an x inside the bar, with a symmetric inset (`minStripWidth/2`)
     /// on each end reserved for the min-strip's rounded caps. The 0..100 % scale therefore lives in

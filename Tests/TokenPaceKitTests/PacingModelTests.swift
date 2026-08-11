@@ -225,7 +225,8 @@ struct BarLayoutTests {
 /// - **remaining scale** (``BarLayout/pressureLength`` = `|u − t| / (1 − t)`) — what it draws now.
 ///
 /// `minPillFraction` is the renderer's floor expressed as a fraction of the bar: `minStripWidth`
-/// is ¾ of the bar height (3.75 pt at the menu bar's 5 pt) against a 34 pt track ⇒ ~11 %. It is
+/// is ¾ of the bar height less 1 pt (2.75 pt at the menu bar's 5 pt, #326) against a 34 pt track
+/// ⇒ ~8.1 %. It is
 /// duplicated here as a plain constant because the geometry that enforces it lives in the AppKit
 /// target, which has no tests — see #307. A state below this floor renders as the minimum pill,
 /// i.e. indistinguishable from every other state below it.
@@ -240,8 +241,9 @@ struct RibbonLengthTests {
         let utilPct: Double
     }
 
-    /// The renderer inflates anything narrower than this to the minimum pill (~11 % of the track).
-    private static let minPillFraction = 0.11
+    /// The renderer inflates anything narrower than this to the minimum pill (~8.1 % of the track:
+    /// `minStripWidth` 2.75 pt / `barWidth` 34 pt).
+    private static let minPillFraction = 2.75 / 34
 
     private static let states: [State] = [
         .init(name: "Deep behind",       timePct: 80, utilPct: 30),
@@ -286,17 +288,21 @@ struct RibbonLengthTests {
         }
     }
 
-    /// ~21 % of the reachable state space renders as the minimum pill on the window scale. Among
-    /// the surveyed states five do: "almost exactly on pace" and "three points from exhaustion"
+    /// A chunk of the reachable state space renders as the minimum pill on the window scale. Among
+    /// the surveyed states four do: "almost exactly on pace" and "three points from exhaustion"
     /// draw the same mark. This is the defect #307 was filed against.
-    @Test func windowScaleCollapsesFiveStatesIntoTheMinimumPill() {
+    ///
+    /// Was five until #326 narrowed `minStripWidth` by 1 pt: "Mildly behind" (a 10 pp gap) now clears
+    /// the floor at 8.1 % where it did not at 11 %. The narrower floor swallows strictly less, so this
+    /// list can only ever shrink — an entry reappearing here means the floor grew again.
+    @Test func windowScaleCollapsesFourStatesIntoTheMinimumPill() {
         let collapsed = Self.states.filter { s in
             let l = Self.layout(s)
             let width = l.gapEnd - l.gapStart
             return width > 0 && width < Self.minPillFraction
         }.map(\.name)
         #expect(collapsed.sorted() == [
-            "Ahead, late", "Ahead, very late", "Mild lead, early", "Mild lead, late", "Mildly behind",
+            "Ahead, late", "Ahead, very late", "Mild lead, early", "Mild lead, late",
         ])
     }
 

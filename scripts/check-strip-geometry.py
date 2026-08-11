@@ -25,7 +25,7 @@ BAR_HEIGHT = 6.0
 BAR_WIDTH = 505.0
 MIN_X = 0.0
 
-MIN_STRIP_WIDTH = 0.75 * BAR_HEIGHT      # PopupBarView.minStripWidth
+MIN_STRIP_WIDTH = 0.75 * BAR_HEIGHT - 1  # PopupBarView.minStripWidth (narrowed by 1 pt, #326)
 INSET = MIN_STRIP_WIDTH / 2              # the `bs` reserved for the pill's caps
 
 
