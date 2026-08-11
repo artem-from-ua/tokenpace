@@ -1,10 +1,15 @@
 ---
 status: accepted
 date: 2026-07-24
-superseded_by: [0038, 0059, 0060, 0074]
+superseded_by: [0038, 0059, 0060, 0074, 0078]
 ---
 
 # ADR-0027: Чесний стан «немає активної 5h-сесії» замість фантомного ресету
+
+> **Частково superseded [ADR-0078](0078-idle-drawn-as-zero-in-both-styles.md):** «суцільно синій бар»
+> у D1/D4 більше не чинне — idle малюється як **нуль** (сірий трек + синя пігулка на нулі) в обох
+> `BarStyle`; під Progress зверху додається маркер часу на нулі. Колір і статус «ready to start»
+> лишаються, змінилася лише форма.
 
 > **Частково superseded [ADR-0074](0074-one-reset-format-on-both-surfaces.md)
 > ([#284](https://github.com/artem-from-ua/tokenpace/issues/284)):** **D3 скасовано повністю** —
