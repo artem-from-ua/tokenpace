@@ -55,9 +55,17 @@ enum PersistedConfig {
         /// How the menu-bar widget picks/hides the reset countdown (#103), stored as the raw
         /// `ResetCountdownMode` string. Default `.smart` — see the property.
         static let resetCountdownModeMenuBar = "resetCountdownModeMenuBar"
-        /// How the pacing bars are presented on both surfaces (#224), stored as the raw `BarStyle`
-        /// string. Default `.pacing` — see the property.
-        static let barStyle = "barStyle"
+        /// How the **menu-bar widget** presents its pacing bars (#224, split per surface in #329),
+        /// stored as the raw `BarStyle` string. Default `.gauge` (from the `.workHarder` preset) —
+        /// see the property.
+        static let menuBarStyle = "menuBarStyle"
+        /// How the **dropdown popup** presents its pacing bars (#329), stored as the raw `BarStyle`
+        /// string. Default `.gauge` — see the property.
+        static let dropdownStyle = "dropdownStyle"
+        /// Legacy pre-#329 key — one style for both surfaces, including the `"mixed"` value that gave
+        /// them different ones. Read once by ``PersistedConfig/migrateBarStyleIfNeeded()`` to seed the
+        /// two per-surface keys, then cleared. Do not read elsewhere.
+        static let legacyBarStyle = "barStyle"
         /// Whether the menu-bar widget draws the service-status dot on a service issue (#31).
         /// Default-on (opt-out) — see the property.
         static let showServiceStatusDot = "showServiceStatusDot"
@@ -298,14 +306,25 @@ enum PersistedConfig {
         set { defaults.set(newValue.rawValue, forKey: Key.resetCountdownModeMenuBar) }
     }
 
-    /// How the pacing bars are **presented** on both surfaces — the menu-bar widget *and* the dropdown
-    /// popup (#224). A single choice governs both. Stored as the raw `BarStyle` string; an absent key
-    /// or an unrecognised value (a newer build's) reads as the default ``BarStyle/pacing`` (the shipped
-    /// dense gap+marker look) — so an older build never trips on a future value. Render-only: never
-    /// changes the underlying layout, severity, or which bars are shown.
-    static var barStyle: BarStyle {
-        get { BarStyle(rawValue: defaults.string(forKey: Key.barStyle) ?? "") ?? AppearancePreset.defaultValues.barStyle }
-        set { defaults.set(newValue.rawValue, forKey: Key.barStyle) }
+    /// How the **menu-bar widget** presents its pacing bars (#224, per-surface since #329). Stored as
+    /// the raw `BarStyle` string; an absent key or an unrecognised value (a newer build's) reads as
+    /// the preset default — ``BarStyle/gauge``, from `.workHarder`. Render-only: never changes the
+    /// underlying layout, severity, or which bars are shown.
+    ///
+    /// The getter looks up `rawValue` **only**, not `BarStyle`'s legacy-aware `Codable` decode, so a
+    /// value written by an older build (`"pacing"`, `"simple"`, `"mixed"`) would silently read as the
+    /// default. That is why ``migrateBarStyleIfNeeded()`` must run before the first read — see there.
+    static var menuBarStyle: BarStyle {
+        get { BarStyle(rawValue: defaults.string(forKey: Key.menuBarStyle) ?? "") ?? AppearancePreset.defaultValues.menuBarStyle }
+        set { defaults.set(newValue.rawValue, forKey: Key.menuBarStyle) }
+    }
+
+    /// How the **dropdown popup** presents its pacing bars (#329) — chosen independently of
+    /// ``menuBarStyle``, so the compact bar and the roomy popup can differ. Same storage, same
+    /// preset-default fallback, and the same dependence on ``migrateBarStyleIfNeeded()``.
+    static var dropdownStyle: BarStyle {
+        get { BarStyle(rawValue: defaults.string(forKey: Key.dropdownStyle) ?? "") ?? AppearancePreset.defaultValues.dropdownStyle }
+        set { defaults.set(newValue.rawValue, forKey: Key.dropdownStyle) }
     }
 
     /// Whether the **menu-bar** widget draws the service-status dot when a monitored service has a
@@ -419,7 +438,11 @@ enum PersistedConfig {
             Key.showExtraUsage,
             Key.modelLimitsVisibility,
             Key.extraUsageVisibility,
-            Key.barStyle,
+            Key.menuBarStyle,
+            Key.dropdownStyle,
+            // Cleared too, so a reset also sweeps away a pre-#329 value the migration may not have
+            // reached yet — otherwise it would be waiting to re-seed the two keys on a later launch.
+            Key.legacyBarStyle,
             Key.showTicks,
             Key.farBehindInterval,
             Key.awaitingInputInMenuBar,
@@ -482,34 +505,58 @@ enum PersistedConfig {
         defaults.removeObject(forKey: Key.legacyShowModelSpecificLimits)
     }
 
-    /// Rewrite a pre-#307 `barStyle` **value** to the case that replaced it: `"pacing"` → `.progress`,
-    /// `"simple"` → `.pressure` (`"mixed"` is unchanged). See `BarStyle.legacyRawValues`.
+    /// Split the pre-#329 single `barStyle` key into the per-surface ``menuBarStyle`` /
+    /// ``dropdownStyle`` pair, reproducing exactly what the old value drew — including the pre-#307
+    /// renames, since a value can be both old *and* unsplit. The mapping lives in
+    /// `BarStyle.legacySurfaceStyles(for:)`, shared with the exported-config decode.
     ///
-    /// Unlike the two migrations above this one keeps the **same key** and only changes the stored
-    /// string, because #307 renamed the cases rather than replacing the setting.
+    /// | stored `barStyle` | menu bar | dropdown |
+    /// |---|---|---|
+    /// | `"mixed"` | `.pressure` | `.progress` |
+    /// | `"pacing"` / `"progress"` | `.progress` | `.progress` |
+    /// | `"simple"` / `"pressure"` | `.pressure` | `.pressure` |
+    /// | `"gauge"` | `.gauge` | `.gauge` |
     ///
-    /// **Why it is not optional.** `barStyle`'s getter resolves an unrecognised raw to the preset
-    /// default, silently. Without this pass every user who chose `Pace` or kept the default `Mixed`…
-    /// — well, `mixed` still resolves, but `pacing`/`simple` would not, so those users would be
-    /// quietly moved to whatever the active preset says, with no error and no trace. That silent
-    /// reset is the whole reason the rename needed a migration.
+    /// **Why it is not optional.** Both getters resolve an unrecognised raw to the preset default,
+    /// silently — and after #329 *every* stored `barStyle` is unrecognised, since the key itself is
+    /// gone. Without this pass each user's deliberate choice would be replaced by whatever the
+    /// default preset says, with no error and no trace. Splitting `"mixed"` across the two surfaces
+    /// rather than collapsing it to one style is what keeps that upgrade visually invisible.
     ///
-    /// Runs on every launch and is idempotent: a value that already matches a current case is left
-    /// alone, and an absent key stays absent so the getter's preset fallback still applies.
+    /// **A user who never set the key is not migrated at all** — nothing is written, both getters
+    /// fall back to `.workHarder`, and that user sees the new default (Gauge). That is intended: the
+    /// default moved, and only people who never expressed a preference follow it.
+    ///
+    /// Runs on every launch and is idempotent: once either new key exists the legacy key is cleared
+    /// and the pass does nothing, and an absent legacy key stays absent.
     static func migrateBarStyleIfNeeded() {
-        guard let raw = defaults.string(forKey: Key.barStyle) else { return }  // never set → preset default
-        guard BarStyle(rawValue: raw) == nil else { return }                   // already a current case
-        guard let migrated = BarStyle.legacyRawValues[raw] else { return }     // unknown → getter's fallback
-        defaults.set(migrated.rawValue, forKey: Key.barStyle)
+        // Already migrated (or a new key explicitly set) → drop the stale legacy value and stop.
+        guard defaults.object(forKey: Key.menuBarStyle) == nil,
+              defaults.object(forKey: Key.dropdownStyle) == nil else {
+            defaults.removeObject(forKey: Key.legacyBarStyle)
+            return
+        }
+        guard let raw = defaults.string(forKey: Key.legacyBarStyle) else { return }  // never set → preset default
+        guard let split = BarStyle.legacySurfaceStyles(for: raw) else {              // unknown → getters' fallback
+            defaults.removeObject(forKey: Key.legacyBarStyle)
+            return
+        }
+        menuBarStyle = split.menuBar
+        dropdownStyle = split.dropdown
+        defaults.removeObject(forKey: Key.legacyBarStyle)
         AppLogger.lifecycle.notice(
-            "bar-style: migrated \(raw, privacy: .public) → \(migrated.rawValue, privacy: .public)")
+            """
+            bar-style: migrated \(raw, privacy: .public) → menu-bar \
+            \(split.menuBar.rawValue, privacy: .public), dropdown \
+            \(split.dropdown.rawValue, privacy: .public)
+            """)
     }
 
     /// Write every **Appearance**-pane key from a named preset's fixed value set (#215, #224) — the
     /// general form of `resetAppearanceToDefaults()`. Unlike reset (which *removes* keys so getters fall
     /// back to their defaults), this writes explicit values, because a preset can differ from the
-    /// factory defaults (e.g. `.controlFreak` turns calm off; `.chill` opts into `.simple` bars while
-    /// the shipped `barStyle` default is `.progress`). The caller re-syncs the model and re-applies the
+    /// factory defaults (e.g. `.controlFreak` turns calm off; `.chill` opts into `.pressure` bars while
+    /// the default `.workHarder` preset uses `.gauge`). The caller re-syncs the model and re-applies the
     /// values to the widget.
     static func apply(_ preset: AppearancePreset) {
         let v = preset.values
@@ -522,7 +569,8 @@ enum PersistedConfig {
         modelLimitsVisibility = v.modelLimitsVisibility
         extraUsageVisibility = v.extraUsageVisibility
         resetCountdownModeMenuBar = v.resetCountdownModeMenuBar
-        barStyle = v.barStyle
+        menuBarStyle = v.menuBarStyle
+        dropdownStyle = v.dropdownStyle
         showTicks = v.showTicks
         farBehindInterval = v.farBehindInterval
     }
@@ -542,7 +590,8 @@ enum PersistedConfig {
             modelLimitsVisibility: modelLimitsVisibility,
             extraUsageVisibility: extraUsageVisibility,
             resetCountdownModeMenuBar: resetCountdownModeMenuBar,
-            barStyle: barStyle,
+            menuBarStyle: menuBarStyle,
+            dropdownStyle: dropdownStyle,
             showTicks: showTicks,
             farBehindInterval: farBehindInterval)
     }

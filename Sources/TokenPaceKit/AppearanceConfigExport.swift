@@ -20,8 +20,8 @@ extension AppearancePresetValues: Codable {
     /// The export keys, in **pane order**. The trailing comments give the control's on-screen label,
     /// so the mapping can be checked against the pane without opening it.
     enum CodingKeys: String, CodingKey {
-        case barStyle                   // "Bar style"
         case farBehindInterval          // "Far behind pace interval"
+        case menuBarStyle               // Menu Bar Widget → "Bar style"
         case calmColorMode              // "Calm non-critical colors"
         case awaitingInputInMenuBar     // "Show awaiting-input icon in the menu bar"
         case pauseHidesBars             // "Pause icon hides bars"
@@ -29,9 +29,15 @@ extension AppearancePresetValues: Codable {
         case hideCalmSevenDayBar        // "Show 7-day bar when calm" (stored inverted, as a *hide* flag)
         case resetCountdownModeMenuBar  // "Show reset countdown"
         case showServiceStatusDot       // "Show service status dot on issues"
+        case dropdownStyle              // Dropdown Widget → "Bar style"
         case modelLimitsVisibility      // "Show model & service limits"
         case extraUsageVisibility       // "Show extra usage"
         case showTicks                  // "Show ticks on bars"
+
+        /// The pre-#329 single "Bar style" key, read-only. Not emitted — it exists so a config
+        /// exported by an older build still imports, splitting into the two per-surface keys via
+        /// `BarStyle.legacySurfaceStyles(for:)`.
+        case barStyle
     }
 
     /// Written out (rather than left to the compiler) only so the key list appears in pane order in
@@ -39,8 +45,8 @@ extension AppearancePresetValues: Codable {
     /// export's order comes from `AppearanceConfigExport.json(values:preset:appVersion:)`.
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(barStyle, forKey: .barStyle)
         try c.encode(farBehindInterval, forKey: .farBehindInterval)
+        try c.encode(menuBarStyle, forKey: .menuBarStyle)
         try c.encode(calmColorMode, forKey: .calmColorMode)
         try c.encode(awaitingInputInMenuBar, forKey: .awaitingInputInMenuBar)
         try c.encode(pauseHidesBars, forKey: .pauseHidesBars)
@@ -48,6 +54,7 @@ extension AppearancePresetValues: Codable {
         try c.encode(hideCalmSevenDayBar, forKey: .hideCalmSevenDayBar)
         try c.encode(resetCountdownModeMenuBar, forKey: .resetCountdownModeMenuBar)
         try c.encode(showServiceStatusDot, forKey: .showServiceStatusDot)
+        try c.encode(dropdownStyle, forKey: .dropdownStyle)
         try c.encode(modelLimitsVisibility, forKey: .modelLimitsVisibility)
         try c.encode(extraUsageVisibility, forKey: .extraUsageVisibility)
         try c.encode(showTicks, forKey: .showTicks)
@@ -56,8 +63,22 @@ extension AppearancePresetValues: Codable {
     /// Decoding is order-independent (JSON objects are unordered by definition), so this only has to
     /// mirror the key names. Present so a dump round-trips back into a value set — the guarantee that
     /// the export really describes the config.
+    ///
+    /// The one place it does more than mirror: a config exported **before #329** carries a single
+    /// `barStyle` key instead of the per-surface pair. It is split here — the level that knows which
+    /// key belongs to which surface — through `BarStyle.legacySurfaceStyles(for:)`, the same call the
+    /// `UserDefaults` migration makes, so importing an old dump and upgrading in place agree. A
+    /// `"mixed"` dump therefore lands as Pressure + Progress, exactly what that build drew.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+
+        let legacy = try c.decodeIfPresent(String.self, forKey: .barStyle)
+            .flatMap(BarStyle.legacySurfaceStyles(for:))
+        let menuBarStyle = try c.decodeIfPresent(BarStyle.self, forKey: .menuBarStyle)
+            ?? legacy?.menuBar ?? AppearancePreset.defaultValues.menuBarStyle
+        let dropdownStyle = try c.decodeIfPresent(BarStyle.self, forKey: .dropdownStyle)
+            ?? legacy?.dropdown ?? AppearancePreset.defaultValues.dropdownStyle
+
         self.init(
             calmColorMode: try c.decode(CalmColorMode.self, forKey: .calmColorMode),
             hideCalmSevenDayBar: try c.decode(Bool.self, forKey: .hideCalmSevenDayBar),
@@ -68,7 +89,8 @@ extension AppearancePresetValues: Codable {
             modelLimitsVisibility: try c.decode(PopupSectionVisibility.self, forKey: .modelLimitsVisibility),
             extraUsageVisibility: try c.decode(PopupSectionVisibility.self, forKey: .extraUsageVisibility),
             resetCountdownModeMenuBar: try c.decode(ResetCountdownMode.self, forKey: .resetCountdownModeMenuBar),
-            barStyle: try c.decode(BarStyle.self, forKey: .barStyle),
+            menuBarStyle: menuBarStyle,
+            dropdownStyle: dropdownStyle,
             showTicks: try c.decode(Bool.self, forKey: .showTicks),
             farBehindInterval: try c.decode(FarBehindInterval.self, forKey: .farBehindInterval))
     }
@@ -84,7 +106,7 @@ extension AppearancePresetValues: Codable {
 /// makes answering "what does your setup look like?" one click instead of a screenshot tour.
 ///
 /// Deliberately **Appearance-only**, unlike the full `PersistedConfig` dump proposed in #256: these
-/// twelve keys are pure presentation — no filesystem paths, no account names, no working hours —
+/// thirteen keys are pure presentation — no filesystem paths, no account names, no working hours —
 /// so a dump can be pasted into an issue without reading it first. Widening this to other panes
 /// requires a per-key privacy pass first (#256).
 ///
@@ -97,7 +119,7 @@ public enum AppearanceConfigExport {
     /// never disappears from the dump.
     public static let customPresetName = "custom"
 
-    /// Build the clipboard JSON: the app version and active preset as metadata, and the twelve
+    /// Build the clipboard JSON: the app version and active preset as metadata, and the thirteen
     /// Appearance values under `appearance` **in pane order** (see the `Codable` extension above).
     ///
     /// No export timestamp on purpose: it would make two dumps of an unchanged config differ, which
@@ -129,8 +151,8 @@ public enum AppearanceConfigExport {
         // Pane order — keep in sync with `CodingKeys` above, `AppearancePane.swift`, and
         // `AppearanceConfigExportTests`. Insert a new option at its on-screen position; never append.
         let appearance: [(String, String)] = [
-            ("barStyle", jsonString(v.barStyle.rawValue)),
             ("farBehindInterval", jsonString(v.farBehindInterval.rawValue)),
+            ("menuBarStyle", jsonString(v.menuBarStyle.rawValue)),
             ("calmColorMode", jsonString(v.calmColorMode.rawValue)),
             ("awaitingInputInMenuBar", jsonBool(v.awaitingInputInMenuBar)),
             ("pauseHidesBars", jsonBool(v.pauseHidesBars)),
@@ -138,6 +160,7 @@ public enum AppearanceConfigExport {
             ("hideCalmSevenDayBar", jsonBool(v.hideCalmSevenDayBar)),
             ("resetCountdownModeMenuBar", jsonString(v.resetCountdownModeMenuBar.rawValue)),
             ("showServiceStatusDot", jsonBool(v.showServiceStatusDot)),
+            ("dropdownStyle", jsonString(v.dropdownStyle.rawValue)),
             ("modelLimitsVisibility", jsonString(v.modelLimitsVisibility.rawValue)),
             ("extraUsageVisibility", jsonString(v.extraUsageVisibility.rawValue)),
             ("showTicks", jsonBool(v.showTicks)),

@@ -26,8 +26,8 @@ public enum BarScale: String, Sendable, Equatable, CaseIterable {
 
 // MARK: - BarStyle (#224)
 
-/// How the pacing bars are **presented** — chosen by the user via a segmented control in Settings →
-/// Appearance. The presentation can differ **per surface** (menu-bar widget vs dropdown popup): a bar
+/// How a pacing bar is **presented** on **one surface** — chosen by the user via a segmented control
+/// in Settings → Appearance, separately for the menu-bar widget and the dropdown popup (#329). A bar
 /// is drawn either as **Progress** (grey track + coloured gap + a "you are here" time-indicator
 /// marker), as **Pressure** (a left-anchored colour ribbon, no marker), or as **Gauge** (a ribbon
 /// growing either way from the centre, no marker). All of them carry the *same* pacing state colour,
@@ -48,92 +48,103 @@ public enum BarScale: String, Sendable, Equatable, CaseIterable {
 ///   scale that renders the underpace half at all: Pressure's `max(0, …)` flattens every calm state
 ///   onto one minimum pill, and a surplus you will not get to spend is exactly what that discards.
 ///
-/// The four cases pick which presentation each surface uses:
-/// - ``pressure`` — **Pressure** on both surfaces (no marker anywhere).
-/// - ``mixed`` — **Pressure** in the menu bar, **Progress** in the dropdown (the marker appears only
-///   where there's room for it).
-/// - ``gauge`` — **Gauge** on both surfaces (no marker anywhere; a permanent centre tick instead).
-/// - ``progress`` — **Progress** on both surfaces (marker everywhere; the shipped pre-#224 look).
+/// **The surface is not part of this type** (#329, ADR-0080). Until then a fourth case, `mixed`,
+/// meant "Pressure in the menu bar, Progress in the dropdown" — the only way to give the two surfaces
+/// different looks, which forced every property here to be a per-surface pair. Now each surface
+/// stores its own `BarStyle`, so this enum answers one question (*which presentation*) and the
+/// caller answers the other (*where*). All nine pairs are reachable; the old `mixed` is simply the
+/// pair `(.pressure, .progress)`.
 ///
 /// This is a **render-only** distinction: it changes how each bar is *drawn*, never the underlying
-/// `BarLayout`, `PacingSeverity`, or which bars are shown. The Kit stays UI-free — the shell reads this
-/// from `PersistedConfig` and threads it into `StatusItemView` / `PopupBarView` via the per-surface
-/// helpers below (mirrors how `calmColors` reaches the render layer).
+/// `BarLayout`, `PacingSeverity`, or which bars are shown. The Kit stays UI-free — the shell reads
+/// `PersistedConfig.menuBarStyle` / `.dropdownStyle` and threads each into `StatusItemView` /
+/// `PopupBarView` (mirrors how `calmColors` reaches the render layer).
 ///
 /// Stored raw-string in `UserDefaults` with a forward-compatible decode so a newer build's value never
 /// makes an older build fail — an unknown raw falls back to ``progress`` (the shipped behaviour).
-/// The pre-#307 raws (`"pacing"`/`"simple"`) are migrated in `PersistedConfig.migrateBarStyleIfNeeded`;
+/// Raws written by older builds (`"pacing"`/`"simple"` from before #307, and `"mixed"` from before
+/// #329) are migrated in `PersistedConfig.migrateBarStyleIfNeeded` via ``legacySurfaceStyles(for:)``;
 /// they must **not** be silently swallowed by that fallback, which is why the migration runs before
 /// any read.
 public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
-    /// **Progress** on both surfaces: a grey track, a coloured pacing gap between the used edge and the
-    /// time edge, and a "you are here" time-indicator marker. The shipped behaviour before #224.
-    /// Raw value was `"pacing"` before #307.
+    /// A grey track, a coloured pacing gap between the used edge and the time edge, and a "you are
+    /// here" time-indicator marker. The shipped behaviour before #224. Raw value was `"pacing"`
+    /// before #307.
     case progress = "progress"
-    /// **Pressure** in the menu bar, **Progress** in the dropdown (#224). The compact menu-bar bar drops
-    /// the marker; the roomier dropdown keeps it.
-    case mixed = "mixed"
-    /// **Pressure** on both surfaces: no time marker anywhere. A colour ribbon anchored to the **left
-    /// edge** whose length is ``BarLayout/pressureLength`` — the gap measured against the time left
-    /// before the reset — coloured by the pacing state (far-behind blue → calm green → yellow →
-    /// orange → red). The colour *is* the "what state am I in" answer and the width is how urgent it
-    /// is, with no marker to correlate against. Raw value was `"simple"` before #307.
+    /// No time marker: a colour ribbon anchored to the **left edge** whose length is
+    /// ``BarLayout/pressureLength`` — the gap measured against the time left before the reset —
+    /// coloured by the pacing state (far-behind blue → calm green → yellow → orange → red). The
+    /// colour *is* the "what state am I in" answer and the width is how urgent it is, with no marker
+    /// to correlate against. Raw value was `"simple"` before #307.
     case pressure = "pressure"
-    /// **Gauge** on both surfaces (#326): a colour ribbon anchored to the bar's **centre**, growing
-    /// **right** when spending is ahead of pace and **left** when it is behind, its signed length
-    /// ``BarLayout/gaugeOffset``. A permanent centre tick marks the zero — without it the direction
-    /// would have nothing to be a direction *from*. No time marker: like Pressure, this scale has no
-    /// position for one.
+    /// A colour ribbon anchored to the bar's **centre** (#326), growing **right** when spending is
+    /// ahead of pace and **left** when it is behind, its signed length ``BarLayout/gaugeOffset``. A
+    /// permanent centre tick marks the zero — without it the direction would have nothing to be a
+    /// direction *from*. No time marker: like Pressure, this scale has no position for one.
     case gauge = "gauge"
 
-    /// Which scale the **menu-bar** bar is measured on (#326). The renderers branch on this rather
-    /// than on a negated marker flag, because three scales no longer fit in one bit.
-    public var menuBarScale: BarScale {
+    /// Which scale this presentation is measured on (#326). The renderers branch on this rather than
+    /// on a negated marker flag, because three scales no longer fit in one bit.
+    public var scale: BarScale {
         switch self {
         case .progress: return .window
-        case .mixed, .pressure: return .remaining
-        case .gauge: return .centred
-        }
-    }
-
-    /// Which scale the **dropdown popup**'s bar is measured on (#326). Also decides the tick ruler's
-    /// fractions: window subdivisions mean nothing off the window scale, so `PopupBarView` marks the
-    /// one landmark each other scale does have — 20 % (exactly on pace) on ``BarScale/remaining``,
-    /// the centre on ``BarScale/centred``.
-    public var popupScale: BarScale {
-        switch self {
-        case .progress, .mixed: return .window
         case .pressure: return .remaining
         case .gauge: return .centred
         }
     }
 
-    /// Whether the **menu-bar** widget draws the time-indicator marker. Derived from the scale, not
-    /// the other way round: a marker only has a position on ``BarScale/window`` — on either of the
-    /// others it would sit at zero forever.
-    public var menuBarShowsTimeMarker: Bool { menuBarScale == .window }
-
-    /// Whether the **dropdown popup** draws the time-indicator marker. Same derivation as
-    /// ``menuBarShowsTimeMarker``: ``progress`` and ``mixed`` mark the popup, ``pressure`` and
-    /// ``gauge`` do not.
-    public var popupShowsTimeMarker: Bool { popupScale == .window }
-
-    /// The pre-#307 raw values, mapped to the cases that replaced them. `"mixed"` is unchanged and so
-    /// is absent here.
+    /// Whether the bar draws the time-indicator marker. Derived from the scale, not the other way
+    /// round: a marker only has a position on ``BarScale/window`` — on either of the others it would
+    /// sit at zero forever.
     ///
-    /// Read by both the `Codable` decode below (exported appearance JSON written by an older build,
-    /// and shared configs) and `PersistedConfig.migrateBarStyleIfNeeded` (the stored `UserDefaults`
-    /// value). Keeping the mapping in one place means the two can never disagree about what
-    /// `"simple"` meant.
+    /// This also decides the popup's tick ruler: window subdivisions mean nothing off the window
+    /// scale, so `PopupBarView` marks the one landmark each other scale does have — 20 % (exactly on
+    /// pace) on ``BarScale/remaining``, the centre on ``BarScale/centred``.
+    public var showsTimeMarker: Bool { scale == .window }
+
+    /// The pre-#307 raw values, mapped to the cases that replaced them.
+    ///
+    /// Only covers the two *renames*. `"mixed"` is not here because it never named a presentation —
+    /// it named a **pair** of them, so it cannot map to a single case; see
+    /// ``legacySurfaceStyles(for:)``.
     public static let legacyRawValues: [String: BarStyle] = [
         "pacing": .progress,
         "simple": .pressure,
     ]
 
+    /// Splits a raw value written by an older build into the pair of per-surface styles that
+    /// reproduces what that build drew (#329). Returns `nil` for a raw this build cannot place —
+    /// the caller then leaves the setting alone and lets the preset default apply.
+    ///
+    /// | stored raw | menu bar | dropdown |
+    /// |---|---|---|
+    /// | `"mixed"` | ``pressure`` | ``progress`` |
+    /// | `"pacing"` / `"progress"` | ``progress`` | ``progress`` |
+    /// | `"simple"` / `"pressure"` | ``pressure`` | ``pressure`` |
+    /// | `"gauge"` | ``gauge`` | ``gauge`` |
+    ///
+    /// `"mixed"` is why this exists and why it returns a pair: it is the one legacy value whose two
+    /// surfaces disagree, so mapping it through ``legacyRawValues`` would have to pick a winner and
+    /// silently change how one surface looks. Splitting it instead means a user who deliberately
+    /// chose Mixed sees **no** visual change across the upgrade.
+    ///
+    /// Read by both `PersistedConfig.migrateBarStyleIfNeeded` (the stored `UserDefaults` value) and
+    /// `AppearanceConfigValues`' decode (an exported config written by an older build), so the two
+    /// paths can never disagree about what `"mixed"` — or `"simple"` — meant.
+    public static func legacySurfaceStyles(for raw: String) -> (menuBar: BarStyle, dropdown: BarStyle)? {
+        if raw == "mixed" { return (.pressure, .progress) }
+        guard let style = BarStyle(rawValue: raw) ?? legacyRawValues[raw] else { return nil }
+        return (style, style)
+    }
+
     /// Decode with legacy support *before* the forward-compatible fallback (#307): a `"pacing"` /
     /// `"simple"` raw written by an older build maps to the case that replaced it, rather than being
     /// swallowed by the unknown-value fallback. Without this, importing a pre-#307 config would
     /// silently turn `Pace` into `Progress` — the exact trap the rename had to avoid.
+    ///
+    /// This decodes **one surface**, so `"mixed"` is deliberately *not* handled here: a pair cannot
+    /// come out of a single-value container. It is split one level up, in `AppearanceConfigValues`'
+    /// decode, where which key belongs to which surface is known (#329).
     ///
     /// An unrecognised raw still falls back to ``progress`` (the default, i.e. the shipped behaviour)
     /// instead of throwing, so a *newer* build's value never makes an older one fail. Mirrors

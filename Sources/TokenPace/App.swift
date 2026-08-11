@@ -392,7 +392,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let view = StatusItemView(frame: NSRect(origin: .zero, size: NSSize(width: 0, height: 22)))
         view.layout = MenuBarLayout.make(from: nil, health: coldHealth, now: now)
         view.calmColorMode = PersistedConfig.calmColorMode     // apply the saved calm-colours mode from launch (#105, #224)
-        view.barStyle = PersistedConfig.barStyle               // apply the saved bar style from launch (#224)
+        view.barStyle = PersistedConfig.menuBarStyle           // apply this surface's saved style (#224, #329)
         // Smooth colour transitions (ADR-0070): both surfaces share one animator, and a frame simply
         // re-renders from the retained poll — the same path a settings change or an age tick takes.
         view.colorAnimator = colorAnimator
@@ -416,7 +416,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         popupVC.loadView()   // realise the view so it can be sized before the menu measures it
-        popupVC.barStyle = PersistedConfig.barStyle   // apply the saved bar style from launch (#224)
+        popupVC.barStyle = PersistedConfig.dropdownStyle   // this surface's own style (#224, #329)
         popupVC.showTicks = PersistedConfig.showTicks   // apply the saved tick-ruler choice from launch (#224)
         // The dropdown's two section-visibility modes (#211), likewise applied from launch.
         popupVC.modelLimitsVisibility = PersistedConfig.modelLimitsVisibility
@@ -607,13 +607,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // the menu-bar layout from the last poll (render reads PersistedConfig for the mode).
                 self?.reRenderForCurrentTime()
             }
-            wc.onBarStyleChange = { [weak self] style in
-                // Render-only, both surfaces (#224). The menu-bar bar occupies the same rect (no width
-                // rebuild), so a re-snapshot suffices; the popup rebuilds its child bars via its own
-                // `barStyle` didSet so the new style reaches each `PopupBarView`.
+            wc.onMenuBarStyleChange = { [weak self] style in
+                // Render-only, menu bar only (#224, #329). The bar occupies the same rect whichever
+                // style it is (no width rebuild), so a re-snapshot suffices.
                 self?.statusView?.barStyle = style
-                self?.popupVC.barStyle = style
                 self?.refreshStatusImage()
+            }
+            wc.onDropdownStyleChange = { [weak self] style in
+                // Render-only, popup only (#329). The VC's `barStyle` didSet rebuilds its child bars,
+                // which is how the new style reaches each `PopupBarView`.
+                self?.popupVC.barStyle = style
                 self?.reRenderForCurrentTime()   // also push the new style into the dev-tuner preview
             }
             wc.onShowTicksChange = { [weak self] on in
@@ -916,9 +919,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PersistedConfig.migratePauseKeysIfNeeded()
         // …and carry the boolean "Show model & service limits" opt-out onto its tri-state successor.
         PersistedConfig.migrateModelLimitsVisibilityIfNeeded()
-        // …and rewrite the pre-#307 bar-style values, whose cases were renamed with the UI (Pace &
-        // Time → Progress, Pace → Pressure). Must run before anything reads `barStyle`, or the
-        // getter resolves the stale raw to the preset default and the choice is silently lost.
+        // …and split the pre-#329 single bar-style key across the two surfaces (`"mixed"` becomes
+        // Pressure + Progress, i.e. what it drew), carrying the pre-#307 renames along. Must run
+        // before anything reads either style key, or the getters resolve the stale raw to the preset
+        // default and the user's choice is silently lost.
         PersistedConfig.migrateBarStyleIfNeeded()
         // Record the running version so the next launch compares against it.
         PersistedConfig.lastRunVersion = current

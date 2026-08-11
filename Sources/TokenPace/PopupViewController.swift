@@ -76,10 +76,15 @@ final class PopupBarView: NSView {
         }
     }
 
-    /// Bar presentation style (#224). ``BarStyle/pacing`` draws the gap + time-indicator marker + gap
-    /// dividers; ``BarStyle/simple`` draws a left-anchored ribbon coloured by the pacing state and keeps
-    /// the under-bar tick ruler, but no marker or dividers. Pushed in from `PopupViewController.addBar`.
-    /// Mirror of `StatusItemView.barStyle` — keep the two draw paths in sync. Default `.progress`.
+    /// Bar presentation style for **this surface** (#224, per-surface since #329) — fed from
+    /// `PersistedConfig.dropdownStyle` and pushed in from `PopupViewController.addBar`.
+    /// ``BarStyle/progress`` draws the gap + time-indicator marker + gap dividers;
+    /// ``BarStyle/pressure`` a left-anchored ribbon; ``BarStyle/gauge`` a centre-anchored one. The
+    /// last two keep the under-bar tick ruler but have no marker or dividers.
+    ///
+    /// Independent of `StatusItemView.barStyle` since #329 — the user picks each surface separately,
+    /// so the two are expected to differ. What keeps the draw paths honest is that both branch on
+    /// `BarStyle.scale`, not on the case.
     var barStyle: BarStyle = .progress {
         didSet {
             guard barStyle != oldValue else { return }
@@ -258,7 +263,7 @@ final class PopupBarView: NSView {
             // Gauge's zero is the centre, so its idle pill sits there (ADR-0078's shape, drawn on this
             // style's own scale). The centre tick itself comes from `drawTicks` below — in the popup
             // the ruler already sits under the bar, so no separate under-track mark is needed.
-            if let idleShape = Self.pillRect(at: barStyle.popupScale == .centred ? 0.5 : 0, in: rect) {
+            if let idleShape = Self.pillRect(at: barStyle.scale == .centred ? 0.5 : 0, in: rect) {
                 // Same corner as the track and every other strip (#326) — idle is a zero-length ribbon,
                 // so it must not be shaped differently from one.
                 let corner = min(Metrics.corner, min(idleShape.width, idleShape.height) / 2)
@@ -277,7 +282,7 @@ final class PopupBarView: NSView {
             }
             drawTicks(in: rect)
             // Progress keeps its identifying mark even here: the marker sits at `timeFraction` = 0.
-            if barStyle.popupShowsTimeMarker { drawTimeMarker(at: 0, colour: idleColor, in: rect) }
+            if barStyle.showsTimeMarker { drawTimeMarker(at: 0, colour: idleColor, in: rect) }
             return
         }
 
@@ -305,7 +310,7 @@ final class PopupBarView: NSView {
         let gaugeFar = 0.5 + (frozenStripFraction.map { $0 * 2 - 1 } ?? l.gaugeOffset) / 2
         let stripFrom: Double
         let stripTo: Double
-        switch barStyle.popupScale {
+        switch barStyle.scale {
         case .window:
             stripFrom = frozenStripFraction != nil ? 0 : l.gapStart
             stripTo = frozenStripFraction ?? l.gapEnd
@@ -330,9 +335,9 @@ final class PopupBarView: NSView {
         // both ends on the zero). `pinsStart` stays exclusive to Progress — on the centred scale both
         // edges are data and the floor must grow symmetrically about the zero.
         let span = Self.stripRect(from: stripFrom, to: stripTo, in: rect,
-                                  pinsStart: frozenStripFraction == nil && barStyle.popupScale == .window,
-                                  anchoredAt: barStyle.popupScale == .centred ? 0.5 : nil)
-            ?? (barStyle.popupScale == .window ? nil : Self.pillRect(at: stripFrom, in: rect))
+                                  pinsStart: frozenStripFraction == nil && barStyle.scale == .window,
+                                  anchoredAt: barStyle.scale == .centred ? 0.5 : nil)
+            ?? (barStyle.scale == .window ? nil : Self.pillRect(at: stripFrom, in: rect))
         if let stripRect = span {
             // The track's corner, not a capsule's (#326) — two shapes in one bar share one corner.
             let capsule = min(Metrics.corner, min(stripRect.width, stripRect.height) / 2)
@@ -366,7 +371,7 @@ final class PopupBarView: NSView {
         drawTicks(in: rect)
 
         // Simple style (#224): no time marker — the ribbon above already conveys pacing by colour + length.
-        if !barStyle.popupShowsTimeMarker { return }
+        if !barStyle.showsTimeMarker { return }
 
         // 4. Time-indicator marker at `timeFraction`. 5. It carries a stronger ambient glow.
         // Under the `color-cycle` stub the marker parks at the pinned strip's end, so Progress keeps
@@ -562,7 +567,7 @@ final class PopupBarView: NSView {
     /// Keyed off `barStyle` alone: `drawTicks` also runs for the **idle** bar, which has no
     /// `BarLayout` to consult.
     private var tickFractions: [CGFloat] {
-        switch barStyle.popupScale {
+        switch barStyle.scale {
         case .remaining: return [0.20]
         case .centred: return [0.5]
         case .window:
@@ -1214,9 +1219,10 @@ final class PopupViewController: NSViewController {
     /// base 5-hour window this way).
     private let frozenStripRow = "5-hour"
 
-    /// Bar presentation style (#224), governing every bar in the popup. Pushed into each `PopupBarView`
-    /// during `rebuild()` → `addBar`. Child bars are built fresh on each rebuild, so a change here must
-    /// rebuild (not just redraw) to reach them — mirrors `optionHeld`. Default `.pacing`.
+    /// Bar presentation style (#224), governing every bar in the popup — `PersistedConfig.dropdownStyle`,
+    /// independent of the menu bar's own choice (#329). Pushed into each `PopupBarView` during
+    /// `rebuild()` → `addBar`. Child bars are built fresh on each rebuild, so a change here must
+    /// rebuild (not just redraw) to reach them — mirrors `optionHeld`.
     var barStyle: BarStyle = .progress {
         didSet {
             guard isViewLoaded, barStyle != oldValue else { return }
@@ -1980,7 +1986,7 @@ final class PopupViewController: NSViewController {
         view.idle = idle   // solid-blue knobless track when the 5h window is idle (#100)
         view.blocked = blocked   // grey instead of blue when that idle state is blocked (#158)
         view.isBaseLimit = isBaseLimit   // only base 5h/7d rows render the far-behind blue zone
-        view.barStyle = barStyle   // pacing (gap+marker) vs simple (left-anchored ribbon) — #224
+        view.barStyle = barStyle   // Progress (gap+marker) vs Pressure/Gauge (marker-less ribbons) — #224
         view.showTicks = showTicks   // under-bar tick ruler on/off — #224
         view.translatesAutoresizingMaskIntoConstraints = false
         view.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true

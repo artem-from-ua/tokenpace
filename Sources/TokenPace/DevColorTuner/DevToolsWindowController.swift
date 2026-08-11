@@ -171,7 +171,7 @@ final class DevToolsWindowController: NSWindowController {
             previewVC.loadView()
             // Seed the bar presentation so the first frame matches the current settings (updatePreview
             // keeps them in sync on every refresh thereafter).
-            previewVC.barStyle = PersistedConfig.barStyle
+            previewVC.barStyle = PersistedConfig.dropdownStyle
             previewVC.showTicks = PersistedConfig.showTicks
             // Borderless: attached as a child of the tuner, it has no title bar / close button — it can't
             // be closed on its own and always travels with the tuner. Its own "Popup Preview" heading is
@@ -305,7 +305,7 @@ final class DevToolsWindowController: NSWindowController {
         guard let preview = previewWindow, preview.isVisible else { return }
         // Keep the bar presentation in sync so a Bar style / tick-ruler change re-renders the preview
         // (each is a no-op didSet unless it actually changed).
-        previewVC.barStyle = PersistedConfig.barStyle
+        previewVC.barStyle = PersistedConfig.dropdownStyle
         previewVC.showTicks = PersistedConfig.showTicks
         previewVC.layout = layout
         for (dot, role) in previewUpdateDots { dot.contentTintColor = ColorStore.shared.color(role) }

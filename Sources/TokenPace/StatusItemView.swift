@@ -60,10 +60,14 @@ final class StatusItemView: NSView {
         }
     }
 
-    /// Bar presentation style (#224). ``BarStyle/pacing`` draws the current gap + time-indicator
-    /// marker; ``BarStyle/simple`` draws a left-anchored ribbon coloured by the pacing state, with no
-    /// marker. Render-only (the bar occupies the same rect either way), so a redraw is all that's
-    /// needed. Kept in sync with the popup's own `barStyle` — see `PopupBarView`. Default `.progress`.
+    /// Bar presentation style for **this surface** (#224, per-surface since #329) — fed from
+    /// `PersistedConfig.menuBarStyle`. ``BarStyle/progress`` draws the current gap + time-indicator
+    /// marker; ``BarStyle/pressure`` a left-anchored ribbon with no marker; ``BarStyle/gauge`` a
+    /// ribbon growing either way from a centre tick. Render-only (the bar occupies the same rect
+    /// whichever it is), so a redraw is all that's needed.
+    ///
+    /// Deliberately **not** kept in sync with `PopupBarView.barStyle` any more: the two surfaces are
+    /// chosen independently, and the drawing code they share is reached through `BarStyle.scale`.
     var barStyle: BarStyle = .progress {
         didSet {
             guard barStyle != oldValue else { return }
@@ -864,8 +868,8 @@ final class StatusItemView: NSView {
             // style's own scale. Its centre tick goes down first, under the track, exactly as the
             // pacing path does: the tick is drawn in *every* state, which is what makes the zero
             // findable at all.
-            let idleZero = barStyle.menuBarScale == .centred ? 0.5 : 0.0
-            if barStyle.menuBarScale == .centred { drawCentreTick(in: rect) }
+            let idleZero = barStyle.scale == .centred ? 0.5 : 0.0
+            if barStyle.scale == .centred { drawCentreTick(in: rect) }
             // Zero pressure — the same pill `fillZone(floorEmptyToPill:)` draws for a zero ribbon.
             // The grey track goes down first, exactly as the pacing path does: without it the pill
             // would hang in empty space while every neighbouring bar shows a track.
@@ -877,7 +881,7 @@ final class StatusItemView: NSView {
                      floorEmptyToPill: true)
             NSGraphicsContext.restoreGraphicsState()
             // Progress keeps its identifying mark: the marker at `timeFraction` = 0, drawn over the pill.
-            if barStyle.menuBarShowsTimeMarker { drawTimeMarker(at: 0, colour: fill, in: rect) }
+            if barStyle.showsTimeMarker { drawTimeMarker(at: 0, colour: fill, in: rect) }
             return
         }
 
@@ -886,7 +890,7 @@ final class StatusItemView: NSView {
 
         // Gauge's centre tick goes down BEFORE the track (#326): the track then covers its middle and
         // only the ends stand proud, which is what keeps it from reading as a Progress time marker.
-        if barStyle.menuBarScale == .centred { drawCentreTick(in: rect) }
+        if barStyle.scale == .centred { drawCentreTick(in: rect) }
 
         // Whole-bar rounded grey track (drawn first; the gap paints over it). Both flanks of the gap —
         // the used head and the future/unused tail — are this one tone, so they read identical.
@@ -916,7 +920,7 @@ final class StatusItemView: NSView {
         // degenerate span becomes a centred pill rather than a blank track. `pinsStart` stays off:
         // both edges here are data, and the floor must grow symmetrically about the zero — pinning
         // would shove the pill off-centre and make "dead on pace" read as a small lead.
-        if barStyle.menuBarScale == .centred {
+        if barStyle.scale == .centred {
             let offset = frozenStrip(for: bar).map { $0 * 2 - 1 } ?? l.gaugeOffset
             let far = 0.5 + offset / 2
             fillZone(from: min(0.5, far), to: max(0.5, far), in: rect, width: w,
@@ -926,7 +930,7 @@ final class StatusItemView: NSView {
             return
         }
 
-        if !barStyle.menuBarShowsTimeMarker {
+        if !barStyle.showsTimeMarker {
             // A **zero-length** ribbon still has to read as "zero", not as an empty track. Without a time
             // marker this branch is the bar's only mark, so `stripRect`'s degenerate-span `nil` would
             // leave the widget completely blank — which is exactly what the reset boundary produces:
