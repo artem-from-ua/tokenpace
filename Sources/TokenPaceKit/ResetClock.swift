@@ -222,18 +222,28 @@ public enum ResetClock {
         return "\(Int((remaining / 86_400).rounded()))d"                    // nearest day
     }
 
+    /// The lead-in every reset line carries, so the duration reads as a sentence rather than a bare
+    /// number: `"resets in 2h at 02:50"`, not `"2h at 02:50"`. Prepended to **all** bands — the menu
+    /// bar keeps its bare `timeToReset` label, where there is no room for words.
+    public static let resetLinePrefix = "resets in"
+
     /// The complete popup reset line — **one unified format for every limit** (the token 5h / 7d /
     /// per-model windows *and* the Extra-usage credits row), so the dropdown never shows two different
-    /// shapes for "time until reset" (#167). The rounded number comes from ``relativeRounded``; a
-    /// qualifier (weekday or clock) is appended by how far off the reset is, in **local** time.
+    /// shapes for "time until reset" (#167). Every line opens with ``resetLinePrefix``; the rounded
+    /// number comes from ``relativeRounded``; a qualifier (weekday or clock) is appended by how far off
+    /// the reset is, in **local** time.
     ///
     /// Bands (by actual remaining time — the number rounds independently, so the two may diverge by a
-    /// unit at a boundary, which is acceptable):
-    /// - `> 7 d`            → `"15d"`               — bare day count, no qualifier
-    /// - `6 d < r ≤ 7 d`    → `"7d next Monday"`    — the weekday, disambiguated with **next**
-    /// - `24 h < r ≤ 6 d`   → `"5d on Friday"`      — the weekday it lands on
-    /// - `r ≤ 24 h`         → `"20h at 03:00"` / `"45m at 03:00"` — the local wall-clock time
+    /// unit at a boundary, which is acceptable), shown here in their `verbose` form:
+    /// - `> 7 d`            → `"resets in 15d"`            — bare day count, no qualifier
+    /// - `6 d < r ≤ 7 d`    → `"resets in 7d next Monday"` — the weekday, disambiguated with **next**
+    /// - `24 h < r ≤ 6 d`   → `"resets in 5d on Friday"`   — the weekday it lands on
+    /// - `r ≤ 24 h`         → `"resets in 20h at 03:00"` / `"resets in 45m at 03:00"` — local wall clock
     /// - `r ≤ 0`            → `nil` (reset now/past — the caller renders its "resetting…" fallback)
+    ///
+    /// Without `verbose` the prefix is dropped and only the qualifier remains — `"15d"`,
+    /// `"5d on Friday"`, `"20h at 03:00"`. That is the resting state: the words are an ⌥ detail, so the
+    /// steady-state line stays as narrow as it was before the prefix existed.
     ///
     /// The `≤ 24 h` band covers both the `Nh` and `Nm` cases automatically — `relativeRounded` picks
     /// the unit; the `at <time>` qualifier is the same for both. The weekday is the fixed **English**
@@ -245,12 +255,15 @@ public enum ResetClock {
     /// - Parameters:
     ///   - resetsAt: The reset instant.
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
+    ///   - verbose: Whether to prepend ``resetLinePrefix``. The popup passes its ⌥ state, so the words
+    ///     appear only while Option is held; `false` (the default) yields the bare `"2h at 02:50"`.
     ///   - locale: Drives 12/24h in the clock qualifier. Default `.current`.
     ///   - timeZone: Wall-clock zone + weekday-day source. Default `.current`.
     /// - Returns: The assembled line, or `nil` for a non-positive remaining.
     public static func resetLine(
         resetsAt: Date,
         now: Date,
+        verbose: Bool = false,
         locale: Locale = .current,
         timeZone: TimeZone = .current
     ) -> String? {
@@ -258,16 +271,17 @@ public enum ResetClock {
         guard remaining > 0, let number = relativeRounded(resetsAt: resetsAt, now: now) else {
             return nil
         }
+        let head = verbose ? "\(resetLinePrefix) \(number)" : number
         let day = 86_400.0
-        if remaining > 7 * day { return number }                              // "15d"
-        if remaining > 6 * day {                                              // "7d next Monday"
-            return "\(number) next \(weekdayString(for: resetsAt, timeZone: timeZone))"
+        if remaining > 7 * day { return head }                                // "resets in 15d"
+        if remaining > 6 * day {                                              // "resets in 7d next Monday"
+            return "\(head) next \(weekdayString(for: resetsAt, timeZone: timeZone))"
         }
-        if remaining > day {                                                  // "5d on Friday"
-            return "\(number) on \(weekdayString(for: resetsAt, timeZone: timeZone))"
+        if remaining > day {                                                  // "resets in 5d on Friday"
+            return "\(head) on \(weekdayString(for: resetsAt, timeZone: timeZone))"
         }
         // ≤ 24 h → clock time; relativeRounded already picked "Nh" / "Nm" / "<1m".
-        return "\(number) at \(absoluteString(for: resetsAt, locale: locale, timeZone: timeZone))"
+        return "\(head) at \(absoluteString(for: resetsAt, locale: locale, timeZone: timeZone))"
     }
 
     // MARK: - Private formatting

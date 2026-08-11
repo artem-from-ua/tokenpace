@@ -270,7 +270,8 @@ return (usage - time) < 0.16 * (1 - time) ? .calm : .ahead
 | Статус кредитів | `creditsStatusText:1914` | `usage >= 1` → завжди `"limit reached"`, ніколи не «ahead» |
 | Суми кредитів | `creditsAmountText:1922` | `"€10.77 / €15.00"` — **обидві суми, без відсотка** |
 | Без capу | `creditsSpentOnlyText` | `"€10.77 spent"` — без бару й вердикту |
-| Рядок ресету, попап | `ResetClock.resetLine` | `"15d"` · `"5d on Friday"` · `"20h at 03:00"` |
+| Рядок ресету, попап | `ResetClock.resetLine` | `"15d"` · `"5d on Friday"` · `"20h at 03:00"`. Під **⌥** — з префіксом `"resets in"` (`verbose: true`): `"resets in 20h at 03:00"` |
+| Відсоток витраченого, попап | `PopupViewController.usedText` | `"20%"`; під **⌥** — `"20% used"`. Обидві половини рядка деталей набувають слів разом із `resetText` |
 | Лейбл ресету, меню-бар | `ResetClock.timeToReset` | **одна одиниця на будь-якій відстані** — `"45m"` · `"5h"` · `"4d"` · `"<1m"`. Годинника (`20:40`) і комбінованого `1h30m` **немає** ([ADR-0074](../adr/0074-one-reset-format-on-both-surfaces.md)) |
 
 ## Ієрархія чорнила в попапі

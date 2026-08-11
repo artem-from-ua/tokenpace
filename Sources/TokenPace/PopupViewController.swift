@@ -1430,7 +1430,8 @@ final class PopupViewController: NSViewController {
             // reset (the "last stand" pick from `layout.blockingReset`).
             if !row.sessionIdle {
                 addDetailLine(
-                    used: Self.usedText(row), reset: Self.resetText(row),
+                    used: Self.usedText(row, verbose: optionHeld),
+                    reset: Self.resetText(row, verbose: optionHeld),
                     resetIsBlocking: Self.isBlockingRow(index, in: layout))
             }
             // No inter-section gap after the **last** bar — but only when there is no credits section
@@ -1501,7 +1502,7 @@ final class PopupViewController: NSViewController {
             badge: credits.inUse ? makeInUseMarker(currency: credits.spent.currency) : nil)
         addDetailLine(
             used: Self.creditsAmountText(spent: credits.spent, limit: limit),
-            reset: credits.resetLine ?? "resetting…",
+            reset: (optionHeld ? credits.resetLineVerbose : credits.resetLine) ?? "resetting…",
             resetIsBlocking: creditsResetIsBlocking)
         // Credits pace over the whole calendar month; there is no window-tick ruler like the token bars,
         // so the bar draws with no subdivisions (a plain pacing bar). `isLast: true` — the credits
@@ -2209,15 +2210,26 @@ final class PopupViewController: NSViewController {
     /// spent — so this number is the only place the quota consumed is stated. Paired with the reset
     /// on the right, the line reads "how much is gone ↔ when it comes back".
     ///
+    /// The `"used"` noun is an **⌥ detail** — at rest the line is the bare `"20%"`. Both halves of the
+    /// detail line drop their words together (`resetText`), so holding Option turns
+    /// `"20%   2h at 02:50"` into the full sentence `"20% used   resets in 2h at 02:50"` and the
+    /// resting line stays as narrow as the numbers themselves.
+    ///
     /// Token rows only; the credits section has its own `creditsAmountText` (money, not a percentage).
-    static func usedText(_ row: LimitRow) -> String { "\(percent(row.utilization)) used" }
+    static func usedText(_ row: LimitRow, verbose: Bool = false) -> String {
+        verbose ? "\(percent(row.utilization)) used" : percent(row.utilization)
+    }
 
     /// The per-limit detail line's **right**-aligned half: the unified reset line
     /// (`ResetClock.resetLine`) — `"20h at 03:00"` for a near reset, `"5d on Friday"` /
     /// `"7d next Monday"` for a far one, `"15d"` for a distant one — or `"resetting…"` when the model
     /// carries no line (reset is now/past). One shape for every limit, credits included (#167).
-    static func resetText(_ row: LimitRow) -> String {
-        row.resetLine ?? "resetting…"
+    ///
+    /// Under ⌥ the line switches to the layout's precomputed verbose form, which prepends
+    /// `"resets in"` — the same gate `usedText` uses, so both halves gain their words at once. The
+    /// `"resetting…"` fallback is already a sentence and is unchanged by the gate.
+    static func resetText(_ row: LimitRow, verbose: Bool = false) -> String {
+        (verbose ? row.resetLineVerbose : row.resetLine) ?? "resetting…"
     }
 
     /// Data-age threshold past which the header timestamp is shown **unconditionally** (not just under
