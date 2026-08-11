@@ -56,6 +56,7 @@ enum StubScenario: String, CaseIterable {
     case creditsActive = "credits-active"
     case creditsLimitReached = "credits-limit-reached"
     case creditsNoLimit = "credits-no-limit"
+    case creditsZeroSpent = "credits-zero-spent"
     case justUnblocked = "just-unblocked"
     case creditsOnset = "credits-onset"
     case resetGrace = "reset-grace"
@@ -167,6 +168,7 @@ enum StubScenario: String, CaseIterable {
         case .creditsActive:       return "Credits · active (paced)"
         case .creditsLimitReached: return "Credits · limit reached (red)"
         case .creditsNoLimit:      return "Credits · no limit (neutral)"
+        case .creditsZeroSpent:    return "Credits · nothing spent yet"
         case .justUnblocked:       return "Back to work! edge"
         case .creditsOnset:        return "Extra Usage Credit onset"
         case .resetGrace:          return "Reset-boundary idle grace"
@@ -269,6 +271,9 @@ enum StubScenario: String, CaseIterable {
                  + "icon."
         case .creditsNoLimit:
             return "Credits ¤ icon (#144): unlimited limit (limit: null) → NEUTRAL (foreground) icon."
+        case .creditsZeroSpent:
+            return "Credits enabled, €15 cap, nothing spent yet (amount_minor: 0) → the resting money "
+                 + "line reads \"€0 of €15\" (⌥ → \"€0.00 of €15.00\"); bar sits at zero."
         case .justUnblocked:
             return "Back-to-work edge (#160): first poll blocked (7d 100 %), then workable → fires the "
                  + "\"Back to work!\" notification once (quiet hours + authorization permitting)."
@@ -344,6 +349,7 @@ enum StubScenario: String, CaseIterable {
         case .creditsActive:       return StubUsageTransport(mode: .credits(.active), now: now)
         case .creditsLimitReached: return StubUsageTransport(mode: .credits(.limitReached), now: now)
         case .creditsNoLimit:      return StubUsageTransport(mode: .credits(.noLimit), now: now)
+        case .creditsZeroSpent:    return StubUsageTransport(mode: .credits(.zeroSpent), now: now)
         case .justUnblocked:       return StubUsageTransport(mode: .justUnblocked, now: now)
         case .creditsOnset:        return StubUsageTransport(mode: .creditsOnset, now: now)
         case .resetGrace:          return StubUsageTransport(mode: .resetGrace, now: now)

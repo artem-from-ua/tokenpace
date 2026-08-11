@@ -17,6 +17,11 @@ import Foundation
 /// | `10140`  | `$10.1K`  |
 /// | `120400` | `$120K`   |
 ///
+/// Two entry points, for the two halves of the credits line: ``text(_:)`` for the **spend** (a moving
+/// value on the ladder, bar one case — an untouched `$0` shows no cents) and ``capText(_:)`` for the
+/// **cap** (a constant, which drops a zero fraction throughout — `€15`, not `€15.0`). The ladder is
+/// shared; only trailing zeros differ.
+///
 /// Lives in the Kit — not on the AppKit view controller — so it is unit-testable, the same reason
 /// ``ExtraUsageOnset/moneyText(_:)`` keeps its copy of the exact formatter here (that one is a
 /// deliberate duplicate of the popup's; this one is the single source both surfaces call).
@@ -32,6 +37,32 @@ public enum CompactMoney {
     /// The amount always comes from the **integer** minor units + exponent, so no representation error
     /// creeps in before rounding.
     public static func text(_ money: Money) -> String {
+        // Nothing spent yet reads as `$0`, not `$0.00`: at exactly zero the cents are not precision but
+        // padding, and the resting line is trying to be narrow. The test is on the **integer** minor
+        // units, so a real but tiny spend keeps its digits — `$0.004` is `$0.00`, never `$0`, because
+        // money has moved and the line must not claim otherwise.
+        guard money.amountMinor != 0 else { return text(money, dropsZeroFraction: true) }
+        return text(money, dropsZeroFraction: false)
+    }
+
+    /// The compact rendering of a **cap** — the ladder above, but a whole amount drops its zero
+    /// fraction entirely: `€15` rather than `€15.0`.
+    ///
+    /// This is the credits line's *right* half only. The two amounts are different kinds of number and
+    /// the asymmetry is the point: the spend is a moving value whose precision carries information,
+    /// while the cap is a constant the user typed into Anthropic's billing — every limit in the captured
+    /// payloads is whole (€15, €11, €5), so its `.00` is noise on a line that is trying to be narrow.
+    /// A cap that *does* carry cents still shows them (`€15.50` → `€15.5`), so nothing is hidden.
+    ///
+    /// The ⌥ form is unaffected: holding Option shows both amounts exact, cap cents included.
+    public static func capText(_ money: Money) -> String {
+        text(money, dropsZeroFraction: true)
+    }
+
+    /// Shared body of ``text(_:)`` and ``capText(_:)``. `dropsZeroFraction` decides only what happens to
+    /// an amount whose fraction rounds to nothing — the ladder itself is identical either way, so the
+    /// two halves of the credits line can never disagree about magnitude, only about trailing zeros.
+    private static func text(_ money: Money, dropsZeroFraction: Bool) -> String {
         let value = Double(money.amountMinor) / pow(10, Double(money.exponent))
         // The K threshold is tested on the value **as it will round** (`999.7` reads as 1000 → `$1.00K`),
         // otherwise a just-under amount would render four digits — the one width this ladder avoids.
@@ -40,7 +71,11 @@ public enum CompactMoney {
         // no smaller unit" (JPY → no cents). Past the K divide the suffix has already changed the scale,
         // so `¥1204` is `¥1.20K` — those decimals are thousands, not sub-unit precision the currency lacks.
         let significant = significantFractionDigits(scaled)
-        let digits = suffix.isEmpty ? min(max(0, money.exponent), significant) : significant
+        var digits = suffix.isEmpty ? min(max(0, money.exponent), significant) : significant
+        // A cap whose fraction rounds away shows none: `€15.0` → `€15`, `$1.20K` → `$1.2K` only when the
+        // hundredth is what vanished. Tested on the value **as this many digits would round it**, so
+        // `€14.999` (which renders `€15.0`) counts as whole too — the string decides, not the input.
+        if dropsZeroFraction, roundsToWhole(scaled, digits: digits) { digits = 0 }
         if isKnownCurrency(money.currency),
            let text = currencyFormatted(scaled, code: money.currency, digits: digits) {
             return "\(text)\(suffix)"
@@ -48,6 +83,17 @@ public enum CompactMoney {
         let amount = String(format: "%.\(digits)f", scaled)
         let code = money.currency.isEmpty ? "" : " \(money.currency.uppercased())"
         return "\(amount)\(suffix)\(code)"
+    }
+
+    /// Whether `value`, rendered at `digits` fraction digits, would show nothing but zeros after the
+    /// decimal point. Compares the value against its own whole-number rounding at that precision, so it
+    /// answers "will the string end in `.0`/`.00`?" rather than "is the input mathematically whole" —
+    /// the two differ for a value like `14.999`, which prints `15.0`.
+    static func roundsToWhole(_ value: Double, digits: Int) -> Bool {
+        guard digits > 0 else { return true }
+        let scale = pow(10, Double(digits))
+        let rounded = (value * scale).rounded() / scale
+        return rounded == rounded.rounded()
     }
 
     /// Fraction digits that leave `value` with three significant digits: `< 10` → 2 (`1.21`), `< 100` →
