@@ -435,11 +435,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // "Insights…" is the first action item (#242, ADR-0067) — opens the separate usage-history
         // visualisation window — followed by a divider that separates it from the standard app items.
-        let insightsItem = NSMenuItem(title: "", action: #selector(openInsights), keyEquivalent: "")
-        insightsItem.attributedTitle = Self.dropdownMenuItemText("Insights…")
-        insightsItem.target = self
-        menu.addItem(insightsItem)
-        menu.addItem(.separator())
+        // Temporarily hidden: the window has nothing worth showing yet, so the entry (and its divider)
+        // stays commented out until the charts (#239/#240/#241) land. The window controller and the
+        // `openInsights` action below are kept intact so restoring this is a one-line uncomment.
+        // let insightsItem = NSMenuItem(title: "", action: #selector(openInsights), keyEquivalent: "")
+        // insightsItem.attributedTitle = Self.dropdownMenuItemText("Insights…")
+        // insightsItem.target = self
+        // menu.addItem(insightsItem)
+        // menu.addItem(.separator())
 
         // Action items at the bottom of the same menu (#14). `keyEquivalent: ""` keeps a shortcut
         // glyph off the right edge — none is wanted, and there is no main menu to host a default ⌘Q.
