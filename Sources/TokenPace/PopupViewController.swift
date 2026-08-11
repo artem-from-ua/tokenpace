@@ -1474,12 +1474,12 @@ final class PopupViewController: NSViewController {
     /// - **Limit set** (`credits.bar != nil`): a full section mirroring a limit window —
     ///   ```
     ///   Extra usage ............... on pace | ahead | limit reached
-    ///   €10.77 / €15.00 ........... 5d on Friday
+    ///   €10.8 of €15.0 ............ 5d on Friday
     ///   ```
     ///   plus a pacing bar (same `PopupBarView`, coloured by `credits.bar` via `aheadColor`).
     /// - **Unlimited** (`credits.bar == nil`): a single bare line, no bar, no reset —
     ///   ```
-    ///   Extra usage ............... €10.77 spent
+    ///   Extra usage ............... €10.8 spent
     ///   ```
     ///
     /// The heading "Extra usage" is styled like the limit-window titles (plain `labelColor`, not the
@@ -1487,7 +1487,9 @@ final class PopupViewController: NSViewController {
     private func addCreditsSection(_ credits: CreditsRow, resetIsBlocking creditsResetIsBlocking: Bool = false) {
         guard let bar = credits.bar, let limit = credits.limit else {
             // Unlimited: "Extra usage … €X.XX spent". No bar, no reset line — no cap to pace.
-            addTitleStatusLine(title: Self.extraUsageTitle, status: Self.creditsSpentOnlyText(credits.spent))
+            addTitleStatusLine(
+                title: Self.extraUsageTitle,
+                status: Self.creditsSpentOnlyText(credits.spent, verbose: optionHeld))
             return
         }
 
@@ -1501,7 +1503,7 @@ final class PopupViewController: NSViewController {
             status: Self.creditsStatusText(bar),
             badge: credits.inUse ? makeInUseMarker(currency: credits.spent.currency) : nil)
         addDetailLine(
-            used: Self.creditsAmountText(spent: credits.spent, limit: limit),
+            used: Self.creditsAmountText(spent: credits.spent, limit: limit, verbose: optionHeld),
             reset: (optionHeld ? credits.resetLineVerbose : credits.resetLine) ?? "resetting…",
             resetIsBlocking: creditsResetIsBlocking)
         // Credits pace over the whole calendar month; there is no window-tick ruler like the token bars,
@@ -2380,16 +2382,24 @@ final class PopupViewController: NSViewController {
         return isWellAhead(bar) ? "well ahead of pace" : "ahead of pace"
     }
 
-    /// The detail line's **left** half when a cap is set: `"€10.77 / €15.00"` — spent over limit, both
-    /// formatted from their exact ``Money`` integers (never a rounded `Double`).
-    static func creditsAmountText(spent: Money, limit: Money) -> String {
-        "\(moneyText(spent)) / \(moneyText(limit))"
+    /// The detail line's **left** half when a cap is set: `"€10.8 of €15.0"` at rest, the exact
+    /// `"€10.77 of €15.00"` under ⌥ — spent out of limit, both formatted from their exact ``Money``
+    /// integers (never a rounded `Double`).
+    ///
+    /// The precision is an **⌥ detail**, the same gate `usedText`/`resetText` use: at rest both amounts
+    /// carry three significant digits (``compactMoneyText(_:)``) so the line stays as narrow as the
+    /// numbers themselves, and holding Option reveals every cent. Both halves switch together — a line
+    /// mixing a rounded spend with an exact cap would read as two different kinds of number.
+    static func creditsAmountText(spent: Money, limit: Money, verbose: Bool = false) -> String {
+        let format = verbose ? moneyText : compactMoneyText
+        return "\(format(spent)) of \(format(limit))"
     }
 
-    /// The **unlimited** line's right half: `"€10.77 spent"` — the spent amount with a trailing word,
-    /// no cap and no reset (there is nothing to pace against).
-    static func creditsSpentOnlyText(_ spent: Money) -> String {
-        "\(moneyText(spent)) spent"
+    /// The **unlimited** line's right half: `"€10.8 spent"` — the spent amount with a trailing word,
+    /// no cap and no reset (there is nothing to pace against). Same ⌥ precision gate as
+    /// ``creditsAmountText(spent:limit:verbose:)``: three significant digits at rest, exact under Option.
+    static func creditsSpentOnlyText(_ spent: Money, verbose: Bool = false) -> String {
+        "\(verbose ? moneyText(spent) : compactMoneyText(spent)) spent"
     }
 
     /// Format a ``Money`` for display. For a **known** currency the symbol sits in that currency's
@@ -2412,6 +2422,13 @@ final class PopupViewController: NSViewController {
         let amount = String(format: "%.\(digits)f", value)
         let code = money.currency.isEmpty ? "" : " \(money.currency.uppercased())"
         return "\(amount)\(code)"
+    }
+
+    /// The resting, **three-significant-digit** form of a ``Money`` — the credits line's default, with
+    /// the exact ``moneyText(_:)`` reserved for ⌥. Delegates to ``CompactMoney/text(_:)`` in the Kit,
+    /// where the ladder (and its rounding boundaries) is unit-tested; see that type for the table.
+    static func compactMoneyText(_ money: Money) -> String {
+        CompactMoney.text(money)
     }
 
     /// Whether we treat this ISO code as "known" — mirrors ``StatusItemView/creditsSymbolName(for:)``
