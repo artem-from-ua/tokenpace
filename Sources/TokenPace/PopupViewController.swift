@@ -232,33 +232,27 @@ final class PopupBarView: NSView {
         // Idle 5h bar (#100, ADR-0027): no pacing zones, "no active session, full quota available".
         // Rendered before the pacing path so the (inert, zeroed) `bar` layout is never consulted.
         //
-        // The shape follows the **style**, so idle cannot be mistaken for a pacing state (#307):
-        // - **Progress** — the solid track, plus the time marker parked at the left edge. Idle means
-        //   the window has just rolled, so `timeFraction` is 0 and the marker belongs at zero. Without
-        //   it a Progress idle bar is indistinguishable from a Pressure bar reading "full pressure".
-        // - **Pressure** — the minimum pill, the same shape any zero-length ribbon draws. On the
-        //   renormalised track idle *is* zero pressure, so a full-width fill would be the loudest
-        //   possible mark for the calmest possible state.
+        // Idle is drawn the same way in **both** styles (#325): the bare grey track, plus a zero-length
+        // mark at the left edge — the minimum pill any zero-length ribbon draws. Progress adds its
+        // identifying time marker on top, parked at `timeFraction` = 0 (the window has just rolled, so
+        // no time has elapsed); the marker covers the pill, so the two styles differ only by that mark.
+        //
+        // Progress used to fill the whole track solid blue, which read as a Pressure bar at *full*
+        // pressure — the loudest possible mark for the calmest possible state, and the exact confusion
+        // the per-style shapes were meant to prevent. Zero usage is zero on both scales, so zero is what
+        // both draw.
         if idle {
             // Blocked idle (#158) → grey (no path to start); otherwise the "ready to start" blue.
             // Grey (blocked) is an already-translucent neutral — leave it; only the blue hue is tinted (#188).
             // Animated so idle→active reads as a fade (ADR-0070); the glow follows automatically
             // because it is derived from this same colour.
             let idleColor = blocked ? Self.monochromeGrey : animated(Palette.idleBlue, part: .fill)
-            // Under Pressure the mark is a pill, so the grey track has to go down first — exactly as
-            // the pacing path does. Without it the pill hangs in empty space while every neighbouring
-            // row shows a track. Progress fills the whole width, so there the fill *is* the track.
-            if barStyle.popupUsesPressureScale {
-                Self.monochromeGrey.setFill()
-                NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner).fill()
-            }
-            let idleShape = barStyle.popupUsesPressureScale
-                ? Self.pillRect(at: 0, in: rect)
-                : rect
-            if let idleShape {
-                let corner = barStyle.popupUsesPressureScale
-                    ? min(idleShape.width, idleShape.height) / 2      // capsule, like any pill
-                    : Metrics.corner
+            // The grey track goes down first, exactly as the pacing path does — without it the mark
+            // hangs in empty space while every neighbouring row shows a track.
+            Self.monochromeGrey.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner).fill()
+            if let idleShape = Self.pillRect(at: 0, in: rect) {
+                let corner = min(idleShape.width, idleShape.height) / 2      // capsule, like any pill
                 let idlePath = NSBezierPath(roundedRect: idleShape, xRadius: corner, yRadius: corner)
                 if blocked {
                     idleColor.setFill()

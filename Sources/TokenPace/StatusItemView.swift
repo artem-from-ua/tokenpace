@@ -820,13 +820,14 @@ final class StatusItemView: NSView {
         // Idle 5h bar (#100, ADR-0027): no pacing zones — "no active session, full quota available".
         // The bar's `layout`/`indicator` are inert here.
         //
-        // The shape follows the **style**, so idle cannot be mistaken for a pacing state (#307):
-        // - **Progress** — the solid track plus the time marker parked at the left edge (`timeFraction`
-        //   is 0: the window has just rolled). Without the marker a Progress idle bar looks exactly
-        //   like a Pressure bar reading "full pressure".
-        // - **Pressure** — the minimum pill, the shape any zero-length ribbon draws. Idle *is* zero
-        //   pressure on the renormalised track, so filling the whole bar would be the loudest mark
-        //   for the calmest state. Mirror of `PopupBarView.draw`'s idle branch.
+        // Idle is drawn the same way in **both** styles (#325): the bare grey track, plus the minimum
+        // pill at the left edge — the shape any zero-length ribbon draws. Progress adds its identifying
+        // time marker on top, parked at `timeFraction` = 0 (the window has just rolled), which covers
+        // the pill; that marker is the only difference between the two styles here.
+        //
+        // Progress used to fill the whole bar solid blue, which read exactly like a Pressure bar at
+        // *full* pressure — the loudest mark for the calmest state. Zero usage is zero on both scales.
+        // Mirror of `PopupBarView.draw`'s idle branch.
         if bar.idle {
             // Idle bar fill (#100/#158): blocked → base track grey; ready+calm → quiet neutral;
             // ready+normal → the "ready to start" blue.
@@ -841,23 +842,17 @@ final class StatusItemView: NSView {
             // swap fade rather than snap.
             let fill = animated(idleTarget, window: bar.window, part: .fill)
             let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
-            if barStyle.menuBarUsesPressureScale {
-                // Zero pressure — the same pill `fillZone(floorEmptyToPill:)` draws for a zero ribbon.
-                // The grey track goes down first, exactly as the pacing path does: without it the pill
-                // would hang in empty space while every neighbouring bar shows a track.
-                Palette.unusedGrey.setFill()
-                path.fill()
-                NSGraphicsContext.saveGraphicsState()
-                path.addClip()
-                fillZone(from: 0, to: 0, in: rect, width: rect.width, color: fill, floorEmptyToPill: true)
-                NSGraphicsContext.restoreGraphicsState()
-            } else {
-                // Progress fills the whole track, so the fill *is* the track — no separate base needed.
-                fill.setFill()
-                path.fill()
-                // Progress keeps its identifying mark: the marker at `timeFraction` = 0.
-                drawTimeMarker(at: 0, colour: fill, in: rect)
-            }
+            // Zero pressure — the same pill `fillZone(floorEmptyToPill:)` draws for a zero ribbon.
+            // The grey track goes down first, exactly as the pacing path does: without it the pill
+            // would hang in empty space while every neighbouring bar shows a track.
+            Palette.unusedGrey.setFill()
+            path.fill()
+            NSGraphicsContext.saveGraphicsState()
+            path.addClip()
+            fillZone(from: 0, to: 0, in: rect, width: rect.width, color: fill, floorEmptyToPill: true)
+            NSGraphicsContext.restoreGraphicsState()
+            // Progress keeps its identifying mark: the marker at `timeFraction` = 0, drawn over the pill.
+            if barStyle.menuBarShowsTimeMarker { drawTimeMarker(at: 0, colour: fill, in: rect) }
             return
         }
 
