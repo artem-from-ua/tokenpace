@@ -79,10 +79,16 @@ final class SettingsWindowController: NSWindowController {
         get { model.onResetCountdownModeMenuBarChange } set { model.onResetCountdownModeMenuBarChange = newValue }
     }
 
-    /// Called when the user changes the "Bar style" segmented control (#224), with the new style.
-    /// Governs both the menu-bar widget and the dropdown popup.
-    var onBarStyleChange: ((BarStyle) -> Void)? {
-        get { model.onBarStyleChange } set { model.onBarStyleChange = newValue }
+    /// Called when the user changes the **Menu Bar Widget** section's "Bar style" control (#224,
+    /// #329), with the new style. Menu bar only — the dropdown has its own callback.
+    var onMenuBarStyleChange: ((BarStyle) -> Void)? {
+        get { model.onMenuBarStyleChange } set { model.onMenuBarStyleChange = newValue }
+    }
+
+    /// Called when the user changes the **Dropdown Widget** section's "Bar style" control (#329),
+    /// with the new style. Popup only.
+    var onDropdownStyleChange: ((BarStyle) -> Void)? {
+        get { model.onDropdownStyleChange } set { model.onDropdownStyleChange = newValue }
     }
 
     /// Called when the user toggles "Show ticks on bars" (#224), with the new state. Popup-only.

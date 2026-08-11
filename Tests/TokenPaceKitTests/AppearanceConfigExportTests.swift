@@ -10,8 +10,8 @@ import Foundation
 /// suite exists to catch. When an Appearance option is added, update the pane, the encoder, and this
 /// list together.
 private let paneOrderedKeys = [
-    "barStyle",                   // "Bar style"
     "farBehindInterval",          // "Far behind pace interval"
+    "menuBarStyle",               // Menu Bar Widget → "Bar style"
     "calmColorMode",              // "Calm non-critical colors"
     "awaitingInputInMenuBar",     // "Show awaiting-input icon in the menu bar"
     "pauseHidesBars",             // "Pause icon hides bars"
@@ -19,6 +19,7 @@ private let paneOrderedKeys = [
     "hideCalmSevenDayBar",        // "Show 7-day bar when calm"
     "resetCountdownModeMenuBar",  // "Show reset countdown"
     "showServiceStatusDot",       // "Show service status dot on issues"
+    "dropdownStyle",              // Dropdown Widget → "Bar style"
     "modelLimitsVisibility",      // "Show model & service limits"
     "extraUsageVisibility",       // "Show extra usage"
     "showTicks",                  // "Show ticks on bars"
@@ -53,7 +54,10 @@ private let customValues = AppearancePresetValues(
     modelLimitsVisibility: .optionOnly,
     extraUsageVisibility: .always,
     resetCountdownModeMenuBar: .never,
-    barStyle: .mixed,
+    // Deliberately mismatched surfaces — the pair no preset can express (#329), and the shape the
+    // retired `"mixed"` value used to name.
+    menuBarStyle: .pressure,
+    dropdownStyle: .progress,
     showTicks: false,
     farBehindInterval: .short)
 
@@ -91,7 +95,7 @@ struct AppearanceConfigExportOrderTests {
     /// Every Appearance value reaches the dump — catches a property added to `AppearancePresetValues`
     /// whose `encode` call was forgotten, which would otherwise drop it silently.
     @Test func everyValueIsExported() {
-        #expect(appearanceKeysInOrder(export(customValues, preset: nil)).count == 12)
+        #expect(appearanceKeysInOrder(export(customValues, preset: nil)).count == 13)
     }
 }
 
@@ -123,7 +127,8 @@ struct AppearanceConfigExportPayloadTests {
     /// survives a case being re-ordered in a later build.
     @Test func enumsExportAsRawStrings() {
         let json = export(customValues, preset: nil)
-        #expect(json.contains("\"barStyle\" : \"mixed\""))
+        #expect(json.contains("\"menuBarStyle\" : \"pressure\""))
+        #expect(json.contains("\"dropdownStyle\" : \"progress\""))
         #expect(json.contains("\"calmColorMode\" : \"off\""))
         #expect(json.contains("\"farBehindInterval\" : \"short\""))
         #expect(json.contains("\"resetCountdownModeMenuBar\" : \"never\""))
@@ -166,8 +171,8 @@ struct AppearancePresetValuesCodableTests {
     /// re-ordered by hand still reads back correctly.
     @Test func decodingIsOrderIndependent() throws {
         let json = """
-        { "showTicks" : true, "barStyle" : "simple", "calmColorMode" : "off",
-          "farBehindInterval" : "long", "hideCalmSevenDayBar" : false,
+        { "showTicks" : true, "dropdownStyle" : "gauge", "calmColorMode" : "off",
+          "menuBarStyle" : "simple", "farBehindInterval" : "long", "hideCalmSevenDayBar" : false,
           "pauseHidesBars" : false, "showExtraUsage" : true,
           "showServiceStatusDot" : true, "awaitingInputInMenuBar" : true,
           "modelLimitsVisibility" : "always", "extraUsageVisibility" : "optionOnly",
@@ -175,11 +180,64 @@ struct AppearancePresetValuesCodableTests {
         """
         let decoded = try JSONDecoder().decode(
             AppearancePresetValues.self, from: Data(json.utf8))
-        #expect(decoded.barStyle == .pressure)
+        #expect(decoded.menuBarStyle == .pressure)   // the pre-#307 raw still maps, per surface
+        #expect(decoded.dropdownStyle == .gauge)
         #expect(decoded.farBehindInterval == .long)
         #expect(decoded.resetCountdownModeMenuBar == .always)
         #expect(decoded.modelLimitsVisibility == .always)
         #expect(decoded.extraUsageVisibility == .optionOnly)
         #expect(decoded.showTicks)
+    }
+
+    // MARK: Pre-#329 configs — one `barStyle` key for both surfaces
+
+    /// A config exported before #329 carries a single `barStyle`. `"mixed"` named *different* styles
+    /// per surface, so it splits into the pair it drew — Pressure in the menu bar, Progress in the
+    /// dropdown — rather than collapsing onto one. Same rule the `UserDefaults` migration applies, so
+    /// importing an old dump and upgrading in place land in the same place.
+    @Test func legacyMixedSplitsAcrossTheTwoSurfaces() throws {
+        let decoded = try JSONDecoder().decode(
+            AppearancePresetValues.self, from: Data(legacyJSON(barStyle: "mixed").utf8))
+        #expect(decoded.menuBarStyle == .pressure)
+        #expect(decoded.dropdownStyle == .progress)
+    }
+
+    /// Every other legacy raw — including the pre-#307 renames — applies to both surfaces, since one
+    /// style is all those values ever meant.
+    @Test func otherLegacyStylesApplyToBothSurfaces() throws {
+        let cases: [(String, BarStyle)] = [
+            ("simple", .pressure),   // pre-#307 "Pace"
+            ("pacing", .progress),   // pre-#307 "Pace & Time"
+            ("gauge", .gauge),
+        ]
+        for (raw, expected) in cases {
+            let decoded = try JSONDecoder().decode(
+                AppearancePresetValues.self, from: Data(legacyJSON(barStyle: raw).utf8))
+            #expect(decoded.menuBarStyle == expected, "\(raw)")
+            #expect(decoded.dropdownStyle == expected, "\(raw)")
+        }
+    }
+
+    /// A dump with **no** style key at all (neither the new pair nor the legacy one) decodes to the
+    /// preset default rather than throwing — the same "a missing choice is the default choice" rule
+    /// the getters follow.
+    @Test func aConfigWithNoStyleKeyFallsBackToTheDefault() throws {
+        let decoded = try JSONDecoder().decode(
+            AppearancePresetValues.self, from: Data(legacyJSON(barStyle: nil).utf8))
+        #expect(decoded.menuBarStyle == AppearancePreset.defaultValues.menuBarStyle)
+        #expect(decoded.dropdownStyle == AppearancePreset.defaultValues.dropdownStyle)
+    }
+
+    /// A pre-#329 dump: every current key except the per-surface styles, plus the single legacy one.
+    private func legacyJSON(barStyle: String?) -> String {
+        let styleLine = barStyle.map { "\"barStyle\" : \"\($0)\"," } ?? ""
+        return """
+        { \(styleLine) "showTicks" : true, "calmColorMode" : "off",
+          "farBehindInterval" : "long", "hideCalmSevenDayBar" : false,
+          "pauseHidesBars" : false, "showExtraUsage" : true,
+          "showServiceStatusDot" : true, "awaitingInputInMenuBar" : true,
+          "modelLimitsVisibility" : "always", "extraUsageVisibility" : "optionOnly",
+          "resetCountdownModeMenuBar" : "always" }
+        """
     }
 }

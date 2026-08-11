@@ -31,7 +31,8 @@ final class SettingsModel {
     var onInstallUpdateNow: (() -> Void)?
     var onCalmColorModeChange: ((CalmColorMode) -> Void)?
     var onResetCountdownModeMenuBarChange: ((ResetCountdownMode) -> Void)?
-    var onBarStyleChange: ((BarStyle) -> Void)?
+    var onMenuBarStyleChange: ((BarStyle) -> Void)?
+    var onDropdownStyleChange: ((BarStyle) -> Void)?
     var onShowTicksChange: ((Bool) -> Void)?
     var onFarBehindIntervalChange: ((FarBehindInterval) -> Void)?
     var onServiceDotChange: ((Bool) -> Void)?
@@ -148,9 +149,12 @@ final class SettingsModel {
     var showServiceDot = false
     /// The reset-countdown choice (always / smart / never), shown as a menu picker.
     var resetRadio: ResetRadio = .smart
-    /// The bar presentation style (pacing / simple), shown as a segmented control (#224). Governs
-    /// both the menu-bar widget and the dropdown popup.
-    var barStyle: BarStyle = .progress
+    /// The **menu-bar widget**'s bar presentation style, shown as a segmented control in that
+    /// section (#224, per-surface since #329).
+    var menuBarStyle: BarStyle = .progress
+    /// The **dropdown popup**'s bar presentation style, chosen independently of ``menuBarStyle``
+    /// and shown in the "Dropdown Widget" section (#329).
+    var dropdownStyle: BarStyle = .progress
     /// Whether the popup draws the under-bar tick ruler on the pacing bars (#224). A popup concern,
     /// shown under the "Dropdown Widget" section.
     var showTicks = false
@@ -326,7 +330,8 @@ final class SettingsModel {
             modelLimitsVisibility: modelLimitsVisibility,
             extraUsageVisibility: extraUsageVisibility,
             resetCountdownModeMenuBar: ResetCountdownMode.from(radio: resetRadio),
-            barStyle: barStyle,
+            menuBarStyle: menuBarStyle,
+            dropdownStyle: dropdownStyle,
             showTicks: showTicks,
             farBehindInterval: farBehindInterval)
     }
@@ -450,7 +455,8 @@ final class SettingsModel {
         extraUsageVisibility = PersistedConfig.extraUsageVisibility
         showServiceDot = PersistedConfig.showServiceStatusDot
         resetRadio = PersistedConfig.resetCountdownModeMenuBar.radio
-        barStyle = PersistedConfig.barStyle
+        menuBarStyle = PersistedConfig.menuBarStyle
+        dropdownStyle = PersistedConfig.dropdownStyle
         showTicks = PersistedConfig.showTicks
         farBehindInterval = PersistedConfig.farBehindInterval
 
@@ -568,13 +574,23 @@ final class SettingsModel {
         onResetCountdownModeMenuBarChange?(mode)
     }
 
-    /// Persist the bar presentation style (#224) and fire the callback. The segmented control writes
-    /// `barStyle` directly (via the binding), then calls this. Governs both surfaces.
-    func setBarStyle(_ style: BarStyle) {
-        barStyle = style
-        PersistedConfig.barStyle = style
-        AppLogger.lifecycle.notice("bar-style: set \(style.rawValue, privacy: .public)")
-        onBarStyleChange?(style)
+    /// Persist the **menu-bar** bar style (#224, #329) and fire the callback. The segmented control in
+    /// the Menu Bar Widget section writes `menuBarStyle` directly (via the binding), then calls this.
+    /// Touches that surface only — the dropdown keeps whatever it was set to.
+    func setMenuBarStyle(_ style: BarStyle) {
+        menuBarStyle = style
+        PersistedConfig.menuBarStyle = style
+        AppLogger.lifecycle.notice("menu-bar-style: set \(style.rawValue, privacy: .public)")
+        onMenuBarStyleChange?(style)
+    }
+
+    /// Persist the **dropdown** bar style (#329) and fire the callback. Mirror of
+    /// ``setMenuBarStyle(_:)`` for the popup's own segmented control.
+    func setDropdownStyle(_ style: BarStyle) {
+        dropdownStyle = style
+        PersistedConfig.dropdownStyle = style
+        AppLogger.lifecycle.notice("dropdown-style: set \(style.rawValue, privacy: .public)")
+        onDropdownStyleChange?(style)
     }
 
     /// Persist the popup tick-ruler toggle (#224) and fire the callback.
@@ -645,7 +661,8 @@ final class SettingsModel {
         onExtraUsageVisibilityChange?(extraUsageVisibility)
         onServiceDotChange?(showServiceDot)
         onResetCountdownModeMenuBarChange?(ResetCountdownMode.from(radio: resetRadio))
-        onBarStyleChange?(barStyle)
+        onMenuBarStyleChange?(menuBarStyle)
+        onDropdownStyleChange?(dropdownStyle)
         onShowTicksChange?(showTicks)
         onFarBehindIntervalChange?(farBehindInterval)
         onAwaitingInputAppearanceChange?()   // #233: a preset/reset may flip the menu-bar copy

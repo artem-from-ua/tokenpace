@@ -21,22 +21,25 @@ struct AppearancePresetTests {
         #expect(v.modelLimitsVisibility == .nonCalm)   // quiet dropdown: fold until orange/red (#211)
         #expect(v.extraUsageVisibility == .nonCalm)
         #expect(v.resetCountdownModeMenuBar == .smart)
-        #expect(v.barStyle == .pressure)
+        #expect(v.menuBarStyle == .pressure)   // the quietest style, and on both surfaces (#329)
+        #expect(v.dropdownStyle == .pressure)
         #expect(!v.showTicks)   // the quiet look drops the tick ruler
         #expect(v.farBehindInterval == .off)   // …and no blue far-behind zone
     }
 
-    /// Work harder! = Chill but with Work harder on, ticks on, and the **mixed** bar style. The calm
-    /// menu-bar toggles / countdown / per-model rows all still match `.chill`.
-    @Test func workHarderIsChillPlusWorkHarderTicksAndMixed() {
+    /// Work harder! = Chill but with Work harder on, ticks on, and **Gauge** bars. The calm menu-bar
+    /// toggles / countdown / per-model rows all still match `.chill`.
+    @Test func workHarderIsChillPlusWorkHarderTicksAndGauge() {
         let wh = AppearancePreset.workHarder.values
         let chill = AppearancePreset.chill.values
         #expect(wh.calmColorMode == .yellowGreen)       // difference 1 — far-behind blue stays coloured
         #expect(chill.calmColorMode == .yellowGreenBlue)
         #expect(wh.showTicks)          // difference 2 — ticks on for every preset but Chill
         #expect(!chill.showTicks)
-        #expect(wh.barStyle == .mixed) // difference 3 — mixed bars (Chill is .pressure)
-        #expect(chill.barStyle == .pressure)
+        // Difference 3 — Gauge on both surfaces (#329; was the per-surface `.mixed` pair before).
+        #expect(wh.menuBarStyle == .gauge)
+        #expect(wh.dropdownStyle == .gauge)
+        #expect(chill.menuBarStyle == .pressure)
         #expect(!wh.pauseHidesBars)    // difference 5 — Work harder keeps the bars beside the pause icon
         #expect(chill.pauseHidesBars)  // …Chill hides them (icon only)
         // The rest matches Chill.
@@ -66,8 +69,21 @@ struct AppearancePresetTests {
         #expect(v.modelLimitsVisibility == .always)
         #expect(v.extraUsageVisibility == .always)
         #expect(v.resetCountdownModeMenuBar == .always)
-        #expect(v.barStyle == .progress)
+        #expect(v.menuBarStyle == .progress)
+        #expect(v.dropdownStyle == .progress)
         #expect(v.showTicks)
+    }
+
+    /// Every preset gives both surfaces the **same** style (#329). The presets are the three coherent
+    /// looks, so one that disagreed with itself across the menu bar and the dropdown would be a fourth;
+    /// mixing the two is what dropping out to "Custom" is for. Also means the three presets cover the
+    /// three styles exactly once, so no style is unreachable from the preset row alone.
+    @Test func everyPresetUsesOneStyleOnBothSurfaces() {
+        for preset in AppearancePreset.allCases {
+            let v = preset.values
+            #expect(v.menuBarStyle == v.dropdownStyle, "\(preset)")
+        }
+        #expect(Set(AppearancePreset.allCases.map(\.values.menuBarStyle)) == Set(BarStyle.allCases))
     }
 
     /// `.default` is the factory default preset — Work harder! (#224), the fallback when no keys stored.
@@ -112,7 +128,10 @@ struct AppearancePresetTests {
             modelLimitsVisibility: chill.modelLimitsVisibility,
             extraUsageVisibility: chill.extraUsageVisibility,
             resetCountdownModeMenuBar: chill.resetCountdownModeMenuBar,
-            barStyle: .progress, // Chill uses .pressure → this is off every preset
+            // Only the *dropdown* is flipped: Chill is Pressure on both, so this mismatched pair is
+            // off every preset — and it is the mix a preset can no longer express (#329).
+            menuBarStyle: chill.menuBarStyle,
+            dropdownStyle: .progress,
             showTicks: chill.showTicks,
             farBehindInterval: chill.farBehindInterval)
         #expect(AppearancePreset.matching(custom) == nil)

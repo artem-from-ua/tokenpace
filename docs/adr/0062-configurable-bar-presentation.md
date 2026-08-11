@@ -2,10 +2,19 @@
 status: superseded
 date: 2026-08-02
 supersedes: []
-superseded_by: [0076]
+superseded_by: [0076, 0080]
 ---
 
 # ADR-0062: Конфігурована подача пейсинг-барів — Bar style, Calm-режим, поріг far-behind
+
+> **Частково витіснений [ADR-0080](0080-per-surface-bar-style.md)** (#329): §1 більше не чинний у
+> частині «один enum на дві поверхні». Кейс `.mixed` видалено, а `BarStyle` тепер описує подачу
+> **однієї** поверхні — меню-бар і попап зберігають свій стиль кожен у своєму ключі
+> (`menuBarStyle` / `dropdownStyle`), тож доступні всі дев'ять пар, а не чотири. Похідні
+> `menuBarScale` / `popupScale` / `menuBarShowsTimeMarker` / `popupShowsTimeMarker` замінені на одну
+> `scale` і один `showsTimeMarker`. Пресет `.workHarder` тепер ставить **Gauge** на обидві поверхні
+> замість Mixed. Решта — `CalmColorMode`, `FarBehindInterval`, `showTicks`, пресет як єдине джерело
+> дефолтів — чинна.
 
 > **Частково витіснений [ADR-0076](0076-pressure-scale-for-marker-less-bar.md)** (#307): стрічка без
 > маркера більше **не** дорівнює ширині пейсинг-gap (`gapEnd − gapStart`) — вона рахується в
@@ -105,6 +114,9 @@ Bool-гейт на `PopupBarView.drawTicks`. Menu bar засічок не має
 | Chill | `.yellowGreenBlue` | `.simple` | off | `.off` |
 | Work harder! (**default**) | `.yellowGreen` | `.mixed` | on | `.medium` |
 | Control freak | `.off` | `.pacing` | on | `.medium` |
+
+> ⚠️ Колонка `BarStyle` витіснена [ADR-0080](0080-per-surface-bar-style.md): пресет задає **два**
+> значення (menu bar / dropdown), і `.workHarder` тепер `.gauge` на обидві. Актуальна таблиця — там.
 
 ## Наслідки
 

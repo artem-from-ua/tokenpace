@@ -50,39 +50,11 @@ struct AppearancePane: View {
                 }
             }
 
-            // Bar presentation style (#224, rescaled in #307) + far-behind (green→blue) threshold (#224) —
-            // both govern the pacing bars across BOTH surfaces, so they share one header-less section
-            // rather than sitting in two adjacent bordered cards. "Bar style": both modes show pacing by
-            // colour, but on different scales — Progress marks positions in the window, Pressure measures
-            // the gap against the time left. "Far behind pace interval": how big a surplus turns the
-            // behind side blue.
+            // Far-behind (green→blue) threshold (#224): how big a surplus turns the behind side blue.
+            // Governs the pacing colour on BOTH surfaces, which is why it sits in its own header-less
+            // section above them rather than inside either one. Bar style used to share this section,
+            // but since #329 each surface picks its own and the two controls live in their sections.
                         Section {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Bar style")
-                        Spacer()
-                        SegmentedControl(
-                            segments: [
-                                .init(value: BarStyle.pressure, title: "Pressure"),
-                                .init(value: BarStyle.mixed, title: "Mixed"),
-                                .init(value: BarStyle.gauge, title: "Gauge"),
-                                .init(value: BarStyle.progress, title: "Progress"),
-                            ],
-                            active: model.barStyle,
-                            onSelect: { model.setBarStyle($0) })
-                    }
-                    SettingsHint(text: "*Progress* puts two marks on the window: where you are in "
-                        + "time, and how much you have spent.")
-                    SettingsHint(text: "*Pressure* grows as you get ahead of pace and shrinks back "
-                        + "as time catches up. The tick marks exactly on pace; a full bar means the "
-                        + "limit is spent.")
-                    SettingsHint(text: "*Mixed* — *Pressure* on the menu bar and *Progress* in the "
-                        + "dropdown.")
-                    SettingsHint(text: "*Gauge* starts from the middle: it grows right as you get "
-                        + "ahead of pace and left as you fall behind, so the quota you are not "
-                        + "getting to spend shows up too.")
-                }
-
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("Far behind pace interval")
@@ -105,6 +77,30 @@ struct AppearancePane: View {
             }
 
             Section("Menu Bar Widget") {
+                // Bar style, menu-bar copy (#224, rescaled in #307, per-surface since #329). All three
+                // show the pacing state by colour and differ in *scale*: Progress marks positions in
+                // the window, Pressure measures the gap against the time left, Gauge measures the same
+                // thing from a centred zero so the underpace side is drawn too. The full explanation
+                // lives here; the Dropdown Widget copy points back at it rather than repeating it.
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Bar style")
+                        Spacer()
+                        SegmentedControl(
+                            segments: Self.barStyleSegments,
+                            active: model.menuBarStyle,
+                            onSelect: { model.setMenuBarStyle($0) })
+                    }
+                    SettingsHint(text: "*Progress* puts two marks on the window: where you are in "
+                        + "time, and how much you have spent.")
+                    SettingsHint(text: "*Pressure* grows as you get ahead of pace and shrinks back "
+                        + "as time catches up. The tick marks exactly on pace; a full bar means the "
+                        + "limit is spent.")
+                    SettingsHint(text: "*Gauge* starts from the middle: it grows right as you get "
+                        + "ahead of pace and left as you fall behind, so the quota you are not "
+                        + "getting to spend shows up too.")
+                }
+
                 // Calm non-critical colors (#224) — a three-way choice (merged the old Calm + Work
                 // harder toggles): which calm colours mute to white. "Yellow + Green + Blue" is
                 // disabled when there is no blue to mute (Far behind = "Less blue, please!"), with a
@@ -191,6 +187,22 @@ struct AppearancePane: View {
             // #211 — a popup-only option, so it lives in its own "Dropdown Widget" section rather than
             // in "Menu Bar Widget" above (whose toggles all govern the menu-bar widget).
             Section("Dropdown Widget") {
+                // Bar style, dropdown copy (#329) — the same three styles as the menu bar, chosen
+                // separately. One hint instead of the three above: repeating the full descriptions a
+                // few rows later would pad the pane without adding anything.
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Bar style")
+                        Spacer()
+                        SegmentedControl(
+                            segments: Self.barStyleSegments,
+                            active: model.dropdownStyle,
+                            onSelect: { model.setDropdownStyle($0) })
+                    }
+                    SettingsHint(text: "The same three styles, picked separately for the dropdown. "
+                        + "The roomier bars here can carry a denser style than the menu bar.")
+                }
+
                 // No `SettingsHint` under either row: the segment labels ("Always" / "Non-calm only" /
                 // "With ⌥ Option") already say when the group shows, and a hint repeating that would
                 // crowd two rows that sit directly above the plain "Show ticks" toggle.
@@ -224,6 +236,18 @@ struct AppearancePane: View {
     /// leave no room for prose, which lives in each row's `SettingsHint` instead.
     private static let visibilitySegments: [SegmentedControl<PopupSectionVisibility>.Segment] =
         PopupSectionVisibility.allCases.map { .init(value: $0, title: $0.displayName) }
+
+    /// The three ``BarStyle`` segments, shared by the Menu-Bar and Dropdown rows (#329) so the two
+    /// surfaces always offer the same choices in the same order.
+    ///
+    /// Ordered **Pressure · Gauge · Progress**, not by `allCases`: it reads as a gradient of how much
+    /// positional information the bar carries — length alone, then length plus direction, then two
+    /// positions on the window. Declaration order is pinned by its own test and is free to differ.
+    private static let barStyleSegments: [SegmentedControl<BarStyle>.Segment] = [
+        .init(value: .pressure, title: "Pressure"),
+        .init(value: .gauge, title: "Gauge"),
+        .init(value: .progress, title: "Progress"),
+    ]
 
     // MARK: Copy config (#257)
 
