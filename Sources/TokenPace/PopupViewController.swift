@@ -304,7 +304,10 @@ final class PopupBarView: NSView {
         // `fillZone(floorEmptyToPill:)`, which has always done this in the menu bar. Progress is
         // deliberately excluded: there an empty gap means "dead on pace" and the marker carries the
         // position.
-        let span = Self.stripRect(from: stripFrom, to: stripTo, in: rect)
+        // Progress pins the strip's start: its left edge is `usage`, so the min-width floor and the
+        // flush-to-track snap must not drag it leftwards into the "already spent" zone (#323).
+        let span = Self.stripRect(from: stripFrom, to: stripTo, in: rect,
+                                  pinsStart: frozenStripFraction == nil && barStyle.popupShowsTimeMarker)
             ?? (barStyle.popupUsesPressureScale ? Self.pillRect(at: stripFrom, in: rect) : nil)
         if let stripRect = span {
             let capsule = min(stripRect.width, stripRect.height) / 2
@@ -384,15 +387,36 @@ final class PopupBarView: NSView {
     /// reads as a pill. An end that lands inside the inset band reserved by ``scaleX`` is snapped
     /// flush to the track's own end, so the strip's cap meets the track's cap with no grey sliver
     /// left between them. Returns `nil` for an empty span (`to <= from`) — nothing to draw.
-    static func stripRect(from: Double, to: Double, in rect: NSRect) -> NSRect? {
+    ///
+    /// `pinsStart` marks the span's **left edge as meaningful data** rather than a mere ribbon origin,
+    /// and is set by the Progress gap `gapStart..gapEnd`, whose left edge is `min(usage, time)` (#323).
+    /// There everything left of the strip reads as "already spent", so neither the min-width floor nor
+    /// the flush-to-track snap may move that edge leftwards.
+    ///
+    /// This is **not** a zero-spend special case: the floor fires on any gap narrower than `minStripWidth`
+    /// — i.e. whenever spending tracks the clock closely — and expanding it about the centre always
+    /// bleeds colour past `usage`. At `u = 0.40, t = 0.405` the strip started a full point left of the
+    /// usage edge. `usage = 0` is merely where it is loudest, because the left cap then also lands inside
+    /// the band snapped flush to `minX`, so the pill escapes from under the time marker (2.25 pt at
+    /// `t = 0.005`) and paints green over a window in which nothing has been spent at all.
+    ///
+    /// With the pin the floor grows the strip to the **right** and the left snap is skipped, so the strip
+    /// starts exactly at `usage`. A gap wider than the floor is untouched either way. Pressure's ribbon
+    /// leaves the pin off: that span genuinely starts at the track's origin.
+    static func stripRect(from: Double, to: Double, in rect: NSRect, pinsStart: Bool = false) -> NSRect? {
         var sx0 = scaleX(CGFloat(from), in: rect)
         var sx1 = scaleX(CGFloat(to), in: rect)
         guard sx1 > sx0 else { return nil }
         let msw = minStripWidth(rect)
         if sx1 - sx0 < msw {
-            let c = (sx0 + sx1) / 2
-            sx0 = c - msw / 2
-            sx1 = c + msw / 2
+            if pinsStart {
+                // Grow rightwards only — the left edge is `usage` and must not drift under the marker.
+                sx1 = sx0 + msw
+            } else {
+                let c = (sx0 + sx1) / 2
+                sx0 = c - msw / 2
+                sx1 = c + msw / 2
+            }
         }
         // Snap an end that lands within the reserved cap band flush to the track. `scaleX` insets the
         // 0..100 % scale by `bs` on each side so a cap never overhangs the rounded track — but at the
@@ -409,8 +433,12 @@ final class PopupBarView: NSView {
         // thinner than a cap cannot read as a deliberate gap — it only reads as the fill missing the end.
         //
         // Applied after the min-width floor, which would otherwise push a snapped end back off the edge.
+        //
+        // Skipped on the left when `pinsStart`: there the leftover strip of track is not an inset
+        // artefact but the "already spent" zone, which has to stay grey up to `usage` whatever `usage`
+        // is. The right end still snaps — `gapEnd` reaching 100 % is a real full bar either way.
         let band = rect.height / 2
-        if sx0 - rect.minX <= band { sx0 = rect.minX }
+        if !pinsStart, sx0 - rect.minX <= band { sx0 = rect.minX }
         if rect.maxX - sx1 <= band { sx1 = rect.maxX }
         return NSRect(x: sx0, y: rect.minY, width: sx1 - sx0, height: rect.height)
     }
