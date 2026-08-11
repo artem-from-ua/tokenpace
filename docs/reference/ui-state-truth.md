@@ -54,7 +54,7 @@ features) **і** «Show awaiting-input icon in the menu bar» (Appearance), — 
 | Константа | Значення |
 |---|---|
 | `barHeight` | 6 |
-| `corner` (трек **і** стрічка) | 1.5 |
+| `corner` (трек **і** стрічка) | 2.25 |
 | `indicatorWidth` × `indicatorHeight` | 7 × 14 |
 | `indicatorCorner` | 2 |
 | обводка маркера | 1 pt, `monochromeGrey` змішаний 40% із кольором маркера |
@@ -138,7 +138,7 @@ func png(_ name: String, _ colour: NSColor,
 
 ### Що малює `.progress` (**Progress**)
 
-1. Сірий трек на всю ширину, радіус 1.5 — **той самий**, що й у стрічки над ним
+1. Сірий трек на всю ширину, радіус 2.25 — **той самий**, що й у стрічки над ним
 2. **Кольорова капсула над проміжком `gapStart..gapEnd`** — не заливка від нуля
 3. Тік-лінійка під баром: частки **вікна**, `k / subdivisions` (лише при `subdivisions >= 2`)
 4. Маркер часу на `timeFraction`

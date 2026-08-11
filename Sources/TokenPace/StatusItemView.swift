@@ -157,7 +157,9 @@ final class StatusItemView: NSView {
         /// 34 pt bar cannot be mistaken for the Progress time marker: only its ends show, it never
         /// moves, and it carries no colour.
         static let centreTickWidth: CGFloat = 1
-        /// Corner radius of each bar.
+        /// Corner radius of each bar — **and** of the coloured strip drawn over it (`fillZone` clamps
+        /// to this rather than rounding a capsule, #326). The value itself is the shipped 1.5;
+        /// only the strip's sharing of it is new.
         static let barCorner: CGFloat = 1.5
         /// Point size of the ⚠️ error glyph (`exclamationmark.triangle.fill`). Tuned to read at the
         /// same weight as the idle `*` and the bars block.

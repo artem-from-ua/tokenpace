@@ -115,10 +115,11 @@ final class PopupBarView: NSView {
     private enum Metrics {
         /// Height of the pacing bar itself (the coloured zones + indicator dot).
         static let barHeight: CGFloat = 6
-        /// Corner radius of the track **and** of the coloured strip laid over it (#326). Narrowed from
-        /// 2, and now shared: the strip used to round as a capsule (`min(w,h)/2` = 3), so the two
-        /// shapes stacked in one bar carried different corners — the same mismatch the menu bar had.
-        static let corner: CGFloat = 1.5
+        /// Corner radius of the track **and** of the coloured strip laid over it (#326). Nudged up from
+        /// the shipped 2 on a 6 pt bar; the strip and the idle pill now take this value instead of
+        /// rounding as capsules (`min(w,h)/2` = 3), so two shapes stacked in one bar share one corner.
+        /// The menu bar keeps its own 1.5 — the two surfaces are tuned separately.
+        static let corner: CGFloat = 2.25
         /// Width of the time-indicator marker — a slim vertical bar, narrower than the old dot so it
         /// reads as a crisp position tick rather than a blob.
         static let indicatorWidth: CGFloat = 7
