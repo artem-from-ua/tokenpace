@@ -559,9 +559,9 @@ final class PopupBarView: NSView {
     /// time marker, and the service-status dots so they lift off the card.
     /// Bar strip glow: a large, soft, low-intensity halo. The idle strip shares these parameters.
     private static let gapGlowRadius: CGFloat = 21
-    private static let gapGlowStrength: CGFloat = 0.25
+    private static let gapGlowStrength: CGFloat = 0.35
     /// Marker glow: a soft halo, kept subtle so the marker doesn't bloom over the card.
-    private static let markerGlowRadius: CGFloat = 7
+    private static let markerGlowRadius: CGFloat = 6
     private static let markerGlowStrength: CGFloat = 0.5
 
     /// Run `body` with a coloured drop-shadow (blur = `radius`, no offset) set as the current shadow, so
