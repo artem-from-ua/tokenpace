@@ -431,8 +431,11 @@ actor StubUsageTransport: UsageTransport {
     ///    true` → the icon forces to **red** (the cap is hit).
     ///  • `.noLimit`      — enabled, `limit: null` (unlimited): no cap to pace → a **neutral**
     ///    (foreground-coloured) icon, no pacing tint.
+    ///  • `.zeroSpent`    — enabled, €15.00 cap, **nothing spent yet** (`amount_minor: 0`): the resting
+    ///    money line renders `€0 of €15`, both halves shedding zeros for their own reason (the spend
+    ///    because it is untouched, the cap because it is whole).
     enum CreditsFrame: Equatable {
-        case active, limitReached, noLimit
+        case active, limitReached, noLimit, zeroSpent
 
         /// The `spend` + `extra_usage` block pair for this frame, as raw JSON fragments (no braces) to
         /// splice into the usage body. Verbatim from `CreditsModelTests` fixtures so the stub exercises
@@ -471,6 +474,17 @@ actor StubUsageTransport: UsageTransport {
                 "spend":{"used":{"amount_minor":1077,"currency":"EUR","exponent":2},"limit":null,\
                 "percent":0,"severity":"normal","enabled":true,"disabled_reason":null,\
                 "balance":null,"auto_reload":null}
+                """
+            case .zeroSpent:
+                return """
+                "extra_usage":{"is_enabled":true,"monthly_limit":1500,"used_credits":0.0,\
+                "utilization":0.0,"currency":"EUR","decimal_places":2,"disabled_reason":null,\
+                "user_disabled":false,"spend_limit_reached":false,"credits_ever_enabled":true,\
+                "daily":null,"weekly":null},\
+                "spend":{"used":{"amount_minor":0,"currency":"EUR","exponent":2},\
+                "limit":{"amount_minor":1500,"currency":"EUR","exponent":2},"percent":0,\
+                "severity":"normal","enabled":true,"disabled_reason":null,"balance":null,\
+                "auto_reload":null}
                 """
             }
         }

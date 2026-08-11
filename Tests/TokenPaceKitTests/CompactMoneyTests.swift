@@ -103,12 +103,81 @@ struct CompactMoneyCurrencyTests {
     }
 }
 
+@Suite("CompactMoney.capText — the cap drops a zero fraction")
+struct CompactMoneyCapTests {
+
+    /// A whole cap shows no decimals at all — the case that motivated the split. Every limit in the
+    /// captured payloads is whole (€15, €11, €5), so this is the shape users actually see.
+    @Test func wholeCapDropsTheFraction() {
+        #expect(CompactMoney.capText(money(15)) == "$15")
+        #expect(CompactMoney.capText(money(11)) == "$11")
+        #expect(CompactMoney.capText(money(5)) == "$5")
+        #expect(CompactMoney.capText(money(120)) == "$120")
+    }
+
+    /// The maintainer's stated range, end to end: every whole cap from 1 to 99 loses its cents.
+    @Test func wholeCapsAcrossTheStatedRange() {
+        #expect(CompactMoney.capText(money(1)) == "$1")
+        #expect(CompactMoney.capText(money(50)) == "$50")
+        #expect(CompactMoney.capText(money(99)) == "$99")
+    }
+
+    /// A cap that genuinely carries cents still shows them — nothing is hidden, only zeros dropped.
+    @Test func capWithCentsKeepsThem() {
+        #expect(CompactMoney.capText(money(15.50)) == "$15.5")
+        #expect(CompactMoney.capText(money(9.99)) == "$9.99")
+        #expect(CompactMoney.capText(money(0.21)) == "$0.21")
+    }
+
+    /// The test is on the **rendered** string, not the input: `14.999` renders `15.0` on the ladder, so
+    /// as a cap it renders `$15` — the zeros that would have shown are the ones that vanish.
+    @Test func capIsJudgedByWhatWouldRender() {
+        #expect(CompactMoney.text(money(14.999)) == "$15.0")
+        #expect(CompactMoney.capText(money(14.999)) == "$15")
+    }
+
+    /// Past the K divide the same rule applies to the scaled amount: `$1000` is whole once scaled.
+    @Test func wholeCapPastTheThousandDivide() {
+        #expect(CompactMoney.capText(money(1_000)) == "$1K")
+        #expect(CompactMoney.capText(money(1_200)) == "$1.20K")
+        #expect(CompactMoney.capText(money(120_000)) == "$120K")
+    }
+
+    /// The spend formatter keeps the ladder even when whole — the cap rule is *not* mirrored onto it.
+    /// A spend of exactly 12 still reads `$12.0`; only an untouched zero is special.
+    @Test func theSpendFormatterStillShowsZeros() {
+        #expect(CompactMoney.text(money(15)) == "$15.0")
+        #expect(CompactMoney.text(money(12)) == "$12.0")
+        #expect(CompactMoney.text(money(5)) == "$5.00")
+    }
+
+    /// A whole-unit currency has no fraction to drop; the cap form matches the plain one.
+    @Test func wholeUnitCurrencyIsUnchanged() {
+        #expect(CompactMoney.capText(money(214, "JPY", exponent: 0)) == "¥214")
+        #expect(CompactMoney.capText(money(1_204, "JPY", exponent: 0)) == "¥1.20K")
+    }
+
+    /// An unknown currency drops the zeros too, code still trailing.
+    @Test func unknownCurrencyCapDropsTheFraction() {
+        #expect(CompactMoney.capText(money(15, "UAH")) == "15 UAH")
+    }
+}
+
 @Suite("CompactMoney.text — zero and negatives")
 struct CompactMoneyEdgeCaseTests {
 
-    /// Zero sits on the finest rung.
-    @Test func zeroUsesTheFinestRung() {
-        #expect(CompactMoney.text(money(0)) == "$0.00")
+    /// Nothing spent yet reads as a bare `$0` — at exactly zero the cents are padding, not precision.
+    @Test func untouchedZeroShowsNoCents() {
+        #expect(CompactMoney.text(money(0)) == "$0")
+        #expect(CompactMoney.text(money(0, "EUR")) == "€0")
+        #expect(CompactMoney.capText(money(0)) == "$0")
+    }
+
+    /// A real but tiny spend keeps its digits: money has moved, and rounding it to `$0` would claim
+    /// otherwise. The zero case is keyed to the **integer** minor units, not to what rounding produces.
+    @Test func aTinySpendIsNotTreatedAsZero() {
+        #expect(CompactMoney.text(Money(amountMinor: 1, currency: "USD", exponent: 2)) == "$0.01")
+        #expect(CompactMoney.text(Money(amountMinor: 4, currency: "USD", exponent: 3)) == "$0.00")
     }
 
     /// A negative amount (a refund/credit adjustment) picks its rung by magnitude, sign intact.
