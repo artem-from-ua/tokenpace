@@ -229,6 +229,12 @@ final class StatusItemView: NSView {
         /// Ring around the time-indicator marker so it stays distinct over any coloured zone —
         /// `.separatorColor`, so the ring flips with the bar (dark ring on a light bar and vice versa).
         static var indicatorStroke: NSColor { ColorStore.shared.color(.indicatorRing) }
+        /// The **Gauge** centre tick (#326) — `secondaryLabelColor` by default, brighter than both the
+        /// marker's `indicatorRing` and the popup ruler's `tick`. It gets its own role because it
+        /// carries more weight than either: it is the only fixed landmark on the centred scale, and
+        /// the direction the ribbon leaves it in *is* the reading. A dimmer tone made the zero hard to
+        /// locate on the 34 pt bar, and everything the style says is relative to it.
+        static var centreTick: NSColor { ColorStore.shared.color(.centreTick) }
         /// The neutral grey track of a menu-bar bar — the whole-bar background, i.e. BOTH the `used`
         /// head and the future/unused tail on either side of the coloured pacing gap. `labelColor` at
         /// 22 % alpha, so both flanks read identical and the track "breathes" with the wallpaper like a
@@ -972,10 +978,11 @@ final class StatusItemView: NSView {
         let cx = PopupBarView.scaleX(0.5, in: rect).rounded()
         let w = Metrics.centreTickWidth
         let h = Metrics.tickHeight
-        // `indicatorRing` — the same neutral role that outlines the Progress marker against the bar.
-        // Reused deliberately: this tick is scale furniture, not data, so it should read in the tone
-        // the widget already uses for "structure", never in a pacing colour.
-        Palette.indicatorStroke.setFill()
+        // Neutral `centreTick` (secondaryLabelColor) — never a pacing colour: this is scale furniture,
+        // not data. Its own role rather than the marker's ring or the popup ruler's tick, both of
+        // which sit dimmer: those only ever separate or annotate shapes that are already visible,
+        // whereas this is the sole landmark the whole reading is relative to.
+        Palette.centreTick.setFill()
         NSRect(x: cx - w / 2, y: rect.midY - h / 2, width: w, height: h).fill()
     }
 

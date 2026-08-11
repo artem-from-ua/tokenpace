@@ -34,6 +34,7 @@ enum ColorRole: String, CaseIterable {
     case barTrack
     case indicatorRing
     case tick
+    case centreTick
     case inUsePill
 
     // MARK: Text / foreground
@@ -68,7 +69,7 @@ enum ColorRole: String, CaseIterable {
         switch self {
         case .green, .yellow, .orange, .red, .blue, .paceBlue, .gray:
             return .semantic
-        case .barTrack, .indicatorRing, .tick, .inUsePill:
+        case .barTrack, .indicatorRing, .tick, .centreTick, .inUsePill:
             return .chrome
         case .foreground, .dimmedLabel, .label, .link, .pillText:
             return .text
@@ -94,6 +95,7 @@ enum ColorRole: String, CaseIterable {
         case .barTrack:      return "Bar track"
         case .indicatorRing: return "Indicator ring"
         case .tick:          return "Tick ruler"
+        case .centreTick:    return "Gauge centre tick"
         case .inUsePill:     return "\"In use\" pill"
         case .foreground:    return "Foreground"
         case .dimmedLabel:   return "Dimmed label"
@@ -140,6 +142,11 @@ enum ColorRole: String, CaseIterable {
                  + "the bar, on both surfaces. Default quaternaryLabelColor."
         case .tick:
             return "Tick-ruler marks below the popup bar. Default tertiaryLabelColor."
+        case .centreTick:
+            return "The Gauge style's centre tick on the MENU BAR only (#326) — the fixed zero its "
+                 + "ribbon grows out of, drawn 1 pt wide under the track so only its ends show. The "
+                 + "popup's Gauge tick is the ruler above, not this. Default secondaryLabelColor: "
+                 + "brighter than the ruler, because on a 34 pt bar every reading is relative to it."
         case .inUsePill:
             return "Popup \"in use\" plaque beside the Extra usage heading while credits are actively "
                  + "spending (#146, #254). The currency glyph is knocked out of this fill, so the popup "
@@ -173,7 +180,7 @@ enum ColorRole: String, CaseIterable {
     var distortion: String? {
         switch self {
         case .green, .yellow, .orange, .red, .blue, .paceBlue, .gray,
-             .indicatorRing, .tick, .inUsePill, .link, .label, .foreground,
+             .indicatorRing, .tick, .centreTick, .inUsePill, .link, .label, .foreground,
              .calmWhite, .idleCalmGrey:
             return "Default is a dynamic system colour (flips light/dark, honours Increase Contrast); "
                  + "a picked colour replaces it flat and loses that adaptation."
@@ -210,6 +217,7 @@ enum ColorRole: String, CaseIterable {
         case .barTrack:      return NSColor.labelColor.withAlphaComponent(0.22)   // the moon: a ~22% labelColor silhouette; the bar shows through 78%, so it dims AND breathes the wallpaper/menu tint
         case .indicatorRing: return .quaternaryLabelColor
         case .tick:          return .tertiaryLabelColor
+        case .centreTick:    return .secondaryLabelColor
         case .inUsePill:     return .labelColor           // #254: a mode marker, not a status colour
         case .foreground:    return .labelColor            // reset text / ⚠️ — re-alpha'd by bright()
         case .dimmedLabel:   return PopupViewController.defaultDimmedLabel
