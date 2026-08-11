@@ -337,6 +337,26 @@ final class PopupBarView: NSView {
             // The track's corner, not a capsule's (#326) — two shapes in one bar share one corner.
             let capsule = min(Metrics.corner, min(stripRect.width, stripRect.height) / 2)
             let stripPath = NSBezierPath(roundedRect: stripRect, xRadius: capsule, yRadius: capsule)
+            // Knock a transparent gutter out of the grey track under a **yellow** strip (#326), 1.5 pt
+            // proud of it on either side, so the panel behind shows through and separates the strip
+            // from the track. Yellow is the one pacing colour close enough in luminance to the
+            // light-theme track to lose its edge against it; every other state separates on hue or
+            // darkness already, so they keep a plain track and the geometry stays put.
+            //
+            // `.clear` with `.copy` REPLACES the track's pixels rather than blending over them — plain
+            // `.sourceOver` of a clear colour is a no-op. Clipped to the track's own rounded path so
+            // the cut can never escape the bar.
+            if isYellow(gapColor) {
+                let gutter = stripRect.insetBy(dx: -Self.yellowGutter, dy: 0)
+                // The SAME radius as the strip, so the cut is the strip's own shape, just wider.
+                let r = min(capsule, min(gutter.width, gutter.height) / 2)
+                NSGraphicsContext.saveGraphicsState()
+                NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner).addClip()
+                NSGraphicsContext.current?.compositingOperation = .copy
+                NSColor.clear.setFill()
+                NSBezierPath(roundedRect: gutter, xRadius: r, yRadius: r).fill()
+                NSGraphicsContext.restoreGraphicsState()
+            }
             withGlow(gapColor, radius: Self.gapGlowRadius, strength: Self.gapGlowStrength) {
                 gapColor.setFill()
                 stripPath.fill()
@@ -650,6 +670,30 @@ final class PopupBarView: NSView {
     /// Glow radii (#188 follow-up): a soft coloured halo (ambient) behind the coloured pacing strip, the
     /// time marker, and the service-status dots so they lift off the card.
     /// Bar strip glow: a large, soft, low-intensity halo. The idle strip shares these parameters.
+    /// How far the transparent gutter under a yellow strip extends past it on each side (#326).
+    /// Tuned live from 0.5 pt (a hairline, it vanished) through 2 pt: 1.5 pt — three physical pixels
+    /// on a Retina display — is the settled width. A `labelColor` backing plate was tried at this spot
+    /// and rejected: the transparent cut is what was wanted, letting the panel itself separate the
+    /// strip from the track.
+    private static let yellowGutter: CGFloat = 1.5
+
+    /// Whether this strip is rendering the **yellow** (mild-lead) pacing colour, and so wants the
+    /// transparent gutter beneath it.
+    ///
+    /// Compared against the live `.yellow` role rather than recomputed from `(u, t)`: the colour that
+    /// actually reaches the bar has already been through the calm-muting and the animator, and it is
+    /// the *rendered* tone whose contrast against the track is the problem. A mid-transition frame
+    /// therefore correctly counts as not-yet-yellow. Both sides are converted into one colour space
+    /// first — a dynamic catalogue colour and a resolved one never compare equal directly.
+    private func isYellow(_ colour: NSColor) -> Bool {
+        guard let a = colour.usingColorSpace(.sRGB),
+              let b = ColorStore.shared.color(.yellow).usingColorSpace(.sRGB) else { return false }
+        let tolerance = 0.02
+        return abs(a.redComponent - b.redComponent) < tolerance
+            && abs(a.greenComponent - b.greenComponent) < tolerance
+            && abs(a.blueComponent - b.blueComponent) < tolerance
+    }
+
     private static let gapGlowRadius: CGFloat = 21
     private static let gapGlowStrength: CGFloat = 0.35
     /// Marker glow: a soft halo, kept subtle so the marker doesn't bloom over the card.

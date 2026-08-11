@@ -157,6 +157,9 @@ final class StatusItemView: NSView {
         /// 34 pt bar cannot be mistaken for the Progress time marker: only its ends show, it never
         /// moves, and it carries no colour.
         static let centreTickWidth: CGFloat = 1
+        /// How far the transparent gutter under a yellow strip extends past it on each side (#326).
+        /// 1.25 pt against this 5 pt bar — the popup's 1.5 pt scaled to the shorter track.
+        static let yellowGutter: CGFloat = 1.25
         /// Corner radius of each bar — **and** of the coloured strip drawn over it (`fillZone` clamps
         /// to this rather than rounding a capsule, #326). The value itself is the shipped 1.5;
         /// only the strip's sharing of it is new.
@@ -1062,6 +1065,25 @@ final class StatusItemView: NSView {
             .bar(surface: .menuBar, row: window.id, part: part), target: target)
     }
 
+    /// Whether this strip is rendering the **yellow** (mild-lead) pacing colour, and so wants the
+    /// transparent gutter beneath it (#326).
+    ///
+    /// Returns `false` outright under calm colours: `mutesCalm` folds yellow into `calmWhite`, so there
+    /// is no yellow left to rescue and cutting the track would only punch a hole under a neutral strip.
+    /// Otherwise the *rendered* colour is compared against the live `.yellow` role — it has already been
+    /// through the animator, so a mid-transition frame correctly counts as not-yet-yellow. Both sides
+    /// are converted into one colour space first; a dynamic catalogue colour never compares equal to a
+    /// resolved one directly.
+    private func isYellow(_ colour: NSColor) -> Bool {
+        guard !calmColorMode.mutesCalm else { return false }
+        guard let a = colour.usingColorSpace(.sRGB),
+              let b = ColorStore.shared.color(.yellow).usingColorSpace(.sRGB) else { return false }
+        let tolerance = 0.02
+        return abs(a.redComponent - b.redComponent) < tolerance
+            && abs(a.greenComponent - b.greenComponent) < tolerance
+            && abs(a.blueComponent - b.blueComponent) < tolerance
+    }
+
     /// Fill the coloured strip spanning the fraction range `[from, to)` of a bar as a rounded capsule.
     /// Shares `PopupBarView`'s inset-scale geometry: the span is mapped through the same `minStripWidth/2`
     /// inset and floored to a minimum width, so a near-zero span reads as a rounded "pill" (rounded on
@@ -1087,6 +1109,23 @@ final class StatusItemView: NSView {
         // Two shapes in one bar should share one corner. The popup keeps its capsule: there the bar is
         // 6 pt and the strip genuinely is a pill (`PopupBarView.draw`).
         let r = min(Metrics.barCorner, min(stripRect.width, stripRect.height) / 2)
+        // Knock a transparent gutter out of the grey track under a **yellow** strip (#326), mirroring
+        // the popup: yellow is the one pacing colour close enough in luminance to the track to lose its
+        // edge against it, so the wallpaper is let through on either side to separate the two. Narrower
+        // here (1.25 pt) than the popup's 1.5, in proportion to the shorter 5 pt bar.
+        //
+        // `.clear` with `.copy` REPLACES the track's pixels rather than blending over them — plain
+        // `.sourceOver` of a clear colour is a no-op. `drawBar` has already clipped to the rounded bar,
+        // so the cut cannot escape it; the state is saved anyway so `.copy` never leaks into the fill.
+        if isYellow(color) {
+            let gutter = stripRect.insetBy(dx: -Metrics.yellowGutter, dy: 0)
+            let gr = min(r, min(gutter.width, gutter.height) / 2)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current?.compositingOperation = .copy
+            NSColor.clear.setFill()
+            NSBezierPath(roundedRect: gutter, xRadius: gr, yRadius: gr).fill()
+            NSGraphicsContext.restoreGraphicsState()
+        }
         color.setFill()
         NSBezierPath(roundedRect: stripRect, xRadius: r, yRadius: r).fill()
     }
