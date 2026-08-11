@@ -264,8 +264,9 @@ final class PopupBarView: NSView {
                     idleColor.setFill()
                     idlePath.fill()
                 } else {
-                    // The idle strip carries the same ambient glow as a pacing strip (#188).
-                    withGlow(idleColor, radius: Self.idleGlowRadius, strength: Self.idleGlowStrength) {
+                    // The idle strip carries the same ambient glow as a pacing strip (#188),
+                    // with the same parameters — one halo treatment across every strip.
+                    withGlow(idleColor, radius: Self.gapGlowRadius, strength: Self.gapGlowStrength) {
                         idleColor.setFill()
                         idlePath.fill()
                     }
@@ -556,15 +557,11 @@ final class PopupBarView: NSView {
 
     /// Glow radii (#188 follow-up): a soft coloured halo (ambient) behind the coloured pacing strip, the
     /// time marker, and the service-status dots so they lift off the card.
-    /// Bar strip glow: a large, soft, low-intensity halo.
+    /// Bar strip glow: a large, soft, low-intensity halo. The idle strip shares these parameters.
     private static let gapGlowRadius: CGFloat = 21
-    private static let gapGlowStrength: CGFloat = 0.25
-    /// Idle-bar glow: half the pacing-strip radius (the idle strip spans the whole bar, so a big halo
-    /// reads as too much), twice the strength.
-    private static let idleGlowRadius: CGFloat = 10.5
-    private static let idleGlowStrength: CGFloat = 0.5
+    private static let gapGlowStrength: CGFloat = 0.35
     /// Marker glow: a soft halo, kept subtle so the marker doesn't bloom over the card.
-    private static let markerGlowRadius: CGFloat = 7
+    private static let markerGlowRadius: CGFloat = 6
     private static let markerGlowStrength: CGFloat = 0.5
 
     /// Run `body` with a coloured drop-shadow (blur = `radius`, no offset) set as the current shadow, so
