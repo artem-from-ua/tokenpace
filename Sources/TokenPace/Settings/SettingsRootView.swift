@@ -121,14 +121,15 @@ private struct SidebarChip: View {
     /// key — but the chip is a flat tint that never participates in vibrancy, so it kept full color
     /// in an inactive window. System Settings dims the two chip layers separately: the tinted
     /// capsule drops to ~half strength (α ≈ 0.5 against the sidebar background), while the glyph is
-    /// redrawn in a solid neutral gray — 0x909090 per Digital Color Meter on an inactive System
-    /// Settings window — rather than composited white-over-tint, which would leave it tinted.
+    /// redrawn in a solid neutral tone rather than composited white-over-tint, which would leave it
+    /// tinted. That tone is *not* the same in both appearances — see `Metrics.inactiveGlyph`.
     @Environment(\.appearsActive) private var appearsActive
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: metrics.symbol, weight: .regular))
-            .foregroundStyle(appearsActive ? Color.white : Metrics.inactiveGlyph)
+            .foregroundStyle(appearsActive ? Color.white : Metrics.inactiveGlyph(for: colorScheme))
             // The system artwork's glyph carries a hairline dark edge that separates it from the
             // tint (visible as a thin gray outline hugging the glyph, strongest below it); a
             // sub-point shadow reproduces it.
@@ -159,8 +160,14 @@ private struct SidebarChip: View {
 
     private enum Metrics {
         /// Glyph color in an inactive window, measured with Digital Color Meter (sRGB) on System
-        /// Settings in dark mode.
-        static let inactiveGlyph = Color(.sRGB, white: 0x90 / 255.0, opacity: 1)
+        /// Settings — separately per appearance, because the system does not dim the glyph the same
+        /// way in both. Dark mode drops it to a mid gray (0x909090); light mode keeps it essentially
+        /// white (0xf8f8f8), only a hair off the active glyph. A single shared constant therefore
+        /// cannot serve both: the dark-mode gray reads as a dark, dirty glyph on a light sidebar.
+        static func inactiveGlyph(for scheme: ColorScheme) -> Color {
+            let white = scheme == .dark ? 0x90 / 255.0 : 0xF8 / 255.0
+            return Color(.sRGB, white: white, opacity: 1)
+        }
         /// Capsule tint opacity in an inactive window; matches System Settings' ~half-strength dim.
         static let inactiveTintAlpha: Double = 0.5
         /// Gradient axis: light at the top-left, dark at the bottom-right — tilted off vertical,
