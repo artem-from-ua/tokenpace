@@ -499,6 +499,59 @@ struct ResetLineTests {
         #expect(ResetClock.resetLine(resetsAt: at(0), now: now, locale: gb, timeZone: utc) == nil)
         #expect(ResetClock.resetLine(resetsAt: at(-60), now: now, locale: gb, timeZone: utc) == nil)
     }
+
+    // ── verbose: the ⌥ form prepends "resets in" to every band ───────────────────────────────
+
+    /// The prefix lands on **all four** bands, not just the clock one — a bare `"15d"` reads as a
+    /// duration only because of the unit, so it gains the words too.
+    @Test func verbosePrefixesEveryBand() {
+        let far = at(15 * 86_400)
+        #expect(ResetClock.resetLine(resetsAt: far, now: now, verbose: true, locale: gb, timeZone: utc)
+                == "resets in 15d")
+
+        let next = at(7 * 86_400)
+        #expect(ResetClock.resetLine(resetsAt: next, now: now, verbose: true, locale: gb, timeZone: utc)
+                == "resets in 7d next \(expectedWeekday(next, utc))")
+
+        let weekday = at(5 * 86_400)
+        #expect(ResetClock.resetLine(resetsAt: weekday, now: now, verbose: true, locale: gb, timeZone: utc)
+                == "resets in 5d on \(expectedWeekday(weekday, utc))")
+
+        let hours = at(2 * 3_600)
+        #expect(ResetClock.resetLine(resetsAt: hours, now: now, verbose: true, locale: gb, timeZone: utc)
+                == "resets in 2h at \(expectedClock(hours, gb, utc))")
+
+        let minutes = at(45 * 60)
+        #expect(ResetClock.resetLine(resetsAt: minutes, now: now, verbose: true, locale: gb, timeZone: utc)
+                == "resets in 45m at \(expectedClock(minutes, gb, utc))")
+    }
+
+    /// Verbose is opt-in: the default stays the bare line every existing caller renders, so the
+    /// resting popup is unchanged by the prefix existing.
+    @Test func defaultIsNotVerbose() {
+        let d = at(2 * 3_600)
+        let bare = ResetClock.resetLine(resetsAt: d, now: now, locale: gb, timeZone: utc)
+        #expect(bare == "2h at \(expectedClock(d, gb, utc))")
+        #expect(bare?.contains(ResetClock.resetLinePrefix) == false)
+    }
+
+    /// The two forms differ by exactly the prefix — nothing else about the line changes under ⌥.
+    @Test func verboseIsBareLinePlusPrefix() {
+        let offsets: [TimeInterval] = [15 * 86_400, 7 * 86_400, 5 * 86_400, 2 * 3_600, 45 * 60, 30]
+        for offset in offsets {
+            let d = at(offset)
+            let bare = ResetClock.resetLine(resetsAt: d, now: now, locale: gb, timeZone: utc)
+            let verbose = ResetClock.resetLine(resetsAt: d, now: now, verbose: true, locale: gb, timeZone: utc)
+            #expect(verbose == "\(ResetClock.resetLinePrefix) \(bare ?? "")")
+        }
+    }
+
+    /// A non-positive remaining is `nil` in both forms — the prefix never manufactures a line where
+    /// there is none (the caller's "resetting…" fallback still owns that state).
+    @Test func verboseIsNilWhenNowOrPast() {
+        #expect(ResetClock.resetLine(resetsAt: at(0), now: now, verbose: true, locale: gb, timeZone: utc) == nil)
+        #expect(ResetClock.resetLine(resetsAt: at(-60), now: now, verbose: true, locale: gb, timeZone: utc) == nil)
+    }
 }
 
 // MARK: - ceilToMinute (round reset display up to the next whole minute)

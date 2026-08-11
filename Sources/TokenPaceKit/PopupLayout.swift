@@ -33,6 +33,12 @@ public struct LimitRow: Sendable, Equatable {
     /// every limit uses (#167). `nil` when the reset is now/past or `resets_at` was unparseable
     /// (the view shows its "resetting…" fallback).
     public let resetLine: String?
+    /// The same line with the `"resets in"` lead-in (`ResetClock.resetLine(verbose: true)`):
+    /// `"resets in 20h at 03:00"`. Both forms are precomputed because the choice between them is the
+    /// **live ⌥ Option state**, which flips while the menu is open and without a re-poll — the same
+    /// reason the per-model rows are always built. The view picks; the layout stays ⌥-agnostic.
+    /// `nil` in exactly the cases ``resetLine`` is.
+    public let resetLineVerbose: String?
     /// Whether this is the **idle** 5-hour row — the 5h window does not exist server-side (no active
     /// session, ``UsageSnapshot/sessionIdle``, #100). When `true` the view renders a solid-blue knobless
     /// bar, the status word "ready to start", and **no second (utilization + reset) line at all**; the
@@ -53,6 +59,7 @@ public struct LimitRow: Sendable, Equatable {
         bar: BarLayout,
         subdivisions: Int,
         resetLine: String?,
+        resetLineVerbose: String? = nil,
         sessionIdle: Bool = false,
         sessionBlocked: Bool = false
     ) {
@@ -63,6 +70,7 @@ public struct LimitRow: Sendable, Equatable {
         self.bar = bar
         self.subdivisions = subdivisions
         self.resetLine = resetLine
+        self.resetLineVerbose = resetLineVerbose
         self.sessionIdle = sessionIdle
         self.sessionBlocked = sessionBlocked
     }
@@ -102,6 +110,9 @@ public struct CreditsRow: Sendable, Equatable {
     /// user's **local** day/time. `nil` when the limit is unlimited (no reset line) or the boundary
     /// was unresolvable.
     public let resetLine: String?
+    /// The ⌥ form of ``resetLine``, with the `"resets in"` lead-in — see
+    /// ``LimitRow/resetLineVerbose`` for why both are precomputed. `nil` whenever ``resetLine`` is.
+    public let resetLineVerbose: String?
     /// Whether paid credits are **actually being spent right now** — `enabled` **and** at least one base
     /// limit is exhausted (`CreditsPacing.shouldShowIcon`, the same gate as the menu-bar icon). Drives
     /// the blue **"in use"** badge next to the heading: the section itself shows whenever credits are
@@ -109,11 +120,13 @@ public struct CreditsRow: Sendable, Equatable {
     /// overflowing into credits.
     public let inUse: Bool
 
-    public init(spent: Money, limit: Money?, bar: BarLayout?, resetLine: String?, inUse: Bool = false) {
+    public init(spent: Money, limit: Money?, bar: BarLayout?, resetLine: String?,
+                resetLineVerbose: String? = nil, inUse: Bool = false) {
         self.spent = spent
         self.limit = limit
         self.bar = bar
         self.resetLine = resetLine
+        self.resetLineVerbose = resetLineVerbose
         self.inUse = inUse
     }
 }
@@ -482,9 +495,11 @@ public struct PopupLayout: Sendable, Equatable {
         let spent = spentMoney(from: spend)
         let bar = CreditsPacing.barLayout(for: spend, now: now)
         // A reset line only makes sense when there is a cap to reset against (bar != nil ⇔ limited).
-        let resetLine = bar == nil
-            ? nil
-            : CreditsPacing.monthEnd(now: now).flatMap { ResetClock.resetLine(resetsAt: $0, now: now) }
+        let monthEnd = bar == nil ? nil : CreditsPacing.monthEnd(now: now)
+        let resetLine = monthEnd.flatMap { ResetClock.resetLine(resetsAt: $0, now: now) }
+        let resetLineVerbose = monthEnd.flatMap {
+            ResetClock.resetLine(resetsAt: $0, now: now, verbose: true)
+        }
         // "active" badge = credits are actually being spent right now — `isSpending` (enabled AND not
         // capped AND a main window exhausted). Deliberately stricter than the icon's `shouldShowIcon`:
         // once the money cap is reached the server disables credits (Claude is blocked), so the badge
@@ -496,7 +511,8 @@ public struct PopupLayout: Sendable, Equatable {
         let inUse = CreditsPacing.isSpending(
             spend, baseLimitExhausted: CreditsPacing.mainWindowExhausted(in: snapshot))
         return CreditsRow(
-            spent: spent, limit: spend.limit, bar: bar, resetLine: resetLine, inUse: inUse)
+            spent: spent, limit: spend.limit, bar: bar, resetLine: resetLine,
+            resetLineVerbose: resetLineVerbose, inUse: inUse)
     }
 
     /// The amount spent as a ``Money``, preferring the exact `spend.used` object and falling back to a
@@ -567,6 +583,9 @@ public struct PopupLayout: Sendable, Equatable {
         )
         let indicator = PacingModel.limitIndicator(utilization: window.utilization)
         let resetLine = parsed.flatMap { ResetClock.resetLine(resetsAt: $0, now: now) }
+        let resetLineVerbose = parsed.flatMap {
+            ResetClock.resetLine(resetsAt: $0, now: now, verbose: true)
+        }
         return LimitRow(
             title: title,
             utilization: window.utilization,
@@ -574,7 +593,8 @@ public struct PopupLayout: Sendable, Equatable {
             indicator: indicator,
             bar: bar,
             subdivisions: kind.subdivisions,
-            resetLine: resetLine
+            resetLine: resetLine,
+            resetLineVerbose: resetLineVerbose
         )
     }
 }

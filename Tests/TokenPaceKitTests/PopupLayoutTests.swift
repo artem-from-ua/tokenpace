@@ -173,6 +173,27 @@ struct PopupLayoutResetTests {
         #expect(p.rows[0].resetLine == nil)
         #expect(p.rows[1].resetLine == nil)
     }
+
+    /// Both forms are precomputed on every row: the view flips between them on the live ⌥ state,
+    /// which changes while the menu is open and without a re-poll.
+    @Test func rowsCarryBothPlainAndVerboseForms() {
+        let snap = snapshot(fiveHourUtil: 50, sevenDayUtil: 30, sevenDayResetsIn: 3 * 24 * 3600)
+        let p = layout(from: snap)
+        for row in p.rows {
+            #expect(row.resetLineVerbose == "\(ResetClock.resetLinePrefix) \(row.resetLine ?? "")")
+        }
+    }
+
+    /// A row with no line has no verbose line either — the ⌥ form never invents one.
+    @Test func unparseableResetGivesNilVerboseLine() {
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 50, resetsAt: "garbage"),
+            sevenDay: UsageWindow(utilization: 30, resetsAt: "null")
+        )
+        let p = layout(from: snap)
+        #expect(p.rows[0].resetLineVerbose == nil)
+        #expect(p.rows[1].resetLineVerbose == nil)
+    }
 }
 
 // MARK: - Per-model breakdown
@@ -672,6 +693,9 @@ struct PopupLayoutCreditsTests {
         // shape every other row uses (#167), no longer a bare relative "6d".
         let monthEnd = CreditsPacing.monthEnd(now: now)!
         #expect(credits.resetLine == ResetClock.resetLine(resetsAt: monthEnd, now: now))
+        // The ⌥ form too — credits gain "resets in" on the same gate the token rows use.
+        #expect(credits.resetLineVerbose
+                == ResetClock.resetLine(resetsAt: monthEnd, now: now, verbose: true))
     }
 
     /// Cap reached: `spend_limit_reached` forces a full bar (red rung) even below the raw fraction.
@@ -692,6 +716,7 @@ struct PopupLayoutCreditsTests {
         #expect(credits.limit == nil)
         #expect(credits.bar == nil)
         #expect(credits.resetLine == nil)
+        #expect(credits.resetLineVerbose == nil)
     }
 
     /// When `spend.used` is absent, the amount is reconstructed from the `used_credits` scalar +
