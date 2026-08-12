@@ -803,6 +803,16 @@ extension NSColor {
     /// is the single knob for how much tone bleeds in.
     static var cardPlateFill: NSColor { NSColor.controlBackgroundColor.withAlphaComponent(cardPlateAlpha) }
 
+    /// The card's colour at **full** opacity — what a badge paints its content in so the glyph reads as
+    /// cut out of the plaque.
+    ///
+    /// The same `controlBackgroundColor` the card is built from, so it is dynamic and flips with the
+    /// theme on its own (light `#FFFFFF`, dark `#1E1E1E`); a fixed value would have to be maintained for
+    /// both appearances and would drift. Deliberately opaque: at `cardPlateAlpha` the menu material
+    /// below would bleed through the glyph and mix it with the plaque's own fill, which is exactly the
+    /// muddy result the alpha is *wanted* for on the card itself and *not* wanted inside a small mark.
+    static var cardPlateFillOpaque: NSColor { .controlBackgroundColor }
+
     /// How opaque the section-card fill is; the remainder lets the layer below (menu material when #188 is
     /// on) tint the plate. 1.0 = fully our colour (no bleed); lower = more tone from below. Tunable.
     static let cardPlateAlpha: CGFloat = 0.85
@@ -1001,39 +1011,123 @@ final class PillView: NSTextField {
         didSet { needsDisplay = true }
     }
 
-    /// Padding between the text and the capsule's edges — applied by ``PillCell`` through
-    /// `drawingRectForBounds(_:)`, and reported to Auto Layout through `intrinsicContentSize`.
-    static let hInset: CGFloat = 6
+    /// Padding **added on top of the cell's own**, applied by ``PillCell`` through
+    /// `drawingRect(forBounds:)` and reported to Auto Layout through `intrinsicContentSize`.
+    ///
+    /// `NSTextFieldCell` already reserves ~``cellOwnInset`` at each end, so this is not the padding you
+    /// see: measured, `hInset = 6` rendered as 10.5 pt of air per side, which is why the badge read as
+    /// over-padded. Zero here leaves the cell's own 4.5 pt — the tightest the capsule goes without
+    /// clipping — which is the intended snug look.
+    static let hInset: CGFloat = 0
     static let vInset: CGFloat = 2
 
+    /// The horizontal padding `NSTextFieldCell` reserves at each end regardless of `drawingRect`.
+    /// Measured by rendering the badge at a range of `hInset` values and reading the pixels back: the
+    /// rendered padding is consistently `hInset + 4.5` per side. Callers that need the *visible* inset —
+    /// the row's column shift — must add this.
+    static let cellOwnInset: CGFloat = 4.5
+
     /// Corner radius as a fraction of the height. `0.5` is a full pill; lower is a softer rounded rect.
-    private static let cornerFraction: CGFloat = 0.35
+    static let cornerFraction: CGFloat = 0.35
+
+    /// The height every badge in the popup shares, whatever it carries.
+    ///
+    /// Derived from the reset badge — the one with the most text in it — so it is the tallest anatomy and
+    /// nothing has to grow past it. ``KnockoutGlyphBadge`` adopts it rather than sizing to its own glyph:
+    /// left to themselves the three badges came out 18.0, 17.5–20.5 and 14.0 pt, and the currency one
+    /// even changed height with the currency (17.5 for `€` against 20.5 for `¤`), so a row could shift as
+    /// the account's billing changed.
+    static var sharedHeight: CGFloat {
+        if let cached = cachedSharedHeight { return cached }
+        let probe = PillView(
+            text: "0", font: PopupViewController.pillFont, textColor: .labelColor, fill: { .clear })
+        probe.isHeightProbe = true
+        let height = probe.intrinsicContentSize.height
+        cachedSharedHeight = height
+        return height
+    }
+    private static var cachedSharedHeight: CGFloat?
+
+    /// A badge whose content is an **SF Symbol** rather than a word — the credits marker's resting form.
+    ///
+    /// The symbol goes in as a text attachment, so it is laid out by the same text system that lays out
+    /// a word: one anatomy, one height, no second code path. `NSImage.SymbolConfiguration` ties the
+    /// glyph to `font`, and the attachment's `bounds` lifts it onto the font's cap height — the standard
+    /// recipe, since SF Symbols are drawn to sit on the text baseline.
+    convenience init(symbol: String, font: NSFont, textColor: NSColor, fill: @escaping () -> NSColor) {
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: font.pointSize, weight: .bold))
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        if let size = image?.size {
+            attachment.bounds = CGRect(x: 0, y: (font.capHeight - size.height) / 2,
+                                       width: size.width, height: size.height)
+        }
+        self.init(attributed: NSAttributedString(attachment: attachment),
+                  font: font, textColor: textColor, fill: fill)
+    }
 
     convenience init(text: String, font: NSFont, textColor: NSColor, fill: @escaping () -> NSColor) {
-        self.init(labelWithString: text)
-        self.font = font
-        self.textColor = textColor
+        self.init(attributed: NSAttributedString(string: text), font: font, textColor: textColor,
+                  fill: fill)
+    }
+
+    private convenience init(attributed: NSAttributedString, font: NSFont, textColor: NSColor,
+                             fill: @escaping () -> NSColor) {
+        self.init(frame: .zero)
+        // Swap the cell in FIRST: assigning `cell` replaces the whole backing store, so anything set
+        // beforehand (string, font, colour, label behaviour) is dropped on the floor. A field whose
+        // string never reached its new cell measures as empty and renders as a bare capsule.
+        let cell = PillCell(textCell: "")
+        cell.isEditable = false
+        cell.isSelectable = false
+        cell.isBezeled = false
+        cell.drawsBackground = false
+        // Centred. Flush-left in the inset rect looks equivalent — the capsule is the text plus two
+        // equal insets — and measures identically when the badge sizes itself. It is not: inside the
+        // row the badge is stretched by the trailing `edgeInsets` shift, and left alignment then pins
+        // the text to the near edge while the extra width all lands on the far side. Measured in the
+        // real row layout, that is a 9 px lean; centring holds at 1 px.
+        cell.alignment = .center
+        cell.font = font
+        cell.textColor = textColor
+        cell.lineBreakMode = .byClipping
+        self.cell = cell
+        // The content goes in after the cell swap, and as an attributed string so a symbol attachment
+        // survives — `stringValue` would flatten it to the attachment's placeholder character.
+        let styled = NSMutableAttributedString(attributedString: attributed)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byClipping
+        styled.addAttributes([.font: font, .foregroundColor: textColor, .paragraphStyle: paragraph],
+                             range: NSRange(location: 0, length: styled.length))
+        self.attributedStringValue = styled
         self.fill = fill
-        self.alignment = .center
-        self.cell = PillCell(textCell: text)
-        // `cell` replacement drops the properties set above; re-apply them to the new cell.
-        self.font = font
-        self.textColor = textColor
-        self.alignment = .center
-        self.isEditable = false
-        self.isSelectable = false
-        self.isBezeled = false
-        self.drawsBackground = false
         self.translatesAutoresizingMaskIntoConstraints = false
     }
 
-    /// The insets live in the cell, so the size the field reports has to include them.
+    /// Width from the content, height from ``sharedHeight`` — every badge in the popup is the same
+    /// height whatever it carries, so a row does not change shape when the badge's content does (the
+    /// credits marker swaps a glyph for a word under ⌥, and its glyph changes with the account's
+    /// currency).
+    ///
+    /// Height from the content is measured off `cell.cellSize`, **not** `super.intrinsicContentSize`.
+    ///
+    /// The field's own intrinsic size already reflects the narrowed `drawingRect`, so adding the insets
+    /// to it counts them twice: the capsule comes out too wide and the cell centres its text in a
+    /// different rect than the fill is drawn in. Measured, that put the text 22 px from the left edge
+    /// against 13 px from the right — a 9 px lean, far worse than the anatomy it replaced.
     override var intrinsicContentSize: NSSize {
-        var size = super.intrinsicContentSize
+        var size = cell?.cellSize ?? super.intrinsicContentSize
         size.width += 2 * Self.hInset
         size.height += 2 * Self.vInset
+        if !isHeightProbe { size.height = Self.sharedHeight }
         return size
     }
+
+    /// Set only on the throwaway instance ``sharedHeight`` measures, so asking it for its size does not
+    /// recurse back into `sharedHeight`.
+    fileprivate var isHeightProbe = false
 
     /// Fill the capsule, then let the field draw its text inside the inset rect the cell returns.
     override func draw(_ dirtyRect: NSRect) {
@@ -1057,131 +1151,6 @@ final class PillView: NSTextField {
 final class PillCell: NSTextFieldCell {
     override func drawingRect(forBounds rect: NSRect) -> NSRect {
         super.drawingRect(forBounds: rect.insetBy(dx: PillView.hInset, dy: PillView.vInset))
-    }
-}
-
-// MARK: - KnockoutGlyphBadge
-
-/// A filled badge with a symbol **knocked out** of it (#254): the plaque is drawn in a solid colour and
-/// the glyph is punched through it, so the popup background shows through the symbol itself rather than
-/// the symbol being painted on top.
-///
-/// This is the third "credits are in use" anatomy under discussion — a `label`-coloured plaque carrying a
-/// see-through currency glyph. It reads as a *chip* (a mode marker) rather than an alarm, because the
-/// colour is the ordinary label ink rather than a status red, while still being a solid, deliberate
-/// object next to the heading.
-///
-/// **How the knockout works.** The badge layer is filled with `fill()`, and a mask layer whose contents
-/// are the *inverted* glyph is applied: the mask is opaque everywhere except where the symbol is, so the
-/// fill is erased exactly under the glyph. Both the fill colour and the mask are rebuilt in
-/// `updateLayer()`/`layout()` because CGColor and rendered images are not appearance-dynamic — the same
-/// dark/light trap `PillView` documents.
-final class KnockoutGlyphBadge: NSView {
-    /// The plaque fill. A closure so a dynamic colour re-resolves per appearance.
-    var fill: () -> NSColor = { ColorStore.shared.color(.label) }
-
-    /// The SF Symbol punched out of the plaque.
-    var symbolName: String = "eurosign"
-
-    /// Point size of the knocked-out glyph.
-    var symbolPointSize: CGFloat = 11
-
-    /// Padding around the glyph inside the plaque. `hInset` is per-side, so the plaque is `2 × hInset`
-    /// wider than the glyph's box; it runs a little wider than `vInset` because a currency glyph is
-    /// narrow and tall, and equal padding on both axes leaves it looking pinched left-to-right.
-    private static let hInset: CGFloat = 5.5
-    private static let vInset: CGFloat = 3
-
-    /// Corner radius as a fraction of the height — matches `PillView` so the two badge anatomies share a
-    /// silhouette family.
-    private static let cornerFraction: CGFloat = 0.35
-
-    override var wantsUpdateLayer: Bool { true }
-
-    /// Plaque size: the glyph's box padded by the insets, rounded to whole points.
-    ///
-    /// Deliberately simple. Measuring the glyph's ink and trying to centre on it exactly chases a
-    /// sub-point difference that survives every rounding (an SF Symbol's ink sits half a point off inside
-    /// its own box, which is a whole pixel on a 2× display) — so instead the glyph is box-centred and a
-    /// single hand-tuned ``opticalNudge`` corrects what is left. Cheap, legible, and adjustable by eye,
-    /// which is how this kind of optical alignment is settled anyway.
-    override var intrinsicContentSize: NSSize {
-        let box = glyphImage()?.size ?? NSSize(width: symbolPointSize, height: symbolPointSize)
-        return NSSize(width: (box.width + Self.hInset * 2).rounded(),
-                      height: (box.height + Self.vInset * 2).rounded())
-    }
-
-    override func layout() {
-        super.layout()
-        layer?.cornerRadius = bounds.height * Self.cornerFraction
-        applyMask()
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        // The mask is rendered for a specific size; rebuild it whenever the plaque is resized, or the
-        // glyph stays centred on the old bounds and drifts off-centre.
-        applyMask()
-    }
-
-    override func updateLayer() {
-        layer?.cornerRadius = bounds.height * Self.cornerFraction
-        layer?.backgroundColor = fill().cgColor
-        applyMask()
-    }
-
-    /// Horizontal correction applied to the box-centred glyph, in points.
-    ///
-    /// A currency SF Symbol's ink sits slightly off-centre inside its own bounding box, so a box-centred
-    /// glyph reads as sitting too far right — it needs a sliver of extra space on its right to look
-    /// balanced. Computing the exact correction is possible but chases a sub-point difference that every
-    /// rounding step reintroduces, and the pixel extents of the knocked-out hole turn out not to predict
-    /// what the eye reads; a fixed nudge settled by eye is simpler and does the job.
-    ///
-    /// Negative moves the glyph **left**, opening up space on the right.
-    private static let opticalNudge: CGFloat = -0.4
-
-    /// The symbol image used both for sizing and for building the knockout mask.
-    private func glyphImage() -> NSImage? {
-        NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: symbolPointSize, weight: .bold))
-    }
-
-    /// Build and attach the inverted-glyph mask: opaque plaque everywhere except the symbol, which is
-    /// cleared so the popup background shows through.
-    ///
-    /// The glyph is punched out with `NSCompositingOperation.destinationOut` rather than a CoreGraphics
-    /// blend mode: an SF Symbol is a **template** image, and `CGContext.setBlendMode(.destinationOut)`
-    /// leaves the mask fully opaque (the symbol never erases anything, so nothing shows through). Drawing
-    /// the symbol black first and then compositing gives a fully transparent knockout instead of the
-    /// partial ~0.6 alpha a straight template composite produces at the glyph's antialiased edges.
-    private func applyMask() {
-        guard bounds.width > 0, bounds.height > 0, let glyph = glyphImage() else { return }
-        let size = bounds.size
-        let g = glyph.size
-        // Box-centre the glyph, plus a fixed optical nudge — see `opticalNudge`.
-        let rect = CGRect(x: (size.width - g.width) / 2 + Self.opticalNudge,
-                          y: (size.height - g.height) / 2,
-                          width: g.width, height: g.height)
-        // A solid-black copy of the symbol: a template image draws in whatever colour is set, and an
-        // opaque source is what makes `destinationOut` erase all the way to zero alpha.
-        let solid = NSImage(size: g, flipped: false) { _ in
-            NSColor.black.set()
-            glyph.draw(in: CGRect(origin: .zero, size: g), from: .zero, operation: .sourceOver, fraction: 1)
-            CGRect(origin: .zero, size: g).fill(using: .sourceAtop)
-            return true
-        }
-        let image = NSImage(size: size, flipped: false) { _ in
-            NSColor.black.setFill()
-            CGRect(origin: .zero, size: size).fill()
-            solid.draw(in: rect, from: .zero, operation: .destinationOut, fraction: 1)
-            return true
-        }
-        let mask = CALayer()
-        mask.frame = bounds
-        mask.contents = image
-        mask.contentsScale = window?.backingScaleFactor ?? 2
-        layer?.mask = mask
     }
 }
 
@@ -1827,8 +1796,8 @@ final class PopupViewController: NSViewController {
     }
 
     /// The **"in use"** marker shown next to the "Extra usage" heading while paid credits are actually
-    /// covering an exhausted plan limit (`CreditsRow.inUse`): a `label`-coloured plaque with the currency
-    /// glyph **knocked out** of it, so the popup background shows through the symbol (#254).
+    /// covering an exhausted plan limit (`CreditsRow.inUse`): a `label`-coloured plaque carrying the
+    /// currency glyph, or the word ``inUseWord`` under ⌥ (#254).
     ///
     /// Replaces the solid red `active` pill this badge used to be (#224). Crossing onto paid credit is a
     /// *mode change* worth flagging, but a red fill made it a *severity*: it took the same token as the
@@ -1836,24 +1805,43 @@ final class PopupViewController: NSViewController {
     /// €0.00 spent, leaving nothing louder for the cap. A neutral plaque states the mode without claiming
     /// the row is blocked, and reuses the menu bar's own currency glyph
     /// (``StatusItemView/creditsSymbolName(for:)``) so both surfaces mark this feature with one symbol.
+    ///
+    /// Under ⌥ the glyph gives way to the word: the plaque is a *mode* marker, and a currency sign only
+    /// hints at the mode by association. The hover text has always spelled it out — ⌥ now surfaces that
+    /// without waiting for a hover, on the same gate as every other detail in the popup.
+    ///
+    /// **Same anatomy as the reset badge.** Both are ``PillView``, so they share a height and a
+    /// silhouette; the content is painted in ``NSColor/cardPlateFillOpaque`` — the card's own colour with
+    /// no alpha — which reads as cut out of the plaque while remaining an ordinary dynamic colour that
+    /// flips with the theme. It used to be a literal hole punched through a mask, which needed its own
+    /// view class, its own ink-measuring geometry and a rebuild on every appearance change; the three
+    /// badges also came out three different heights (18.0 / 17.5–20.5 / 14.0 pt) because each sized
+    /// itself to its own content.
     private func makeInUseMarker(currency: String) -> NSView {
-        let badge = KnockoutGlyphBadge()
-        badge.symbolName = StatusItemView.creditsSymbolName(for: currency)
-        badge.symbolPointSize = Metrics.textSize - 1
-        badge.fill = { ColorStore.shared.color(.inUsePill) }
-        badge.wantsLayer = true
-        badge.translatesAutoresizingMaskIntoConstraints = false
+        // The word takes the reset badge's own font — same size, same weight — so the two badges read as
+        // one component with different contents rather than two similar-looking things. The glyph keeps
+        // that size too; `PillView(symbol:)` scales the symbol from the font it is given.
+        let font = Self.pillFont
+        let badge: PillView = optionHeld
+            ? PillView(text: Self.inUseWord, font: font, textColor: .cardPlateFillOpaque,
+                       fill: { ColorStore.shared.color(.inUsePill) })
+            : PillView(symbol: StatusItemView.creditsSymbolName(for: currency), font: font,
+                       textColor: .cardPlateFillOpaque,
+                       fill: { ColorStore.shared.color(.inUsePill) })
         badge.toolTip = Self.inUseHint
         badge.setAccessibilityLabel(Self.inUseAccessibilityLabel)
         // Pin the plaque to its intrinsic size: inside the title stack an unpinned view is stretched to
-        // fill, which widens the plaque without moving the knocked-out glyph — it reads as a lopsided
-        // badge with too much padding on one side.
+        // fill, which widens the plaque without moving the glyph — it reads as a lopsided badge with too
+        // much padding on one side.
         badge.setContentHuggingPriority(.required, for: .horizontal)
         badge.setContentHuggingPriority(.required, for: .vertical)
         badge.setContentCompressionResistancePriority(.required, for: .horizontal)
         badge.setContentCompressionResistancePriority(.required, for: .vertical)
         return badge
     }
+
+    /// The word knocked out of the "in use" marker under ⌥, in place of the currency glyph.
+    static let inUseWord = "active"
 
     /// Hover text for the "in use" marker — the words the old `active` badge used to spell out, stating
     /// explicitly that the spending is happening *right now*.
@@ -1882,12 +1870,13 @@ final class PopupViewController: NSViewController {
     /// ``PillView`` is a label whose cell pads its own text — see that type for why the padding lives
     /// there rather than in constraints or in hand-drawing.
     private static func makePill(text: String, fill: @escaping () -> NSColor) -> NSView {
-        PillView(
-            text: text,
-            font: .systemFont(ofSize: Metrics.textSize - 2, weight: .medium),
-            textColor: ColorStore.shared.color(.pillText),
-            fill: fill)
+        PillView(text: text, font: pillFont, textColor: ColorStore.shared.color(.pillText), fill: fill)
     }
+
+    /// The type face every badge uses — the blocking reset, the credits currency glyph and the ⌥ word
+    /// alike. One constant rather than one per call site: the badges appear in the same popup, and a
+    /// half-point difference between them reads as a mistake rather than a distinction.
+    static let pillFont: NSFont = .systemFont(ofSize: Metrics.textSize - 2, weight: .medium)
 
     @discardableResult
     private func addLabel(_ text: String, font: NSFont, secondary: Bool = false, color: NSColor? = nil) -> NSView {
@@ -1997,15 +1986,16 @@ final class PopupViewController: NSViewController {
         return row
     }
 
-    /// How far a badge hangs past the content column so its text lines up with the plain resets above
-    /// and below it — the badge's full internal inset, so the *text* ends where their text ends.
+    /// The badge is **not** shifted past the content column: its capsule ends where every other row's
+    /// text ends.
     ///
-    /// A half-inset was tried first, on the theory that the capsule would otherwise look like it was
-    /// escaping the card. It is not enough: in a screenshot of the real popup the badge's text still sat
-    /// visibly short of the column that `resets in 3h at 16:00` and `resets in 18d` line up on. The
-    /// capsule is *meant* to bleed — that is what a filled badge does — while the text is what the eye
-    /// aligns.
-    private static let badgeColumnOvershoot: CGFloat = PillView.hInset
+    /// An earlier version pushed it out so the badge's *text* would share the column with the plain
+    /// resets, letting the capsule overhang. That reads wrong — the filled shape is the widest thing on
+    /// the row, so its edge sticking out past the text above it looks like a layout error rather than a
+    /// deliberate bleed. Aligning the capsule instead leaves the badge's text slightly inside the
+    /// column, which is what padding on a filled shape is supposed to look like. Every 2 pt of shift
+    /// moves the capsule 4 px past the column (measured), so the value is zero.
+    private static let badgeColumnOvershoot: CGFloat = 0
 
     /// A label that **wraps** onto multiple lines instead of clipping — for the error detail, whose
     /// text can be the server's own response body (`authHTTP`) and so be arbitrarily long. A plain
