@@ -246,12 +246,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// shell probe is memoised so it runs at most once, not on every heartbeat.
     private lazy var ghAuthEnabled: Bool = Self.resolveGHAuth()
 
-    /// Which logical services to monitor on the status page (#89) — loaded from `PersistedConfig`
-    /// on launch, updated live when the user changes it in Settings (`monitoredServicesChanged`).
-    /// `Claude API` is always monitored regardless of this; the two toggleable services and the
-    /// WEB/Desktop mode come from here. Seeded to `.default` until `applicationDidFinishLaunching`
-    /// reads the stored value.
-    private var monitoredServices: MonitoredServices = .default
+    /// What TokenPace monitors for Claude (#89, #341) — loaded from `PersistedConfig` on launch,
+    /// updated live when the user changes it in Settings (`providerMonitoringChanged`).
+    ///
+    /// Carries both halves: whether the usage API is polled at all, and which status-page services are
+    /// watched. `Claude API` has no flag — it is derived (`claudeApiLocked`) from the rest. Seeded to
+    /// `.default` until `applicationDidFinishLaunching` reads the stored value.
+    private var providerMonitoring: ProviderMonitoring = .default
+
+    /// The status-page half, for the many call sites that only care about services.
+    private var monitoredServices: MonitoredServices { providerMonitoring.services }
 
     /// Re-renders the popup/menu bar from `lastOutput` on a fixed cadence so the "Last update" age
     /// grows ("just now" → "1m ago") without waiting for the next 180 s poll. **Never** fetches — it
@@ -384,9 +388,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Load the persisted monitored-services choice (#89) before the first status poll, so it
-        // resolves the right logical services from the start. Falls back to `.default` when absent.
-        monitoredServices = PersistedConfig.monitoredServices
+        // Load the persisted provider-monitoring choice (#89, #341) before the first poll, so both
+        // the usage mode and the logical services resolve correctly from the start. Falls back to
+        // `.default` when the keys are absent.
+        providerMonitoring = PersistedConfig.providerMonitoring
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -584,11 +589,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Open (or focus) the Settings… window, optionally forcing a specific `section` (#210 — the update
     /// menu item opens straight to About). Lazily creates the single instance and wires the
-    /// monitored-services change callback (#89) so a toggle there re-polls the status immediately.
+    /// provider-monitoring change callback (#89, #341) so a toggle there re-polls immediately.
     private func openSettings(section: SettingsSection?) {
         if settingsWC == nil {
             let wc = SettingsWindowController()
-            wc.onMonitoredServicesChange = { [weak self] config in self?.monitoredServicesChanged(config) }
+            wc.onProviderMonitoringChange = { [weak self] config in self?.providerMonitoringChanged(config) }
             wc.onCheckForUpdatesNow = { [weak self] in self?.performUpdateCheck(userInitiated: true) }
             wc.onInstallUpdateNow = { [weak self] in self?.installUpdateNow() }
             wc.onCalmColorModeChange = { [weak self] mode in
@@ -852,13 +857,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         forceRefresh()
     }
 
-    /// Apply a new monitored-services config chosen in Settings (#89): adopt it, drop the stale
+    /// Apply a new provider-monitoring config chosen in Settings (#89, #341): adopt it, drop the stale
     /// status (it was resolved under the old config — the enabled set may have changed), and force an
     /// immediate re-poll so the popup/menu-bar reflect the new services within a moment. Clearing
     /// `lastStatusHealth` briefly hides the status rows/dot until that fetch lands — honest, since
     /// the retained value describes services that are no longer the ones being monitored.
-    func monitoredServicesChanged(_ config: MonitoredServices) {
-        monitoredServices = config
+    ///
+    /// The `.manualRefresh` signal is what makes a `usageApiEnabled` flip take effect **now** rather
+    /// than up to a full interval later: the polling engine reads the mode from its seam at the top of
+    /// each iteration, so it needs to be woken, not reconfigured.
+    func providerMonitoringChanged(_ config: ProviderMonitoring) {
+        providerMonitoring = config
         lastStatusHealth = nil
         lastStatusSuccess = nil            // status poll is due again on the immediate tick
         signals.send(.manualRefresh)       // wake the usage loop now, which rides the status poll
@@ -1429,8 +1438,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusTask?.cancel()
         let transport = statusTransport
         // Snapshot the config for this fetch — which logical services to resolve, and which grey
-        // `unknown` lines to show if it fails (#89). `Claude API` is always in there.
+        // `unknown` lines to show if it fails (#89). `Claude API` rides along whenever anything at
+        // all is monitored, which is why the usage flag travels with the service config (#341).
         let config = monitoredServices
+        let usageApiEnabled = providerMonitoring.usageApiEnabled
         statusTask = Task { [weak self] in
             let health: StatusHealth
             let succeeded: Bool
@@ -1438,14 +1449,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             var fetchedBody: Data?
             do {
                 let (summary, body) = try await StatusClient.fetchRaw(transport: transport)
-                health = .from(summary, config: config)
+                health = .from(summary, config: config, usageApiEnabled: usageApiEnabled)
                 fetchedSummary = summary
                 fetchedBody = body
                 succeeded = true
             } catch {
                 // Any failure → honest "unknown" (grey), and don't advance lastStatusSuccess so the
                 // next usage tick retries.
-                health = .unknown(for: config)
+                health = .unknown(for: config, usageApiEnabled: usageApiEnabled)
                 succeeded = false
             }
             guard let self, !Task.isCancelled else { return }
@@ -1456,7 +1467,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // page is not evidence that an incident ended.
             if succeeded, let summary = fetchedSummary {
                 self.lastVisibleIncidents = IncidentVisibility.visible(
-                    in: summary, config: config, now: self.currentDate(),
+                    in: summary, config: config, usageApiEnabled: usageApiEnabled,
+                    now: self.currentDate(),
                     maxAge: PersistedConfig.incidentMaxAge)
                 self.advanceEpisodeSubscription()
             }

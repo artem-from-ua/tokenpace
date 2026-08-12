@@ -88,12 +88,30 @@ struct StatusHealthFromTests {
         ("Claude Cowork", "operational"),
     ]
 
-    @Test func claudeAPIAlwaysPresentEvenWhenEverythingElseOff() {
-        // Both toggleable services disabled → Claude API is still monitored (it is not configurable).
+    @Test func claudeAPIPresentWhenOnlyTheUsagePollIsOn() {
+        // Both toggleable services disabled, usage poll on → Claude API is still monitored: the usage
+        // poll talks to it, so it cannot be off while that runs (#341).
         let config = MonitoredServices(claudeCodeEnabled: false, webDesktopEnabled: false)
-        let health = StatusHealth.from(summary(allComponents), config: config)
+        let health = StatusHealth.from(summary(allComponents), config: config, usageApiEnabled: true)
         #expect(health.checks.map(\.id) == [.claudeAPI])
         #expect(check(.claudeAPI, in: health)?.components.map(\.name) == ["Claude API (api.anthropic.com)"])
+    }
+
+    @Test func claudeAPIPresentWhenOnlyAServiceIsOn() {
+        // The reverse dependency: no usage poll, but a service is watched → Claude API rides along,
+        // because a Claude Code outage is unreadable without knowing whether the API itself is up.
+        let config = MonitoredServices(claudeCodeEnabled: true, webDesktopEnabled: false)
+        let health = StatusHealth.from(summary(allComponents), config: config, usageApiEnabled: false)
+        #expect(health.checks.map(\.id) == [.claudeAPI, .claudeCode])
+    }
+
+    @Test func nothingMonitoredProducesNoChecksAtAll() {
+        // The one state where Claude API is absent — the user turned everything off (#341). It is a
+        // legitimate configuration, not a broken one, so the result is empty rather than a lone API row.
+        let config = MonitoredServices(claudeCodeEnabled: false, webDesktopEnabled: false)
+        let health = StatusHealth.from(summary(allComponents), config: config, usageApiEnabled: false)
+        #expect(health.checks.isEmpty)
+        #expect(health.worstProblem == nil)
     }
 
     @Test func defaultConfigHasApiCodeAndWebDesktop() {
@@ -247,10 +265,21 @@ struct StatusHealthWorstProblemTests {
         #expect(cowork.worstProblem == .majorOutage)
     }
 
-    @Test func claudeAPIProblemSurfacesEvenWithEverythingElseDisabled() {
+    @Test func claudeAPIProblemSurfacesWithEveryServiceDisabled() {
+        // Services all off but the usage poll on: the API outage still drives the dot, because that
+        // outage is precisely what breaks the poll (#341).
         let health = StatusHealth.from(summary([("Claude API (api.anthropic.com)", "major_outage")]),
-            config: MonitoredServices(claudeCodeEnabled: false, webDesktopEnabled: false))
+            config: MonitoredServices(claudeCodeEnabled: false, webDesktopEnabled: false),
+            usageApiEnabled: true)
         #expect(health.worstProblem == .majorOutage)
+    }
+
+    @Test func noProblemSurfacesWhenMonitoringIsOffEntirely() {
+        // The user opted out of everything — an API outage is not ours to report (#341).
+        let health = StatusHealth.from(summary([("Claude API (api.anthropic.com)", "major_outage")]),
+            config: MonitoredServices(claudeCodeEnabled: false, webDesktopEnabled: false),
+            usageApiEnabled: false)
+        #expect(health.worstProblem == nil)
     }
 }
 

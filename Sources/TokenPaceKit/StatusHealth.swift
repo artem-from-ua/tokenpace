@@ -67,8 +67,10 @@ public enum ServiceStatus: Sendable, Equatable {
 /// (ADR-0009/0013: display text lives in the view, semantics in the kit), so the labels can change
 /// without touching the persisted config or this enum.
 public enum ServiceID: Sendable, Equatable {
-    /// "Claude API" — the `Claude API (api.anthropic.com)` component. Always monitored (TokenPace's
-    /// own usage-API calls depend on it), not user-configurable.
+    /// "Claude API" — the `Claude API (api.anthropic.com)` component. Present whenever anything at
+    /// all is monitored, and locked on in the UI while it is (#341): the usage poll talks to this
+    /// endpoint, and the other services are unreadable without knowing whether the API is up. It goes
+    /// away only in the state where the user has turned everything off.
     case claudeAPI
     /// "Claude Code" — the `Claude Code` component (CLI product infrastructure: login, updater,
     /// model routing).
@@ -146,8 +148,9 @@ public struct ServiceCheck: Sendable, Equatable {
 /// constituents (plus an aggregated worst-of-N), so the popup draws one row per component, while the
 /// menu bar shows one dot that is the worst across all enabled services (ADR-0024).
 ///
-/// `Claude API` is always present as the first check regardless of config — it cannot be disabled
-/// (TokenPace's own usage-API calls depend on it). The two toggleable services follow when enabled.
+/// `Claude API` is present as the first check whenever anything is monitored — the usage poll or
+/// either toggleable service (#341). It has no switch of its own: enabling anything implies it, and
+/// the only configuration without it is "monitor nothing", which yields an empty `checks`.
 ///
 /// A failed status poll does not produce a distinct value: the shell maps any ``StatusFetchError``
 /// to ``unknown(for:)`` (every enabled component grey), because the UI for "service is unknown" and
@@ -155,7 +158,8 @@ public struct ServiceCheck: Sendable, Equatable {
 /// need not carry a separate failure flag.
 public struct StatusHealth: Sendable, Equatable {
     /// The resolved logical services in display order (`Claude API`, then `Claude Code`, then
-    /// `Claude WEB/Desktop` — the enabled ones). Always contains at least the `Claude API` check.
+    /// `Claude WEB/Desktop` — the enabled ones). Contains the `Claude API` check whenever anything is
+    /// monitored, and is empty only when the user has turned monitoring off entirely (#341).
     public let checks: [ServiceCheck]
 
     public init(checks: [ServiceCheck]) {
@@ -193,8 +197,12 @@ public struct StatusHealth: Sendable, Equatable {
     /// Map a decoded summary to the enabled logical services. A component absent from `components[]`
     /// (Anthropic renamed or removed it) maps to ``ServiceStatus/unknown`` rather than silently
     /// defaulting to operational (ADR-0013 §1). Every other component in the array is ignored.
-    public static func from(_ summary: StatusSummary, config: MonitoredServices) -> StatusHealth {
-        StatusHealth(checks: checks(for: config) { name in
+    public static func from(
+        _ summary: StatusSummary,
+        config: MonitoredServices,
+        usageApiEnabled: Bool = true
+    ) -> StatusHealth {
+        StatusHealth(checks: checks(for: config, usageApiEnabled: usageApiEnabled) { name in
             guard let component = summary.components.first(where: { $0.name == name }) else {
                 return (.unknown, nil)
             }
@@ -206,8 +214,8 @@ public struct StatusHealth: Sendable, Equatable {
     /// component grey, so the popup shows honest `unknown` lines for exactly the services being
     /// monitored. Depends on the config (which services/components exist), so it is a function, not
     /// a `static let`.
-    public static func unknown(for config: MonitoredServices) -> StatusHealth {
-        StatusHealth(checks: checks(for: config) { _ in (.unknown, nil) })
+    public static func unknown(for config: MonitoredServices, usageApiEnabled: Bool = true) -> StatusHealth {
+        StatusHealth(checks: checks(for: config, usageApiEnabled: usageApiEnabled) { _ in (.unknown, nil) })
     }
 
     /// The component names a config resolves to — the join key ``IncidentVisibility`` intersects an
@@ -221,30 +229,44 @@ public struct StatusHealth: Sendable, Equatable {
     /// §1 chose names as the single identity axis; a second one would need an id↔name map maintained
     /// against Anthropic's renames. The accepted cost: a renamed component stops matching, so its
     /// incidents quietly stop showing (the service line already degrades to `unknown` in that case).
-    public static func monitoredComponentNames(for config: MonitoredServices) -> Set<String> {
-        Set(checks(for: config) { _ in (.unknown, nil) }.flatMap(\.components).map(\.name))
+    public static func monitoredComponentNames(
+        for config: MonitoredServices,
+        usageApiEnabled: Bool = true
+    ) -> Set<String> {
+        Set(
+            checks(for: config, usageApiEnabled: usageApiEnabled) { _ in (.unknown, nil) }
+                .flatMap(\.components).map(\.name))
     }
 
     /// The single source of truth for **which** services and constituents exist under a config —
     /// shared by ``from(_:config:)`` and ``unknown(for:)``, which differ only in how each
     /// component's status is obtained (`statusOf`: from a summary, vs the constant `.unknown`).
     ///
-    /// `Claude API` is emitted unconditionally as the first check; `Claude Code` and `Claude
-    /// WEB/Desktop` follow when their flags are set, WEB/Desktop adding `Claude Cowork` in the
-    /// cowork mode.
+    /// `Claude API` is emitted as the first check whenever **anything** is monitored — the usage poll
+    /// (`usageApiEnabled`) or either toggleable service (#341); `Claude Code` and `Claude WEB/Desktop`
+    /// follow when their flags are set, WEB/Desktop adding `Claude Cowork` in the cowork mode. With
+    /// everything off the result is empty, which is what makes "monitor nothing" representable.
+    ///
+    /// `usageApiEnabled` arrives as a separate argument rather than a field of `config` on purpose:
+    /// it belongs to ``ProviderMonitoring``, not to the status-page config (whose docblock says
+    /// exactly what it holds). It defaults to `true` so the many call sites that only care about
+    /// services — tests included — read unchanged.
     private static func checks(
         for config: MonitoredServices,
+        usageApiEnabled: Bool = true,
         statusOf: (String) -> (status: ServiceStatus, changedAt: Date?)
     ) -> [ServiceCheck] {
         func component(_ name: String) -> ResolvedComponent {
             let resolved = statusOf(name)
             return ResolvedComponent(name: name, status: resolved.status, changedAt: resolved.changedAt)
         }
-        var checks: [ServiceCheck] = [
-            ServiceCheck(id: .claudeAPI, components: [
+        let monitoring = ProviderMonitoring(usageApiEnabled: usageApiEnabled, services: config)
+        var checks: [ServiceCheck] = []
+        if monitoring.claudeApiLocked {
+            checks.append(ServiceCheck(id: .claudeAPI, components: [
                 component(claudeAPIComponentName),
-            ]),
-        ]
+            ]))
+        }
         if config.claudeCodeEnabled {
             checks.append(ServiceCheck(id: .claudeCode, components: [
                 component(claudeCodeComponentName),

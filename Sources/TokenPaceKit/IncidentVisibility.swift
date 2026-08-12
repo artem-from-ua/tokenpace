@@ -144,15 +144,20 @@ public enum IncidentVisibility {
     /// - Parameters:
     ///   - summary: The decoded poll.
     ///   - config: Which logical services the user monitors — the same config that builds the rows.
+    ///   - usageApiEnabled: Whether the usage poll is on (#341). It is one of the things that pulls
+    ///     `Claude API` into the monitored set, so it participates in "is this incident mine".
+    ///     With everything off the monitored set is empty and **no** incident is visible.
     ///   - now: Injected for determinism (never `Date()` in here).
     ///   - maxAge: Hide incidents older than this. `nil` = no limit.
     public static func visible(
         in summary: StatusSummary,
         config: MonitoredServices,
+        usageApiEnabled: Bool = true,
         now: Date,
         maxAge: TimeInterval? = nil
     ) -> [VisibleIncident] {
-        let monitored = StatusHealth.monitoredComponentNames(for: config)
+        let monitored = StatusHealth.monitoredComponentNames(
+            for: config, usageApiEnabled: usageApiEnabled)
         return summary.incidents.compactMap { incident in
             let stage = IncidentStage(rawAPIValue: incident.status)
             guard !stage.isClosed else { return nil }

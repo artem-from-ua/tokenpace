@@ -36,18 +36,18 @@ struct ExtraFeaturesPane: View {
 
                 Toggle("Claude Code", isOn: Binding(
                     get: { model.claudeCodeEnabled },
-                    set: { model.claudeCodeEnabled = $0; model.commitMonitoredServices() }))
+                    set: { model.claudeCodeEnabled = $0; model.commitProviderMonitoring() }))
 
                 Toggle("Claude Web / Desktop", isOn: Binding(
                     get: { model.webDesktopEnabled },
-                    set: { model.webDesktopEnabled = $0; model.commitMonitoredServices() }))
+                    set: { model.webDesktopEnabled = $0; model.commitProviderMonitoring() }))
 
                 if model.webDesktopEnabled {
                     HStack {
                         Spacer()
                         Picker("", selection: Binding(
                             get: { model.webDesktopMode },
-                            set: { model.webDesktopMode = $0; model.commitMonitoredServices() })) {
+                            set: { model.webDesktopMode = $0; model.commitProviderMonitoring() })) {
                             Text("Chat only").tag(WebDesktopMode.chatOnly)
                             Text("Chat and Cowork").tag(WebDesktopMode.chatAndCowork)
                         }

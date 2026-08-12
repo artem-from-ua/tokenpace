@@ -26,7 +26,7 @@ final class SettingsModel {
 
     // MARK: Callbacks (the AppDelegate contract — set by the window controller's forwarders)
 
-    var onMonitoredServicesChange: ((MonitoredServices) -> Void)?
+    var onProviderMonitoringChange: ((ProviderMonitoring) -> Void)?
     var onCheckForUpdatesNow: (() -> Void)?
     var onInstallUpdateNow: (() -> Void)?
     var onCalmColorModeChange: ((CalmColorMode) -> Void)?
@@ -171,11 +171,27 @@ final class SettingsModel {
     /// shown under the "Dropdown Widget" section.
     var showTicks = false
 
-    // MARK: Monitored Services
+    // MARK: Provider monitoring (#89, #341)
 
+    /// Whether the usage API is polled — the switch behind the bars (#341). Separate from the
+    /// status-page services below: turning it off leaves them monitored.
+    var usageApiEnabled = true
     var claudeCodeEnabled = true
     var webDesktopEnabled = true
     var webDesktopMode: WebDesktopMode = .chatOnly
+
+    /// What the provider pages currently describe — the value the callback carries.
+    var providerMonitoring: ProviderMonitoring {
+        ProviderMonitoring(
+            usageApiEnabled: usageApiEnabled,
+            services: MonitoredServices(
+                claudeCodeEnabled: claudeCodeEnabled,
+                webDesktopEnabled: webDesktopEnabled,
+                webDesktopMode: webDesktopMode))
+    }
+
+    /// Whether the `Claude API` row is forced on and locked — derived, never stored (#341).
+    var claudeApiLocked: Bool { providerMonitoring.claudeApiLocked }
 
     // MARK: Notifications (#160)
 
@@ -468,10 +484,14 @@ final class SettingsModel {
         dropdownStyle = PersistedConfig.dropdownStyle
         showTicks = PersistedConfig.showTicks
 
-        let ms = PersistedConfig.monitoredServices
-        claudeCodeEnabled = ms.claudeCodeEnabled
-        webDesktopEnabled = ms.webDesktopEnabled
-        webDesktopMode = ms.webDesktopMode
+        // Straight assignments, not the `set…` methods — see the ordering invariant above: a re-sync
+        // must not re-persist or re-fire `onProviderMonitoringChange`, or every open of the Settings
+        // window would signal a polling-mode change (#341).
+        let pm = PersistedConfig.providerMonitoring
+        usageApiEnabled = pm.usageApiEnabled
+        claudeCodeEnabled = pm.services.claudeCodeEnabled
+        webDesktopEnabled = pm.services.webDesktopEnabled
+        webDesktopMode = pm.services.webDesktopMode
 
         backToWorkEnabled = PersistedConfig.backToWorkEnabled
         extraUsageNotifyEnabled = PersistedConfig.extraUsageNotifyEnabled
@@ -688,14 +708,15 @@ final class SettingsModel {
         onAwaitingInputAppearanceChange?()   // #233: a preset/reset may flip the menu-bar copy
     }
 
-    /// Build `MonitoredServices` from the current toggles/radio, persist, and fire the callback.
-    func commitMonitoredServices() {
-        let config = MonitoredServices(
-            claudeCodeEnabled: claudeCodeEnabled,
-            webDesktopEnabled: webDesktopEnabled,
-            webDesktopMode: webDesktopMode)
-        PersistedConfig.monitoredServices = config
-        onMonitoredServicesChange?(config)
+    /// Build ``ProviderMonitoring`` from the current toggles/radio, persist both halves, and fire the
+    /// callback. Persist-then-notify, per the ordering invariant at the top of this file.
+    ///
+    /// One commit for both halves on purpose: `Claude API`'s locked state is derived from the two of
+    /// them together, so the shell must never see one without the other.
+    func commitProviderMonitoring() {
+        let config = providerMonitoring
+        PersistedConfig.providerMonitoring = config
+        onProviderMonitoringChange?(config)
     }
 
     func toggleLaunchAtLogin(_ wantOn: Bool) {
@@ -769,9 +790,9 @@ final class SettingsModel {
         incidentMaxAgeHours = hours
         PersistedConfig.incidentMaxAge = hours > 0 ? TimeInterval(hours) * 3600 : nil
         AppLogger.lifecycle.notice("incident: max age set \(hours, privacy: .public)h")
-        // Reuse the monitored-services callback: the app re-resolves the status (and with it the
+        // Reuse the provider-monitoring callback: the app re-resolves the status (and with it the
         // visible incidents) on that signal, which is exactly what a changed age cut-off needs.
-        commitMonitoredServices()
+        commitProviderMonitoring()
     }
 
     func setNotifyWindow(start: Int, end: Int) {

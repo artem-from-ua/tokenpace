@@ -31,10 +31,14 @@ public enum WebDesktopMode: String, Sendable, Equatable, Codable, CaseIterable {
 /// The user's choice of which Claude status-page services to monitor (#89) — the persisted config
 /// that replaces the previously hard-coded set of components.
 ///
-/// `Claude API (api.anthropic.com)` is deliberately **not** represented here: it is always monitored
-/// and not user-configurable (TokenPace's own ability to call the usage API depends on it), so there
-/// is no flag to store. This type carries only the two toggleable logical services plus the
-/// WEB/Desktop mode.
+/// `Claude API (api.anthropic.com)` is deliberately **not** represented here: it has no switch of its
+/// own. It is monitored whenever anything else is — either toggleable service, or the usage poll —
+/// and locked on in the UI while that holds (#341), so its state is *derived*
+/// (``ProviderMonitoring/claudeApiLocked``) rather than stored. This type carries only the two
+/// toggleable logical services plus the WEB/Desktop mode.
+///
+/// The usage poll is **not** here either, for the same reason this docblock can stay honest: it is a
+/// different subsystem, and lives beside this one in ``ProviderMonitoring``.
 ///
 /// `Codable` because it is persisted in `UserDefaults` as JSON (the `TokenPace` shell owns the
 /// read/write via `PersistedConfig`; this layer only defines the shape). The custom ``init(from:)``

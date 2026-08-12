@@ -84,9 +84,10 @@ final class SettingsWindowController: NSWindowController {
     /// `DevToolsWindowController.updatePreview` — both are called from `AppDelegate.setPopupLayout`.
     func updatePreview(_ layout: PopupLayout) { preview.update(layout) }
 
-    /// Called when the user changes the monitored-services selection (#89), with the new config.
-    var onMonitoredServicesChange: ((MonitoredServices) -> Void)? {
-        get { model.onMonitoredServicesChange } set { model.onMonitoredServicesChange = newValue }
+    /// Called when the user changes what is monitored for a provider (#89, #341) — either the usage
+    /// poll or the status-page services — with the new composite config.
+    var onProviderMonitoringChange: ((ProviderMonitoring) -> Void)? {
+        get { model.onProviderMonitoringChange } set { model.onProviderMonitoringChange = newValue }
     }
 
     /// Called when the user clicks "Check now" (#37) — runs an immediate update check.
