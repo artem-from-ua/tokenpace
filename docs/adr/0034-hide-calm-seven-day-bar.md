@@ -1,9 +1,15 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [0086]
 date: 2026-07-25
 ---
 
 # ADR-0034: Ховати спокійну 7d-смужку в menu bar (опція, default-on)
+
+> **Замінено [ADR-0086](0086-tri-state-calm-bar-hiding.md).** Булева опція стала трипозиційною
+> («Hide the calm bar»: `5-hour` / `7-day` / `Never`), тож ховати можна **будь-яку** з двох смужок, а
+> не лише 7-денну; фабричний дефолт відтоді ховає **5-годинну**. Описане нижче лишається чинним як
+> опис режиму `.sevenDay` і як контекст рішення.
 
 > Продовжує лінійку «менше шуму» в menu-bar віджеті — ту саму, що [ADR-0028](0028-hide-reset-label-when-pacing-is-calm.md)
 > / [ADR-0029](0029-reset-countdown-selection-by-severity.md) (ховання reset-часу) і

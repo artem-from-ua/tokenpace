@@ -15,7 +15,7 @@ private let paneOrderedKeys = [
     "awaitingInputInMenuBar",     // "Show awaiting-input icon in the menu bar"
     "pauseHidesBars",             // "Pause icon hides bars"
     "showExtraUsage",             // "Show extra-usage credits icon"
-    "hideCalmSevenDayBar",        // "Show 7-day bar when calm"
+    "calmBarHiding",              // "Hide the calm bar"
     "resetCountdownModeMenuBar",  // "Show reset countdown"
     "showServiceStatusDot",       // "Show service status dot on issues"
     "dropdownStyle",              // Dropdown Widget → "Bar style"
@@ -45,7 +45,9 @@ private func appearanceKeysInOrder(_ json: String) -> [String] {
 /// A value set that deliberately matches **no** preset, so `preset` exports as "custom".
 private let customValues = AppearancePresetValues(
     calmColorMode: .off,
-    hideCalmSevenDayBar: true,
+    // `.sevenDay` belongs to no preset since ADR-0086 (the calm ones hide the 5-hour bar, Control freak
+    // hides neither), which suits a deliberately preset-less value set.
+    calmBarHiding: .sevenDay,
     pauseHidesBars: true,
     showExtraUsage: false,
     showServiceStatusDot: false,
@@ -129,13 +131,17 @@ struct AppearanceConfigExportPayloadTests {
         #expect(json.contains("\"dropdownStyle\" : \"progress\""))
         #expect(json.contains("\"calmColorMode\" : \"off\""))
         #expect(json.contains("\"resetCountdownModeMenuBar\" : \"never\""))
+        #expect(json.contains("\"calmBarHiding\" : \"sevenDay\""))
     }
 
-    /// `hideCalmSevenDayBar` is exported in the stored *hide* sense, not the pane's inverted
-    /// "Show 7-day bar when calm" — otherwise the dump would contradict `PersistedConfig`.
-    @Test func sevenDayFlagKeepsTheStoredHideSense() {
-        let hidden = AppearancePreset.chill.values   // hideCalmSevenDayBar == true
-        #expect(export(hidden, preset: .chill).contains("\"hideCalmSevenDayBar\" : true"))
+    /// `calmBarHiding` exports as the raw string naming the **hidden** bar — the same sense
+    /// `PersistedConfig` stores, with no inversion left anywhere (ADR-0086 retired the boolean whose
+    /// stored form was the opposite of its checkbox).
+    @Test func calmBarHidingExportsTheHiddenBar() {
+        #expect(export(AppearancePreset.chill.values, preset: .chill)
+            .contains("\"calmBarHiding\" : \"fiveHour\""))
+        #expect(export(AppearancePreset.controlFreak.values, preset: .controlFreak)
+            .contains("\"calmBarHiding\" : \"never\""))
     }
 
     /// Pretty-printed, so the dump is readable where it's pasted.
@@ -183,6 +189,35 @@ struct AppearancePresetValuesCodableTests {
         #expect(decoded.modelLimitsVisibility == .always)
         #expect(decoded.extraUsageVisibility == .optionOnly)
         #expect(decoded.showTicks)
+        // This fixture also predates ADR-0086, so it exercises the legacy boolean: `false` → `.never`.
+        #expect(decoded.calmBarHiding == .never)
+    }
+
+    /// A dump exported **before ADR-0086** carries the boolean `hideCalmSevenDayBar` instead of
+    /// `calmBarHiding`. It maps through `CalmBarHiding.migrated(fromLegacyHide:)` — the same call the
+    /// `UserDefaults` migration makes — so importing an old dump and upgrading in place agree.
+    @Test func decodesTheLegacyHideCalmSevenDayBoolean() throws {
+        func decode(_ legacy: String) throws -> AppearancePresetValues {
+            let json = """
+            { "showTicks" : true, "menuBarStyle" : "gauge", "dropdownStyle" : "gauge",
+              "calmColorMode" : "off", \(legacy),
+              "pauseHidesBars" : false, "showExtraUsage" : true,
+              "showServiceStatusDot" : true, "awaitingInputInMenuBar" : true,
+              "modelLimitsVisibility" : "always", "extraUsageVisibility" : "optionOnly",
+              "resetCountdownModeMenuBar" : "always" }
+            """
+            return try JSONDecoder().decode(AppearancePresetValues.self, from: Data(json.utf8))
+        }
+        // `true` hid the calm 7-day bar; `false` kept both.
+        #expect(try decode("\"hideCalmSevenDayBar\" : true").calmBarHiding == .sevenDay)
+        #expect(try decode("\"hideCalmSevenDayBar\" : false").calmBarHiding == .never)
+        // The new key wins when both are present — an old key left in a hand-edited dump can't override
+        // the current one.
+        #expect(try decode("\"calmBarHiding\" : \"fiveHour\", \"hideCalmSevenDayBar\" : true")
+            .calmBarHiding == .fiveHour)
+        // Neither key (a dump older still) falls back to the pre-enum semantics rather than today's
+        // default, so an ancient config is not silently reinterpreted.
+        #expect(try decode("\"unrelated\" : 1").calmBarHiding == .sevenDay)
     }
 
     // MARK: Pre-#329 configs — one `barStyle` key for both surfaces

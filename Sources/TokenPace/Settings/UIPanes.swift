@@ -199,13 +199,20 @@ struct MenuBarPane: View {
                 Toggle("Show extra-usage credits icon", isOn: Binding(
                     get: { model.showExtraUsage }, set: { model.setShowExtraUsage($0) }))
 
-                // Shown to the user as "Show 7-day bar when calm" — the inverse of the stored
-                // `hideCalmSevenDay` flag (off by default = the calm 7-day bar is hidden by default).
+                // Which bar steps aside while it is calm (ADR-0086) — a three-way choice replacing the
+                // old inverted "Show 7-day bar when calm" checkbox. The segment names the bar that gets
+                // *hidden*, so the row reads as one sentence: "Hide the calm bar — 7-day".
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Show 7-day bar when calm", isOn: Binding(
-                        get: { !model.hideCalmSevenDay }, set: { model.setHideCalmSevenDay(!$0) }))
-                    SettingsHint(text: "Off hides the 7-day bar while it's calm, bringing it back "
-                        + "when it turns orange or red.")
+                    HStack {
+                        Text("Hide the calm bar")
+                        Spacer()
+                        SegmentedControl(
+                            segments: AppearanceCalmBarHiding.segments,
+                            active: model.calmBarHiding,
+                            onSelect: { model.setCalmBarHiding($0) })
+                    }
+                    SettingsHint(text: "The bar you pick is hidden while it's calm and comes back as "
+                        + "soon as it needs attention (orange or red). The other one is always shown.")
                 }
 
                 // Reset-countdown mode: a segmented control matching the page's other three-way rows,
@@ -328,4 +335,13 @@ enum AppearanceBarStyle {
         .init(value: .gauge, title: "Gauge"),
         .init(value: .progress, title: "Progress"),
     ]
+}
+
+/// The three ``CalmBarHiding`` segments for the Menu bar pane's "Hide the calm bar" row (ADR-0086).
+/// Built from `allCases` so the on-screen order *is* the declaration order — the two windows first,
+/// the opt-out last — and a new case can never be left out of the control.
+@MainActor
+enum AppearanceCalmBarHiding {
+    static let segments: [SegmentedControl<CalmBarHiding>.Segment] =
+        CalmBarHiding.allCases.map { .init(value: $0, title: $0.displayName) }
 }

@@ -72,9 +72,13 @@ enum PersistedConfig {
         /// Whether the menu-bar widget draws the service-status dot on a service issue (#31).
         /// Default-on (opt-out) — see the property.
         static let showServiceStatusDot = "showServiceStatusDot"
-        /// Whether the menu-bar widget hides the 7-day bar while it is calm (green/yellow),
-        /// centring the 5h bar alone (#94). Default-on (opt-out) — see the property.
-        static let hideCalmSevenDayBar = "hideCalmSevenDayBar"
+        /// Which menu-bar bar is hidden while it is calm — stored as the raw `CalmBarHiding` string
+        /// (ADR-0086). Default `.fiveHour` (from the `.workHarder` preset) — see the property.
+        static let calmBarHiding = "calmBarHiding"
+        /// Legacy pre-ADR-0086 key — the boolean "hide the calm **7-day** bar" opt-out (#94). Read once
+        /// by ``PersistedConfig/migrateCalmBarHidingIfNeeded()`` to seed ``calmBarHiding``, then cleared.
+        /// Do not read elsewhere.
+        static let legacyHideCalmSevenDayBar = "hideCalmSevenDayBar"
         /// Whether the red "pause" icon **hides** the pacing bars while the user is fully blocked
         /// (`CreditsPacing.isBlocked`), leaving only the reset countdown beside the icon (#194, #227).
         /// `true` → icon only; `false` → icon + bars. The pause icon itself is always drawn when blocked.
@@ -343,17 +347,19 @@ enum PersistedConfig {
         set { defaults.set(newValue, forKey: Key.showServiceStatusDot) }
     }
 
-    /// Whether the **menu-bar** widget hides the **7-day** bar while it is calm — green (on pace or
-    /// behind) or mild-ahead yellow (`BarView.isCalm`) — leaving the 5h bar as the single, vertically
-    /// centred bar (#94). **Default-on** (opt-out): an absent key reads as `true`, so the quieter
-    /// single-bar look is the out-of-the-box behaviour. `object(forKey:) as? Bool ?? true`
-    /// distinguishes "unset" (→ true) from an explicit `false` the user chose — `bool(forKey:)` would
-    /// collapse both to `false` and silently defeat the opt-out default. An **orange/red** 7-day bar
-    /// always stays visible; the error state (⚠️ + stale bars, #12) is unaffected — the 7-day bar is
-    /// kept there for diagnostics regardless of this toggle.
-    static var hideCalmSevenDayBar: Bool {
-        get { defaults.object(forKey: Key.hideCalmSevenDayBar) as? Bool ?? AppearancePreset.defaultValues.hideCalmSevenDayBar }
-        set { defaults.set(newValue, forKey: Key.hideCalmSevenDayBar) }
+    /// Which **menu-bar** bar is hidden while it is calm — green (on pace or behind), mild-ahead yellow,
+    /// or far-behind blue (`BarView.isCalm`) — leaving the other one as the single, vertically centred
+    /// bar (ADR-0086, supersedes the boolean of #94). Default `.fiveHour` from the `.workHarder` preset:
+    /// out of the box the 5-hour bar steps aside while quiet and the 7-day one stays.
+    ///
+    /// An **orange/red** bar always stays visible, and at most one bar is ever hidden, so the widget
+    /// never empties. The error state (⚠️ + stale bars, #12) is unaffected — both bars are kept there
+    /// for diagnostics regardless of this choice. An absent or unrecognised value falls back to the
+    /// preset default; ``migrateCalmBarHidingIfNeeded()`` carries an explicit pre-ADR-0086 boolean over.
+    static var calmBarHiding: CalmBarHiding {
+        get { CalmBarHiding(rawValue: defaults.string(forKey: Key.calmBarHiding) ?? "")
+              ?? AppearancePreset.defaultValues.calmBarHiding }
+        set { defaults.set(newValue.rawValue, forKey: Key.calmBarHiding) }
     }
 
     /// Whether the red "pause" icon **hides** the **menu-bar** pacing bars while the user is *fully
@@ -429,7 +435,11 @@ enum PersistedConfig {
             Key.calmColorMode,
             Key.resetCountdownModeMenuBar,
             Key.showServiceStatusDot,
-            Key.hideCalmSevenDayBar,
+            Key.calmBarHiding,
+            // Cleared too, for the same reason as `legacyBarStyle` below: a Reset must also sweep a
+            // pre-ADR-0086 boolean the migration may not have reached yet, or it would sit there ready
+            // to re-seed `calmBarHiding` on a later launch.
+            Key.legacyHideCalmSevenDayBar,
             Key.pauseHidesBars,
             Key.showExtraUsage,
             Key.modelLimitsVisibility,
@@ -506,6 +516,33 @@ enum PersistedConfig {
     ///
     /// There is no counterpart for the Extra-usage section: it had no popup-side setting before, so
     /// everyone starts on the preset default.
+    /// One-time upgrade of the boolean "hide the calm **7-day** bar" opt-out (#94) to the tri-state
+    /// ``calmBarHiding`` (ADR-0086). The old key could only ever hide the 7-day bar, so an explicit
+    /// choice maps onto two of the three cases — `true` → `.sevenDay`, `false` → `.never` — each
+    /// preserving exactly what the user was looking at. The mapping itself lives in
+    /// `CalmBarHiding.migrated(fromLegacyHide:)` so it is unit-testable from the Kit and shared with the
+    /// exported-config decode.
+    ///
+    /// Runs on every launch and is idempotent: it does nothing once the new key exists (the legacy key is
+    /// cleared either way). Only an **explicit** legacy value migrates. Someone who never touched the old
+    /// toggle has nothing stored, so they pick up the new `.fiveHour` default from the getter's preset
+    /// fallback — a deliberate shift of the out-of-the-box look (the 7-day bar now stays and the 5-hour
+    /// one steps aside while calm), the same way ADR-0080 moved the factory bar style.
+    static func migrateCalmBarHidingIfNeeded() {
+        // Already migrated (or new key explicitly set) → nothing to do.
+        guard defaults.object(forKey: Key.calmBarHiding) == nil else {
+            defaults.removeObject(forKey: Key.legacyHideCalmSevenDayBar)
+            return
+        }
+        if let legacyHide = defaults.object(forKey: Key.legacyHideCalmSevenDayBar) as? Bool {
+            let migrated = CalmBarHiding.migrated(fromLegacyHide: legacyHide)
+            calmBarHiding = migrated
+            AppLogger.lifecycle.notice(
+                "calm-bar-hiding: migrated \(legacyHide, privacy: .public) → \(migrated.rawValue, privacy: .public)")
+        }
+        defaults.removeObject(forKey: Key.legacyHideCalmSevenDayBar)
+    }
+
     static func migrateModelLimitsVisibilityIfNeeded() {
         // Already migrated (or new key explicitly set) → nothing to do.
         guard defaults.object(forKey: Key.modelLimitsVisibility) == nil else {
@@ -602,7 +639,7 @@ enum PersistedConfig {
     /// used to restore the saved Custom setup (#333).
     static func applyValues(_ v: AppearancePresetValues) {
         calmColorMode = v.calmColorMode
-        hideCalmSevenDayBar = v.hideCalmSevenDayBar
+        calmBarHiding = v.calmBarHiding
         pauseHidesBars = v.pauseHidesBars
         showExtraUsage = v.showExtraUsage
         showServiceStatusDot = v.showServiceStatusDot
@@ -622,7 +659,7 @@ enum PersistedConfig {
     static var currentAppearanceValues: AppearancePresetValues {
         AppearancePresetValues(
             calmColorMode: calmColorMode,
-            hideCalmSevenDayBar: hideCalmSevenDayBar,
+            calmBarHiding: calmBarHiding,
             pauseHidesBars: pauseHidesBars,
             showExtraUsage: showExtraUsage,
             showServiceStatusDot: showServiceStatusDot,

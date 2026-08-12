@@ -651,9 +651,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.popupVC.extraUsageVisibility = mode
                 self?.reRenderForCurrentTime()
             }
-            wc.onHideCalmSevenDayChange = { [weak self] _ in
-                // Toggling this changes the layout (7-day bar drawn or not, 5h vertical centring),
-                // not just a colour — rebuild from the last poll (render reads PersistedConfig).
+            wc.onCalmBarHidingChange = { [weak self] _ in
+                // Changing this changes the layout (which bar is drawn, and whether the survivor is
+                // vertically centred), not just a colour — rebuild from the last poll (render reads
+                // PersistedConfig.calmBarHiding).
                 self?.reRenderForCurrentTime()
             }
             wc.onPauseHidesBarsChange = { [weak self] _ in
@@ -924,6 +925,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PersistedConfig.migratePauseKeysIfNeeded()
         // …and carry the boolean "Show model & service limits" opt-out onto its tri-state successor.
         PersistedConfig.migrateModelLimitsVisibilityIfNeeded()
+        // …and the same for the boolean "hide the calm 7-day bar" opt-out, whose tri-state successor can
+        // hide either bar (ADR-0086). Only an explicit old choice carries over; anyone who never touched
+        // it picks up the new `.fiveHour` default.
+        PersistedConfig.migrateCalmBarHidingIfNeeded()
         // …and split the pre-#329 single bar-style key across the two surfaces (`"mixed"` becomes
         // Pressure + Progress, i.e. what it drew), carrying the pre-#307 renames along. Must run
         // before anything reads either style key, or the getters resolve the stale raw to the preset
@@ -2146,8 +2151,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             serviceProblem: PersistedConfig.showServiceStatusDot
                 ? (colorCycleStatus ?? lastStatusHealth?.worstProblem) : nil,
             resetMode: PersistedConfig.resetCountdownModeMenuBar,   // #103: which reset countdown to show
-            // #94: honour the "Hide 7-day bar when calm" toggle — drops a calm 7-day bar, centring 5h.
-            hideCalmSevenDay: PersistedConfig.hideCalmSevenDayBar,
+            // ADR-0086: honour the "Hide the calm bar" choice — drops whichever bar the user picked while
+            // it is calm, centring the one that remains. `.never` keeps both.
+            hideCalmBar: PersistedConfig.calmBarHiding,
             // #144: honour the "Show extra-usage credits" toggle — draws the ¤ icon when credits are
             // active and a base limit is exhausted; false hides it and reclaims its width.
             showCredits: PersistedConfig.showExtraUsage,

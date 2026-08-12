@@ -128,8 +128,10 @@ struct WeeklyGateFiveHourTests {
             from: snapshot(sevenDayUtil: 70), now: now).mode else {
             Issue.record("expected expanded mode"); return
         }
-        #expect(openFive.layout.severity == .farBehind)
-        #expect(closedFive.layout.severity == .calm)
+        // Both bars are optional in `.expanded` since ADR-0086, but neither `make` call above asks for
+        // any hiding (`hideCalmBar` defaults to `.never`), so the 5h bar is always there.
+        #expect(openFive?.layout.severity == .farBehind)
+        #expect(closedFive?.layout.severity == .calm)
     }
 }
 

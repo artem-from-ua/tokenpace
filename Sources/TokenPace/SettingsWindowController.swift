@@ -147,9 +147,9 @@ final class SettingsWindowController: NSWindowController {
         get { model.onExtraUsageVisibilityChange } set { model.onExtraUsageVisibilityChange = newValue }
     }
 
-    /// Called when the user toggles "Hide 7-day bar when calm" (#94), with the new state.
-    var onHideCalmSevenDayChange: ((Bool) -> Void)? {
-        get { model.onHideCalmSevenDayChange } set { model.onHideCalmSevenDayChange = newValue }
+    /// Called when the user picks a "Hide the calm bar" segment (ADR-0086), with the new mode.
+    var onCalmBarHidingChange: ((CalmBarHiding) -> Void)? {
+        get { model.onCalmBarHidingChange } set { model.onCalmBarHidingChange = newValue }
     }
 
     /// Called when the user toggles "Pause icon hides bars" (#194, #227), with the new state — `true`

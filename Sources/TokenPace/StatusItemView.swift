@@ -703,7 +703,7 @@ final class StatusItemView: NSView {
 
     // MARK: Expanded
 
-    private func drawExpanded(fiveHour: BarView, sevenDay: BarView?, reset: String?, in rect: NSRect) {
+    private func drawExpanded(fiveHour: BarView?, sevenDay: BarView?, reset: String?, in rect: NSRect) {
         // Leading decorations first (#199, #227): the red pause glyph (when blocked) then the credits
         // icon (when present), each shifting the bars right past it — the same leading pattern the ⚠️
         // error state uses. Order: pause → credits → bars.
@@ -746,24 +746,27 @@ final class StatusItemView: NSView {
     }
 
     /// Draw the pacing bars starting at `originX`; the reset label is drawn to their right only when
-    /// `reset != nil`. Two layouts by whether the 7-day bar is present:
-    /// - **`sevenDay != nil`**: 5h on top, 7d below, the pair vertically centred as one block.
-    /// - **`sevenDay == nil`** (the calm 7-day was hidden, #94): the 5h bar **alone**, vertically
-    ///   centred on the item — so a single bar sits mid-height, not clinging to the top row.
+    /// `reset != nil`. Two layouts by **how many** bars are present:
+    /// - **both**: 5h on top, 7d below, the pair vertically centred as one block.
+    /// - **one** (the other was hidden while calm — ``CalmBarHiding``, ADR-0086): that bar **alone**,
+    ///   vertically centred on the item — so a single bar sits mid-height, not clinging to the top row.
+    ///   The geometry depends on the *count*, not on which window survived, so a lone 7-day bar lands
+    ///   exactly where a lone 5-hour bar used to (#94).
     ///
     /// Shared by ``drawExpanded(fiveHour:sevenDay:reset:in:)`` and the bars-beside-⚠️ error phase so
     /// the geometry is identical; only the left origin differs (the error glyph shifts it right). The
-    /// error phase always passes a non-nil `sevenDay` (the 7-day bar is diagnostic there, never
-    /// hidden) and a non-nil `reset`; in the normal expanded mode `nil` `reset` means the countdown
-    /// was dropped per the selection table (ADR-0029).
-    private func drawBars(fiveHour: BarView, sevenDay: BarView?, reset: String?,
+    /// error phase always passes both bars (they are diagnostic there, never hidden) and a non-nil
+    /// `reset`; in the normal expanded mode `nil` `reset` means the countdown was dropped per the
+    /// selection table (ADR-0029).
+    private func drawBars(fiveHour: BarView?, sevenDay: BarView?, reset: String?,
                           originX: CGFloat, in rect: NSRect) {
         // Right edge of the bar column (same `barWidth` for one or two bars) — where the reset label
         // starts. The item width does not change when the 7-day bar is hidden (only the vertical
         // layout does), so this stays aligned with `barsBlockWidth`/`itemWidth`.
         let barsMaxX = originX + Metrics.barWidth
 
-        if let sevenDay {
+        switch (fiveHour, sevenDay) {
+        case let (.some(five), .some(seven)):
             // Two bars stacked, vertically centred as a block, then nudged onto the pixel grid.
             //
             // `NSStatusBarButton` sits at a **half-point** y inside its window — its 22 pt frame is
@@ -774,20 +777,27 @@ final class StatusItemView: NSView {
             // to sit at 8.5 → a sharp 14.0, which is why only the stacked pair looked fuzzy.
             let blockHeight = Metrics.barHeight * 2 + Metrics.barGap
             let topY = halfPointAligned(rect.minY + (rect.height - blockHeight) / 2)
-            drawBar(fiveHour, in: NSRect(
+            drawBar(five, in: NSRect(
                 x: originX, y: topY,
                 width: Metrics.barWidth, height: Metrics.barHeight
             ))
-            drawBar(sevenDay, in: NSRect(
+            drawBar(seven, in: NSRect(
                 x: originX, y: topY + Metrics.barHeight + Metrics.barGap,
                 width: Metrics.barWidth, height: Metrics.barHeight
             ))
-        } else {
-            // Single 5h bar (calm 7-day hidden, #94): vertically centred on the item.
-            drawBar(fiveHour, in: NSRect(
+        case let (.some(only), nil), let (nil, .some(only)):
+            // One bar (the other was hidden while calm): vertically centred on the item. Same y for
+            // either window — a lone 7-day bar sits exactly where a lone 5-hour bar did before ADR-0086.
+            drawBar(only, in: NSRect(
                 x: originX, y: rect.midY - Metrics.barHeight / 2,
                 width: Metrics.barWidth, height: Metrics.barHeight
             ))
+        case (nil, nil):
+            // Unreachable: `CalmBarHiding` elides at most one bar, so `.expanded` always carries one
+            // (see `MenuBarMode.expanded`'s invariant), and the error phase passes both or neither —
+            // and the neither case never reaches here (`drawError` draws the glyph alone instead).
+            // A silent no-op rather than an assertion: the view stays a thin shell (ADR-0009).
+            break
         }
 
         if let reset {

@@ -65,7 +65,7 @@ struct MenuBarLayoutMakeTests {
             Issue.record("expected .expanded at 0%, got \(layout.mode)")
             return
         }
-        #expect(!five.idle)
+        #expect(five?.idle == false)
     }
 
     @Test func highUtilizationExpands() {
@@ -82,13 +82,19 @@ struct MenuBarLayoutMakeTests {
 @Suite("MenuBarLayout expanded content")
 struct MenuBarLayoutExpandedTests {
 
-    /// Pull the associated values out of an expanded mode, or fail the test. `seven` is optional —
-    /// `nil` when the calm 7-day bar was hidden (#94); the default `hideCalmSevenDay: false` keeps it.
+    /// Pull the associated values out of an expanded mode, or fail the test. Both bars are optional in
+    /// the mode (either can be hidden while calm — ``CalmBarHiding``), but these tests all call `make`
+    /// without `hideCalmBar:`, which defaults to `.never`, so the 5h bar is unwrapped here and a `nil`
+    /// is reported as a failure rather than pushed onto every call site. `seven` stays optional.
     private func expanded(
         _ layout: MenuBarLayout
     ) -> (five: BarView, seven: BarView?, resetToShow: ResetToShow?)? {
         guard case let .expanded(five, seven, resetToShow) = layout.mode else {
             Issue.record("expected .expanded, got \(layout.mode)")
+            return nil
+        }
+        guard let five else {
+            Issue.record("expected a 5h bar (no hideCalmBar was requested), got nil")
             return nil
         }
         return (five, seven, resetToShow)
@@ -226,11 +232,18 @@ struct MenuBarLayoutExpandedTests {
 @Suite("MenuBarLayout session-idle")
 struct MenuBarLayoutIdleTests {
 
+    /// As in the expanded-content suite: these all call `make` without `hideCalmBar:` (→ `.never`), so
+    /// the idle 5h bar is always present and is unwrapped here. The case where `.fiveHour` *does* elide
+    /// an idle 5h bar is covered by the hide-calm-bar suite below.
     private func expanded(
         _ layout: MenuBarLayout
     ) -> (five: BarView, seven: BarView?, resetToShow: ResetToShow?)? {
         guard case let .expanded(five, seven, resetToShow) = layout.mode else {
             Issue.record("expected .expanded, got \(layout.mode)")
+            return nil
+        }
+        guard let five else {
+            Issue.record("expected a 5h bar (no hideCalmBar was requested), got nil")
             return nil
         }
         return (five, seven, resetToShow)
@@ -578,7 +591,7 @@ struct MenuBarLayoutShowResetTests {
             Issue.record("expected .expanded, got \(layout.mode)")
             return
         }
-        #expect(five.idle)
+        #expect(five?.idle == true)
         #expect(resetToShow == nil)
     }
 
@@ -710,12 +723,12 @@ struct MenuBarLayoutSelectResetTests {
     }
 }
 
-// MARK: - hide calm 7-day bar (#94)
+// MARK: - hide the calm bar (ADR-0086, supersedes #94)
 
-/// The `hideCalmSevenDay` opt-out: a **calm** 7-day bar (green/mild-yellow) is dropped from
-/// `.expanded` (leaving the 5h bar alone), while an **orange/red** 7-day bar is always kept and the
-/// **error** state is never affected. The reset-countdown selection is unchanged (`selectReset` runs
-/// on the true severities regardless).
+/// The `hideCalmBar` choice: the bar the user picked is dropped from `.expanded` while it is **calm**,
+/// leaving the other one alone; an **orange/red** bar is always kept, and the **error** state is never
+/// affected. The reset-countdown selection is unchanged (`selectReset` runs on the true severities
+/// regardless). `.sevenDay` is the pre-ADR-0086 behaviour of #94; `.fiveHour` is its mirror image.
 ///
 /// Fixture arithmetic (against the 7d window = 604 800 s, `snapshot()`'s reset defaults):
 /// - 7d **green**: `sevenDayUtil: 30`, default reset 3 d out → elapsed ≈ 0.571 → usage < time → calm.
@@ -723,13 +736,15 @@ struct MenuBarLayoutSelectResetTests {
 ///   past the dynamic threshold `0.16·(1−0.143) ≈ 0.137` → noisy.
 /// - 7d **red**: `sevenDayUtil: 100` → usageFraction ≥ 1 → exhausted.
 /// The 5h side uses `fiveHourUtil: 50` (default 4 h reset → elapsed 0.2 → ahead 0.30, past threshold
-/// 0.128 → noisy) so the 5h bar is present and drives the countdown in the mixed cases.
-@Suite("MenuBarLayout hide calm 7d (#94)")
-struct MenuBarLayoutHideCalmSevenDayTests {
+/// 0.128 → noisy) for a **noisy** 5h bar, and `fiveHourUtil: 10` (usage 0.10 < time 0.20, and the gap
+/// stays inside the far-behind band) for a **calm** one.
+@Suite("MenuBarLayout hide the calm bar")
+struct MenuBarLayoutHideCalmBarTests {
 
+    /// Both bars stay optional here — this suite is precisely about one of them going away.
     private func expanded(
         _ layout: MenuBarLayout
-    ) -> (five: BarView, seven: BarView?, resetToShow: ResetToShow?)? {
+    ) -> (five: BarView?, seven: BarView?, resetToShow: ResetToShow?)? {
         guard case let .expanded(five, seven, resetToShow) = layout.mode else {
             Issue.record("expected .expanded, got \(layout.mode)")
             return nil
@@ -737,88 +752,187 @@ struct MenuBarLayoutHideCalmSevenDayTests {
         return (five, seven, resetToShow)
     }
 
-    @Test func defaultOffKeepsCalmSevenDay() {
-        // Regression: the default `hideCalmSevenDay: false` never elides the 7-day bar, even calm.
-        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), now: now)
+    // MARK: .never
+
+    @Test func defaultNeverKeepsBothBars() {
+        // Regression: the default `.never` never elides either bar, however calm both are.
+        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), now: now)
         guard let e = expanded(layout) else { return }
+        #expect(e.five != nil)
         #expect(e.seven != nil)
-        #expect(e.seven?.isCalm == true)   // confirm the fixture really is calm
+        #expect(e.five?.isCalm == true)    // confirm the fixture really is calm on both sides
+        #expect(e.seven?.isCalm == true)
     }
 
+    // MARK: .sevenDay (the #94 behaviour)
+
     @Test func calmSevenDayIsHidden() {
-        // Calm 7-day + opt-in → 7-day dropped, 5h bar alone.
+        // Calm 7-day + `.sevenDay` → 7-day dropped, 5h bar alone.
         let layout = MenuBarLayout.make(
-            from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), now: now, hideCalmSevenDay: true)
+            from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), now: now, hideCalmBar: .sevenDay)
         guard let e = expanded(layout) else { return }
         #expect(e.seven == nil)
-        #expect(e.five.window == .fiveHour)
-        #expect(!e.five.idle)
+        #expect(e.five?.window == .fiveHour)
+        #expect(e.five?.idle == false)
     }
 
     @Test func orangeSevenDayStaysVisible() {
-        // Ahead-of-pace (orange) 7-day is noisy → kept even with the opt-in.
+        // Ahead-of-pace (orange) 7-day is noisy → kept even when it is the chosen bar.
         let layout = MenuBarLayout.make(
             from: snapshot(fiveHourUtil: 50, sevenDayUtil: 55, sevenDayResetsIn: 6 * 24 * 3600),
-            now: now, hideCalmSevenDay: true)
+            now: now, hideCalmBar: .sevenDay)
         guard let e = expanded(layout) else { return }
         #expect(e.seven != nil)
         #expect(e.seven?.severity == .ahead)
     }
 
     @Test func redSevenDayStaysVisible() {
-        // Exhausted (red) 7-day is noisy → kept even with the opt-in.
+        // Exhausted (red) 7-day is noisy → kept even when it is the chosen bar.
         let layout = MenuBarLayout.make(
-            from: snapshot(fiveHourUtil: 50, sevenDayUtil: 100), now: now, hideCalmSevenDay: true)
+            from: snapshot(fiveHourUtil: 50, sevenDayUtil: 100), now: now, hideCalmBar: .sevenDay)
         guard let e = expanded(layout) else { return }
         #expect(e.seven != nil)
         #expect(e.seven?.severity == .exhausted)
     }
 
-    @Test func sessionIdleWithCalmSevenDayLeavesOnlyIdleFive() {
-        // Session-idle 5h + calm 7-day + opt-in → only the idle 5h bar, centred (7-day dropped).
+    // MARK: .fiveHour (the mirror image)
+
+    @Test func calmFiveHourIsHidden() {
+        // Calm 5h + `.fiveHour` → 5h dropped, the 7-day bar stands alone.
         let layout = MenuBarLayout.make(
-            from: idleSnapshot(sevenDayUtil: 20), now: now, hideCalmSevenDay: true)
+            from: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
+        guard let e = expanded(layout) else { return }
+        #expect(e.five == nil)
+        #expect(e.seven?.window == .sevenDay)
+    }
+
+    @Test func orangeFiveHourStaysVisible() {
+        // Ahead-of-pace (orange) 5h is noisy → kept under `.fiveHour`.
+        let layout = MenuBarLayout.make(
+            from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
+        guard let e = expanded(layout) else { return }
+        #expect(e.five != nil)
+        #expect(e.five?.severity == .ahead)
+    }
+
+    @Test func redFiveHourStaysVisible() {
+        // Exhausted (red) 5h is noisy → kept under `.fiveHour`.
+        let layout = MenuBarLayout.make(
+            from: snapshot(fiveHourUtil: 100, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
+        guard let e = expanded(layout) else { return }
+        #expect(e.five != nil)
+        #expect(e.five?.severity == .exhausted)
+    }
+
+    // MARK: session-idle
+
+    @Test func sessionIdleWithCalmSevenDayLeavesOnlyIdleFive() {
+        // Session-idle 5h + calm 7-day + `.sevenDay` → only the idle 5h bar, centred (7-day dropped).
+        let layout = MenuBarLayout.make(
+            from: idleSnapshot(sevenDayUtil: 20), now: now, hideCalmBar: .sevenDay)
         guard let e = expanded(layout) else { return }
         #expect(e.seven == nil)
-        #expect(e.five.idle)
+        #expect(e.five?.idle == true)
     }
 
     @Test func sessionIdleWithNoisySevenDayKeepsIt() {
-        // Session-idle 5h + a noisy (red) 7-day + opt-in → the 7-day bar stays; 5h idle rides above it.
+        // Session-idle 5h + a noisy (red) 7-day + `.sevenDay` → the 7-day bar stays; 5h idle rides above.
         let layout = MenuBarLayout.make(
-            from: idleSnapshot(sevenDayUtil: 100), now: now, hideCalmSevenDay: true)
+            from: idleSnapshot(sevenDayUtil: 100), now: now, hideCalmBar: .sevenDay)
         guard let e = expanded(layout) else { return }
         #expect(e.seven != nil)
-        #expect(e.five.idle)
+        #expect(e.five?.idle == true)
     }
 
-    @Test func errorPhaseKeepsCalmSevenDayForDiagnostics() {
-        // The error state (⚠️ + stale bars, 30–60 min) ignores the opt-in — the calm 7-day is kept
-        // for diagnostics, so both stale bars sit beside the glyph.
+    @Test func idleFiveHourIsHiddenToo() {
+        // The deliberate no-exemption case (ADR-0086): an idle 5h bar reports `.calm`, so `.fiveHour`
+        // hides it as well — between sessions the widget shows the 7-day bar alone. This is the most
+        // visible consequence of the default, so it is pinned here rather than left implicit.
+        let layout = MenuBarLayout.make(
+            from: idleSnapshot(sevenDayUtil: 20), now: now, hideCalmBar: .fiveHour)
+        guard let e = expanded(layout) else { return }
+        #expect(e.five == nil)
+        #expect(e.seven != nil)
+    }
+
+    // MARK: the invariant
+
+    @Test func atLeastOneBarSurvivesEveryCombination() {
+        // The widget can never render empty: `CalmBarHiding` names one window, so even when *both* bars
+        // are calm only the chosen one goes. Swept over the modes × a calm/noisy grid on both windows,
+        // plus the idle path, since that is where "everything is calm" is easiest to hit.
+        let snapshots = [
+            snapshot(fiveHourUtil: 10, sevenDayUtil: 30),    // both calm — the case that matters most
+            snapshot(fiveHourUtil: 50, sevenDayUtil: 30),    // 5h noisy, 7d calm
+            snapshot(fiveHourUtil: 10, sevenDayUtil: 100),   // 5h calm, 7d red
+            snapshot(fiveHourUtil: 50, sevenDayUtil: 100),   // both noisy
+            idleSnapshot(sevenDayUtil: 20),                  // idle 5h (always calm) + calm 7d
+            idleSnapshot(sevenDayUtil: 100),                 // idle 5h + red 7d
+        ]
+        for mode in CalmBarHiding.allCases {
+            for snap in snapshots {
+                let layout = MenuBarLayout.make(from: snap, now: now, hideCalmBar: mode)
+                guard case let .expanded(five, seven, _) = layout.mode else { continue }
+                #expect(five != nil || seven != nil, "both bars elided under \(mode)")
+            }
+        }
+    }
+
+    @Test func bothCalmUnderFiveHourLeavesTheSevenDayBar() {
+        // The sharpest instance of the invariant: both bars calm and the calm 5h is the chosen one, so
+        // exactly one bar is drawn — the 7-day one, calm as it is.
+        let layout = MenuBarLayout.make(
+            from: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
+        guard let e = expanded(layout) else { return }
+        #expect(e.five == nil)
+        #expect(e.seven != nil)
+        #expect(e.seven?.isCalm == true)
+    }
+
+    // MARK: error state
+
+    @Test func errorPhaseKeepsBothBarsForDiagnostics() {
+        // The error state (⚠️ + stale bars, 30–60 min) ignores the choice entirely — both stale bars sit
+        // beside the glyph, whichever one the user hides while healthy.
         let health = UsageHealth(
             lastSuccess: now.addingTimeInterval(-31 * 60),
             failingSince: now.addingTimeInterval(-31 * 60),
             reason: .notSignedIn)
-        let layout = MenuBarLayout.make(
-            from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), health: health, now: now,
-            hideCalmSevenDay: true)
-        guard case let .error(five, seven, _, _) = layout.mode else {
-            Issue.record("expected .error with bars, got \(layout.mode)")
-            return
+        for mode in CalmBarHiding.allCases {
+            let layout = MenuBarLayout.make(
+                from: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), health: health, now: now,
+                hideCalmBar: mode)
+            guard case let .error(five, seven, _, _) = layout.mode else {
+                Issue.record("expected .error with bars under \(mode), got \(layout.mode)")
+                continue
+            }
+            #expect(five != nil, "5h bar dropped from the diagnostic error state under \(mode)")
+            #expect(seven != nil, "7d bar dropped from the diagnostic error state under \(mode)")
         }
-        #expect(five != nil)
-        #expect(seven != nil)   // calm 7-day kept in the diagnostic error state
     }
+
+    // MARK: reset selection
 
     @Test func resetSelectionUnaffectedByHidingSevenDay() {
         // Hiding the calm 7-day bar does not change the reset countdown: 5h noisy + 7d calm → 5h reset,
         // identical whether or not the bar is elided.
         let snap = snapshot(fiveHourUtil: 50, sevenDayUtil: 30)
-        let hidden = MenuBarLayout.make(from: snap, now: now, hideCalmSevenDay: true)
-        let shown = MenuBarLayout.make(from: snap, now: now, hideCalmSevenDay: false)
+        let hidden = MenuBarLayout.make(from: snap, now: now, hideCalmBar: .sevenDay)
+        let shown = MenuBarLayout.make(from: snap, now: now, hideCalmBar: .never)
         guard let eh = expanded(hidden), let es = expanded(shown) else { return }
         #expect(eh.resetToShow?.which == .fiveHour)
         #expect(eh.resetToShow == es.resetToShow)   // same countdown, bar presence aside
+    }
+
+    @Test func resetSelectionUnaffectedByHidingFiveHour() {
+        // Mirror image: eliding the calm 5h bar leaves the countdown exactly as it was — `selectReset`
+        // still sees the real 5h severity, so a hidden bar can still be the one driving the label.
+        let snap = snapshot(fiveHourUtil: 10, sevenDayUtil: 100)
+        let hidden = MenuBarLayout.make(from: snap, now: now, hideCalmBar: .fiveHour)
+        let shown = MenuBarLayout.make(from: snap, now: now, hideCalmBar: .never)
+        guard let eh = expanded(hidden), let es = expanded(shown) else { return }
+        #expect(eh.five == nil)
+        #expect(eh.resetToShow == es.resetToShow)
     }
 }
 
