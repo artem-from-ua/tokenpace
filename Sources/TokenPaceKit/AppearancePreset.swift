@@ -143,7 +143,7 @@ public struct AppearancePresetValues: Sendable, Equatable {
     public let showServiceStatusDot: Bool
     /// Whether the awaiting-input `hand.raised` indicator is shown in the menu bar (#233). The popup
     /// always shows it while the feature is on; this only governs the menu-bar copy. Meaningful only
-    /// when the master toggle (`awaitingInputEnabled`, in Extra features) is on.
+    /// when the master toggle (`awaitingInputEnabled`, on the Appearance page) is on.
     public let awaitingInputInMenuBar: Bool
     /// When the **dropdown** lists the per-model / per-service 7-day rows (#211). Was a boolean opt-out
     /// before the tri-state; the calmer presets now use `.nonCalm` so the rows surface only when one of

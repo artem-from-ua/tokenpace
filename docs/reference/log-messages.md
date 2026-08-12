@@ -230,8 +230,8 @@ token itself never is.
 | 158 | `lifecycle` | `.notice` | `launch-at-login: user set <true/false>` | user toggled the launch-at-login checkbox successfully |
 | 164 | `lifecycle` | `.error` | `launch-at-login: toggle failed: <error>` | toggle threw (e.g. unsigned build) — a deliberate user action, so it stays `.error` |
 | — | `lifecycle` | `.notice` | `calm-color-mode: set <mode>` | user picked a "Calm non-critical colors" segment (#105, #224); `<mode>` is the raw `CalmColorMode` (`off`/`yellowGreen`/`yellowGreenBlue`) — replaces the old `calm-colors` + `work-harder-colors` toggles |
-| — | `lifecycle` | `.notice` | `menu-bar-style: set <style>` | user picked a "Bar style" segment in the **Menu Bar Widget** section (#224, per-surface since #329 [ADR-0080](../adr/0080-per-surface-bar-style.md)); `<style>` is the raw `BarStyle` (`progress`/`pressure`/`gauge`) and governs that surface only. Renamed with the UI in #307 ([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md)) — `pacing` → `progress`, `simple` → `pressure`; `gauge` joined in #326 ([ADR-0079](../adr/0079-centred-zero-gauge-scale.md)). `mixed` can no longer be written: it named a *pair* of styles, and #329 gave each surface its own key |
-| — | `lifecycle` | `.notice` | `dropdown-style: set <style>` | same, for the **Dropdown Widget** section's own "Bar style" row (#329). The two rows are independent — picking one never emits the other |
+| — | `lifecycle` | `.notice` | `menu-bar-style: set <style>` | user picked a "Bar style" segment on the **Menu bar** pane (#224, per-surface since #329 [ADR-0080](../adr/0080-per-surface-bar-style.md)); `<style>` is the raw `BarStyle` (`progress`/`pressure`/`gauge`) and governs that surface only. Renamed with the UI in #307 ([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md)) — `pacing` → `progress`, `simple` → `pressure`; `gauge` joined in #326 ([ADR-0079](../adr/0079-centred-zero-gauge-scale.md)). `mixed` can no longer be written: it named a *pair* of styles, and #329 gave each surface its own key |
+| — | `lifecycle` | `.notice` | `dropdown-style: set <style>` | same, for the **Dropdown** pane's own "Bar style" row (#329). The two rows are independent — picking one never emits the other |
 | — | `lifecycle` | `.notice` | `bar-style: migrated <old> → menu-bar <style>, dropdown <style>` | launch-time split of the pre-#329 single `barStyle` key across the two surfaces, emitted once per upgraded install by `PersistedConfig.migrateBarStyleIfNeeded` (which then deletes the old key). `<old>` also covers the pre-#307 raws, so one line can carry both migrations: `mixed` → `menu-bar pressure, dropdown progress` (what that value actually drew), `simple` → both `pressure`, `pacing` → both `progress`, `gauge` → both `gauge`. Absent on a fresh install, on a user who never set the key, and on every launch after the first |
 | — | `lifecycle` | `.notice` | `show-ticks: popup set <bool>` | user toggled the "Show ticks on bars" checkbox (#224) — popup-only tick ruler |
 | 434 | `lifecycle` | `.notice` | `reset-countdown: menu-bar mode set <mode>` | user picked a "Show reset countdown" segment (#103); `<mode>` is the raw `ResetCountdownMode` |
@@ -242,7 +242,7 @@ token itself never is.
 | — | `lifecycle` | `.notice` | `model-specific-limits: popup set <mode>` | user picked a "Show model & service limits" segment — gates the popup's per-model/per-service rows (Opus/Sonnet/scoped); `<mode>` is the raw `PopupSectionVisibility` (`always`/`nonCalm`/`optionOnly`) (#211) |
 | — | `lifecycle` | `.notice` | `extra-usage-section: popup set <mode>` | user picked a "Show extra usage" segment — gates the popup's paid-credits section; `<mode>` is the raw `PopupSectionVisibility`. Distinct from `extra-usage-icon`, which is the menu-bar glyph (#211) |
 | — | `lifecycle` | `.notice` | `appearance settings reset to defaults` | user cleared the Appearance keys (#214); all thirteen Appearance keys cleared to their defaults, plus the legacy pre-#329 `barStyle` key — swept too so a stale value can't re-seed the per-surface pair on a later launch |
-| — | `lifecycle` | `.notice` | `appearance preset applied: <preset>` | user picked an Appearance-pane preset segment (#215, #224); `<preset>` is the raw `AppearancePreset` (`chill`/`workHarder`/`controlFreak`) — sets all thirteen Appearance keys at once (twelve before #329 split `barStyle` in two) |
+| — | `lifecycle` | `.notice` | `appearance preset applied: <preset>` | user picked a preset segment on the UI presets pane (#215, #224); `<preset>` is the raw `AppearancePreset` (`chill`/`workHarder`/`controlFreak`), or the literal **`custom`** when the user returned to their own saved setup (#333) — either way it sets all thirteen Appearance keys at once (twelve before #329 split `barStyle` in two) |
 | — | `lifecycle` | `.notice` | `screen-lock-pause: setting set <bool>` | user toggled the "Pause polling while the screen is locked" checkbox (#114, ADR-0032) |
 | 439 | `lifecycle` | `.notice` | `update: automatic checks set <bool>` | user toggled the "Check for updates automatically" checkbox (#37) |
 | — | `lifecycle` | `.notice` | `archive: enabled set <bool>` | user toggled the "Archive session logs to a folder" checkbox (#110) |
@@ -256,7 +256,7 @@ token itself never is.
 | — | `lifecycle` | `.notice` | `incident: max age set <n>h` | user changed "Hide incidents older than" in Extra features; `0` means no limit (#279, ADR-0071 §9) |
 | — | `lifecycle` | `.notice` | `extra-usage: try (forced) notification` | user pressed the "Switching to Extra Usage" Settings "Try" button, forcing a `postExtraUsage` that bypasses edge-detection and quiet hours |
 
-## `Sources/TokenPace/Settings/AppearancePane.swift`
+## `Sources/TokenPace/Settings/UIPanes.swift`
 
 The first — and so far only — user of the `ui` category. The Settings *toggle* lines above are
 `lifecycle` because they change persisted state; this one changes nothing, it only reports that a
@@ -418,7 +418,7 @@ One log line per interval change. The format is built by
 | `network` | 29 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `UpdateInstaller` (3), `PollingEngine` (2), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
 | `keychain` | 12 | `ClaudeCLIRefresher` (6), `TokenProvider` (3), `PollingEngine` (1) |
 | `lifecycle` | 110 | `App` (47), `SettingsModel` (29), `UpdateInstaller` (13), `PollingShell` (7), `BackToWorkNotifier` (6), `AwaitingInputWatcher` (5), `ShellEnvironment` (1), `PollingEngine` (1), `IncidentNotificationDelegate` (1) |
-| `ui` | 1 | `AppearancePane` (1) |
+| `ui` | 1 | `UIPresetsPane` (1) |
 | `archive` | 7 | `App` (5), `LogArchiver` (2) |
 | `journal` | 12 | `UsageJournal` (4), `StatusPayloadLog` (4), `App` (3), `DevToolsWindowController` (1) |
 

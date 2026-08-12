@@ -377,13 +377,13 @@ git log "${LAST}..HEAD" --no-merges --pretty='- [ ] %s'     # кандидати
 
 **Назви елементів UI — звіряй із кодом, не з пам'яттю.** Пишеш «перейменували X на Y» —
 відкрий файл, де підпис задано, і процитуй обидві назви звідти. Для стилів барів це
-`Sources/TokenPace/Settings/AppearancePane.swift` (рядки `.init(value: BarStyle.…, title: "…")`),
+`Sources/TokenPace/Settings/UIPanes.swift` (рядки `.init(value: BarStyle.…, title: "…")`),
 для старої назви — той самий файл на тегу минулого релізу:
 
 ```sh
 LAST="$(gh release view --json tagName -q .tagName)"
-git show "${LAST}:Sources/TokenPace/Settings/AppearancePane.swift" | grep -n 'title:'
-grep -n 'title:' Sources/TokenPace/Settings/AppearancePane.swift
+git show "${LAST}:Sources/TokenPace/Settings/UIPanes.swift" | grep -n 'title:'
+grep -n 'title:' Sources/TokenPace/Settings/UIPanes.swift
 ```
 
 Помилитись тут легко й непомітно: у `v0.76.0` чернетка нотаток двічі стверджувала

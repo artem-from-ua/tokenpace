@@ -148,7 +148,7 @@ public enum AppearanceConfigExport {
         preset: AppearancePreset?,
         appVersion: String
     ) -> String {
-        // Pane order — keep in sync with `CodingKeys` above, `AppearancePane.swift`, and
+        // Pane order — keep in sync with `CodingKeys` above, `UIPanes.swift`, and
         // `AppearanceConfigExportTests`. Insert a new option at its on-screen position; never append.
         let appearance: [(String, String)] = [
             ("menuBarStyle", jsonString(v.menuBarStyle.rawValue)),

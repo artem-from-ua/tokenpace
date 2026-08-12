@@ -35,8 +35,8 @@ struct SettingsRootView: View {
             }
             .listStyle(.sidebar)
             // `.navigationSplitViewColumnWidth` is unreliable for a `.sidebar` List (it leaves the
-            // sidebar at SwiftUI's narrow default, truncating "Monitored Services"). Constrain the
-            // List's own width instead so it holds the longest label; the width tracks the system
+            // sidebar at SwiftUI's narrow default, truncating the longer labels). Constrain the
+            // List's own width instead so it holds the longest one; the width tracks the system
             // sidebar-icon-size bucket, like System Settings.
             .frame(width: model.sidebarIcons.sidebarWidth)
             // A menu-bar Settings window has no collapsible sidebar (System Settings doesn't either);
@@ -58,14 +58,14 @@ struct SettingsRootView: View {
         .frame(minWidth: minWidth, maxWidth: .infinity, minHeight: minHeight, maxHeight: .infinity)
     }
 
-    /// One sidebar row for a section — the tinted chip plus the title, tagged for selection. Shared by
-    /// both sidebar groups (the leading Insights section and the main list).
+    /// One sidebar row for a section — the tinted chip plus the title, tagged for selection. Shared
+    /// by every sidebar group.
     private func sidebarRow(_ section: SettingsSection) -> some View {
         Label {
             Text(section.title)
                 .font(.system(size: model.sidebarIcons.label))
         } icon: {
-            SidebarChip(symbol: section.symbol, tint: section.tint, metrics: model.sidebarIcons)
+            SidebarChip(section: section, metrics: model.sidebarIcons)
         }
         // SwiftUI's default Label gap is ~half the System Settings sidebar gap; set it explicitly.
         .labelStyle(SidebarLabelStyle(gap: model.sidebarIcons.chipLabelGap))
@@ -78,16 +78,23 @@ struct SettingsRootView: View {
         static let formTopMargin: CGFloat = -20
     }
 
+    /// The detail column's content — the selected section's pane.
+    ///
+    /// The panes sit at one level: the UI trio (presets, menu bar, dropdown) are sidebar rows of their
+    /// own rather than pages drilled into from a parent (#333). The sidebar has room for them, and a
+    /// divider already says they belong together — a parent page would only add a click.
     @ViewBuilder
     private var detailPane: some View {
         switch model.selection {
         case .about:             AboutPane(model: model)
         case .general:           GeneralPane(model: model)
-        case .appearance:        AppearancePane(model: model)
+        case .uiPresets:         UIPresetsPane(model: model)
+        case .menuBar:           MenuBarPane(model: model)
+        case .dropdown:          DropdownPane(model: model)
         case .notifications:     NotificationsPane(model: model)
         case .extraFeatures:     ExtraFeaturesPane(model: model)
-        // Scroll-test filler rows (`TOKENPACE_SIDEBAR_FILLER`) have no pane of their own; they exist
-        // only to make the sidebar long enough to scroll.
+        // Scroll-test filler rows (`TOKENPACE_SIDEBAR_FILLER`) have no pane of their own; they
+        // exist only to make the sidebar long enough to scroll.
         default:                 Text(model.selection.title).foregroundStyle(.secondary)
         }
     }
@@ -114,8 +121,7 @@ private struct SidebarLabelStyle: LabelStyle {
 /// a white glyph on a tinted rounded rect. Chip/symbol sizes follow the system "Sidebar icon size"
 /// via `SidebarIconMetrics` (no single hardcoded size).
 private struct SidebarChip: View {
-    let symbol: String
-    let tint: CapsuleTint
+    let section: SettingsSection
     var metrics: SidebarIconMetrics
     /// Sidebar labels are vibrant, so the material dims them automatically when the window resigns
     /// key — but the chip is a flat tint that never participates in vibrancy, so it kept full color
@@ -127,19 +133,71 @@ private struct SidebarChip: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: metrics.symbol, weight: .regular))
-            .foregroundStyle(appearsActive ? Color.white : Metrics.inactiveGlyph(for: colorScheme))
+        glyph
+            .foregroundStyle(glyphColor)
+            // A per-section nudge, for the one glyph whose mass sits off-centre in its own box.
+            .offset(y: section.glyphOffsetY)
             // The system artwork's glyph carries a hairline dark edge that separates it from the
             // tint (visible as a thin gray outline hugging the glyph, strongest below it); a
             // sub-point shadow reproduces it.
             .shadow(color: Metrics.glyphEdge, radius: Metrics.glyphEdgeRadius, y: Metrics.glyphEdgeOffset)
             .frame(width: metrics.chip, height: metrics.chip)
             // Fixed 5 pt corner radius, matching the previous AppKit ChipView (System Settings' chip).
-            .background(
-                capsuleStyle,
-                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-            )
+            .background(capsuleStyle, in: Self.shape)
+            // Only the white chip asks for one — it is the single capsule lighter than the sidebar
+            // material behind it, so without a hairline its edge simply is not there.
+            .overlay { if section.tint.needsBorder { Self.shape.stroke(Metrics.chipBorder, lineWidth: 1) } }
+    }
+
+    /// The capsule outline, shared by the fill and the optional border so the two cannot drift.
+    private static let shape = RoundedRectangle(cornerRadius: 5, style: .continuous)
+
+    /// The glyph's colour. The inactive-window treatment only applies to chips whose glyph is white:
+    /// the system redraws those in a neutral tone, which on the **white** capsule would paint the
+    /// glyph into invisibility. A chip that already carries a dark glyph keeps it.
+    private var glyphColor: Color {
+        guard section.tint.glyph == .white else { return section.tint.glyph }
+        return appearsActive ? .white : Metrics.inactiveGlyph(for: colorScheme)
+    }
+
+    /// The symbol, drawn whole — or, for a section that asks for it, only the middle band of it.
+    ///
+    /// The trim happens on the rendered `NSImage`, not through SwiftUI transforms: the band is cut
+    /// out and the result handed over as a plain image, so it lays out as exactly what it is. The
+    /// `.scaleEffect` + `.mask` spelling looks equivalent and is not — the scale moves the glyph's
+    /// centre relative to the mask, so the surviving strip is not the one that was measured.
+    @ViewBuilder
+    private var glyph: some View {
+        if section.trimsOuterRules, let trimmed = Self.trimmedSymbol(section.symbol, size: metrics.symbol) {
+            Image(nsImage: trimmed)
+        } else {
+            Image(systemName: section.symbol).font(.system(size: metrics.symbol, weight: .regular))
+        }
+    }
+
+    /// Render `name` at `size` and keep only `SettingsSection.trimmedBand` of its height.
+    ///
+    /// `distribute.vertical` is a rounded rectangle between two full-width rules, and only the
+    /// rectangle is wanted — one bar, which is what a menu bar is. No SF Symbol draws that shape
+    /// alone (checked), and the rules sit in bands the rectangle never enters, so the cut is exact.
+    /// The image is left as a template so the chip's own `foregroundStyle` still tints it, including
+    /// the inactive-window tone.
+    private static func trimmedSymbol(_ name: String, size: CGFloat) -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
+        guard let full = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config) else { return nil }
+        let band = SettingsSection.trimmedBand
+        let kept = NSSize(width: full.size.width, height: full.size.height * (band.upperBound - band.lowerBound))
+        guard kept.height > 0 else { return nil }
+        let out = NSImage(size: kept)
+        out.lockFocus()
+        // Draw the whole glyph shifted down by the discarded lower band, so the kept slice lands in
+        // the canvas and everything outside it falls off the edges.
+        full.draw(in: NSRect(x: 0, y: -full.size.height * band.lowerBound,
+                             width: full.size.width, height: full.size.height))
+        out.unlockFocus()
+        out.isTemplate = true
+        return out
     }
 
     /// System Settings capsules are not flat: a gradient runs from the measured `tint.dark` at the
@@ -149,7 +207,7 @@ private struct SidebarChip: View {
     /// same gradient at the dimmed opacity.
     private var capsuleStyle: AnyShapeStyle {
         let gradient = LinearGradient(
-            colors: [tint.light, tint.dark],
+            colors: [section.tint.light, section.tint.dark],
             startPoint: Metrics.gradientLightPoint,
             endPoint: Metrics.gradientDarkPoint
         )
@@ -179,5 +237,8 @@ private struct SidebarChip: View {
         static let glyphEdge = Color.black.opacity(0.25)
         static let glyphEdgeRadius: CGFloat = 0.5
         static let glyphEdgeOffset: CGFloat = 0.5
+        /// Hairline around the white capsule — the system separator colour, so it tracks the
+        /// appearance the way every other divider in the window does.
+        static let chipBorder = Color(nsColor: .separatorColor)
     }
 }

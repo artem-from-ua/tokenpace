@@ -62,13 +62,12 @@ final class SettingsModel {
 
     // MARK: Selection (dev hook)
 
-    /// The section the root view should show. Seeded once from `TOKENPACE_SETTINGS_SECTION` on `show()`.
+    /// The section the root view should show — bound straight to the sidebar's `List(selection:)`.
     ///
-    /// Every write records the previous pane in ``backStack``, which is what makes the toolbar's ‹ ›
-    /// buttons work: they walk the history of *visited panes*, exactly like a browser's, rather than
-    /// descending into subpages (the tree is flat and stays that way). Writes coming from ``goBack()``
-    /// / ``goForward()`` are excluded — replaying history must not itself become history, or ‹ would
-    /// never reach further than one step.
+    /// Every write records the previous pane in the history, which is what makes the toolbar's ‹ ›
+    /// buttons work: they walk the history of *visited panes*, exactly like a browser's. Writes coming
+    /// from ``goBack()`` / ``goForward()`` are excluded — replaying history must not itself become
+    /// history, or ‹ would never reach further than one step.
     var selection: SettingsSection = .about {
         didSet {
             guard selection != oldValue, !isReplayingHistory else { return }
@@ -90,6 +89,20 @@ final class SettingsModel {
 
     var canGoBack: Bool { history.canGoBack }
     var canGoForward: Bool { history.canGoForward }
+
+    /// Seat the window on a pane **without recording a visit** — the `TOKENPACE_SETTINGS_SECTION`
+    /// dev hook's entry point.
+    ///
+    /// Opening straight onto a pane is where the user *starts*, not somewhere they navigated to, so
+    /// it seeds the history rather than appending to it: otherwise ‹ would light up on a freshly
+    /// opened window and step "back" to About, a pane never shown. (The hook used to write
+    /// `selection` directly and did exactly that.)
+    func openAtLaunch(_ section: SettingsSection) {
+        isReplayingHistory = true
+        selection = section
+        isReplayingHistory = false
+        history = NavigationHistory(current: section)
+    }
 
     /// Step back to the previously visited pane.
     func goBack() {
@@ -610,13 +623,35 @@ final class SettingsModel {
     /// Apply a named Appearance **preset** (#215, #224) — the general form of
     /// `resetAppearanceToDefaults()`. Writes all twelve keys from the preset's fixed value set, re-syncs
     /// the model so the controls repaint (the preset segmented control re-lights via `activePreset`),
-    /// then fires each pane callback so both surfaces rebuild. The segmented control in `AppearancePane`
+    /// then fires each pane callback so both surfaces rebuild. The segmented control in `UIPresetsPane`
     /// calls this.
     func apply(_ preset: AppearancePreset) {
+        // Stash the setup being overwritten if it is the user's own (#333). This is the only moment it
+        // can be lost — every other write keeps the config where the user put it — so it is also the
+        // only place that needs to remember. A config already equal to some preset is not worth
+        // stashing: it is reachable by clicking that preset.
+        if activePreset == nil { PersistedConfig.customAppearanceValues = liveAppearanceValues }
         PersistedConfig.apply(preset)
         syncFromConfig()
         AppLogger.lifecycle.notice("appearance preset applied: \(preset.rawValue, privacy: .public)")
         fireAppearanceCallbacks()
+    }
+
+    /// Restore the saved **Custom** setup — the segment's own action (#333). No-op when nothing is
+    /// saved, which is the state ``canRestoreCustom`` renders as an unselectable segment.
+    func applySavedCustom() {
+        guard let values = PersistedConfig.customAppearanceValues else { return }
+        PersistedConfig.applyValues(values)
+        syncFromConfig()
+        AppLogger.lifecycle.notice("appearance preset applied: custom")
+        fireAppearanceCallbacks()
+    }
+
+    /// Whether the **Custom** segment can be clicked: there is a saved setup, and we are not already
+    /// on it. Without a saved setup the segment is an indicator, exactly as it was before #333 — on a
+    /// fresh install there is nothing to return to.
+    var canRestoreCustom: Bool {
+        activePreset != nil && PersistedConfig.customAppearanceValues != nil
     }
 
     /// The live Appearance config as clipboard-ready pretty-printed JSON (#257) — the payload behind

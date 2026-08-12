@@ -285,8 +285,10 @@ final class SettingsWindowController: NSWindowController {
     ///
     /// Pass a non-nil `section` to force the window onto that pane (#210 — the update menu item opens
     /// straight to About). `nil` leaves the current selection alone: a fresh window is on About (the
-    /// model default), a reused one keeps its last-viewed pane. The `TOKENPACE_SETTINGS_SECTION` dev
-    /// hook is applied *after* this, so it still wins during verification.
+    /// model default), a reused one keeps its last-viewed page. The `TOKENPACE_SETTINGS_SECTION` dev
+    /// hook is applied *after* this, so it still wins during verification — and unlike the `section:`
+    /// argument it *seeds* the history rather than navigating (`openAtLaunch`), so a window opened
+    /// straight onto a page has both chevrons dim, as a freshly opened window should.
     func show(section: SettingsSection? = nil) {
         model.syncFromConfig()
         if let section { model.selection = section }
@@ -303,10 +305,11 @@ final class SettingsWindowController: NSWindowController {
             applyRestoredOrDefaultFrame()
         }
         window?.makeKeyAndOrderFront(nil)
-        // Dev helper: `TOKENPACE_SETTINGS_SECTION=<index>` opens straight to a given pane (0-based).
+        // Dev helper: `TOKENPACE_SETTINGS_SECTION=<index>` opens straight to a given pane — see
+        // `SettingsSection` for the mapping (the raw values are stable identifiers, not row order).
         if let raw = ProcessInfo.processInfo.environment["TOKENPACE_SETTINGS_SECTION"],
            let idx = Int(raw), let section = SettingsSection(rawValue: idx) {
-            model.selection = section
+            model.openAtLaunch(section)
         }
         observeToolbarState()
         // After the tree is on screen: the strip does not exist until SwiftUI has laid the split view

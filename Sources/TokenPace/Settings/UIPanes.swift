@@ -1,11 +1,22 @@
 import SwiftUI
 import TokenPaceKit
 
-// MARK: - AppearancePane (#168, ADR-0042)
+// MARK: - The UI panes (#168, ADR-0042; split by surface in #333)
 
-/// Settings → Appearance: the menu-bar widget options in a "Menu Bar Widget" section, plus a
-/// "Dropdown" section for popup-only options (the per-model limits toggle, #211).
-struct AppearancePane: View {
+/// The three panes the old Appearance pane became, in sidebar order: ``UIPresetsPane``,
+/// ``MenuBarPane``, ``DropdownPane``. They form one sidebar group, which is what says they belong
+/// together — the split axis is the surface each option configures.
+///
+/// Settings → UI presets: what applies to the whole widget rather than to one surface — the preset
+/// picker and its copy-config button.
+///
+/// Bar style is *not* here despite looking like a single setting: since #329 it is two independent
+/// values, one per surface (ADR-0080), so each sits with its own surface.
+///
+/// The preset control and the copy button work across the split without knowing about it: both read
+/// `SettingsModel.liveAppearanceValues`, which reads the model's fields directly rather than
+/// anything a view holds.
+struct UIPresetsPane: View {
     @Bindable var model: SettingsModel
 
     /// Ephemeral "copied!" feedback for the config-copy button (#257): the glyph flips to a checkmark
@@ -22,9 +33,12 @@ struct AppearancePane: View {
         Form {
             // First section: one-click Appearance presets (#215, #224) — a "Change UI preset" segmented
             // control. Selecting Chill / Work harder! / Control freak applies that preset (sets every
-            // option below at once). The trailing "Custom" segment is an **indicator**, not a choice:
-            // its selection is ignored, and it lights up only when the live config matches no preset —
-            // i.e. after any manual toggle. `model.activePreset` is nil in that Custom state.
+            // option on both child pages at once).
+            //
+            // The trailing "Custom" segment is a **real slot** since #333, not the pure indicator it
+            // was: applying a preset stashes the setup it overwrites, so Custom can restore it. It
+            // falls back to indicator-only (unselectable, with a popover explaining how to reach it)
+            // while nothing is stashed — a fresh install has nothing to come back to.
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     // Label + control on ONE row (label leading, control trailing — the pane's rhythm),
@@ -38,30 +52,93 @@ struct AppearancePane: View {
                         SegmentedControl(
                             segments: AppearancePreset.allCases.map {
                                 .init(value: AppearancePreset?.some($0), title: $0.displayName)
-                            } + [.init(value: AppearancePreset?.none, title: "Custom", selectable: false,
+                            } + [.init(value: AppearancePreset?.none, title: "Custom",
+                                       // Selectable once there is a setup to go back to (#333); until
+                                       // then it stays the indicator it always was, and explains itself.
+                                       selectable: model.canRestoreCustom,
                                        inactiveHelp: "Change any option below to craft your own custom setup.")],
                             active: model.activePreset,
-                            onSelect: { picked in if let preset = picked { model.apply(preset) } })
+                            onSelect: { picked in
+                                if let preset = picked { model.apply(preset) } else { model.applySavedCustom() }
+                            })
                     }
-                    SettingsHint(text: "Set all the options below at once. Pick one of three, from "
-                        + "calmest to loudest: *highlight only critical states* → *also nudge you "
-                        + "when you're underpacing* → *show every indicator*.")
-                    SettingsHint(text: "This overwrites your current choices.", warning: true)
+                    SettingsHint(text: "Set all the options for *Menu bar* and *Dropdown* at once.")
                 }
             }
 
-            Section("Menu Bar Widget") {
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: Copy config (#257)
+
+    /// The copy-to-clipboard button sitting immediately **left of** the preset segmented control:
+    /// it puts the Appearance values (plus the active preset and app version) on the clipboard as
+    /// pretty-printed JSON, so "what does your setup look like?" is one click instead of a
+    /// screenshot tour of the pane — now of three pages, which is what makes it worth more than it
+    /// was before the split.
+    ///
+    /// `doc.on.doc` is the same glyph as the Troubleshoot window's copy button, keeping one visual
+    /// vocabulary for "copy" across the app — a share icon would promise a share sheet that isn't
+    /// there. The hint rides as a native tooltip rather than a `SettingsHint` row: the preset row
+    /// already carries two hint lines explaining the presets, and a third would crowd them.
+    private var copyConfigButton: some View {
+        Button {
+            copyConfigToClipboard()
+        } label: {
+            Image(systemName: didCopyConfig ? CopyFeedback.confirmedSymbol : CopyFeedback.restingSymbol)
+                // A fixed width keeps the segmented control from shifting sideways when the glyph
+                // swaps to the (narrower) checkmark and back.
+                .frame(width: 16)
+        }
+        .buttonStyle(.borderless)
+        .help("Copy \(Self.copyTarget) to the clipboard")
+        .accessibilityLabel(didCopyConfig
+            ? CopyFeedback.confirmedLabel
+            : CopyFeedback.restingLabel(Self.copyTarget))
+    }
+
+    /// What this button copies — used in the tooltip and the accessibility label.
+    private static let copyTarget = "UI settings"
+
+    /// Write the model's JSON dump to the general pasteboard and show the checkmark. The pasteboard
+    /// write lives here rather than in `SettingsModel` so the model stays free of AppKit.
+    private func copyConfigToClipboard() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(model.appearanceConfigJSON(), forType: .string)
+        AppLogger.ui.notice("appearance config copied to clipboard")
+
+        didCopyConfig = true
+        copyFeedbackTask?.cancel()
+        copyFeedbackTask = Task {
+            try? await Task.sleep(for: .seconds(CopyFeedback.duration))
+            guard !Task.isCancelled else { return }
+            didCopyConfig = false
+        }
+    }
+}
+
+// MARK: - MenuBarPane (#333)
+
+/// Settings → Menu bar: everything that configures the **menu-bar widget** — its bar style, which
+/// colours it mutes, and which indicators it may draw.
+struct MenuBarPane: View {
+    @Bindable var model: SettingsModel
+
+    var body: some View {
+        Form {
+            Section {
                 // Bar style, menu-bar copy (#224, rescaled in #307, per-surface since #329). All three
                 // show the pacing state by colour and differ in *scale*: Progress marks positions in
                 // the window, Pressure measures the gap against the time left, Gauge measures the same
                 // thing from a centred zero so the underpace side is drawn too. The full explanation
-                // lives here; the Dropdown Widget copy points back at it rather than repeating it.
+                // lives here; the Dropdown page's copy points back at it rather than repeating it.
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("Bar style")
                         Spacer()
                         SegmentedControl(
-                            segments: Self.barStyleSegments,
+                            segments: AppearanceBarStyle.segments,
                             active: model.menuBarStyle,
                             onSelect: { model.setMenuBarStyle($0) })
                     }
@@ -96,12 +173,13 @@ struct AppearancePane: View {
                         + "always stay colored.")
                 }
 
-                // Awaiting-input in the menu bar (#233). The popup always shows the indicator while the
-                // feature is on; this adds the menu-bar copy (a leading hand icon). Meaningful only
-                // while the master toggle in Extra features is on, so it's disabled — with a ⚠️ hint —
-                // otherwise. A data stub is a third state: the watcher never runs, so the hint says so.
+                // Awaiting-input in the menu bar (#233). The feature itself is switched on in Extra
+                // features, which is what puts the count in the dropdown; this row decides whether the
+                // menu bar carries it too (a leading hand icon). Meaningless while the feature is off,
+                // so it is disabled — with a ⚠️ hint — then. A data stub is a third state: the watcher
+                // never runs, so the hint says so.
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Show awaiting-input icon in the menu bar", isOn: Binding(
+                    Toggle("Show sessions awaiting input", isOn: Binding(
                         get: { model.awaitingInputInMenuBar },
                         set: { model.setAwaitingInputInMenuBar($0) }))
                     .disabled(!model.awaitingInputEnabled)
@@ -130,7 +208,7 @@ struct AppearancePane: View {
                         + "when it turns orange or red.")
                 }
 
-                // Reset-countdown mode: a segmented control matching the pane's other three-way rows,
+                // Reset-countdown mode: a segmented control matching the page's other three-way rows,
                 // with the "Smart" behaviour explained on the line below.
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -152,19 +230,46 @@ struct AppearancePane: View {
                 Toggle("Show service status dot on issues", isOn: Binding(
                     get: { model.showServiceDot }, set: { model.setShowServiceDot($0) }))
             }
+        }
+        .formStyle(.grouped)
+    }
 
-            // #211 — a popup-only option, so it lives in its own "Dropdown Widget" section rather than
-            // in "Menu Bar Widget" above (whose toggles all govern the menu-bar widget).
-            Section("Dropdown Widget") {
+    /// The hint under the awaiting-input row, in priority order: the feature is off (nothing to place
+    /// anywhere) → a stub is driving the app (the watcher doesn't run at all) → the plain
+    /// description. The first two are ⚠️ states; see ``awaitingInputHintIsWarning``.
+    private var awaitingInputHint: String {
+        guard model.awaitingInputEnabled else {
+            return "Enable *Show sessions awaiting input* in Extra features first."
+        }
+        if model.stubScenarioActive { return SettingsStubHint.text }
+        return "Adds a hand icon to the menu bar (leading) when sessions are waiting. "
+            + "The count itself is shown only in the dropdown."
+    }
+
+    private var awaitingInputHintIsWarning: Bool {
+        !model.awaitingInputEnabled || model.stubScenarioActive
+    }
+}
+
+// MARK: - DropdownPane (#333)
+
+/// Settings → Dropdown: everything that configures the **popup** — its bar style and which of its
+/// sections are listed when.
+struct DropdownPane: View {
+    @Bindable var model: SettingsModel
+
+    var body: some View {
+        Form {
+            Section {
                 // Bar style, dropdown copy (#329) — the same three styles as the menu bar, chosen
-                // separately. One hint instead of the three above: repeating the full descriptions a
-                // few rows later would pad the pane without adding anything.
+                // separately. One hint instead of the three on the Menu bar page: repeating the full
+                // descriptions would pad the page without adding anything.
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("Bar style")
                         Spacer()
                         SegmentedControl(
-                            segments: Self.barStyleSegments,
+                            segments: AppearanceBarStyle.segments,
                             active: model.dropdownStyle,
                             onSelect: { model.setDropdownStyle($0) })
                     }
@@ -200,83 +305,27 @@ struct AppearancePane: View {
         .formStyle(.grouped)
     }
 
-    /// The three ``PopupSectionVisibility`` segments, shared by both Dropdown-Widget rows so they can
-    /// never drift apart. Labels are deliberately terse — three segments plus a full-width row title
-    /// leave no room for prose, which lives in each row's `SettingsHint` instead.
+    /// The three ``PopupSectionVisibility`` segments, shared by both rows above so they can never
+    /// drift apart. Labels are deliberately terse — three segments plus a full-width row title leave
+    /// no room for prose, which lives in each row's `SettingsHint` instead.
     private static let visibilitySegments: [SegmentedControl<PopupSectionVisibility>.Segment] =
         PopupSectionVisibility.allCases.map { .init(value: $0, title: $0.displayName) }
+}
 
-    /// The three ``BarStyle`` segments, shared by the Menu-Bar and Dropdown rows (#329) so the two
-    /// surfaces always offer the same choices in the same order.
-    ///
-    /// Ordered **Pressure · Gauge · Progress**, not by `allCases`: it reads as a gradient of how much
-    /// positional information the bar carries — length alone, then length plus direction, then two
-    /// positions on the window. Declaration order is pinned by its own test and is free to differ.
-    private static let barStyleSegments: [SegmentedControl<BarStyle>.Segment] = [
+// MARK: - Shared across the surface panes
+
+/// The ``BarStyle`` segments, shared by the Menu bar and Dropdown panes (#329) so the two surfaces
+/// always offer the same choices in the same order — now that the two controls live on separate
+/// panes, a shared constant is the only thing keeping them from drifting apart unnoticed.
+///
+/// Ordered **Pressure · Gauge · Progress**, not by `allCases`: it reads as a gradient of how much
+/// positional information the bar carries — length alone, then length plus direction, then two
+/// positions on the window. Declaration order is pinned by its own test and is free to differ.
+@MainActor
+enum AppearanceBarStyle {
+    static let segments: [SegmentedControl<BarStyle>.Segment] = [
         .init(value: .pressure, title: "Pressure"),
         .init(value: .gauge, title: "Gauge"),
         .init(value: .progress, title: "Progress"),
     ]
-
-    // MARK: Copy config (#257)
-
-    /// The copy-to-clipboard button sitting immediately **left of** the preset segmented control:
-    /// it puts the twelve Appearance values (plus the active preset and app version) on the clipboard
-    /// as pretty-printed JSON, so "what does your setup look like?" is one click instead of a
-    /// screenshot tour of the pane.
-    ///
-    /// `doc.on.doc` is the same glyph as the Troubleshoot window's copy button, keeping one visual
-    /// vocabulary for "copy" across the app — a share icon would promise a share sheet that isn't
-    /// there. The hint rides as a native tooltip rather than a `SettingsHint` row: the preset row
-    /// already carries two hint lines explaining the presets, and a third would crowd them.
-    private var copyConfigButton: some View {
-        Button {
-            copyConfigToClipboard()
-        } label: {
-            Image(systemName: didCopyConfig ? CopyFeedback.confirmedSymbol : CopyFeedback.restingSymbol)
-                // A fixed width keeps the segmented control from shifting sideways when the glyph
-                // swaps to the (narrower) checkmark and back.
-                .frame(width: 16)
-        }
-        .buttonStyle(.borderless)
-        .help("Copy \(Self.copyTarget) to the clipboard")
-        .accessibilityLabel(didCopyConfig
-            ? CopyFeedback.confirmedLabel
-            : CopyFeedback.restingLabel(Self.copyTarget))
-    }
-
-    /// What this button copies — used in the tooltip and the accessibility label.
-    private static let copyTarget = "Appearance settings"
-
-    /// Write the model's JSON dump to the general pasteboard and show the checkmark. The pasteboard
-    /// write lives here rather than in `SettingsModel` so the model stays free of AppKit.
-    private func copyConfigToClipboard() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(model.appearanceConfigJSON(), forType: .string)
-        AppLogger.ui.notice("appearance config copied to clipboard")
-
-        didCopyConfig = true
-        copyFeedbackTask?.cancel()
-        copyFeedbackTask = Task {
-            try? await Task.sleep(for: .seconds(CopyFeedback.duration))
-            guard !Task.isCancelled else { return }
-            didCopyConfig = false
-        }
-    }
-
-    /// The hint under the awaiting-input menu-bar toggle, in priority order: the master toggle is off
-    /// (nothing to place anywhere) → a stub is driving the app (the watcher doesn't run at all) → the
-    /// plain description. The first two are ⚠️ states; see ``awaitingInputHintIsWarning``.
-    private var awaitingInputHint: String {
-        guard model.awaitingInputEnabled else {
-            return "Enable *Show sessions awaiting input* in Extra features first."
-        }
-        if model.stubScenarioActive { return ExtraFeaturesPane.stubbedHint }
-        return "Adds a hand icon to the menu bar (leading) when sessions are waiting. "
-            + "The count is shown only in the dropdown."
-    }
-
-    private var awaitingInputHintIsWarning: Bool {
-        !model.awaitingInputEnabled || model.stubScenarioActive
-    }
 }

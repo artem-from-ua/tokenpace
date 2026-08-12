@@ -83,6 +83,15 @@ struct SectionHeaderWithHint: View {
     }
 }
 
+/// The ⚠️ line shown under any section whose data is canned by a `TOKENPACE_STUB` scenario.
+///
+/// Shared rather than duplicated so the wording stays identical wherever it appears. It used to be a
+/// `static let` on `ExtraFeaturesPane`, which meant every other pane reached into that one for it —
+/// a coupling that only got more awkward as panes moved (#333). It belongs to no pane.
+enum SettingsStubHint {
+    static let text = "Stubbed in this development build."
+}
+
 /// Shows the icon only when present, so a plain hint has no leading gap.
 private struct HintLabelStyle: LabelStyle {
     let showIcon: Bool

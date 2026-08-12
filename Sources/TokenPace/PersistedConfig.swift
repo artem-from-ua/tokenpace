@@ -25,6 +25,9 @@ enum PersistedConfig {
         static let lastRunVersion = "lastRunVersion"
         /// The monitored-services config (#89), stored as a JSON blob under this key.
         static let monitoredServices = "monitoredServices"
+        /// The user's own Appearance setup, kept so the "Custom" segment can be returned to after a
+        /// detour through the presets (#333). See ``customAppearanceValues``.
+        static let customAppearanceValues = "customAppearanceValues"
         /// Whether the periodic update check runs (#37). Default-on (opt-out) — see the property.
         static let automaticUpdateChecks = "automaticUpdateChecks"
         /// Whether a found update is downloaded and installed automatically (#122). Default-**on**
@@ -110,7 +113,7 @@ enum PersistedConfig {
         /// Whether the session-log archiver runs (#110). Default-off (opt-in) — see the property.
         static let archiveEnabled = "archiveEnabled"
         /// Whether the "sessions awaiting input" indicator is shown (#233). Default-off (opt-in) —
-        /// master toggle in Extra features; placement configured in Appearance. See the property.
+        /// master toggle on the Appearance page; placement on its Menu bar child page. See the property.
         static let awaitingInputEnabled = "awaitingInputEnabled"
         /// Whether the awaiting-input indicator also appears in the menu bar (as the first leading
         /// element), in addition to the popup (#233). Default-off (opt-in). An Appearance option, but
@@ -568,8 +571,36 @@ enum PersistedConfig {
     /// factory defaults (e.g. `.controlFreak` turns calm off; `.chill` opts into `.pressure` bars while
     /// the default `.workHarder` preset uses `.gauge`). The caller re-syncs the model and re-applies the
     /// values to the widget.
-    static func apply(_ preset: AppearancePreset) {
-        let v = preset.values
+    static func apply(_ preset: AppearancePreset) { applyValues(preset.values) }
+
+    /// The user's own Appearance setup — the values the **Custom** segment restores (#333).
+    ///
+    /// Custom used to be an indicator: it lit up when the live config matched no preset, and clicking
+    /// it did nothing, so trying a preset destroyed a hand-made setup with no way back. Keeping a
+    /// snapshot makes it a real slot — try Chill, then return to exactly what you had.
+    ///
+    /// Written whenever the live config drifts off every preset (that drift *is* the user's custom
+    /// setup), never by applying a preset. `nil` until such a drift exists, which is what keeps the
+    /// segment unselectable on a fresh install: there is nothing to go back to yet.
+    static var customAppearanceValues: AppearancePresetValues? {
+        get {
+            guard let data = defaults.data(forKey: Key.customAppearanceValues),
+                  let decoded = try? JSONDecoder().decode(AppearancePresetValues.self, from: data)
+            else { return nil }
+            return decoded
+        }
+        set {
+            guard let newValue, let data = try? JSONEncoder().encode(newValue) else {
+                defaults.removeObject(forKey: Key.customAppearanceValues)
+                return
+            }
+            defaults.set(data, forKey: Key.customAppearanceValues)
+        }
+    }
+
+    /// Write every Appearance key from an arbitrary value set — the general form of ``apply(_:)``,
+    /// used to restore the saved Custom setup (#333).
+    static func applyValues(_ v: AppearancePresetValues) {
         calmColorMode = v.calmColorMode
         hideCalmSevenDayBar = v.hideCalmSevenDayBar
         pauseHidesBars = v.pauseHidesBars
@@ -587,7 +618,7 @@ enum PersistedConfig {
     /// The live Appearance config assembled into an `AppearancePresetValues` — the read-mirror of
     /// ``apply(_:)`` (#224). Used by the Settings model to light the preset segmented control's active
     /// segment via `AppearancePreset.matching(_:)`: equal to a preset's `.values` → that preset is
-    /// active; equal to none → the "Custom" indicator.
+    /// active; equal to none → the "Custom" slot.
     static var currentAppearanceValues: AppearancePresetValues {
         AppearancePresetValues(
             calmColorMode: calmColorMode,

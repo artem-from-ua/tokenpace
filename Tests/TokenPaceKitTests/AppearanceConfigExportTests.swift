@@ -5,7 +5,7 @@ import Foundation
 // MARK: - Fixtures
 
 /// The canonical key order: the top-to-bottom order of the controls in Settings → Appearance
-/// (`AppearancePane.swift`). Duplicated here on purpose — a test that derived the expected order from
+/// (`UIPanes.swift`). Duplicated here on purpose — a test that derived the expected order from
 /// `CodingKeys` would pass no matter how the keys were re-ordered, which is exactly the drift this
 /// suite exists to catch. When an Appearance option is added, update the pane, the encoder, and this
 /// list together.
