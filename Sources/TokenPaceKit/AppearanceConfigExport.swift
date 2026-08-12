@@ -20,7 +20,6 @@ extension AppearancePresetValues: Codable {
     /// The export keys, in **pane order**. The trailing comments give the control's on-screen label,
     /// so the mapping can be checked against the pane without opening it.
     enum CodingKeys: String, CodingKey {
-        case farBehindInterval          // "Far behind pace interval"
         case menuBarStyle               // Menu Bar Widget → "Bar style"
         case calmColorMode              // "Calm non-critical colors"
         case awaitingInputInMenuBar     // "Show awaiting-input icon in the menu bar"
@@ -38,6 +37,9 @@ extension AppearancePresetValues: Codable {
         /// exported by an older build still imports, splitting into the two per-surface keys via
         /// `BarStyle.legacySurfaceStyles(for:)`.
         case barStyle
+
+        // A retired `farBehindInterval` key needs no case at all: `Codable` ignores unknown JSON keys,
+        // so a config exported before the far-behind width was fixed still imports cleanly.
     }
 
     /// Written out (rather than left to the compiler) only so the key list appears in pane order in
@@ -45,7 +47,6 @@ extension AppearancePresetValues: Codable {
     /// export's order comes from `AppearanceConfigExport.json(values:preset:appVersion:)`.
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(farBehindInterval, forKey: .farBehindInterval)
         try c.encode(menuBarStyle, forKey: .menuBarStyle)
         try c.encode(calmColorMode, forKey: .calmColorMode)
         try c.encode(awaitingInputInMenuBar, forKey: .awaitingInputInMenuBar)
@@ -91,8 +92,7 @@ extension AppearancePresetValues: Codable {
             resetCountdownModeMenuBar: try c.decode(ResetCountdownMode.self, forKey: .resetCountdownModeMenuBar),
             menuBarStyle: menuBarStyle,
             dropdownStyle: dropdownStyle,
-            showTicks: try c.decode(Bool.self, forKey: .showTicks),
-            farBehindInterval: try c.decode(FarBehindInterval.self, forKey: .farBehindInterval))
+            showTicks: try c.decode(Bool.self, forKey: .showTicks))
     }
 }
 
@@ -151,7 +151,6 @@ public enum AppearanceConfigExport {
         // Pane order — keep in sync with `CodingKeys` above, `AppearancePane.swift`, and
         // `AppearanceConfigExportTests`. Insert a new option at its on-screen position; never append.
         let appearance: [(String, String)] = [
-            ("farBehindInterval", jsonString(v.farBehindInterval.rawValue)),
             ("menuBarStyle", jsonString(v.menuBarStyle.rawValue)),
             ("calmColorMode", jsonString(v.calmColorMode.rawValue)),
             ("awaitingInputInMenuBar", jsonBool(v.awaitingInputInMenuBar)),

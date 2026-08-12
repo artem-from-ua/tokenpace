@@ -56,8 +56,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 resetCountdownModeMenuBar: .smart,
                 menuBarStyle: .pressure,
                 dropdownStyle: .pressure,
-                showTicks: false,   // the quiet look drops the under-bar tick ruler too
-                farBehindInterval: .off)   // …and no blue far-behind zone
+                showTicks: false)   // the quiet look drops the under-bar tick ruler too
         case .workHarder:
             // `.chill` with Work harder on and **Gauge** bars on both surfaces (#329) — the style that
             // renders the underpace half, so an unspendable surplus is visible rather than flattened;
@@ -77,8 +76,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 resetCountdownModeMenuBar: .smart,
                 menuBarStyle: .gauge,
                 dropdownStyle: .gauge,
-                showTicks: true,
-                farBehindInterval: .medium)
+                showTicks: true)
         case .controlFreak:
             // Show everything: calm off; nothing hidden; every glyph/dot/credits/per-model row on;
             // countdown always; dense pacing bars. Work harder on so the far-behind blue stays loud too.
@@ -96,8 +94,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 resetCountdownModeMenuBar: .always,
                 menuBarStyle: .progress,
                 dropdownStyle: .progress,
-                showTicks: true,
-                farBehindInterval: .medium)
+                showTicks: true)
         }
     }
 
@@ -165,7 +162,6 @@ public struct AppearancePresetValues: Sendable, Equatable {
     /// landmark the chosen scale has.
     public let dropdownStyle: BarStyle
     public let showTicks: Bool
-    public let farBehindInterval: FarBehindInterval
 
     public init(
         calmColorMode: CalmColorMode,
@@ -179,8 +175,7 @@ public struct AppearancePresetValues: Sendable, Equatable {
         resetCountdownModeMenuBar: ResetCountdownMode,
         menuBarStyle: BarStyle,
         dropdownStyle: BarStyle,
-        showTicks: Bool,
-        farBehindInterval: FarBehindInterval
+        showTicks: Bool
     ) {
         self.calmColorMode = calmColorMode
         self.hideCalmSevenDayBar = hideCalmSevenDayBar
@@ -194,6 +189,5 @@ public struct AppearancePresetValues: Sendable, Equatable {
         self.menuBarStyle = menuBarStyle
         self.dropdownStyle = dropdownStyle
         self.showTicks = showTicks
-        self.farBehindInterval = farBehindInterval
     }
 }

@@ -625,12 +625,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.popupVC.showTicks = on
                 self?.reRenderForCurrentTime()   // also push the tick-ruler change into the preview
             }
-            wc.onFarBehindIntervalChange = { [weak self] _ in
-                // The green→blue threshold changes each bar's `behindMultiplier` (#224), which is baked
-                // into the layout — rebuild both surfaces from the last poll (render reads
-                // PersistedConfig.farBehindInterval for the multiplier).
-                self?.reRenderForCurrentTime()
-            }
             wc.onServiceDotChange = { [weak self] _ in
                 // The dot changes the layout (drawn + item width), not just a colour — rebuild the
                 // menu-bar layout from the last poll (render reads PersistedConfig for the toggle).
@@ -924,6 +918,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // before anything reads either style key, or the getters resolve the stale raw to the preset
         // default and the user's choice is silently lost.
         PersistedConfig.migrateBarStyleIfNeeded()
+        // …and drop the retired "Far behind pace interval" key: the green→blue width is fixed now, and
+        // whether blue applies is decided by the weekly data rather than by a preference.
+        PersistedConfig.retireFarBehindIntervalIfNeeded()
         // Record the running version so the next launch compares against it.
         PersistedConfig.lastRunVersion = current
     }

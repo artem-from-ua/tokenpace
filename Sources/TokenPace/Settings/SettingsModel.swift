@@ -34,7 +34,6 @@ final class SettingsModel {
     var onMenuBarStyleChange: ((BarStyle) -> Void)?
     var onDropdownStyleChange: ((BarStyle) -> Void)?
     var onShowTicksChange: ((Bool) -> Void)?
-    var onFarBehindIntervalChange: ((FarBehindInterval) -> Void)?
     var onServiceDotChange: ((Bool) -> Void)?
     var onExtraUsageChange: ((Bool) -> Void)?
     var onModelLimitsVisibilityChange: ((PopupSectionVisibility) -> Void)?
@@ -158,8 +157,6 @@ final class SettingsModel {
     /// Whether the popup draws the under-bar tick ruler on the pacing bars (#224). A popup concern,
     /// shown under the "Dropdown Widget" section.
     var showTicks = false
-    /// The far-behind (green→blue) threshold interval (#224), shown as a menu picker.
-    var farBehindInterval: FarBehindInterval = .medium
 
     // MARK: Monitored Services
 
@@ -332,8 +329,7 @@ final class SettingsModel {
             resetCountdownModeMenuBar: ResetCountdownMode.from(radio: resetRadio),
             menuBarStyle: menuBarStyle,
             dropdownStyle: dropdownStyle,
-            showTicks: showTicks,
-            farBehindInterval: farBehindInterval)
+            showTicks: showTicks)
     }
 
     /// Which preset the live config matches, or `nil` for the "Custom" state (#215, #224). Drives the
@@ -458,7 +454,6 @@ final class SettingsModel {
         menuBarStyle = PersistedConfig.menuBarStyle
         dropdownStyle = PersistedConfig.dropdownStyle
         showTicks = PersistedConfig.showTicks
-        farBehindInterval = PersistedConfig.farBehindInterval
 
         let ms = PersistedConfig.monitoredServices
         claudeCodeEnabled = ms.claudeCodeEnabled
@@ -601,15 +596,6 @@ final class SettingsModel {
         onShowTicksChange?(on)
     }
 
-    /// Persist the far-behind (green→blue) interval (#224) and fire the callback. The picker writes
-    /// `farBehindInterval` directly (via the binding), then calls this. Governs both surfaces.
-    func setFarBehindInterval(_ interval: FarBehindInterval) {
-        farBehindInterval = interval
-        PersistedConfig.farBehindInterval = interval
-        AppLogger.lifecycle.notice("far-behind-interval: set \(interval.rawValue, privacy: .public)")
-        onFarBehindIntervalChange?(interval)
-    }
-
     /// Revert every Appearance-pane setting to its factory default (the "Reset" button). Clears the
     /// stored keys, re-syncs the model so the controls repaint, then fires each pane callback with the
     /// now-default value so the menu-bar widget rebuilds — the same notifications the individual setters
@@ -664,7 +650,6 @@ final class SettingsModel {
         onMenuBarStyleChange?(menuBarStyle)
         onDropdownStyleChange?(dropdownStyle)
         onShowTicksChange?(showTicks)
-        onFarBehindIntervalChange?(farBehindInterval)
         onAwaitingInputAppearanceChange?()   // #233: a preset/reset may flip the menu-bar copy
     }
 

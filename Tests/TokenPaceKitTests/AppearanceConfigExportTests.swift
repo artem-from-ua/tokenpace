@@ -10,7 +10,6 @@ import Foundation
 /// suite exists to catch. When an Appearance option is added, update the pane, the encoder, and this
 /// list together.
 private let paneOrderedKeys = [
-    "farBehindInterval",          // "Far behind pace interval"
     "menuBarStyle",               // Menu Bar Widget → "Bar style"
     "calmColorMode",              // "Calm non-critical colors"
     "awaitingInputInMenuBar",     // "Show awaiting-input icon in the menu bar"
@@ -58,8 +57,7 @@ private let customValues = AppearancePresetValues(
     // retired `"mixed"` value used to name.
     menuBarStyle: .pressure,
     dropdownStyle: .progress,
-    showTicks: false,
-    farBehindInterval: .short)
+    showTicks: false)
 
 private func export(_ values: AppearancePresetValues, preset: AppearancePreset?) -> String {
     AppearanceConfigExport.json(values: values, preset: preset, appVersion: "9.9.9")
@@ -95,7 +93,7 @@ struct AppearanceConfigExportOrderTests {
     /// Every Appearance value reaches the dump — catches a property added to `AppearancePresetValues`
     /// whose `encode` call was forgotten, which would otherwise drop it silently.
     @Test func everyValueIsExported() {
-        #expect(appearanceKeysInOrder(export(customValues, preset: nil)).count == 13)
+        #expect(appearanceKeysInOrder(export(customValues, preset: nil)).count == 12)
     }
 }
 
@@ -130,7 +128,6 @@ struct AppearanceConfigExportPayloadTests {
         #expect(json.contains("\"menuBarStyle\" : \"pressure\""))
         #expect(json.contains("\"dropdownStyle\" : \"progress\""))
         #expect(json.contains("\"calmColorMode\" : \"off\""))
-        #expect(json.contains("\"farBehindInterval\" : \"short\""))
         #expect(json.contains("\"resetCountdownModeMenuBar\" : \"never\""))
     }
 
@@ -182,7 +179,6 @@ struct AppearancePresetValuesCodableTests {
             AppearancePresetValues.self, from: Data(json.utf8))
         #expect(decoded.menuBarStyle == .pressure)   // the pre-#307 raw still maps, per surface
         #expect(decoded.dropdownStyle == .gauge)
-        #expect(decoded.farBehindInterval == .long)
         #expect(decoded.resetCountdownModeMenuBar == .always)
         #expect(decoded.modelLimitsVisibility == .always)
         #expect(decoded.extraUsageVisibility == .optionOnly)
