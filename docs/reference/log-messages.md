@@ -247,13 +247,15 @@ token itself never is.
 | 439 | `lifecycle` | `.notice` | `update: automatic checks set <bool>` | user toggled the "Check for updates automatically" checkbox (#37) |
 | — | `lifecycle` | `.notice` | `archive: enabled set <bool>` | user toggled the "Archive session logs to a folder" checkbox (#110) |
 | — | `lifecycle` | `.notice` | `archive: destination chosen` | user picked an archive folder via `NSOpenPanel` (#110); the path itself is not logged |
-| — | `lifecycle` | `.notice` | `journal: enabled set <bool>` | user toggled the "Record usage history" checkbox in Settings → General → Usage history (#242, ADR-0067; the section moved from Extra features in #317) |
+| — | `lifecycle` | `.notice` | `journal: enabled set <bool>` | user toggled the "Record usage history" checkbox in Settings → General → Usage history (#242, ADR-0067; the section moved from Extra features in #317, and that pane was retired in #341) |
 | — | `lifecycle` | `.notice` | `back-to-work: enabled set <bool>` | user toggled the "Back to work" notification switch (#160, ADR-0039) |
 | — | `lifecycle` | `.notice` | `back-to-work: time window set <start>–<end>` | user changed the allowed-hours pickers; `<start>`/`<end>` are minute-of-day (#160) |
 | — | `lifecycle` | `.notice` | `back-to-work: suppress set <raw>` | user picked a "Suppress notifications on" radio; `<raw>` is the raw `SuppressDays` (#160) |
 | — | `lifecycle` | `.notice` | `back-to-work: try (forced) notification` | user pressed the Settings "Try" button, forcing a `postBackToWork` that bypasses edge-detection and quiet hours (#193) |
 | — | `lifecycle` | `.notice` | `extra-usage: notify enabled set <bool>` | user toggled the "Switching to Extra Usage" notification switch |
-| — | `lifecycle` | `.notice` | `incident: max age set <n>h` | user changed "Hide incidents older than" in Extra features; `0` means no limit (#279, ADR-0071 §9) |
+| — | `lifecycle` | `.notice` | `incident: max age set <n>h` | user changed "Hide incidents older than" in Providers → Incidents; `0` means no limit (#279, ADR-0071 §9; the row moved with the pane in #341) |
+| — | `lifecycle` | `.notice` | `settings hook: unknown section <raw> — ignored` | `TOKENPACE_SETTINGS_SECTION` carried a value that resolves to no pane — e.g. the retired `4` (#341, ADR-0084). Logged rather than silently ignored: a no-op hook looks exactly like one that worked and landed on the default pane |
+| — | `lifecycle` | `.notice` | `settings hook: unknown child <raw> — opening the section` | the dotted form named a child index the section does not have; the window still opens on the section (#341, ADR-0084) |
 | — | `lifecycle` | `.notice` | `extra-usage: try (forced) notification` | user pressed the "Switching to Extra Usage" Settings "Try" button, forcing a `postExtraUsage` that bypasses edge-detection and quiet hours |
 
 ## `Sources/TokenPace/Settings/UIPanes.swift`
@@ -398,6 +400,8 @@ One log line per interval change. The format is built by
 | 514 | `lifecycle` | `.notice` | `interval <from>→<to>: <phrase>` | the polling interval moved; emitted once per change |
 | 520 | `network` | `.notice` | `five_hour idle — no active session (resets_at absent)` | the 5h window flipped to session-idle (`sessionIdleTransition`); emitted **once per transition**, not every poll (#100, ADR-0027) |
 | 520 | `network` | `.notice` | `five_hour window active again` | the 5h window came back (idle → active); same call site, once per transition (#100, ADR-0027) |
+| — | `lifecycle` | `.notice` | `usage poll off — service status only` | the user turned the usage API off (#341, ADR-0085); emitted **once per transition**, not every tick. From here the heartbeat still runs, but it carries only the status poll — no Keychain read, no usage request |
+| — | `lifecycle` | `.notice` | `usage poll on` | the usage API was switched back on; same call site, once per transition (#341, ADR-0085) |
 | 526 | `network` | `.notice` | `five_hour idle suppressed — within reset grace` | the reset-boundary idle grace armed (`applyIdleGrace`, `idleSuppressedUntil` nil → non-nil); emitted **once per transition**, not every poll. Now arms only when the previous window was active **and** the user was recently working (`claudeActive && utilFresh`, ADR-0045) — a genuine pause no longer arms it |
 | 614 | `keychain` | `.notice` | `token expired, len=<count>` | `pollOnce` — the read credentials are expired (`isExpired` true); moved here from `TokenProvider` with the expiry decision (ADR-0020) |
 
@@ -417,16 +421,18 @@ One log line per interval change. The format is built by
 |----------|-------|-------|
 | `network` | 29 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `UpdateInstaller` (3), `PollingEngine` (2), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
 | `keychain` | 12 | `ClaudeCLIRefresher` (6), `TokenProvider` (3), `PollingEngine` (1) |
-| `lifecycle` | 110 | `App` (47), `SettingsModel` (29), `UpdateInstaller` (13), `PollingShell` (7), `BackToWorkNotifier` (6), `AwaitingInputWatcher` (5), `ShellEnvironment` (1), `PollingEngine` (1), `IncidentNotificationDelegate` (1) |
+| `lifecycle` | 116 | `App` (48), `SettingsModel` (30), `UpdateInstaller` (13), `PollingShell` (7), `BackToWorkNotifier` (6), `AwaitingInputWatcher` (5), `PollingEngine` (3), `SettingsWindowController` (2), `ShellEnvironment` (1), `PersistedConfig` (1), `IncidentNotificationDelegate` (1) |
 | `ui` | 1 | `UIPresetsPane` (1) |
 | `archive` | 7 | `App` (5), `LogArchiver` (2) |
 | `journal` | 12 | `UsageJournal` (4), `StatusPayloadLog` (4), `App` (3), `DevToolsWindowController` (1) |
 
-**Total: 173 log statements** — `.error` ×46, `.notice` ×109, `.info` ×13, `.debug` ×5.
+**Total: 177 log statements** — `.error` ×46, `.notice` ×113, `.info` ×13, `.debug` ×5.
 
 > Counts recomputed from the source in #275 (the previous figures had drifted over several releases —
-> `SettingsModel` and `BackToWorkNotifier` were missing entirely). Regenerate with:
-> `grep -rn 'AppLogger\.<category>\.' Sources/ | grep -v AppLogger.swift`.
+> `SettingsModel` and `BackToWorkNotifier` were missing entirely) and again in #341, where the same
+> drift had recurred: `SettingsWindowController` and `PersistedConfig` were missing, and `App` /
+> `SettingsModel` / `PollingEngine` had each gained statements the table did not know about.
+> Regenerate with: `grep -rho 'AppLogger\.[a-z]*\.' Sources/ | sort | uniq -c`.
 
 The `journal: enabled set <bool>` toggle line (`SettingsModel`) is a `lifecycle` statement (like the
 other Settings-toggle lines), counted under `lifecycle`. The twelve `journal`-category statements are
@@ -439,3 +445,7 @@ The `five_hour idle …` / `window active again` pair is one call site (`session
 emits one of two strings; it is counted once under `PollingEngine` network. The
 `five_hour idle suppressed …` grace line (`applyIdleGrace`, ADR-0041) is a separate call site,
 counted as the second `PollingEngine` network statement.
+
+The `usage poll off/on` pair (#341) follows the same shape — one call site emitting one of two
+strings, counted once — but under `lifecycle` rather than `network`: nothing is fetched at that
+point, the mode itself changed.
