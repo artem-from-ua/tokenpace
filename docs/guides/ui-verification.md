@@ -146,7 +146,7 @@
 
 ### Видимість секцій дропдауна: «Show model & service limits» і «Show extra usage» (#211)
 
-Settings → Appearance › **Dropdown**. Обидві опції — тристанові
+Settings → **Dropdown**. Обидві опції — тристанові
 (`PopupSectionVisibility`), сегменти **Always | Non-calm only | With ⌥ Option**:
 
 | Режим | Поведінка |
@@ -692,52 +692,54 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_STUB=screenshot swift run
 Флаг opt-in (не прив'язаний до dev-білда), тож звичайний `swift run` стартує тихо. Продакшн-`.app`
 поводиться так само лише за явно виставленого env, чого при нормальному запуску не буває.
 
-Додатково `TOKENPACE_SETTINGS_SECTION=<index>` відкриває **конкретну** сторінку Settings за індексом —
-щоб зробити скриншот потрібної панелі без AX-кліку по sidebar-рядку. Один простір індексів на два
-рівні (#333, [ADR-0082](../adr/0082-settings-drill-in-child-pages.md)):
+Додатково `TOKENPACE_SETTINGS_SECTION=<index>` відкриває **конкретний** пан Settings за індексом —
+щоб зробити скриншот потрібної панелі без AX-кліку по sidebar-рядку.
 
-| Індекс | Сторінка |
+| Індекс | Пан |
 |---|---|
 | 0 | About |
 | 1 | General |
-| 2 | Appearance (батьківська) |
+| 2 | UI presets |
 | 3 | Notifications |
 | 4 | Extra features |
-| **50** | Appearance › **Menu bar** (дочірня) |
-| **51** | Appearance › **Dropdown** (дочірня) |
+| **5** | **Menu bar** |
+| **6** | **Dropdown** |
 | 100–108 | scroll-філер (`TOKENPACE_SIDEBAR_FILLER`, див. нижче) |
+
+**Індекси — стабільні ідентифікатори, не порядок рядків** (#333). Порядок у sidebar задає
+`SettingsSection.groups`, і він інший: About / General · Notifications / **UI presets · Menu bar ·
+Dropdown** / Extra features. Розділення саме таке, щоб перестановка рядків не перенаправляла мовчки
+кожен задокументований рецепт на інший пан; `2` лишилось за `UI presets`, бо це те, чим став
+колишній Appearance.
 
 (Monitored Services більше не окрема секція — це підсекція «Monitored services» у Extra features,
 #242.)
 
 ```sh
 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=3 swift run   # відкриє одразу на Notifications
-TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=50 swift run  # одразу на Appearance › Menu bar
+TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=5 swift run   # одразу на Menu bar
 ```
 
-Хук **сідає** на сторінку, а не «навігує»: вікно, відкрите так, має **обидва чеврони ‹ › дим**, як і
-має бути в щойно відкритому вікні. Якщо ‹ активний одразу після запуску — це регресія.
+Хук **сідає** на пан, а не «навігує»: вікно, відкрите так, має **обидва чеврони ‹ › дим**, як і має
+бути в щойно відкритому вікні. Якщо ‹ активний одразу після запуску — це регресія.
 
-### Drill-in: що перевіряти (#333)
+### Три UI-пани: що перевіряти (#333)
 
-Дочірні сторінки Appearance відкриваються рядком-навігатором унизу батьківської, повертаються ‹ у
-тулбарі. Сценарії, які ламаються найлегше:
+Колишній Appearance став трьома панами в одній групі sidebar. Що ламається найлегше:
 
-1. **Заголовок тулбара** — на дочірній має стояти її назва («Menu bar»), не «Appearance».
-2. **Підсвітка sidebar** — поки відкрита дочірня, **батьківський рядок лишається підсвіченим**
-   звичайною синьою підсвіткою (так само поводиться System Settings: Мережа → Wi-Fi).
-3. **‹ › через межу drill-in** — батьківська → дочірня → інша секція в sidebar → ‹ ‹ має провести
-   назад **через** дочірню, а не перестрибнути її.
-4. **Зміна секції з дочірньої** — клік по іншому рядку sidebar скидає до кореня нової секції; ‹ по
-   тому повертає в дочірню, яку ти покинув.
-5. **Клікабельність усього рядка** — не лише chevron'а і не лише тексту; порожнє місце між
-   підзаголовком і chevron'ом теж має спрацьовувати.
-6. **Awaiting-input** — вимкни «Show sessions awaiting input» у *Extra features*, зайди в
-   Appearance › *Menu bar*: тамтешній однойменний тумблер має бути **disabled**, а хінт читатись
-   «…in Extra features first». Глобальний вмикач керує долонею в дропдауні, цей — у menu bar.
+1. **Група й роздільники** — `UI presets`, `Menu bar`, `Dropdown` стоять поруч, відділені
+   роздільниками зверху й знизу, і ділять **один** зелений тінт капсули.
+2. **Пресети дістають обидві поверхні** — застосуй `Chill` на *UI presets*, тоді перевір, що
+   змінились обидва «Bar style» (на *Menu bar* і на *Dropdown*), а не один.
+3. **Custom** — зміни будь-що вручну, застосуй пресет, тоді натисни `Custom`: має повернутись твій
+   сетап. На чистій інсталяції (нічого не збережено) сегмент неклікабельний і пояснює себе попапом.
+4. **Copy config** — кнопка на *UI presets* збирає значення з усіх трьох панів.
+5. **Awaiting-input** — вимкни «Show sessions awaiting input» у *Extra features*, зайди на *Menu bar*:
+   тамтешній однойменний тумблер має бути **disabled**, а хінт читатись «…in Extra features first».
+   Глобальний вмикач керує долонею в дропдауні, цей — у menu bar.
 
-**Джерело істини цього порядку/індексів** — `enum SettingsSection: Int` для панів і
-`enum SettingsChildPage: Int` для дочірніх сторінок; змінюючи склад, онови їх і таблицю вище разом.
+**Джерело істини складу й індексів** — `enum SettingsSection: Int` (raw-значення) плюс
+`SettingsSection.groups` (порядок і групування); змінюючи склад, онови їх і таблицю вище разом.
 Detail-панелі — SwiftUI `Form.formStyle(.grouped)` ([ADR-0042](../adr/0042-settings-swiftui-form.md)),
 тож паритет grouped-inset карток доводиться скриншотами light+dark так само, як раніше для
 AppKit-версії.
@@ -873,7 +875,7 @@ Wi-Fi, battery) має **суворий метод**, вироблений бо�
 
 Лічильник сесій Claude Code, що очікують вводу користувача, у menu bar та попапі. Фіча **opt-in**
 (Settings → Extra features → «Show sessions awaiting input», дефолт OFF); показ у menu bar —
-Settings → Appearance › Menu bar.
+Settings → Menu bar.
 
 Під тумблером — **постійний ⚠️-рядок** «Experimental. This reads Claude Code's internal files…»
 (#243, ADR-0066): фіча стоїть на приватному форматі, який може змінитися на боці Anthropic. Він
@@ -886,7 +888,7 @@ Settings → Appearance › Menu bar.
 > сесії, що випадково чекають вводу в момент зйомки. Гейт той самий, що в журналу
 > (`currentScenario == .realNetwork`), і він перераховується при **живому** перемиканні стуба в
 > dev-tools. Наслідки: під стубом без `TOKENPACE_AWAITING` індикатора нема **навіть із увімкненим
-> тумблером**, а в Settings (Extra features → Session status і Appearance › Menu bar) видно ⚠️ «Stubbed in this
+> тумблером**, а в Settings (Extra features → Session status і Menu bar) видно ⚠️ «Stubbed in this
 > development build.».
 >
 > **Живого watcher'а мало бути в `.realNetwork` — цей live має бути обраний явно (#267).** Тобто

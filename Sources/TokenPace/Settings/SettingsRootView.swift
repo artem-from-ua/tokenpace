@@ -81,9 +81,8 @@ struct SettingsRootView: View {
     /// The detail column's content — the selected section's pane.
     ///
     /// The panes sit at one level: the UI trio (presets, menu bar, dropdown) are sidebar rows of their
-    /// own rather than child pages reached from a parent (#333). A drill-in level exists in the model
-    /// (`SettingsChildPage`, ADR-0082) for a section that genuinely needs one; a sidebar with room to
-    /// spare does not, and the extra click would buy nothing.
+    /// own rather than pages drilled into from a parent (#333). The sidebar has room for them, and a
+    /// divider already says they belong together — a parent page would only add a click.
     @ViewBuilder
     private var detailPane: some View {
         switch model.selection {
@@ -121,10 +120,6 @@ private struct SidebarLabelStyle: LabelStyle {
 /// The coloured rounded-rect chip behind a sidebar section's SF Symbol, matching System Settings —
 /// a white glyph on a tinted rounded rect. Chip/symbol sizes follow the system "Sidebar icon size"
 /// via `SidebarIconMetrics` (no single hardcoded size).
-///
-/// Sidebar-only: the drill-in navigator rows (`SettingsNavigationRow`, #333) draw their own flat
-/// black/white chip instead, because theirs depicts a *surface* rather than naming a pane — the
-/// measured gradient and the inactive-window dimming below would both work against that.
 private struct SidebarChip: View {
     let symbol: String
     let tint: CapsuleTint
