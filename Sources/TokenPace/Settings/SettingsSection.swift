@@ -132,13 +132,17 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
     /// between the two rules, generous enough to clear the rectangle's rounded corners at any size.
     static let trimmedBand: ClosedRange<CGFloat> = 0.28...0.72
 
+
     /// Vertical nudge for the glyph inside its chip, in points, negative = up.
     ///
-    /// `puzzlepiece.extension.fill` carries its tab on the **left edge** and its mass low, so centred
-    /// on the glyph box it reads as sitting below centre in the capsule. A small lift puts the body
-    /// where the eye expects it. Kept per-section rather than applied to every chip: no other symbol
-    /// here needs it, and a blanket offset would push the ones that are already right.
-    var glyphOffsetY: CGFloat { self == .extraFeatures ? -1 : 0 }
+    /// `puzzlepiece.extension.fill` carries its tab on the left edge and its mass low, so centred on
+    /// its own box it reads a touch below centre in the capsule. Half a point is deliberate, not a
+    /// rounding artefact: on a 2× display it is exactly one device pixel — the smallest correction
+    /// that exists, and the size of the error.
+    ///
+    /// Per-section rather than global: nothing else here is off, and a blanket offset would push the
+    /// glyphs that are already right.
+    var glyphOffsetY: CGFloat { self == .extraFeatures ? -0.5 : 0 }
 
     /// Capsule gradient endpoints of the sidebar icon chip, matching System Settings (#156).
     /// The system capsules are baked icon artwork, not dynamic colors — each pane has its own
