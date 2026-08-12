@@ -981,24 +981,82 @@ final class SubscribeRowView: NSView {
 /// Since #254 this is the popup's **only** filled badge: the credits "in use" marker moved to the
 /// knocked-out glyph of ``KnockoutGlyphBadge``, so a solid fill now means exactly one thing — the
 /// reset that unblocks work.
-final class PillView: NSView {
+/// The badge **draws its own text** rather than hosting an `NSTextField`, so the padding around the
+/// text is one `NSTextField` whose cell insets its own drawing rect (#158 follow-up).
+///
+/// The badge is **a label with padding and a filled background**, so it is built as one — not as a
+/// label positioned inside a container, and not as a view that draws the string itself. Both of those
+/// were tried here and both put the padding at the mercy of a rounding step: a hosted field rounds its
+/// width up to a backing pixel before the centring splits what is left, so the padding drifts with the
+/// string, and since the badge is pinned to the row's trailing edge, holding ⌥ swaps a short string for
+/// a long one and the text steps sideways. Hand-drawing moves the same remainder elsewhere rather than
+/// removing it.
+///
+/// ``PillCell`` narrows the rect the text is laid out in, which is the AppKit-sanctioned way to pad a
+/// cell's content. One text object, laid out once, with the framework resolving the rounding.
+final class PillView: NSTextField {
     /// The badge fill. Defaults to the accent blue; callers set it (e.g. the exhausted red). A closure
     /// (not a stored `NSColor`) so a dynamic colour re-resolves per appearance.
-    var fill: () -> NSColor = { .controlAccentColor }
+    var fill: () -> NSColor = { .controlAccentColor } {
+        didSet { needsDisplay = true }
+    }
+
+    /// Padding between the text and the capsule's edges — applied by ``PillCell`` through
+    /// `drawingRectForBounds(_:)`, and reported to Auto Layout through `intrinsicContentSize`.
+    static let hInset: CGFloat = 6
+    static let vInset: CGFloat = 2
 
     /// Corner radius as a fraction of the height. `0.5` is a full pill; lower is a softer rounded rect.
     private static let cornerFraction: CGFloat = 0.35
 
-    override var wantsUpdateLayer: Bool { true }
-
-    override func layout() {
-        super.layout()
-        layer?.cornerRadius = bounds.height * Self.cornerFraction
+    convenience init(text: String, font: NSFont, textColor: NSColor, fill: @escaping () -> NSColor) {
+        self.init(labelWithString: text)
+        self.font = font
+        self.textColor = textColor
+        self.fill = fill
+        self.alignment = .center
+        self.cell = PillCell(textCell: text)
+        // `cell` replacement drops the properties set above; re-apply them to the new cell.
+        self.font = font
+        self.textColor = textColor
+        self.alignment = .center
+        self.isEditable = false
+        self.isSelectable = false
+        self.isBezeled = false
+        self.drawsBackground = false
+        self.translatesAutoresizingMaskIntoConstraints = false
     }
 
-    override func updateLayer() {
-        layer?.cornerRadius = bounds.height * Self.cornerFraction
-        layer?.backgroundColor = fill().cgColor
+    /// The insets live in the cell, so the size the field reports has to include them.
+    override var intrinsicContentSize: NSSize {
+        var size = super.intrinsicContentSize
+        size.width += 2 * Self.hInset
+        size.height += 2 * Self.vInset
+        return size
+    }
+
+    /// Fill the capsule, then let the field draw its text inside the inset rect the cell returns.
+    override func draw(_ dirtyRect: NSRect) {
+        let radius = bounds.height * Self.cornerFraction
+        fill().setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
+        super.draw(dirtyRect)
+    }
+}
+
+/// Applies ``PillView``'s padding the way AppKit intends: by narrowing the rect the cell lays its text
+/// out in, rather than by positioning a separate label inside a container.
+///
+/// This matters beyond tidiness. Hosting an `NSTextField` inside a plain `NSView` and pinning it with
+/// constraints makes the field round its own width up to a backing pixel *first*, after which the
+/// leftover — different for every string — is split by the centring inside the field. The padding then
+/// drifts with the text, and because the badge is pinned to the row's trailing edge, holding ⌥ swaps a
+/// short string for a long one and the text visibly steps sideways. Drawing the string by hand instead
+/// trades that for the same problem in a different place. Letting the cell inset its own drawing rect
+/// keeps one text object, laid out once, with AppKit resolving the rounding.
+final class PillCell: NSTextFieldCell {
+    override func drawingRect(forBounds rect: NSRect) -> NSRect {
+        super.drawingRect(forBounds: rect.insetBy(dx: PillView.hInset, dy: PillView.vInset))
     }
 }
 
@@ -1308,6 +1366,10 @@ final class PopupViewController: NSViewController {
         /// outer inset on both sides minus the inner horizontal padding on both sides. Held constant at
         /// 252 pt (296 − 2·8 − 2·14) so bar/label wrapping is identical to before the card was added.
         static let contentWidth: CGFloat = width - 2 * cardInset - 2 * hPadding
+        /// The smallest readable gap between a split row's two halves. Below it the two columns stop
+        /// reading as separate facts, so a pair that cannot keep this much air between them counts as
+        /// not fitting (``PopupViewController/detailHalvesFit(left:right:font:)``).
+        static let minSplitGap: CGFloat = 12
     }
 
     private let stack = NSStackView()
@@ -1644,6 +1706,9 @@ final class PopupViewController: NSViewController {
             title: Self.extraUsageTitle,
             status: Self.creditsStatusText(bar),
             badge: credits.inUse ? makeInUseMarker(currency: credits.spent.currency) : nil)
+        // Both halves grow under ⌥ at once — exact cents on the left, the "resets in" lead-in on the
+        // right — and the credits amounts are the popup's widest left half to begin with, so this is
+        // where `addDetailLine`'s fit gate actually fires: the reset drops and the amounts stay.
         addDetailLine(
             used: Self.creditsAmountText(spent: credits.spent, limit: limit, verbose: optionHeld),
             reset: (optionHeld ? credits.resetLineVerbose : credits.resetLine) ?? "resetting…",
@@ -1813,25 +1878,15 @@ final class PopupViewController: NSViewController {
     /// Shared pill factory (#146/#158): white medium text on a rounded, layer-backed capsule whose
     /// fill is `fill()` (re-resolved per appearance). Sizing comes from the text + insets; the radius is
     /// half the height, so it reads as a pill at any font size.
+    ///
+    /// ``PillView`` is a label whose cell pads its own text — see that type for why the padding lives
+    /// there rather than in constraints or in hand-drawing.
     private static func makePill(text: String, fill: @escaping () -> NSColor) -> NSView {
-        let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: Metrics.textSize - 2, weight: .medium)
-        label.textColor = ColorStore.shared.color(.pillText)
-        label.translatesAutoresizingMaskIntoConstraints = false
-
-        let pill = PillView()
-        pill.fill = fill
-        pill.wantsLayer = true
-        pill.translatesAutoresizingMaskIntoConstraints = false
-        pill.addSubview(label)
-        let hInset: CGFloat = 6, vInset: CGFloat = 2
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: hInset),
-            label.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -hInset),
-            label.topAnchor.constraint(equalTo: pill.topAnchor, constant: vInset),
-            label.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -vInset),
-        ])
-        return pill
+        PillView(
+            text: text,
+            font: .systemFont(ofSize: Metrics.textSize - 2, weight: .medium),
+            textColor: ColorStore.shared.color(.pillText),
+            fill: fill)
     }
 
     @discardableResult
@@ -1846,6 +1901,17 @@ final class PopupViewController: NSViewController {
     /// The per-limit detail line: `used` percent flush left, `reset` countdown flush **right** against
     /// the content width — the percent leads the line (under the "% used" reading) while the reset time
     /// lines up with the bar's right edge below it.
+    ///
+    /// When the two halves cannot both fit the content column, the **reset is dropped** and the left
+    /// half renders alone (``detailHalvesFit(left:right:font:)``). The row is an `NSStackView` with
+    /// `.equalSpacing`, so the alternative is not wrapping but Auto Layout compressing one label into an
+    /// ellipsis — and a truncated `resets in 5d on Fri…` is worse than no reset at all. It is dropped
+    /// rather than blanked: an empty label would still claim its slot.
+    ///
+    /// This bites mainly under ⌥ on the credits line, where both halves grow at once and the amounts are
+    /// the popup's widest. A **blocking** reset (#158) is exempt — it is the one fact that says when work
+    /// becomes possible again, so it keeps its badge whatever the width.
+    ///
     @discardableResult
     private func addDetailLine(used: String, reset: String, resetIsBlocking: Bool = false) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
@@ -1857,6 +1923,11 @@ final class PopupViewController: NSViewController {
         // even if its own limit is also exhausted.
         if resetIsBlocking {
             return addSplitRow(leadingView: usedLabel, rightView: makeResetBadge(text: reset))
+        }
+        guard Self.detailHalvesFit(left: used, right: reset, font: font) else {
+            usedLabel.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(usedLabel)
+            return usedLabel
         }
         let resetLabel = NSTextField(labelWithString: reset)
         resetLabel.font = font
@@ -1898,6 +1969,19 @@ final class PopupViewController: NSViewController {
 
     /// `addSplitRow` variant whose **trailing** half is an arbitrary view (e.g. the blocking-reset
     /// pill, #158), not just a label — the leading view still pins flush left at the content width.
+    ///
+    /// A ``PillView`` trailing half is nudged **out** by ``badgeColumnOvershoot`` so the badge's *text*
+    /// lands in roughly the same column as every other row's reset.
+    ///
+    /// The row pins whatever it is given flush right. For a plain label that puts the last glyph on the
+    /// column edge, but for a badge it puts the *capsule* there and the text sits ``PillView/hInset``
+    /// further left — 6 pt, 13 px measured in a render. The popup routinely shows both anatomies at
+    /// once (the blocking row is badged, the others are not), so the badged reset visibly hangs back
+    /// from the column the rest line up on.
+    ///
+    /// `alignmentRectInsets` is the API meant for exactly this, but `NSStackView` lays its arranged
+    /// views out by frame and ignores it — measured, the text did not move at all — so the shift is
+    /// applied to the row instead.
     @discardableResult
     private func addSplitRow(leadingView: NSView, rightView: NSView) -> NSView {
         let row = NSStackView(views: [leadingView, rightView])
@@ -1905,9 +1989,23 @@ final class PopupViewController: NSViewController {
         row.distribution = .equalSpacing
         row.translatesAutoresizingMaskIntoConstraints = false
         row.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
+        if rightView is PillView {
+            row.edgeInsets = NSEdgeInsets(
+                top: 0, left: 0, bottom: 0, right: -Self.badgeColumnOvershoot)
+        }
         stack.addArrangedSubview(row)
         return row
     }
+
+    /// How far a badge hangs past the content column so its text lines up with the plain resets above
+    /// and below it — the badge's full internal inset, so the *text* ends where their text ends.
+    ///
+    /// A half-inset was tried first, on the theory that the capsule would otherwise look like it was
+    /// escaping the card. It is not enough: in a screenshot of the real popup the badge's text still sat
+    /// visibly short of the column that `resets in 3h at 16:00` and `resets in 18d` line up on. The
+    /// capsule is *meant* to bleed — that is what a filled badge does — while the text is what the eye
+    /// aligns.
+    private static let badgeColumnOvershoot: CGFloat = PillView.hInset
 
     /// A label that **wraps** onto multiple lines instead of clipping — for the error detail, whose
     /// text can be the server's own response body (`authHTTP`) and so be arbitrarily long. A plain
@@ -2525,12 +2623,23 @@ final class PopupViewController: NSViewController {
     }
 
     /// The detail line's **left** half when a cap is set: `"€10.8 of €15"` at rest, the exact
-    /// `"€10.77 of €15.00"` under ⌥ — spent out of limit, both formatted from their exact ``Money``
-    /// integers (never a rounded `Double`).
+    /// `"spent €10.77 of €15.00"` under ⌥ — spent out of limit, both formatted from their exact
+    /// ``Money`` integers (never a rounded `Double`).
     ///
     /// The precision is an **⌥ detail**, the same gate `usedText`/`resetText` use: at rest the amounts
     /// carry three significant digits so the line stays as narrow as the numbers themselves, and holding
     /// Option reveals every cent of both.
+    ///
+    /// The ⌥ form also names the verb, and names it **first**: `spent €10.77 of €15.00`, not
+    /// `€10.77 of €15.00 spent`. A trailing `spent` binds to the nearest noun phrase — the *cap* — so
+    /// the postfixed reading is "€10.77 of the €15.00 that were spent", exactly inverting which number
+    /// is the money gone. Leading, the verb can only govern the first amount. The unlimited line
+    /// (``creditsSpentOnlyText(_:verbose:)``) keeps its trailing `spent` because it has one number, so
+    /// there is nothing for the word to mis-bind to.
+    ///
+    /// The cap is shown even at **zero spend** (`€0 of €15`). Dropping it there would render as a bare
+    /// `€0`/`€0 spent`, which is precisely the unlimited line's shape — two different billing
+    /// configurations collapsing onto one string. The cap is what distinguishes them.
     ///
     /// At rest the two halves are formatted **differently on purpose**: the spend keeps the ladder
     /// (``compactMoneyText(_:)``), the cap additionally drops a zero fraction
@@ -2539,8 +2648,34 @@ final class PopupViewController: NSViewController {
     /// billing, and every captured limit is whole. Under ⌥ both go exact, so the asymmetry exists only
     /// in the narrow resting form.
     static func creditsAmountText(spent: Money, limit: Money, verbose: Bool = false) -> String {
-        guard !verbose else { return "\(moneyText(spent)) of \(moneyText(limit))" }
+        guard !verbose else { return "spent \(moneyText(spent)) of \(moneyText(limit))" }
         return "\(compactMoneyText(spent)) of \(CompactMoney.capText(limit))"
+    }
+
+    /// Whether a detail line's two halves both fit on one line at `font`, keeping at least
+    /// ``Metrics/minSplitGap`` of air between them.
+    ///
+    /// The row is an `NSStackView` pinned to ``Metrics/contentWidth`` with `.equalSpacing`: when the two
+    /// labels are too wide it does **not** wrap, it compresses one of them into an ellipsis. A truncated
+    /// `resets in 5d on Fri…` is worse than no reset at all — the amounts are the fact the user opened
+    /// the popup for, and the reset is repeated in the menu bar anyway. So the caller drops the right
+    /// half instead of letting Auto Layout pick a victim.
+    ///
+    /// Measured with `NSAttributedString.size()` rather than a stored metric because the strings are
+    /// locale- and currency-dependent (`10,77 kr`, `12.00 UAH`) and the font follows the system text
+    /// size — no constant could stand in for either.
+    ///
+    /// Measured widths at 13 pt against the 268 pt column, for calibration:
+    /// - `20% used` + `resets in 2h at 02:50` → 198 pt — every token row fits with room to spare.
+    /// - `€10.8 of €15` + `5d on Friday` → 162 pt — the resting credits line always fits.
+    /// - `spent €10.77 of €15.00` + `resets in 5d on Friday` → 281 pt — the **ordinary** ⌥ credits line
+    ///   already overflows, which is what this gate is for; it is not an exotic-payload guard.
+    /// - `spent €1,234.56 of €2,000.00` + `resets in 5d on Friday` → 322 pt — four-figure worst case.
+    static func detailHalvesFit(left: String, right: String, font: NSFont) -> Bool {
+        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        let leftWidth = (left as NSString).size(withAttributes: attrs).width
+        let rightWidth = (right as NSString).size(withAttributes: attrs).width
+        return leftWidth + Metrics.minSplitGap + rightWidth <= Metrics.contentWidth
     }
 
     /// The **unlimited** line's right half: `"€10.8 spent"` — the spent amount with a trailing word,

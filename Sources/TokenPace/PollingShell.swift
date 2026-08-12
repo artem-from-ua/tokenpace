@@ -435,7 +435,7 @@ actor StubUsageTransport: UsageTransport {
     ///    money line renders `€0 of €15`, both halves shedding zeros for their own reason (the spend
     ///    because it is untouched, the cap because it is whole).
     enum CreditsFrame: Equatable {
-        case active, limitReached, noLimit, zeroSpent
+        case active, limitReached, noLimit, zeroSpent, wideAmounts
 
         /// The `spend` + `extra_usage` block pair for this frame, as raw JSON fragments (no braces) to
         /// splice into the usage body. Verbatim from `CreditsModelTests` fixtures so the stub exercises
@@ -483,6 +483,21 @@ actor StubUsageTransport: UsageTransport {
                 "daily":null,"weekly":null},\
                 "spend":{"used":{"amount_minor":0,"currency":"EUR","exponent":2},\
                 "limit":{"amount_minor":1500,"currency":"EUR","exponent":2},"percent":0,\
+                "severity":"normal","enabled":true,"disabled_reason":null,"balance":null,\
+                "auto_reload":null}
+                """
+            case .wideAmounts:
+                // €1,234.56 of €2,000.00 — four-figure amounts with grouping separators, the widest
+                // money line a real payload can produce. Paced (~62 %) so no red badge overrides the
+                // fit gate. 7d is left un-exhausted by the caller, so the reset here is a plain label:
+                // exactly the case the gate is allowed to drop.
+                return """
+                "extra_usage":{"is_enabled":true,"monthly_limit":200000,"used_credits":123456.0,\
+                "utilization":61.7,"currency":"EUR","decimal_places":2,"disabled_reason":null,\
+                "user_disabled":false,"spend_limit_reached":false,"credits_ever_enabled":true,\
+                "daily":null,"weekly":null},\
+                "spend":{"used":{"amount_minor":123456,"currency":"EUR","exponent":2},\
+                "limit":{"amount_minor":200000,"currency":"EUR","exponent":2},"percent":62,\
                 "severity":"normal","enabled":true,"disabled_reason":null,"balance":null,\
                 "auto_reload":null}
                 """
