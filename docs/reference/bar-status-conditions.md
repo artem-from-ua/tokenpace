@@ -21,8 +21,8 @@
 
 Не всі бари можуть набути всіх статусів. Це найчастіше джерело хибних мокапів.
 
-Колонка «Пейсинговий синій» — про `farBehind`-зону (`ColorRole.paceBlue`), тобто про **статус**, а
-не про будь-який синій піксель.
+Колонка «Пейсинговий синій» — про `farBehind`-зону, тобто про **статус**, а не про будь-який синій
+піксель (усе синє в застосунку тепер бере одну роль `ColorRole.blue`).
 
 | Тип бару | Джерело | Вікно | Пейсинговий синій? | Де малюється |
 |---|---|---|---|---|
@@ -39,13 +39,13 @@ Per-model і credits проходять гілкою `Palette.gapGreen`
 ([PopupViewController.swift:607, 619](../../Sources/TokenPace/PopupViewController.swift#L607)).
 Menu bar per-model барів не має взагалі.
 
-**Чому в idle «ні», хоч пігулка на екрані синя.** Idle-бар не має пейсингу як такого — він не
-проходить через `severity` і не може набути `farBehind`. Його синій — це заливка стану «ready to
-start» (`ColorRole.blue`), інша роль палітри з тим самим дефолтним `.systemBlue`. Детально — §6.
+**Чому в idle «ні», хоч пігулка буває синя.** Idle-бар не має пейсингу як такого — він не проходить
+через `severity` і не може набути `farBehind`. Його синій — це заливка стану «ready to start», яка
+**теж** гейтиться станом тижня, але окремим шляхом. Детально — §6.
 
-> ⚠️ **Журнал сьогодні цього гейта не має.** `PacingBucket.of` не знає про `isBaseLimit`, тож у
-> `usage-journal-*.jsonl` scoped-вікно **може** отримати `sev: "blue"`, якого користувач ніколи не
-> бачив. Розбіжність відома.
+> **Журнал і UI збігаються.** `PacingBucket.of` читає те саме `blueAllowed`, що й рендер, а
+> per-model рядки несуть той самий weekly-gate, тож у `usage-journal-*.jsonl` scoped-вікно більше
+> не може отримати `sev: "blue"`, якого користувач не бачив.
 
 ---
 
@@ -69,10 +69,28 @@ start» (`ColorRole.blue`), інша роль палітри з тим сами�
 | `pacingBlueStartOverrideSeconds` | 1200 c (20 хв) | старт вікна → синій не блимає |
 | `aheadThreshold(timeFraction:)` | `0.16 × (1 − t)` | межа жовтий→помаранчевий, **динамічна** |
 | `behindThreshold(...)` | 5h: 0.40, 7d: ≈0.2857 | межа зелений→синій, **фіксована в реальному часі** |
+| `farBehindWidthMultiplier` | 2 | множник базової ширини, **константа** (не налаштування) |
+| `blueAllowed` | Bool | чи взагалі дозволений синій для цього бару |
 
-`behindThreshold` = `blueBehindWidthSeconds × multiplier / windowDurationSeconds`, де база — 60 хв
-(5h) і 24 год (7d), а `multiplier` — `FarBehindInterval` користувача (дефолт ×2)
-([PacingModel.swift:458](../../Sources/TokenPaceKit/PacingModel.swift#L458)).
+`behindThreshold` = `blueBehindWidthSeconds × 2 / windowDurationSeconds`, де база — 60 хв (5h) і
+24 год (7d). Раніше множник задавав користувач (`FarBehindInterval`); тепер він фіксований, а
+питання «чи малювати синій» повністю переїхало в `blueAllowed`
+([PacingModel.swift](../../Sources/TokenPaceKit/PacingModel.swift)).
+
+### `blueAllowed` — weekly-capacity gate
+
+`blueAllowed` ставиться при побудові бару й відповідає на питання «чи має цей бар право радити
+розганятися»:
+
+| Бар | `blueAllowed` |
+|---|---|
+| d7 | `true` завжди — сам себе не гейтить |
+| h5, Opus/Sonnet/scoped | `PacingModel.weeklyHasHeadroom(in:now:)` |
+| credits, idle-плейсхолдери | `false` — пейсингу не мають |
+
+`weeklyHasHeadroom` = `d7.pacing == .onPaceOrBehind && d7.usageFraction < 1`, тобто d7-бакет ∈
+{blue, green}. **Closed by default:** якщо `resets_at` тижня не парситься, повертає `false` — інакше
+fallback `?? now` дав би `timeFraction = 1.0` і хибно **відкрив** би gate.
 
 ---
 
@@ -85,18 +103,18 @@ start» (`ColorRole.blue`), інша роль палітри з тим сами�
 
 | # | Умова | Severity | Колір | Бакет |
 |---|---|---|---|---|
-| 0 | `u <= t` **і** `behindMultiplier == 0` | `.calm` | зелений | *(журнал ігнорує)* |
+| 0 | `u <= t` **і** `!blueAllowed` | `.calm` | зелений | `green` |
 | 1 | `u <= t` **і** `elapsed <= 1200` | `.calm` | зелений | `green` |
-| 2 | `u <= t` **і** `(t − u) > behindThreshold` | `.farBehind` | **синій** | `blue` |
+| 2 | `u <= t`, `blueAllowed` **і** `(t − u) > behindThreshold` | `.farBehind` | **синій** | `blue` |
 | 3 | `u <= t` (решта) | `.calm` | зелений | `green` |
 | 4 | `u > t` **і** `u >= 1` | `.exhausted` | червоний | `red` |
 | 5 | `u > t` **і** `remainingSeconds <= 1200` | `.ahead` | помаранчевий | `orange` |
 | 6 | `u > t` **і** `(u − t) < 0.16×(1−t)` | `.calm` | жовтий | `yellow` |
 | 7 | `u > t` (решта) | `.ahead` | помаранчевий | `orange` |
 
-Гілка 0 — це `FarBehindInterval.off` користувача; вона **передує** start-override
-([PacingModel.swift:270](../../Sources/TokenPaceKit/PacingModel.swift#L270)). У колонці «Бакет»
-її немає, бо `PacingBucket` користувацький множник ігнорує (див. §7).
+Гілка 0 — weekly-gate (або інертний бар); вона **передує** start-override. На відміну від
+скасованого `FarBehindInterval.off`, це не налаштування, а факт про дані, тож **журнал її теж
+поважає** — саме тому в колонці «Бакет» стоїть `green`, а не пропуск.
 
 ### Чотири пастки в цій таблиці
 
@@ -152,6 +170,9 @@ Ahead-поріг **звужується** з часом (лід наприкін
 ([PopupViewController.swift:2569](../../Sources/TokenPace/PopupViewController.swift#L2569)); вони
 показують «on pace».
 
+**У журналі так само.** Вони несуть `blueAllowed = weeklyHasHeadroom`, тож `sev` для них ніколи не
+`blue` — раніше журнал міг записати синій, якого користувач не бачив.
+
 ---
 
 ## 5. Credits (money) бар
@@ -164,7 +185,7 @@ Ahead-поріг **звужується** з часом (лід наприкін
 | `t` | частка вікна | частка **календарного місяця** |
 | Часова зона | локальна | **UTC** (жорстко) |
 | Вікно | 5h / 7d | місяць; у `BarLayout` підставляється 7d як плейсхолдер |
-| Синій | так (базові) | **ніколи** |
+| Синій | так (базові) | **ніколи** (`blueAllowed: false`) |
 | Бар існує? | завжди | **лише коли є cap** |
 
 **Бар відсутній, якщо немає ліміту.** `barLayout(for:now:)` повертає `nil`, коли `spentFraction`
@@ -192,22 +213,33 @@ Ahead-поріг **звужується** з часом (лід наприкін
 ([PopupLayout.swift:542](../../Sources/TokenPaceKit/PopupLayout.swift#L542),
 [MenuBarLayout.swift:348](../../Sources/TokenPaceKit/MenuBarLayout.swift#L348)).
 
+Пігулка **тризначна**:
+
 | Умова | Заливка | Слово |
 |---|---|---|
-| `sessionIdle` **і** `CreditsPacing.isBlocked` | **сіра** (`monochromeGrey`) | «waiting for limit reset» |
-| `sessionIdle` (решта) | **синя** (`Palette.idleBlue`) | «ready to start» |
+| `sessionIdle` **і** `CreditsPacing.isBlocked` | **сіра** | «waiting for limit reset» |
+| `sessionIdle`, не blocked, **і** `weeklyHeadroom` | **синя** | «ready to start» |
+| `sessionIdle`, не blocked, **без** headroom | **зелена** | «ready to start» |
 
-`isBlocked` = `mainWindowExhausted && !creditsCanCover`
-([CreditsPacing.swift:150](../../Sources/TokenPaceKit/CreditsPacing.swift#L150)) — тобто сірий лише
-коли головне вікно вичерпане **на 100 %** *і* кредити не покривають. При 7d = помаранчевий
-пігулка лишається **синьою**.
+- `isBlocked` = `mainWindowExhausted && !creditsCanCover`
+  ([CreditsPacing.swift:150](../../Sources/TokenPaceKit/CreditsPacing.swift#L150)) — сірий лише коли
+  головне вікно вичерпане **на 100 %** *і* кредити не покривають: працювати неможливо.
+- `weeklyHeadroom` — той самий `PacingModel.weeklyHasHeadroom`, що гейтить пейсинговий синій.
+  Синя пігулка обіцяє вільну квоту, і ця обіцянка хибна, щойно тиждень пішов попереду темпу.
+- **Слово не змінюється** між синьою й зеленою: працювати справді можна, різниця лише в тому, чи є
+  що «розганяти». Раніше текст обіцяв «ready to start, full quota available» — цю частину прибрано.
 
-> **Той самий синій, дві ручки в тюнері.** `Palette.idleBlue` → `ColorRole.blue`
-> («idle / maintenance») і пейсинговий `Palette.gapBlue` → `ColorRole.paceBlue`
-> («far behind / big surplus») — **обидві дефолтяться в `.systemBlue`**
-> ([ColorRole.swift:214-215](../../Sources/TokenPace/DevColorTuner/ColorRole.swift#L214)), тож на
-> екрані це один і той самий колір. Розділені лише як два незалежні записи палітри, які колор-тюнер
-> може розвести. Тобто «два сині» — факт про палітру, а не про те, що бачить користувач.
+Прапорець їде окремим полем (`LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom`), бо idle-бар не
+читає `blueAllowed` зі свого інертного `BarLayout`.
+
+> **Один синій, одна роль.** Раніше idle-заливка (`ColorRole.blue`) і пейсинговий зазор
+> (`ColorRole.paceBlue`) були двома записами палітри з **однаковим** дефолтом `.systemBlue` — на
+> екрані нерозрізненні, а розділені лише тим, що тюнер міг їх розвести. Ролі злито в одну `.blue`.
+
+**Узгодженість із «Back to work!».** Зелена пігулка може співіснувати з нотіфікацією, і це не
+суперечність: `WorkAvailability.canWork` питає «чи можливо працювати» (вичерпання), а gate — «чи є
+запас» (темп). Тиждень, що скинувся зі 100 % до 85 % на початку вікна, дає і нотіфікацію, і зелену
+пігулку: «працювати можна, тільки без розгону».
 
 **Геометрія, не колір.** [ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md) «idle малюється
 як нуль» стосується **форми** — суцільна knobless-пігулка на нулі, без зон і без маркера часу.
@@ -229,15 +261,14 @@ Ahead-поріг **звужується** з часом (лід наприкін
 
 Попередження ніколи не глушаться. Попап не глушить нічого.
 
-### `FarBehindInterval` — ширина синьої зони
-
-Множить базову ширину (1h / 5h, 1d / 7d): `.short` ×1, `.medium` ×2 (дефолт), `.long` ×3,
-`.off` → поріг `+∞`, синього немає ніколи.
-
 ### Journal vs UI
 
-`PacingBucket` навмисно **ігнорує** обидва модифікатори — пінить ×2 і не знає про `CalmColorMode`,
-щоб серія лишалась порівнюваною між користувачами ([PacingBucket.swift:11-21](../../Sources/TokenPaceKit/PacingBucket.swift#L11)).
+`PacingBucket` ігнорує **лише** `CalmColorMode` — це косметика, і серія має лишатися порівнюваною
+між користувачами. `blueAllowed` він, навпаки, **поважає**: це не налаштування, а факт про дані
+([PacingBucket.swift](../../Sources/TokenPaceKit/PacingBucket.swift)).
+
+Ширина синьої зони більше не налаштовується: колишній `FarBehindInterval` (×1/×2/×3/off) прибрано,
+множник фіксований на ×2.
 
 ---
 
@@ -256,6 +287,9 @@ Ahead-поріг **звужується** з часом (лід наприкін
 | Idle-бар із заливкою на всю ширину | idle — це пігулка на нулі |
 | Жовтий на спокійному боці | жовтий існує лише при `u > t` |
 | Синій на 5h при `t < 0.40` | `t − u ≤ t`, тож запас не досягне порога |
+| **Синій h5 при d7 ∈ {yellow, orange, red}** | weekly-gate закритий → `blueAllowed == false` |
+| **Синя idle-пігулка при гарячому тижні** | той самий gate → зелена заливка |
+| `sev: "blue"` у журналі, якого не було на екрані | журнал читає те саме `blueAllowed` |
 
 ---
 
@@ -269,7 +303,8 @@ t = elapsed / windowDuration          # частка вікна, що минул
 elapsed = windowDuration - remainingSeconds
 
 if u <= t:
-    if elapsed <= 1200:                     -> ЗЕЛЕНИЙ (start-override)
+    if not blueAllowed:                     -> ЗЕЛЕНИЙ (weekly gate / інертний бар)
+    elif elapsed <= 1200:                   -> ЗЕЛЕНИЙ (start-override)
     elif (t - u) > behindThreshold:         -> СИНІЙ (лише h5/d7)
     else:                                   -> ЗЕЛЕНИЙ
 else:
@@ -292,9 +327,11 @@ else:
 | `both-orange` / `both-red` | ahead-бік і вичерпання |
 | `calm-both` | обидва зелені |
 | `near-reset` | 20-хв кінець-override (2 пп ліду → помаранчевий) |
-| `bar-extremes` | 5h синій (75 пп запасу) + 7d ледь попереду |
-| `idle` | синя idle-пігулка, «ready to start» |
+| `bar-extremes` | 5h синій (75 пп запасу) + 7d позаду темпу (щоб gate лишався відкритим) |
+| `idle` | синя idle-пігулка (тиждень спокійний), «ready to start» |
+| `idle-week-hot` | **зелена** idle-пігулка (тиждень попереду темпу), те саме слово |
 | `idle-blocked` | сіра idle-пігулка, «waiting for limit reset» |
+| `weekly-gate` | 5h глибоко позаду, але тиждень вичерпаний → 5h **зелений**, не синій |
 | `credits-*` | money-бар у різних станах, зокрема без cap |
 | `color-cycle` | прогін усіх бакетів по черзі |
 

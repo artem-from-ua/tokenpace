@@ -392,7 +392,9 @@ Settings → Notifications → **Preview** біля «Claude service incidents»
 | `calm-both` | green | green | обидва calm **зелені** (малий запас: 5h ~10 пт < 0.20, 7d ~9 пт < 0.143 — під фіксованим behind-порогом, тож НЕ сині); за default-ON #94 7d ховається → **одинока центрована зелена 5h** без reset-тексту (зніми чекбокс — знову дві смужки) |
 | `near-reset` | orange (override) | green | ADR-0044: 5h попереду лише ~2 пт (usage 98 vs elapsed ~96 %), але ресет за **12 хв** → override робить бар **помаранчевим** (без override був би жовтий/calm), countdown зʼявляється. Перевірка динамічного порога + 20-хв override |
 | `mid-band-reset` | orange | green | [#284](https://github.com/artem-from-ua/tokenpace/issues/284)/[ADR-0074](../adr/0074-one-reset-format-on-both-surfaces.md): 5h-ресет за **4 год 41 хв** — смуга 90 хв – 24 год, яка раніше друкувала настінний годинник (`20:40`), а тепер читається `5h`. Єдиний стуб на цю смугу. Перевіряй **на одному кадрі**: число в барі має збігатися з числом, яким починається рядок ресету в попапі (`5h` vs `5h at …`) |
-| `far-behind` | blue | blue | ADR-0061/0062: обидва базові бари глибоко позаду (5h запас ~0.55, 7d ~0.61 — над behind-порогом за дефолтного `FarBehindInterval` ×2, past 20-хв start-override) → **сині**. Перевірка синьої зони + `CalmColorMode`: Settings → Appearance → «Calm non-critical colors» — під **Yellow + Green** синій лишається кольоровим, під **+ Blue** мутиться в білий, під **Off** усе кольорове. Плюс `FarBehindInterval`: «Less blue, please!» робить обидва бари зеленими (синього немає). Per-model/credits рядки (у попапі) лишаються зеленими завжди |
+| `far-behind` | blue | blue | ADR-0061/0081: обидва базові бари глибоко позаду (5h запас ~0.55, 7d ~0.61 — над фіксованим behind-порогом ×2 = 0.40/0.286, past 20-хв start-override) **і тиждень сам спокійний**, тож weekly-gate відкритий → **сині**. Перевірка синьої зони + `CalmColorMode`: Settings → Appearance → «Calm non-critical colors» — під **Yellow + Green** синій лишається кольоровим, під **+ Blue** мутиться в білий, під **Off** усе кольорове. Per-model/credits рядки (у попапі) лишаються зеленими завжди |
+| `weekly-gate` | green | green | [ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md): 5h глибоко позаду (u = 5 %, t = 60 % → 55 пп запасу, далеко за порогом 0.40) — але 7d **вичерпаний**, тож weekly-gate закритий і 5h має бути **зеленим**, не синім (і не жовтим). У попапі 5h-рядок каже «on pace», а не «far behind pace». Пара до `far-behind`: кадри різняться лише станом тижня |
+| `idle-week-hot` | green (idle pill) | green (idle pill) | [ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md): немає 5h-сесії, тиждень попереду темпу (70 % при t ≈ 29 %), але **не** вичерпаний → не blocked. Idle-пігулка має бути **зеленою**, не синьою; слово лишається «ready to start». Порівняти з `idle` (спокійний тиждень → синя пігулка) і `idle-blocked` (сіра, «waiting for limit reset») — три кадри покривають усі три стани пігулки |
 | `near-zero` | green (pill) | green (pill) | Майже-нульове заповнення на **свіжих** вікнах (5h 0 %, 7d 4 %, Fable/Mythos ~1–4 %, майже нуль elapsed) → кольоровий gap завтовшки з волосину. Перевірка **min-strip pill-геометрії**: кольорова частина має малюватись як заокруглена «пігулка» **всередині** треку (обидва кінці круглі), а не тонка риска, що випирає за заокруглений край. І в menu bar, і в попапі; мітки інтервалів та time-marker мають стояти узгоджено зі стисненою на `BS` шкалою |
 | `edge-extremes` | pill на самому початку | red (на всю ширину) | Обидва краї шкали одночасно: 5h 0 % і 7d 100 % на **свіжих** вікнах. Перевірка **прищеплення країв смужки до торців треку**: 7d має заповнювати трек **від краю до краю** — жодного сірого хвоста ані ліворуч, ані праворуч від заливки; 5h показує пігулку впритул до лівого торця. Міряти пікселями (заливка і трек мають закінчуватись на тому самому x), бо на око 2 pt хвоста легко проґавити. І в menu bar, і в попапі |
 
@@ -400,8 +402,8 @@ Settings → Notifications → **Preview** біля «Claude service incidents»
 >
 > **Синій — лише базові 5h/7d.** Синя зона (`.farBehind`, ADR-0061) з'являється, коли запас
 > `time − usage` перевищує behind-поріг **конфігурованої** ширини (ADR-0062): база 1h / 5h, 1d / 7d,
-> помножена на `FarBehindInterval` (×1/×2/×3; дефолт ×2 = 2h/2d = 0.40/0.286), або зовсім вимкнена
-> (`.off`) — і минуло > 20 хв вікна. Наявні «зелені» стуби (`calm-both`, `red-green`, `calm5-orange7`,
+> помножена на фіксований `farBehindWidthMultiplier` = 2 (2h/2d = 0.40/0.286), минуло > 20 хв вікна,
+> **і** weekly-gate відкритий (`blueAllowed` — тиждень сам не попереду темпу, ADR-0081). Наявні «зелені» стуби (`calm-both`, `red-green`, `calm5-orange7`,
 > `near-reset` 7d) мають **малий** запас, тож коректно лишаються зеленими за будь-якого інтервалу.
 
 ### Нові Appearance-опції подачі барів (#224, ADR-0062)
@@ -421,7 +423,7 @@ Settings → Notifications → **Preview** біля «Claude service incidents»
   `checkmark`, тоді вертається (тултип при наведенні: «Copy Appearance settings to clipboard»).
   Той самий фідбек має давати копі-кнопка у вікні Troubleshoot — спільні константи в `CopyFeedback`.
   Вставити в редактор і перевірити **порядок ключів — він має збігатися з порядком контролів на
-  сторінці згори вниз** (`farBehindInterval` → `menuBarStyle` → `calmColorMode` → … →
+  сторінці згори вниз** (`menuBarStyle` → `calmColorMode` → … →
   `showServiceStatusDot` → `dropdownStyle` → … → `showTicks`), а не бути алфавітним; це і є суть
   фічі, тож звіряти з панеллю поруч. Зверни увагу: два стильові ключі стоять **у різних місцях**
   списку — кожен на позиції свого рядка в своїй секції, а не поруч; ключа `barStyle` в дампі
@@ -431,7 +433,8 @@ Settings → Notifications → **Preview** біля «Claude service incidents»
   кліку не змінюється.
 - **Bar style — ДВА окремі рядки** ([ADR-0080](../adr/0080-per-surface-bar-style.md), #329): перший
   у секції **Menu Bar Widget**, другий у **Dropdown Widget**, обидва `Pressure | Gauge | Progress`.
-  У безіменній секції вгорі лишається сам **Far behind pace interval** — Bar style звідти пішов.
+  Безіменної секції вгорі **більше немає** — її єдиний контрол (Far behind pace interval) прибрано
+  разом з опцією (ADR-0081).
   Стилі: «Pressure» — стрічка від лівого краю без маркера, довжиною `pressureLength` =
   `(r + k − 1)/k`, де `r = (u − t)/(1 − t)`, `k = 1.25` (20 % бару = рівно за планом, 33 % = початок
   помаранчевого); «Progress» — gap + маркер часу в шкалі вікна; «Gauge»
@@ -451,9 +454,8 @@ Settings → Notifications → **Preview** біля «Claude service incidents»
   змінюється), решта raw-ів (включно з пре-#307 `pacing`/`simple`) — сам у себе на обидві поверхні.
   Хто ключа не мав, отримує новий дефолт **Gauge/Gauge**.
 - **Calm non-critical colors** (`Off | Yellow + Green | + Blue`): що мутиться в білий (orange/red завжди
-  кольорові). «+ Blue» **disabled** коли Far behind = «Less blue, please!» (клік → popover причини).
-- **Far behind pace interval** (`1h/1d | 2h/2d | 3h/3d | Less blue, please!`): поріг green→blue; «Less
-  blue» вимикає синій зовсім (на `far-behind` стубі бари стають зеленими).
+  кольорові). Усі три сегменти **завжди активні** — синій більше не можна вимкнути, тож стану «нема
+  чого мутити» не існує (ADR-0081).
 - **Show ticks on bars** (Dropdown Widget): вмикає/вимикає під-барову шкалу засічок у попапі (menu bar
   засічок не має). Набір засічок залежить від стилю ([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md)):
   під **Progress** — частки вікна (`subdivisions − 1`: 4 для 5h, 6 для 7d), під **Pressure** — чверті

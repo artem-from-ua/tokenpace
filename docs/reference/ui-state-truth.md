@@ -336,6 +336,7 @@ Per-surface пари прапорців тут більше немає, і зн�
 ```swift
 // PacingModel.severity
 if pacing == .onPaceOrBehind {                    // usage <= time
+    if !blueAllowed { return .calm }              // weekly gate / інертний бар (ADR-0081)
     if elapsed <= 1200 { return .calm }           // 20-хв старт-override
     return (time - usage) > behindThreshold ? .farBehind : .calm
 }
@@ -389,6 +390,8 @@ return (usage - time) < 0.16 * (1 - time) ? .calm : .ahead
 
 | Комбінація | Чому неможлива |
 |---|---|
+| **Синій 5h при 7d ∈ {yellow, orange, red}** | weekly-capacity gate ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md)): `blueAllowed == false`, тож бік «позаду» лишається зеленим за будь-якого запасу. Стосується і пейсингового бару, і idle-пігулки |
+| **Синя idle-пігулка при гарячому тижні** | той самий gate — пігулка зелена; сіра лишається лише для `isBlocked` |
 | Pause-гліф **і** символ валюти разом | `blockedPause` вимагає `CreditsPacing.isBlocked` — «немає шляху працювати»; кредити, що покривають ліміт, і є тим шляхом |
 | Вичерпаний ліміт **без жодного** з них | Зворотний бік того самого: при `mainWindowExhausted` стани вичерпні — або `creditsCanCover` (символ валюти), або `isBlocked` (pause-гліф). Порожнього варіанту не буває |
 | 100% кредитів + «well ahead of pace» | `creditsStatusText` при `usage >= 1` повертає `"limit reached"` |
