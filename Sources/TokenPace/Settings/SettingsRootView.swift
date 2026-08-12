@@ -135,6 +135,8 @@ private struct SidebarChip: View {
     var body: some View {
         glyph
             .foregroundStyle(glyphColor)
+            // A per-section nudge, for the one glyph whose mass sits off-centre in its own box.
+            .offset(y: section.glyphOffsetY)
             // The system artwork's glyph carries a hairline dark edge that separates it from the
             // tint (visible as a thin gray outline hugging the glyph, strongest below it); a
             // sub-point shadow reproduces it.

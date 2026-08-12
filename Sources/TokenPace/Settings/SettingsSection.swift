@@ -107,11 +107,11 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         switch self {
         case .about: return "info.circle"
         case .general: return "gear"
-        case .uiPresets: return "paintbrush"
+        case .uiPresets: return "paintbrush.fill"
         case .menuBar: return "distribute.vertical"
         case .dropdown: return "chart.bar.horizontal.page"
         case .notifications: return "bell.badge.fill"
-        case .extraFeatures: return "puzzlepiece.extension"
+        case .extraFeatures: return "puzzlepiece.extension.fill"
         default: return "circle.dashed"
         }
     }
@@ -131,6 +131,14 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
     /// The slice of the symbol's height the chip keeps when ``trimsOuterRules`` is set — the band
     /// between the two rules, generous enough to clear the rectangle's rounded corners at any size.
     static let trimmedBand: ClosedRange<CGFloat> = 0.28...0.72
+
+    /// Vertical nudge for the glyph inside its chip, in points, negative = up.
+    ///
+    /// `puzzlepiece.extension.fill` carries its tab on the **left edge** and its mass low, so centred
+    /// on the glyph box it reads as sitting below centre in the capsule. A small lift puts the body
+    /// where the eye expects it. Kept per-section rather than applied to every chip: no other symbol
+    /// here needs it, and a blanket offset would push the ones that are already right.
+    var glyphOffsetY: CGFloat { self == .extraFeatures ? -1 : 0 }
 
     /// Capsule gradient endpoints of the sidebar icon chip, matching System Settings (#156).
     /// The system capsules are baked icon artwork, not dynamic colors — each pane has its own
