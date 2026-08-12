@@ -6,10 +6,13 @@ import TokenPaceKit
 /// Settings → Extra features: opt-in extras grouped in one pane —
 /// - **Monitored services** — which Claude services feed the menu-bar status (#89, ADR-0024).
 /// - **Sessions backup** — the raw-log archiver (#110, ADR-0031): enable, destination, Archive Now.
-/// - **Session status** — the "sessions awaiting input" indicator (#233, ADR-0066), moved here from
-///   General (its placement is still configured in Appearance).
 /// - **Usage history** — the usage journal collector (#242, ADR-0067): enable, plus a read-only
 ///   destination the user can reveal in Finder but not change (the file lives in Application Support).
+///
+/// The "Session status" section that used to sit here moved to Appearance's parent page (#333): the
+/// master switch is what turns the *indicator* on, and it governs both surfaces, so it belongs with
+/// them rather than in a drawer of unrelated extras. The rest of this pane is scheduled to follow —
+/// #317 stage 2 retires the pane entirely.
 struct ExtraFeaturesPane: View {
     @Bindable var model: SettingsModel
 
@@ -82,7 +85,7 @@ struct ExtraFeaturesPane: View {
                 // caveat covers the whole section, so it rides the *header*: directly under the title
                 // and outside the grouped card, rather than as a row among the switches.
                 SectionHeaderWithHint(title: "Monitored services",
-                                      hint: model.stubScenarioActive ? Self.stubbedHint : nil)
+                                      hint: model.stubScenarioActive ? SettingsStubHint.text : nil)
             }
 
             // MARK: Sessions backup (was "Session Logs")
@@ -125,7 +128,9 @@ struct ExtraFeaturesPane: View {
                     Toggle("Show sessions awaiting input", isOn: Binding(
                         get: { model.awaitingInputEnabled },
                         set: { model.setAwaitingInputEnabled($0) }))
-                    SettingsHint(text: "Shows how many Claude Code sessions are waiting for your reply. Configure where it appears in Appearance.")
+                    SettingsHint(text: "Shows how many Claude Code sessions are waiting for your reply "
+                        + "in the dropdown. Whether it also appears in the menu bar is configured in "
+                        + "Appearance → Menu bar.")
                     // Unlike the stub caveat in the header, this one is unconditional: the feature
                     // reads Claude Code's private state files (ADR-0066), so the fragility is a
                     // permanent property of it rather than a state we detect. Declaring it here is
@@ -139,7 +144,7 @@ struct ExtraFeaturesPane: View {
                 // live ~/.claude trees would let real waiting sessions leak into it. `TOKENPACE_AWAITING=N`
                 // exercises the indicator with synthetic sessions instead. Same header treatment as above.
                 SectionHeaderWithHint(title: "Session status",
-                                      hint: model.stubScenarioActive ? Self.stubbedHint : nil)
+                                      hint: model.stubScenarioActive ? SettingsStubHint.text : nil)
             }
 
             // MARK: Usage history (usage journal collector, #242)
@@ -175,10 +180,6 @@ struct ExtraFeaturesPane: View {
         .animation(nil, value: model.journalEnabled)
         .animation(nil, value: model.webDesktopEnabled)
     }
-
-    /// The ⚠️ line shown under any section whose data is canned by a `TOKENPACE_STUB` scenario. Shared
-    /// with `AppearancePane` so the wording stays identical across panes.
-    static let stubbedHint = "Stubbed in this development build."
 
     private var archiveDestinationURL: URL? {
         guard let path = model.archiveDestination else { return nil }

@@ -3,9 +3,11 @@ import SwiftUI
 // MARK: - SettingsSection (#168, ADR-0042)
 
 /// The Settings window's sidebar sections, in display order. The raw `Int` is the **0-based index**
-/// that the `TOKENPACE_SETTINGS_SECTION` dev hook selects (0 = About … 5 = Session Logs) — this enum
-/// is the single source of truth for that order and mapping, so the sidebar, the detail switch, and
-/// the docs (`ui-verification.md`) all agree. Changing the order here changes the dev-hook indices.
+/// that the `TOKENPACE_SETTINGS_SECTION` dev hook selects (0 = About … 4 = Extra features) — this
+/// enum is the single source of truth for that order and mapping, so the sidebar, the detail switch,
+/// and the docs (`ui-verification.md`) all agree. Changing the order here changes the dev-hook
+/// indices. Child pages drilled into from a section have their own indices in the same space — see
+/// ``SettingsChildPage`` (#333, ADR-0082).
 enum SettingsSection: Int, CaseIterable, Identifiable {
     case about = 0
     case general = 1

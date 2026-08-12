@@ -35,8 +35,8 @@ struct SettingsRootView: View {
             }
             .listStyle(.sidebar)
             // `.navigationSplitViewColumnWidth` is unreliable for a `.sidebar` List (it leaves the
-            // sidebar at SwiftUI's narrow default, truncating "Monitored Services"). Constrain the
-            // List's own width instead so it holds the longest label; the width tracks the system
+            // sidebar at SwiftUI's narrow default, truncating the longer labels). Constrain the
+            // List's own width instead so it holds the longest one; the width tracks the system
             // sidebar-icon-size bucket, like System Settings.
             .frame(width: model.sidebarIcons.sidebarWidth)
             // A menu-bar Settings window has no collapsible sidebar (System Settings doesn't either);
@@ -58,8 +58,8 @@ struct SettingsRootView: View {
         .frame(minWidth: minWidth, maxWidth: .infinity, minHeight: minHeight, maxHeight: .infinity)
     }
 
-    /// One sidebar row for a section — the tinted chip plus the title, tagged for selection. Shared by
-    /// both sidebar groups (the leading Insights section and the main list).
+    /// One sidebar row for a section — the tinted chip plus the title, tagged for selection. Shared
+    /// by every sidebar group.
     private func sidebarRow(_ section: SettingsSection) -> some View {
         Label {
             Text(section.title)
@@ -78,17 +78,33 @@ struct SettingsRootView: View {
         static let formTopMargin: CGFloat = -20
     }
 
+    /// The detail column's content: the open child page if there is one, otherwise the selected
+    /// section's own pane (#333).
+    ///
+    /// A child page is swapped in **here**, at the same level as a pane, rather than pushed onto a
+    /// `NavigationStack` wrapped around this column. Two reasons, both already paid for: a stack's
+    /// back button cannot reach our toolbar (`NavigationSplitView` inside an `NSHostingController`
+    /// does not register its columns with the toolbar bridge — ADR-0077 §3), and any container
+    /// introduced between `detail:` and the pane would sit between the `Form` and the
+    /// `.contentMargins` applied to this view, moving every card's top edge.
     @ViewBuilder
     private var detailPane: some View {
-        switch model.selection {
-        case .about:             AboutPane(model: model)
-        case .general:           GeneralPane(model: model)
-        case .appearance:        AppearancePane(model: model)
-        case .notifications:     NotificationsPane(model: model)
-        case .extraFeatures:     ExtraFeaturesPane(model: model)
-        // Scroll-test filler rows (`TOKENPACE_SIDEBAR_FILLER`) have no pane of their own; they exist
-        // only to make the sidebar long enough to scroll.
-        default:                 Text(model.selection.title).foregroundStyle(.secondary)
+        if let child = model.childPage {
+            switch child {
+            case .appearanceMenuBar:  AppearanceMenuBarPane(model: model)
+            case .appearanceDropdown: AppearanceDropdownPane(model: model)
+            }
+        } else {
+            switch model.selection {
+            case .about:             AboutPane(model: model)
+            case .general:           GeneralPane(model: model)
+            case .appearance:        AppearancePane(model: model)
+            case .notifications:     NotificationsPane(model: model)
+            case .extraFeatures:     ExtraFeaturesPane(model: model)
+            // Scroll-test filler rows (`TOKENPACE_SIDEBAR_FILLER`) have no pane of their own; they
+            // exist only to make the sidebar long enough to scroll.
+            default:                 Text(model.selection.title).foregroundStyle(.secondary)
+            }
         }
     }
 }
@@ -113,10 +129,17 @@ private struct SidebarLabelStyle: LabelStyle {
 /// The coloured rounded-rect chip behind a sidebar section's SF Symbol, matching System Settings —
 /// a white glyph on a tinted rounded rect. Chip/symbol sizes follow the system "Sidebar icon size"
 /// via `SidebarIconMetrics` (no single hardcoded size).
+///
+/// Sidebar-only: the drill-in navigator rows (`SettingsNavigationRow`, #333) draw their own flat
+/// black/white chip instead, because theirs depicts a *surface* rather than naming a pane — the
+/// measured gradient and the inactive-window dimming below would both work against that.
 private struct SidebarChip: View {
     let symbol: String
     let tint: CapsuleTint
-    var metrics: SidebarIconMetrics
+    /// Chip side length in points.
+    var chip: CGFloat
+    /// SF-Symbol point size inside the chip.
+    var symbolSize: CGFloat
     /// Sidebar labels are vibrant, so the material dims them automatically when the window resigns
     /// key — but the chip is a flat tint that never participates in vibrancy, so it kept full color
     /// in an inactive window. System Settings dims the two chip layers separately: the tinted
@@ -126,15 +149,27 @@ private struct SidebarChip: View {
     @Environment(\.appearsActive) private var appearsActive
     @Environment(\.colorScheme) private var colorScheme
 
+    /// The sidebar's spelling: sizes come from the live system bucket.
+    init(symbol: String, tint: CapsuleTint, metrics: SidebarIconMetrics) {
+        self.init(symbol: symbol, tint: tint, chip: metrics.chip, symbolSize: metrics.symbol)
+    }
+
+    init(symbol: String, tint: CapsuleTint, chip: CGFloat, symbolSize: CGFloat) {
+        self.symbol = symbol
+        self.tint = tint
+        self.chip = chip
+        self.symbolSize = symbolSize
+    }
+
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: metrics.symbol, weight: .regular))
+            .font(.system(size: symbolSize, weight: .regular))
             .foregroundStyle(appearsActive ? Color.white : Metrics.inactiveGlyph(for: colorScheme))
             // The system artwork's glyph carries a hairline dark edge that separates it from the
             // tint (visible as a thin gray outline hugging the glyph, strongest below it); a
             // sub-point shadow reproduces it.
             .shadow(color: Metrics.glyphEdge, radius: Metrics.glyphEdgeRadius, y: Metrics.glyphEdgeOffset)
-            .frame(width: metrics.chip, height: metrics.chip)
+            .frame(width: chip, height: chip)
             // Fixed 5 pt corner radius, matching the previous AppKit ChipView (System Settings' chip).
             .background(
                 capsuleStyle,

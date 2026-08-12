@@ -110,7 +110,7 @@ enum PersistedConfig {
         /// Whether the session-log archiver runs (#110). Default-off (opt-in) — see the property.
         static let archiveEnabled = "archiveEnabled"
         /// Whether the "sessions awaiting input" indicator is shown (#233). Default-off (opt-in) —
-        /// master toggle in Extra features; placement configured in Appearance. See the property.
+        /// master toggle on the Appearance page; placement on its Menu bar child page. See the property.
         static let awaitingInputEnabled = "awaitingInputEnabled"
         /// Whether the awaiting-input indicator also appears in the menu bar (as the first leading
         /// element), in addition to the popup (#233). Default-off (opt-in). An Appearance option, but
