@@ -48,6 +48,8 @@ enum StubScenario: String, CaseIterable {
     case midBandReset = "mid-band-reset"
     case calmBoth = "calm-both"
     case farBehind = "far-behind"
+    case weeklyGate = "weekly-gate"
+    case idleWeekHot = "idle-week-hot"
     case pressureSweep = "pressure-sweep"
     case gaugeSweep = "gauge-sweep"
     case barExtremes = "bar-extremes"
@@ -163,6 +165,8 @@ enum StubScenario: String, CaseIterable {
         case .midBandReset:        return "Pacing · reset 4 h 41 m out (mid band)"
         case .calmBoth:            return "Pacing · both calm"
         case .farBehind:           return "Pacing · both far behind (blue)"
+        case .weeklyGate:          return "Pacing · 5h far behind, week spent (gate)"
+        case .idleWeekHot:         return "Idle · week ahead of pace (green pill)"
         case .pressureSweep:       return "Pacing · Pressure scale (sharp 5h + clipped 7d)"
         case .gaugeSweep:          return "Pacing · Gauge scale (full-left 5h + short-right 7d)"
         case .barExtremes:         return "Pacing · fill extremes (full blue 5h + 1 % green 7d)"
@@ -245,6 +249,21 @@ enum StubScenario: String, CaseIterable {
         case .farBehind:
             return "Both base bars far behind pace (ADR-0061): a big surplus past the behind-threshold "
                  + "→ blue. Turn \"Work harder\" on with Calm colours to keep the blue coloured."
+        case .weeklyGate:
+            return "The weekly-capacity gate. 5h is deep behind pace (u = 5 %, t = 60 %) — a 55 pp "
+                 + "surplus, far past the 40 pp threshold, so it WOULD be blue — but the 7-day window "
+                 + "is exhausted (100 %). Blue advises \"there's room to push\", which a spent week "
+                 + "cannot fund, so the 5h bar must be GREEN, not blue (and not yellow: its own pace is "
+                 + "calm). Check both surfaces, and the popup's 5h row saying \"on pace\" rather than "
+                 + "\"far behind pace\". Compare with `far-behind`, where the week is calm and the blue "
+                 + "stays."
+        case .idleWeekHot:
+            return "Idle 5h while the week runs ahead of pace (u = 70 %, t = 29 %). No active session, "
+                 + "so the 5h bar is the knobless idle pill — and because the week has no headroom to "
+                 + "advertise, it must be GREEN, not the \"ready to start\" blue. The status word stays "
+                 + "\"ready to start\" (work IS possible; only the promise of spare quota is withdrawn). "
+                 + "Compare with `idle` (calm week → blue pill) and `idle-blocked` (7d exhausted, no "
+                 + "credits → grey pill, \"waiting for limit reset\")."
         case .pressureSweep:
             return "Pressure scale (#307): 5h three points from exhaustion with 7 % of the window left "
                  + "— 4 % of the bar on the old window scale (below the min pill), 66 % now. 7d sits in "
@@ -376,6 +395,8 @@ enum StubScenario: String, CaseIterable {
         case .midBandReset:        return StubUsageTransport(mode: .pacing(.midBandReset), now: now)
         case .calmBoth:            return StubUsageTransport(mode: .pacing(.calmBoth), now: now)
         case .farBehind:           return StubUsageTransport(mode: .pacing(.farBehind), now: now)
+        case .weeklyGate:          return StubUsageTransport(mode: .pacing(.weeklyGate), now: now)
+        case .idleWeekHot:         return StubUsageTransport(mode: .idleWeekHot, now: now)
         case .pressureSweep:       return StubUsageTransport(mode: .pacing(.pressureSweep), now: now)
         case .gaugeSweep:          return StubUsageTransport(mode: .pacing(.gaugeSweep), now: now)
         case .barExtremes:         return StubUsageTransport(mode: .pacing(.barExtremes), now: now)

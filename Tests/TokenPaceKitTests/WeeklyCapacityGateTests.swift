@@ -238,3 +238,44 @@ struct WeeklyGateJournalTests {
         #expect(sample.d7.sev == .blue)
     }
 }
+
+// MARK: - Stub-frame parity
+
+/// The two new stub frames must actually produce the states their summaries promise — a stub whose
+/// fixture drifts is worse than no stub, because the manual check then "passes" against the wrong thing.
+@Suite("Weekly gate — stub frames")
+struct WeeklyGateStubFrameTests {
+
+    /// `weekly-gate`: 5h deep behind (u = 5 %, 2 h left of 5 h → t = 60 %, surplus 55 pp) with the week
+    /// exhausted. The 5-hour bar must be green, and the frame must NOT read as blocked-with-hidden-bars
+    /// (`pauseHidesBars` is off by default, but the row itself must still be a normal 5h row).
+    @Test func weeklyGateFrameShowsAGreenFiveHourBar() {
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 5, resetsAt: resetsAt(inSeconds: 2 * 3600)),
+            sevenDay: UsageWindow(utilization: 100, resetsAt: resetsAt(inSeconds: 5 * 24 * 3600)),
+            limits: [],
+            spend: nil)
+        let five = PopupLayout.make(from: snap, now: now, lastUpdate: now, interval: 60)
+            .rows.first { $0.title == "5-hour" }
+        #expect(five?.sessionIdle == false)          // a real bar, not the idle placeholder
+        #expect(five?.bar.blueAllowed == false)      // gate shut by the exhausted week
+        #expect(five?.bar.severity == .calm)         // …so green, despite the 55 pp surplus
+    }
+
+    /// `idle-week-hot`: no 5h session, week at 70 % with ~5 days left (ahead of pace, not exhausted).
+    /// The idle pill must be the green "ready, no headroom" state — not blue, and not the grey blocked
+    /// one (which needs an exhausted week credits cannot cover).
+    @Test func idleWeekHotFrameShowsAGreenPill() {
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
+            sevenDay: UsageWindow(utilization: 70, resetsAt: resetsAt(inSeconds: 5 * 24 * 3600)),
+            limits: [],
+            sessionIdle: true,
+            spend: nil)
+        let idle = PopupLayout.make(from: snap, now: now, lastUpdate: now, interval: 60)
+            .rows.first { $0.sessionIdle }
+        #expect(idle != nil)
+        #expect(idle?.sessionBlocked == false)   // not the grey state
+        #expect(idle?.weeklyHeadroom == false)   // …but not the blue one either → green
+    }
+}
