@@ -41,18 +41,24 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
     var id: Int { rawValue }
 
     /// The sidebar groups, **in display order** — a divider is drawn between each (a `.sidebar` List
-    /// renders the gap between `Section`s as the divider). `About` sits alone at the top, the app's own
-    /// settings next, then the three UI pages as a group of their own, and `Extra features` alone at the
-    /// bottom. (Monitored Services is no longer a sidebar pane — it moved into the Extra features pane
-    /// as a section, #242.)
+    /// renders the gap between `Section`s as the divider). `About` sits alone at the top, `General`
+    /// next, then the three UI pages as a group of their own, then `Notifications` alone, and
+    /// `Extra features` alone at the bottom. (Monitored Services is no longer a sidebar pane — it moved
+    /// into the Extra features pane as a section, #242.)
     ///
     /// The UI trio is grouped rather than drilled into (#333): the sidebar is short enough to carry
     /// three more rows, and a divider says "these three belong together" without costing the extra
     /// click a parent page would.
+    ///
+    /// `Notifications` sits below the UI pages in a group of its own rather than beside `General`: it
+    /// configures a surface outside the app's own windows — Notification Center — so it belongs neither
+    /// with the app-wide preferences above it nor with the two rendered surfaces in the UI group. The
+    /// gap on both sides is the point; pairing it with `General` implied a kinship that isn't there.
     static let groups: [[SettingsSection]] = [
         [.about],
-        [.general, .notifications],
+        [.general],
         [.uiPresets, .menuBar, .dropdown],
+        [.notifications],
         [.extraFeatures] + filler,
     ]
 
