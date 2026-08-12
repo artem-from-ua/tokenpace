@@ -9,10 +9,10 @@ import TokenPaceKit
 /// - **Session status** — the "sessions awaiting input" feature's own switch (#233, ADR-0066). It is
 ///   what makes the count appear in the dropdown; whether the *menu bar* also carries it is a
 ///   menu-bar concern and lives on that pane.
-/// - **Usage history** — the usage journal collector (#242, ADR-0067): enable, plus a read-only
-///   destination the user can reveal in Finder but not change (the file lives in Application Support).
 ///
-/// This pane is scheduled to be retired — #317 stage 2 moves the rest of it into Providers.
+/// This pane is being retired (#317). **Usage history** has already left for General — the journal
+/// is an app-wide feature, not a provider's. The three sections above go to Providers next, and the
+/// pane disappears with them.
 struct ExtraFeaturesPane: View {
     @Bindable var model: SettingsModel
 
@@ -147,37 +147,10 @@ struct ExtraFeaturesPane: View {
                                       hint: model.stubScenarioActive ? SettingsStubHint.text : nil)
             }
 
-            // MARK: Usage history (usage journal collector, #242)
-            Section("Usage history") {
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Record usage history", isOn: Binding(
-                        get: { model.journalEnabled },
-                        set: { model.setJournalEnabled($0) }))
-                    SettingsHint(text: "Saves each usage reading to a local file so the Insights window can show trends over time. The data stays on this Mac and never leaves it.")
-                }
-
-                // Read-only destination: the journal lives in Application Support and is not
-                // user-relocatable, but the folder can be revealed in Finder. Shown only when on.
-                // The path control is display-only (no click) and hugs its content — right-aligned
-                // before the button, since a separate "Open in Finder" button already reveals it.
-                if model.journalEnabled {
-                    LabeledContent("Location") {
-                        HStack(spacing: 8) {
-                            Spacer(minLength: 0)
-                            PathControlView(url: journalDirectoryURL, clickToReveal: false)
-                                .fixedSize()
-                            Button("Open in Finder") {
-                                NSWorkspace.shared.activateFileViewerSelecting([journalDirectoryURL])
-                            }
-                        }
-                    }
-                }
-            }
         }
         .formStyle(.grouped)
         // Show/hide the dependent rows without an insertion animation (avoids neighbour-height flicker).
         .animation(nil, value: model.archiveEnabled)
-        .animation(nil, value: model.journalEnabled)
         .animation(nil, value: model.webDesktopEnabled)
     }
 
@@ -185,7 +158,4 @@ struct ExtraFeaturesPane: View {
         guard let path = model.archiveDestination else { return nil }
         return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
     }
-
-    /// The fixed journal directory in Application Support — read-only, revealed via Finder.
-    private var journalDirectoryURL: URL { UsageJournal.defaultDirectory }
 }

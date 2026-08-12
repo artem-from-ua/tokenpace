@@ -71,8 +71,10 @@ final class InsightsWindowController: NSWindowController {
 ///   ticket opens with. Quantifying it honestly means counting *days with data* (idle cadence and
 ///   `pausePollingWhenScreenLocked` leave gaps, so wall-clock overstates coverage) — that belongs with
 ///   the charts, not with a placeholder, so the promise is dropped rather than made precise.
-/// - The Settings pointer names **Extra features**, where the toggle actually lives; it used to say
-///   General, which is where it was before #242 moved it (see `ExtraFeaturesPane`).
+/// - The Settings pointer names **General**, where the toggle actually lives. This is the third
+///   place it has named: General before #242, Extra features after it, General again since #317
+///   moved the journal back. A hard-coded path to another pane goes stale silently — nothing fails
+///   to build when the toggle moves — so whoever moves it next must grep for this string.
 private struct InsightsRootView: View {
     /// Read once on appear — a plain read of the collector switch (no live binding needed for a
     /// placeholder; the window is short-lived and re-reads on each open).
@@ -93,7 +95,7 @@ private struct InsightsRootView: View {
             SettingsHint(text: "This window is still a placeholder — the charts arrive in a future version of TokenPace.",
                          warning: true)
             if !recording {
-                Text("Turn on **Record usage history** in Settings → Extra features to start collecting data.")
+                Text("Turn on **Record usage history** in Settings → General to start collecting data.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

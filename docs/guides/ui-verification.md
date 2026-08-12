@@ -713,7 +713,7 @@ Notifications / Extra features. Розділення саме таке, щоб �
 колишній Appearance.
 
 (Monitored Services більше не окрема секція — це підсекція «Monitored services» у Extra features,
-#242.)
+#242. Секція «Usage history» з Extra features **пішла** — вона тепер у General, #317.)
 
 ```sh
 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=3 swift run   # відкриє одразу на Notifications
@@ -1042,10 +1042,10 @@ TOKENPACE_DEVTOOLS=1 TOKENPACE_STUB=real swift run
 ### Журнал використання (#242, ADR-0067)
 
 Журнал **не має `TOKENPACE_STUB`-сценарію**: він пише лише на живих реальних даних
-(`currentScenario == .realNetwork` І тумблер «Record usage history» у Settings → **Extra features →
+(`currentScenario == .realNetwork` І тумблер «Record usage history» у Settings → **General →
 Usage history** увімкнено) — синтетичний стуб у журнал не потрапляє навмисно.
 
-- **Тумблер:** Settings → **Extra features** → секція «Usage history» → «Record usage history»
+- **Тумблер:** Settings → **General** → секція «Usage history» → «Record usage history»
   (default-off); під ним read-only «Location» (шлях у Application Support) із кнопкою «Open in Finder».
   Перегляд даних — окреме вікно **«Insights»**; його пункт **«Insights…»** у dropdown-меню (разом із
   роздільником після нього) **тимчасово закоментовано** в `App.swift`, бо показувати там поки нічого:
