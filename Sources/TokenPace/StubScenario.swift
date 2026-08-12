@@ -59,6 +59,7 @@ enum StubScenario: String, CaseIterable {
     case creditsLimitReached = "credits-limit-reached"
     case creditsNoLimit = "credits-no-limit"
     case creditsZeroSpent = "credits-zero-spent"
+    case creditsWideAmounts = "credits-wide-amounts"
     case justUnblocked = "just-unblocked"
     case creditsOnset = "credits-onset"
     case resetGrace = "reset-grace"
@@ -173,6 +174,7 @@ enum StubScenario: String, CaseIterable {
         case .creditsLimitReached: return "Credits · limit reached (red)"
         case .creditsNoLimit:      return "Credits · no limit (neutral)"
         case .creditsZeroSpent:    return "Credits · nothing spent yet"
+        case .creditsWideAmounts:  return "Credits · wide amounts (⌥ drops reset)"
         case .justUnblocked:       return "Back to work! edge"
         case .creditsOnset:        return "Extra Usage Credit onset"
         case .resetGrace:          return "Reset-boundary idle grace"
@@ -296,7 +298,17 @@ enum StubScenario: String, CaseIterable {
             return "Credits ¤ icon (#144): unlimited limit (limit: null) → NEUTRAL (foreground) icon."
         case .creditsZeroSpent:
             return "Credits enabled, €15 cap, nothing spent yet (amount_minor: 0) → the resting money "
-                 + "line reads \"€0 of €15\" (⌥ → \"€0.00 of €15.00\"); bar sits at zero."
+                 + "line reads \"€0 of €15\" (⌥ → \"spent €0.00 of €15.00\"); bar sits at zero. The cap "
+                 + "stays on the line at zero spend: without it the row would read like the unlimited "
+                 + "one, which is a different billing configuration."
+        case .creditsWideAmounts:
+            return "The fit gate at its worst: €1,234.56 of a €2,000 cap — the widest money line a real "
+                 + "payload can produce (322 pt under ⌥ against a 268 pt column). At rest both halves fit "
+                 + "(\"€1.23K of €2K\" + \"5d on Friday\"); hold ⌥ and the reset is DROPPED rather than "
+                 + "truncated to an ellipsis, leaving the amounts. Release ⌥ and it returns. Note the "
+                 + "gate also fires on plain `credits-active` (281 pt) — this stub is the extreme, not "
+                 + "the only case. 7d is left un-exhausted on purpose: a blocking reset is a red badge "
+                 + "and is never dropped."
         case .justUnblocked:
             return "Back-to-work edge (#160): first poll blocked (7d 100 %), then workable → fires the "
                  + "\"Back to work!\" notification once (quiet hours + authorization permitting)."
@@ -375,6 +387,7 @@ enum StubScenario: String, CaseIterable {
         case .creditsLimitReached: return StubUsageTransport(mode: .credits(.limitReached), now: now)
         case .creditsNoLimit:      return StubUsageTransport(mode: .credits(.noLimit), now: now)
         case .creditsZeroSpent:    return StubUsageTransport(mode: .credits(.zeroSpent), now: now)
+        case .creditsWideAmounts:  return StubUsageTransport(mode: .credits(.wideAmounts), now: now)
         case .justUnblocked:       return StubUsageTransport(mode: .justUnblocked, now: now)
         case .creditsOnset:        return StubUsageTransport(mode: .creditsOnset, now: now)
         case .resetGrace:          return StubUsageTransport(mode: .resetGrace, now: now)
