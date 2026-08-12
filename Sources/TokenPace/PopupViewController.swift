@@ -664,12 +664,14 @@ final class PopupBarView: NSView {
     /// to base 5h/7d bars by the caller (`isBaseLimit`); per-model / credits rows stay green.
     static func behindColor(_ l: BarLayout) -> NSColor {
         let green = ColorStore.shared.color(.green)
-        // `behindMultiplier == 0` (FarBehindInterval.off): blue is disabled — always green, any surplus.
-        if l.behindMultiplier == 0 { return green }
+        // Blue is off the table for this bar (weekly gate closed, or an inert/non-token bar) → green.
+        // Must stay in lock-step with `isFarBehind`, or the bar reads green under a "far behind pace"
+        // status word.
+        if !l.blueAllowed { return green }
         let elapsed = Double(l.windowDurationSeconds) - l.remainingSeconds
         if elapsed <= PacingModel.pacingBlueStartOverrideSeconds { return green }
-        return (l.timeFraction - l.usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: l.windowDurationSeconds, multiplier: l.behindMultiplier)
-            ? ColorStore.shared.color(.paceBlue) : green
+        return (l.timeFraction - l.usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: l.windowDurationSeconds)
+            ? ColorStore.shared.color(.blue) : green
     }
 
     /// Glow radii (#188 follow-up): a soft coloured halo (ambient) behind the coloured pacing strip, the
@@ -2591,10 +2593,11 @@ final class PopupViewController: NSViewController {
     /// the base 5h/7d rows (which render blue) get the "far behind pace" wording.
     private static func isFarBehind(_ bar: BarLayout) -> Bool {
         guard bar.pacing == .onPaceOrBehind else { return false }
-        if bar.behindMultiplier == 0 { return false }   // FarBehindInterval.off → never blue
+        // Mirror of `behindColor`'s first test — keep the two edited together (see that method).
+        if !bar.blueAllowed { return false }
         let elapsed = Double(bar.windowDurationSeconds) - bar.remainingSeconds
         if elapsed <= PacingModel.pacingBlueStartOverrideSeconds { return false }
-        return (bar.timeFraction - bar.usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: bar.windowDurationSeconds, multiplier: bar.behindMultiplier)
+        return (bar.timeFraction - bar.usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: bar.windowDurationSeconds)
     }
 
     // MARK: Extra usage (money-credits) formatters (#145)

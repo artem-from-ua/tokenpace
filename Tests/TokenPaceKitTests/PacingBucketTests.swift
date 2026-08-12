@@ -14,14 +14,14 @@ struct PacingBucketTests {
     private let fiveHour = LimitWindow.fiveHour.durationSeconds   // 18 000
 
     /// A layout mid-window (so neither 20-min override fires) with the given usage/time fractions.
-    private func layout(usage: Double, time: Double, behindMultiplier: Int = 2) -> BarLayout {
+    private func layout(usage: Double, time: Double, blueAllowed: Bool = true) -> BarLayout {
         // Place the window half-elapsed so `remainingSeconds` and `elapsed` are both well past 1200 s.
         let remaining = Double(fiveHour) * 0.5
         let pacing: PacingState = time >= usage ? .onPaceOrBehind : .ahead
         return BarLayout(
             usageFraction: usage, timeFraction: time, pacing: pacing,
             remainingSeconds: remaining, windowDurationSeconds: fiveHour,
-            behindMultiplier: behindMultiplier)
+            blueAllowed: blueAllowed)
     }
 
     @Test func exhaustedIsRedEvenWhenOnPace() {
@@ -55,7 +55,7 @@ struct PacingBucketTests {
         // Within 20 min of reset, any ahead lead is orange regardless of the dynamic threshold.
         let l = BarLayout(
             usageFraction: 0.51, timeFraction: 0.5, pacing: .ahead,
-            remainingSeconds: 600, windowDurationSeconds: fiveHour, behindMultiplier: 2)
+            remainingSeconds: 600, windowDurationSeconds: fiveHour)
         #expect(PacingBucket.of(l) == .orange)   // lead 0.01 < threshold, but ≤ 20 min → orange
     }
 
@@ -65,14 +65,16 @@ struct PacingBucketTests {
         let l = BarLayout(
             usageFraction: 0.0, timeFraction: 0.9, pacing: .onPaceOrBehind,
             remainingSeconds: Double(fiveHour) - elapsed,
-            windowDurationSeconds: fiveHour, behindMultiplier: 2)
+            windowDurationSeconds: fiveHour)
         #expect(PacingBucket.of(l) == .green)
     }
 
-    @Test func blueIgnoresUserFarBehindSetting() {
-        // Even if the user turned blue OFF (behindMultiplier 0), the journal bucket still evaluates at
-        // medium — the "control-freak" contract — so a deep surplus reads blue regardless.
-        #expect(PacingBucket.of(layout(usage: 0.0, time: 0.5, behindMultiplier: 0)) == .blue)
+    @Test func blueRespectsBlueAllowed() {
+        // `blueAllowed` is not a cosmetic user setting but an objective fact about the data (the weekly
+        // window has no headroom), so the journal must honour it: the same deep surplus that reads blue
+        // with the gate open reads green with it closed.
+        #expect(PacingBucket.of(layout(usage: 0.0, time: 0.5)) == .blue)
+        #expect(PacingBucket.of(layout(usage: 0.0, time: 0.5, blueAllowed: false)) == .green)
     }
 
     @Test func codableRawValuesAreStable() {

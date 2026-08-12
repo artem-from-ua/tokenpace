@@ -4,12 +4,6 @@ import Foundation
 
 extension JournalRecord {
 
-    /// The `FarBehindInterval` multiplier the journal always paces at — the shipped **medium** width,
-    /// so the recorded ``PacingBucket`` is independent of the user's blue-zone setting (see
-    /// ``PacingBucket``). Kept in sync with ``PacingBucket`` by intent, not by reference (that type
-    /// hard-codes the same value for its own reason — the constant is private there).
-    private static let journalBehindMultiplier = 2
-
     /// Build a `usage` record from a successful poll's snapshot plus the poll instant and latency.
     ///
     /// All the derived states are computed here (in the pure Kit) so the shell stays a thin
@@ -29,16 +23,22 @@ extension JournalRecord {
             } ?? false,
             onCredits: ExtraUsageOnset.isOnCredits(snapshot))
 
+        // The weekly gate, hoisted **out** of the `UsageSample(...)` literal below: `d7` is built at the
+        // same expression level as `h5`, so the 7-day state has to be resolved before the literal or the
+        // 5-hour sample could not see it. Recording it here also keeps the journal's bucket identical to
+        // the pixel the user saw — the render layer applies the same gate.
+        let weeklyHeadroom = PacingModel.weeklyHasHeadroom(in: snapshot, now: now)
+
         let sample = UsageSample(
             t: ResetClock.isoString(from: now),
             ms: durationMs,
             plan: plan,
             tier: tier,
-            h5: window(snapshot.fiveHour, window: .fiveHour, now: now),
-            d7: window(snapshot.sevenDay, window: .sevenDay, now: now),
-            opus: snapshot.sevenDayOpus.map { window($0, window: .sevenDay, now: now) },
-            sonnet: snapshot.sevenDaySonnet.map { window($0, window: .sevenDay, now: now) },
-            scoped: snapshot.scopedModelWindows.map { scoped($0, now: now) },
+            h5: window(snapshot.fiveHour, window: .fiveHour, now: now, blueAllowed: weeklyHeadroom),
+            d7: window(snapshot.sevenDay, window: .sevenDay, now: now, blueAllowed: true),
+            opus: snapshot.sevenDayOpus.map { window($0, window: .sevenDay, now: now, blueAllowed: weeklyHeadroom) },
+            sonnet: snapshot.sevenDaySonnet.map { window($0, window: .sevenDay, now: now, blueAllowed: weeklyHeadroom) },
+            scoped: snapshot.scopedModelWindows.map { scoped($0, now: now, blueAllowed: weeklyHeadroom) },
             sessionIdle: snapshot.sessionIdle,
             spend: snapshot.spend.map { SpendSample($0, now: now) },
             blocked: CreditsPacing.isBlocked(in: snapshot),
@@ -93,7 +93,8 @@ extension JournalRecord {
     /// When the reset parses, the bucket comes from a real ``BarLayout``; when it doesn't (idle/empty
     /// or malformed reset), fall back to exhausted-or-green from utilisation alone (there is no pacing
     /// gap to colour without a reset instant).
-    private static func window(_ w: UsageWindow, window kind: LimitWindow, now: Date) -> WindowSample {
+    private static func window(_ w: UsageWindow, window kind: LimitWindow, now: Date,
+                               blueAllowed: Bool) -> WindowSample {
         guard let resetsAt = ResetClock.parse(w.resetsAt) else {
             // No parseable reset → no pacing gap to colour; `timePct` 0, `gap` from time(0)−util.
             return WindowSample(util: w.utilization, reset: w.resetsAt, timePct: 0,
@@ -101,16 +102,17 @@ extension JournalRecord {
         }
         let layout = PacingModel.barLayout(
             utilization: w.utilization, resetsAt: resetsAt, now: now,
-            window: kind, behindMultiplier: journalBehindMultiplier)
+            window: kind, blueAllowed: blueAllowed)
         return WindowSample(
             util: w.utilization, reset: w.resetsAt,
             timePct: layout.timeFraction, gap: layout.timeFraction * 100 - w.utilization,
             sev: PacingBucket.of(layout))
     }
 
-    /// Journal a scoped per-model window — all 7-day-paced, so it borrows the 7-day pacing math.
-    private static func scoped(_ s: ScopedModelWindow, now: Date) -> ScopedSample {
-        let w = window(s.window, window: .sevenDay, now: now)
+    /// Journal a scoped per-model window — all 7-day-paced, so it borrows the 7-day pacing math (and
+    /// the same weekly gate: a scoped limit spends from the weekly budget too).
+    private static func scoped(_ s: ScopedModelWindow, now: Date, blueAllowed: Bool) -> ScopedSample {
+        let w = window(s.window, window: .sevenDay, now: now, blueAllowed: blueAllowed)
         return ScopedSample(name: s.name, pct: s.window.utilization, reset: s.window.resetsAt,
                             timePct: w.timePct, gap: w.gap, sev: w.sev)
     }

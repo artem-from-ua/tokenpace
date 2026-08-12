@@ -339,10 +339,9 @@ public struct PopupLayout: Sendable, Equatable {
         from snapshot: UsageSnapshot,
         now: Date,
         lastUpdate: Date,
-        interval: TimeInterval,
-        behindMultiplier: Int = 2
+        interval: TimeInterval
     ) -> PopupLayout {
-        let rows = self.rows(from: snapshot, now: now, behindMultiplier: behindMultiplier)
+        let rows = self.rows(from: snapshot, now: now)
         let credits = self.creditsRow(from: snapshot, now: now)
         return PopupLayout(
             lastUpdateAge: max(0, now.timeIntervalSince(lastUpdate)),
@@ -386,8 +385,7 @@ public struct PopupLayout: Sendable, Equatable {
         health: UsageHealth,
         now: Date,
         interval: TimeInterval,
-        serviceStatus: StatusHealth? = nil,
-        behindMultiplier: Int = 2
+        serviceStatus: StatusHealth? = nil
     ) -> PopupLayout {
         let lastUpdateAge = health.lastSuccess.map { max(0, now.timeIntervalSince($0)) } ?? 0
 
@@ -404,7 +402,7 @@ public struct PopupLayout: Sendable, Equatable {
         }
 
         let rows = snapshot.map {
-            self.rows(from: $0, now: now, behindMultiplier: behindMultiplier)
+            self.rows(from: $0, now: now)
         } ?? []
         // A failing poll surfaces its own reason (with the last known — possibly stale — rows above).
         let warning: FailureReason? = health.isFailing ? health.reason : nil
@@ -448,7 +446,7 @@ public struct PopupLayout: Sendable, Equatable {
     ///
     /// Shared by both ``make`` overloads.
     private static func rows(
-        from snapshot: UsageSnapshot, now: Date, behindMultiplier: Int = 2
+        from snapshot: UsageSnapshot, now: Date
     ) -> [LimitRow] {
         // The 5-hour row is the idle placeholder when the window has no active session (#100); every
         // other row is built normally, including the 7-day one (which always exists). When idle is also
@@ -457,18 +455,23 @@ public struct PopupLayout: Sendable, Equatable {
         // it shows the normal "limit reached" — only the red blocking-reset badge marks it, via
         // `blockingReset`.)
         let idleBlocked = snapshot.sessionIdle && CreditsPacing.isBlocked(in: snapshot)
+        // The weekly gate (`PacingModel.weeklyHasHeadroom`): blue is "there is room to push", so every
+        // row that spends from the weekly budget — the 5-hour window and the 7-day-paced per-model
+        // rows — may only go blue while the 7-day window itself has headroom. The 7-day row never
+        // gates on itself.
+        let weeklyHeadroom = PacingModel.weeklyHasHeadroom(in: snapshot, now: now)
         var rows: [LimitRow] = [
-            snapshot.sessionIdle ? idleFiveHourRow(blocked: idleBlocked) : row(title: "5-hour", window: snapshot.fiveHour, as: .fiveHour, now: now, behindMultiplier: behindMultiplier),
-            row(title: "7-day", window: snapshot.sevenDay, as: .sevenDay, now: now, behindMultiplier: behindMultiplier),
+            snapshot.sessionIdle ? idleFiveHourRow(blocked: idleBlocked) : row(title: "5-hour", window: snapshot.fiveHour, as: .fiveHour, now: now, blueAllowed: weeklyHeadroom),
+            row(title: "7-day", window: snapshot.sevenDay, as: .sevenDay, now: now, blueAllowed: true),
         ]
         if let opus = snapshot.sevenDayOpus {
-            rows.append(row(title: "Opus", window: opus, as: .sevenDay, now: now, behindMultiplier: behindMultiplier))
+            rows.append(row(title: "Opus", window: opus, as: .sevenDay, now: now, blueAllowed: weeklyHeadroom))
         }
         if let sonnet = snapshot.sevenDaySonnet {
-            rows.append(row(title: "Sonnet", window: sonnet, as: .sevenDay, now: now, behindMultiplier: behindMultiplier))
+            rows.append(row(title: "Sonnet", window: sonnet, as: .sevenDay, now: now, blueAllowed: weeklyHeadroom))
         }
         for scoped in snapshot.scopedModelWindows {
-            rows.append(row(title: scoped.name, window: scoped.window, as: .sevenDay, now: now, behindMultiplier: behindMultiplier))
+            rows.append(row(title: scoped.name, window: scoped.window, as: .sevenDay, now: now, blueAllowed: weeklyHeadroom))
         }
         return rows
     }
@@ -539,7 +542,7 @@ public struct PopupLayout: Sendable, Equatable {
             indicator: .neutral,
             // Inert placeholder: `.onPaceOrBehind` → `severity` is `.calm` before `remainingSeconds`
             // is ever read, so the value here is immaterial (0).
-            bar: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0, windowDurationSeconds: 0, behindMultiplier: 2),
+            bar: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0, windowDurationSeconds: 0, blueAllowed: false),
             subdivisions: LimitWindow.fiveHour.subdivisions,
             resetLine: nil,
             sessionIdle: true,
@@ -572,14 +575,14 @@ public struct PopupLayout: Sendable, Equatable {
     /// `resets_at` falls back to `now` for the bar geometry (→ `elapsedFraction == 1.0`, matching
     /// `MenuBarLayout`) and to `nil` reset strings (the view shows a stale signal).
     private static func row(title: String, window: UsageWindow, as kind: LimitWindow, now: Date,
-                            behindMultiplier: Int = 2) -> LimitRow {
+                            blueAllowed: Bool = true) -> LimitRow {
         let parsed = ResetClock.parse(window.resetsAt)
         let bar = PacingModel.barLayout(
             utilization: window.utilization,
             resetsAt: parsed ?? now,
             now: now,
             window: kind,
-            behindMultiplier: behindMultiplier
+            blueAllowed: blueAllowed
         )
         let indicator = PacingModel.limitIndicator(utilization: window.utilization)
         let resetLine = parsed.flatMap { ResetClock.resetLine(resetsAt: $0, now: now) }

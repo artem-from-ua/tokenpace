@@ -84,8 +84,11 @@ struct PopupLayoutRowsTests {
         #expect(p.rows[0].utilization == 42.5)
         #expect(p.rows[1].utilization == 73.0)
 
+        // The 7-day window is at 73 % against a much smaller elapsed fraction, i.e. ahead of pace, so
+        // the weekly gate is closed and the 5-hour row is built with `blueAllowed: false`.
         let expected = PacingModel.barLayout(
-            utilization: 42.5, resetsAt: ResetClock.parse(snap.fiveHour.resetsAt)!, now: now, window: .fiveHour
+            utilization: 42.5, resetsAt: ResetClock.parse(snap.fiveHour.resetsAt)!, now: now, window: .fiveHour,
+            blueAllowed: PacingModel.weeklyHasHeadroom(in: snap, now: now)
         )
         #expect(p.rows[0].pacing == expected.pacing)
         #expect(p.rows[0].bar == expected)
