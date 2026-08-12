@@ -1232,6 +1232,11 @@ final class PopupViewController: NSViewController {
     /// A closure rather than a delegate protocol — this is the popup's only outbound action.
     var onToggleSubscription: (() -> Void)?
 
+    /// Invoked when the "turn monitoring back on" row is clicked in the nothing-monitored state
+    /// (#341). Same shape as ``onToggleSubscription``: the controller reports the click, the delegate
+    /// decides what it opens.
+    var onOpenProviderSettings: (() -> Void)?
+
     /// The clock the status/incident ages are measured against. Injected (not `Date()` inline) so a
     /// date-decoupled stub renders the same frame every time, matching how the engine takes its
     /// `now` — otherwise a screenshot frame would drift with the wall clock.
@@ -1509,9 +1514,19 @@ final class PopupViewController: NSViewController {
         // rather than falling back to the service rows the user was already looking at.
         let hasRecentRecovery = status?.checks.flatMap(\.components)
             .contains { Self.isRecentlyRecovered($0, now: now()) } ?? false
+        // #341: in the services-only mode the service rows are the popup's **entire** content — the
+        // limit sections are gone with the usage poll. The ordinary condition would hide them while
+        // everything is green, leaving a popup with nothing in it but a brand title, so this mode
+        // shows them unconditionally.
+        let servicesAreTheContent = layout.monitoringMode == .servicesOnly
         let showStatusRows = status != nil
-            && (status?.worstProblem != nil || hasRecentRecovery || (optionHeld && !layout.incidents.isEmpty))
+            && (servicesAreTheContent || status?.worstProblem != nil || hasRecentRecovery
+                || (optionHeld && !layout.incidents.isEmpty))
+        // The age threshold is 2× the usage poll's floor, which the status cadence never reaches — so
+        // in the services-only mode the age would essentially never appear without ⌥, and the one
+        // number that mode has to offer would stay hidden. There, show it whenever it exists.
         let showAge = optionHeld || layout.lastUpdateAge >= Self.staleAgeThreshold
+            || (servicesAreTheContent && layout.lastUpdateAge > 0)
         let ageString = showAge ? Self.ageText(layout.lastUpdateAge) : ""
         // Header layout (#233): the "Claude" brand title with the "Nm ago" age beside it on the left —
         // **always**, whether or not an awaiting-input count exists. The age belongs to the brand title,
@@ -1573,15 +1588,52 @@ final class PopupViewController: NSViewController {
                 // popup that looks identical to "nothing ever happened".
                 let components = status.checks.flatMap(\.components)
                     .filter { $0.status.isProblem || Self.isRecentlyRecovered($0, now: now) }
+                // #341: showing the section is not enough — this filter would still drop every row
+                // when all services are green, which is the normal case in the services-only mode.
+                // One summary row then stands for the lot: it is what the mode is reporting.
+                if servicesAreTheContent, components.isEmpty, !optionHeld {
+                    lastRow = addServiceStatusRow(
+                        label: "All services",
+                        status: status.worstProblem ?? .operational,
+                        age: layout.lastUpdateAge > 0 ? layout.lastUpdateAge : nil)
+                }
                 for component in components {
                     lastRow = addServiceStatusRow(
                         label: Self.displayName(component),
                         status: component.status,
                         age: component.stateAge(at: now))
                 }
+                // Under ⌥ the per-component rows are the detail this summary stands in for; when the
+                // filter kept nothing and ⌥ is held, fall back to listing every monitored component
+                // rather than an empty section.
+                if servicesAreTheContent, components.isEmpty, optionHeld {
+                    for component in status.checks.flatMap(\.components) {
+                        lastRow = addServiceStatusRow(
+                            label: Self.displayName(component),
+                            status: component.status,
+                            age: component.stateAge(at: now))
+                    }
+                }
             }
             if let subscribeRow = addSubscribeRowIfNeeded(layout) { lastRow = subscribeRow }
             if let lastRow { stack.setCustomSpacing(Metrics.sectionSpacing, after: lastRow) }
+        }
+
+        // #341: nothing is monitored. Same two-line shape as the error block below, but deliberately
+        // **not** red and not a ⚠️ — the app is doing exactly what it was told. The second line is a
+        // clickable route back into the setting that produced this state, since a popup that explains
+        // an empty widget without offering the way out is a dead end.
+        if layout.monitoringMode == .nothing {
+            addWarningTitle("Monitoring is off",
+                            symbolName: "eye.slash",
+                            color: Self.dimmedLabelColor)
+            let row = SubscribeRowView(
+                symbolName: "gearshape", text: "Turn it back on in Settings…", filled: false)
+            row.onClick = { [weak self] in self?.onOpenProviderSettings?() }
+            row.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            stack.setCustomSpacing(Metrics.sectionSpacing, after: row)
         }
 
         // Error block (when failing): two lines — a bold title led by the ⚠️ symbol, then the
@@ -2041,15 +2093,23 @@ final class PopupViewController: NSViewController {
     /// system red so the failure reads at a glance. The symbol is the popup counterpart of the
     /// menu-bar glyph (issue #12); using `.systemRed` (not the fixed palette sRGB) lets the popup,
     /// which is appearance-aware, keep contrast on light and dark panels alike.
+    ///
+    /// The symbol and colour are parameters because not every block that uses this shape is an error:
+    /// "monitoring is off" (#341) is a state the user chose, and painting it red would report their
+    /// own setting back to them as a fault. The defaults keep every existing caller unchanged.
     @discardableResult
-    private func addWarningTitle(_ text: String) -> NSView {
+    private func addWarningTitle(
+        _ text: String,
+        symbolName: String = "exclamationmark.triangle.fill",
+        color: NSColor? = nil
+    ) -> NSView {
         let font = NSFont.boldSystemFont(ofSize: Metrics.textSize)
-        let color = ColorStore.shared.color(.red)
+        let color = color ?? ColorStore.shared.color(.red)
         let attributed = NSMutableAttributedString()
 
         let symbolConfig = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
             .applying(.init(paletteColors: [color]))
-        if let symbol = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "warning")?
+        if let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: "warning")?
             .withSymbolConfiguration(symbolConfig) {
             let attachment = NSTextAttachment()
             attachment.image = symbol

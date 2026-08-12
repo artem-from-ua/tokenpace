@@ -461,9 +461,13 @@ final class SettingsWindowController: NSWindowController {
         window?.makeKeyAndOrderFront(nil)
         // Dev helper: `TOKENPACE_SETTINGS_SECTION=<index>` opens straight to a given pane — see
         // `SettingsSection` for the mapping (the raw values are stable identifiers, not row order).
-        if let raw = ProcessInfo.processInfo.environment["TOKENPACE_SETTINGS_SECTION"],
-           let idx = Int(raw), let section = SettingsSection(rawValue: idx) {
-            model.openAtLaunch(section)
+        //
+        // Since #341 the value may also carry a child page after a dot: `7.0` is Providers › its
+        // first child. The dotted form indexes the section's children **in display order** rather
+        // than by their raw value, so a recipe reads as "the first page under Providers" and does not
+        // have to know `SettingsChildPage`'s numbering.
+        if let raw = ProcessInfo.processInfo.environment["TOKENPACE_SETTINGS_SECTION"] {
+            openAtLaunchFromHook(raw)
         }
         observeToolbarState()
         // After the tree is on screen: the strip does not exist until SwiftUI has laid the split view
@@ -479,6 +483,37 @@ final class SettingsWindowController: NSWindowController {
         // move it (restore, centre, the section hook). Attaching earlier would align it to the
         // zero-width sliver an unsized hosting window starts as.
         if let window { preview.attach(to: window) }
+    }
+
+    /// Seat the window from the `TOKENPACE_SETTINGS_SECTION` dev hook (#341).
+    ///
+    /// Accepts `<section>` or `<section>.<childIndex>`; the child index counts the section's pages in
+    /// display order. Seating (rather than navigating) is what keeps **both** toolbar chevrons dimmed:
+    /// the page is where the window opened, not somewhere the user went.
+    ///
+    /// An unrecognised value **logs** rather than silently doing nothing. A hook that no-ops looks
+    /// exactly like a hook that worked and landed on the default pane, which is how a stale recipe
+    /// survives unnoticed — and #341 retired one index (`4`), so stale recipes exist.
+    private func openAtLaunchFromHook(_ raw: String) {
+        let parts = raw.split(separator: ".", maxSplits: 1)
+        guard let sectionRaw = parts.first.flatMap({ Int($0) }),
+              let section = SettingsSection(rawValue: sectionRaw) else {
+            AppLogger.lifecycle.notice(
+                "settings hook: unknown section \(raw, privacy: .public) — ignored")
+            return
+        }
+        guard parts.count == 2 else {
+            model.openAtLaunch(section)
+            return
+        }
+        let pages = SettingsChildPage.pages(of: section)
+        guard let childIndex = Int(parts[1]), pages.indices.contains(childIndex) else {
+            AppLogger.lifecycle.notice(
+                "settings hook: unknown child \(raw, privacy: .public) — opening the section")
+            model.openAtLaunch(section)
+            return
+        }
+        model.openAtLaunch(pages[childIndex])
     }
 
     /// Keep the toolbar's title and ‹ › enablement in step with the model.

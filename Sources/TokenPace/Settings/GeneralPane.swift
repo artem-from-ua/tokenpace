@@ -9,7 +9,7 @@ import TokenPaceKit
 /// **Usage history belongs here rather than with a provider** (#317): the journal is a feature of
 /// the app — it feeds the Insights window (ADR-0067) — and providers are merely sources of records
 /// in it. A second provider adds rows to the same single journal, so the switch that owns it stays
-/// app-wide. (It spent #242…#317 on the "Extra features" pane, which is being retired.)
+/// app-wide. (It spent #242…#317 on the "Extra features" pane, retired in #341.)
 struct GeneralPane: View {
     @Bindable var model: SettingsModel
 

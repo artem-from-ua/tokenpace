@@ -209,6 +209,16 @@ enum PersistedConfig {
         set { defaults.set(newValue, forKey: Key.usageApiEnabled) }
     }
 
+    /// The same read, callable off the main actor — the polling engine's seam reads this on every
+    /// iteration from its own task, and this type is `@MainActor`.
+    ///
+    /// `nonisolated` and going straight to `UserDefaults` (which is thread-safe) rather than
+    /// duplicating the key string at the call site: one source of truth for both the key and the
+    /// opt-out default, so the two readers cannot drift apart.
+    nonisolated static func usageApiEnabledUnsafe() -> Bool {
+        UserDefaults.standard.object(forKey: Key.usageApiEnabled) as? Bool ?? true
+    }
+
     /// The two halves above read as one value — what the provider pages edit and what the polling and
     /// status layers consume. A computed composite rather than a stored one: there is nothing extra to
     /// persist, and `claudeApiLocked` stays derived.

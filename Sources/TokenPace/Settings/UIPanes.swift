@@ -239,7 +239,7 @@ struct MenuBarPane: View {
     /// description. The first two are ⚠️ states; see ``awaitingInputHintIsWarning``.
     private var awaitingInputHint: String {
         guard model.awaitingInputEnabled else {
-            return "Enable *Show sessions awaiting input* in Extra features first."
+            return "Enable *Show sessions awaiting input* in Providers › Session status first."
         }
         if model.stubScenarioActive { return SettingsStubHint.text }
         return "Adds a hand icon to the menu bar (leading) when sessions are waiting. "

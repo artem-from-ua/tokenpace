@@ -111,6 +111,18 @@ public enum FailureReason: Sendable, Equatable {
 /// The popup, by contrast, warns **immediately** on any failure (no threshold) — `isFailing`
 /// drives `PopupLayout.warning`. The phase logic itself lives in `MenuBarLayout.make`; this type
 /// owns only the inputs and the thresholds.
+///
+/// ## The third state: `notPolling` (#341)
+/// "We are deliberately not asking" is neither healthy nor failing, and both attempts to encode it
+/// with the two existing states break something. Reporting it as failing makes the popup show a red
+/// error banner instantly and the menu bar decay to ⚠️ after 30 minutes — the user switched the poll
+/// off, and the UI tells them it is broken. Reporting it as healthy makes `lastSuccess` lie: the
+/// popup says "Updated just now" with no data behind it.
+///
+/// So it is a separate flag, and **every** consumer that branches on failure must consider it. The
+/// compiler cannot help here — this is a `struct` of predicates, not an enum, so nothing fails to
+/// build if a consumer is missed. The predicates below exist to make each site read as a decision
+/// rather than an omission.
 public struct UsageHealth: Sendable, Equatable {
     /// Instant of the last successful 200, or `nil` if we have **never** succeeded (cold start).
     /// Drives the "Last update …" staleness line and the stale-vs-dead menu-bar decision.
@@ -120,16 +132,33 @@ public struct UsageHealth: Sendable, Equatable {
     public let failingSince: Date?
     /// The most recent failure's user-facing cause, or `nil` when healthy. Drives the popup warning.
     public let reason: FailureReason?
+    /// Whether the usage API is deliberately not being polled (#341) — the user switched it off.
+    ///
+    /// Orthogonal to the failure fields on purpose: entering this state does not invent a failure,
+    /// and leaving it does not clear one. While it is `true`, `failingSince` is `nil` and
+    /// `lastSuccess` is whatever it was — stale, and the UI must not present it as fresh.
+    public let notPolling: Bool
 
-    public init(lastSuccess: Date?, failingSince: Date?, reason: FailureReason?) {
+    /// Defaulted so the many existing construction sites — production and test alike — keep meaning
+    /// "we are polling", and only the polling engine's service-only path opts in.
+    public init(
+        lastSuccess: Date?, failingSince: Date?, reason: FailureReason?, notPolling: Bool = false
+    ) {
         self.lastSuccess = lastSuccess
         self.failingSince = failingSince
         self.reason = reason
+        self.notPolling = notPolling
     }
 
     /// Healthy state: the last poll succeeded at `at`, no failure in progress.
     public static func healthy(lastSuccess at: Date) -> UsageHealth {
         UsageHealth(lastSuccess: at, failingSince: nil, reason: nil)
+    }
+
+    /// The usage poll is off (#341). No failure, and no fresh success to report either — whatever
+    /// `lastSuccess` held is left behind as the stale value it is.
+    public static func notPollingUsage(lastSuccess: Date? = nil) -> UsageHealth {
+        UsageHealth(lastSuccess: lastSuccess, failingSince: nil, reason: nil, notPolling: true)
     }
 
     // MARK: thresholds
@@ -146,7 +175,23 @@ public struct UsageHealth: Sendable, Equatable {
 
     /// Whether a failure is currently in progress — the popup warns the moment this is true,
     /// regardless of the menu-bar thresholds (SPEC: "за будь-якої непрацюючої авторизації … одразу").
+    ///
+    /// Never true while ``notPolling``: not asking is not failing.
     public var isFailing: Bool { failingSince != nil }
+
+    /// Whether usage data is being collected at all — the guard for every consumer that treats
+    /// "not failing" as "we have fresh data" (#341).
+    ///
+    /// The pair `!isFailing && notPolling` is a state that did not exist before this flag, and it is
+    /// what silently breaks the naive `guard !isFailing` sites: they read "healthy" and act on a
+    /// snapshot that is no longer being refreshed. Prefer this predicate over `!isFailing` wherever
+    /// the answer sought is "is the usage data live".
+    public var isCollectingUsage: Bool { !notPolling }
+
+    /// Whether the usage data on hand is fresh enough to act on: we are polling **and** not failing.
+    /// The condition the back-to-work and extra-usage edge detectors need — both fire on a
+    /// transition, and a frozen snapshot must not keep re-triggering one.
+    public var hasLiveUsageData: Bool { !notPolling && !isFailing }
 
     /// How long the current failure run has lasted at `now`, or `nil` when healthy. Clamped `≥ 0`
     /// so a `failingSince` slightly in the future (clock skew) never yields a negative age.

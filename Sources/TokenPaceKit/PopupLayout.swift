@@ -250,6 +250,22 @@ public struct PopupLayout: Sendable, Equatable {
     /// the row is omitted entirely (#279).
     public let subscription: EpisodeSubscriptionState?
 
+    /// What the user currently monitors (#341) — the popup's own copy of the mode the menu bar shows
+    /// as `zzz` or ⚠️. The view uses it to swap the red failure banner for a plain explanation, to
+    /// keep the service rows visible while everything is green, and to read ``lastUpdateAge`` as the
+    /// age of the *status* poll rather than the usage poll.
+    public let monitoringMode: MonitoringMode
+
+    /// Which data sources are switched on (#341).
+    public enum MonitoringMode: Sendable, Equatable {
+        /// The usage API is polled — the ordinary case, and every layout that predates #341.
+        case usageAndServices
+        /// The usage poll is off; status-page services are still watched.
+        case servicesOnly
+        /// Nothing is monitored at all.
+        case nothing
+    }
+
     public init(
         lastUpdateAge: TimeInterval,
         intervalSeconds: TimeInterval,
@@ -264,7 +280,8 @@ public struct PopupLayout: Sendable, Equatable {
         awaitingInput: AwaitingSessions? = nil,
         incidents: [VisibleIncident] = [],
         subscription: EpisodeSubscriptionState? = nil,
-        planLabel: String? = nil
+        planLabel: String? = nil,
+        monitoringMode: MonitoringMode = .usageAndServices
     ) {
         self.lastUpdateAge = lastUpdateAge
         self.intervalSeconds = intervalSeconds
@@ -282,6 +299,7 @@ public struct PopupLayout: Sendable, Equatable {
         self.planLabel = planLabel
         self.incidents = incidents
         self.subscription = subscription
+        self.monitoringMode = monitoringMode
     }
 
     /// A copy of this layout with **one** field replaced, everything else carried over.
@@ -291,20 +309,23 @@ public struct PopupLayout: Sendable, Equatable {
     /// omission, so a field added by one branch and a helper touched by another merge cleanly into
     /// a layout that silently loses data. One copy point means adding a field is one edit.
     private func copy(
+        lastUpdateAge: TimeInterval? = nil,
         awaitingInput: AwaitingSessions?? = nil,
         incidents: [VisibleIncident]? = nil,
         subscription: EpisodeSubscriptionState?? = nil,
         planLabel: String?? = nil
     ) -> PopupLayout {
         PopupLayout(
-            lastUpdateAge: lastUpdateAge, intervalSeconds: intervalSeconds, rows: rows,
+            lastUpdateAge: lastUpdateAge ?? self.lastUpdateAge,
+            intervalSeconds: intervalSeconds, rows: rows,
             warning: warning, serviceStatus: serviceStatus, credits: credits,
             blockingReset: blockingReset, perModelRowsStart: perModelRowsStart,
             perModelRowsAreNonCalm: perModelRowsAreNonCalm, creditsIsNonCalm: creditsIsNonCalm,
             awaitingInput: awaitingInput ?? self.awaitingInput,
             incidents: incidents ?? self.incidents,
             subscription: subscription ?? self.subscription,
-            planLabel: planLabel ?? self.planLabel)
+            planLabel: planLabel ?? self.planLabel,
+            monitoringMode: monitoringMode)
     }
 
     /// A copy of this layout with the awaiting-input count grafted on, everything else unchanged
@@ -324,6 +345,23 @@ public struct PopupLayout: Sendable, Equatable {
     /// A copy of this layout with the subscribe row's state grafted on (#279). `nil` omits the row.
     public func withSubscription(_ subscription: EpisodeSubscriptionState?) -> PopupLayout {
         copy(subscription: .some(subscription))
+    }
+
+    /// A copy of this layout whose ``lastUpdateAge`` is measured from the **status** poll instead of
+    /// the usage poll (#341) — used only in ``MonitoringMode/servicesOnly``, where the usage clock is
+    /// deliberately stopped and reporting its age would be a lie ("0 s ago" for data nobody fetched).
+    ///
+    /// A graft rather than a `make` parameter, following ``withIncidents(_:)`` and
+    /// ``withSubscription(_:)``: like those, this value rides the status poll's own cadence, so it
+    /// arrives outside the usage snapshot and threading it through `make` would touch every call site
+    /// for a value most of them do not have.
+    ///
+    /// `nil` means the status poll has not landed yet — the common case on entry to the mode, since
+    /// the shell clears its status clock at exactly that moment. The age then stays `0` and the view
+    /// shows no age rather than inventing one.
+    public func withStatusAge(_ age: TimeInterval?) -> PopupLayout {
+        guard monitoringMode == .servicesOnly, let age else { return self }
+        return copy(lastUpdateAge: max(0, age))
     }
 
     /// A copy of this layout with the plan label grafted on, everything else unchanged. The shell
@@ -392,20 +430,47 @@ public struct PopupLayout: Sendable, Equatable {
     /// As in the other overload, the per-model rows are always built; ``perModelRowsStart`` /
     /// ``perModelRowsAreNonCalm`` / ``creditsIsNonCalm`` let the view apply the user's
     /// ``PopupSectionVisibility`` against the live ⌥ state (#211).
+    ///   - monitoringAnything: Whether anything is monitored at all (#341). `false` produces a layout
+    ///     with no rows and no red banner — nothing is broken, so the view explains the state in
+    ///     words instead. Default `true`.
     public static func make(
         from snapshot: UsageSnapshot?,
         health: UsageHealth,
         now: Date,
         interval: TimeInterval,
-        serviceStatus: StatusHealth? = nil
+        serviceStatus: StatusHealth? = nil,
+        monitoringAnything: Bool = true
     ) -> PopupLayout {
         let lastUpdateAge = health.lastSuccess.map { max(0, now.timeIntervalSince($0)) } ?? 0
+
+        // #341, ahead of every failure branch below — for the same reason as in `MenuBarLayout`: these
+        // are user choices, and the failure machinery would otherwise dress them up as breakage. In
+        // both modes there are no rows: whatever snapshot survived is not being refreshed, and drawing
+        // bars from it would present frozen numbers as current.
+        //
+        // `lastUpdateAge` starts from the usage clock and is replaced by `withStatusAge(_:)` in the
+        // services-only mode — the shell owns that value, since it is the one polling the status page.
+        if !monitoringAnything {
+            return PopupLayout(
+                lastUpdateAge: lastUpdateAge, intervalSeconds: interval, rows: [],
+                serviceStatus: serviceStatus, monitoringMode: .nothing)
+        }
+        if !health.isCollectingUsage {
+            return PopupLayout(
+                lastUpdateAge: lastUpdateAge, intervalSeconds: interval, rows: [],
+                serviceStatus: serviceStatus, monitoringMode: .servicesOnly)
+        }
 
         // A malformed **current** 200 body — an active window with a non-empty, unparseable `resets_at`
         // (`hasBrokenActiveReset`, #167/ADR-0043). Unlike a *health* failure (where the last **good**
         // snapshot's stale rows are still worth showing), here the current snapshot itself is corrupt, so
         // there is nothing trustworthy to render: show **only** the red warning banner (`.serverProblem`),
         // with no limit rows / credits / blocking-reset — the same shape as a cold-start failure.
+        //
+        // Note the guard is `!isFailing`, which #341's third state would also satisfy: a stale snapshot
+        // with a broken reset would raise a red server-problem banner in a mode where nothing is being
+        // fetched. The monitoring branches above return before reaching here, which is why this line
+        // needs no condition of its own.
         let brokenData = !health.isFailing && (snapshot?.hasBrokenActiveReset == true)
         if brokenData {
             return PopupLayout(

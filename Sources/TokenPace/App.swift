@@ -183,6 +183,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastStatusHealth: StatusHealth?
     /// Instant of the last **successful** status poll, driving `StatusCadence.isDue`. A failed poll
     /// does not advance it, so the next usage tick retries.
+    ///
+    /// Stamped with `currentDate()`, not `Date()`: since #341 this value also reaches `PopupLayout`
+    /// (via `withStatusAge`), a deterministic layer, so under a time-mocking stub a wall-clock stamp
+    /// would render an age that is negative or jumps.
     private var lastStatusSuccess: Date?
     /// The in-flight status fetch, if any — held so a new tick can cancel a slow one rather than
     /// overlap (the status loop hangs off the usage poll's heartbeat, it owns no timer).
@@ -361,6 +365,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             BackToWorkNotifier.registerCategories()
         }
         popupVC.onToggleSubscription = { [weak self] in self?.toggleEpisodeSubscription() }
+        // #341: the nothing-monitored popup routes straight to the page that produced the state.
+        popupVC.onOpenProviderSettings = { [weak self] in self?.openSettings(section: .providers) }
         // The popup measures status/incident ages against the **scenario's** clock, not the wall
         // clock: a date-decoupled stub freezes time, and mixing the two made a stub's "2h" render as
         // "203d 11h" — the gap between the frozen frame and today.
@@ -1089,7 +1095,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refresher: refresher,
             scheduler: LivePollScheduler(signals: signals.newStream()),
             probe: ProcessClaudeActivityProbe(),
-            now: clock)
+            now: clock,
+            // #341: read the switch **live** on every iteration, not once at construction — a toggle
+            // in Settings then takes effect on the next tick, and `providerMonitoringChanged` sends
+            // `.manualRefresh` so that tick is immediate.
+            //
+            // The engine calls this from its own task, so it goes through the `nonisolated` reader
+            // rather than the main-actor-isolated property — same key, same opt-out default.
+            usageApiEnabled: { PersistedConfig.usageApiEnabledUnsafe() })
 
         // Consume on the main actor — every PollOutput drives the menu bar + popup.
         pollTask = Task { [weak self] in
@@ -1181,6 +1194,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// swallowed by the writer. The interval carried on `output` is the gap-detector's expected cadence.
     private func journalPoll(_ output: PollOutput) {
         guard PersistedConfig.journalEnabled, currentScenario == .realNetwork else { return }
+        // #341: while the usage poll is off there is no usage sample to record and no failure to
+        // report — writing an `error` line every tick would fill the journal with a state the user
+        // chose. The gap this leaves in the usage timeline is real, and `ResumeMarker` is right to
+        // mark it when polling resumes. Status polls keep writing through `appendStatus`, which does
+        // not touch the usage clock (see its docblock), so that half of the journal stays live.
+        guard output.health.isCollectingUsage else { return }
         let now = currentDate()
         let interval = output.interval
         let record: JournalRecord
@@ -1230,7 +1249,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// snapshot forward (`health.failingSince != nil`), and the optimistic-reset overlay bypasses
     /// `apply` entirely (it calls `render`, not `apply`), so neither can produce a false "unblocked".
     private func detectBackToWorkEdge(_ output: PollOutput) {
-        guard output.health.failingSince == nil, let snapshot = output.snapshot else { return }
+        // `hasLiveUsageData`, not `failingSince == nil` (#341): the service-only mode is not failing
+        // either, and a frozen snapshot there would re-assert "workable" on every tick. The engine
+        // also drops the snapshot on entry, so this is belt and braces — but the guard should say
+        // what it means rather than lean on that.
+        guard output.health.hasLiveUsageData, let snapshot = output.snapshot else { return }
         let nowWorkable = WorkAvailability.canWork(snapshot)
         if PersistedConfig.backToWorkEnabled, PersistedConfig.backToWorkWasBlocked, nowWorkable {
             maybePostBackToWork()
@@ -1259,7 +1282,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// This is a distinct edge from "Back to work!": that fires on blocked→workable, this on the switch
     /// onto paid credit (a state that is already workable), so the two never collide.
     private func detectExtraUsageEdge(_ output: PollOutput) {
-        guard output.health.failingSince == nil, let snapshot = output.snapshot else { return }
+        // Same reasoning as `detectBackToWorkEdge` (#341): not polling is not "a successful poll".
+        guard output.health.hasLiveUsageData, let snapshot = output.snapshot else { return }
         let nowOnCredits = ExtraUsageOnset.isOnCredits(snapshot)
         if PersistedConfig.extraUsageNotifyEnabled,
            !PersistedConfig.extraUsageWasOnCredits,
@@ -1461,7 +1485,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             guard let self, !Task.isCancelled else { return }
             self.lastStatusHealth = health
-            if succeeded { self.lastStatusSuccess = Date() }
+            if succeeded { self.lastStatusSuccess = self.currentDate() }
             // #279: recompute which incidents are worth showing, then fold the poll into the episode
             // subscription. A failed poll leaves the previous list in place — an unreachable status
             // page is not evidence that an incident ended.
@@ -2166,16 +2190,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // #194, #227: honour the "Pause icon hides bars" toggle — when fully blocked (isBlocked), true
             // drops both bars for a countdown-only widget beside the red pause icon; false keeps the (red)
             // bars beside it. The pause icon itself is drawn whenever blocked, independent of this flag.
-            pauseHidesBars: PersistedConfig.pauseHidesBars)
+            pauseHidesBars: PersistedConfig.pauseHidesBars,
+            // #341: with nothing monitored the widget reports that, rather than the last thing it saw.
+            monitoringAnything: providerMonitoring.isMonitoringAnything)
             .withAwaitingInput(awaitingInput)   // #233: graft the awaiting-input indicator (trailing)
         refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
         setPopupLayout(PopupLayout.make(
             from: snapshot, health: output.health, now: now, interval: output.interval,
             serviceStatus: lastStatusHealth,
+            monitoringAnything: providerMonitoring.isMonitoringAnything
             // #211: the per-model rows are always built here; whether they're drawn is the popup VC's
             // call (it owns the live ⌥ Option state — see `PopupSectionVisibility`).
             )
             .withAwaitingInput(awaitingInput)   // #233: graft the awaiting-input indicator (right of brand)
+            // #341: in the services-only mode the age shown is the **status** poll's, since that is the
+            // only thing being fetched. A no-op in every other mode.
+            .withStatusAge(lastStatusSuccess.map { max(0, now.timeIntervalSince($0)) })
             // #279: graft the incidents (⌥ swaps the service rows for them) and the state of the one
             // subscribe row. Both ride the status poll, not this usage poll, so they are grafted for
             // the same reason the awaiting-input breakdown is.
