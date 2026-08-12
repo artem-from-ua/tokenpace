@@ -97,23 +97,40 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
     /// SF Symbol for the sidebar chip. Names match the real System Settings panes read from their
     /// `.appex` Info.plist (#156): General uses `gear` (not `gearshape`); Notifications is a red bell.
     ///
-    /// The two surface panes are deliberately one family: both carry the same bar across the top, and
-    /// the dropdown's adds the panel hanging below it — which is literally the difference between the
-    /// surfaces. Chosen by rendering the candidates, not by name (#333): `rectangle.inset.filled`
-    /// variants read as record buttons rather than popups. `slider.horizontal.3` gives UI presets the
-    /// "adjust everything at once" glyph without stealing either surface's picture.
+    /// The three UI panes picture what they configure: a brush for the presets that repaint
+    /// everything, the lone bar of the menu bar, and a page of rows for the dropdown. Chosen by
+    /// rendering the candidates rather than by name (#333) — `rectangle.inset.filled` variants read
+    /// as record buttons, not popups.
+    ///
+    /// `menuBar` is the one glyph we do not draw as-is: see ``trimsOuterRules``.
     var symbol: String {
         switch self {
         case .about: return "info.circle"
         case .general: return "gear"
-        case .uiPresets: return "slider.horizontal.3"
-        case .menuBar: return "menubar.rectangle"
-        case .dropdown: return "menubar.dock.rectangle"
+        case .uiPresets: return "paintbrush"
+        case .menuBar: return "distribute.vertical"
+        case .dropdown: return "chart.bar.horizontal.page"
         case .notifications: return "bell.badge.fill"
         case .extraFeatures: return "puzzlepiece.extension"
         default: return "circle.dashed"
         }
     }
+
+    /// Whether the chip draws only the **middle** of its symbol, dropping the rules above and below.
+    ///
+    /// `distribute.vertical` is three shapes — a rounded rectangle between two full-width rules — and
+    /// only the rectangle is wanted: one bar, which is what a menu bar is. There is no SF Symbol of
+    /// just that shape (checked), and the two rules sit in bands the rectangle never enters, so a
+    /// clip keeps exactly the part we want.
+    ///
+    /// Measured on the rendered glyph at 64 pt (91×68 px): rules at y 5–9 and 59–63, rectangle at
+    /// y 23–45, with clean gaps between. Expressed as fractions of the glyph box rather than pixels so
+    /// it holds at every sidebar icon size.
+    var trimsOuterRules: Bool { self == .menuBar }
+
+    /// The slice of the symbol's height the chip keeps when ``trimsOuterRules`` is set — the band
+    /// between the two rules, generous enough to clear the rectangle's rounded corners at any size.
+    static let trimmedBand: ClosedRange<CGFloat> = 0.28...0.72
 
     /// Capsule gradient endpoints of the sidebar icon chip, matching System Settings (#156).
     /// The system capsules are baked icon artwork, not dynamic colors — each pane has its own
@@ -126,9 +143,14 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         switch self {
         case .about: return CapsuleTint(dark: 0x0D81FA, light: 0x41A6FF)
         case .general: return CapsuleTint(dark: 0x5E5E5F, light: 0xC0C0C4)
-        // The three UI panes share the measured Appearance green: the divider already separates the
-        // group, and a distinct hue per row would break the one thing that says they belong together.
-        case .uiPresets, .menuBar, .dropdown: return CapsuleTint(dark: 0x2ED149, light: 0x63E977)
+        // UI presets keeps the measured Appearance green — it is what that pane became.
+        case .uiPresets: return CapsuleTint(dark: 0x2ED149, light: 0x63E977)
+        // The two surfaces are flat black and white rather than a hue: the chips *depict* what they
+        // configure — the dark strip along the top of the screen, and the light panel that drops
+        // below it. Fixed tones, not semantic ones: flipping them with the appearance would destroy
+        // the only thing they say. The white chip needs a hairline to exist on a light sidebar.
+        case .menuBar: return CapsuleTint(flat: 0x000000)
+        case .dropdown: return CapsuleTint(flat: 0xFFFFFF, glyph: .black, needsBorder: true)
         case .notifications: return CapsuleTint(dark: 0xFB4439, light: 0xFB7A71)
         case .extraFeatures: return CapsuleTint(dark: 0x5E5CE6, light: 0x8C8AFB)
         default: return CapsuleTint(dark: 0x5E5E5F, light: 0xC0C0C4)
@@ -136,14 +158,28 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
     }
 }
 
-/// The two measured endpoints of a sidebar capsule's gradient (see `SettingsSection.tint`).
+/// The two measured endpoints of a sidebar capsule's gradient (see `SettingsSection.tint`), plus how
+/// the glyph on top of it is drawn.
 struct CapsuleTint {
     let dark: Color
     let light: Color
+    /// The glyph's colour when the window is active. White on every measured system capsule; black on
+    /// the white chip, which would otherwise draw white on white.
+    let glyph: Color
+    /// Whether the capsule needs a hairline outline to read against the sidebar. Only the white one
+    /// does — every other chip is darker than the material behind it.
+    let needsBorder: Bool
 
-    init(dark: UInt32, light: UInt32) {
+    init(dark: UInt32, light: UInt32, glyph: Color = .white, needsBorder: Bool = false) {
         self.dark = Self.color(dark)
         self.light = Self.color(light)
+        self.glyph = glyph
+        self.needsBorder = needsBorder
+    }
+
+    /// A capsule with no gradient at all — both endpoints the same colour.
+    init(flat hex: UInt32, glyph: Color = .white, needsBorder: Bool = false) {
+        self.init(dark: hex, light: hex, glyph: glyph, needsBorder: needsBorder)
     }
 
     private static func color(_ hex: UInt32) -> Color {
