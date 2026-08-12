@@ -31,11 +31,31 @@ final class SettingsPreviewWindowController {
     private enum Metrics {
         /// Gap between the Settings window's edge and the preview.
         static let gap: CGFloat = 12
-        /// Space between the title plaque's divider and the popup content.
-        static let contentTopInset: CGFloat = 6
-        /// Space below the popup content, before the card's rounded bottom edge. Matches the inset the
-        /// dev tuner leaves before its footer, so the bars never sit flush against the corner.
-        static let contentBottomInset: CGFloat = 8
+
+        /// The margin the popup's card should show on every side of this window.
+        ///
+        /// The popup already carries its own outer margins, but they are tuned for life inside an
+        /// `NSMenu`: `cardInset` 14 at the sides, a trimmed 10 on top (the menu adds its own padding
+        /// above the hosted view) and just 4 at the bottom (a native separator follows it there). In a
+        /// plain window neither of those neighbours exists, so the card would sit almost flush against
+        /// the bottom edge. The insets below top the popup's own margins up to this single value, so the
+        /// card is framed evenly.
+        static let cardMargin: CGFloat = 14
+
+        /// Gap between the heading and the popup content, measured to the *card*, so it matches the
+        /// margin on the other three sides.
+        static let headingToCard = cardMargin - 10   // popup's own `cardTopInset`
+
+        /// Bottom gap, likewise topped up from the popup's trimmed `cardBottomInset`.
+        static let belowCard = cardMargin - 4        // popup's own `cardBottomInset`
+
+        /// Space above the heading text. Equal to the card margin so the window is framed evenly.
+        static let aboveHeading: CGFloat = cardMargin
+
+        /// The window's width before Auto Layout measures it: the popup's own fixed width. Only the
+        /// height is ever in question, so this is exact rather than a guess — it is used to size the
+        /// initial frame and to reserve room when centring the pair.
+        static let nominalWidth: CGFloat = 312
     }
 
     // MARK: - State
@@ -59,6 +79,15 @@ final class SettingsPreviewWindowController {
     /// so a light↔dark flip has to re-force it — otherwise the preview stays frozen in the old theme.
     private var appearanceObservation: NSKeyValueObservation?
 
+    /// The heading, retained so it can be dimmed in step with the parent window's focus.
+    private weak var heading: TitlePlaqueView?
+
+    /// The card's backing, retained so it can go opaque in step with the same focus change.
+    private weak var backdrop: MenuMaterialBackdrop?
+
+    /// Observers for the parent window becoming/resigning key.
+    private var keyObservers: [NSObjectProtocol] = []
+
     /// Shared with the live surfaces so colour transitions stay in lockstep (ADR-0070). Assigning a
     /// *separate* animator would mean a second 30 fps timer and visibly desynchronised fades in two
     /// windows on the same screen.
@@ -67,6 +96,19 @@ final class SettingsPreviewWindowController {
     }
 
     var isVisible: Bool { window?.isVisible ?? false }
+
+    /// How much room the preview claims beside the Settings window — its own width plus the gap.
+    ///
+    /// Used to centre the **pair** rather than the Settings window alone: centring the parent by itself
+    /// leaves the two of them visibly listing to one side, because the preview is not part of the frame
+    /// AppKit is centring.
+    ///
+    /// Measured from the built window when there is one; before that it falls back to the nominal
+    /// width, which is what the window settles at anyway — the popup is fixed-width and only its
+    /// height moves.
+    var occupiedWidth: CGFloat {
+        (window?.frame.width ?? Metrics.nominalWidth) + Metrics.gap
+    }
 
     // MARK: - Attach / detach
 
@@ -89,6 +131,33 @@ final class SettingsPreviewWindowController {
         win.orderFront(nil)
         startOptionTracking()
         observeAppearance()
+        observeParentFocus(parent)
+    }
+
+    /// Dim the heading whenever the Settings window is not the active one, so it fades in step with
+    /// that window's own toolbar title instead of staying at full strength beside a dimmed one.
+    ///
+    /// Keyed off the **parent**: this window is borderless and never becomes key itself, so its own
+    /// key notifications would never fire.
+    private func observeParentFocus(_ parent: NSWindow) {
+        guard keyObservers.isEmpty else { return }
+        applyActive(parent.isKeyWindow)
+        let centre = NotificationCenter.default
+        for (name, active) in [(NSWindow.didBecomeKeyNotification, true),
+                               (NSWindow.didResignKeyNotification, false)] {
+            let token = centre.addObserver(forName: name, object: parent, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.applyActive(active) }
+            }
+            keyObservers.append(token)
+        }
+    }
+
+    /// Both the heading and the card's backing follow the parent window's focus: the title dims, and
+    /// the material settles to an opaque tone so an unfocused preview stops showing the desktop through
+    /// itself.
+    private func applyActive(_ active: Bool) {
+        heading?.isWindowActive = active
+        backdrop?.isWindowActive = active
     }
 
     /// Order out, drop the child relationship, and stop tracking. Idempotent: `windowWillClose` can
@@ -96,6 +165,8 @@ final class SettingsPreviewWindowController {
     func detach() {
         stopOptionTracking()
         appearanceObservation = nil
+        keyObservers.forEach(NotificationCenter.default.removeObserver)
+        keyObservers.removeAll()
         guard let win = window else { return }
         win.parent?.removeChildWindow(win)
         win.orderOut(nil)
@@ -174,9 +245,9 @@ final class SettingsPreviewWindowController {
 
     /// Re-force the Vibrant appearance when the system theme flips.
     ///
-    /// `ThemedFillView`/`TitlePlaqueView` re-resolve their own colours through `updateLayer`, but the
-    /// window's forced appearance is a one-shot assignment — without this the preview keeps rendering
-    /// its neutrals in the *previous* theme's vibrancy.
+    /// The material backdrop and the labels re-resolve on their own, but the window's forced appearance
+    /// is a one-shot assignment — without this the preview keeps rendering its neutrals in the
+    /// *previous* theme's vibrancy.
     private func observeAppearance() {
         guard appearanceObservation == nil else { return }
         appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
@@ -239,7 +310,8 @@ final class SettingsPreviewWindowController {
         // controls. The subscribe row still draws (it is part of the layout); clicking it does nothing.
         syncPresentation()
 
-        let win = NSWindow(contentRect: NSRect(origin: .zero, size: NSSize(width: 340, height: 320)),
+        let win = NSWindow(contentRect: NSRect(origin: .zero,
+                                               size: NSSize(width: Metrics.nominalWidth, height: 320)),
                            styleMask: [.borderless], backing: .buffered, defer: false)
         win.isReleasedWhenClosed = false
         win.hasShadow = true
@@ -252,45 +324,39 @@ final class SettingsPreviewWindowController {
         return win
     }
 
-    /// The card: a title plaque, a divider, and the popup itself. No footer — the dev tuner's mock
-    /// "update available" rows exist to expose those two colours for tuning; here they would be a
-    /// fake notification the user could mistake for a real one.
+    /// The card: a heading and the popup itself, nothing else.
+    ///
+    /// No divider under the heading and no footer. The dev tuner has both — mock "update available"
+    /// rows to expose those two colours for tuning, and a rule to fence them off — but here each would
+    /// be furniture the real dropdown does not have, and the mock rows would read as a live
+    /// notification. The heading floats over the same material as the card, so the window stays one
+    /// surface with a label on it.
     private func buildContent() -> NSView {
         previewVC.view.translatesAutoresizingMaskIntoConstraints = false
 
-        let plaque = TitlePlaqueView(title: "Dropdown live preview")
-        plaque.translatesAutoresizingMaskIntoConstraints = false
+        let heading = TitlePlaqueView(title: "Dropdown live preview")
+        heading.translatesAutoresizingMaskIntoConstraints = false
+        self.heading = heading
 
-        let divider = NSBox()
-        divider.boxType = .separator
-        divider.translatesAutoresizingMaskIntoConstraints = false
+        // The real menu material, not a flat fill: the popup's own card is translucent by design and
+        // expects something to show through it. See `PreviewChrome.makeMenuMaterialBackdrop`.
+        let container = PreviewChrome.makeMenuMaterialBackdrop()
+        self.backdrop = container
 
-        let container = ThemedFillView()
-        // Flat menu-matched fill, not an NSVisualEffectView: a real vibrancy view renders lighter here
-        // than the system menu does on screen, which would push the popup's neutrals lighter than the
-        // live dropdown — measured with Digital Color Meter, not from a screenshot.
-        container.fillColor = .popupMenuMatchedBackground
-        container.borderColor = .popupMenuBorder   // hairline edge, like a real system menu window
-        container.cornerRadius = PreviewChrome.menuPopupCornerRadius()
-
-        container.addSubview(plaque)
-        container.addSubview(divider)
+        container.addSubview(heading)
         container.addSubview(previewVC.view)
         NSLayoutConstraint.activate([
-            plaque.topAnchor.constraint(equalTo: container.topAnchor),
-            plaque.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            plaque.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            heading.topAnchor.constraint(equalTo: container.topAnchor, constant: Metrics.aboveHeading),
+            heading.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            heading.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
-            divider.topAnchor.constraint(equalTo: plaque.bottomAnchor),
-            divider.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            divider.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-
-            previewVC.view.topAnchor.constraint(equalTo: divider.bottomAnchor,
-                                                constant: Metrics.contentTopInset),
+            // The popup view spans the full width — its own `cardInset` provides the side margins.
+            previewVC.view.topAnchor.constraint(equalTo: heading.bottomAnchor,
+                                                constant: Metrics.headingToCard),
             previewVC.view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             previewVC.view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            previewVC.view.bottomAnchor.constraint(equalTo: container.bottomAnchor,
-                                                   constant: -Metrics.contentBottomInset),
+            container.bottomAnchor.constraint(equalTo: previewVC.view.bottomAnchor,
+                                              constant: Metrics.belowCard),
         ])
         return container
     }

@@ -251,11 +251,13 @@ final class DevToolsWindowController: NSWindowController {
         container.addSubview(previewVC.view)
         container.addSubview(footer)
         NSLayoutConstraint.activate([
-            plaque.topAnchor.constraint(equalTo: container.topAnchor),
+            // The heading hugs its label (it lost the backing strip that used to give it a height), so
+            // the breathing room above it is stated here.
+            plaque.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
             plaque.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             plaque.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
-            plaqueDivider.topAnchor.constraint(equalTo: plaque.bottomAnchor),
+            plaqueDivider.topAnchor.constraint(equalTo: plaque.bottomAnchor, constant: 8),
             plaqueDivider.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             plaqueDivider.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
