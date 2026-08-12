@@ -50,32 +50,6 @@ struct AppearancePane: View {
                 }
             }
 
-            // Far-behind (green→blue) threshold (#224): how big a surplus turns the behind side blue.
-            // Governs the pacing colour on BOTH surfaces, which is why it sits in its own header-less
-            // section above them rather than inside either one. Bar style used to share this section,
-            // but since #329 each surface picks its own and the two controls live in their sections.
-                        Section {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Far behind pace interval")
-                        Spacer()
-                        Picker("", selection: Binding(
-                            get: { model.farBehindInterval },
-                            set: { model.setFarBehindInterval($0) })) {
-                            Text("1h on the 5-hour bar; 1d on the 7-day bar").tag(FarBehindInterval.short)
-                            Text("2h on the 5-hour bar; 2d on the 7-day bar").tag(FarBehindInterval.medium)
-                            Text("3h on the 5-hour bar; 3d on the 7-day bar").tag(FarBehindInterval.long)
-                            Text("Less blue, please!").tag(FarBehindInterval.off)
-                        }
-                        .labelsHidden()
-                        .fixedSize()
-                    }
-                    SettingsHint(text: "How much of a surplus separates \"on-pace\" green from "
-                        + "\"far-behind\" blue. A larger interval needs a bigger surplus before a bar "
-                        + "turns blue.")
-                }
-            }
-
             Section("Menu Bar Widget") {
                 // Bar style, menu-bar copy (#224, rescaled in #307, per-surface since #329). All three
                 // show the pacing state by colour and differ in *scale*: Progress marks positions in
@@ -102,9 +76,9 @@ struct AppearancePane: View {
                 }
 
                 // Calm non-critical colors (#224) — a three-way choice (merged the old Calm + Work
-                // harder toggles): which calm colours mute to white. "Yellow + Green + Blue" is
-                // disabled when there is no blue to mute (Far behind = "Less blue, please!"), with a
-                // popover explaining why — mirroring the preset "Custom" indicator.
+                // harder toggles): which calm colours mute to white. Every segment is always
+                // selectable: the far-behind blue can no longer be switched off, so there is no state
+                // where "+ Blue" would have nothing to mute.
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("Calm non-critical colors")
@@ -113,12 +87,7 @@ struct AppearancePane: View {
                             segments: [
                                 .init(value: CalmColorMode.off, title: "Off"),
                                 .init(value: CalmColorMode.yellowGreen, title: "Yellow + Green"),
-                                .init(value: CalmColorMode.yellowGreenBlue, title: "+ Blue",
-                                      selectable: model.farBehindInterval != .off,
-                                      inactiveHelp: model.farBehindInterval == .off
-                                        ? "There's no blue to mute while *Far behind pace interval* is "
-                                          + "*Less blue, please!*. Pick an interval first."
-                                        : nil),
+                                .init(value: CalmColorMode.yellowGreenBlue, title: "+ Blue"),
                             ],
                             active: model.calmColorMode,
                             onSelect: { model.setCalmColorMode($0) })

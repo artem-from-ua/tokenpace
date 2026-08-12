@@ -124,13 +124,38 @@ public struct BarLayout: Sendable, Equatable {
     /// the *end*-of-window orange override, which needs only `remainingSeconds`. See
     /// ``PacingModel/pacingBlueStartOverrideSeconds``.
     public let windowDurationSeconds: Int
-    /// The user's ``FarBehindInterval`` multiplier, mirrored onto the layout so ``severity`` (and the
-    /// AppKit `behindColor`/`isFarBehind`, which read it off this struct) can scale the green→blue
-    /// crossover width without re-reading config. **`0` means "off"** — the blue (`farBehind`) zone is
-    /// disabled and the behind side stays green at any surplus; `1`/`2`/`3` scale the base 1h(5h)/1d(7d)
-    /// width (see ``FarBehindInterval/multiplier``, whose `nil` maps to `0` here). Kept as a plain `Int`
-    /// (not `Int?`) so the struct stays value-flat; the nil→0 mapping is `interval.multiplier ?? 0`.
-    public let behindMultiplier: Int
+    /// Whether this bar may render the blue (`farBehind`) zone at all. `false` forces the behind side
+    /// to plain green at any surplus — the same early exit the retired `FarBehindInterval.off` used to
+    /// provide, now driven by data rather than by a user setting.
+    ///
+    /// Set `false` for every bar whose blue would be a **lie about the week**: the 5-hour bar (and the
+    /// 7-day-paced per-model bars) when the weekly window has no headroom left. Blue reads as "there is
+    /// room to push"; that advice must not appear while the 7-day quota is spent or running ahead of
+    /// pace — see ``PacingModel/weeklyHasHeadroom(in:now:)``. The 7-day bar itself is always `true`
+    /// (it never gates on itself), and the inert idle placeholders are `false` (no pacing at all).
+    ///
+    /// Mirrored onto the layout so ``severity`` and the AppKit `behindColor`/`isFarBehind` — which read
+    /// it off this struct — cannot disagree about whether blue is on the table.
+    public let blueAllowed: Bool
+
+    /// Memberwise init, written out so ``blueAllowed`` can default to `true` — the synthesized one
+    /// cannot give a default to a `let` without an initial value. Callers that build a bar for a real
+    /// window pass the gate explicitly; the inert placeholders pass `false`.
+    public init(
+        usageFraction: Double,
+        timeFraction: Double,
+        pacing: PacingState,
+        remainingSeconds: TimeInterval,
+        windowDurationSeconds: Int,
+        blueAllowed: Bool = true
+    ) {
+        self.usageFraction = usageFraction
+        self.timeFraction = timeFraction
+        self.pacing = pacing
+        self.remainingSeconds = remainingSeconds
+        self.windowDurationSeconds = windowDurationSeconds
+        self.blueAllowed = blueAllowed
+    }
 
     /// Left edge of the gap zone = `min(usageFraction, timeFraction)`.
     public var gapStart: Double { min(usageFraction, timeFraction) }
@@ -264,15 +289,14 @@ public struct BarLayout: Sendable, Equatable {
     /// blue never flickers at window start (symmetric to the end-of-window orange override).
     public var severity: PacingSeverity {
         if pacing == .onPaceOrBehind {
-            // `behindMultiplier == 0` (FarBehindInterval.off): blue is disabled — the behind side is
-            // always plain green, regardless of surplus. behindThreshold returns +∞ for it, so the
-            // strict `>` below can never fire, but short-circuit here for clarity.
-            if behindMultiplier == 0 { return .calm }                                   // green (blue off)
+            // Blue is off the table for this bar — the weekly window has no headroom, or the bar is an
+            // inert placeholder. The behind side stays plain green at any surplus.
+            if !blueAllowed { return .calm }                                            // green (blue gated)
             // 20-min start-of-window override: always plain green early on (blue must not flicker at
             // start). elapsed < 0 under clock skew (remaining > duration) also folds to green here.
             let elapsed = Double(windowDurationSeconds) - remainingSeconds
             if elapsed <= PacingModel.pacingBlueStartOverrideSeconds { return .calm }   // green
-            return (timeFraction - usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: windowDurationSeconds, multiplier: behindMultiplier)
+            return (timeFraction - usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: windowDurationSeconds)
                 ? .farBehind : .calm                              // blue : green
         }
         if usageFraction >= 1 { return .exhausted }                // red (limit hit)
@@ -429,36 +453,42 @@ public enum PacingModel {
         min(0.16, max(0, 0.16 * (1 - timeFraction)))
     }
 
+    /// The fixed scale applied to the base green→blue width (1 h for the 5-hour window, 1 d for the
+    /// 7-day one), giving the shipped **2 h / 5 h = 0.40** and **2 d / 7 d ≈ 0.2857** crossovers.
+    ///
+    /// This was the user-facing `FarBehindInterval` (×1 / ×2 / ×3 / off), retired in favour of the
+    /// single shipped width: ×2 was already the default and the value the usage journal recorded at,
+    /// ×1 had been rejected as the default when the option was introduced, and ×3 put the 5-hour
+    /// threshold at 0.60 — a surplus that window can barely reach (`surplus ≤ timeFraction`), i.e. a
+    /// dead zone. "Whether blue applies at all" now lives in ``BarLayout/blueAllowed``, not here.
+    public static let farBehindWidthMultiplier = 2
+
     /// The green→blue (`.farBehind`) boundary for the on-pace/behind gap, as a **fixed span of real
     /// time** rather than a fraction of the window (unlike ``aheadThreshold(timeFraction:)``, which is
     /// dynamic). Returned as the fraction the pacing math compares against:
-    /// `LimitWindow.blueBehindWidthSeconds × multiplier / windowDurationSeconds`. With the base 1h(5h)/
-    /// 1d(7d) width, the default `multiplier = 2` (``FarBehindInterval/medium``) gives **2 h / 5 h = 0.40**
-    /// (5h) and **2 d / 7 d ≈ 0.2857** (7d); `multiplier = 1` reproduces the old 0.20 / 0.1429 split, and
-    /// `multiplier = 0` (``FarBehindInterval/off``) returns `+∞` so blue never appears.
+    /// `LimitWindow.blueBehindWidthSeconds × farBehindWidthMultiplier / windowDurationSeconds` —
+    /// **2 h / 5 h = 0.40** (5h) and **2 d / 7 d ≈ 0.2857** (7d).
     ///
     /// A surplus (`timeFraction − usageFraction`) at or below this stays green (`.calm`); a surplus
-    /// strictly above it is blue (`.farBehind`). Being behind by more than an hour (5h) / a day (7d)
-    /// means you have real, fixed headroom to push, independent of how far the window has elapsed.
+    /// strictly above it is blue (`.farBehind`). Being behind by more than two hours (5h) / two days
+    /// (7d) means you have real, fixed headroom to push, independent of how far the window has elapsed.
     /// Shared by ``BarLayout/severity`` (Kit) and `PopupBarView.behindColor` (AppKit) so colour and
     /// severity never drift.
+    ///
+    /// This answers only **how wide** the blue zone is, never **whether** it applies — that is
+    /// ``BarLayout/blueAllowed``, checked before this is ever called. So this never returns `+∞`.
     ///
     /// The comparison side uses a strict `>` (a surplus exactly at the threshold is green — the louder
     /// of the two calm tones). A separate 20-min *start* override (``pacingBlueStartOverrideSeconds``)
     /// keeps the first 20 minutes green regardless of this.
     ///
-    /// - Parameters:
-    ///   - windowDurationSeconds: The window length (``LimitWindow/durationSeconds``: 18 000 for 5h,
-    ///     604 800 for 7d), carried on ``BarLayout``. A non-positive value (inert placeholder bars)
-    ///     returns `0` — any surplus reads as the calmer green, matching those bars' forced-calm intent.
-    ///   - multiplier: The user's ``FarBehindInterval`` scale on the base 1h(5h)/1d(7d) width
-    ///     (``BarLayout/behindMultiplier``): `1`/`2`/`3` widen the blue zone (base × multiplier), and
-    ///     **`0` disables blue** by returning `.greatestFiniteMagnitude`, so the caller's strict `>`
-    ///     comparison is always false (never blue). Defaults to `2` (the shipped ``FarBehindInterval/medium``).
-    public static func behindThreshold(windowDurationSeconds: Int, multiplier: Int = 2) -> Double {
-        guard multiplier > 0 else { return .greatestFiniteMagnitude }   // off → never blue
+    /// - Parameter windowDurationSeconds: The window length (``LimitWindow/durationSeconds``: 18 000 for
+    ///   5h, 604 800 for 7d), carried on ``BarLayout``. A non-positive value (inert placeholder bars)
+    ///   returns `0` — any surplus reads as the calmer green, matching those bars' forced-calm intent.
+    public static func behindThreshold(windowDurationSeconds: Int) -> Double {
         guard windowDurationSeconds > 0 else { return 0 }
-        let width = blueBehindWidthSeconds(forWindowDurationSeconds: windowDurationSeconds) * multiplier
+        let width = blueBehindWidthSeconds(forWindowDurationSeconds: windowDurationSeconds)
+            * farBehindWidthMultiplier
         return Double(width) / Double(windowDurationSeconds)
     }
 
@@ -492,16 +522,16 @@ public enum PacingModel {
     ///   - resetsAt: Parsed `resets_at` date from the API response.
     ///   - now: Current instant (inject for deterministic tests; do **not** call `Date()` here).
     ///   - window: The rolling window this limit belongs to.
-    ///   - behindMultiplier: The user's ``FarBehindInterval`` scale for the green→blue crossover, stored
-    ///     onto ``BarLayout/behindMultiplier`` (`0` = off/no-blue; `1`/`2`/`3` = ×base). Defaults to `2`
-    ///     (``FarBehindInterval/medium``) so existing/synthetic callers keep the shipped look; the AppKit
-    ///     layer must pass the **real** configured value (`interval.multiplier ?? 0`).
+    ///   - blueAllowed: Whether this bar may render the blue (`farBehind`) zone, stored onto
+    ///     ``BarLayout/blueAllowed``. Defaults to `true` so synthetic/preview callers keep the shipped
+    ///     look; the real callers pass ``weeklyHasHeadroom(in:now:)`` for the 5-hour and per-model bars,
+    ///     `true` for the 7-day bar (it never gates on itself).
     public static func barLayout(
         utilization: Double,
         resetsAt: Date,
         now: Date,
         window: LimitWindow,
-        behindMultiplier: Int = 2
+        blueAllowed: Bool = true
     ) -> BarLayout {
         let usageFraction = min(1, max(0, utilization / 100))
         let remaining     = resetsAt.timeIntervalSince(now)   // seconds until reset (may be ≤ 0)
@@ -510,7 +540,39 @@ public enum PacingModel {
         return BarLayout(usageFraction: usageFraction, timeFraction: timeFraction,
                          pacing: pacing, remainingSeconds: remaining,
                          windowDurationSeconds: window.durationSeconds,
-                         behindMultiplier: behindMultiplier)
+                         blueAllowed: blueAllowed)
+    }
+
+    // MARK: weeklyHasHeadroom
+
+    /// Whether the **7-day** window still has room to spend — the gate that lets a 5-hour (or
+    /// 7-day-paced per-model) bar render the blue `farBehind` zone.
+    ///
+    /// Blue says *there is room to push*. Computed per-window, that advice becomes a lie whenever the
+    /// week itself is spent or running ahead of pace: a freshly reset 5-hour window turns blue 20 min
+    /// in and urges a push the weekly quota cannot fund. The worst shape is a blocked week — the 5-hour
+    /// bar empties out and starts advertising headroom while no work is possible at all.
+    ///
+    /// So blue on the short window requires the week to be **itself** calm:
+    /// `pacing == .onPaceOrBehind && usageFraction < 1` — i.e. the 7-day bucket is blue or green.
+    /// A yellow/orange/red week closes the gate and the 5-hour bar degrades to plain green (not
+    /// yellow: its own pace really is calm; only the *advice* is withdrawn).
+    ///
+    /// **Closed by default.** Returns `false` when the 7-day reset is missing or unparseable, because
+    /// the bar builders fall back to `resetsAt = now`, which yields `timeFraction == 1.0` — a
+    /// maximally-"behind" week that would falsely *open* the gate. Absent a trustworthy weekly clock,
+    /// the advice is withheld rather than guessed. (``UsageSnapshot/hasBrokenActiveReset`` is the wrong
+    /// predicate here: it ignores a zero-usage window and an empty date, which are exactly the cases
+    /// that must still close the gate.)
+    ///
+    /// Derived through ``barLayout(utilization:resetsAt:now:window:blueAllowed:)`` rather than by
+    /// re-deriving the arithmetic, so the gate cannot disagree with the 7-day row the user is looking
+    /// at. Not recursive: only `pacing`/`usageFraction` are read, and neither depends on `blueAllowed`.
+    public static func weeklyHasHeadroom(in snapshot: UsageSnapshot, now: Date) -> Bool {
+        guard let resetsAt = ResetClock.parse(snapshot.sevenDay.resetsAt) else { return false }
+        let weekly = barLayout(utilization: snapshot.sevenDay.utilization,
+                               resetsAt: resetsAt, now: now, window: .sevenDay)
+        return weekly.pacing == .onPaceOrBehind && weekly.usageFraction < 1
     }
 
     // MARK: blockIndex (popup-only derivative)

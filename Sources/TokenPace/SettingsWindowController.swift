@@ -96,12 +96,6 @@ final class SettingsWindowController: NSWindowController {
         get { model.onShowTicksChange } set { model.onShowTicksChange = newValue }
     }
 
-    /// Called when the user changes the "Far behind pace interval" picker (#224), with the new interval.
-    /// Governs the green→blue threshold on both surfaces.
-    var onFarBehindIntervalChange: ((FarBehindInterval) -> Void)? {
-        get { model.onFarBehindIntervalChange } set { model.onFarBehindIntervalChange = newValue }
-    }
-
     /// Called when the user toggles "Show service status dot on issues" (#31), with the new state.
     var onServiceDotChange: ((Bool) -> Void)? {
         get { model.onServiceDotChange } set { model.onServiceDotChange = newValue }

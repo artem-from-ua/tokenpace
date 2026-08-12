@@ -51,13 +51,9 @@ enum ColorCycleStub {
     /// Values are nudged to sit clearly inside each band rather than on its boundary, so a small
     /// drift in `timeFraction` between steps can't tip a zone into its neighbour.
     static func utilization(for zone: PacingBucket, timeFraction: Double,
-                            windowDurationSeconds: Int, behindMultiplier: Int) -> Double {
+                            windowDurationSeconds: Int) -> Double {
         let ahead = PacingModel.aheadThreshold(timeFraction: timeFraction)
-        // The behind side is measured against the *configured* crossover width; fall back to the
-        // shipped medium (2) when the user has blue switched off, so the blue step still shows.
-        let behind = PacingModel.behindThreshold(
-            windowDurationSeconds: windowDurationSeconds,
-            multiplier: behindMultiplier == 0 ? 2 : behindMultiplier)
+        let behind = PacingModel.behindThreshold(windowDurationSeconds: windowDurationSeconds)
 
         let fraction: Double
         switch zone {

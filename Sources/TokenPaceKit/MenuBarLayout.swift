@@ -26,25 +26,34 @@ public struct BarView: Sendable, Equatable {
     /// Whether this **idle** 5-hour bar is also **blocked** — the 7-day limit is exhausted and paid
     /// credits cannot cover, so there is no path to start a session (#158, `CreditsPacing.isBlocked`).
     /// When `true` the view draws the solid idle track in **grey** (not the "ready" blue), meaning
-    /// "waiting for a limit to reset" rather than "ready to start, full quota available". Only ever
-    /// `true` alongside ``idle``; `false` on every normal bar and on a non-blocked idle bar.
+    /// "waiting for a limit to reset" rather than "ready to start". Only ever `true` alongside
+    /// ``idle``; `false` on every normal bar and on a non-blocked idle bar.
     public let blocked: Bool
+    /// Whether the **week** still has room to spend (``PacingModel/weeklyHasHeadroom(in:now:)``), for
+    /// the idle bar's fill colour. An idle bar draws no pacing, so it cannot read the gate off its
+    /// inert ``layout`` — the verdict rides alongside.
+    ///
+    /// The "ready to start" blue claims there is quota to burn, which is wrong while the week runs
+    /// ahead of pace, so the idle fill degrades to **green** there — grey still means blocked (no work
+    /// possible) and blue still means a genuinely calm week. Meaningful only while ``idle``.
+    public let weeklyHeadroom: Bool
 
     public init(
         layout: BarLayout, indicator: LimitIndicator, window: LimitWindow,
-        idle: Bool = false, blocked: Bool = false
+        idle: Bool = false, blocked: Bool = false, weeklyHeadroom: Bool = true
     ) {
         self.layout = layout
         self.indicator = indicator
         self.window = window
         self.idle = idle
         self.blocked = blocked
+        self.weeklyHeadroom = weeklyHeadroom
     }
 
     /// The bar's pacing **severity** for reset-countdown selection (#103, ADR-0028/0029). Delegates to
     /// `BarLayout.severity`, except an **idle** 5-hour bar is always ``PacingSeverity/calm``: it carries
-    /// an inert placeholder `layout` (`usage 0 / time 0`) and means "ready to start, full quota
-    /// available", never a pacing concern — so it must not drive the countdown. Only the 7-day bar
+    /// an inert placeholder `layout` (`usage 0 / time 0`) and means "ready to start", never a pacing
+    /// concern — so it must not drive the countdown. Only the 7-day bar
     /// decides in the idle state.
     public var severity: PacingSeverity { idle ? .calm : layout.severity }
 
@@ -314,10 +323,13 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///     diagnostic stale bars are never dropped.
     public static func make(
         from snapshot: UsageSnapshot, now: Date, resetMode: ResetCountdownMode = .smart,
-        hideCalmSevenDay: Bool = false, pauseHidesBars: Bool = false,
-        behindMultiplier: Int = 2
+        hideCalmSevenDay: Bool = false, pauseHidesBars: Bool = false
     ) -> MenuBarLayout {
-        let seven = bar(for: snapshot.sevenDay, window: .sevenDay, now: now, behindMultiplier: behindMultiplier)
+        // The weekly gate, resolved once for every exit path below: the 5-hour bar may only go blue
+        // while the 7-day window itself has headroom (`PacingModel.weeklyHasHeadroom`). The 7-day bar
+        // never gates on itself.
+        let weeklyHeadroom = PacingModel.weeklyHasHeadroom(in: snapshot, now: now)
+        let seven = bar(for: snapshot.sevenDay, window: .sevenDay, now: now, blueAllowed: true)
         let sevenResetsAt = ResetClock.parse(snapshot.sevenDay.resetsAt)
         // Elide the 7-day bar when it is calm and the user opted in (#94). `selectReset` below still
         // sees the real `seven.severity`, so the reset-countdown logic is untouched.
@@ -345,8 +357,9 @@ public struct MenuBarLayout: Sendable, Equatable {
             let five = BarView(
                 // Inert placeholder: `.onPaceOrBehind` → `severity` is `.calm` before `remainingSeconds`
                 // is ever read, so the value here is immaterial (0).
-                layout: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0, windowDurationSeconds: 0, behindMultiplier: 2),
-                indicator: .neutral, window: .fiveHour, idle: true, blocked: blocked)
+                layout: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0, windowDurationSeconds: 0, blueAllowed: false),
+                indicator: .neutral, window: .fiveHour, idle: true, blocked: blocked,
+                weeklyHeadroom: weeklyHeadroom)
             // In the idle state the 5h window is legitimately date-less (ADR-0027, not an error), but the
             // 7-day window is real: if it reports usage yet its `resets_at` is unparseable, that is the
             // same broken-payload data error as on the active path (#167, ADR-0043) → ⚠️.
@@ -381,7 +394,7 @@ public struct MenuBarLayout: Sendable, Equatable {
                 fiveHour: five, sevenDay: sevenToShow, resetToShow: resetToShow))
         }
 
-        let five = bar(for: snapshot.fiveHour, window: .fiveHour, now: now, behindMultiplier: behindMultiplier)
+        let five = bar(for: snapshot.fiveHour, window: .fiveHour, now: now, blueAllowed: weeklyHeadroom)
         let fiveResetsAt = ResetClock.parse(snapshot.fiveHour.resetsAt)
 
         // API data error (#167, ADR-0043): a window the server reports as **active** (real usage) but
@@ -455,14 +468,12 @@ public struct MenuBarLayout: Sendable, Equatable {
     public static func make(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
         serviceProblem: ServiceStatus? = nil, resetMode: ResetCountdownMode = .smart,
-        hideCalmSevenDay: Bool = false, showCredits: Bool = false, pauseHidesBars: Bool = false,
-        behindMultiplier: Int = 2
+        hideCalmSevenDay: Bool = false, showCredits: Bool = false, pauseHidesBars: Bool = false
     ) -> MenuBarLayout {
         let credits = showCredits ? snapshot.flatMap { creditsMarker(for: $0, now: now) } : nil
         let layout = usageMode(from: snapshot, health: health, now: now,
                                resetMode: resetMode, hideCalmSevenDay: hideCalmSevenDay,
-                               pauseHidesBars: pauseHidesBars,
-                               behindMultiplier: behindMultiplier)
+                               pauseHidesBars: pauseHidesBars)
         // Pause icon: drawn whenever the user is fully blocked (`CreditsPacing.isBlocked` — no path to
         // work), **always**, independent of `pauseHidesBars` (that flag only decides whether the bars are
         // hidden beside it). Left of the bars (`.expanded`) or left of the countdown (`.blockedReset`,
@@ -503,22 +514,19 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// so ``make(from:health:now:serviceProblem:resetMode:)`` can graft the service dot onto its result.
     private static func usageMode(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
-        resetMode: ResetCountdownMode, hideCalmSevenDay: Bool, pauseHidesBars: Bool,
-        behindMultiplier: Int
+        resetMode: ResetCountdownMode, hideCalmSevenDay: Bool, pauseHidesBars: Bool
     ) -> MenuBarLayout {
         // Healthy, or stale within the grace window: show the (possibly stale) bars unchanged.
         // A healthy state with no snapshot only happens at the very first tick before the first
         // poll resolves; with no data to draw, fall back to the bare ⚠️ error glyph.
         guard let age = health.failureAge(now: now) else {
             return snapshot.map { make(from: $0, now: now, resetMode: resetMode,
-                                       hideCalmSevenDay: hideCalmSevenDay, pauseHidesBars: pauseHidesBars,
-                                       behindMultiplier: behindMultiplier) }
+                                       hideCalmSevenDay: hideCalmSevenDay, pauseHidesBars: pauseHidesBars) }
                 ?? MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
         }
         if let snapshot, age <= UsageHealth.glyphAfter {
             return make(from: snapshot, now: now, resetMode: resetMode,
-                        hideCalmSevenDay: hideCalmSevenDay, pauseHidesBars: pauseHidesBars,
-                        behindMultiplier: behindMultiplier)
+                        hideCalmSevenDay: hideCalmSevenDay, pauseHidesBars: pauseHidesBars)
         }
 
         // Failing past the glyph threshold. Keep the bars only in the 30–60 min stale window and
@@ -531,8 +539,8 @@ public struct MenuBarLayout: Sendable, Equatable {
         // `make` never returning `.blockedReset` here (#194).
         let keepBars = snapshot != nil && age <= UsageHealth.hideBarsAfter
         guard keepBars, let snapshot,
-              case let .expanded(five, seven, _) = make(from: snapshot, now: now, resetMode: resetMode,
-                                                        behindMultiplier: behindMultiplier).mode else {
+              case let .expanded(five, seven, _) = make(from: snapshot, now: now,
+                                                        resetMode: resetMode).mode else {
             return MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
         }
         // Both `resets_at` unparseable → no diagnostic countdown (the ⚠️ + stale bars still show).
@@ -587,14 +595,14 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// One `BarView` for a window, combining its bar geometry and its exhausted flag
     /// (`limitIndicator`, `.critical` when usage truncates to 100).
     private static func bar(for window: UsageWindow, window kind: LimitWindow, now: Date,
-                            behindMultiplier: Int) -> BarView {
+                            blueAllowed: Bool) -> BarView {
         let resetsAt = ResetClock.parse(window.resetsAt) ?? now  // unparseable → elapsedFraction = 1.0
         let layout = PacingModel.barLayout(
             utilization: window.utilization,
             resetsAt: resetsAt,
             now: now,
             window: kind,
-            behindMultiplier: behindMultiplier
+            blueAllowed: blueAllowed
         )
         let indicator = PacingModel.limitIndicator(utilization: window.utilization)
         return BarView(layout: layout, indicator: indicator, window: kind)

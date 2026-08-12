@@ -24,7 +24,6 @@ struct AppearancePresetTests {
         #expect(v.menuBarStyle == .pressure)   // the quietest style, and on both surfaces (#329)
         #expect(v.dropdownStyle == .pressure)
         #expect(!v.showTicks)   // the quiet look drops the tick ruler
-        #expect(v.farBehindInterval == .off)   // …and no blue far-behind zone
     }
 
     /// Work harder! = Chill but with Work harder on, ticks on, and **Gauge** bars. The calm menu-bar
@@ -51,8 +50,6 @@ struct AppearancePresetTests {
         #expect(wh.modelLimitsVisibility == chill.modelLimitsVisibility)   // both .nonCalm (#211)
         #expect(wh.extraUsageVisibility == chill.extraUsageVisibility)
         #expect(wh.resetCountdownModeMenuBar == chill.resetCountdownModeMenuBar)
-        #expect(wh.farBehindInterval == .medium)   // difference 4 — Chill is .off (no blue)
-        #expect(chill.farBehindInterval == .off)
     }
 
     /// Control freak = everything loud: calm off, nothing hidden, every glyph/dot/credits/per-model
@@ -132,8 +129,7 @@ struct AppearancePresetTests {
             // off every preset — and it is the mix a preset can no longer express (#329).
             menuBarStyle: chill.menuBarStyle,
             dropdownStyle: .progress,
-            showTicks: chill.showTicks,
-            farBehindInterval: chill.farBehindInterval)
+            showTicks: chill.showTicks)
         #expect(AppearancePreset.matching(custom) == nil)
     }
 }

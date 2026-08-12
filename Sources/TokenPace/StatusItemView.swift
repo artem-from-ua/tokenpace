@@ -227,10 +227,10 @@ final class StatusItemView: NSView {
         static var gapGreen: NSColor { ColorStore.shared.color(.green) }
 
         /// Pacing gap / dot when **far behind** pace (deep behind / big surplus) on the base 5h/7d
-        /// bars — `.systemBlue` via the dedicated `paceBlue` role (distinct from the idle-bar blue).
-        /// Chosen by `PopupBarView.behindColor`; on the menu bar the surface only ever carries base
-        /// 5h/7d bars, so no per-row gate is needed here.
-        static var gapBlue: NSColor { ColorStore.shared.color(.paceBlue) }
+        /// bars — `.systemBlue` via the shared `blue` role, the same one the idle fill and the
+        /// maintenance dot use. Chosen by `PopupBarView.behindColor`; on the menu bar the surface only
+        /// ever carries base 5h/7d bars, so no per-row gate is needed here.
+        static var gapBlue: NSColor { ColorStore.shared.color(.blue) }
 
         /// Time-indicator dot when on pace. Shares the unified green with the gap (`.systemGreen`), so the
         /// marker reads as the gap's colour with no manual lightening.
@@ -250,7 +250,7 @@ final class StatusItemView: NSView {
         /// native icon. The unified `barTrack` role — the popup bar uses the same one.
         static var unusedGrey: NSColor { ColorStore.shared.color(.barTrack) }
         /// The **idle** 5-hour bar's solid fill (#100, ADR-0027) — the 5h window has no active session,
-        /// so the bar is a knobless solid track meaning "ready to start, full quota available", not a
+        /// so the bar is a knobless solid track meaning "ready to start", not a
         /// pacing state. `.systemBlue`, so it flips light/dark and honours Increase Contrast like the
         /// native icons; the unified `blue` role, shared with the popup idle bar and maintenance dot.
         static var idleBlue: NSColor { ColorStore.shared.color(.blue) }
@@ -838,7 +838,7 @@ final class StatusItemView: NSView {
     /// base zones (used + future/unused) share the solid ``PopupBarView/monochromeGrey`` with the popup,
     /// so the menu-bar bars read identically; only the pacing gap and dot carry colour.
     private func drawBar(_ bar: BarView, in rect: NSRect) {
-        // Idle 5h bar (#100, ADR-0027): no pacing zones — "no active session, full quota available".
+        // Idle 5h bar (#100, ADR-0027): no pacing zones — "no active session".
         // The bar's `layout`/`indicator` are inert here.
         //
         // Idle is drawn the same way in **both** styles (#325): the bare grey track, plus the minimum
@@ -856,9 +856,13 @@ final class StatusItemView: NSView {
             // Calm uses the same `calmWhite` neutral as every muted pacing bar, not a dimmer tone of
             // its own (#307): idle sitting quieter than the calm bars beside it made the "nothing is
             // happening" state read as "something is wrong with this bar".
+            // Blue only while the week has headroom (`PacingModel.weeklyHasHeadroom`): the "ready to
+            // start" blue claims quota to burn, which is wrong once the week runs ahead of pace — it
+            // degrades to green there, the same way the pacing blue does. Grey still means blocked.
+            let idleReady = bar.weeklyHeadroom ? Palette.idleBlue : Palette.gapGreen
             let idleTarget: NSColor = bar.blocked
                 ? Palette.unusedGrey
-                : (calmColorMode.mutesCalm ? Palette.calmWhite : accent(Palette.idleBlue))
+                : (calmColorMode.mutesCalm ? Palette.calmWhite : accent(idleReady))
             // Animated like any other bar colour, so idle→active (blue→green) and the blocked grey
             // swap fade rather than snap.
             let fill = animated(idleTarget, window: bar.window, part: .fill)

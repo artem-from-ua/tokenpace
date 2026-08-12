@@ -625,12 +625,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.popupVC.showTicks = on
                 self?.reRenderForCurrentTime()   // also push the tick-ruler change into the preview
             }
-            wc.onFarBehindIntervalChange = { [weak self] _ in
-                // The green→blue threshold changes each bar's `behindMultiplier` (#224), which is baked
-                // into the layout — rebuild both surfaces from the last poll (render reads
-                // PersistedConfig.farBehindInterval for the multiplier).
-                self?.reRenderForCurrentTime()
-            }
             wc.onServiceDotChange = { [weak self] _ in
                 // The dot changes the layout (drawn + item width), not just a colour — rebuild the
                 // menu-bar layout from the last poll (render reads PersistedConfig for the toggle).
@@ -924,6 +918,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // before anything reads either style key, or the getters resolve the stale raw to the preset
         // default and the user's choice is silently lost.
         PersistedConfig.migrateBarStyleIfNeeded()
+        // …and drop the retired "Far behind pace interval" key: the green→blue width is fixed now, and
+        // whether blue applies is decided by the weekly data rather than by a preference.
+        PersistedConfig.retireFarBehindIntervalIfNeeded()
         // Record the running version so the next launch compares against it.
         PersistedConfig.lastRunVersion = current
     }
@@ -2022,8 +2019,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let utilization = ColorCycleStub.utilization(
             for: zone, timeFraction: timeFraction,
-            windowDurationSeconds: window.durationSeconds,
-            behindMultiplier: PersistedConfig.farBehindInterval.multiplier ?? 0)
+            windowDurationSeconds: window.durationSeconds)
 
         let overlay = PollOutput(
             snapshot: UsageSnapshot(
@@ -2147,10 +2143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // #194, #227: honour the "Pause icon hides bars" toggle — when fully blocked (isBlocked), true
             // drops both bars for a countdown-only widget beside the red pause icon; false keeps the (red)
             // bars beside it. The pause icon itself is drawn whenever blocked, independent of this flag.
-            pauseHidesBars: PersistedConfig.pauseHidesBars,
-            // "Far behind" interval: the user's green→blue crossover scale (off→0/no-blue, short→1,
-            // medium→2, long→3). `nil` (off) maps to 0.
-            behindMultiplier: PersistedConfig.farBehindInterval.multiplier ?? 0)
+            pauseHidesBars: PersistedConfig.pauseHidesBars)
             .withAwaitingInput(awaitingInput)   // #233: graft the awaiting-input indicator (trailing)
         refreshStatusImage()   // the menu-bar image is snapshotted, not auto-rendered, on layout change
         setPopupLayout(PopupLayout.make(
@@ -2158,9 +2151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             serviceStatus: lastStatusHealth,
             // #211: the per-model rows are always built here; whether they're drawn is the popup VC's
             // call (it owns the live ⌥ Option state — see `PopupSectionVisibility`).
-            // "Far behind" interval: the user's green→blue crossover scale (off→0/no-blue, short→1,
-            // medium→2, long→3). `nil` (off) maps to 0.
-            behindMultiplier: PersistedConfig.farBehindInterval.multiplier ?? 0)
+            )
             .withAwaitingInput(awaitingInput)   // #233: graft the awaiting-input indicator (right of brand)
             // #279: graft the incidents (⌥ swaps the service rows for them) and the state of the one
             // subscribe row. Both ride the status poll, not this usage poll, so they are grafted for

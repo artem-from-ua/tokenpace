@@ -99,9 +99,11 @@ enum PersistedConfig {
         /// Whether the popup draws the under-bar tick ruler on the pacing bars (#224). Default-on
         /// (opt-out) — see the property.
         static let showTicks = "showTicks"
-        /// The far-behind (green→blue) threshold interval (#224), stored as the raw `FarBehindInterval`
-        /// string. Default `.medium` — see the property.
-        static let farBehindInterval = "farBehindInterval"
+        /// **Retired.** The far-behind (green→blue) threshold interval (#224) — the green→blue width is
+        /// now the fixed shipped ×2 (`PacingModel.farBehindWidthMultiplier`), and whether blue applies
+        /// at all is decided by the data (`PacingModel.weeklyHasHeadroom`), not by a preference. The key
+        /// is kept only so the retiring migration and the Appearance reset can sweep it away.
+        static let retiredFarBehindInterval = "farBehindInterval"
         /// Whether polling pauses while the screen is locked / off / running a screensaver (#114).
         /// Default-on (opt-out) — see the property.
         static let pausePollingWhenScreenLocked = "pausePollingWhenScreenLocked"
@@ -413,15 +415,6 @@ enum PersistedConfig {
     }
 
 
-    /// The far-behind (green→blue) threshold interval (#224) — how big a surplus turns the behind side
-    /// blue (`.off` = never blue; `.short`/`.medium`/`.long` = 1×/2×/3× the 1h(5h)/1d(7d) base). Stored
-    /// as the raw `FarBehindInterval` string; an absent key or an unrecognised value falls back to the
-    /// factory default (`AppearancePreset.default`). Governs both surfaces via `BarLayout.behindMultiplier`.
-    static var farBehindInterval: FarBehindInterval {
-        get { FarBehindInterval(rawValue: defaults.string(forKey: Key.farBehindInterval) ?? "") ?? AppearancePreset.defaultValues.farBehindInterval }
-        set { defaults.set(newValue.rawValue, forKey: Key.farBehindInterval) }
-    }
-
     /// Revert every setting the **Appearance** pane owns to its factory default — the menu-bar widget
     /// toggles, the wallpaper-brightness theme, the reset-countdown mode, and the dropdown's per-model
     /// toggle. Done by **removing** each key (not writing an explicit default), so each property's getter
@@ -444,7 +437,9 @@ enum PersistedConfig {
             // reached yet — otherwise it would be waiting to re-seed the two keys on a later launch.
             Key.legacyBarStyle,
             Key.showTicks,
-            Key.farBehindInterval,
+            // Retired (see `Key.retiredFarBehindInterval`), still swept so a Reset also clears it for
+            // anyone who never launched the retiring build.
+            Key.retiredFarBehindInterval,
             Key.awaitingInputInMenuBar,
         ] {
             defaults.removeObject(forKey: key)
@@ -477,6 +472,21 @@ enum PersistedConfig {
     private static func clearLegacyPauseKeys() {
         defaults.removeObject(forKey: Key.legacyHideBarsWhenBlocked)
         defaults.removeObject(forKey: Key.legacyShowBlockedPause)
+    }
+
+    /// Retire the "Far behind pace interval" key. The option is gone: the green→blue width is the fixed
+    /// shipped ×2 (`PacingModel.farBehindWidthMultiplier`), and whether blue applies at all is now
+    /// decided by the data (`PacingModel.weeklyHasHeadroom`) rather than by a preference.
+    ///
+    /// There is **no successor to seed** — unlike the pause/bar-style migrations, the stored value maps
+    /// onto nothing, so this simply clears it (the `clearLegacyPauseKeys` shape). Idempotent; runs on
+    /// every launch and does nothing once the key is gone.
+    ///
+    /// Note for anyone reading a `defaults export` afterwards: users who had picked
+    /// *"Less blue, please!"* (the retired `off`) will start seeing the far-behind blue again in the
+    /// dropdown. On the menu bar the shipped calm default still mutes it to white.
+    static func retireFarBehindIntervalIfNeeded() {
+        defaults.removeObject(forKey: Key.retiredFarBehindInterval)
     }
 
     /// One-time upgrade of the boolean "Show model & service limits" opt-out to the tri-state
@@ -572,7 +582,6 @@ enum PersistedConfig {
         menuBarStyle = v.menuBarStyle
         dropdownStyle = v.dropdownStyle
         showTicks = v.showTicks
-        farBehindInterval = v.farBehindInterval
     }
 
     /// The live Appearance config assembled into an `AppearancePresetValues` — the read-mirror of
@@ -592,8 +601,7 @@ enum PersistedConfig {
             resetCountdownModeMenuBar: resetCountdownModeMenuBar,
             menuBarStyle: menuBarStyle,
             dropdownStyle: dropdownStyle,
-            showTicks: showTicks,
-            farBehindInterval: farBehindInterval)
+            showTicks: showTicks)
     }
 
     /// Whether polling pauses while the screen is **locked, off, or running a screensaver** (#114,

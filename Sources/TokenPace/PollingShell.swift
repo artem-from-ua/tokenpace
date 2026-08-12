@@ -334,7 +334,7 @@ actor StubUsageTransport: UsageTransport {
     /// (#65) — Fable / Mythos — so the scoped-model popup rows are exercised end-to-end, and their
     /// utilisations (plus the 7-day window) show a couple of the ahead-of-pace gap colours.
     enum Mode: Equatable {
-        case climbing, screenshot, authError, idle, idleBlocked, activeBlocked
+        case climbing, screenshot, authError, idle, idleBlocked, idleWeekHot, activeBlocked
         /// The **stale-while-erroring** frame (spacing bug): the first usage poll returns a full, valid
         /// snapshot (5h idle "ready to start", a 18 % 7-day window, a Fable per-model row, an on-pace
         /// "Extra usage" credits section), then **every later poll throws** `URLError(.timedOut)`. The
@@ -542,6 +542,15 @@ actor StubUsageTransport: UsageTransport {
         /// see the far-behind blue zone and the "Work harder" toggle (blue stays coloured under Calm).
         case farBehind
 
+        /// **Weekly-gate** frame: the state the gate exists for. 5h is deep behind pace (u = 5 % with
+        /// 2 h left of the 5-hour window → `t = 60 %`, a 55 pp surplus, far past the 40 pp threshold),
+        /// so on its own it would be blue — but `seven_day` is **exhausted** (100 %). Blue advises
+        /// "there's room to push", which a spent week cannot fund, so the 5h bar degrades to **green**
+        /// (`PacingModel.weeklyHasHeadroom`). Not yellow: the 5-hour window's own pace really is calm;
+        /// only the advice is withdrawn. Compare against `far-behind`, where the week is calm and both
+        /// bars stay blue.
+        case weeklyGate
+
         /// **Near-zero** frame: tiny usage on a *fresh* window (barely any time elapsed), so the pacing
         /// gap is a hairline — the case that exercises the min-strip "pill" geometry. Both usage and
         /// `timeFraction` are ≈ 0 (5h resets ~17 950 s out of an 18 000 s window; 7d ~596 000 s out of
@@ -606,9 +615,12 @@ actor StubUsageTransport: UsageTransport {
         ///   (2 h of 5 h = 40 pp), so the bar is **blue** and, under Gauge, fills its whole left half
         ///   (`r = −3.75`, clamped). A full-length strip is the only state where the strip's corners
         ///   meet the track's own, so it is the state that shows whether the two radii agree.
-        /// - **7d** — `t = 30 %, u = 31.25 %`: a hair of a lead → `+1.4 %` of the ahead half, i.e. far
-        ///   under `minStripWidth`, floored to the minimum pill. That is the opposite end: the
-        ///   smallest mark the widget can draw, where an over-rounded strip reads as a lozenge.
+        /// - **7d** — `t = 30 %, u = 20 %`: a 10 pp surplus, well under the 28.6 pp far-behind
+        ///   threshold, so it stays green and draws a short strip — the opposite end from the 5h row:
+        ///   the smallest mark the widget can draw, where an over-rounded strip reads as a lozenge.
+        ///   It must stay *behind* pace: the 5h row's blue is gated on the week having headroom
+        ///   (`PacingModel.weeklyHasHeadroom`), so an ahead-of-pace week here would take away the very
+        ///   full-length blue strip this frame exists to judge.
         case barExtremes
 
         /// (fiveUtil, sevenUtil, fiveResetSeconds, sevenResetSeconds).
@@ -623,6 +635,8 @@ actor StubUsageTransport: UsageTransport {
             case .calmBoth:           return (10, 20, 4 * 3600, 5 * 24 * 3600)
             case .nearResetFiveHour:  return (98, 20, 12 * 60, 5 * 24 * 3600)
             case .farBehind:          return (5, 10, 2 * 3600, 2 * 24 * 3600)
+            // 5h: u=5 vs t=60 % → 55 pp surplus (would be blue). 7d exhausted → gate shut.
+            case .weeklyGate:         return (5, 100, 2 * 3600, 5 * 24 * 3600)
             // Fresh windows: reset is almost a full window away → timeFraction ≈ 0 → hairline gap.
             case .nearZero:           return (0, 4, 17_950, 596_000)
             // Fresh windows (almost the whole window left) → timeFraction ≈ 0, so the gap is
@@ -638,7 +652,7 @@ actor StubUsageTransport: UsageTransport {
             // `pressureScaleCoefficient` at 1.25.
             case .pressureSweep:      return (97, 38, 1_260, 423_360)
             case .gaugeSweep:         return (70, 38, 1_800, 423_360)
-            case .barExtremes:        return (5, 31.25, 3_600, 423_360)
+            case .barExtremes:        return (5, 20, 3_600, 423_360)
             }
         }
     }
@@ -823,6 +837,24 @@ actor StubUsageTransport: UsageTransport {
             {"kind":"weekly_scoped","group":"weekly","percent":15,"severity":"normal",\
             "resets_at":"\(sevenReset)","scope":{"model":{"id":null,"display_name":"Fable"},\
             "surface":null},"is_active":false}]}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
+        // Idle + hot week frame: the same idle 5h shape as `.idle`, but `seven_day` is **ahead of
+        // pace** (70 % used with ~5 days of the week left, i.e. t ≈ 29 %) while still far from
+        // exhausted — so this is NOT `idleBlocked`. The idle pill must therefore read **green**, not
+        // the "ready to start" blue: work is possible, but the week has no headroom to advertise. The
+        // three idle stubs together cover the pill's three states — `idle` (blue), this (green),
+        // `idle-blocked` (grey).
+        if mode == .idleWeekHot {
+            let sevenReset = self.resetsAt(inSeconds: 5 * 24 * 3600)   // ≥ 24 h → "5d"
+            let body = """
+            {"five_hour":{"utilization":0.0,"resets_at":null},\
+            "seven_day":{"utilization":70.0,"resets_at":"\(sevenReset)"},\
+            "limits":[]}
             """.data(using: .utf8)!
             let response = HTTPURLResponse(
                 url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!

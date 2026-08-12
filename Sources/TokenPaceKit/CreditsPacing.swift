@@ -206,16 +206,14 @@ public enum CreditsPacing {
         let remaining = monthEnd(now: now, timeZone: timeZone)?.timeIntervalSince(now)
             ?? Double(LimitWindow.sevenDay.durationSeconds)
         let pacing: PacingState = timeFraction >= usageFraction ? .onPaceOrBehind : .ahead
-        // Credits are out of the blue-zone scope (the render layer never sets `isBaseLimit` for the
-        // credits bar, so `behindColor`'s blue never applies). The window length here only feeds
-        // `severity`; `farBehind` stays calm like green, so `isCalm`/muting behaviour is unchanged.
-        // Use the 7-day length as a stable placeholder for the monthly window.
+        // Credits are out of the blue-zone scope: the money window is not a token limit, so "you are
+        // far behind pace, push harder" is not advice that applies to spending. `blueAllowed: false`
+        // states that in the model rather than relying on the render layer never setting `isBaseLimit`.
+        // The window length is the 7-day one purely as a stable placeholder for the monthly window.
         return BarLayout(usageFraction: usageFraction, timeFraction: timeFraction,
                          pacing: pacing, remainingSeconds: remaining,
                          windowDurationSeconds: LimitWindow.sevenDay.durationSeconds,
-                         // Credits are out of the blue-zone scope (never `isBaseLimit`), so this only
-                         // feeds `severity`, which stays calm. Medium (×2) is an immaterial placeholder.
-                         behindMultiplier: 2)
+                         blueAllowed: false)
     }
 
     /// The time zone the monthly spend limit resets in — **UTC**.

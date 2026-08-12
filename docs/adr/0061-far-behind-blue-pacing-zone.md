@@ -2,11 +2,16 @@
 status: accepted
 date: 2026-08-02
 supersedes: []
-superseded_by: [0062]
+superseded_by: [0062, 0081]
 ---
 
 # ADR-0061: Синя зона пейсингу «far behind» + опція «Work harder»
 
+> **Частково витіснений [ADR-0081](0081-weekly-capacity-gate-for-blue.md).** Behind-поріг знову
+> фіксований (множник — константа ×2, опцію прибрано), але з'явилася нова умова: синій показується
+> лише поки **тижневе вікно саме має запас** (`BarLayout.blueAllowed` /
+> `PacingModel.weeklyHasHeadroom`). Роль `ColorRole.paceBlue` злито в `.blue`.
+>
 > **Частково витіснений [ADR-0062](0062-configurable-bar-presentation.md) (#224).** Behind-поріг більше
 > не **фіксованої** ширини — тепер конфігурований через `FarBehindInterval` (множник ×1/×2/×3 або
 > off), дефолт 2h/2d. Bool-опція «Work harder» (розділ 5) замінена триставним `CalmColorMode`

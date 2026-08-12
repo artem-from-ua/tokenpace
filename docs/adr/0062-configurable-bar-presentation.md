@@ -2,11 +2,16 @@
 status: superseded
 date: 2026-08-02
 supersedes: []
-superseded_by: [0076, 0080]
+superseded_by: [0076, 0080, 0081]
 ---
 
 # ADR-0062: Конфігурована подача пейсинг-барів — Bar style, Calm-режим, поріг far-behind
 
+> **Частково витіснений [ADR-0081](0081-weekly-capacity-gate-for-blue.md)**: §3 більше не чинний —
+> `FarBehindInterval` прибрано з Settings, множник зафіксовано на ×2, а `BarLayout.behindMultiplier`
+> замінено на `blueAllowed`, що несе weekly-capacity gate. Решта (§2 `CalmColorMode`, §4 `showTicks`,
+> пресети) — чинна.
+>
 > **Частково витіснений [ADR-0080](0080-per-surface-bar-style.md)** (#329): §1 більше не чинний у
 > частині «один enum на дві поверхні». Кейс `.mixed` видалено, а `BarStyle` тепер описує подачу
 > **однієї** поверхні — меню-бар і попап зберігають свій стиль кожен у своєму ключі
