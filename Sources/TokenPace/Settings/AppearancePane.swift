@@ -61,7 +61,7 @@ struct AppearancePane: View {
                                 if let preset = picked { model.apply(preset) } else { model.applySavedCustom() }
                             })
                     }
-                    SettingsHint(text: "Sets all options on the *Menu bar* and *Dropdown* pages.")
+                    SettingsHint(text: "Set all the options for *Menu bar* and *Dropdown* at once.")
                 }
             }
 
