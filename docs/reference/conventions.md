@@ -55,7 +55,7 @@ git config core.hooksPath .githooks
 - **Мета: максимально слідувати дизайну рідних застосунків macOS** (System Settings передусім). Для
   стандартних системних елементів — **нуль захардкоджених** розмірів/шрифтів/відступів/кольорів;
   використовувати системні механізми (семантичні `NSColor`, `NSFont.systemFontSize`/text styles,
-  `NSSwitch.controlSize`, `rowSizeStyle`/`NSTableViewDefaultSizeMode`, `NSStackView.firstBaseline`,
+  `NSSwitch.controlSize`, `NSStackView.firstBaseline`,
   `NSPathControl` тощо).
 - **Вікно Settings — SwiftUI** `Form { Section }.formStyle(.grouped)` + `NavigationSplitView`, вбудований
   у `NSWindow` через `NSHostingController` (ADR-0042, #168) — як і сам System Settings. Grouped-inset

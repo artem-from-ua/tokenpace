@@ -1,74 +1,50 @@
 import SwiftUI
 
-// MARK: - SidebarIconMetrics (#168, ADR-0042)
+// MARK: - SidebarIconMetrics (#168, ADR-0042; pinned to Large in #335)
 
-/// The System Settings "Sidebar icon size" (System Settings → Appearance) drives the size of the
-/// coloured SF-Symbol chips in a source-list sidebar. macOS keys this off `NSTableViewDefaultSizeMode`
-/// in `NSGlobalDomain` (1 = Small, 2 = Medium, 3 = Large; absent = Medium) and broadcasts changes via
-/// a private `AppleSideBarDefaultIconSizeChanged` distributed notification.
+/// Sizes for the coloured SF-Symbol chips in the Settings sidebar — **fixed at the Large bucket**,
+/// deliberately ignoring System Settings → Appearance → "Sidebar icon size".
 ///
-/// SwiftUI's `List(.sidebar)` doesn't size a *custom* icon view from this automatically (the standard
-/// chip treatment is bespoke), so this observable reads the system bucket and exposes the matching
-/// chip / symbol / label sizes, updating live when the user changes the setting. The per-bucket values
-/// are **measured** from the live macOS 15 System Settings sidebar (chip 14/20/26, symbol 9/13/17,
-/// label 11/13/15 for S/M/L) — the same values the old AppKit sidebar used — because there is no public
-/// API that hands them to us. This keeps the size *system-driven* (not one hardcoded size) while the
-/// exact numbers are documented, per ADR-0040.
+/// It used to follow that setting: read `NSTableViewDefaultSizeMode` from `NSGlobalDomain`
+/// (1/2/3 = S/M/L), expose the matching chip/symbol/label sizes, and update live off the private
+/// `AppleSideBarDefaultIconSizeChanged` distributed notification. Chip sizes did track the system;
+/// nothing else did. Following one axis of a design while the rest stays put produced a sidebar that
+/// matched System Settings at no size at all (#335):
+///
+/// - **Column width** could not be made to follow. Neither SwiftUI lever scales it — measured on the
+///   live window, `.navigationSplitViewColumnWidth(259)` rendered 307 pt, and `.frame(width:)` snaps
+///   between a couple of fixed states rather than scaling (frame 200 → 307 pt, 240 → 243, 340 → 243:
+///   a *wider* frame giving a *narrower* column). Reaching into AppKit for
+///   `NSSplitView.setPosition(_:ofDividerAt:)` did work, but see below.
+/// - **Row inset** drifted with the list width — 32.5 pt at Small against the system's 10 — because
+///   `List(.sidebar)` derives it, and `listRowInsets` can only *add* to its own 20 pt floor
+///   (measured: leading 0 → 20 pt, 4 → 24, 10 → 30).
+///
+/// Both were fixable in isolation and the combination still did not match: chip, width and inset are
+/// three of many numbers the system moves together, and we were chasing them one at a time. Pinning
+/// to one size makes the window honestly *one* size — the largest, because that is the one whose
+/// measured values (#156) the rest of the layout was built against.
+///
+/// The type stays (rather than the numbers being inlined at their use sites) so there is still one
+/// place that answers "how big is a sidebar chip", and one place to revisit if a future macOS gives
+/// SwiftUI a real handle on the column.
 @MainActor
 @Observable
 final class SidebarIconMetrics {
     /// Chip (rounded-rect background) side length in points.
-    private(set) var chip: CGFloat = 20
+    let chip: CGFloat = 26
     /// SF-Symbol point size inside the chip.
-    private(set) var symbol: CGFloat = 13
+    let symbol: CGFloat = 17
     /// Sidebar row label point size.
-    private(set) var label: CGFloat = 13
+    let label: CGFloat = 15
     /// Gap between the icon chip and the label. SwiftUI's `Label` default is ~half the System Settings
     /// sidebar gap, so we set it explicitly (measured ≈ 8 pt against the live sidebar) — a documented
     /// value, since SwiftUI exposes no "match the system sidebar gap" API (ADR-0040 measured exception).
-    private(set) var chipLabelGap: CGFloat = 8
+    let chipLabelGap: CGFloat = 8
 
-    /// Sidebar column width. System Settings widens the sidebar with the icon size (measured live: the
-    /// visible sidebar is ≈ 278 pt at Large). SwiftUI's `.frame` on the List eats ≈ 30 pt of inset, so
-    /// these are the *frame* values tuned to render to the measured visible widths.
-    private(set) var sidebarWidth: CGFloat = 288
-
-    // Not UI state, so keep it out of `@Observable` tracking; `nonisolated(unsafe)` lets `deinit`
-    // (a nonisolated context) read it to unregister the observer.
-    @ObservationIgnored nonisolated(unsafe) private var observer: NSObjectProtocol?
-
-    init() {
-        apply()
-        // Re-read when the user changes "Sidebar icon size" while the window is open. That is a
-        // cross-process write to NSGlobalDomain, which UserDefaults KVO does NOT observe — only the
-        // private distributed notification does. A nil-name observer would not receive it; the name
-        // must be explicit. Best-effort: the name is private and may change on a future OS.
-        observer = DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("AppleSideBarDefaultIconSizeChanged"), object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.apply() }
-        }
-    }
-
-    deinit {
-        if let observer {
-            DistributedNotificationCenter.default().removeObserver(observer)
-        }
-    }
-
-    /// The current system bucket: `NSTableViewDefaultSizeMode` (1/2/3 = S/M/L; anything else → Medium).
-    private static func systemBucket() -> Int {
-        let mode = UserDefaults.standard.integer(forKey: "NSTableViewDefaultSizeMode")
-        return (1...3).contains(mode) ? mode : 2
-    }
-
-    private func apply() {
-        // Measured from the live macOS 15 System Settings sidebar (#156): chip 14/20/26, symbol ≈ 0.65
-        // chip → 9/13/17, label 11/13/15 for Small/Medium/Large.
-        switch Self.systemBucket() {
-        case 1:  (chip, symbol, label, sidebarWidth) = (14, 9, 11, 242)    // Small
-        case 3:  (chip, symbol, label, sidebarWidth) = (26, 17, 15, 275)   // Large
-        default: (chip, symbol, label, sidebarWidth) = (20, 13, 13, 255)   // Medium
-        }
-    }
+    /// Sidebar column width, as handed to the `List`'s `.frame`. Not the rendered width: SwiftUI
+    /// reinterprets it (see the type doc). 275 is what the Large bucket passed before the size was
+    /// pinned, so the rendered sidebar is unchanged — it was pixel-identical to System Settings at
+    /// Large, and pinning must not move it.
+    let sidebarWidth: CGFloat = 275
 }

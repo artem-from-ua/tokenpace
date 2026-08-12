@@ -37,7 +37,7 @@
 
 | Що | Системний механізм | НЕ робити |
 |---|---|---|
-| Розмір sidebar-іконок | читати `NSTableViewDefaultSizeMode` (`NSGlobalDomain`, 1/2/3=S/M/L) — реагувати на зміну через `DistributedNotificationCenter` ім'я **`AppleSideBarDefaultIconSizeChanged`** | не хардкодити один розмір; `effectiveRowSizeStyle` **не** резолвить `.large` для source-list — не покладатись на нього |
+| Розмір sidebar-іконок | **виняток: зафіксовано на Large** (#335). Раніше читали `NSTableViewDefaultSizeMode` (`NSGlobalDomain`, 1/2/3=S/M/L) через `DistributedNotificationCenter` (`AppleSideBarDefaultIconSizeChanged`) — механізм працював, але слідував **лише** розмір чіпа: ширину колонки SwiftUI не віддає (виміряно: `.navigationSplitViewColumnWidth(259)` → 307 pt; `.frame(width:)` не масштабує зовсім — 200 → 307, 240 → 243, 340 → 243), а інсет рядка тягнеться за шириною списку (32.5 pt на Small проти системних 10) і `listRowInsets` уміє лише **додавати** до 20-pt підлоги. Слідувати одній осі з кількох = не збігатися з системою на жодному розмірі | `effectiveRowSizeStyle` **не** резолвить `.large` для source-list — не покладатись на нього |
 | Розмір перемикачів | `NSSwitch.controlSize = .mini` (26×15 pt — точний збіг із System Settings) | не `.regular`/`.small` (завеликі) |
 | Popup-меню (dropdown) | `.flexiblePush` + `.small` + `showsBorderOnlyWhileMouseInside = true` (компактний, borderless-at-rest) | не `.push`/`.automatic` (важка синя рамка) |
 | Шрифти | `NSFont.systemFontSize` (13) / `NSFont.smallSystemFontSize` (11) / text styles | не сирі `ofSize: 11`/`12` |
@@ -94,7 +94,10 @@ Menu-bar-віджет (`StatusItemView`) тепер малює **системн�
 6. **`UserDefaults.didChangeNotification` не ловить крос-процесну зміну** глобального домену. Runtime-
    реакція на зміну sidebar icon size вимагає `DistributedNotificationCenter` з приватним ім'ям
    `AppleSideBarDefaultIconSizeChanged`. **Урок:** зовнішні зміни `NSGlobalDomain` — через distributed
-   notification, не local defaults-KVO.
+   notification, не local defaults-KVO. (Уроки 5–6 про механізм лишаються чинними, але sidebar його
+   більше не використовує — розмір зафіксовано на Large, #335. Заразом виміряно, що `defaults write`
+   цієї нотифікації **не шле** — її шле сам System Settings, тож перевіряти реакцію на зміну треба
+   через його UI, а не через `defaults`.)
 
 ## Як вимірювати System Settings (метод)
 
