@@ -247,7 +247,7 @@ token itself never is.
 | 439 | `lifecycle` | `.notice` | `update: automatic checks set <bool>` | user toggled the "Check for updates automatically" checkbox (#37) |
 | — | `lifecycle` | `.notice` | `archive: enabled set <bool>` | user toggled the "Archive session logs to a folder" checkbox (#110) |
 | — | `lifecycle` | `.notice` | `archive: destination chosen` | user picked an archive folder via `NSOpenPanel` (#110); the path itself is not logged |
-| — | `lifecycle` | `.notice` | `journal: enabled set <bool>` | user toggled the "Record usage history" checkbox in Settings → Extra features → Usage history (#242, ADR-0067) |
+| — | `lifecycle` | `.notice` | `journal: enabled set <bool>` | user toggled the "Record usage history" checkbox in Settings → General → Usage history (#242, ADR-0067; the section moved from Extra features in #317) |
 | — | `lifecycle` | `.notice` | `back-to-work: enabled set <bool>` | user toggled the "Back to work" notification switch (#160, ADR-0039) |
 | — | `lifecycle` | `.notice` | `back-to-work: time window set <start>–<end>` | user changed the allowed-hours pickers; `<start>`/`<end>` are minute-of-day (#160) |
 | — | `lifecycle` | `.notice` | `back-to-work: suppress set <raw>` | user picked a "Suppress notifications on" radio; `<raw>` is the raw `SuppressDays` (#160) |
