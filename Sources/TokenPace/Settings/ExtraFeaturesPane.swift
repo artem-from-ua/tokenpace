@@ -6,13 +6,13 @@ import TokenPaceKit
 /// Settings → Extra features: opt-in extras grouped in one pane —
 /// - **Monitored services** — which Claude services feed the menu-bar status (#89, ADR-0024).
 /// - **Sessions backup** — the raw-log archiver (#110, ADR-0031): enable, destination, Archive Now.
+/// - **Session status** — the "sessions awaiting input" feature's own switch (#233, ADR-0066). It is
+///   what makes the count appear in the dropdown; whether the *menu bar* also carries it is a
+///   menu-bar concern and lives on that pane.
 /// - **Usage history** — the usage journal collector (#242, ADR-0067): enable, plus a read-only
 ///   destination the user can reveal in Finder but not change (the file lives in Application Support).
 ///
-/// The "Session status" section that used to sit here moved to Appearance's parent page (#333): the
-/// master switch is what turns the *indicator* on, and it governs both surfaces, so it belongs with
-/// them rather than in a drawer of unrelated extras. The rest of this pane is scheduled to follow —
-/// #317 stage 2 retires the pane entirely.
+/// This pane is scheduled to be retired — #317 stage 2 moves the rest of it into Providers.
 struct ExtraFeaturesPane: View {
     @Bindable var model: SettingsModel
 
@@ -130,7 +130,7 @@ struct ExtraFeaturesPane: View {
                         set: { model.setAwaitingInputEnabled($0) }))
                     SettingsHint(text: "Shows how many Claude Code sessions are waiting for your reply "
                         + "in the dropdown. Whether it also appears in the menu bar is configured in "
-                        + "Appearance → Menu bar.")
+                        + "*Menu bar*.")
                     // Unlike the stub caveat in the header, this one is unconditional: the feature
                     // reads Claude Code's private state files (ADR-0066), so the fragility is a
                     // permanent property of it rather than a state we detect. Declaring it here is

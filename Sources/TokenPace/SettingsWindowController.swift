@@ -305,15 +305,11 @@ final class SettingsWindowController: NSWindowController {
             applyRestoredOrDefaultFrame()
         }
         window?.makeKeyAndOrderFront(nil)
-        // Dev helper: `TOKENPACE_SETTINGS_SECTION=<index>` opens straight to a given page (0-based
-        // for panes, 50+ for a child page — see `SettingsChildPage`).
+        // Dev helper: `TOKENPACE_SETTINGS_SECTION=<index>` opens straight to a given pane — see
+        // `SettingsSection` for the mapping (the raw values are stable identifiers, not row order).
         if let raw = ProcessInfo.processInfo.environment["TOKENPACE_SETTINGS_SECTION"],
-           let idx = Int(raw) {
-            if let child = SettingsChildPage(rawValue: idx) {
-                model.openAtLaunch(child)
-            } else if let section = SettingsSection(rawValue: idx) {
-                model.openAtLaunch(section)
-            }
+           let idx = Int(raw), let section = SettingsSection(rawValue: idx) {
+            model.openAtLaunch(section)
         }
         observeToolbarState()
         // After the tree is on screen: the strip does not exist until SwiftUI has laid the split view

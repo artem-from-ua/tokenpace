@@ -2,18 +2,26 @@ import SwiftUI
 
 // MARK: - SettingsSection (#168, ADR-0042)
 
-/// The Settings window's sidebar sections, in display order. The raw `Int` is the **0-based index**
-/// that the `TOKENPACE_SETTINGS_SECTION` dev hook selects (0 = About … 4 = Extra features) — this
-/// enum is the single source of truth for that order and mapping, so the sidebar, the detail switch,
-/// and the docs (`ui-verification.md`) all agree. Changing the order here changes the dev-hook
-/// indices. Child pages drilled into from a section have their own indices in the same space — see
-/// ``SettingsChildPage`` (#333, ADR-0082).
+/// The Settings window's sidebar sections. The raw `Int` is the index the
+/// `TOKENPACE_SETTINGS_SECTION` dev hook selects — this enum is the single source of truth for that
+/// mapping, so the sidebar, the detail switch, and the docs (`ui-verification.md`) all agree.
+///
+/// **Raw values are stable identifiers, not display order** (#333): `groups` below owns the order.
+/// Keeping them fixed means a rearranged sidebar doesn't silently repoint every documented
+/// verification recipe at a different pane. `uiPresets` keeps `2` because it is what the Appearance
+/// pane became.
 enum SettingsSection: Int, CaseIterable, Identifiable {
     case about = 0
     case general = 1
-    case appearance = 2
+    /// Presets and the config-copy button — what the Appearance pane was left holding once the two
+    /// surfaces moved out to panes of their own.
+    case uiPresets = 2
     case notifications = 3
     case extraFeatures = 4
+    /// Everything that configures the menu-bar widget (#333).
+    case menuBar = 5
+    /// Everything that configures the dropdown popup (#333).
+    case dropdown = 6
 
     // Scroll-test filler (`TOKENPACE_SIDEBAR_FILLER`). Raw values start at `fillerBase` so they sit
     // clear of the real panes and of the `TOKENPACE_SETTINGS_SECTION` indices those panes own.
@@ -32,13 +40,19 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
 
     var id: Int { rawValue }
 
-    /// The sidebar groups, in order — a divider is drawn between each group (a `.sidebar` List renders
-    /// the gap between `Section`s as the divider). `About` sits alone at the top, the standard panes in
-    /// the middle, and `Extra features` alone at the bottom. (Monitored Services is no longer a sidebar
-    /// pane — it moved into the Extra features pane as a section, #242.)
+    /// The sidebar groups, **in display order** — a divider is drawn between each (a `.sidebar` List
+    /// renders the gap between `Section`s as the divider). `About` sits alone at the top, the app's own
+    /// settings next, then the three UI pages as a group of their own, and `Extra features` alone at the
+    /// bottom. (Monitored Services is no longer a sidebar pane — it moved into the Extra features pane
+    /// as a section, #242.)
+    ///
+    /// The UI trio is grouped rather than drilled into (#333): the sidebar is short enough to carry
+    /// three more rows, and a divider says "these three belong together" without costing the extra
+    /// click a parent page would.
     static let groups: [[SettingsSection]] = [
         [.about],
-        [.general, .appearance, .notifications],
+        [.general, .notifications],
+        [.uiPresets, .menuBar, .dropdown],
         [.extraFeatures] + filler,
     ]
 
@@ -71,7 +85,9 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         switch self {
         case .about: return "About"
         case .general: return "General"
-        case .appearance: return "Appearance"
+        case .uiPresets: return "UI presets"
+        case .menuBar: return "Menu bar"
+        case .dropdown: return "Dropdown"
         case .notifications: return "Notifications"
         case .extraFeatures: return "Extra features"
         default: return "ITEM_\(rawValue - Self.fillerBase + 1)"
@@ -80,11 +96,19 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
 
     /// SF Symbol for the sidebar chip. Names match the real System Settings panes read from their
     /// `.appex` Info.plist (#156): General uses `gear` (not `gearshape`); Notifications is a red bell.
+    ///
+    /// The two surface panes are deliberately one family: both carry the same bar across the top, and
+    /// the dropdown's adds the panel hanging below it — which is literally the difference between the
+    /// surfaces. Chosen by rendering the candidates, not by name (#333): `rectangle.inset.filled`
+    /// variants read as record buttons rather than popups. `slider.horizontal.3` gives UI presets the
+    /// "adjust everything at once" glyph without stealing either surface's picture.
     var symbol: String {
         switch self {
         case .about: return "info.circle"
         case .general: return "gear"
-        case .appearance: return "menubar.rectangle"
+        case .uiPresets: return "slider.horizontal.3"
+        case .menuBar: return "menubar.rectangle"
+        case .dropdown: return "menubar.dock.rectangle"
         case .notifications: return "bell.badge.fill"
         case .extraFeatures: return "puzzlepiece.extension"
         default: return "circle.dashed"
@@ -102,7 +126,9 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         switch self {
         case .about: return CapsuleTint(dark: 0x0D81FA, light: 0x41A6FF)
         case .general: return CapsuleTint(dark: 0x5E5E5F, light: 0xC0C0C4)
-        case .appearance: return CapsuleTint(dark: 0x2ED149, light: 0x63E977)
+        // The three UI panes share the measured Appearance green: the divider already separates the
+        // group, and a distinct hue per row would break the one thing that says they belong together.
+        case .uiPresets, .menuBar, .dropdown: return CapsuleTint(dark: 0x2ED149, light: 0x63E977)
         case .notifications: return CapsuleTint(dark: 0xFB4439, light: 0xFB7A71)
         case .extraFeatures: return CapsuleTint(dark: 0x5E5CE6, light: 0x8C8AFB)
         default: return CapsuleTint(dark: 0x5E5E5F, light: 0xC0C0C4)

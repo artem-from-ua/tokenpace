@@ -1,21 +1,22 @@
 import SwiftUI
 import TokenPaceKit
 
-// MARK: - AppearancePane (#168, ADR-0042; split into child pages #333, ADR-0082)
+// MARK: - The UI panes (#168, ADR-0042; split by surface in #333)
 
-/// Settings → Appearance, the **parent** page: what applies to the widget as a whole — the preset
-/// picker with its copy-config button, the awaiting-input master switch, and the two navigator rows
-/// leading to the per-surface pages.
+/// The three panes the old Appearance pane became, in sidebar order: ``UIPresetsPane``,
+/// ``MenuBarPane``, ``DropdownPane``. They form one sidebar group, which is what says they belong
+/// together — the split axis is the surface each option configures.
 ///
-/// The split follows one axis: anything that configures a **single surface** lives on that surface's
-/// child page (``AppearanceMenuBarPane`` / ``AppearanceDropdownPane``), anything spanning both stays
-/// here. That is why the bar style is *not* here despite looking like one setting — since #329 it is
-/// two independent values, one per surface (ADR-0080), so each belongs with its own surface.
+/// Settings → UI presets: what applies to the whole widget rather than to one surface — the preset
+/// picker and its copy-config button.
 ///
-/// The preset control and the copy button keep working across the split without knowing about it:
-/// both read `SettingsModel.liveAppearanceValues`, which reads the model's fields directly rather
-/// than anything a view holds.
-struct AppearancePane: View {
+/// Bar style is *not* here despite looking like a single setting: since #329 it is two independent
+/// values, one per surface (ADR-0080), so each sits with its own surface.
+///
+/// The preset control and the copy button work across the split without knowing about it: both read
+/// `SettingsModel.liveAppearanceValues`, which reads the model's fields directly rather than
+/// anything a view holds.
+struct UIPresetsPane: View {
     @Bindable var model: SettingsModel
 
     /// Ephemeral "copied!" feedback for the config-copy button (#257): the glyph flips to a checkmark
@@ -65,14 +66,6 @@ struct AppearancePane: View {
                 }
             }
 
-            // The two per-surface pages. A section of their own rather than appended to the one above:
-            // they are navigation, not settings, and System Settings likewise groups its drill-in rows
-            // into their own card.
-            Section {
-                ForEach(SettingsChildPage.pages(of: .appearance)) { page in
-                    SettingsNavigationRow(page: page) { model.drill(into: page) }
-                }
-            }
         }
         .formStyle(.grouped)
     }
@@ -106,7 +99,7 @@ struct AppearancePane: View {
     }
 
     /// What this button copies — used in the tooltip and the accessibility label.
-    private static let copyTarget = "Appearance settings"
+    private static let copyTarget = "UI settings"
 
     /// Write the model's JSON dump to the general pasteboard and show the checkmark. The pasteboard
     /// write lives here rather than in `SettingsModel` so the model stays free of AppKit.
@@ -125,11 +118,11 @@ struct AppearancePane: View {
     }
 }
 
-// MARK: - AppearanceMenuBarPane (#333)
+// MARK: - MenuBarPane (#333)
 
-/// Settings → Appearance › Menu bar: everything that configures the **menu-bar widget** — its bar
-/// style, which colours it mutes, and which indicators it may draw.
-struct AppearanceMenuBarPane: View {
+/// Settings → Menu bar: everything that configures the **menu-bar widget** — its bar style, which
+/// colours it mutes, and which indicators it may draw.
+struct MenuBarPane: View {
     @Bindable var model: SettingsModel
 
     var body: some View {
@@ -183,7 +176,7 @@ struct AppearanceMenuBarPane: View {
                 // Awaiting-input in the menu bar (#233). The feature itself is switched on in Extra
                 // features, which is what puts the count in the dropdown; this row decides whether the
                 // menu bar carries it too (a leading hand icon). Meaningless while the feature is off,
-                // so it's disabled — with a ⚠️ hint — then. A data stub is a third state: the watcher
+                // so it is disabled — with a ⚠️ hint — then. A data stub is a third state: the watcher
                 // never runs, so the hint says so.
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Show sessions awaiting input", isOn: Binding(
@@ -258,11 +251,11 @@ struct AppearanceMenuBarPane: View {
     }
 }
 
-// MARK: - AppearanceDropdownPane (#333)
+// MARK: - DropdownPane (#333)
 
-/// Settings → Appearance › Dropdown: everything that configures the **popup** — its bar style and
-/// which of its sections are listed when.
-struct AppearanceDropdownPane: View {
+/// Settings → Dropdown: everything that configures the **popup** — its bar style and which of its
+/// sections are listed when.
+struct DropdownPane: View {
     @Bindable var model: SettingsModel
 
     var body: some View {
@@ -319,11 +312,11 @@ struct AppearanceDropdownPane: View {
         PopupSectionVisibility.allCases.map { .init(value: $0, title: $0.displayName) }
 }
 
-// MARK: - Shared across the Appearance pages
+// MARK: - Shared across the surface panes
 
-/// The ``BarStyle`` segments, shared by the Menu bar and Dropdown pages (#329) so the two surfaces
+/// The ``BarStyle`` segments, shared by the Menu bar and Dropdown panes (#329) so the two surfaces
 /// always offer the same choices in the same order — now that the two controls live on separate
-/// pages, a shared constant is the only thing keeping them from drifting apart unnoticed.
+/// panes, a shared constant is the only thing keeping them from drifting apart unnoticed.
 ///
 /// Ordered **Pressure · Gauge · Progress**, not by `allCases`: it reads as a gradient of how much
 /// positional information the bar carries — length alone, then length plus direction, then two

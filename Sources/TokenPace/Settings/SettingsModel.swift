@@ -62,110 +62,65 @@ final class SettingsModel {
 
     // MARK: Selection (dev hook)
 
-    /// The **sidebar's** selection — the section whose row is highlighted. Bound straight to the
-    /// root view's `List(selection:)`, which is why it stays a bare `SettingsSection`: the sidebar
-    /// has no row for a child page, and while one is open the parent's row stays highlighted (System
-    /// Settings does the same).
+    /// The section the root view should show — bound straight to the sidebar's `List(selection:)`.
     ///
-    /// Writing it is how the user picks a section, and that **pops any open child page**: a sidebar
-    /// pick cannot leave you inside the previous section's child. Writes coming from ``goBack()`` /
-    /// ``goForward()`` are excluded — replaying history must not itself become history, or ‹ would
-    /// never reach further than one step.
+    /// Every write records the previous pane in the history, which is what makes the toolbar's ‹ ›
+    /// buttons work: they walk the history of *visited panes*, exactly like a browser's. Writes coming
+    /// from ``goBack()`` / ``goForward()`` are excluded — replaying history must not itself become
+    /// history, or ‹ would never reach further than one step.
     var selection: SettingsSection = .about {
         didSet {
             guard selection != oldValue, !isReplayingHistory else { return }
-            childPage = nil
-            history.visit(.root(selection))
+            history.visit(selection)
         }
     }
 
-    /// The child page drilled into from ``selection``, or nil at the section's own page (#333).
-    /// Written by ``drill(into:)`` and cleared by a section change or ``popToRoot()``; the root view
-    /// reads it to decide which view the detail column shows.
-    private(set) var childPage: SettingsChildPage?
+    /// Back/forward over the panes the user has visited — what the toolbar's ‹ › buttons walk. The
+    /// rules (a new pick clears the forward branch, a replay records nothing) live in the kit, where
+    /// they are unit-tested; this class only keeps `selection` and the history in step.
+    private var history = NavigationHistory<SettingsSection>(current: .about)
 
-    /// Where the window is, as one value — the pair the history walks. Kept derived from the two
-    /// stored fields rather than stored itself, so `selection` can stay a plain `Binding` target for
-    /// the sidebar and the two can never disagree.
-    var route: SettingsRoute {
-        childPage.map { SettingsRoute(selection).drilling(into: $0) } ?? SettingsRoute(selection)
-    }
-
-    /// Back/forward over the routes the user has visited — what the toolbar's ‹ › buttons walk. The
-    /// rules (a new visit clears the forward branch, a replay records nothing, parent and child are
-    /// distinct stops) live in the kit, where they are unit-tested; this class only keeps the stored
-    /// fields and the history in step.
-    private var history = NavigationHistory<SettingsRoute>(current: SettingsRoute(.about))
-
-    /// Set while ``goBack()``/``goForward()`` write the stored fields, so the `didSet` above can tell
-    /// a history replay from a user's own pick — replaying must not itself become history.
+    /// Set while ``goBack()``/``goForward()`` write `selection`, so the `didSet` above can tell a
+    /// history replay from a user's own pick — replaying must not itself become history.
     private var isReplayingHistory = false
 
-    /// The title the toolbar shows — the open child page's name, or the section's.
-    var currentPaneTitle: String { route.title }
+    /// The title the toolbar shows — the current pane's name.
+    var currentPaneTitle: String { selection.title }
 
     var canGoBack: Bool { history.canGoBack }
     var canGoForward: Bool { history.canGoForward }
 
-    /// Open a child page of the current section — what a ``SettingsNavigationRow`` calls. Recorded as
-    /// its own history stop, so ‹ returns to the parent page rather than skipping the section.
-    func drill(into page: SettingsChildPage) {
-        guard childPage != page else { return }
-        childPage = page
-        history.visit(route)
-    }
-
-    /// Leave the child page for the section's own page. Not wired to the toolbar's ‹ (that walks
-    /// history, which lands here anyway when the parent is the previous stop) — this is for paths
-    /// that must pop regardless of how the page was reached.
-    func popToRoot() {
-        guard childPage != nil else { return }
-        childPage = nil
-        history.visit(route)
-    }
-
-    /// Seat the window on a page **without recording a visit** — the `TOKENPACE_SETTINGS_SECTION`
+    /// Seat the window on a pane **without recording a visit** — the `TOKENPACE_SETTINGS_SECTION`
     /// dev hook's entry point.
     ///
-    /// Opening straight onto a page is where the user *starts*, not somewhere they navigated to, so
+    /// Opening straight onto a pane is where the user *starts*, not somewhere they navigated to, so
     /// it seeds the history rather than appending to it: otherwise ‹ would light up on a freshly
-    /// opened window and step "back" to About, a page never shown. (Before #333 the hook wrote
+    /// opened window and step "back" to About, a pane never shown. (The hook used to write
     /// `selection` directly and did exactly that.)
-    func openAtLaunch(_ section: SettingsSection) { seat(.root(section)) }
-
-    /// Seat the window on a child page — the same contract, one level down.
-    func openAtLaunch(_ page: SettingsChildPage) {
-        seat(SettingsRoute(page.section).drilling(into: page))
-    }
-
-    private func seat(_ route: SettingsRoute) {
+    func openAtLaunch(_ section: SettingsSection) {
         isReplayingHistory = true
-        selection = route.section
-        childPage = route.child
+        selection = section
         isReplayingHistory = false
-        history = NavigationHistory(current: route)
+        history = NavigationHistory(current: section)
     }
 
-    /// Step back to the previously visited route.
+    /// Step back to the previously visited pane.
     func goBack() {
         guard history.canGoBack else { return }
         history.goBack()
         applyHistorySelection()
     }
 
-    /// Step forward to the most recently popped route.
+    /// Step forward to the most recently popped pane.
     func goForward() {
         guard history.canGoForward else { return }
         history.goForward()
         applyHistorySelection()
     }
 
-    /// Write the replayed route into both stored fields under the replay guard, so neither `didSet`
-    /// nor `drill(into:)` records it again.
     private func applyHistorySelection() {
         isReplayingHistory = true
-        selection = history.current.section
-        childPage = history.current.child
+        selection = history.current
         isReplayingHistory = false
     }
 

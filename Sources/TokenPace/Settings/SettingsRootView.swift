@@ -78,33 +78,25 @@ struct SettingsRootView: View {
         static let formTopMargin: CGFloat = -20
     }
 
-    /// The detail column's content: the open child page if there is one, otherwise the selected
-    /// section's own pane (#333).
+    /// The detail column's content — the selected section's pane.
     ///
-    /// A child page is swapped in **here**, at the same level as a pane, rather than pushed onto a
-    /// `NavigationStack` wrapped around this column. Two reasons, both already paid for: a stack's
-    /// back button cannot reach our toolbar (`NavigationSplitView` inside an `NSHostingController`
-    /// does not register its columns with the toolbar bridge — ADR-0077 §3), and any container
-    /// introduced between `detail:` and the pane would sit between the `Form` and the
-    /// `.contentMargins` applied to this view, moving every card's top edge.
+    /// The panes sit at one level: the UI trio (presets, menu bar, dropdown) are sidebar rows of their
+    /// own rather than child pages reached from a parent (#333). A drill-in level exists in the model
+    /// (`SettingsChildPage`, ADR-0082) for a section that genuinely needs one; a sidebar with room to
+    /// spare does not, and the extra click would buy nothing.
     @ViewBuilder
     private var detailPane: some View {
-        if let child = model.childPage {
-            switch child {
-            case .appearanceMenuBar:  AppearanceMenuBarPane(model: model)
-            case .appearanceDropdown: AppearanceDropdownPane(model: model)
-            }
-        } else {
-            switch model.selection {
-            case .about:             AboutPane(model: model)
-            case .general:           GeneralPane(model: model)
-            case .appearance:        AppearancePane(model: model)
-            case .notifications:     NotificationsPane(model: model)
-            case .extraFeatures:     ExtraFeaturesPane(model: model)
-            // Scroll-test filler rows (`TOKENPACE_SIDEBAR_FILLER`) have no pane of their own; they
-            // exist only to make the sidebar long enough to scroll.
-            default:                 Text(model.selection.title).foregroundStyle(.secondary)
-            }
+        switch model.selection {
+        case .about:             AboutPane(model: model)
+        case .general:           GeneralPane(model: model)
+        case .uiPresets:         UIPresetsPane(model: model)
+        case .menuBar:           MenuBarPane(model: model)
+        case .dropdown:          DropdownPane(model: model)
+        case .notifications:     NotificationsPane(model: model)
+        case .extraFeatures:     ExtraFeaturesPane(model: model)
+        // Scroll-test filler rows (`TOKENPACE_SIDEBAR_FILLER`) have no pane of their own; they
+        // exist only to make the sidebar long enough to scroll.
+        default:                 Text(model.selection.title).foregroundStyle(.secondary)
         }
     }
 }
