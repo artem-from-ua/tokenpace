@@ -707,8 +707,8 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_STUB=screenshot swift run
 | 100–108 | scroll-філер (`TOKENPACE_SIDEBAR_FILLER`, див. нижче) |
 
 **Індекси — стабільні ідентифікатори, не порядок рядків** (#333). Порядок у sidebar задає
-`SettingsSection.groups`, і він інший: About / General · Notifications / **UI presets · Menu bar ·
-Dropdown** / Extra features. Розділення саме таке, щоб перестановка рядків не перенаправляла мовчки
+`SettingsSection.groups`, і він інший: About / General / **UI presets · Menu bar · Dropdown** /
+Notifications / Extra features. Розділення саме таке, щоб перестановка рядків не перенаправляла мовчки
 кожен задокументований рецепт на інший пан; `2` лишилось за `UI presets`, бо це те, чим став
 колишній Appearance.
 
