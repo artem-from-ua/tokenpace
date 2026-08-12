@@ -155,6 +155,51 @@ struct WeeklyGatePerModelTests {
     }
 }
 
+// MARK: - Idle pill
+
+@Suite("Weekly gate — idle pill")
+struct WeeklyGateIdleTests {
+
+    private func idleRow(_ snap: UsageSnapshot) -> LimitRow? {
+        PopupLayout.make(from: snap, now: now, lastUpdate: now, interval: 60)
+            .rows.first { $0.sessionIdle }
+    }
+
+    /// The idle pill is three-way now: blue while the week has headroom ("ready to start" with quota
+    /// to burn), green once the week runs ahead of pace (ready, but nothing to advertise), and grey
+    /// only when work is impossible. The view picks the colour from these two flags.
+    @Test func idleRowCarriesTheWeeklyVerdict() {
+        #expect(idleRow(snapshot(sevenDayUtil: 25, sessionIdle: true))?.weeklyHeadroom == true)
+        #expect(idleRow(snapshot(sevenDayUtil: 70, sessionIdle: true))?.weeklyHeadroom == false)
+        #expect(idleRow(snapshot(sevenDayUtil: 33, sessionIdle: true))?.weeklyHeadroom == false)
+    }
+
+    /// Blocked is a separate axis and still wins — it means "no path to start" rather than "no
+    /// headroom to advertise".
+    @Test func blockedIdleIsStillItsOwnState() {
+        // 7d exhausted with no credits → blocked, and the gate is closed too.
+        let blocked = snapshot(sevenDayUtil: 100, sessionIdle: true)
+        #expect(idleRow(blocked)?.sessionBlocked == true)
+        #expect(idleRow(blocked)?.weeklyHeadroom == false)
+    }
+
+    /// The menu bar's idle bar carries the same verdict, so the two surfaces cannot disagree.
+    @Test func menuBarIdleBarCarriesTheVerdict() {
+        func idleBar(_ snap: UsageSnapshot) -> BarView? {
+            guard case let .expanded(five, _, _) = MenuBarLayout.make(from: snap, now: now).mode else { return nil }
+            return five
+        }
+        #expect(idleBar(snapshot(sevenDayUtil: 25, sessionIdle: true))?.weeklyHeadroom == true)
+        #expect(idleBar(snapshot(sevenDayUtil: 70, sessionIdle: true))?.weeklyHeadroom == false)
+    }
+
+    /// An idle bar never renders the pacing blue whatever the week does — it has no pacing at all.
+    @Test func idleBarNeverRendersPacingBlue() {
+        #expect(idleRow(snapshot(sevenDayUtil: 25, sessionIdle: true))?.bar.blueAllowed == false)
+        #expect(idleRow(snapshot(sevenDayUtil: 25, sessionIdle: true))?.bar.severity == .calm)
+    }
+}
+
 // MARK: - Journal parity
 
 @Suite("Weekly gate — journal matches the UI")

@@ -26,25 +26,34 @@ public struct BarView: Sendable, Equatable {
     /// Whether this **idle** 5-hour bar is also **blocked** — the 7-day limit is exhausted and paid
     /// credits cannot cover, so there is no path to start a session (#158, `CreditsPacing.isBlocked`).
     /// When `true` the view draws the solid idle track in **grey** (not the "ready" blue), meaning
-    /// "waiting for a limit to reset" rather than "ready to start, full quota available". Only ever
-    /// `true` alongside ``idle``; `false` on every normal bar and on a non-blocked idle bar.
+    /// "waiting for a limit to reset" rather than "ready to start". Only ever `true` alongside
+    /// ``idle``; `false` on every normal bar and on a non-blocked idle bar.
     public let blocked: Bool
+    /// Whether the **week** still has room to spend (``PacingModel/weeklyHasHeadroom(in:now:)``), for
+    /// the idle bar's fill colour. An idle bar draws no pacing, so it cannot read the gate off its
+    /// inert ``layout`` — the verdict rides alongside.
+    ///
+    /// The "ready to start" blue claims there is quota to burn, which is wrong while the week runs
+    /// ahead of pace, so the idle fill degrades to **green** there — grey still means blocked (no work
+    /// possible) and blue still means a genuinely calm week. Meaningful only while ``idle``.
+    public let weeklyHeadroom: Bool
 
     public init(
         layout: BarLayout, indicator: LimitIndicator, window: LimitWindow,
-        idle: Bool = false, blocked: Bool = false
+        idle: Bool = false, blocked: Bool = false, weeklyHeadroom: Bool = true
     ) {
         self.layout = layout
         self.indicator = indicator
         self.window = window
         self.idle = idle
         self.blocked = blocked
+        self.weeklyHeadroom = weeklyHeadroom
     }
 
     /// The bar's pacing **severity** for reset-countdown selection (#103, ADR-0028/0029). Delegates to
     /// `BarLayout.severity`, except an **idle** 5-hour bar is always ``PacingSeverity/calm``: it carries
-    /// an inert placeholder `layout` (`usage 0 / time 0`) and means "ready to start, full quota
-    /// available", never a pacing concern — so it must not drive the countdown. Only the 7-day bar
+    /// an inert placeholder `layout` (`usage 0 / time 0`) and means "ready to start", never a pacing
+    /// concern — so it must not drive the countdown. Only the 7-day bar
     /// decides in the idle state.
     public var severity: PacingSeverity { idle ? .calm : layout.severity }
 
@@ -349,7 +358,8 @@ public struct MenuBarLayout: Sendable, Equatable {
                 // Inert placeholder: `.onPaceOrBehind` → `severity` is `.calm` before `remainingSeconds`
                 // is ever read, so the value here is immaterial (0).
                 layout: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0, windowDurationSeconds: 0, blueAllowed: false),
-                indicator: .neutral, window: .fiveHour, idle: true, blocked: blocked)
+                indicator: .neutral, window: .fiveHour, idle: true, blocked: blocked,
+                weeklyHeadroom: weeklyHeadroom)
             // In the idle state the 5h window is legitimately date-less (ADR-0027, not an error), but the
             // 7-day window is real: if it reports usage yet its `resets_at` is unparseable, that is the
             // same broken-payload data error as on the active path (#167, ADR-0043) → ⚠️.

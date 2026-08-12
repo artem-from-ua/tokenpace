@@ -65,6 +65,16 @@ final class PopupBarView: NSView {
         }
     }
 
+    /// Whether the **week** still has headroom (`PacingModel.weeklyHasHeadroom`). Only meaningful
+    /// alongside ``idle``: it picks the "ready" fill between the blue that advertises spare quota and
+    /// the plain green that does not. Defaults to `true` so a bar built without it looks unchanged.
+    var weeklyHeadroom: Bool = true {
+        didSet {
+            guard weeklyHeadroom != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
     /// Whether this is a **base** 5h/7d limit row (as opposed to a per-model/per-service row or the
     /// credits bar). Only base bars render the far-behind **blue** zone (``behindColor``); everything
     /// else keeps the plain green on the calm side. Set from the row-build loop; the raw
@@ -166,7 +176,7 @@ final class PopupBarView: NSView {
         /// (strong lead) → `.systemRed` (exhausted), via `aheadColor`.
         static var gapGreen: NSColor { ColorStore.shared.color(.green) }
         /// The **idle** 5-hour bar's solid fill (#100, ADR-0027): the 5h window has no active session, so
-        /// the bar is a knobless solid track meaning "ready to start, full quota available" — plain
+        /// the bar is a knobless solid track meaning "ready to start" — plain
         /// `.systemBlue`, the appearance-aware pair to the on-pace green; the unified `blue` role, so it
         /// flips light/dark like the native icons and matches the menu-bar idle bar exactly.
         static var idleBlue: NSColor { ColorStore.shared.color(.blue) }
@@ -174,9 +184,10 @@ final class PopupBarView: NSView {
         static var gapYellow: NSColor { ColorStore.shared.color(.yellow) }
         static var gapOrange: NSColor { ColorStore.shared.color(.orange) }
         /// The **far-behind** pacing gap (deep behind pace / big surplus) on the base 5h/7d bars —
-        /// `.systemBlue` via the dedicated `paceBlue` role (distinct from the idle-bar `blue`). Chosen
-        /// by `behindColor` when the surplus is above the dynamic behind-threshold; otherwise green.
-        static var gapBlue: NSColor { ColorStore.shared.color(.paceBlue) }
+        /// `.systemBlue` via the shared `blue` role, the same one the idle fill and the maintenance dot
+        /// use. Chosen by `behindColor` when the surplus clears the behind-threshold and the weekly
+        /// gate is open; otherwise green.
+        static var gapBlue: NSColor { ColorStore.shared.color(.blue) }
 
         /// Indicator-dot ring: a soft separation between the dot and the bar beneath it. `separatorColor`
         /// — the unified `indicatorRing` role, the same semantic hairline the menu-bar ring uses.
@@ -238,7 +249,7 @@ final class PopupBarView: NSView {
         let rect = NSRect(
             x: bounds.minX, y: bounds.minY + overhang, width: bounds.width, height: Metrics.barHeight)
 
-        // Idle 5h bar (#100, ADR-0027): no pacing zones, "no active session, full quota available".
+        // Idle 5h bar (#100, ADR-0027): no pacing zones, "no active session".
         // Rendered before the pacing path so the (inert, zeroed) `bar` layout is never consulted.
         //
         // Idle is drawn the same way in **both** styles (#325): the bare grey track, plus a zero-length
@@ -255,7 +266,13 @@ final class PopupBarView: NSView {
             // Grey (blocked) is an already-translucent neutral — leave it; only the blue hue is tinted (#188).
             // Animated so idle→active reads as a fade (ADR-0070); the glow follows automatically
             // because it is derived from this same colour.
-            let idleColor = blocked ? Self.monochromeGrey : animated(Palette.idleBlue, part: .fill)
+            // Three-way, not two (#331 follow-up): grey when blocked (no path to start), blue when the
+            // week has headroom ("ready to start" with quota to burn), and green in between — ready,
+            // but with nothing to advertise, so the pill must not promise a full quota the week cannot
+            // fund. Same verdict the pacing blue is gated on (`PacingModel.weeklyHasHeadroom`).
+            let idleTarget = blocked ? Self.monochromeGrey
+                : (weeklyHeadroom ? Palette.idleBlue : ColorStore.shared.color(.green))
+            let idleColor = blocked ? idleTarget : animated(idleTarget, part: .fill)
             // The grey track goes down first, exactly as the pacing path does — without it the mark
             // hangs in empty space while every neighbouring row shows a track.
             Self.monochromeGrey.setFill()
@@ -2051,8 +2068,8 @@ final class PopupViewController: NSViewController {
     /// ``addBar(bar:subdivisions:idle:isLast:)`` that unpacks the row's geometry.
     private func addBar(_ row: LimitRow, isLast: Bool, isBaseLimit: Bool) {
         addBar(bar: row.bar, subdivisions: row.subdivisions, idle: row.sessionIdle,
-               blocked: row.sessionBlocked, isLast: isLast, isBaseLimit: isBaseLimit,
-               tweenRow: row.title)
+               blocked: row.sessionBlocked, weeklyHeadroom: row.weeklyHeadroom,
+               isLast: isLast, isBaseLimit: isBaseLimit, tweenRow: row.title)
     }
 
     /// Add a pacing bar from raw geometry — shared by the token limit rows and the "Extra usage"
@@ -2061,6 +2078,7 @@ final class PopupViewController: NSViewController {
     /// draws the solid-blue knobless 5h track (#100). When `bar` is `nil` the view draws nothing —
     /// but callers only reach here with a real bar (idle uses the flag, not the layout).
     private func addBar(bar: BarLayout?, subdivisions: Int, idle: Bool, blocked: Bool = false,
+                        weeklyHeadroom: Bool = true,
                         isLast: Bool, isBaseLimit: Bool = false, tweenRow: String? = nil) {
         let view = PopupBarView()
         view.bar = bar
@@ -2075,6 +2093,7 @@ final class PopupViewController: NSViewController {
         view.subdivisions = subdivisions
         view.idle = idle   // solid-blue knobless track when the 5h window is idle (#100)
         view.blocked = blocked   // grey instead of blue when that idle state is blocked (#158)
+        view.weeklyHeadroom = weeklyHeadroom   // green instead of blue when the week has no headroom
         view.isBaseLimit = isBaseLimit   // only base 5h/7d rows render the far-behind blue zone
         view.barStyle = barStyle   // Progress (gap+marker) vs Pressure/Gauge (marker-less ribbons) — #224
         view.showTicks = showTicks   // under-bar tick ruler on/off — #224
