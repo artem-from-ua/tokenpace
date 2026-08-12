@@ -51,7 +51,22 @@ final class SettingsWindowController: NSWindowController {
     /// The window's toolbar — ‹ › plus the pane name, System Settings' own header (#156 §2).
     private let toolbarController = SettingsToolbarController()
 
+    /// The live dropdown preview riding beside this window (ADR-0083). Owned here, not by
+    /// `AppDelegate`, because its lifetime is exactly this window's and its parking maths needs the
+    /// move/resize callbacks this controller already receives.
+    private let preview = SettingsPreviewWindowController()
+
     // MARK: Public callbacks (the AppDelegate contract — forwarded into the model, unchanged surface)
+
+    /// The shared colour animator, handed down so the preview's transitions stay in lockstep with the
+    /// live surfaces instead of running their own timer (ADR-0070).
+    var previewColorAnimator: ColorAnimator? {
+        get { preview.colorAnimator } set { preview.colorAnimator = newValue }
+    }
+
+    /// Feed the preview the layout the live dropdown just received. Mirrors
+    /// `DevToolsWindowController.updatePreview` — both are called from `AppDelegate.setPopupLayout`.
+    func updatePreview(_ layout: PopupLayout) { preview.update(layout) }
 
     /// Called when the user changes the monitored-services selection (#89), with the new config.
     var onMonitoredServicesChange: ((MonitoredServices) -> Void)? {
@@ -319,6 +334,10 @@ final class SettingsWindowController: NSWindowController {
         DispatchQueue.main.async { [weak self] in
             self?.mergeSidebarTitlebarStrip()
         }
+        // Last: the preview parks against the parent's *final* frame, and everything above can still
+        // move it (restore, centre, the section hook). Attaching earlier would align it to the
+        // zero-width sliver an unsized hosting window starts as.
+        if let window { preview.attach(to: window) }
     }
 
     /// Keep the toolbar's title and ‹ › enablement in step with the model.
@@ -493,13 +512,33 @@ extension SettingsWindowController: NSWindowDelegate {
         // owns their buttons and dims them with the window itself (#312).
     }
 
-    func windowDidResize(_ notification: Notification) { persistFrame() }
+    /// A child window follows its parent when *dragged*, but a resize moves only the bottom edge —
+    /// the preview aligns to the **top**, so it has to re-park itself explicitly.
+    func windowDidResize(_ notification: Notification) {
+        persistFrame()
+        preview.reposition()
+    }
 
-    func windowDidMove(_ notification: Notification) { persistFrame() }
+    func windowDidMove(_ notification: Notification) {
+        persistFrame()
+        preview.reposition()
+    }
 
     /// The state the window was in when it went away is the one to reopen at — a resize immediately
     /// followed by a close would otherwise be the one change that never got recorded.
-    func windowWillClose(_ notification: Notification) { persistFrame() }
+    func windowWillClose(_ notification: Notification) {
+        persistFrame()
+        preview.detach()
+    }
+
+    /// A miniaturised window must not leave the preview floating on screen — and, whatever AppKit does
+    /// with the child window itself, it will not remove the preview's ⌥ event monitor. `detach`/`attach`
+    /// are idempotent, so this is safe even if the child is already hidden for us.
+    func windowDidMiniaturize(_ notification: Notification) { preview.detach() }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        if let window { preview.attach(to: window) }
+    }
 }
 
 // MARK: - WindowFrameBox ↔ CoreGraphics

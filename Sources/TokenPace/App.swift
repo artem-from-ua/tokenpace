@@ -106,6 +106,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// between polls (the data is unchanged; only `now` advances).
     private var lastOutput: PollOutput?
 
+    /// The most recent popup model, retained so a window opened *between* renders can be seeded with
+    /// what the dropdown is showing right now — the Settings preview (ADR-0083) would otherwise sit
+    /// empty until the next poll or 30 s age tick.
+    private var lastPopupLayout: PopupLayout?
+
     // MARK: Awaiting-input indicator (#233, ADR-0066)
 
     /// Watches `~/.claude/sessions` + `jobs` for sessions awaiting user input, or `nil` while the
@@ -706,6 +711,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     BackToWorkNotifier.postExtraUsage(body: ExtraUsageOnset.bannerBody(for: spend))
                 }
             }
+            // The live preview shares the one animator, so its transitions run on the same frame clock
+            // as the menu bar and the popup rather than a second timer (ADR-0070, ADR-0083).
+            wc.previewColorAnimator = colorAnimator
             settingsWC = wc
         }
         // Reflect the latest known update state whenever the window opens (#37), including why an
@@ -721,6 +729,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // window first opened went to a nil controller. Pull the current value on every open so the
         // "Stubbed in this development build." hints can never outlive the stub.
         settingsWC?.updateStubState(active: currentScenario != .realNetwork)
+        // Seed the preview before the window goes up: `show()` attaches it, and renders can be up to
+        // 30 s apart, so without this it would paint an empty card until the next one.
+        if let lastPopupLayout { settingsWC?.updatePreview(lastPopupLayout) }
         settingsWC?.show(section: section)
     }
 
@@ -2172,7 +2183,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setPopupLayout(_ layout: PopupLayout) {
         popupVC.layout = layout
         popupVC.view.frame = NSRect(origin: .zero, size: popupVC.view.fittingSize)
+        // Latched for a Settings window opened *between* renders: without it the preview would sit
+        // empty until the next poll or age tick (up to 30 s).
+        lastPopupLayout = layout
         devToolsWC?.updatePreview(layout)   // mirror into the dev colour tuner's live popup preview (#185)
+        settingsWC?.updatePreview(layout)   // …and into the Settings window's live preview (ADR-0083)
     }
 
     // MARK: - Menu-bar image
