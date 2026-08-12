@@ -671,10 +671,32 @@ final class SettingsModel {
     /// then fires each pane callback so both surfaces rebuild. The segmented control in `AppearancePane`
     /// calls this.
     func apply(_ preset: AppearancePreset) {
+        // Stash the setup being overwritten if it is the user's own (#333). This is the only moment it
+        // can be lost — every other write keeps the config where the user put it — so it is also the
+        // only place that needs to remember. A config already equal to some preset is not worth
+        // stashing: it is reachable by clicking that preset.
+        if activePreset == nil { PersistedConfig.customAppearanceValues = liveAppearanceValues }
         PersistedConfig.apply(preset)
         syncFromConfig()
         AppLogger.lifecycle.notice("appearance preset applied: \(preset.rawValue, privacy: .public)")
         fireAppearanceCallbacks()
+    }
+
+    /// Restore the saved **Custom** setup — the segment's own action (#333). No-op when nothing is
+    /// saved, which is the state ``canRestoreCustom`` renders as an unselectable segment.
+    func applySavedCustom() {
+        guard let values = PersistedConfig.customAppearanceValues else { return }
+        PersistedConfig.applyValues(values)
+        syncFromConfig()
+        AppLogger.lifecycle.notice("appearance preset applied: custom")
+        fireAppearanceCallbacks()
+    }
+
+    /// Whether the **Custom** segment can be clicked: there is a saved setup, and we are not already
+    /// on it. Without a saved setup the segment is an indicator, exactly as it was before #333 — on a
+    /// fresh install there is nothing to return to.
+    var canRestoreCustom: Bool {
+        activePreset != nil && PersistedConfig.customAppearanceValues != nil
     }
 
     /// The live Appearance config as clipboard-ready pretty-printed JSON (#257) — the payload behind

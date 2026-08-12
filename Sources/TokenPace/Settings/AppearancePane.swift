@@ -32,9 +32,12 @@ struct AppearancePane: View {
         Form {
             // First section: one-click Appearance presets (#215, #224) — a "Change UI preset" segmented
             // control. Selecting Chill / Work harder! / Control freak applies that preset (sets every
-            // option on both child pages at once). The trailing "Custom" segment is an **indicator**,
-            // not a choice: its selection is ignored, and it lights up only when the live config
-            // matches no preset — i.e. after any manual toggle. `model.activePreset` is nil then.
+            // option on both child pages at once).
+            //
+            // The trailing "Custom" segment is a **real slot** since #333, not the pure indicator it
+            // was: applying a preset stashes the setup it overwrites, so Custom can restore it. It
+            // falls back to indicator-only (unselectable, with a popover explaining how to reach it)
+            // while nothing is stashed — a fresh install has nothing to come back to.
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     // Label + control on ONE row (label leading, control trailing — the pane's rhythm),
@@ -48,15 +51,17 @@ struct AppearancePane: View {
                         SegmentedControl(
                             segments: AppearancePreset.allCases.map {
                                 .init(value: AppearancePreset?.some($0), title: $0.displayName)
-                            } + [.init(value: AppearancePreset?.none, title: "Custom", selectable: false,
+                            } + [.init(value: AppearancePreset?.none, title: "Custom",
+                                       // Selectable once there is a setup to go back to (#333); until
+                                       // then it stays the indicator it always was, and explains itself.
+                                       selectable: model.canRestoreCustom,
                                        inactiveHelp: "Change any option below to craft your own custom setup.")],
                             active: model.activePreset,
-                            onSelect: { picked in if let preset = picked { model.apply(preset) } })
+                            onSelect: { picked in
+                                if let preset = picked { model.apply(preset) } else { model.applySavedCustom() }
+                            })
                     }
-                    SettingsHint(text: "Set all the options on both pages below at once. Pick one of "
-                        + "three, from calmest to loudest: *highlight only critical states* → *also "
-                        + "nudge you when you're underpacing* → *show every indicator*.")
-                    SettingsHint(text: "This overwrites your current choices.", warning: true)
+                    SettingsHint(text: "Sets all options on the *Menu bar* and *Dropdown* pages.")
                 }
             }
 
