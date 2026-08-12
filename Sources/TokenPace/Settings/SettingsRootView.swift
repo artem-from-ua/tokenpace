@@ -10,16 +10,17 @@ import SwiftUI
 /// hand-tuned card/row/padding metrics (the whole point of moving to `Form.formStyle(.grouped)`).
 struct SettingsRootView: View {
     @Bindable var model: SettingsModel
-    /// The window's floor: 857 wide (pinned — the width never changes) and, since ADR-0069, the
+    /// The window's floor: its pinned width (the width never changes) and, since ADR-0069, the
     /// smallest height it can be dragged to. The hosting view has no intrinsic size for a
     /// `NavigationSplitView`, so the root asks to fill at least the window — otherwise the whole
     /// SwiftUI content lays out narrower than the window and the split's columns shrink with it (a
     /// too-narrow sidebar that truncates, plus dead space on the right of the detail).
     ///
-    /// `minHeight` must match the window's `contentMinSize.height`, and `SettingsWindowController`
-    /// passes both explicitly so they cannot drift: if the window could be dragged shorter than this,
-    /// SwiftUI would clip the detail pane instead of letting its grouped `Form` scroll.
-    var minWidth: CGFloat = 857
+    /// Both must match the window's `contentMinSize`, and `SettingsWindowController` passes them
+    /// explicitly so they cannot drift: if the window could be dragged shorter than this, SwiftUI would
+    /// clip the detail pane instead of letting its grouped `Form` scroll. The defaults here are only a
+    /// fallback for previews — the live values come from `Metrics`.
+    var minWidth: CGFloat = 792
     var minHeight: CGFloat = 480
 
     var body: some View {
@@ -34,10 +35,11 @@ struct SettingsRootView: View {
                 }
             }
             .listStyle(.sidebar)
-            // `.navigationSplitViewColumnWidth` is unreliable for a `.sidebar` List (it leaves the
-            // sidebar at SwiftUI's narrow default, truncating the longer labels). Constrain the
-            // List's own width instead so it holds the longest one; the width tracks the system
-            // sidebar-icon-size bucket, like System Settings.
+            // Keeps the List itself from laying out narrower than the column it sits in. The column's
+            // real width — and the fact that its divider cannot be dragged — is settled in AppKit, on
+            // the `NSSplitViewItem`: neither SwiftUI lever works here (`.navigationSplitViewColumnWidth`
+            // is unreliable for a `.sidebar` List, and `.frame` alone snaps between a few fixed states
+            // rather than scaling). See `SettingsWindowController.pinSidebarSplit()`.
             .frame(width: model.sidebarIcons.sidebarWidth)
             // A menu-bar Settings window has no collapsible sidebar (System Settings doesn't either);
             // suppress the automatic sidebar toggle so only the fixed split shows.

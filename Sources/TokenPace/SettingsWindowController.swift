@@ -1,4 +1,5 @@
 import AppKit
+import ObjectiveC   // runtime class generation — see `claimDividerCursor`
 import SwiftUI
 import TokenPaceKit
 
@@ -25,10 +26,16 @@ import TokenPaceKit
 final class SettingsWindowController: NSWindowController {
 
     private enum Metrics {
-        /// Fixed window content width, matching System Settings exactly (measured 857 pt, #156). Still
-        /// pinned min == max: only the **height** resizes (ADR-0069). The sidebar/detail split is tuned
-        /// to this width (sidebar 258, detail 599) and would reflow if the user could drag it.
-        static let contentWidth: CGFloat = 857
+        /// Fixed window content width. Pinned min == max: only the **height** resizes (ADR-0069).
+        ///
+        /// **Was 857** — System Settings' own width, measured (#156), when the sidebar was 275. The
+        /// sidebar has since been narrowed to 210 (`SidebarIconMetrics.sidebarWidth`), and this width
+        /// tracks it exactly — 857 − (275 − 210) = 792 — so the **detail column keeps the width its
+        /// panes were laid out against**. Giving the detail column the reclaimed space instead would
+        /// reflow every pane; the split is tuned to this width, which is why it is not draggable.
+        ///
+        /// Change one of the two and the other must follow, or the detail column silently resizes.
+        static let contentWidth: CGFloat = 792
         /// Content height the window **opens at** — a default since ADR-0069, a hard size before it.
         /// It was hand-bumped every time the Appearance pane grew an option: 480 → 520 (#199) → 560
         /// (#211) → 600 (#215) → 636 (the "Work harder" toggle) → 684 → 776 (#224 — "Bar style", the
@@ -51,7 +58,31 @@ final class SettingsWindowController: NSWindowController {
     /// The window's toolbar — ‹ › plus the pane name, System Settings' own header (#156 §2).
     private let toolbarController = SettingsToolbarController()
 
+    /// The live dropdown preview riding beside this window (ADR-0083). Owned here, not by
+    /// `AppDelegate`, because its lifetime is exactly this window's and its parking maths needs the
+    /// move/resize callbacks this controller already receives.
+    private let preview = SettingsPreviewWindowController()
+
+    /// The hard width constraint pinning the sidebar column. Retained so repeated `pinSidebarSplit()`
+    /// passes update the one constraint instead of stacking a new one on every window show.
+    private var sidebarWidthConstraint: NSLayoutConstraint?
+
+    /// Prefix for the runtime subclass that neutralises the sidebar divider (see `claimDividerCursor`).
+    /// Also the marker that makes that pass idempotent.
+    private static let fixedDividerClassPrefix = "TokenPaceFixedDivider_"
+
+
     // MARK: Public callbacks (the AppDelegate contract — forwarded into the model, unchanged surface)
+
+    /// The shared colour animator, handed down so the preview's transitions stay in lockstep with the
+    /// live surfaces instead of running their own timer (ADR-0070).
+    var previewColorAnimator: ColorAnimator? {
+        get { preview.colorAnimator } set { preview.colorAnimator = newValue }
+    }
+
+    /// Feed the preview the layout the live dropdown just received. Mirrors
+    /// `DevToolsWindowController.updatePreview` — both are called from `AppDelegate.setPopupLayout`.
+    func updatePreview(_ layout: PopupLayout) { preview.update(layout) }
 
     /// Called when the user changes the monitored-services selection (#89), with the new config.
     var onMonitoredServicesChange: ((MonitoredServices) -> Void)? {
@@ -264,6 +295,128 @@ final class SettingsWindowController: NSWindowController {
     /// there is then only one material to dim.
     ///
     /// Re-applied whenever the SwiftUI tree may have rebuilt it (see `show()`); a no-op once it holds.
+    /// Pin the sidebar column width in AppKit, and make its divider inert.
+    ///
+    /// SwiftUI cannot do either job on this window. `.navigationSplitViewColumnWidth` is unreliable for
+    /// a `.sidebar` List, and `.frame(width:)` does not scale the column at all — measured live, it
+    /// snaps between a handful of fixed states (frame 200 → 307 pt, 240 → 243, 340 → 243: a *wider*
+    /// frame giving a *narrower* column, see `SidebarIconMetrics`).
+    ///
+    /// The lever is the **`NSSplitViewItem`**, not the split view. Setting `NSSplitView.delegate` throws
+    /// outright here — *"A SplitView managed by a SplitViewController cannot have its delegate
+    /// modified"* — because SwiftUI drives the split through an `NSSplitViewController` that owns the
+    /// delegate slot. The item exposes the same constraints as properties, which the controller honours:
+    /// `canCollapse` off, and holding/minimum/maximum thickness collapsed onto one value so there is
+    /// nothing for a drag to move.
+    ///
+    /// Without this the divider stays live: the sidebar does not visibly resize (the List holds its own
+    /// width), but the seam moves and the detail column reflows under the cursor — a drag the window
+    /// advertises and then refuses, the same complaint as the ↔ cursor on its side edges (#263).
+    private func pinSidebarSplit() {
+        guard let window else { return }
+        let width = model.sidebarIcons.sidebarWidth
+        // Walk the **view** tree, not the controller tree: SwiftUI's split lives inside the hosting
+        // controller's views and is not exposed as a child view controller.
+        func pin(_ view: NSView) {
+            if let split = view as? NSSplitView, let sidebar = split.arrangedSubviews.first {
+                // A hard width constraint on the sidebar view itself, held across rebuilds.
+                //
+                // Everything gentler was tried and measured on this window: `NSSplitViewItem`'s
+                // min/max/canCollapse are re-applied by SwiftUI after our pass (the divider stayed
+                // draggable and the sidebar could still be collapsed to nothing), and
+                // `NSSplitView.delegate` throws outright — *"A SplitView managed by a
+                // SplitViewController cannot have its delegate modified"*. A constraint outranks the
+                // split's own layout, so the drag has nothing left to move.
+                if let existing = self.sidebarWidthConstraint, existing.firstItem === sidebar {
+                    existing.constant = width
+                } else {
+                    self.sidebarWidthConstraint?.isActive = false
+                    let constraint = sidebar.widthAnchor.constraint(equalToConstant: width)
+                    constraint.priority = .required
+                    constraint.isActive = true
+                    self.sidebarWidthConstraint = constraint
+                }
+                // Belt and braces: keep the item's own bounds in step, so AppKit does not fight the
+                // constraint during a window resize.
+                if let controller = self.splitController(for: split),
+                   let item = controller.splitViewItems.first {
+                    item.canCollapse = false
+                    item.minimumThickness = width
+                    item.maximumThickness = width
+                }
+                self.claimDividerCursor(on: split)
+                return
+            }
+            view.subviews.forEach(pin)
+        }
+        if let themeFrame = window.contentView?.superview { pin(themeFrame) }
+    }
+
+    /// Stop the divider advertising a drag the pinned sidebar will refuse.
+    ///
+    /// **The mechanism, established by instrumenting AppKit rather than by guesswork:**
+    /// `-[NSSplitView resetCursorRects]` installs a `resizeLeftRight` **cursor rect** — measured at
+    /// `(sidebarWidth, 0, 5, height)`, a 5 pt band around the 1 pt divider. It derives that rect from
+    /// the divider's *effective rect*, which the split view asks its delegate for via
+    /// `splitView:effectiveRect:forDrawnRect:ofDividerAtIndex:`. Return `.zero` there and no cursor
+    /// rect is added at all (verified: zero `addCursorRect` calls), taking the drag zone with it.
+    ///
+    /// This is why every lighter attempt failed. Cursor rects are geometry registered **with the
+    /// window**; they do not consult `hitTest` and have no z-order, so an overlay on top cannot win one,
+    /// and `cursorUpdate` never fires for a view that does not own the rect. `NSSplitViewItem`'s
+    /// thickness limits constrain the *outcome* of a drag, never the divider's zone.
+    ///
+    /// The delegate is SwiftUI's own `NavigationSplitViewController` — a real `NSSplitViewController`
+    /// subclass. It cannot be *replaced* (assigning throws *"A SplitView managed by a SplitViewController
+    /// cannot have its delegate modified"*), but its method can be overridden by moving that one
+    /// instance into a runtime-generated subclass. That is what this does.
+    ///
+    /// Deliberately an **isa-swizzle of a single instance**, not a method swizzle on `NSSplitView`:
+    /// nothing outside this window is touched. Note the split view itself is already
+    /// `NSKVONotifying_NSSplitView` — isa-swizzling *that* would break its KVO, so the controller is the
+    /// right target. The private class name is never hard-coded (the class is read back from the live
+    /// delegate), so if a future macOS renames it this degrades to the old cosmetic wart rather than
+    /// breaking.
+    private func claimDividerCursor(on split: NSSplitView) {
+        guard let delegate = split.delegate as? NSSplitViewController else { return }
+        let baseClass: AnyClass = object_getClass(delegate)!
+        let baseName = NSStringFromClass(baseClass)
+        guard !baseName.hasPrefix(Self.fixedDividerClassPrefix) else { return }   // already swizzled
+
+        let subclassName = Self.fixedDividerClassPrefix + baseName
+        let subclass: AnyClass
+        if let existing = NSClassFromString(subclassName) {
+            subclass = existing
+        } else {
+            let selector = NSSelectorFromString("splitView:effectiveRect:forDrawnRect:ofDividerAtIndex:")
+            guard let allocated = objc_allocateClassPair(baseClass, subclassName, 0),
+                  let method = class_getInstanceMethod(baseClass, selector) else { return }
+            let override: @convention(block) (AnyObject, NSSplitView, NSRect, NSRect, Int) -> NSRect =
+                { _, _, _, _, _ in .zero }
+            class_addMethod(allocated, selector, imp_implementationWithBlock(override),
+                            method_getTypeEncoding(method))
+            objc_registerClassPair(allocated)
+            subclass = allocated
+        }
+        object_setClass(delegate, subclass)
+        // Cursor rects are cached per window; without this the old resize rect survives until some
+        // unrelated event invalidates them.
+        window?.invalidateCursorRects(for: split)
+    }
+
+    /// The `NSSplitViewController` driving `split`, if there is one. Found through the responder chain
+    /// because SwiftUI does not expose it as a child of the window's content controller.
+    private func splitController(for split: NSSplitView) -> NSSplitViewController? {
+        var responder: NSResponder? = split.nextResponder
+        while let current = responder {
+            if let controller = current as? NSSplitViewController, controller.splitView === split {
+                return controller
+            }
+            responder = current.nextResponder
+        }
+        return nil
+    }
+
     private func mergeSidebarTitlebarStrip() {
         guard let window, let themeFrame = window.contentView?.superview else { return }
         let sidebarWidth = model.sidebarIcons.sidebarWidth
@@ -316,9 +469,15 @@ final class SettingsWindowController: NSWindowController {
         // out, and a reopened window may have rebuilt it. Once more on the next turn of the run loop,
         // because the first pass can land before the columns have their final width.
         mergeSidebarTitlebarStrip()
+        pinSidebarSplit()
         DispatchQueue.main.async { [weak self] in
             self?.mergeSidebarTitlebarStrip()
+            self?.pinSidebarSplit()
         }
+        // Last: the preview parks against the parent's *final* frame, and everything above can still
+        // move it (restore, centre, the section hook). Attaching earlier would align it to the
+        // zero-width sliver an unsized hosting window starts as.
+        if let window { preview.attach(to: window) }
     }
 
     /// Keep the toolbar's title and ‹ › enablement in step with the model.
@@ -378,8 +537,25 @@ final class SettingsWindowController: NSWindowController {
             // Size first, then position — `center()` on an unsized window is the off-screen bug.
             window.setContentSize(NSSize(width: Metrics.contentWidth,
                                          height: Metrics.defaultContentHeight))
-            window.center()
+            centreWithPreview(window)
         }
+    }
+
+    /// Centre the window **and its preview as one unit**, so the pair sits centred rather than the
+    /// Settings window alone with the preview hanging off to the right.
+    ///
+    /// `NSWindow.center()` knows only about this window, so with the preview attached the visual centre
+    /// of what the user sees lands well right of the screen's. Shifting left by half the preview's
+    /// footprint puts the pair's midpoint where `center()` would have put this window's.
+    ///
+    /// Falls back to plain `center()` when the shift would push the window off the left edge — a
+    /// half-visible Settings window is a worse outcome than an off-centre pair.
+    private func centreWithPreview(_ window: NSWindow) {
+        window.center()
+        guard let visible = (window.screen ?? NSScreen.main)?.visibleFrame else { return }
+        let shifted = window.frame.origin.x - preview.occupiedWidth / 2
+        guard shifted >= visible.minX else { return }
+        window.setFrameOrigin(NSPoint(x: shifted, y: window.frame.origin.y))
     }
 
     /// The full window size (content plus chrome) for a given **content** height at the pinned width —
@@ -493,13 +669,33 @@ extension SettingsWindowController: NSWindowDelegate {
         // owns their buttons and dims them with the window itself (#312).
     }
 
-    func windowDidResize(_ notification: Notification) { persistFrame() }
+    /// A child window follows its parent when *dragged*, but a resize moves only the bottom edge —
+    /// the preview aligns to the **top**, so it has to re-park itself explicitly.
+    func windowDidResize(_ notification: Notification) {
+        persistFrame()
+        preview.reposition()
+    }
 
-    func windowDidMove(_ notification: Notification) { persistFrame() }
+    func windowDidMove(_ notification: Notification) {
+        persistFrame()
+        preview.reposition()
+    }
 
     /// The state the window was in when it went away is the one to reopen at — a resize immediately
     /// followed by a close would otherwise be the one change that never got recorded.
-    func windowWillClose(_ notification: Notification) { persistFrame() }
+    func windowWillClose(_ notification: Notification) {
+        persistFrame()
+        preview.detach()
+    }
+
+    /// A miniaturised window must not leave the preview floating on screen — and, whatever AppKit does
+    /// with the child window itself, it will not remove the preview's ⌥ event monitor. `detach`/`attach`
+    /// are idempotent, so this is safe even if the child is already hidden for us.
+    func windowDidMiniaturize(_ notification: Notification) { preview.detach() }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        if let window { preview.attach(to: window) }
+    }
 }
 
 // MARK: - WindowFrameBox ↔ CoreGraphics
@@ -526,3 +722,4 @@ extension WindowFrameBox {
     /// Flattened for storage — see `PersistedConfig.settingsWindowFrame` for why plain numbers.
     var components: [Double] { [x, y, width, height] }
 }
+

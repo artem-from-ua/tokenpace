@@ -159,11 +159,6 @@ final class DevToolsWindowController: NSWindowController {
 
     // MARK: - Preview window
 
-    /// Whether the system is in dark mode — drives the preview window's Vibrant appearance choice.
-    private static var isDarkMode: Bool {
-        NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-    }
-
     private func showPreviewWindow() {
         if previewWindow == nil {
             // The preview is a plain window, not an NSMenu; its #212121 menu-matched backdrop comes from
@@ -187,12 +182,9 @@ final class DevToolsWindowController: NSWindowController {
             // behind them as square corners). The rounded, filled container provides the visible surface.
             win.isOpaque = false
             win.backgroundColor = .clear
-            // Match the real NSMenu popup's **Vibrant** appearance (not plain aqua/darkAqua): system label
-            // colours resolve differently under vibrancy — e.g. the popup's translucent grey track resolves
-            // to an opaque #323232 in VibrantDark vs a light white@0.17 in DarkAqua — so without this the
-            // preview's neutrals read noticeably lighter than the live menu. Diagnosed live: the menu window
-            // is `NSAppearanceNameVibrantDark`; the preview window defaulted to `DarkAqua`.
-            win.appearance = NSAppearance(named: Self.isDarkMode ? .vibrantDark : .vibrantLight)
+            // Match the real NSMenu popup's **Vibrant** appearance (not plain aqua/darkAqua) — see
+            // `PreviewChrome.isDark` for why this is correctness, not cosmetics.
+            win.appearance = PreviewChrome.vibrantAppearance
             win.contentView = buildPreviewContent()
             previewWindow = win
         }
@@ -252,18 +244,20 @@ final class DevToolsWindowController: NSWindowController {
         // translucency the real menu can't reproduce for its neutrals.
         container.fillColor = .popupMenuMatchedBackground
         container.borderColor = .popupMenuBorder   // hairline edge, like a real system menu window
-        container.cornerRadius = Self.menuPopupCornerRadius(for: window)
+        container.cornerRadius = PreviewChrome.menuPopupCornerRadius()
 
         container.addSubview(plaque)
         container.addSubview(plaqueDivider)
         container.addSubview(previewVC.view)
         container.addSubview(footer)
         NSLayoutConstraint.activate([
-            plaque.topAnchor.constraint(equalTo: container.topAnchor),
+            // The heading hugs its label (it lost the backing strip that used to give it a height), so
+            // the breathing room above it is stated here.
+            plaque.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
             plaque.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             plaque.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
-            plaqueDivider.topAnchor.constraint(equalTo: plaque.bottomAnchor),
+            plaqueDivider.topAnchor.constraint(equalTo: plaque.bottomAnchor, constant: 8),
             plaqueDivider.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             plaqueDivider.trailingAnchor.constraint(equalTo: container.trailingAnchor),
 
@@ -567,15 +561,6 @@ final class DevToolsWindowController: NSWindowController {
         editorControls = [copyRGBButton, copyHexButton, resetButton, lockButton]
             + Channel.allCases.compactMap { channelRows[$0] }.flatMap { [$0.slider, $0.field] as [NSControl] }
         return stack
-    }
-
-    /// The corner radius of a **menu-bar pop-up** on the running macOS version, so the borderless preview
-    /// reads as the real popup rather than a plain window. The menu window class (`_NSMenuWindow`) is
-    /// private with no public metric, so this is keyed off the OS version — matched visually against a
-    /// real TokenPace menu: macOS 15 Sequoia menus use ~10 pt; macOS 26 Tahoe rounds them more (~14 pt).
-    private static func menuPopupCornerRadius(for referenceWindow: NSWindow?) -> CGFloat {
-        if #available(macOS 26.0, *) { return 14 }
-        return 10   // macOS 11–15
     }
 
     private static func makeIntFormatter() -> NumberFormatter {

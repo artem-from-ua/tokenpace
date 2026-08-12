@@ -43,8 +43,15 @@ final class SidebarIconMetrics {
     let chipLabelGap: CGFloat = 8
 
     /// Sidebar column width, as handed to the `List`'s `.frame`. Not the rendered width: SwiftUI
-    /// reinterprets it (see the type doc). 275 is what the Large bucket passed before the size was
-    /// pinned, so the rendered sidebar is unchanged — it was pixel-identical to System Settings at
-    /// Large, and pinning must not move it.
-    let sidebarWidth: CGFloat = 275
+    /// reinterprets it (see the type doc).
+    ///
+    /// **Was 275** — the system width for Large icons, pixel-identical to System Settings' own sidebar
+    /// and what the Large bucket passed before the size was pinned (ADR-0082). Narrowed because this
+    /// window's sidebar holds seven short labels and needs none of the room System Settings reserves
+    /// for its far longer list; the window narrows with it, so the detail column keeps the width its
+    /// panes were laid out against (`SettingsWindowController.Metrics.contentWidth`).
+    ///
+    /// 183 was a third off 275; 210 walks 15 % of that back, which is where the labels stopped looking
+    /// cramped against the chips.
+    let sidebarWidth: CGFloat = 210
 }
