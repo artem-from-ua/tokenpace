@@ -89,8 +89,17 @@ struct MenuBarLayoutExpandedTests {
     private func expanded(
         _ layout: MenuBarLayout
     ) -> (five: BarView, seven: BarView?, resetToShow: ResetToShow?)? {
-        guard case let .expanded(five, seven, resetToShow) = layout.mode else {
-            Issue.record("expected .expanded, got \(layout.mode)")
+        expanded(layout.mode)
+    }
+
+    /// The same unwrap against a bare mode, for the exhausted states that `make` now answers with the
+    /// bars-less ``MenuBarMode/iconOnlyReset`` (ADR-0090). Their **bars** are still built — by
+    /// `expandedBars`, which the stale/diagnostic path uses — and that is what these tests pin.
+    private func expanded(
+        _ mode: MenuBarMode
+    ) -> (five: BarView, seven: BarView?, resetToShow: ResetToShow?)? {
+        guard case let .expanded(five, seven, resetToShow) = mode else {
+            Issue.record("expected .expanded, got \(mode)")
             return nil
         }
         guard let five else {
@@ -155,9 +164,10 @@ struct MenuBarLayoutExpandedTests {
     }
 
     @Test func criticalUtilizationSurfacesIndicator() {
-        // utilisation == 100 → .critical on that bar (PacingModel), and the widget is expanded.
-        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 100, sevenDayUtil: 30), now: now)
-        guard let e = expanded(layout) else { return }
+        // utilisation == 100 → .critical on that bar (PacingModel). Built through `expandedBars`: an
+        // exhausted 5h window is "cannot work" for `make`, which answers it without bars (ADR-0090).
+        let built = MenuBarLayout.expandedBars(for: snapshot(fiveHourUtil: 100, sevenDayUtil: 30), now: now)
+        guard let e = expanded(built) else { return }
         #expect(e.five.indicator == .critical)
     }
 
@@ -238,8 +248,17 @@ struct MenuBarLayoutIdleTests {
     private func expanded(
         _ layout: MenuBarLayout
     ) -> (five: BarView, seven: BarView?, resetToShow: ResetToShow?)? {
-        guard case let .expanded(five, seven, resetToShow) = layout.mode else {
-            Issue.record("expected .expanded, got \(layout.mode)")
+        expanded(layout.mode)
+    }
+
+    /// The same unwrap against a bare mode, for the exhausted states that `make` now answers with the
+    /// bars-less ``MenuBarMode/iconOnlyReset`` (ADR-0090). Their **bars** are still built — by
+    /// `expandedBars`, which the stale/diagnostic path uses — and that is what these tests pin.
+    private func expanded(
+        _ mode: MenuBarMode
+    ) -> (five: BarView, seven: BarView?, resetToShow: ResetToShow?)? {
+        guard case let .expanded(five, seven, resetToShow) = mode else {
+            Issue.record("expected .expanded, got \(mode)")
             return nil
         }
         guard let five else {
@@ -345,8 +364,10 @@ struct MenuBarLayoutIdleTests {
     @Test func idleBlockedWhenSevenDayExhaustedNoCredits() {
         // 7d at 100 with no credits → blocked; the grey-bar flag is set and the countdown surfaces the
         // 7-day reset even in the default mode (blocked overrides the calm-hides-countdown table).
-        let layout = MenuBarLayout.make(from: idleSnapshot(sevenDayUtil: 100), now: now)
-        guard let e = expanded(layout) else { return }
+        // `make` answers this state with the bars-less mode (ADR-0090); the **bar** it would draw is
+        // still built by `expandedBars`, and its grey-vs-blue flag is what this test pins.
+        let mode = MenuBarLayout.expandedBars(for: idleSnapshot(sevenDayUtil: 100), now: now)
+        guard let e = expanded(mode) else { return }
         #expect(e.five.blocked)
         guard let r = e.resetToShow else { Issue.record("blocked idle must show a countdown"); return }
         #expect(r.display == "4d")   // 7d reset 4 days out, compact-days
@@ -358,8 +379,7 @@ struct MenuBarLayoutIdleTests {
             fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
             sevenDay: UsageWindow(utilization: 100, resetsAt: resetsAt(inSeconds: 4 * 24 * 3600)),
             sessionIdle: true, spend: SpendInfo(enabled: true, spendLimitReached: false))
-        let layout = MenuBarLayout.make(from: snap, now: now)
-        guard let e = expanded(layout) else { return }
+        guard let e = expanded(MenuBarLayout.expandedBars(for: snap, now: now)) else { return }
         #expect(!e.five.blocked)
     }
 
@@ -370,8 +390,7 @@ struct MenuBarLayoutIdleTests {
             fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
             sevenDay: UsageWindow(utilization: 100, resetsAt: resetsAt(inSeconds: 4 * 24 * 3600)),
             sessionIdle: true, spend: SpendInfo(enabled: false, spendLimitReached: true))
-        let layout = MenuBarLayout.make(from: snap, now: now)
-        guard let e = expanded(layout) else { return }
+        guard let e = expanded(MenuBarLayout.expandedBars(for: snap, now: now)) else { return }
         #expect(e.five.blocked)
         guard let r = e.resetToShow else { Issue.record("blocked idle must show a countdown"); return }
         // 7-day reset is 4 days out; the credits month-end is weeks away, so 7d is the blocking reset.
@@ -532,9 +551,13 @@ struct MenuBarLayoutShowResetTests {
 
     /// Whether the default-mode layout draws a countdown (`resetToShow != nil`), or `nil` (recording a
     /// failure) if not expanded. All tests here use the default `.smart` mode.
-    private func showReset(_ layout: MenuBarLayout) -> Bool? {
-        guard case let .expanded(_, _, resetToShow) = layout.mode else {
-            Issue.record("expected .expanded, got \(layout.mode)")
+    private func showReset(_ layout: MenuBarLayout) -> Bool? { showReset(layout.mode) }
+
+    /// The same probe against a bare mode, for the exhausted cases that `make` now answers without bars
+    /// (ADR-0090) — `selectReset`'s table still runs in the bar-building half.
+    private func showReset(_ mode: MenuBarMode) -> Bool? {
+        guard case let .expanded(_, _, resetToShow) = mode else {
+            Issue.record("expected .expanded, got \(mode)")
             return nil
         }
         return resetToShow != nil
@@ -571,9 +594,10 @@ struct MenuBarLayoutShowResetTests {
     }
 
     @Test func oneExhaustedShowsReset() {
-        // 7d usage == 100 → red → noisy, even though 5h is green.
-        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 100), now: now)
-        #expect(showReset(layout) == true)
+        // 7d usage == 100 → red → noisy, even though 5h is green. Built through `expandedBars`, since
+        // `make` answers an exhausted window with the bars-less mode and no `resetToShow` to inspect.
+        let built = MenuBarLayout.expandedBars(for: snapshot(fiveHourUtil: 10, sevenDayUtil: 100), now: now)
+        #expect(showReset(built) == true)
     }
 
     @Test func nearResetOverrideShowsReset() {
@@ -742,11 +766,16 @@ struct MenuBarLayoutSelectResetTests {
 struct MenuBarLayoutHideCalmBarTests {
 
     /// Both bars stay optional here — this suite is precisely about one of them going away.
+    ///
+    /// Built through `expandedBars` rather than `make`: several cases below are deliberately exhausted
+    /// (a red bar must never be elided as "calm"), and since ADR-0090 `make` answers an exhausted
+    /// snapshot with the bars-less ``MenuBarMode/iconOnlyReset``. The calm-hiding rule itself lives in
+    /// the bar-building half, which is exactly what this suite exercises.
     private func expanded(
-        _ layout: MenuBarLayout
+        _ mode: MenuBarMode
     ) -> (five: BarView?, seven: BarView?, resetToShow: ResetToShow?)? {
-        guard case let .expanded(five, seven, resetToShow) = layout.mode else {
-            Issue.record("expected .expanded, got \(layout.mode)")
+        guard case let .expanded(five, seven, resetToShow) = mode else {
+            Issue.record("expected .expanded, got \(mode)")
             return nil
         }
         return (five, seven, resetToShow)
@@ -756,7 +785,7 @@ struct MenuBarLayoutHideCalmBarTests {
 
     @Test func defaultNeverKeepsBothBars() {
         // Regression: the default `.never` never elides either bar, however calm both are.
-        let layout = MenuBarLayout.make(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), now: now)
+        let layout = MenuBarLayout.expandedBars(for: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), now: now)
         guard let e = expanded(layout) else { return }
         #expect(e.five != nil)
         #expect(e.seven != nil)
@@ -768,8 +797,8 @@ struct MenuBarLayoutHideCalmBarTests {
 
     @Test func calmSevenDayIsHidden() {
         // Calm 7-day + `.sevenDay` → 7-day dropped, 5h bar alone.
-        let layout = MenuBarLayout.make(
-            from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), now: now, hideCalmBar: .sevenDay)
+        let layout = MenuBarLayout.expandedBars(
+            for: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), now: now, hideCalmBar: .sevenDay)
         guard let e = expanded(layout) else { return }
         #expect(e.seven == nil)
         #expect(e.five?.window == .fiveHour)
@@ -778,8 +807,8 @@ struct MenuBarLayoutHideCalmBarTests {
 
     @Test func orangeSevenDayStaysVisible() {
         // Ahead-of-pace (orange) 7-day is noisy → kept even when it is the chosen bar.
-        let layout = MenuBarLayout.make(
-            from: snapshot(fiveHourUtil: 50, sevenDayUtil: 55, sevenDayResetsIn: 6 * 24 * 3600),
+        let layout = MenuBarLayout.expandedBars(
+            for: snapshot(fiveHourUtil: 50, sevenDayUtil: 55, sevenDayResetsIn: 6 * 24 * 3600),
             now: now, hideCalmBar: .sevenDay)
         guard let e = expanded(layout) else { return }
         #expect(e.seven != nil)
@@ -788,8 +817,8 @@ struct MenuBarLayoutHideCalmBarTests {
 
     @Test func redSevenDayStaysVisible() {
         // Exhausted (red) 7-day is noisy → kept even when it is the chosen bar.
-        let layout = MenuBarLayout.make(
-            from: snapshot(fiveHourUtil: 50, sevenDayUtil: 100), now: now, hideCalmBar: .sevenDay)
+        let layout = MenuBarLayout.expandedBars(
+            for: snapshot(fiveHourUtil: 50, sevenDayUtil: 100), now: now, hideCalmBar: .sevenDay)
         guard let e = expanded(layout) else { return }
         #expect(e.seven != nil)
         #expect(e.seven?.severity == .exhausted)
@@ -799,8 +828,8 @@ struct MenuBarLayoutHideCalmBarTests {
 
     @Test func calmFiveHourIsHidden() {
         // Calm 5h + `.fiveHour` → 5h dropped, the 7-day bar stands alone.
-        let layout = MenuBarLayout.make(
-            from: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
+        let layout = MenuBarLayout.expandedBars(
+            for: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
         guard let e = expanded(layout) else { return }
         #expect(e.five == nil)
         #expect(e.seven?.window == .sevenDay)
@@ -808,8 +837,8 @@ struct MenuBarLayoutHideCalmBarTests {
 
     @Test func orangeFiveHourStaysVisible() {
         // Ahead-of-pace (orange) 5h is noisy → kept under `.fiveHour`.
-        let layout = MenuBarLayout.make(
-            from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
+        let layout = MenuBarLayout.expandedBars(
+            for: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
         guard let e = expanded(layout) else { return }
         #expect(e.five != nil)
         #expect(e.five?.severity == .ahead)
@@ -817,8 +846,8 @@ struct MenuBarLayoutHideCalmBarTests {
 
     @Test func redFiveHourStaysVisible() {
         // Exhausted (red) 5h is noisy → kept under `.fiveHour`.
-        let layout = MenuBarLayout.make(
-            from: snapshot(fiveHourUtil: 100, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
+        let layout = MenuBarLayout.expandedBars(
+            for: snapshot(fiveHourUtil: 100, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
         guard let e = expanded(layout) else { return }
         #expect(e.five != nil)
         #expect(e.five?.severity == .exhausted)
@@ -828,8 +857,8 @@ struct MenuBarLayoutHideCalmBarTests {
 
     @Test func sessionIdleWithCalmSevenDayLeavesOnlyIdleFive() {
         // Session-idle 5h + calm 7-day + `.sevenDay` → only the idle 5h bar, centred (7-day dropped).
-        let layout = MenuBarLayout.make(
-            from: idleSnapshot(sevenDayUtil: 20), now: now, hideCalmBar: .sevenDay)
+        let layout = MenuBarLayout.expandedBars(
+            for: idleSnapshot(sevenDayUtil: 20), now: now, hideCalmBar: .sevenDay)
         guard let e = expanded(layout) else { return }
         #expect(e.seven == nil)
         #expect(e.five?.idle == true)
@@ -837,8 +866,8 @@ struct MenuBarLayoutHideCalmBarTests {
 
     @Test func sessionIdleWithNoisySevenDayKeepsIt() {
         // Session-idle 5h + a noisy (red) 7-day + `.sevenDay` → the 7-day bar stays; 5h idle rides above.
-        let layout = MenuBarLayout.make(
-            from: idleSnapshot(sevenDayUtil: 100), now: now, hideCalmBar: .sevenDay)
+        let layout = MenuBarLayout.expandedBars(
+            for: idleSnapshot(sevenDayUtil: 100), now: now, hideCalmBar: .sevenDay)
         guard let e = expanded(layout) else { return }
         #expect(e.seven != nil)
         #expect(e.five?.idle == true)
@@ -848,8 +877,8 @@ struct MenuBarLayoutHideCalmBarTests {
         // The deliberate no-exemption case (ADR-0086): an idle 5h bar reports `.calm`, so `.fiveHour`
         // hides it as well — between sessions the widget shows the 7-day bar alone. This is the most
         // visible consequence of the default, so it is pinned here rather than left implicit.
-        let layout = MenuBarLayout.make(
-            from: idleSnapshot(sevenDayUtil: 20), now: now, hideCalmBar: .fiveHour)
+        let layout = MenuBarLayout.expandedBars(
+            for: idleSnapshot(sevenDayUtil: 20), now: now, hideCalmBar: .fiveHour)
         guard let e = expanded(layout) else { return }
         #expect(e.five == nil)
         #expect(e.seven != nil)
@@ -871,8 +900,8 @@ struct MenuBarLayoutHideCalmBarTests {
         ]
         for mode in CalmBarHiding.allCases {
             for snap in snapshots {
-                let layout = MenuBarLayout.make(from: snap, now: now, hideCalmBar: mode)
-                guard case let .expanded(five, seven, _) = layout.mode else { continue }
+                let built = MenuBarLayout.expandedBars(for: snap, now: now, hideCalmBar: mode)
+                guard case let .expanded(five, seven, _) = built else { continue }
                 #expect(five != nil || seven != nil, "both bars elided under \(mode)")
             }
         }
@@ -881,8 +910,8 @@ struct MenuBarLayoutHideCalmBarTests {
     @Test func bothCalmUnderFiveHourLeavesTheSevenDayBar() {
         // The sharpest instance of the invariant: both bars calm and the calm 5h is the chosen one, so
         // exactly one bar is drawn — the 7-day one, calm as it is.
-        let layout = MenuBarLayout.make(
-            from: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
+        let layout = MenuBarLayout.expandedBars(
+            for: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
         guard let e = expanded(layout) else { return }
         #expect(e.five == nil)
         #expect(e.seven != nil)
@@ -917,8 +946,8 @@ struct MenuBarLayoutHideCalmBarTests {
         // Hiding the calm 7-day bar does not change the reset countdown: 5h noisy + 7d calm → 5h reset,
         // identical whether or not the bar is elided.
         let snap = snapshot(fiveHourUtil: 50, sevenDayUtil: 30)
-        let hidden = MenuBarLayout.make(from: snap, now: now, hideCalmBar: .sevenDay)
-        let shown = MenuBarLayout.make(from: snap, now: now, hideCalmBar: .never)
+        let hidden = MenuBarLayout.expandedBars(for: snap, now: now, hideCalmBar: .sevenDay)
+        let shown = MenuBarLayout.expandedBars(for: snap, now: now, hideCalmBar: .never)
         guard let eh = expanded(hidden), let es = expanded(shown) else { return }
         #expect(eh.resetToShow?.which == .fiveHour)
         #expect(eh.resetToShow == es.resetToShow)   // same countdown, bar presence aside
@@ -928,8 +957,8 @@ struct MenuBarLayoutHideCalmBarTests {
         // Mirror image: eliding the calm 5h bar leaves the countdown exactly as it was — `selectReset`
         // still sees the real 5h severity, so a hidden bar can still be the one driving the label.
         let snap = snapshot(fiveHourUtil: 10, sevenDayUtil: 100)
-        let hidden = MenuBarLayout.make(from: snap, now: now, hideCalmBar: .fiveHour)
-        let shown = MenuBarLayout.make(from: snap, now: now, hideCalmBar: .never)
+        let hidden = MenuBarLayout.expandedBars(for: snap, now: now, hideCalmBar: .fiveHour)
+        let shown = MenuBarLayout.expandedBars(for: snap, now: now, hideCalmBar: .never)
         guard let eh = expanded(hidden), let es = expanded(shown) else { return }
         #expect(eh.five == nil)
         #expect(eh.resetToShow == es.resetToShow)
@@ -998,17 +1027,31 @@ struct MenuBarLayoutCreditsTests {
         #expect(marker?.bar != nil)   // a cap to pace against → a coloured bar
     }
 
-    @Test func limitReachedForcesRedAndShows() {
-        // `spend_limit_reached` shows the icon (even though `enabled: false`) and forces usage to 1 →
-        // an exhausted bar (red rung), regardless of the raw used/limit fraction.
+    @Test func limitReachedForcesRed() {
+        // `spend_limit_reached` forces usage to 1 → an exhausted bar (red rung), regardless of the raw
+        // used/limit fraction. Read off `creditsMarker` directly: with a **main** window exhausted this
+        // state is also `isBlocked`, where the layout suppresses the icon entirely (see
+        // `limitReachedIsSuppressedWhileBlocked`), so the colour rule has to be pinned at its source.
+        let marker = MenuBarLayout.creditsMarker(
+            for: creditsSnapshot(
+                sevenDayUtil: 100, spend: spend(limit: 500, enabled: false, spendLimitReached: true)),
+            now: now)
+        #expect(marker?.bar?.usageFraction == 1)
+        #expect(marker?.bar?.severity == .exhausted)
+        #expect(marker?.isCalm == false)
+    }
+
+    @Test func limitReachedIsSuppressedWhileBlocked() {
+        // ADR-0090: hitting the money cap satisfies the icon's trigger (`isActive` is
+        // `enabled || spend_limit_reached`) **and** blocks the user (`creditsCanCover` is
+        // `enabled && !spend_limit_reached`), so the two icons used to draw side by side — a pair
+        // `ui-state-truth.md` already listed as impossible. The pause wins.
         let snap = creditsSnapshot(
             sevenDayUtil: 100, spend: spend(limit: 500, enabled: false, spendLimitReached: true))
         let layout = MenuBarLayout.make(
             from: snap, health: .healthy(lastSuccess: now), now: now, showCredits: true)
-        let marker = try? #require(layout.credits)
-        #expect(marker?.bar?.usageFraction == 1)
-        #expect(marker?.bar?.severity == .exhausted)
-        #expect(marker?.isCalm == false)
+        #expect(layout.blockedPause == true)
+        #expect(layout.credits == nil)
     }
 
     @Test func noLimitYieldsNeutralMarker() {
@@ -1033,27 +1076,31 @@ struct MenuBarLayoutCreditsTests {
     }
 }
 
-// MARK: - Pause icon hides bars (#194, #227)
+// MARK: - "Can we work?" — the bars-less answers (#194, #227, ADR-0090)
 
-@Suite("MenuBarLayout pauseHidesBars")
-struct MenuBarLayoutPauseHidesBarsTests {
+/// The menu bar answers one question, and the two answers that are not "yes, on the subscription"
+/// both drop the bars for a single icon + countdown (``MenuBarMode/iconOnlyReset``). Which icon is
+/// drawn is decided by the orthogonal `blockedPause`/`credits` fields, tested in the suites below —
+/// here we pin the **mode** and the countdown each answer selects.
+@Suite("MenuBarLayout can-we-work")
+struct MenuBarLayoutCanWeWorkTests {
 
-    /// Pull the associated values out of a `.blockedReset` mode, or fail the test.
-    private func blocked(_ layout: MenuBarLayout) -> (reset: String, which: LimitWindow)? {
-        guard case let .blockedReset(reset, which) = layout.mode else {
-            Issue.record("expected .blockedReset, got \(layout.mode)")
+    /// Pull the associated values out of an `.iconOnlyReset` mode, or fail the test.
+    private func iconOnly(_ layout: MenuBarLayout) -> (reset: String, which: LimitWindow)? {
+        guard case let .iconOnlyReset(reset, which) = layout.mode else {
+            Issue.record("expected .iconOnlyReset, got \(layout.mode)")
             return nil
         }
         return (reset, which)
     }
 
-    @Test func activeBlockedHidesBarsWhenOn() {
-        // Both main windows exhausted (no credits → fully blocked) + toggle on → no bars, just the
-        // blocking-reset countdown. With both exhausted the later token reset wins (last-stand): the
-        // 7d (3d out) over the 5h (4h out).
+    @Test func activeBlockedHidesBars() {
+        // Both main windows exhausted (no credits → fully blocked) → no bars, just the blocking-reset
+        // countdown. With both exhausted the later token reset wins (last-stand): the 7d (3d out) over
+        // the 5h (4h out). Unconditional since ADR-0090 — there is no toggle to switch it off.
         let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
-        let layout = MenuBarLayout.make(from: snap, now: now, pauseHidesBars: true)
-        guard let b = blocked(layout) else { return }
+        let layout = MenuBarLayout.make(from: snap, now: now)
+        guard let b = iconOnly(layout) else { return }
         #expect(b.which == .sevenDay)
         #expect(b.reset == "3d")   // 7d reset 3 days out, compact-days
     }
@@ -1062,8 +1109,8 @@ struct MenuBarLayoutPauseHidesBarsTests {
         // Only the 5h window is exhausted (7d has quota) → the 5h reset drives the countdown, so the
         // label counts the 2 hours to *that* reset rather than the days to the 7-day one.
         let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 40, fiveHourResetsIn: 2 * 3600)
-        let layout = MenuBarLayout.make(from: snap, now: now, pauseHidesBars: true)
-        guard let b = blocked(layout) else { return }
+        let layout = MenuBarLayout.make(from: snap, now: now)
+        guard let b = iconOnly(layout) else { return }
         #expect(b.which == .fiveHour)
         #expect(b.reset == "2h")
     }
@@ -1071,78 +1118,122 @@ struct MenuBarLayoutPauseHidesBarsTests {
     @Test func sevenDayExhaustedAloneUsesSevenDayReset() {
         // Only the 7d window is exhausted (5h has quota) → the 7d reset drives the countdown.
         let snap = snapshot(fiveHourUtil: 30, sevenDayUtil: 100, sevenDayResetsIn: 2 * 24 * 3600)
-        let layout = MenuBarLayout.make(from: snap, now: now, pauseHidesBars: true)
-        guard let b = blocked(layout) else { return }
+        let layout = MenuBarLayout.make(from: snap, now: now)
+        guard let b = iconOnly(layout) else { return }
         #expect(b.which == .sevenDay)
         #expect(b.reset == "2d")
     }
 
-    @Test func keepsBarsWhenOff() {
-        // Same blocked snapshot, toggle off → the normal expanded bars, unchanged (pause icon + bars).
-        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
-        let layout = MenuBarLayout.make(from: snap, now: now, pauseHidesBars: false)
-        guard case .expanded = layout.mode else {
-            Issue.record("expected .expanded when toggle off, got \(layout.mode)")
-            return
-        }
-    }
-
-    @Test func notBlockedStaysExpandedEvenWhenOn() {
-        // Neither window exhausted (both < 100) → not blocked, so the toggle is inert: full bars.
+    @Test func notExhaustedStaysExpanded() {
+        // Neither window exhausted (both < 100) → we can work on the subscription: full bars.
         let snap = snapshot(fiveHourUtil: 80, sevenDayUtil: 90)
-        let layout = MenuBarLayout.make(from: snap, now: now, pauseHidesBars: true)
+        let layout = MenuBarLayout.make(from: snap, now: now)
         guard case .expanded = layout.mode else {
-            Issue.record("expected .expanded when not blocked, got \(layout.mode)")
+            Issue.record("expected .expanded when not exhausted, got \(layout.mode)")
             return
         }
     }
 
     @Test func forcesResetEvenInNeverMode() {
-        // `resetMode: .never` normally hides every countdown, but a bars-less blocked widget would then
-        // show nothing beside the icon — so the blocking reset is forced regardless of the mode.
+        // `resetMode: .never` normally hides every countdown, but a bars-less widget would then show
+        // nothing beside the icon — so the reset is forced regardless of the mode.
         let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
-        let layout = MenuBarLayout.make(
-            from: snap, now: now, resetMode: .never, pauseHidesBars: true)
-        guard let b = blocked(layout) else { return }
+        let layout = MenuBarLayout.make(from: snap, now: now, resetMode: .never)
+        guard let b = iconOnly(layout) else { return }
         #expect(b.reset == "3d")
     }
 
-    @Test func keepsBarsWhenCreditsCover() {
-        // The strict `isBlocked` predicate (#227): a 7d at 100 % with active, uncapped credits is
-        // `mainWindowExhausted` but NOT blocked (work continues on the paid tier), so the bars stay even
-        // with the toggle on. This is the deliberate change from the pre-#227 `mainWindowExhausted` gate.
+    // MARK: Paying — subscription spent, credits covering (ADR-0090)
+
+    @Test func creditsCoveringAlsoHidesBars() {
+        // A 7d at 100 % with active, uncapped credits is `subscriptionExhaustedWhileCovered`: work
+        // continues, but on money. **Inverts the pre-ADR-0090 behaviour**, where this state kept its
+        // bars — a red 100 % bar carries no pacing information, and the 5h bar refilling underneath a
+        // blocking 7d changes nothing (you keep paying until the *blocking* window resets).
         let snap = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 20, resetsAt: resetsAt(inSeconds: 4 * 3600)),
             sevenDay: UsageWindow(utilization: 100, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600)),
             spend: SpendInfo(enabled: true, spendLimitReached: false))
-        let layout = MenuBarLayout.make(from: snap, now: now, pauseHidesBars: true)
-        guard case .expanded = layout.mode else {
-            Issue.record("expected .expanded (credits cover → not blocked), got \(layout.mode)")
-            return
-        }
+        let layout = MenuBarLayout.make(from: snap, now: now)
+        guard let b = iconOnly(layout) else { return }
+        // The countdown is the moment the plan quota returns and credits stop being spent — the 7d
+        // reset, never the credits' own month-end (`forSubscriptionExhausted` passes `creditsReset: nil`).
+        #expect(b.which == .sevenDay)
+        #expect(b.reset == "3d")
     }
 
-    @Test func idleBlockedHidesBarsWhenOn() {
+    @Test func payingIsNotBlocked() {
+        // The two answers are complements on an exhausted main window, so the paying state must never
+        // carry the pause icon — that is what keeps the two icons mutually exclusive.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 20, resetsAt: resetsAt(inSeconds: 4 * 3600)),
+            sevenDay: UsageWindow(utilization: 100, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600)),
+            spend: SpendInfo(enabled: true, spendLimitReached: false))
+        let layout = MenuBarLayout.make(
+            from: snap, health: .healthy(lastSuccess: now), now: now, showCredits: true)
+        #expect(layout.blockedPause == false)
+        // …and it must carry the currency icon, or the widget would be a bare countdown. The link is a
+        // three-step implication across two types (`subscriptionExhaustedWhileCovered` ⇒
+        // `mainWindowExhausted` ⇒ `anyBaseLimitExhausted`, plus `spend != nil`); pin it so the two
+        // predicates cannot drift apart unnoticed.
+        #expect(layout.credits != nil)
+    }
+
+    @Test func perModelExhaustionKeepsBars() {
+        // A per-model window at 100 % triggers the credits *icon* (`anyBaseLimitExhausted`) but does
+        // **not** gate work, so the bars must stay. This is why the paying branch keys on
+        // `subscriptionExhaustedWhileCovered` rather than on the icon's own predicate.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 10, resetsAt: resetsAt(inSeconds: 4 * 3600)),
+            sevenDay: UsageWindow(utilization: 36, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600)),
+            sevenDayOpus: UsageWindow(utilization: 100, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600)),
+            spend: SpendInfo(enabled: true, spendLimitReached: false))
+        let layout = MenuBarLayout.make(
+            from: snap, health: .healthy(lastSuccess: now), now: now, showCredits: true)
+        guard case .expanded = layout.mode else {
+            Issue.record("expected .expanded (per-model does not gate work), got \(layout.mode)")
+            return
+        }
+        #expect(layout.credits != nil)   // the icon still shows — it just no longer hides the bars
+    }
+
+    // MARK: Idle and fallbacks
+
+    @Test func idleBlockedHidesBars() {
         // The idle-blocked state (7d exhausted, no credits, no active 5h) also drops its grey idle bar
-        // for the countdown-only widget when the toggle is on.
+        // for the countdown-only widget.
         let snap = idleSnapshot(sevenDayUtil: 100)
-        let layout = MenuBarLayout.make(from: snap, now: now, pauseHidesBars: true)
-        guard let b = blocked(layout) else { return }
+        let layout = MenuBarLayout.make(from: snap, now: now)
+        guard let b = iconOnly(layout) else { return }
         #expect(b.which == .sevenDay)
         #expect(b.reset == "4d")   // idle 7d reset 4 days out
     }
 
     @Test func brokenResetFallsBackToNormalPath() {
         // Exhausted but the only exhausted window's `resets_at` is unparseable → `forBlocked` yields nil,
-        // so we do NOT enter `.blockedReset`; the normal path surfaces the data error as ⚠️ instead.
+        // so we do NOT enter `.iconOnlyReset`; the normal path surfaces the data error as ⚠️ instead.
         let snap = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 30, resetsAt: resetsAt(inSeconds: 4 * 3600)),
             sevenDay: UsageWindow(utilization: 100, resetsAt: "not-a-date"))
-        let layout = MenuBarLayout.make(from: snap, now: now, pauseHidesBars: true)
-        if case .blockedReset = layout.mode {
-            Issue.record("expected a fallback away from .blockedReset for a broken reset, got \(layout.mode)")
+        let layout = MenuBarLayout.make(from: snap, now: now)
+        if case .iconOnlyReset = layout.mode {
+            Issue.record("expected a fallback away from .iconOnlyReset for a broken reset, got \(layout.mode)")
         }
     }
+
+    @Test func payingWithBrokenResetFallsBackToo() {
+        // Same fallback on the paying side: an unparseable `resets_at` must not yield a currency icon
+        // beside an empty countdown.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 30, resetsAt: resetsAt(inSeconds: 4 * 3600)),
+            sevenDay: UsageWindow(utilization: 100, resetsAt: "not-a-date"),
+            spend: SpendInfo(enabled: true, spendLimitReached: false))
+        let layout = MenuBarLayout.make(from: snap, now: now)
+        if case .iconOnlyReset = layout.mode {
+            Issue.record("expected a fallback for a broken reset while paying, got \(layout.mode)")
+        }
+    }
+
 }
 
 // MARK: - Blocked pause glyph (#199, #227)
@@ -1159,62 +1250,51 @@ struct MenuBarLayoutBlockedPauseTests {
                     failingSince: now.addingTimeInterval(-age), reason: .timeout)
     }
 
-    @Test func pauseWhenBlockedAndBarsKept() {
-        // Fully blocked (both windows 100 %, no credits), toggle off (bars kept) → the mode stays
-        // `.expanded` (red bars) AND the pause glyph is set. The icon is always shown when blocked.
+    @Test func pauseWhenBlocked() {
+        // Fully blocked (both windows 100 %, no credits) → the bars-less mode AND the pause glyph.
+        // Since ADR-0090 there is no "bars kept" variant to test: hiding is the only behaviour.
         let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
-        let layout = MenuBarLayout.make(
-            from: snap, health: healthy, now: now, pauseHidesBars: false)
-        guard case .expanded = layout.mode else {
-            Issue.record("expected .expanded (bars kept), got \(layout.mode)")
-            return
-        }
-        #expect(layout.blockedPause == true)
-    }
-
-    @Test func pauseWhenBlockedAndBarsHidden() {
-        // Same blocked snapshot but the toggle hides the bars (#194 countdown-only) → the pause glyph is
-        // still set, drawn to the left of the countdown (#199, #227).
-        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
-        let layout = MenuBarLayout.make(
-            from: snap, health: healthy, now: now, pauseHidesBars: true)
-        guard case .blockedReset = layout.mode else {
-            Issue.record("expected .blockedReset when bars hidden, got \(layout.mode)")
+        let layout = MenuBarLayout.make(from: snap, health: healthy, now: now)
+        guard case .iconOnlyReset = layout.mode else {
+            Issue.record("expected .iconOnlyReset when blocked, got \(layout.mode)")
             return
         }
         #expect(layout.blockedPause == true)
     }
 
     @Test func noPauseWhenNotBlocked() {
-        // Neither window exhausted → not blocked, so the glyph stays off regardless of the toggle.
+        // Neither window exhausted → not blocked, so the glyph stays off.
         let snap = snapshot(fiveHourUtil: 80, sevenDayUtil: 90)
-        let layout = MenuBarLayout.make(
-            from: snap, health: healthy, now: now, pauseHidesBars: false)
+        let layout = MenuBarLayout.make(from: snap, health: healthy, now: now)
         #expect(layout.blockedPause == false)
     }
 
     @Test func noPauseWhenCreditsCover() {
         // A 7d at 100 % with active, uncapped credits is `mainWindowExhausted` but NOT `isBlocked` (work
-        // continues on the paid tier), so the pause glyph — which keys off `isBlocked` — stays off, and
-        // the bars stay too.
+        // continues on the paid tier), so the pause glyph — which keys off `isBlocked` — stays off. The
+        // bars go, but that is the *paying* answer, wearing the currency icon instead.
         let snap = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 20, resetsAt: resetsAt(inSeconds: 4 * 3600)),
             sevenDay: UsageWindow(utilization: 100, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600)),
             spend: SpendInfo(enabled: true, spendLimitReached: false))
-        let layout = MenuBarLayout.make(
-            from: snap, health: healthy, now: now, pauseHidesBars: false)
+        let layout = MenuBarLayout.make(from: snap, health: healthy, now: now)
         #expect(layout.blockedPause == false)
     }
 
-    @Test func pauseIsAlwaysOnWhenBlocked() {
-        // #227: the pause icon is no longer user-optional — whenever fully blocked it is drawn, regardless
-        // of the `pauseHidesBars` toggle (which only decides whether the bars are hidden beside it).
-        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
-        for hides in [true, false] {
-            let layout = MenuBarLayout.make(
-                from: snap, health: healthy, now: now, pauseHidesBars: hides)
-            #expect(layout.blockedPause == true)
-        }
+    @Test func creditsSuppressedWhileBlocked() {
+        // ADR-0090: the money cap being hit satisfies both `isActive` (`enabled || spend_limit_reached`
+        // → the icon showed) and `!creditsCanCover` (`enabled && !spend_limit_reached` → blocked), so the
+        // pause glyph and the currency icon used to draw side by side. `ui-state-truth.md` already listed
+        // that pair as impossible; the pause wins, because "no path to work" is the answer and a red ¤ is
+        // a detail of *why*.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 100, resetsAt: resetsAt(inSeconds: 4 * 3600)),
+            sevenDay: UsageWindow(utilization: 100, resetsAt: resetsAt(inSeconds: 3 * 24 * 3600)),
+            spend: SpendInfo(enabled: false, spendLimitReached: true))
+        let layout = MenuBarLayout.make(
+            from: snap, health: healthy, now: now, showCredits: true)
+        #expect(layout.blockedPause == true)
+        #expect(layout.credits == nil)   // the icon is suppressed, not merely undrawn by the view
     }
 
     @Test func noPauseInErrorState() {
@@ -1222,8 +1302,7 @@ struct MenuBarLayoutBlockedPauseTests {
         // though the last snapshot was blocked.
         let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
         let layout = MenuBarLayout.make(
-            from: snap, health: failing(for: UsageHealth.hideBarsAfter + 1), now: now,
-            pauseHidesBars: false)
+            from: snap, health: failing(for: UsageHealth.hideBarsAfter + 1), now: now)
         guard case .error = layout.mode else {
             Issue.record("expected .error past the stale threshold, got \(layout.mode)")
             return
@@ -1231,14 +1310,30 @@ struct MenuBarLayoutBlockedPauseTests {
         #expect(layout.blockedPause == false)
     }
 
-    @Test func idleBlockedPauseWhenBarsKept() {
-        // The idle-blocked state (7d exhausted, no credits, no active 5h) is also `isBlocked`; with the
-        // toggle off it stays `.expanded` (grey idle bar) and the glyph precedes it.
-        let snap = idleSnapshot(sevenDayUtil: 100)
+    @Test func staleExhaustedKeepsDiagnosticBars() {
+        // The stale window (30–60 min of failures) rebuilds its bars through `expandedBars`, never
+        // through the "can we work?" branches — an exhausted snapshot up to an hour old must not claim
+        // "blocked right now", and routing it through `make` would drop the stale bars for exactly the
+        // users who are blocked or paying, collapsing the diagnostic phase into the bare-glyph one.
+        let snap = snapshot(fiveHourUtil: 100, sevenDayUtil: 100)
         let layout = MenuBarLayout.make(
-            from: snap, health: healthy, now: now, pauseHidesBars: false)
-        guard case .expanded = layout.mode else {
-            Issue.record("expected .expanded (idle bar kept), got \(layout.mode)")
+            from: snap, health: failing(for: UsageHealth.glyphAfter + 60), now: now)
+        guard case let .error(five, seven, _, _) = layout.mode else {
+            Issue.record("expected .error in the stale window, got \(layout.mode)")
+            return
+        }
+        #expect(five != nil)
+        #expect(seven != nil)
+        #expect(layout.blockedPause == false)   // stale data never asserts a live block
+    }
+
+    @Test func idleBlockedHidesBarsAndKeepsPause() {
+        // The idle-blocked state (7d exhausted, no credits, no active 5h) is also `isBlocked`, so it too
+        // drops its grey idle bar for the countdown-only widget, with the glyph leading.
+        let snap = idleSnapshot(sevenDayUtil: 100)
+        let layout = MenuBarLayout.make(from: snap, health: healthy, now: now)
+        guard case .iconOnlyReset = layout.mode else {
+            Issue.record("expected .iconOnlyReset when idle-blocked, got \(layout.mode)")
             return
         }
         #expect(layout.blockedPause == true)

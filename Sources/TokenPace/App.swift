@@ -2193,13 +2193,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // ADR-0086: honour the "Hide the calm bar" choice — drops whichever bar the user picked while
             // it is calm, centring the one that remains. `.never` keeps both.
             hideCalmBar: PersistedConfig.calmBarHiding,
-            // #144: honour the "Show extra-usage credits" toggle — draws the ¤ icon when credits are
-            // active and a base limit is exhausted; false hides it and reclaims its width.
-            showCredits: PersistedConfig.showExtraUsage,
-            // #194, #227: honour the "Pause icon hides bars" toggle — when fully blocked (isBlocked), true
-            // drops both bars for a countdown-only widget beside the red pause icon; false keeps the (red)
-            // bars beside it. The pause icon itself is drawn whenever blocked, independent of this flag.
-            pauseHidesBars: PersistedConfig.pauseHidesBars,
+            // #144: the ¤ icon shows whenever credits are active and a base limit is exhausted. No user
+            // gate since ADR-0090 — the data decides, and it is already silent until money is in play.
+            showCredits: true,
             // #341: with nothing monitored the widget reports that, rather than the last thing it saw.
             monitoringAnything: providerMonitoring.isMonitoringAnything)
             .withAwaitingInput(awaitingInput)   // #233: graft the awaiting-input indicator (trailing)

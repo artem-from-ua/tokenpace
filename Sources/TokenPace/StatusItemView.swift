@@ -422,7 +422,7 @@ final class StatusItemView: NSView {
         switch layout.mode {
         case let .expanded(fiveHour, sevenDay, resetToShow):
             drawExpanded(fiveHour: fiveHour, sevenDay: sevenDay, reset: resetToShow?.display, in: contentRect)
-        case let .blockedReset(reset, _):
+        case let .iconOnlyReset(reset, _):
             drawBlockedReset(reset, in: contentRect)
         case let .error(fiveHour, sevenDay, reset, _):
             drawError(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: contentRect)
@@ -1243,7 +1243,7 @@ final class StatusItemView: NSView {
         case let .expanded(_, _, resetToShow):
             return dotInset + Metrics.hPadding + leadingInset
                 + barsBlockWidth(reset: resetToShow?.display) + Metrics.hPadding
-        case let .blockedReset(reset, _):
+        case let .iconOnlyReset(reset, _):
             // No bars (#194): the item hugs the leading decorations (pause + credits) plus the countdown.
             return dotInset + Metrics.hPadding + leadingInset + resetLabelWidth(reset) + Metrics.hPadding
         case let .error(five, _, reset, _):
