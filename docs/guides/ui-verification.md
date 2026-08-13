@@ -769,6 +769,31 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=7.0 swift run   # одра�
 Хук **сідає** на пан, а не «навігує»: вікно, відкрите так, має **обидва чеврони ‹ › дим**, як і має
 бути в щойно відкритому вікні. Якщо ‹ активний одразу після запуску — це регресія.
 
+### Скрол detail-панелі, риска тулбара, мінімальна висота (#346)
+
+Механіка описана в [ADR-0088](../adr/0088-settings-hosting-safe-area-and-manual-separator.md);
+режими відмови різні на різних висотах, тому кожен пункт перевіряється **і на мінімальній висоті
+(470), і на розтягнутій**.
+
+```sh
+TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=5 swift run    # Menu bar — найдовша
+TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=3 swift run    # Notifications
+TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=7.0 swift run  # drill-in Providers › Claude
+```
+
+1. **Скрол**: довга панель докручується до останнього рядка («Suppress on weekends» на
+   Notifications); rubber-band не відкочує назад.
+2. **Скролбар** (найзручніше з System Settings → Appearance → «Show scroll bars: Always»): від
+   низу тулбара до краю вікна, не обрізаний з жодного кінця.
+3. **Риска тулбара**: нема у спокої; з'являється, щойно контент їде під тулбар; зникає при
+   повороті нагору; не «залипає» після перемикання панелей і drill-in (риску веде наш контролер,
+   не `.automatic` — ADR-0087).
+4. **Перша картка** — на 52 pt від верху вікна, як у System Settings поруч.
+5. **Мінімальна висота** — стискання до упору зупиняється там само, де System Settings (обидва
+   вікна поруч, тягнути обидва до упору).
+6. **Ресайз від мінімуму** — плавний, без стрибка розміру.
+7. **Короткі панелі** (About, General) — без фантомного скролу.
+
 ### Три UI-пани: що перевіряти (#333)
 
 Колишній Appearance став трьома панами в одній групі sidebar. Що ламається найлегше:
