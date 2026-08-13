@@ -146,29 +146,49 @@
 
 ### Видимість секцій дропдауна: «Show model & service limits» і «Show extra usage» (#211)
 
-Settings → **Dropdown**. Обидві опції — тристанові
-(`PopupSectionVisibility`), сегменти **Always | Non-calm only | With ⌥ Option**:
+Settings → **Dropdown**. Обидві опції — `PopupSectionVisibility`, але набори сегментів **різні**
+([ADR-0087](../adr/0087-above-zero-section-visibility.md)):
+
+```
+Show model & service limits   [ Always | Above zero | Non-calm only | With ⌥ Option ]
+Show extra usage              [ Always | Above zero | With ⌥ Option ]
+```
 
 | Режим | Поведінка |
 |---|---|
 | `Always` | група видима завжди |
-| `Non-calm only` (дефолт `.chill`/`.workHarder`) | видима, коли хоч один її рядок **помаранчевий або червоний** (`.ahead`/`.exhausted`) — **або** поки утримується ⌥ |
+| `Above zero` (дефолт `.chill`/`.workHarder` для **Extra usage**) | видима, коли в ній є хоч щось ненульове: per-model рядок із `utilization > 0`, або витрачені гроші — **або** поки утримується ⌥ |
+| `Non-calm only` (дефолт `.chill`/`.workHarder` для **model & service**; для Extra usage **не пропонується**) | видима, коли хоч один її рядок **помаранчевий або червоний** (`.ahead`/`.exhausted`) — **або** поки утримується ⌥ |
 | `With ⌥ Option` | схована завжди, крім моменту утримання ⌥ |
 
 Перше гейтить per-model/per-service рядки (`Opus`/`Sonnet` із legacy-полів + `weekly_scoped` як
 `Fable`/`Mythos`), друге — секцію **Extra usage**. Синій `far behind` — **не** тривожний
 (`.farBehind` спокійніший за зелений), тому групу не розкриває.
 
+**Два предикати вимірюють різне і не заміняють один одного.** `Above zero` читає **значення**,
+`Non-calm only` — **вердикт** пейсингу про це значення. Тому 2 % на початку тижня — це одночасно
+«above zero» і «non-calm» (пейсинг читає малу цифру як `.ahead`), а витрачені €10.80 при
+**безлімітному** капі — «above zero», але **ніколи** не «non-calm»: без стелі немає бару, а отже й
+severity. Саме тому кредитний рядок `Non-calm only` не пропонує взагалі.
+
 ```sh
-TOKENPACE_STUB=screenshot TOKENPACE_DEVTOOLS=1 swift run        # Fable 70 % (помаранч) + Mythos 100 % (черв.)
-TOKENPACE_STUB=credits-active TOKENPACE_DEVTOOLS=1 swift run    # секція Extra usage з баром
+TOKENPACE_STUB=screenshot TOKENPACE_DEVTOOLS=1 swift run          # Fable 70 % (помаранч) + Mythos 100 % (черв.)
+TOKENPACE_STUB=credits-active TOKENPACE_DEVTOOLS=1 swift run      # €10.77 of €15 — секція з баром
+TOKENPACE_STUB=credits-zero-spent TOKENPACE_DEVTOOLS=1 swift run  # €0 of €15 — Above zero ховає
+TOKENPACE_STUB=credits-no-limit TOKENPACE_DEVTOOLS=1 swift run    # €10.8 unlimited — Above zero показує
 ```
 
 - `Always` → рядки на місці; утримання ⌥ нічого не змінює.
 - `Non-calm` на стубі з помаранчевим/червоним per-model рядком (`screenshot`) → рядки видимі без ⌥.
+- `Above zero` на `credits-zero-spent` → секції **немає** (витрачено €0); на `credits-active` і
+  `credits-no-limit` → секція видима.
+- **Ключова перевірка сліпої зони:** на `credits-no-limit` перемкни рядок Extra usage у `Above zero` —
+  секція має бути видима. Це той випадок, де старий `Non-calm only` ховав витрати назавжди.
 - `Non-calm` → затиснути **⌥ Option** при відкритому меню: група з'являється **живо** (50 мс
-  polling-таймер ADR-0020), попап переміряється; відпустити → зникає.
+  polling-таймер ADR-0020), попап переміряється; відпустити → зникає. Те саме для `Above zero`.
 - `⌥ Option` → групи немає навіть коли рядок червоний; лише ⌥ її показує.
+- **Ширина Settings:** рядок «Show model & service limits» тепер має **чотири** сегменти — перевір,
+  що вони не налазять на заголовок і не обрізаються.
 - Перемикання застосовується **одразу** (live callback, без реполу) і персиститься між запусками.
 - **Роздільник:** коли Extra usage схована, останній видимий бар не має отримувати зайвий відступ;
   коли схована per-model група — теж (в'юха рахує «останній рядок» за видимим набором).
@@ -187,6 +207,22 @@ defaults write com.artem-n.tokenpace showModelSpecificLimits -bool false
 # після запуску: modelLimitsVisibility = optionOnly, старий ключ видалено
 defaults read com.artem-n.tokenpace | grep -i -e modelLimits -e ModelSpecific
 ```
+
+Міграція `nonCalm` → `aboveZero` для **Extra usage** (ADR-0087, теж одноразова). Той сегмент зник із
+контрола, тож збережене значення треба перенести — інакше активним не був би жоден сегмент. Перевіряй
+у дев-домені (`swift run` пише в `TokenPace`, підписана дев-збірка — у `com.artem-n.tokenpace.dev`),
+**не** в реальному домені зі своїми налаштуваннями:
+
+```sh
+defaults write TokenPace extraUsageVisibility -string nonCalm
+defaults delete TokenPace extraUsageVisibilityMigratedFromNonCalm 2>/dev/null
+TOKENPACE_STUB=credits-active TOKENPACE_DEVTOOLS=1 swift run
+# після запуску: aboveZero, і в Settings підсвічений сегмент «Above zero»
+defaults read TokenPace | grep -i extraUsageVisibility
+```
+
+Ідемпотентність: другий запуск нічого не змінює, і якщо тепер вручну поставити `always`, наступний
+старт **не** перепише його назад (маркер уже стоїть).
 
 Явний `true` → `always`, явний `false` → `optionOnly`, ключа не було → дефолт пресета (`nonCalm`).
 **Не** роби `defaults delete` домену — це зітре реальні налаштування.

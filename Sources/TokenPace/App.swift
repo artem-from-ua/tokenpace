@@ -940,6 +940,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PersistedConfig.migratePauseKeysIfNeeded()
         // …and carry the boolean "Show model & service limits" opt-out onto its tri-state successor.
         PersistedConfig.migrateModelLimitsVisibilityIfNeeded()
+        // …and move an "Extra usage" section still set to `.nonCalm` onto `.aboveZero`: that segment is
+        // gone from the credits row, and on an unlimited money cap it had no severity to fire on at all.
+        PersistedConfig.migrateExtraUsageVisibilityIfNeeded()
         // …and the same for the boolean "hide the calm 7-day bar" opt-out, whose tri-state successor can
         // hide either bar (ADR-0086). Only an explicit old choice carries over; anyone who never touched
         // it picks up the new `.fiveHour` default.

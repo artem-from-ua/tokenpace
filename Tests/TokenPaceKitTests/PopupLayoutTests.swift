@@ -870,4 +870,82 @@ struct PopupLayoutSectionVisibilityTests {
         #expect(p.rows[0].bar.severity == .exhausted)
         #expect(!p.perModelRowsAreNonCalm)
     }
+
+    // MARK: - aboveZero (the value predicate)
+
+    /// Every per-model window at a flat 0 % — the start-of-week state `.aboveZero` exists to fold away.
+    @Test func untouchedPerModelRowsAreNotAboveZero() {
+        let p = layout(from: snapshot(
+            fiveHourUtil: 50, sevenDayUtil: 30,
+            opus: (util: 0, resetsIn: 3 * 24 * 3600),
+            sonnet: (util: 0, resetsIn: 3 * 24 * 3600),
+            limits: [scopedLimit(name: "Fable", percent: 0, resetsIn: 3 * 24 * 3600)]))
+        #expect(!p.perModelRowsAreAboveZero)
+    }
+
+    /// One touched row is enough — the group is revealed whole, since hiding is per-group.
+    @Test func oneUsedPerModelRowIsAboveZero() {
+        let p = layout(from: snapshot(
+            fiveHourUtil: 50, sevenDayUtil: 30,
+            opus: (util: 0, resetsIn: 3 * 24 * 3600),
+            sonnet: (util: 3, resetsIn: 3 * 24 * 3600),
+            limits: [scopedLimit(name: "Fable", percent: 0, resetsIn: 3 * 24 * 3600)]))
+        #expect(p.perModelRowsAreAboveZero)
+    }
+
+    /// Busy **base** rows must not speak for the group — the same independence the non-calm flag has.
+    @Test func usedBaseRowDoesNotFlagThePerModelGroupAsAboveZero() {
+        let p = layout(from: snapshot(
+            fiveHourUtil: 80, sevenDayUtil: 60,
+            opus: (util: 0, resetsIn: 3 * 24 * 3600)))
+        #expect(!p.perModelRowsAreAboveZero)
+    }
+
+    /// The two per-model predicates read different things: a few percent early in a 7-day window paces
+    /// `.ahead` (orange) *and* is above zero, which is exactly the case `.aboveZero` was added to keep
+    /// folded — so this asserts they are computed independently, not that one implies the other.
+    @Test func perModelFlagsAreComputedIndependently() {
+        let p = layout(from: allModelsSnapshot(opusUtil: 100))
+        #expect(p.perModelRowsAreNonCalm)
+        #expect(p.perModelRowsAreAboveZero)
+    }
+
+    /// No credits section at all → neither credits flag is set.
+    @Test func absentCreditsAreNeitherNonCalmNorAboveZero() {
+        let p = layout(from: snapshot(fiveHourUtil: 50, sevenDayUtil: 30))
+        #expect(p.credits == nil)
+        #expect(!p.creditsIsNonCalm)
+        #expect(!p.creditsIsAboveZero)
+    }
+
+    /// Credits enabled with a cap but nothing spent yet (the `credits-zero-spent` stub) — the section
+    /// exists, so it can be shown by `.always`, but `.aboveZero` keeps it folded.
+    @Test func zeroSpendIsNotAboveZero() {
+        let p = layout(from: snapshot(
+            fiveHourUtil: 50, sevenDayUtil: 30,
+            spend: SpendInfo(used: eur(0), limit: eur(1500), enabled: true, spendLimitReached: false)))
+        #expect(p.credits != nil)
+        #expect(!p.creditsIsAboveZero)
+    }
+
+    /// A single cent flips it.
+    @Test func anySpendIsAboveZero() {
+        let p = layout(from: snapshot(
+            fiveHourUtil: 50, sevenDayUtil: 30,
+            spend: SpendInfo(used: eur(1), limit: eur(1500), enabled: true, spendLimitReached: false)))
+        #expect(p.creditsIsAboveZero)
+    }
+
+    /// **The case that justifies reading `spent` rather than `bar`.** An unlimited money cap
+    /// (`spend.limit == nil`) builds no bar, so there is no severity and `creditsIsNonCalm` can never be
+    /// true however much is spent — a `.nonCalm` gate would hide this user's spend forever. `.aboveZero`
+    /// sees the money regardless.
+    @Test func unlimitedCapWithSpendIsAboveZeroButNeverNonCalm() {
+        let p = layout(from: snapshot(
+            fiveHourUtil: 50, sevenDayUtil: 30,
+            spend: SpendInfo(used: eur(1080), limit: nil, enabled: true, spendLimitReached: false)))
+        #expect(p.credits?.bar == nil)
+        #expect(!p.creditsIsNonCalm)
+        #expect(p.creditsIsAboveZero)
+    }
 }

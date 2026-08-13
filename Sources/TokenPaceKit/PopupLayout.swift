@@ -219,10 +219,29 @@ public struct PopupLayout: Sendable, Equatable {
     /// knowledge, and recomputed on every poll like the rows themselves.
     public let perModelRowsAreNonCalm: Bool
 
+    /// Whether any **per-model / per-service** row has been used at all (`utilization > 0`) — the
+    /// "is there anything in this group?" input to ``PopupSectionVisibility/aboveZero``. `false` when
+    /// the group is empty or every row sits at a flat zero.
+    ///
+    /// Deliberately independent of ``perModelRowsAreNonCalm``: this reads the raw value, that reads the
+    /// pacing verdict, and early in a 7-day window a 2 % row is simultaneously above zero *and* orange.
+    /// Only the base rows are excluded, exactly as in the non-calm flag.
+    public let perModelRowsAreAboveZero: Bool
+
     /// Whether the **Extra usage** credits section is orange or red — `credits.bar`'s severity, or
     /// `false` when there is no credits section or it is unlimited (`bar == nil`, nothing to pace, so
     /// nothing to be alarmed about).
     public let creditsIsNonCalm: Bool
+
+    /// Whether any money has been spent this period (`credits.spent` non-zero), or `false` when there
+    /// is no credits section.
+    ///
+    /// Reads ``CreditsRow/spent`` and **not** ``CreditsRow/bar`` — that distinction is the whole reason
+    /// this flag exists. An unlimited money cap (`spend.limit == null`) produces no bar and therefore no
+    /// severity, so ``creditsIsNonCalm`` is permanently `false` there and a `nonCalm` gate would hide a
+    /// paying user's spend forever. `spent` is always present (`spentMoney(from:)` falls back to a zero
+    /// amount), so this stays meaningful in every credits state.
+    public let creditsIsAboveZero: Bool
 
     /// The Claude Code sessions awaiting user input to advertise flush-right in the "Claude" section
     /// header (#233, ADR-0066), or `nil` to draw nothing. `nil` whenever the feature is off, the count
@@ -276,7 +295,9 @@ public struct PopupLayout: Sendable, Equatable {
         blockingReset: BlockingReset.Choice? = nil,
         perModelRowsStart: Int? = nil,
         perModelRowsAreNonCalm: Bool = false,
+        perModelRowsAreAboveZero: Bool = false,
         creditsIsNonCalm: Bool = false,
+        creditsIsAboveZero: Bool = false,
         awaitingInput: AwaitingSessions? = nil,
         incidents: [VisibleIncident] = [],
         subscription: EpisodeSubscriptionState? = nil,
@@ -294,7 +315,9 @@ public struct PopupLayout: Sendable, Equatable {
         // short `rows` a cold start / broken-data layout carries (empty, or fewer than two rows).
         self.perModelRowsStart = perModelRowsStart ?? min(2, rows.count)
         self.perModelRowsAreNonCalm = perModelRowsAreNonCalm
+        self.perModelRowsAreAboveZero = perModelRowsAreAboveZero
         self.creditsIsNonCalm = creditsIsNonCalm
+        self.creditsIsAboveZero = creditsIsAboveZero
         self.awaitingInput = awaitingInput
         self.planLabel = planLabel
         self.incidents = incidents
@@ -320,7 +343,9 @@ public struct PopupLayout: Sendable, Equatable {
             intervalSeconds: intervalSeconds, rows: rows,
             warning: warning, serviceStatus: serviceStatus, credits: credits,
             blockingReset: blockingReset, perModelRowsStart: perModelRowsStart,
-            perModelRowsAreNonCalm: perModelRowsAreNonCalm, creditsIsNonCalm: creditsIsNonCalm,
+            perModelRowsAreNonCalm: perModelRowsAreNonCalm,
+            perModelRowsAreAboveZero: perModelRowsAreAboveZero,
+            creditsIsNonCalm: creditsIsNonCalm, creditsIsAboveZero: creditsIsAboveZero,
             awaitingInput: awaitingInput ?? self.awaitingInput,
             incidents: incidents ?? self.incidents,
             subscription: subscription ?? self.subscription,
@@ -401,7 +426,9 @@ public struct PopupLayout: Sendable, Equatable {
             blockingReset: self.blockingReset(from: snapshot, now: now),
             perModelRowsStart: min(baseRowCount, rows.count),
             perModelRowsAreNonCalm: self.groupIsNonCalm(rows),
-            creditsIsNonCalm: credits?.bar?.severity.isNonCalm ?? false
+            perModelRowsAreAboveZero: self.groupIsAboveZero(rows),
+            creditsIsNonCalm: credits?.bar?.severity.isNonCalm ?? false,
+            creditsIsAboveZero: credits.map { !$0.spent.isZero } ?? false
         )
     }
 
@@ -495,7 +522,9 @@ public struct PopupLayout: Sendable, Equatable {
             blockingReset: blockingReset,
             perModelRowsStart: min(baseRowCount, rows.count),
             perModelRowsAreNonCalm: self.groupIsNonCalm(rows),
-            creditsIsNonCalm: credits?.bar?.severity.isNonCalm ?? false
+            perModelRowsAreAboveZero: self.groupIsAboveZero(rows),
+            creditsIsNonCalm: credits?.bar?.severity.isNonCalm ?? false,
+            creditsIsAboveZero: credits.map { !$0.spent.isZero } ?? false
         )
     }
 
@@ -510,6 +539,16 @@ public struct PopupLayout: Sendable, Equatable {
     /// `false` when the snapshot carries no per-model windows.
     private static func groupIsNonCalm(_ rows: [LimitRow]) -> Bool {
         rows.dropFirst(baseRowCount).contains { $0.bar.severity.isNonCalm }
+    }
+
+    /// Whether any **per-model** row has been used at all — the `aboveZero` counterpart of
+    /// ``groupIsNonCalm(_:)``, dropping the same base rows so a busy 5h/7d window never speaks for the
+    /// optional group.
+    ///
+    /// Reads `utilization` (the API percent) rather than anything derived from the bar: the bar encodes
+    /// pacing, and pacing is a verdict about the value, not the value itself.
+    private static func groupIsAboveZero(_ rows: [LimitRow]) -> Bool {
+        rows.dropFirst(baseRowCount).contains { $0.utilization > 0 }
     }
 
     /// The ordered limit sections for a snapshot: `5h`, `7d`, then any present per-model rows: the

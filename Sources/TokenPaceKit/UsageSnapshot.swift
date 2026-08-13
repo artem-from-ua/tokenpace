@@ -191,6 +191,11 @@ public struct Money: Sendable, Equatable, Decodable {
     public var majorUnitValue: Double {
         Double(amountMinor) / pow(10, Double(exponent))
     }
+
+    /// Whether this is a zero amount — tested on the **integer** minor units, never on
+    /// ``majorUnitValue``, so it is exact at any exponent and immune to the float division above.
+    /// Currency-agnostic: €0, $0 and a zero in an unknown currency are all zero.
+    public var isZero: Bool { amountMinor == 0 }
 }
 
 // MARK: - SpendInfo

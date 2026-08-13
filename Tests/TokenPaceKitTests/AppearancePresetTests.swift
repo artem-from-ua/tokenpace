@@ -19,7 +19,9 @@ struct AppearancePresetTests {
         #expect(v.showServiceStatusDot)
         #expect(!v.awaitingInputInMenuBar)   // Chill: awaiting hand stays in the popup only (#233)
         #expect(v.modelLimitsVisibility == .nonCalm)   // quiet dropdown: fold until orange/red (#211)
-        #expect(v.extraUsageVisibility == .nonCalm)
+        // Credits fold until money is actually spent, not until they turn orange: an unlimited cap has
+        // no bar and hence no severity, so `.nonCalm` would hide the spend forever.
+        #expect(v.extraUsageVisibility == .aboveZero)
         #expect(v.resetCountdownModeMenuBar == .smart)
         #expect(v.menuBarStyle == .pressure)   // the quietest style, and on both surfaces (#329)
         #expect(v.dropdownStyle == .pressure)
@@ -49,6 +51,7 @@ struct AppearancePresetTests {
         #expect(!chill.awaitingInputInMenuBar)      // …Chill keeps it popup-only (#233)
         #expect(wh.modelLimitsVisibility == chill.modelLimitsVisibility)   // both .nonCalm (#211)
         #expect(wh.extraUsageVisibility == chill.extraUsageVisibility)
+        #expect(wh.extraUsageVisibility == .aboveZero)   // pinned, not just "same as Chill"
         #expect(wh.resetCountdownModeMenuBar == chill.resetCountdownModeMenuBar)
     }
 

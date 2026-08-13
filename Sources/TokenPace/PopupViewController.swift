@@ -1683,9 +1683,11 @@ final class PopupViewController: NSViewController {
         // `layout.blockingReset` keys its `.token(id:)` pick to the full row order, and `isBlockingRow`
         // matches it against this `index`. Renumbering would paint the red badge on the wrong row.
         let showPerModel = modelLimitsVisibility.shows(
-            isNonCalm: layout.perModelRowsAreNonCalm, optionHeld: optionHeld)
+            isNonCalm: layout.perModelRowsAreNonCalm,
+            isAboveZero: layout.perModelRowsAreAboveZero, optionHeld: optionHeld)
         let showCredits = layout.credits != nil && extraUsageVisibility.shows(
-            isNonCalm: layout.creditsIsNonCalm, optionHeld: optionHeld)
+            isNonCalm: layout.creditsIsNonCalm,
+            isAboveZero: layout.creditsIsAboveZero, optionHeld: optionHeld)
         // Which row ends the visible list — the last one actually drawn, so the "no gap after the last
         // bar" rule follows what's on screen rather than what the model built.
         let lastVisibleRowIndex = showPerModel ? layout.rows.count - 1 : layout.perModelRowsStart - 1

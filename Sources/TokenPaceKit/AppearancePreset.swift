@@ -50,10 +50,12 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 showExtraUsage: true,
                 showServiceStatusDot: true,
                 awaitingInputInMenuBar: false,   // calm look: awaiting hand stays in the popup only
-                // The dropdown stays quiet too: per-model rows and the credits section appear only
-                // once one of them turns orange/red (⌥ Option still reveals them on demand).
+                // The dropdown stays quiet too, but the two groups are quiet about different things:
+                // per-model rows wait for orange/red, credits only for the first cent actually spent
+                // (money has no calm/loud reading, and an unlimited cap has no severity at all).
+                // ⌥ Option still reveals either on demand.
                 modelLimitsVisibility: .nonCalm,
-                extraUsageVisibility: .nonCalm,
+                extraUsageVisibility: .aboveZero,
                 resetCountdownModeMenuBar: .smart,
                 menuBarStyle: .pressure,
                 dropdownStyle: .pressure,
@@ -73,7 +75,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 // Same quiet dropdown as `.chill` — the extra loudness of this preset is in the menu
                 // bar (blue far-behind, ticks), not in permanently expanded popup sections.
                 modelLimitsVisibility: .nonCalm,
-                extraUsageVisibility: .nonCalm,
+                extraUsageVisibility: .aboveZero,
                 resetCountdownModeMenuBar: .smart,
                 menuBarStyle: .gauge,
                 dropdownStyle: .gauge,
