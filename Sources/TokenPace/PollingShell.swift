@@ -419,8 +419,17 @@ actor StubUsageTransport: UsageTransport {
     ///  • `.recovery` — a **silent** recovery driven by the poll counter: degraded for the first two
     ///    polls, then `operational` with no further update, exactly as `mgp99sn4ynd4` behaved. The
     ///    one frame where an updates-driven listener would have stayed quiet for 43 minutes.
+    ///  • `.wrapped`  — three names covering every placement the chip can take (#351): one that
+    ///    **shares** its last line, one that wraps to two lines and pushes the chip to a third, and a
+    ///    **single-line** name that still has too little room, so its chip sits alone on line two. On
+    ///    its own line the chip must still be flush right, which the tab stop alone does not deliver.
+    ///  • `.spacing`  — two degraded services and two **very short, single-line** incidents, so the
+    ///    vertical rhythm can be compared with nothing else in the way (#351). ⌥ swaps one pair for
+    ///    the other in place: incident↔incident, incident↔subscribe, service↔service and
+    ///    service↔subscribe must all be the same gap, which multi-line descriptions make impossible
+    ///    to judge by eye.
     enum IncidentFrame: Equatable {
-        case active, green, two, recovery
+        case active, green, two, recovery, wrapped, spacing
     }
 
     /// A money-credits state for the `=credits-*` verification stubs (#144). Each supplies the raw
@@ -783,18 +792,24 @@ actor StubUsageTransport: UsageTransport {
             // A `monitoring` stage on the green frame is the point of it: formally open, actually
             // fine — the 66-minute gap that must render nothing.
             let stage = (frame == .green || recovered) ? "monitoring" : "identified"
-            incidents.append("""
-            {"id":"f6gkkq6txl7z","name":"Degraded performance of multiple models",\
-            "status":"\(stage)","impact":"minor","shortlink":"https://stspg.io/s2ysk4zxbyy3",\
-            "created_at":"\(isoStamp(minutesAgo: 127))","started_at":"\(isoStamp(minutesAgo: 127))",\
-            "monitoring_at":null,"resolved_at":null,\
-            "incident_updates":[\
-            {"id":"upd-1","status":"investigating","body":"We are investigating elevated error rates \
-            on requests to multiple Claude models.","created_at":"\(isoStamp(minutesAgo: 127))"},\
-            {"id":"upd-2","status":"identified","body":"We are continuing to work on a fix for this \
-            issue.","created_at":"\(isoStamp(minutesAgo: 41))"}],\
-            "components":\(mirrored)}
-            """)
+            // `.spacing` supplies its own pair of short incidents below; this one wraps to two lines,
+            // which is exactly what that frame must not contain.
+            if frame != .spacing {
+                incidents.append("""
+                {"id":"f6gkkq6txl7z","name":"Degraded performance of multiple models",\
+                "status":"\(stage)","impact":"minor","shortlink":"https://stspg.io/s2ysk4zxbyy3",\
+                "created_at":"\(isoStamp(minutesAgo: 127))",\
+                "started_at":"\(isoStamp(minutesAgo: 127))",\
+                "monitoring_at":null,"resolved_at":null,\
+                "incident_updates":[\
+                {"id":"upd-1","status":"investigating","body":"We are investigating elevated error \
+                rates on requests to multiple Claude models.",\
+                "created_at":"\(isoStamp(minutesAgo: 127))"},\
+                {"id":"upd-2","status":"identified","body":"We are continuing to work on a fix for \
+                this issue.","created_at":"\(isoStamp(minutesAgo: 41))"}],\
+                "components":\(mirrored)}
+                """)
+            }
 
             if frame == .two {
                 // The real 14:00 shape: a second, younger incident naming the same components — so
@@ -808,6 +823,71 @@ actor StubUsageTransport: UsageTransport {
                 "incident_updates":[\
                 {"id":"upd-b1","status":"investigating","body":"We have identified the cause of \
                 elevated errors and are working on a fix.","created_at":"\(isoStamp(minutesAgo: 12))"}],\
+                "components":\(mirrored)}
+                """)
+            }
+
+            if frame == .wrapped {
+                // The name from #351: it wraps to two lines whose second ends ~29 pt short of the
+                // trailing edge — too little for a `13m · investigating` chip (~113 pt), so the chip
+                // takes a third line of its own.
+                incidents.append("""
+                {"id":"n4tq8zv2hb6c","name":"Elevated errors for Claude Mythos 5, Claude Fable 5, \
+                and Claude Sonnet 5","status":"investigating","impact":"minor",\
+                "shortlink":"https://stspg.io/w9r3ptmc5xkd",\
+                "created_at":"\(isoStamp(minutesAgo: 13))","started_at":"\(isoStamp(minutesAgo: 13))",\
+                "monitoring_at":null,"resolved_at":null,\
+                "incident_updates":[\
+                {"id":"upd-c1","status":"investigating","body":"We are investigating elevated error \
+                rates across several models.","created_at":"\(isoStamp(minutesAgo: 13))"}],\
+                "components":\(mirrored)}
+                """)
+
+                // The clearest form of the same case: a name that fits on ONE line (ends at ~185 pt)
+                // yet still leaves too little for the chip, so the second line carries the chip
+                // ALONE. The wrapped names above end close to the trailing edge, where a chip on its
+                // own line reads almost like a continuation of the description; here the gap after
+                // the name is wide and obvious, so the chip's right alignment is unmistakable — this
+                // is the row that showed the bug most plainly.
+                incidents.append("""
+                {"id":"q7vd3knm8ptb","name":"Elevated error rates on the API",\
+                "status":"investigating","impact":"minor",\
+                "shortlink":"https://stspg.io/j2xh6bqw4rvn",\
+                "created_at":"\(isoStamp(minutesAgo: 6))","started_at":"\(isoStamp(minutesAgo: 6))",\
+                "monitoring_at":null,"resolved_at":null,\
+                "incident_updates":[\
+                {"id":"upd-d1","status":"investigating","body":"We are investigating an elevated rate \
+                of errors on the API.","created_at":"\(isoStamp(minutesAgo: 6))"}],\
+                "components":\(mirrored)}
+                """)
+            }
+
+            if frame == .spacing {
+                // Two names short enough that each row is a single line, chip included. That is the
+                // whole point of the frame: with no wrapping anywhere, the incident rows and the
+                // service rows they replace are the same shape, so any difference in the vertical
+                // rhythm is the spacing itself rather than a taller row. Both components stay
+                // degraded, so ⌥ toggles between two service rows and two incident rows — same
+                // count, same height, directly comparable.
+                incidents.append("""
+                {"id":"r5m2ycx8wq4t","name":"Elevated errors","status":"investigating",\
+                "impact":"minor","shortlink":"https://stspg.io/k4nc7vzr9gxt",\
+                "created_at":"\(isoStamp(minutesAgo: 6))","started_at":"\(isoStamp(minutesAgo: 6))",\
+                "monitoring_at":null,"resolved_at":null,\
+                "incident_updates":[\
+                {"id":"upd-e1","status":"investigating","body":"We are investigating elevated error \
+                rates on the API.","created_at":"\(isoStamp(minutesAgo: 6))"}],\
+                "components":\(mirrored)}
+                """)
+                incidents.append("""
+                {"id":"t8bq4wnh2vkd","name":"Console slowdown","status":"identified",\
+                "impact":"minor","shortlink":"https://stspg.io/p6ty3mfd5wqb",\
+                "created_at":"\(isoStamp(minutesAgo: 21))",\
+                "started_at":"\(isoStamp(minutesAgo: 21))",\
+                "monitoring_at":null,"resolved_at":null,\
+                "incident_updates":[\
+                {"id":"upd-f1","status":"identified","body":"We have identified the cause of the \
+                slowdown.","created_at":"\(isoStamp(minutesAgo: 21))"}],\
                 "components":\(mirrored)}
                 """)
             }

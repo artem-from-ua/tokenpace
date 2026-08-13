@@ -959,10 +959,16 @@ final class SubscribeRowView: NSView {
         //
         // The text then starts where every service/incident name starts (dot width + gap), so the
         // two columns hold across the whole block.
+        //
+        // The glyph carries its own side bearing, so centring its box on the dots' axis still reads a
+        // touch left of them; `subscribeGlyphNudge` corrects that by eye (#351). The label keeps its
+        // own leading constant, so nudging the icon does not move the text column.
         let dotDiameter = PopupViewController.Metrics.statusDotDiameter
         let gap = PopupViewController.Metrics.statusDotGap
+        let glyphNudge = PopupViewController.Metrics.subscribeGlyphNudge
         NSLayoutConstraint.activate([
-            iconView.centerXAnchor.constraint(equalTo: leadingAnchor, constant: dotDiameter / 2),
+            iconView.centerXAnchor.constraint(
+                equalTo: leadingAnchor, constant: dotDiameter / 2 + glyphNudge),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: dotDiameter + gap),
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
@@ -1340,21 +1346,21 @@ final class PopupViewController: NSViewController {
         /// rounded edge).
         static let bottomPadding: CGFloat = 12
         static let rowSpacing: CGFloat = 3
-        /// Gap after an incident row (#279). Larger than ``rowSpacing`` because an incident is a
-        /// wrapped block rather than a single line: at 3 pt two incidents run together and read as
-        /// one paragraph. Applied after **every** incident, so the distance between two of them and
-        /// the distance from the last one to the subscribe row are the same.
-        static let incidentRowSpacing: CGFloat = 8
         static let sectionSpacing: CGFloat = 14
         /// Gap **between limit blocks** (after each section's bar) — a touch tighter than
         /// `sectionSpacing` so the limit list reads as a group without the header's larger breathing room.
         static let limitSpacing: CGFloat = 10
         static let textSize: CGFloat = dropdownTextSize
-        /// Diameter of the service-status glow dot (#188), the gap between it and the component name, and
-        /// the extra leading inset that pushes the dot in from the card's left edge.
+        /// Diameter of the service-status glow dot (#188) and the gap between it and the component name.
         static let statusDotDiameter: CGFloat = 9
         static let statusDotGap: CGFloat = 10
-        static let statusRowLeadingInset: CGFloat = 15
+        /// Optical nudge to the right for the status/incident dot, and for the subscribe row's glyph
+        /// (#351), measured from where each sat before. Both are aligned by eye against the left edge
+        /// of the text in the rows above ("5-hour", "7-day"): a round dot and a glyph with side
+        /// bearing each read as sitting slightly left of that column even when their boxes are flush —
+        /// and by different amounts, the bell needing twice the dot's correction.
+        static let statusDotNudge: CGFloat = 0.5
+        static let subscribeGlyphNudge: CGFloat = 1
         /// The inner content column width for fixed-width rows/labels — the popup width minus the card's
         /// outer inset on both sides minus the inner horizontal padding on both sides. Held constant at
         /// 252 pt (296 − 2·8 − 2·14) so bar/label wrapping is identical to before the card was added.
@@ -1595,14 +1601,15 @@ final class PopupViewController: NSViewController {
                 // rows are replaced by the incidents behind them. Green service lines are not shown
                 // here — under ⌥ the question is "what is broken", and a green row does not answer it.
                 for incident in layout.incidents {
-                    let row = addIncidentRow(incident, now: now)
-                    // One gap for the whole block: the same distance between two incidents as
-                    // between the last incident and the subscribe row. The default `rowSpacing`
-                    // alone does not achieve that — a wrapped, multi-line description carries
-                    // trailing line leading that the single-line subscribe row does not, so equal
-                    // spacing values render as visibly unequal gaps.
-                    stack.setCustomSpacing(Metrics.incidentRowSpacing, after: row)
-                    lastRow = row
+                    // Plain `rowSpacing`, the same gap the service rows use. ⌥ swaps one dimension
+                    // for the other in place, so a different rhythm here makes the switch jump.
+                    //
+                    // #279 set this to 8 pt on the theory that a wrapped description carries trailing
+                    // line leading a single-line row does not, making equal values render unequal.
+                    // Measured, it does not: the system font at 13 pt has `leading == 0` and every
+                    // line box is exactly 16 pt, wrapped or not, so the 5 pt was simply extra space
+                    // after incidents and before the subscribe row (#351).
+                    lastRow = addIncidentRow(incident, now: now)
                 }
             } else {
                 // Default: only the non-operational components — plus any that went green within the
@@ -2223,9 +2230,13 @@ final class PopupViewController: NSViewController {
         let leadingLabel = NSStackView(views: [dot, nameLabel])
         leadingLabel.orientation = .horizontal
         leadingLabel.alignment = .centerY
-        leadingLabel.spacing = Metrics.statusDotGap
-        // Dot flush-left with the rest of the widget's text (no extra leading inset), so the status
-        // rows align on the same left edge as "5-hour"/"7-day" and the per-project rows (#233).
+        // The nudge moves the dot alone: it is taken out of the gap that follows, so the name still
+        // starts at `statusDotDiameter + statusDotGap` and the text column does not move (#351).
+        leadingLabel.spacing = Metrics.statusDotGap - Metrics.statusDotNudge
+        leadingLabel.edgeInsets = NSEdgeInsets(
+            top: 0, left: Metrics.statusDotNudge, bottom: 0, right: 0)
+        // Dot flush-left with the rest of the widget's text (bar the optical nudge above), so the
+        // status rows align on the same left edge as "5-hour"/"7-day" and the per-project rows (#233).
 
         // Trailing half, pinned flush-right: how long the component has been in this state, then the
         // status word. Operational → plain dimmed text (no link); otherwise → underlined link colour,
@@ -2385,31 +2396,13 @@ final class PopupViewController: NSViewController {
         dot.toolTip = Self.word(incident.severity)
 
         let meta = Self.incidentMetaText(incident, now: now)
-        let text = NSMutableAttributedString(
-            string: incident.name + "\t",
-            attributes: [.font: font, .foregroundColor: ColorStore.shared.color(.label)])
-
-        let ageAndSeparator = meta.age.map { "\($0) · " } ?? ""
-        if !ageAndSeparator.isEmpty {
-            text.append(NSAttributedString(
-                string: ageAndSeparator, attributes: [.font: font, .foregroundColor: Self.dimmedLabelColor]))
-        }
-        let stageStart = text.length
-        text.append(NSAttributedString(string: meta.stage, attributes: incident.shortlink != nil
-            ? [.font: font, .foregroundColor: ColorStore.shared.color(.link),
-               .underlineStyle: NSUnderlineStyle.single.rawValue]
-            : [.font: font, .foregroundColor: Self.dimmedLabelColor]))
-
-        // A right tab stop at the content's trailing edge pulls everything after the tab flush right;
-        // the description wraps ahead of it and the chip settles on whatever line it lands on.
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: Self.incidentTextWidth)]
-        // Word-wrapping, **not** truncating: a truncating line-break mode in the paragraph style
-        // suppresses wrapping outright, so the description collapsed to a single elided line no
-        // matter what `maximumNumberOfLines` said (measured: 16 pt tall for an 87-character name).
-        // The line cap is enforced by `maximumNumberOfLines`, which still elides the last line.
-        paragraph.lineBreakMode = .byWordWrapping
-        text.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: text.length))
+        let built = Self.incidentText(
+            name: incident.name, meta: meta, isLinked: incident.shortlink != nil, font: font)
+        let text = built.text
+        let stageStart = built.stageStart
+        // The chip's own line is not one of the description's, so the cap gains it back — otherwise a
+        // three-line description would push the chip onto a fourth line and the label would elide it.
+        let maxLines = Self.maxIncidentDescriptionLines + (built.chipOnOwnLine ? 1 : 0)
 
         let label = StatusLineLabel(labelWithAttributedString: text)
         // `labelWithAttributedString` hands back a single-line field, and `usesSingleLineMode`
@@ -2419,7 +2412,7 @@ final class PopupViewController: NSViewController {
         label.usesSingleLineMode = false
         label.cell?.wraps = true
         label.cell?.isScrollable = false
-        label.maximumNumberOfLines = Self.maxIncidentDescriptionLines
+        label.maximumNumberOfLines = maxLines
         label.preferredMaxLayoutWidth = Self.incidentTextWidth
         if let shortlink = incident.shortlink {
             label.linkRange = NSRange(location: stageStart, length: (meta.stage as NSString).length)
@@ -2433,7 +2426,10 @@ final class PopupViewController: NSViewController {
         let row = NSStackView(views: [dot, label])
         row.orientation = .horizontal
         row.alignment = .top
-        row.spacing = Metrics.statusDotGap
+        // Same optical nudge as the service rows, taken out of the following gap so the description
+        // column stays put — it is also what `incidentTextWidth` and the right tab stop assume.
+        row.spacing = Metrics.statusDotGap - Metrics.statusDotNudge
+        row.edgeInsets = NSEdgeInsets(top: 0, left: Metrics.statusDotNudge, bottom: 0, right: 0)
         row.translatesAutoresizingMaskIntoConstraints = false
         // Centre the dot on the **first line** of the wrapped description, so it sits against the
         // text exactly as a service row's dot does — those rows get it from `.centerY`, which a
@@ -2453,6 +2449,101 @@ final class PopupViewController: NSViewController {
     /// location of the right tab stop the `age · stage` chip aligns to.
     static var incidentTextWidth: CGFloat {
         Metrics.contentWidth - Metrics.statusDotDiameter - Metrics.statusDotGap
+    }
+
+    /// The incident row's attributed text: the description, then the `age · stage` chip set flush
+    /// right — on the description's last line when it fits there, on a line of its own when it does
+    /// not. Returns the chip's stage offset too, which the label needs for its link range.
+    ///
+    /// Two mechanisms, because one alone gets the wrapped case wrong. A right tab stop only aligns
+    /// text that still shares the line the tab sits on; once the chip is pushed past the stop it wraps
+    /// to the next line, where the stop is behind the caret and no longer pulls anything — the chip
+    /// then sat flush **left** under the description (#351). So the fit is measured up front: when the
+    /// chip does not fit after the description's last line, the tab is replaced by a hard newline and
+    /// the chip's own paragraph is right-aligned, which needs no tab stop to reach the trailing edge.
+    static func incidentText(
+        name: String,
+        meta: (age: String?, stage: String),
+        isLinked: Bool,
+        font: NSFont
+    ) -> (text: NSMutableAttributedString, stageStart: Int, chipOnOwnLine: Bool) {
+        let ageAndSeparator = meta.age.map { "\($0) · " } ?? ""
+        let chip = ageAndSeparator + meta.stage
+        let separator = chipFitsAfterDescription(name: name, chip: chip, font: font) ? "\t" : "\n"
+
+        let text = NSMutableAttributedString(
+            string: name + separator,
+            attributes: [.font: font, .foregroundColor: ColorStore.shared.color(.label)])
+        if !ageAndSeparator.isEmpty {
+            text.append(NSAttributedString(
+                string: ageAndSeparator, attributes: [.font: font, .foregroundColor: dimmedLabelColor]))
+        }
+        let stageStart = text.length
+        text.append(NSAttributedString(string: meta.stage, attributes: isLinked
+            ? [.font: font, .foregroundColor: ColorStore.shared.color(.link),
+               .underlineStyle: NSUnderlineStyle.single.rawValue]
+            : [.font: font, .foregroundColor: dimmedLabelColor]))
+
+        // A right tab stop at the content's trailing edge pulls everything after the tab flush right;
+        // the description wraps ahead of it and the chip settles on whatever line it lands on.
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: incidentTextWidth)]
+        // Word-wrapping, **not** truncating: a truncating line-break mode in the paragraph style
+        // suppresses wrapping outright, so the description collapsed to a single elided line no
+        // matter what `maximumNumberOfLines` said (measured: 16 pt tall for an 87-character name).
+        // The line cap is enforced by `maximumNumberOfLines`, which still elides the last line.
+        paragraph.lineBreakMode = .byWordWrapping
+        text.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: text.length))
+
+        if separator == "\n" {
+            // The chip is on its own line: right-align that paragraph outright. Applied from the
+            // newline onwards so the description's paragraph keeps its natural left alignment — a
+            // paragraph style covers whole paragraphs, and the newline terminates the first one.
+            let chipParagraph = NSMutableParagraphStyle()
+            chipParagraph.alignment = .right
+            chipParagraph.lineBreakMode = .byWordWrapping
+            let newlineIndex = (name as NSString).length
+            text.addAttribute(
+                .paragraphStyle, value: chipParagraph,
+                range: NSRange(location: newlineIndex, length: text.length - newlineIndex))
+        }
+        return (text, stageStart, separator == "\n")
+    }
+
+    /// Whether `chip` still fits on the last line the description wraps onto, at the incident text
+    /// width. Laid out with `TextKit` rather than estimated: the description's own wrapping decides
+    /// where its last line ends, and only a layout pass knows that.
+    ///
+    /// The cap on description lines is applied here too — a description that overruns it is elided on
+    /// its last line, which leaves no room to share, so the chip goes to its own line.
+    private static func chipFitsAfterDescription(name: String, chip: String, font: NSFont) -> Bool {
+        let storage = NSTextStorage(string: name, attributes: [.font: font])
+        let layoutManager = NSLayoutManager()
+        let container = NSTextContainer(size: CGSize(width: incidentTextWidth, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        container.lineBreakMode = .byWordWrapping
+        layoutManager.addTextContainer(container)
+        storage.addLayoutManager(layoutManager)
+        layoutManager.ensureLayout(for: container)
+
+        var lineCount = 0
+        var lastLineWidth: CGFloat = 0
+        var index = 0
+        let glyphCount = layoutManager.numberOfGlyphs
+        while index < glyphCount {
+            var lineRange = NSRange()
+            let rect = layoutManager.lineFragmentUsedRect(forGlyphAt: index, effectiveRange: &lineRange)
+            lineCount += 1
+            lastLineWidth = rect.maxX
+            index = NSMaxRange(lineRange)
+        }
+        guard lineCount <= maxIncidentDescriptionLines else { return false }
+
+        // A minimum gap so the chip never butts against the description; the tab stop would otherwise
+        // allow them to touch when the last line ends a hair short of the chip's start.
+        let gap: CGFloat = 12
+        let chipWidth = (chip as NSString).size(withAttributes: [.font: font]).width
+        return lastLineWidth + gap + chipWidth <= incidentTextWidth
     }
 
     /// How many lines an incident description may occupy before truncating. Three covers the longest
