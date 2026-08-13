@@ -86,10 +86,72 @@ struct SectionHeaderWithHint: View {
 /// The ⚠️ line shown under any section whose data is canned by a `TOKENPACE_STUB` scenario.
 ///
 /// Shared rather than duplicated so the wording stays identical wherever it appears. It used to be a
-/// `static let` on `ExtraFeaturesPane`, which meant every other pane reached into that one for it —
-/// a coupling that only got more awkward as panes moved (#333). It belongs to no pane.
+/// `static let` on a single pane, which meant every other pane reached into that one for it — a
+/// coupling that only got more awkward as panes moved (#333, #341). It belongs to no pane.
 enum SettingsStubHint {
     static let text = "Stubbed in this development build."
+}
+
+// MARK: - SettingsNavigationRow (#341, ADR-0084)
+
+/// A row inside a `Form` that opens a child page — the drill-in affordance System Settings uses on
+/// its own parent pages.
+///
+/// Anatomy, read off a live System Settings window rather than from memory: the page's name, an
+/// optional second line reporting its state, and a small grey chevron at the trailing edge. The
+/// **whole row** is the hit target, not just the chevron.
+///
+/// Modelled on **Network** / **Internet Accounts**, not General. General's rows ("Storage ›") only
+/// lead somewhere, so they carry a name and nothing else; ours *report* — "Usage API · 3 services
+/// monitored" answers the question the page exists to answer, and reading it should not require
+/// opening the page. That is also why there is no icon: a provider logo is the obvious candidate and
+/// a legally awkward one, and a generic glyph would be decoration standing where information goes.
+///
+/// Built from a plain `Button` with `.buttonStyle(.plain)` rather than a `NavigationLink`: the
+/// window's navigation state is ours (`SettingsModel`'s route plus the AppKit toolbar's ‹ ›), and a
+/// `NavigationLink` would need a `NavigationStack` whose back button cannot land in our toolbar —
+/// `NavigationSplitView` inside an `NSHostingController` does not register its columns with the
+/// toolbar bridge, so SwiftUI `.navigation` items surface above the *sidebar* instead (ADR-0077 §3,
+/// the same wall #156 and #314 hit). The row therefore only reports the tap; the model decides.
+struct SettingsNavigationRow: View {
+    let title: String
+    /// The state line under the title. `nil` draws a single-line row.
+    let subtitle: String?
+    /// Invoked on click — the pane hands this straight to `SettingsModel.drill(into:)`.
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Metrics.chipTextGap) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: Metrics.subtitle))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: Metrics.chipTextGap)
+                Image(systemName: "chevron.right")
+                    // `.tertiary` is the weight System Settings gives this chevron: present enough to
+                    // read as "there is more here", never competing with the row's own text.
+                    .foregroundStyle(.tertiary)
+                    .font(.system(size: Metrics.chevron, weight: .semibold))
+            }
+            // Without this the hit target is only the drawn content, leaving the gap between the
+            // subtitle and the chevron dead — but the whole row is what looks clickable.
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private enum Metrics {
+        /// Gap between the text block and the chevron.
+        static let chipTextGap: CGFloat = 10
+        static let chevron: CGFloat = 11
+        /// The state line, one step down from the row's own text — System Settings' proportion.
+        static let subtitle: CGFloat = 11
+    }
 }
 
 /// Shows the icon only when present, so a plain hint has no leading gap.

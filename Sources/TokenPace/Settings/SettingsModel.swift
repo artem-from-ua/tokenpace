@@ -26,7 +26,7 @@ final class SettingsModel {
 
     // MARK: Callbacks (the AppDelegate contract — set by the window controller's forwarders)
 
-    var onMonitoredServicesChange: ((MonitoredServices) -> Void)?
+    var onProviderMonitoringChange: ((ProviderMonitoring) -> Void)?
     var onCheckForUpdatesNow: (() -> Void)?
     var onInstallUpdateNow: (() -> Void)?
     var onCalmColorModeChange: ((CalmColorMode) -> Void)?
@@ -71,24 +71,54 @@ final class SettingsModel {
     var selection: SettingsSection = .about {
         didSet {
             guard selection != oldValue, !isReplayingHistory else { return }
-            history.visit(selection)
+            // Picking a different sidebar row cannot leave the window inside the previous section's
+            // child page (#341) — the section is entered at its own root.
+            childPage = nil
+            history.visit(SettingsRoute(selection))
         }
     }
 
-    /// Back/forward over the panes the user has visited — what the toolbar's ‹ › buttons walk. The
-    /// rules (a new pick clears the forward branch, a replay records nothing) live in the kit, where
-    /// they are unit-tested; this class only keeps `selection` and the history in step.
-    private var history = NavigationHistory<SettingsSection>(current: .about)
+    /// The child page drilled into from ``selection``, or `nil` at the section's own page (#341).
+    /// The sidebar keeps highlighting the parent section while this is set, as System Settings does.
+    private(set) var childPage: SettingsChildPage?
 
-    /// Set while ``goBack()``/``goForward()`` write `selection`, so the `didSet` above can tell a
+    /// Where the window is: the section, plus the child page if one is open.
+    var route: SettingsRoute {
+        childPage.map { SettingsRoute(selection).drilling(into: $0) } ?? SettingsRoute(selection)
+    }
+
+    /// Back/forward over the places the user has visited — what the toolbar's ‹ › buttons walk. The
+    /// rules (a new pick clears the forward branch, a replay records nothing) live in the kit, where
+    /// they are unit-tested; this class only keeps the route and the history in step.
+    ///
+    /// The history is over **routes**, not sections, which is what makes a parent and its child two
+    /// distinct stops: ‹ from `Providers › Claude` lands on `Providers`, rather than skipping past it
+    /// to whatever came before the section.
+    private var history = NavigationHistory<SettingsRoute>(current: SettingsRoute(.about))
+
+    /// Set while ``goBack()``/``goForward()`` write the route, so the `didSet` above can tell a
     /// history replay from a user's own pick — replaying must not itself become history.
     private var isReplayingHistory = false
 
-    /// The title the toolbar shows — the current pane's name.
-    var currentPaneTitle: String { selection.title }
+    /// The title the toolbar shows — the child page's name while one is open, else the section's.
+    var currentPaneTitle: String { route.title }
 
     var canGoBack: Bool { history.canGoBack }
     var canGoForward: Bool { history.canGoForward }
+
+    /// Open a child page of the current section, recording it as its own history stop (#341).
+    func drill(into page: SettingsChildPage) {
+        guard childPage != page else { return }
+        childPage = page
+        history.visit(route)
+    }
+
+    /// Leave the child page for its parent section's own page.
+    func popToRoot() {
+        guard childPage != nil else { return }
+        childPage = nil
+        history.visit(route)
+    }
 
     /// Seat the window on a pane **without recording a visit** — the `TOKENPACE_SETTINGS_SECTION`
     /// dev hook's entry point.
@@ -98,10 +128,21 @@ final class SettingsModel {
     /// opened window and step "back" to About, a pane never shown. (The hook used to write
     /// `selection` directly and did exactly that.)
     func openAtLaunch(_ section: SettingsSection) {
+        seat(SettingsRoute(section))
+    }
+
+    /// Seat the window directly on a **child page**, same no-visit semantics as the section form —
+    /// both toolbar chevrons stay dimmed, because the page is where the window opened.
+    func openAtLaunch(_ page: SettingsChildPage) {
+        seat(SettingsRoute(page.section).drilling(into: page))
+    }
+
+    private func seat(_ route: SettingsRoute) {
         isReplayingHistory = true
-        selection = section
+        selection = route.section
+        childPage = route.child
         isReplayingHistory = false
-        history = NavigationHistory(current: section)
+        history = NavigationHistory(current: route)
     }
 
     /// Step back to the previously visited pane.
@@ -120,7 +161,8 @@ final class SettingsModel {
 
     private func applyHistorySelection() {
         isReplayingHistory = true
-        selection = history.current
+        selection = history.current.section
+        childPage = history.current.child
         isReplayingHistory = false
     }
 
@@ -173,11 +215,40 @@ final class SettingsModel {
     /// shown under the "Dropdown Widget" section.
     var showTicks = false
 
-    // MARK: Monitored Services
+    // MARK: Provider monitoring (#89, #341)
 
+    /// Whether the usage API is polled — the switch behind the bars (#341). Separate from the
+    /// status-page services below: turning it off leaves them monitored.
+    var usageApiEnabled = true
     var claudeCodeEnabled = true
     var webDesktopEnabled = true
     var webDesktopMode: WebDesktopMode = .chatOnly
+
+    /// What the provider pages currently describe — the value the callback carries.
+    var providerMonitoring: ProviderMonitoring {
+        ProviderMonitoring(
+            usageApiEnabled: usageApiEnabled,
+            services: MonitoredServices(
+                claudeCodeEnabled: claudeCodeEnabled,
+                webDesktopEnabled: webDesktopEnabled,
+                webDesktopMode: webDesktopMode))
+    }
+
+    /// Whether the `Claude API` row is forced on and locked — derived, never stored (#341).
+    var claudeApiLocked: Bool { providerMonitoring.claudeApiLocked }
+
+    /// The state line under the `Claude` row on the Providers page (#341) — what is being collected
+    /// and how many services are watched, so the answer is readable without opening the page.
+    ///
+    /// Counts the services actually resolved (`Claude API` included, `Cowork` when the mode adds it)
+    /// rather than the switches, so the number matches the rows the popup draws.
+    var claudeProviderSummary: String {
+        let services = StatusHealth.monitoredComponentNames(
+            for: providerMonitoring.services, usageApiEnabled: usageApiEnabled).count
+        guard services > 0 else { return "Off" }
+        let servicesText = "\(services) service\(services == 1 ? "" : "s") monitored"
+        return usageApiEnabled ? "Usage API · \(servicesText)" : servicesText
+    }
 
     // MARK: Notifications (#160)
 
@@ -470,10 +541,14 @@ final class SettingsModel {
         dropdownStyle = PersistedConfig.dropdownStyle
         showTicks = PersistedConfig.showTicks
 
-        let ms = PersistedConfig.monitoredServices
-        claudeCodeEnabled = ms.claudeCodeEnabled
-        webDesktopEnabled = ms.webDesktopEnabled
-        webDesktopMode = ms.webDesktopMode
+        // Straight assignments, not the `set…` methods — see the ordering invariant above: a re-sync
+        // must not re-persist or re-fire `onProviderMonitoringChange`, or every open of the Settings
+        // window would signal a polling-mode change (#341).
+        let pm = PersistedConfig.providerMonitoring
+        usageApiEnabled = pm.usageApiEnabled
+        claudeCodeEnabled = pm.services.claudeCodeEnabled
+        webDesktopEnabled = pm.services.webDesktopEnabled
+        webDesktopMode = pm.services.webDesktopMode
 
         backToWorkEnabled = PersistedConfig.backToWorkEnabled
         extraUsageNotifyEnabled = PersistedConfig.extraUsageNotifyEnabled
@@ -690,14 +765,15 @@ final class SettingsModel {
         onAwaitingInputAppearanceChange?()   // #233: a preset/reset may flip the menu-bar copy
     }
 
-    /// Build `MonitoredServices` from the current toggles/radio, persist, and fire the callback.
-    func commitMonitoredServices() {
-        let config = MonitoredServices(
-            claudeCodeEnabled: claudeCodeEnabled,
-            webDesktopEnabled: webDesktopEnabled,
-            webDesktopMode: webDesktopMode)
-        PersistedConfig.monitoredServices = config
-        onMonitoredServicesChange?(config)
+    /// Build ``ProviderMonitoring`` from the current toggles/radio, persist both halves, and fire the
+    /// callback. Persist-then-notify, per the ordering invariant at the top of this file.
+    ///
+    /// One commit for both halves on purpose: `Claude API`'s locked state is derived from the two of
+    /// them together, so the shell must never see one without the other.
+    func commitProviderMonitoring() {
+        let config = providerMonitoring
+        PersistedConfig.providerMonitoring = config
+        onProviderMonitoringChange?(config)
     }
 
     func toggleLaunchAtLogin(_ wantOn: Bool) {
@@ -771,9 +847,9 @@ final class SettingsModel {
         incidentMaxAgeHours = hours
         PersistedConfig.incidentMaxAge = hours > 0 ? TimeInterval(hours) * 3600 : nil
         AppLogger.lifecycle.notice("incident: max age set \(hours, privacy: .public)h")
-        // Reuse the monitored-services callback: the app re-resolves the status (and with it the
+        // Reuse the provider-monitoring callback: the app re-resolves the status (and with it the
         // visible incidents) on that signal, which is exactly what a changed age cut-off needs.
-        commitMonitoredServices()
+        commitProviderMonitoring()
     }
 
     func setNotifyWindow(start: Int, end: Int) {

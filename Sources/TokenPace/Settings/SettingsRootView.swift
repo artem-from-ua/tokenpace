@@ -25,7 +25,7 @@ struct SettingsRootView: View {
 
     var body: some View {
         NavigationSplitView {
-            // Grouped so dividers separate About (top) and Extra features (bottom) from the standard
+            // Grouped so dividers separate About (top) and Notifications (bottom) from the standard
             // panes in the middle — a `.sidebar` List renders the gap between `Section`s as the divider.
             List(selection: $model.selection) {
                 ForEach(Array(SettingsSection.groups.enumerated()), id: \.offset) { _, group in
@@ -80,24 +80,36 @@ struct SettingsRootView: View {
         static let formTopMargin: CGFloat = -20
     }
 
-    /// The detail column's content — the selected section's pane.
+    /// The detail column's content — the child page when one is drilled into, else the section's pane.
     ///
-    /// The panes sit at one level: the UI trio (presets, menu bar, dropdown) are sidebar rows of their
-    /// own rather than pages drilled into from a parent (#333). The sidebar has room for them, and a
-    /// divider already says they belong together — a parent page would only add a click.
+    /// Most panes sit at one level: the UI trio (presets, menu bar, dropdown) are sidebar rows of
+    /// their own rather than pages drilled into from a parent (#333). The sidebar has room for them,
+    /// and a divider already says they belong together — a parent page would only add a click.
+    /// `Providers` is the exception (#341, ADR-0084): its children are per-provider, so the list grows
+    /// with each provider added, which is exactly the shape the sidebar cannot absorb.
+    ///
+    /// The child branch is checked **first and in the same switch**, deliberately flat: wrapping the
+    /// panes in a container here would break `.contentMargins(.top, formTopMargin)`, which the detail
+    /// column applies to the pane's own scroll view.
     @ViewBuilder
     private var detailPane: some View {
-        switch model.selection {
-        case .about:             AboutPane(model: model)
-        case .general:           GeneralPane(model: model)
-        case .uiPresets:         UIPresetsPane(model: model)
-        case .menuBar:           MenuBarPane(model: model)
-        case .dropdown:          DropdownPane(model: model)
-        case .notifications:     NotificationsPane(model: model)
-        case .extraFeatures:     ExtraFeaturesPane(model: model)
-        // Scroll-test filler rows (`TOKENPACE_SIDEBAR_FILLER`) have no pane of their own; they
-        // exist only to make the sidebar long enough to scroll.
-        default:                 Text(model.selection.title).foregroundStyle(.secondary)
+        if let child = model.childPage {
+            switch child {
+            case .providersClaude: ProvidersClaudePane(model: model)
+            }
+        } else {
+            switch model.selection {
+            case .about:             AboutPane(model: model)
+            case .general:           GeneralPane(model: model)
+            case .uiPresets:         UIPresetsPane(model: model)
+            case .menuBar:           MenuBarPane(model: model)
+            case .dropdown:          DropdownPane(model: model)
+            case .notifications:     NotificationsPane(model: model)
+            case .providers:         ProvidersPane(model: model)
+            // Scroll-test filler rows (`TOKENPACE_SIDEBAR_FILLER`) have no pane of their own; they
+            // exist only to make the sidebar long enough to scroll.
+            default:                 Text(model.selection.title).foregroundStyle(.secondary)
+            }
         }
     }
 }
@@ -137,8 +149,6 @@ private struct SidebarChip: View {
     var body: some View {
         glyph
             .foregroundStyle(glyphColor)
-            // A per-section nudge, for the one glyph whose mass sits off-centre in its own box.
-            .offset(y: section.glyphOffsetY)
             // The system artwork's glyph carries a hairline dark edge that separates it from the
             // tint (visible as a thin gray outline hugging the glyph, strongest below it); a
             // sub-point shadow reproduces it.

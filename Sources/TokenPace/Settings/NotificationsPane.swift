@@ -66,8 +66,8 @@ struct NotificationsPane: View {
                             + "— with the amount spent and your limit, if set.")
                 }
 
-                // The switch is on and disabled, mirroring the always-monitored "Claude API" row in
-                // Extra features. There is nothing to turn off — an incident subscription is already
+                // The switch is on and disabled, mirroring the locked "Claude API" row in
+                // Providers › Claude. There is nothing to turn off — an incident subscription is already
                 // opt-in per episode from the popup — but omitting the control entirely left the row
                 // visibly short next to its two neighbours and read as an oversight. Shown-on-and-
                 // disabled says "always available" where a missing control says nothing at all.

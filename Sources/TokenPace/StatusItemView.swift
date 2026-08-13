@@ -420,6 +420,13 @@ final class StatusItemView: NSView {
             drawBlockedReset(reset, in: contentRect)
         case let .error(fiveHour, sevenDay, reset, _):
             drawError(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: contentRect)
+        case .usagePollingOff:
+            // #341: `zzz` alone. The status dot above is deliberately still drawn — in this mode it
+            // is the item's only live signal, so suppressing it would leave a widget saying nothing.
+            drawGlyphAlone("zzz", accessibilityDescription: "usage monitoring off", in: contentRect)
+        case .nothingMonitored:
+            drawGlyphAlone("exclamationmark.triangle", accessibilityDescription: "monitoring off",
+                           in: contentRect)
         }
     }
 
@@ -820,10 +827,24 @@ final class StatusItemView: NSView {
     /// the image vertically (the triangle came out upside-down / crooked); the flag fixes that.
     @discardableResult
     private func drawErrorGlyph(in rect: NSRect) -> CGFloat {
+        drawGlyphAlone("exclamationmark.triangle", accessibilityDescription: "error", in: rect)
+    }
+
+    /// Draw a single leading glyph in the menu-bar foreground colour and return its right edge x.
+    ///
+    /// Factored out of ``drawErrorGlyph`` so the states that show a lone glyph — the error ⚠️, and
+    /// the two monitoring states of #341 — share one measurement and one drawing path. The width
+    /// counterpart is ``glyphWidth(_:)``, which must use the same `SymbolConfiguration` or the item
+    /// will reserve a width it does not draw into.
+    @discardableResult
+    private func drawGlyphAlone(
+        _ symbolName: String, accessibilityDescription: String, in rect: NSRect
+    ) -> CGFloat {
         let originX = rect.minX + Metrics.hPadding
         let config = NSImage.SymbolConfiguration(pointSize: Metrics.errorGlyphSize, weight: .semibold)
-            .applying(.init(paletteColors: [bright(Palette.foreground)]))   // ⚠️ — labelColor at text opacity
-        guard let symbol = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "error")?
+            .applying(.init(paletteColors: [bright(Palette.foreground)]))   // labelColor at text opacity
+        guard let symbol = NSImage(systemSymbolName: symbolName,
+                                   accessibilityDescription: accessibilityDescription)?
             .withSymbolConfiguration(config) else {
             return originX
         }
@@ -1209,7 +1230,8 @@ final class StatusItemView: NSView {
         let leadingInset = awaitingInset + pauseInset + creditsInset
         switch layout?.mode {
         case .none:
-            // Cold start (no layout / `.error` reached via trailing credits): credits is trailing here.
+            // No layout at all — the very first draw, before the first poll resolves. Credits is
+            // trailing here, as in every glyph-only state.
             return Metrics.height + dotInset + creditsInset
         case let .expanded(_, _, resetToShow):
             return dotInset + Metrics.hPadding + leadingInset
@@ -1223,6 +1245,11 @@ final class StatusItemView: NSView {
             guard five != nil, let reset else { return Metrics.height + dotInset + creditsInset }
             return dotInset + creditsInset + Metrics.hPadding + errorGlyphWidth() + Metrics.errorGlyphGap
                 + barsBlockWidth(reset: reset) + Metrics.hPadding
+        case .usagePollingOff, .nothingMonitored:
+            // A lone glyph in both (#341) — same compact width as the glyph-only error phases. The
+            // credits inset is structurally zero here (`make` suppresses the marker in these modes),
+            // but it is kept in the sum so this branch cannot drift from the others.
+            return Metrics.height + dotInset + creditsInset
         }
     }
 

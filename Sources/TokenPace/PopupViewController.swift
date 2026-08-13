@@ -1232,6 +1232,11 @@ final class PopupViewController: NSViewController {
     /// A closure rather than a delegate protocol — this is the popup's only outbound action.
     var onToggleSubscription: (() -> Void)?
 
+    /// Invoked when the "turn monitoring back on" row is clicked in the nothing-monitored state
+    /// (#341). Same shape as ``onToggleSubscription``: the controller reports the click, the delegate
+    /// decides what it opens.
+    var onOpenProviderSettings: (() -> Void)?
+
     /// The clock the status/incident ages are measured against. Injected (not `Date()` inline) so a
     /// date-decoupled stub renders the same frame every time, matching how the engine takes its
     /// `now` — otherwise a screenshot frame would drift with the wall clock.
@@ -1509,9 +1514,23 @@ final class PopupViewController: NSViewController {
         // rather than falling back to the service rows the user was already looking at.
         let hasRecentRecovery = status?.checks.flatMap(\.components)
             .contains { Self.isRecentlyRecovered($0, now: now()) } ?? false
+        // #341: in the services-only mode the service rows are the popup's **entire** content — the
+        // limit sections are gone with the usage poll. The ordinary condition would hide them while
+        // everything is green, leaving a popup with nothing in it but a brand title, so this mode
+        // shows them unconditionally.
+        let servicesAreTheContent = layout.monitoringMode == .servicesOnly
+        // `hasRecentRecovery` keeps the section up under ⌥ as well, which is what makes the
+        // "No ongoing incidents" row reachable right after a fix lands: the service rows say a
+        // component just recovered, so the incident dimension must answer for the same moment rather
+        // than go blank (the ⌥ half would otherwise look broken beside a populated non-⌥ half).
         let showStatusRows = status != nil
-            && (status?.worstProblem != nil || hasRecentRecovery || (optionHeld && !layout.incidents.isEmpty))
+            && (servicesAreTheContent || status?.worstProblem != nil || hasRecentRecovery
+                || (optionHeld && !layout.incidents.isEmpty))
+        // The age threshold is 2× the usage poll's floor, which the status cadence never reaches — so
+        // in the services-only mode the age would essentially never appear without ⌥, and the one
+        // number that mode has to offer would stay hidden. There, show it whenever it exists.
         let showAge = optionHeld || layout.lastUpdateAge >= Self.staleAgeThreshold
+            || (servicesAreTheContent && layout.lastUpdateAge > 0)
         let ageString = showAge ? Self.ageText(layout.lastUpdateAge) : ""
         // Header layout (#233): the "Claude" brand title with the "Nm ago" age beside it on the left —
         // **always**, whether or not an awaiting-input count exists. The age belongs to the brand title,
@@ -1553,7 +1572,25 @@ final class PopupViewController: NSViewController {
         if showStatusRows, let status {
             var lastRow: NSView?
             let now = self.now()
-            if optionHeld, !layout.incidents.isEmpty {
+            if optionHeld, layout.incidents.isEmpty {
+                // ⌥ asks "what is broken", and here the answer is "nothing" — a different statement
+                // from `operational`, which answers "is everything up". Saying it out loud beats
+                // dropping the rows: this section is already on screen (something is wrong, or
+                // something just recovered), so an empty dimension would read as a glitch rather than
+                // as an answer.
+                //
+                // This is the shape ADR-0071 §4 produces on purpose — an incident whose components
+                // have gone green is hidden, because the popup's question is "can I work" and green
+                // already answers it. Alternative K there (show it as "recovering") stays rejected;
+                // this row reports the *absence*, it does not bring the incident back.
+                lastRow = addServiceStatusRow(
+                    label: "No ongoing incidents",
+                    status: .operational,
+                    age: layout.lastUpdateAge > 0 ? layout.lastUpdateAge : nil,
+                    // The label already is the statement; `operational` beside it would answer the
+                    // service dimension in a row that belongs to the incident one.
+                    showsStatusWord: false)
+            } else if optionHeld, !layout.incidents.isEmpty {
                 // ⌥ switches the **dimension**, not the level of detail (ADR-0071 §2): the service
                 // rows are replaced by the incidents behind them. Green service lines are not shown
                 // here — under ⌥ the question is "what is broken", and a green row does not answer it.
@@ -1573,15 +1610,55 @@ final class PopupViewController: NSViewController {
                 // popup that looks identical to "nothing ever happened".
                 let components = status.checks.flatMap(\.components)
                     .filter { $0.status.isProblem || Self.isRecentlyRecovered($0, now: now) }
-                for component in components {
+                // #341: in the services-only mode this section is the popup's entire content, so the
+                // question it answers is "is anything wrong", and the answer while nothing is —
+                // **one** summary row standing for the lot.
+                //
+                // The condition is `worstProblem == nil`, not `components.isEmpty`: the filter above
+                // also keeps components that went green within the recovery window, so a service that
+                // recovered minutes ago would otherwise replace the summary with a lone green row
+                // ("Web/Desktop · operational") that reads as though it were the only thing watched.
+                // A recent recovery is worth showing when it sits among real rows; it is not worth
+                // standing in for the whole section.
+                //
+                // **Not gated on `optionHeld`.** ⌥ switches the dimension to incidents (the branch
+                // above), and when there are none it changes nothing at all — this section keeps
+                // answering the same question either way. Expanding the summary into a per-component
+                // list under ⌥ would make it a level-of-detail control, which is exactly what
+                // ADR-0071 §2 says it is not.
+                if servicesAreTheContent, status.worstProblem == nil {
                     lastRow = addServiceStatusRow(
-                        label: Self.displayName(component),
-                        status: component.status,
-                        age: component.stateAge(at: now))
+                        label: "All services",
+                        status: .operational,
+                        age: layout.lastUpdateAge > 0 ? layout.lastUpdateAge : nil)
+                } else {
+                    for component in components {
+                        lastRow = addServiceStatusRow(
+                            label: Self.displayName(component),
+                            status: component.status,
+                            age: component.stateAge(at: now))
+                    }
                 }
             }
             if let subscribeRow = addSubscribeRowIfNeeded(layout) { lastRow = subscribeRow }
             if let lastRow { stack.setCustomSpacing(Metrics.sectionSpacing, after: lastRow) }
+        }
+
+        // #341: nothing is monitored. Same two-line shape as the error block below, but deliberately
+        // **not** red and not a ⚠️ — the app is doing exactly what it was told. The second line is a
+        // clickable route back into the setting that produced this state, since a popup that explains
+        // an empty widget without offering the way out is a dead end.
+        if layout.monitoringMode == .nothing {
+            addWarningTitle("Monitoring is off",
+                            symbolName: "eye.slash",
+                            color: Self.dimmedLabelColor)
+            let row = SubscribeRowView(
+                symbolName: "gearshape", text: "Turn it back on in Settings…", filled: false)
+            row.onClick = { [weak self] in self?.onOpenProviderSettings?() }
+            row.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            stack.setCustomSpacing(Metrics.sectionSpacing, after: row)
         }
 
         // Error block (when failing): two lines — a bold title led by the ⚠️ symbol, then the
@@ -2041,15 +2118,23 @@ final class PopupViewController: NSViewController {
     /// system red so the failure reads at a glance. The symbol is the popup counterpart of the
     /// menu-bar glyph (issue #12); using `.systemRed` (not the fixed palette sRGB) lets the popup,
     /// which is appearance-aware, keep contrast on light and dark panels alike.
+    ///
+    /// The symbol and colour are parameters because not every block that uses this shape is an error:
+    /// "monitoring is off" (#341) is a state the user chose, and painting it red would report their
+    /// own setting back to them as a fault. The defaults keep every existing caller unchanged.
     @discardableResult
-    private func addWarningTitle(_ text: String) -> NSView {
+    private func addWarningTitle(
+        _ text: String,
+        symbolName: String = "exclamationmark.triangle.fill",
+        color: NSColor? = nil
+    ) -> NSView {
         let font = NSFont.boldSystemFont(ofSize: Metrics.textSize)
-        let color = ColorStore.shared.color(.red)
+        let color = color ?? ColorStore.shared.color(.red)
         let attributed = NSMutableAttributedString()
 
         let symbolConfig = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
             .applying(.init(paletteColors: [color]))
-        if let symbol = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "warning")?
+        if let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: "warning")?
             .withSymbolConfiguration(symbolConfig) {
             let attachment = NSTextAttachment()
             attachment.image = symbol
@@ -2114,8 +2199,15 @@ final class PopupViewController: NSViewController {
     /// `addWarningTitle`'s symbol-attachment technique (`circle.fill` tinted via `paletteColors`);
     /// the link, when present, is handled explicitly by `StatusLineLabel` because `NSTextField`'s
     /// built-in `.link` handling is unreliable inside an `NSMenu`-hosted view.
+    ///
+    /// `showsStatusWord: false` keeps the dot and the age but drops the word — for a row whose label
+    /// is already the whole statement. "No ongoing incidents · operational" reads as an answer to two
+    /// different questions at once: the label answers the incident dimension, the word answers the
+    /// service one (#341).
     @discardableResult
-    private func addServiceStatusRow(label: String, status: ServiceStatus, age: TimeInterval? = nil) -> NSView {
+    private func addServiceStatusRow(
+        label: String, status: ServiceStatus, age: TimeInterval? = nil, showsStatusWord: Bool = true
+    ) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
 
         // Leading half: the colour dot (#130) as a glowing layer-backed subview (#188 — re-resolves on a
@@ -2141,12 +2233,22 @@ final class PopupViewController: NSViewController {
         // a component can be degraded by more than one incident at once (measured — two incidents
         // named the same four components), so there is no single right target here. The per-incident
         // link lives on the incident row, where the question "which one" has an answer (ADR-0071 §3).
-        let wordLabel = Self.makeLinkWord(
-            Self.word(status),
-            url: status == .operational ? nil : StatusHealth.pageURL,
-            prefix: age.map { Self.durationMinutes(Int($0)) + " · " })
+        let trailing: NSView
+        if showsStatusWord {
+            trailing = Self.makeLinkWord(
+                Self.word(status),
+                url: status == .operational ? nil : StatusHealth.pageURL,
+                prefix: age.map { Self.durationMinutes(Int($0)) + " · " })
+        } else {
+            // Age alone, in the same dimmed tone the word's prefix uses, so the column still lines up
+            // with the rows that do carry a word.
+            let ageLabel = NSTextField(labelWithString: age.map { Self.durationMinutes(Int($0)) } ?? "")
+            ageLabel.font = font
+            ageLabel.textColor = Self.dimmedLabelColor
+            trailing = ageLabel
+        }
 
-        return addSplitRow(leadingView: leadingLabel, rightView: wordLabel)
+        return addSplitRow(leadingView: leadingLabel, rightView: trailing)
     }
 
     /// The popup's status dot: a glowing, layer-backed circle whose colour re-resolves through the

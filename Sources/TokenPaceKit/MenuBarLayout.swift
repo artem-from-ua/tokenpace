@@ -131,6 +131,22 @@ public enum MenuBarMode: Sendable, Equatable {
     ///   - reset: The last known nearest-reset countdown, or `nil`.
     ///   - which: Which window drove `reset`, or `nil`.
     case error(fiveHour: BarView?, sevenDay: BarView?, reset: String?, which: LimitWindow?)
+    /// The usage poll is off but services are still watched (#341): a `zzz` glyph, no bars, no
+    /// countdown. The status dot — drawn outside this switch — remains the item's only live signal,
+    /// which is the point: the widget reports what it is actually collecting.
+    ///
+    /// A separate case rather than an ``error`` with all-`nil` values, because ``error`` already
+    /// carries two meanings (cold start, and a failure run past 60 min) and both decay into a ⚠️.
+    /// Reusing it would make a deliberate user choice age into an error report.
+    ///
+    /// Not to be confused with the *session* idle of ADR-0027 ("no active 5h window"), which is drawn
+    /// as a zero bar (ADR-0078). This one means "the user switched usage monitoring off".
+    case usagePollingOff
+    /// Nothing is monitored at all (#341): a ⚠️ glyph, no bars, no countdown. Distinct from
+    /// ``error`` in meaning — nothing is broken — but it does warrant the attention glyph, since a
+    /// widget that reports nothing is otherwise indistinguishable from a stuck one. The popup
+    /// explains it in words and offers the way back into Settings.
+    case nothingMonitored
 }
 
 // MARK: - ResetToShow
@@ -484,15 +500,24 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///     the icon. The error state (⚠️ + stale bars) ignores it: the bars are diagnostic there and
     ///     always kept. Default `false`. Note: the pause icon itself is drawn whenever blocked,
     ///     independent of this flag (see below).
+    ///   - monitoringAnything: Whether the user monitors anything at all (#341). `false` overrides
+    ///     every other input with ``MenuBarMode/nothingMonitored`` — with no data source switched on
+    ///     there is nothing to draw, and a stale snapshot must not stand in for one. Default `true`.
     public static func make(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
         serviceProblem: ServiceStatus? = nil, resetMode: ResetCountdownMode = .smart,
-        hideCalmBar: CalmBarHiding = .never, showCredits: Bool = false, pauseHidesBars: Bool = false
+        hideCalmBar: CalmBarHiding = .never, showCredits: Bool = false, pauseHidesBars: Bool = false,
+        monitoringAnything: Bool = true
     ) -> MenuBarLayout {
-        let credits = showCredits ? snapshot.flatMap { creditsMarker(for: $0, now: now) } : nil
+        // The credits marker rides on the snapshot, which is stale in both new modes (#341) — money
+        // state that is no longer being refreshed is not worth an icon.
+        let dataIsLive = monitoringAnything && health.isCollectingUsage
+        let credits = (showCredits && dataIsLive)
+            ? snapshot.flatMap { creditsMarker(for: $0, now: now) } : nil
         let layout = usageMode(from: snapshot, health: health, now: now,
                                resetMode: resetMode, hideCalmBar: hideCalmBar,
-                               pauseHidesBars: pauseHidesBars)
+                               pauseHidesBars: pauseHidesBars,
+                               monitoringAnything: monitoringAnything)
         // Pause icon: drawn whenever the user is fully blocked (`CreditsPacing.isBlocked` — no path to
         // work), **always**, independent of `pauseHidesBars` (that flag only decides whether the bars are
         // hidden beside it). Left of the bars (`.expanded`) or left of the countdown (`.blockedReset`,
@@ -502,7 +527,9 @@ public struct MenuBarLayout: Sendable, Equatable {
             guard let snapshot, CreditsPacing.isBlocked(in: snapshot) else { return false }
             switch layout.mode {
             case .expanded, .blockedReset: return true
-            case .error: return false
+            // The diagnostic and switched-off states all rest on data that is stale or absent; a
+            // pause icon there would assert a "blocked right now" that nothing is confirming (#341).
+            case .error, .usagePollingOff, .nothingMonitored: return false
             }
         }()
         return layout.with(serviceProblem: serviceProblem, credits: credits, blockedPause: blockedPause)
@@ -533,8 +560,16 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// so ``make(from:health:now:serviceProblem:resetMode:)`` can graft the service dot onto its result.
     private static func usageMode(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
-        resetMode: ResetCountdownMode, hideCalmBar: CalmBarHiding, pauseHidesBars: Bool
+        resetMode: ResetCountdownMode, hideCalmBar: CalmBarHiding, pauseHidesBars: Bool,
+        monitoringAnything: Bool = true
     ) -> MenuBarLayout {
+        // #341, checked before anything else: these two states are user choices, not poll outcomes,
+        // so no snapshot or failure age can override them. Placing them first is what stops the
+        // "switched off" states from decaying into the 30/60-min error phases below — a deliberate
+        // choice must not age into a report that something is broken.
+        guard monitoringAnything else { return MenuBarLayout(mode: .nothingMonitored) }
+        guard health.isCollectingUsage else { return MenuBarLayout(mode: .usagePollingOff) }
+
         // Healthy, or stale within the grace window: show the (possibly stale) bars unchanged.
         // A healthy state with no snapshot only happens at the very first tick before the first
         // poll resolves; with no data to draw, fall back to the bare ⚠️ error glyph.

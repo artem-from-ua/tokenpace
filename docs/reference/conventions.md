@@ -125,7 +125,7 @@ git config core.hooksPath .githooks
 
 ### Експорт конфіга: порядок ключів = порядок контролів у панелі
 
-Кнопка «Copy Appearance settings to clipboard» (Settings → Appearance, #257) віддає JSON, у якому
+Кнопка «Copy Appearance settings to clipboard» (Settings → UI presets, #257; пан звався Appearance до #333) віддає JSON, у якому
 ключі в блоці `appearance` йдуть **у тому самому порядку згори вниз, що й контроли на сторінці
 Appearance** — не за алфавітом і не в порядку полів структури. Дамп читають, тримаючи панель перед
 очима: збіг порядку дає відповідність рядок-у-рядок.

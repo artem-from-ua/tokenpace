@@ -604,7 +604,7 @@ swift run
 
 #### Гейти резервного копіювання ([#306](https://github.com/artem-from-ua/tokenpace/issues/306))
 
-Коли бекап сесій не йде, секція **Extra features → Sessions backup** пояснює причину ⚠-рядком під
+Коли бекап сесій не йде, секція **Providers → Backup** пояснює причину ⚠-рядком під
 статусом «Last archived …». Обидва стани — з трикутником: рядок, що повідомляє про умову, яка **не
 пускає фічу**, це попередження, незалежно від того, чи мине воно саме. Різниця між ними в тексті
 («free up space» проти «will resume when you plug in»), не в іконці. Без трикутника в проєкті
@@ -617,7 +617,7 @@ swift run
 Секція показується, лише коли бекап **увімкнено й обрано теку** — інакше рядків не буде взагалі.
 
 ```sh
-TOKENPACE_STUB=1 TOKENPACE_DEVTOOLS=1 TOKENPACE_SETTINGS_SECTION=4 \
+TOKENPACE_STUB=1 TOKENPACE_DEVTOOLS=1 TOKENPACE_SETTINGS_SECTION=7 \
 TOKENPACE_FAKE_ARCHIVE_GATE=space \
 swift run
 ```
@@ -701,23 +701,33 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_STUB=screenshot swift run
 | 1 | General |
 | 2 | UI presets |
 | 3 | Notifications |
-| 4 | Extra features |
-| **5** | **Menu bar** |
-| **6** | **Dropdown** |
+| ~~4~~ | ~~Extra features~~ — пан прибрано ([#341](https://github.com/artem-from-ua/tokenpace/issues/341)); індекс **виведено з обігу й не перевикористано** |
+| 5 | Menu bar |
+| 6 | Dropdown |
+| **7** | **Providers** |
+| **7.0** | **Providers › Claude** (дочірня сторінка) |
 | 100–108 | scroll-філер (`TOKENPACE_SIDEBAR_FILLER`, див. нижче) |
 
 **Індекси — стабільні ідентифікатори, не порядок рядків** (#333). Порядок у sidebar задає
-`SettingsSection.groups`, і він інший: About / General / **UI presets · Menu bar · Dropdown** /
-Notifications / Extra features. Розділення саме таке, щоб перестановка рядків не перенаправляла мовчки
+`SettingsSection.groups`, і він інший: About / **General · Providers** / **UI presets · Menu bar ·
+Dropdown** / Notifications. Розділення саме таке, щоб перестановка рядків не перенаправляла мовчки
 кожен задокументований рецепт на інший пан; `2` лишилось за `UI presets`, бо це те, чим став
-колишній Appearance.
+колишній Appearance, а `4` лишається **дірою**: старі рецепти його досі носять, і напрямити їх на
+інший пан означало б рецепт, що бреше замість падати.
 
-(Monitored Services більше не окрема секція — це підсекція «Monitored services» у Extra features,
-#242. Секція «Usage history» з Extra features **пішла** — вона тепер у General, #317.)
+**Крапковий синтаксис — дочірні сторінки** ([#341](https://github.com/artem-from-ua/tokenpace/issues/341),
+[ADR-0084](../adr/0084-settings-drill-in-child-pages.md)): `<секція>.<індекс дитини>`, де індекс
+рахує сторінки **в порядку показу**, а не за raw-значенням. Невідома секція чи дитина тепер **пишеться
+в лог** (`settings hook: unknown …`), а не ігнорується мовчки.
+
+(Monitored services тепер живе в **Providers › Claude** разом із тумблером Claude Usage API, #341.
+Monitored service incidents, Sessions і Backup лишились на батьківській **Providers** — вони не належать жодному
+провайдеру. Секція «Usage history» — у General, #317.)
 
 ```sh
-TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=3 swift run   # відкриє одразу на Notifications
-TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=5 swift run   # одразу на Menu bar
+TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=3 swift run     # відкриє одразу на Notifications
+TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=5 swift run     # одразу на Menu bar
+TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=7.0 swift run   # одразу на Providers › Claude
 ```
 
 Хук **сідає** на пан, а не «навігує»: вікно, відкрите так, має **обидва чеврони ‹ › дим**, як і має
@@ -734,8 +744,10 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=5 swift run   # одраз�
 3. **Custom** — зміни будь-що вручну, застосуй пресет, тоді натисни `Custom`: має повернутись твій
    сетап. На чистій інсталяції (нічого не збережено) сегмент неклікабельний і пояснює себе попапом.
 4. **Copy config** — кнопка на *UI presets* збирає значення з усіх трьох панів.
-5. **Awaiting-input** — вимкни «Show sessions awaiting input» у *Extra features*, зайди на *Menu bar*:
-   тамтешній однойменний тумблер має бути **disabled**, а хінт читатись «…in Extra features first».
+5. **Awaiting-input** — вимкни «Detect sessions waiting for input» у *Providers → Sessions*, зайди
+   на *Menu bar*: тамтешній «Show waiting sessions» має бути **disabled**, а хінт читатись
+   «…in Providers › Sessions first». Назви навмисно різні (#341): на Providers вмикається саме
+   **виявлення**, на Menu bar — лише **показ** іконки.
    Глобальний вмикач керує долонею в дропдауні, цей — у menu bar.
 
 **Джерело істини складу й індексів** — `enum SettingsSection: Int` (raw-значення) плюс
@@ -743,6 +755,30 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=5 swift run   # одраз�
 Detail-панелі — SwiftUI `Form.formStyle(.grouped)` ([ADR-0042](../adr/0042-settings-swiftui-form.md)),
 тож паритет grouped-inset карток доводиться скриншотами light+dark так само, як раніше для
 AppKit-версії.
+
+### Providers і два стани віджета ([#341](https://github.com/artem-from-ua/tokenpace/issues/341))
+
+Ця частина **стубу не має і мати не може**: перевіряється саме поведінка поллінгу, а стуб його
+підміняє. Перемикати доводиться руками в Settings, на живих даних.
+
+1. **Drill-in** — `Providers` → рядок `Claude` (стрілка `›` справа, підрядок читає стан) → сторінка
+   `Claude`. Заголовок тулбара — рівно **«Claude»**, не «Providers › Claude». ‹ повертає на
+   `Providers`, а не перестрибує на попередню секцію.
+2. **Сідання на дитину** — `TOKENPACE_SETTINGS_SECTION=7.0`: обидва шеврони **приглушені**. Активний
+   ‹ одразу після запуску — регресія.
+3. **Замикання Claude API** — увімкни Usage API: рядок `Claude API` стає on, вимкнений, із приміткою
+   «required by the above». Вимкни все: рядок гасне, примітка читає «nothing to monitor».
+4. **Режим `zzz`** — Usage API off, хоч один сервіс on: у барі **`zzz`**, без барів і часу; у попапі
+   «Claude» + зелена плашка «All services» з віком **status-полла**. Вік не «0 s ago» і не порожньо.
+5. **Той самий режим ≥ 30 хв** — `zzz` **не** перетворюється на ⚠️. Якщо перетворився — стан поїхав у
+   гілку `.error`, і це та регресія, заради якої кейс зроблено окремим.
+6. **Нічого не ввімкнено** — у барі **⚠️**; у попапі **не червоний** блок «Monitoring is off» плюс
+   клікабельний рядок, що веде в Settings. Червоний банер тут — регресія.
+7. **Негайність перемикання** — після кожного тумблера бар має змінитись **за секунди**, не за
+   хвилини: `.manualRefresh` будить цикл одразу.
+
+Підрядок під `Claude` рахує **сервіси, що реально резолвляться** (`Claude API` включно, `Cowork` —
+лише в режимі cowork), тож число має збігатися з кількістю рядків у попапі під ⌥.
 
 ### Прев'ю дропдауна поруч із Settings ([ADR-0083](../adr/0083-live-dropdown-preview-in-settings.md))
 
@@ -786,7 +822,7 @@ Sidebar закороткий, щоб скролити на будь-якій п�
 він з'являється при звичайному перетягуванні вікна (#312 follow-up).
 
 ```sh
-TOKENPACE_SIDEBAR_FILLER=1 TOKENPACE_OPEN_SETTINGS=1 swift run   # +9 фіктивних рядків після Extra features
+TOKENPACE_SIDEBAR_FILLER=1 TOKENPACE_OPEN_SETTINGS=1 swift run   # +9 фіктивних рядків після Notifications
 ```
 
 Рядки звуться `ITEM_1`…`ITEM_9`, власної панелі не мають (detail показує саму назву) і беруть
@@ -909,21 +945,25 @@ Wi-Fi, battery) має **суворий метод**, вироблений бо�
 ### Індикатор «sessions awaiting input» (#233, ADR-0066)
 
 Лічильник сесій Claude Code, що очікують вводу користувача, у menu bar та попапі. Фіча **opt-in**
-(Settings → Extra features → «Show sessions awaiting input», дефолт OFF); показ у menu bar —
+(Settings → Providers → Sessions → «Detect sessions waiting for input», дефолт OFF); показ у menu bar —
 Settings → Menu bar.
 
-Під тумблером — **постійний ⚠️-рядок** «Experimental. This reads Claude Code's internal files…»
-(#243, ADR-0066): фіча стоїть на приватному форматі, який може змінитися на боці Anthropic. Він
-видимий **завжди** — при увімкненому й вимкненому тумблері, у стуб- і в релізній збірці, — на
-відміну від умовної ⚠️ «Stubbed in this development build.» у **заголовку** секції. Побачивши обидва
-⚠️ одночасно під стубом, не вважай це регресією: вони про різне.
+Під тумблером — **один** нейтральний рядок-опис («Shows how many Claude Code sessions are waiting for
+your reply in the dropdown.»). Постійне ⚠️-попередження «Experimental. This reads Claude Code's
+internal files…» (#243) **прибрано в #341**: воно описувало властивість усього застосунку, а не цієї
+однієї фічі, тож своєї роботи — виділити ризиковану опцію серед звичайних — не виконувало. Те, що
+фіча стоїть на приватному форматі Claude Code, лишається зафіксованим в
+[ADR-0066](../adr/0066-detect-sessions-awaiting-input.md).
+
+Умовна ⚠️ «Stubbed in this development build.» у **заголовку** секції лишається — вона про стан
+збірки, і під стубом має бути видимою.
 
 > **Під будь-яким `TOKENPACE_STUB` watcher не працює взагалі.** Стуб — це заморожений відтворюваний
 > кадр, а watcher читає **живі** `~/.claude/sessions|jobs`, тож на стубі в кадр протікали б реальні
 > сесії, що випадково чекають вводу в момент зйомки. Гейт той самий, що в журналу
 > (`currentScenario == .realNetwork`), і він перераховується при **живому** перемиканні стуба в
 > dev-tools. Наслідки: під стубом без `TOKENPACE_AWAITING` індикатора нема **навіть із увімкненим
-> тумблером**, а в Settings (Extra features → Session status і Menu bar) видно ⚠️ «Stubbed in this
+> тумблером**, а в Settings (Providers → Sessions і Menu bar) видно ⚠️ «Stubbed in this
 > development build.».
 >
 > **Живого watcher'а мало бути в `.realNetwork` — цей live має бути обраний явно (#267).** Тобто
@@ -976,8 +1016,9 @@ TOKENPACE_STUB=1 TOKENPACE_AWAITING=8 TOKENPACE_AWAITING_DAYS=3,28,10,5,25,12,20
     видно **обрізані** кінчики пальців, нічого не вилазить за віджет і не налазить на pause-гліф.
     Без fade, без зміни ширини.
   - **Опція OFF** — ширина така сама, як була до #283 (жодного зарезервованого місця). Перевір
-    **обидва** тумблери окремо: і Appearance-опцію, і master «Show sessions awaiting input» в Extra
-    features. Вимикання master'а лише дизейблить Appearance-тумблер, не скидаючи його значення, тож
+    **обидва** тумблери окремо: і «Show waiting sessions» на *Menu bar*, і master
+    «Detect sessions waiting for input» у *Providers → Sessions*. Вимикання master'а лише дизейблить
+    менюбарний тумблер, не скидаючи його значення, тож
     слот мусить звільнятись і від нього — інакше ≈18 pt тримаються під вимкнену фічу.
   - **Колір на виході** — з `TOKENPACE_AWAITING_DAYS=3` червона долоня лишається червоною дорогою
     вниз (не сіріє посеред руху). Без `_DAYS` вона нейтральна = **біла**.
@@ -995,9 +1036,9 @@ TOKENPACE_STUB=1 TOKENPACE_AWAITING=8 TOKENPACE_AWAITING_DAYS=3,28,10,5,25,12,20
   **inline-розбивка по проєктах**: `project ..... 2✋ 1✋ 6✋` (по одній долоні на непорожній бакет,
   порядок нейтр→оранж→червон, завжди з числом вкл. 1). Наведення на кожну руку → tooltip бакета
   («<7d/<15d/>15d till deletion»). (Попап показує індикатор завжди, поки фіча ON.)
-- **Appearance-опція** «Show awaiting-input icon in the menu bar» (після «Calm non-critical
-  colors»): ON → долоня в барі (leading); OFF → лише в попапі. Активна лише коли master ON; інакше
-  недоступна з **⚠️-підказкою** «Enable *Show sessions awaiting input* in Extra features first.».
+- **Menu bar-опція** «Show waiting sessions»: ON → долоня в барі (leading); OFF → лише в попапі.
+  Активна лише коли master ON; інакше недоступна з **⚠️-підказкою**
+  «Enable *Detect sessions waiting for input* in Providers › Sessions first.».
 
 Реальний (не-стуб) шлях: watcher читає `~/.claude/sessions` + `jobs/` через FSEvents; щоб побачити
 живий лічильник, запусти кілька Claude-сесій, що чекають на дозвіл/план (**обов'язково без стуба**, з

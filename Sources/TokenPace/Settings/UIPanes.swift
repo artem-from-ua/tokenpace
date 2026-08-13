@@ -131,25 +131,18 @@ struct MenuBarPane: View {
                 // Bar style, menu-bar copy (#224, rescaled in #307, per-surface since #329). All three
                 // show the pacing state by colour and differ in *scale*: Progress marks positions in
                 // the window, Pressure measures the gap against the time left, Gauge measures the same
-                // thing from a centred zero so the underpace side is drawn too. The full explanation
-                // lives here; the Dropdown page's copy points back at it rather than repeating it.
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Bar style")
-                        Spacer()
-                        SegmentedControl(
-                            segments: AppearanceBarStyle.segments,
-                            active: model.menuBarStyle,
-                            onSelect: { model.setMenuBarStyle($0) })
-                    }
-                    SettingsHint(text: "*Progress* puts two marks on the window: where you are in "
-                        + "time, and how much you have spent.")
-                    SettingsHint(text: "*Pressure* grows as you get ahead of pace and shrinks back "
-                        + "as time catches up. The tick marks exactly on pace; a full bar means the "
-                        + "limit is spent.")
-                    SettingsHint(text: "*Gauge* starts from the middle: it grows right as you get "
-                        + "ahead of pace and left as you fall behind, so the quota you are not "
-                        + "getting to spend shows up too.")
+                // thing from a centred zero so the underpace side is drawn too.
+                //
+                // No hints under the row (#341): three paragraphs describing the styles cost more
+                // vertical space than they bought — the live dropdown preview beside the window
+                // (ADR-0083) shows each style the moment it is picked, which no amount of prose does.
+                HStack {
+                    Text("Bar style")
+                    Spacer()
+                    SegmentedControl(
+                        segments: AppearanceBarStyle.segments,
+                        active: model.menuBarStyle,
+                        onSelect: { model.setMenuBarStyle($0) })
                 }
 
                 // Calm non-critical colors (#224) — a three-way choice (merged the old Calm + Work
@@ -173,13 +166,16 @@ struct MenuBarPane: View {
                         + "always stay colored.")
                 }
 
-                // Awaiting-input in the menu bar (#233). The feature itself is switched on in Extra
-                // features, which is what puts the count in the dropdown; this row decides whether the
-                // menu bar carries it too (a leading hand icon). Meaningless while the feature is off,
-                // so it is disabled — with a ⚠️ hint — then. A data stub is a third state: the watcher
-                // never runs, so the hint says so.
+                // Awaiting-input in the menu bar (#233). The feature itself is switched on in
+                // Providers › Sessions, which is what puts the count in the dropdown; this row decides
+                // whether the menu bar carries it too (a leading hand icon). Meaningless while the
+                // feature is off, so it is disabled — with a ⚠️ hint — then. A data stub is a third
+                // state: the watcher never runs, so the hint says so.
+                //
+                // "Show", against Providers' "Detect" (#341): that page decides whether we look, this
+                // one decides where the answer appears.
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Show sessions awaiting input", isOn: Binding(
+                    Toggle("Show waiting sessions", isOn: Binding(
                         get: { model.awaitingInputInMenuBar },
                         set: { model.setAwaitingInputInMenuBar($0) }))
                     .disabled(!model.awaitingInputEnabled)
@@ -246,10 +242,10 @@ struct MenuBarPane: View {
     /// description. The first two are ⚠️ states; see ``awaitingInputHintIsWarning``.
     private var awaitingInputHint: String {
         guard model.awaitingInputEnabled else {
-            return "Enable *Show sessions awaiting input* in Extra features first."
+            return "Enable *Detect sessions waiting for input* in Providers › Sessions first."
         }
         if model.stubScenarioActive { return SettingsStubHint.text }
-        return "Adds a hand icon to the menu bar (leading) when sessions are waiting. "
+        return "Adds a hand icon when sessions are waiting. "
             + "The count itself is shown only in the dropdown."
     }
 
@@ -269,19 +265,14 @@ struct DropdownPane: View {
         Form {
             Section {
                 // Bar style, dropdown copy (#329) — the same three styles as the menu bar, chosen
-                // separately. One hint instead of the three on the Menu bar page: repeating the full
-                // descriptions would pad the page without adding anything.
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Bar style")
-                        Spacer()
-                        SegmentedControl(
-                            segments: AppearanceBarStyle.segments,
-                            active: model.dropdownStyle,
-                            onSelect: { model.setDropdownStyle($0) })
-                    }
-                    SettingsHint(text: "The same three styles, picked separately for the dropdown. "
-                        + "The roomier bars here can carry a denser style than the menu bar.")
+                // separately. No hint, as on the Menu bar page (#341): the preview shows the choice.
+                HStack {
+                    Text("Bar style")
+                    Spacer()
+                    SegmentedControl(
+                        segments: AppearanceBarStyle.segments,
+                        active: model.dropdownStyle,
+                        onSelect: { model.setDropdownStyle($0) })
                 }
 
                 // No `SettingsHint` under either row: the segment labels ("Always" / "Non-calm only" /

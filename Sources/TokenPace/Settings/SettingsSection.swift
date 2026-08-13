@@ -17,11 +17,17 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
     /// surfaces moved out to panes of their own.
     case uiPresets = 2
     case notifications = 3
-    case extraFeatures = 4
+    // Raw value `4` belonged to `Extra features`, retired in #341. It is deliberately **not** reused:
+    // documented verification recipes and dev-hook invocations still carry it, and pointing an old
+    // `TOKENPACE_SETTINGS_SECTION=4` at some unrelated pane would be a recipe that lies rather than
+    // fails.
     /// Everything that configures the menu-bar widget (#333).
     case menuBar = 5
     /// Everything that configures the dropdown popup (#333).
     case dropdown = 6
+    /// What TokenPace monitors, per provider (#341) — a parent page whose provider rows drill into
+    /// their own child pages.
+    case providers = 7
 
     // Scroll-test filler (`TOKENPACE_SIDEBAR_FILLER`). Raw values start at `fillerBase` so they sit
     // clear of the real panes and of the `TOKENPACE_SETTINGS_SECTION` indices those panes own.
@@ -41,10 +47,13 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
     var id: Int { rawValue }
 
     /// The sidebar groups, **in display order** — a divider is drawn between each (a `.sidebar` List
-    /// renders the gap between `Section`s as the divider). `About` sits alone at the top, `General`
-    /// next, then the three UI pages as a group of their own, then `Notifications` alone, and
-    /// `Extra features` alone at the bottom. (Monitored Services is no longer a sidebar pane — it moved
-    /// into the Extra features pane as a section, #242.)
+    /// renders the gap between `Section`s as the divider). `About` sits alone at the top, then
+    /// `General` and `Providers` as the app-wide pair, then the three UI pages as a group of their
+    /// own, then `Notifications` alone at the bottom.
+    ///
+    /// `Providers` sits beside `General` because it answers the same class of question — what the app
+    /// does, rather than how it looks. It replaces `Extra features` (#341), which was a drawer with no
+    /// organising principle: the things in it had nothing in common except not fitting elsewhere.
     ///
     /// The UI trio is grouped rather than drilled into (#333): the sidebar is short enough to carry
     /// three more rows, and a divider says "these three belong together" without costing the extra
@@ -56,13 +65,13 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
     /// gap on both sides is the point; pairing it with `General` implied a kinship that isn't there.
     static let groups: [[SettingsSection]] = [
         [.about],
-        [.general],
+        [.general, .providers],
         [.uiPresets, .menuBar, .dropdown],
-        [.notifications],
-        [.extraFeatures] + filler,
+        [.notifications] + filler,
     ]
 
-    /// Nine throwaway rows appended after `Extra features` when `TOKENPACE_SIDEBAR_FILLER` is set.
+    /// Nine throwaway rows appended after `Notifications` when `TOKENPACE_SIDEBAR_FILLER` is set —
+    /// the last group, wherever that happens to be.
     ///
     /// The sidebar is otherwise too short to scroll at any supported window height, so the separator
     /// that is *supposed* to appear under the titlebar when the list scrolls under it cannot be
@@ -95,7 +104,7 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         case .menuBar: return "Menu bar"
         case .dropdown: return "Dropdown"
         case .notifications: return "Notifications"
-        case .extraFeatures: return "Extra features"
+        case .providers: return "Providers"
         default: return "ITEM_\(rawValue - Self.fillerBase + 1)"
         }
     }
@@ -117,7 +126,10 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         case .menuBar: return "distribute.vertical"
         case .dropdown: return "chart.bar.horizontal.page"
         case .notifications: return "bell.badge.fill"
-        case .extraFeatures: return "puzzlepiece.extension.fill"
+        // Providers are remote services, not local hardware — a cloud, not a rack. Verified to
+        // resolve on macOS 15 with `NSImage(systemSymbolName:)`, which returns nil for a name that
+        // does not exist (that check is how we learned `zzz.circle` is not a symbol, #341).
+        case .providers: return "cloud.fill"
         default: return "circle.dashed"
         }
     }
@@ -137,18 +149,6 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
     /// The slice of the symbol's height the chip keeps when ``trimsOuterRules`` is set — the band
     /// between the two rules, generous enough to clear the rectangle's rounded corners at any size.
     static let trimmedBand: ClosedRange<CGFloat> = 0.28...0.72
-
-
-    /// Vertical nudge for the glyph inside its chip, in points, negative = up.
-    ///
-    /// `puzzlepiece.extension.fill` carries its tab on the left edge and its mass low, so centred on
-    /// its own box it reads a touch below centre in the capsule. Half a point is deliberate, not a
-    /// rounding artefact: on a 2× display it is exactly one device pixel — the smallest correction
-    /// that exists, and the size of the error.
-    ///
-    /// Per-section rather than global: nothing else here is off, and a blanket offset would push the
-    /// glyphs that are already right.
-    var glyphOffsetY: CGFloat { self == .extraFeatures ? -0.5 : 0 }
 
     /// Capsule gradient endpoints of the sidebar icon chip, matching System Settings (#156).
     /// The system capsules are baked icon artwork, not dynamic colors — each pane has its own
@@ -172,7 +172,11 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         case .menuBar: return CapsuleTint(flat: 0x000000)
         case .dropdown: return CapsuleTint(flat: 0xFFFFFF, glyph: .black, needsBorder: true)
         case .notifications: return CapsuleTint(dark: 0xFB4439, light: 0xFB7A71)
-        case .extraFeatures: return CapsuleTint(dark: 0x5E5CE6, light: 0x8C8AFB)
+        // ⚠️ Inherited from the retired Extra features chip (#341) as a **starting value**, not a
+        // measurement of this one: the pair above was metered off a different System Settings pane.
+        // Standing debt — re-check with Digital Color Meter in sRGB against whichever system pane
+        // this ends up resembling, and replace if it reads wrong beside the others.
+        case .providers: return CapsuleTint(dark: 0x5E5CE6, light: 0x8C8AFB)
         default: return CapsuleTint(dark: 0x5E5E5F, light: 0xC0C0C4)
         }
     }

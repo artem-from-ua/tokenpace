@@ -98,11 +98,25 @@ struct IncidentServiceFilterTests {
         #expect(IncidentVisibility.visible(in: s, config: config, now: now).isEmpty)
     }
 
-    @Test func claudeAPIIsAlwaysMonitored() {
-        // `Claude API` cannot be switched off — TokenPace's own polling depends on it.
+    @Test func claudeAPIIsMonitoredWheneverAnythingIs() {
+        // `Claude API` has no switch of its own: it rides along with whatever else is on (#341).
+        let s = summary([incident(components: [component(apiName, "partial_outage")])])
+        let noServices = MonitoredServices(claudeCodeEnabled: false, webDesktopEnabled: false)
+        // Usage poll alone keeps it monitored…
+        #expect(IncidentVisibility.visible(
+            in: s, config: noServices, usageApiEnabled: true, now: now).count == 1)
+        // …and so does a service alone, with the usage poll off.
+        let codeOnly = MonitoredServices(claudeCodeEnabled: true, webDesktopEnabled: false)
+        #expect(IncidentVisibility.visible(
+            in: s, config: codeOnly, usageApiEnabled: false, now: now).count == 1)
+    }
+
+    @Test func nothingIsVisibleWhenMonitoringIsOffEntirely() {
+        // Everything off → the monitored set is empty, so no incident is "mine" (#341).
         let s = summary([incident(components: [component(apiName, "partial_outage")])])
         let config = MonitoredServices(claudeCodeEnabled: false, webDesktopEnabled: false)
-        #expect(IncidentVisibility.visible(in: s, config: config, now: now).count == 1)
+        #expect(IncidentVisibility.visible(
+            in: s, config: config, usageApiEnabled: false, now: now).isEmpty)
     }
 
     @Test func coworkCountsOnlyInCoworkMode() {
@@ -343,21 +357,39 @@ struct MonitoredComponentNamesTests {
     /// The names used to filter incidents must be exactly the ones the popup draws rows for — for
     /// every config permutation. Adding a service to `checks(for:)` must never silently fail here.
     @Test func matchesTheRowsForEveryConfig() {
-        for code in [true, false] {
-            for web in [true, false] {
-                for mode in [WebDesktopMode.chatOnly, .chatAndCowork] {
-                    let config = MonitoredServices(
-                        claudeCodeEnabled: code, webDesktopEnabled: web, webDesktopMode: mode)
-                    let fromRows = Set(StatusHealth.unknown(for: config).checks.flatMap(\.components).map(\.name))
-                    #expect(StatusHealth.monitoredComponentNames(for: config) == fromRows)
+        for usage in [true, false] {
+            for code in [true, false] {
+                for web in [true, false] {
+                    for mode in [WebDesktopMode.chatOnly, .chatAndCowork] {
+                        let config = MonitoredServices(
+                            claudeCodeEnabled: code, webDesktopEnabled: web, webDesktopMode: mode)
+                        let fromRows = Set(
+                            StatusHealth.unknown(for: config, usageApiEnabled: usage)
+                                .checks.flatMap(\.components).map(\.name))
+                        #expect(
+                            StatusHealth.monitoredComponentNames(for: config, usageApiEnabled: usage)
+                                == fromRows)
+                    }
                 }
             }
         }
     }
 
-    @Test func alwaysContainsClaudeAPI() {
+    @Test func containsClaudeAPIWheneverAnythingIsMonitored() {
+        let noServices = MonitoredServices(claudeCodeEnabled: false, webDesktopEnabled: false)
+        // Usage poll alone → just the API name.
+        #expect(
+            StatusHealth.monitoredComponentNames(for: noServices, usageApiEnabled: true) == [apiName])
+        // A service alone → the API name comes with it, unasked (#341).
+        let codeOnly = MonitoredServices(claudeCodeEnabled: true, webDesktopEnabled: false)
+        #expect(
+            StatusHealth.monitoredComponentNames(for: codeOnly, usageApiEnabled: false)
+                .contains(apiName))
+    }
+
+    @Test func isEmptyWhenMonitoringIsOffEntirely() {
         let config = MonitoredServices(claudeCodeEnabled: false, webDesktopEnabled: false)
-        #expect(StatusHealth.monitoredComponentNames(for: config) == [apiName])
+        #expect(StatusHealth.monitoredComponentNames(for: config, usageApiEnabled: false).isEmpty)
     }
 
     @Test func coworkAppearsOnlyInCoworkMode() {

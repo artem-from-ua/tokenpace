@@ -135,6 +135,10 @@ public struct PollState: Sendable, Equatable {
     /// relaunch): it gates the reset-boundary grace, and after a relaunch the grace has no prior
     /// window to protect anyway. `nil` until the first observed rise. Read by ``applyIdleGrace``.
     public var lastUtilizationChange: Date?
+    /// Whether the usage API is deliberately not being polled (#341). Projected into
+    /// ``UsageHealth/notPolling``; see ``PollingEngine/enteringServiceOnlyMode(_:previous:)`` for why
+    /// entering this mode also clears `lastSnapshot`.
+    public var notPolling: Bool = false
 
     /// Cold start: healthy backoff (no hold), no data yet. `claudeActive` defaults to `true` so the
     /// very first interval is the responsive 3-min base until the first probe.
@@ -147,7 +151,8 @@ public struct PollState: Sendable, Equatable {
         reason: FailureReason? = nil,
         refreshGate: RefreshGate = RefreshGate(),
         idleSuppressedUntil: Date? = nil,
-        lastUtilizationChange: Date? = nil
+        lastUtilizationChange: Date? = nil,
+        notPolling: Bool = false
     ) {
         self.backoff = backoff
         self.claudeActive = claudeActive
@@ -158,11 +163,14 @@ public struct PollState: Sendable, Equatable {
         self.refreshGate = refreshGate
         self.idleSuppressedUntil = idleSuppressedUntil
         self.lastUtilizationChange = lastUtilizationChange
+        self.notPolling = notPolling
     }
 
     /// The `UsageHealth` view-model input derived from this state.
     public var health: UsageHealth {
-        UsageHealth(lastSuccess: lastSuccess, failingSince: failingSince, reason: reason)
+        UsageHealth(
+            lastSuccess: lastSuccess, failingSince: failingSince, reason: reason,
+            notPolling: notPolling)
     }
 }
 
@@ -281,6 +289,12 @@ public struct PollingEngine: Sendable {
     let scheduler: PollScheduler
     let probe: ClaudeActivityProbe
     let now: @Sendable () -> Date
+    /// Whether to poll the usage API at all (#341), read **live at the top of every iteration** —
+    /// the same discipline as the journal seam. The shell closes over `PersistedConfig`, so a toggle
+    /// in Settings takes effect on the next tick without reconfiguring the engine; the accompanying
+    /// `.manualRefresh` signal is what makes "the next tick" mean *now* rather than up to an interval
+    /// later. Defaults to always-on so every existing construction site reads unchanged.
+    let usageApiEnabled: @Sendable () -> Bool
 
     public init(
         transport: UsageTransport,
@@ -288,7 +302,8 @@ public struct PollingEngine: Sendable {
         refresher: DelegatedRefresher? = nil,
         scheduler: PollScheduler,
         probe: ClaudeActivityProbe,
-        now: @escaping @Sendable () -> Date
+        now: @escaping @Sendable () -> Date,
+        usageApiEnabled: @escaping @Sendable () -> Bool = { true }
     ) {
         self.transport = transport
         self.tokenProvider = tokenProvider
@@ -296,6 +311,7 @@ public struct PollingEngine: Sendable {
         self.scheduler = scheduler
         self.probe = probe
         self.now = now
+        self.usageApiEnabled = usageApiEnabled
     }
 
     // MARK: Pure transitions
@@ -368,6 +384,39 @@ public struct PollingEngine: Sendable {
             recordFailure(into: &next, previous: previous, reason: FailureReason(error), now: now)
         }
 
+        return next
+    }
+
+    /// Fold "the usage poll is off" into the state (#341) — the transition the loop applies instead
+    /// of polling, when the seam reports the usage API disabled.
+    ///
+    /// **Clears `lastSnapshot`, deliberately.** Keeping it would create a pair that never existed
+    /// before — "not failing, and a snapshot in hand" — while nothing refreshes that snapshot. That
+    /// pair is what breaks the naive consumers: the popup would draw bars from frozen data, the
+    /// broken-reset banner would fire off a stale reading, and the back-to-work / extra-usage edge
+    /// detectors (whose guards are exactly `failingSince == nil` + `let snapshot`) would re-trigger on
+    /// every tick. Dropping the snapshot removes the fuel rather than patching each consumer.
+    ///
+    /// `lastSuccess` survives: it is honest history ("this is when we last had data"), and the popup
+    /// needs it to explain how old the numbers were. No failure is invented — not asking is not
+    /// failing — and the 429 hold is reset, so re-enabling the poll starts clean.
+    public static func enteringServiceOnlyMode(previous: PollState, claudeActive: Bool) -> PollState {
+        var next = previous
+        next.claudeActive = claudeActive
+        next.notPolling = true
+        next.lastSnapshot = nil
+        next.failingSince = nil
+        next.reason = nil
+        next.backoff = previous.backoff.reset()
+        next.idleSuppressedUntil = nil
+        return next
+    }
+
+    /// Fold "the usage poll is back on" into the state (#341). Only lifts the flag — the next real
+    /// poll fills in data or records a failure the usual way.
+    public static func leavingServiceOnlyMode(previous: PollState) -> PollState {
+        var next = previous
+        next.notPolling = false
         return next
     }
 
@@ -559,11 +608,30 @@ public struct PollingEngine: Sendable {
                 var state = PollState()
                 while !Task.isCancelled {
                     let active = probe.isClaudeRunning()
-                    let result = await pollOnce(state: state, claudeActive: active)
                     let previous = state
-                    state = Self.advance(
-                        previous: previous, outcome: result.outcome, refresh: result.refresh,
-                        claudeActive: active, now: now())
+                    // #341: the usage poll is a user switch. When it is off we skip the request
+                    // entirely — no Keychain read, no network — and fold the mode into the state
+                    // instead. The heartbeat itself keeps running: the shell rides it to poll the
+                    // status page, which is the only data source left in this mode.
+                    let pollingUsage = usageApiEnabled()
+                    var result: PollResult?
+                    if pollingUsage {
+                        let poll = await pollOnce(state: state, claudeActive: active)
+                        result = poll
+                        state = Self.advance(
+                            previous: Self.leavingServiceOnlyMode(previous: previous),
+                            outcome: poll.outcome, refresh: poll.refresh,
+                            claudeActive: active, now: now())
+                    } else {
+                        state = Self.enteringServiceOnlyMode(previous: previous, claudeActive: active)
+                    }
+
+                    // Log the mode flip once per transition, not the mode every tick — the same
+                    // "only on change" discipline as the interval and idle logs below.
+                    if previous.notPolling != state.notPolling {
+                        AppLogger.lifecycle.notice(
+                            "usage poll \(state.notPolling ? "off — service status only" : "on", privacy: .public)")
+                    }
 
                     if let decision = Self.intervalDecision(previous: previous, next: state) {
                         AppLogger.lifecycle.notice("\(decision.logMessage, privacy: .public)")
@@ -584,7 +652,7 @@ public struct PollingEngine: Sendable {
                     let interval = Self.effectiveInterval(state)
                     continuation.yield(PollOutput(
                         snapshot: state.lastSnapshot, health: state.health, interval: interval,
-                        diagnostics: result.diagnostics))
+                        diagnostics: result?.diagnostics))
 
                     // Wait for the next poll, but suppress a **redundant** wake: a `.wake` /
                     // `.networkRestored` that arrives while the cached data is still fresh (last
@@ -606,8 +674,12 @@ public struct PollingEngine: Sendable {
                         case .interrupted(.wake), .interrupted(.networkRestored):
                             // Fetch now only if the cache is already stale; otherwise re-arm for the
                             // time left until it would be. Pure decision in `wakeRearmInterval`.
+                            // In service-only mode `lastSuccess` is old history, not a fresh cache
+                            // (#341) — passing it here would re-arm the wait against data we are not
+                            // refreshing, and delay the status poll this heartbeat carries.
                             guard let remaining = Self.wakeRearmInterval(
-                                lastSuccess: state.lastSuccess, interval: interval, now: now())
+                                lastSuccess: state.notPolling ? nil : state.lastSuccess,
+                                interval: interval, now: now())
                             else { break waitLoop }              // stale (or no prior success) → poll now
                             wait = remaining
                             // loop: wait out the remainder; the next signal re-enters this switch.

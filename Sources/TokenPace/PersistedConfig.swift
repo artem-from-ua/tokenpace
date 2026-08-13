@@ -25,6 +25,12 @@ enum PersistedConfig {
         static let lastRunVersion = "lastRunVersion"
         /// The monitored-services config (#89), stored as a JSON blob under this key.
         static let monitoredServices = "monitoredServices"
+        /// Whether the usage API is polled at all (#341). Default-on (opt-out) — see the property.
+        ///
+        /// A **separate scalar key**, deliberately not folded into the ``monitoredServices`` blob: an
+        /// older build that rewrites that blob knows nothing of this flag and would silently erase the
+        /// user's choice. Two keys survive a downgrade; one blob does not.
+        static let usageApiEnabled = "usageApiEnabled"
         /// The user's own Appearance setup, kept so the "Custom" segment can be returned to after a
         /// detour through the presets (#333). See ``customAppearanceValues``.
         static let customAppearanceValues = "customAppearanceValues"
@@ -190,6 +196,41 @@ enum PersistedConfig {
         set {
             guard let data = try? JSONEncoder().encode(newValue) else { return }
             defaults.set(data, forKey: Key.monitoredServices)
+        }
+    }
+
+    /// Whether the usage API is polled at all (#341) — the switch behind the bars.
+    ///
+    /// Default-on via the `object(forKey:) as? Bool ?? true` idiom, like every other opt-out here:
+    /// `bool(forKey:)` would read an absent key and an explicit `false` identically and defeat the
+    /// opt-out. Stored as its own scalar rather than inside the ``monitoredServices`` blob — see
+    /// `Key.usageApiEnabled` for why a downgrade makes that distinction matter.
+    ///
+    /// Turning this off is a legitimate choice, not a broken state: the status-page services keep
+    /// being monitored and the menu bar says so with its own glyph, rather than an error.
+    static var usageApiEnabled: Bool {
+        get { defaults.object(forKey: Key.usageApiEnabled) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.usageApiEnabled) }
+    }
+
+    /// The same read, callable off the main actor — the polling engine's seam reads this on every
+    /// iteration from its own task, and this type is `@MainActor`.
+    ///
+    /// `nonisolated` and going straight to `UserDefaults` (which is thread-safe) rather than
+    /// duplicating the key string at the call site: one source of truth for both the key and the
+    /// opt-out default, so the two readers cannot drift apart.
+    nonisolated static func usageApiEnabledUnsafe() -> Bool {
+        UserDefaults.standard.object(forKey: Key.usageApiEnabled) as? Bool ?? true
+    }
+
+    /// The two halves above read as one value — what the provider pages edit and what the polling and
+    /// status layers consume. A computed composite rather than a stored one: there is nothing extra to
+    /// persist, and `claudeApiLocked` stays derived.
+    static var providerMonitoring: ProviderMonitoring {
+        get { ProviderMonitoring(usageApiEnabled: usageApiEnabled, services: monitoredServices) }
+        set {
+            usageApiEnabled = newValue.usageApiEnabled
+            monitoredServices = newValue.services
         }
     }
 
