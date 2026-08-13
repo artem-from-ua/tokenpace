@@ -35,7 +35,7 @@ struct GeneralPane: View {
                     Toggle("Record usage history", isOn: Binding(
                         get: { model.journalEnabled },
                         set: { model.setJournalEnabled($0) }))
-                    SettingsHint(text: "Saves each usage reading to a local file so the Insights window can show trends over time. The data stays on this Mac and never leaves it.")
+                    SettingsHint(text: "Saves each usage reading to a local file so *Insights* can show trends over time. The data stays on this Mac and never leaves it.")
                 }
 
                 // Read-only destination: the journal lives in Application Support and is not

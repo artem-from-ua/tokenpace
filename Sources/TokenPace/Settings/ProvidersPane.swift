@@ -20,39 +20,25 @@ struct ProvidersPane: View {
 
     var body: some View {
         Form {
-            // MARK: Providers
-            Section("Providers") {
+            // MARK: Providers — unlabelled on purpose
+            //
+            // The page is already called "Providers" in the toolbar, so a header repeating it would
+            // be the only section title on this page that adds nothing. The rows below name their
+            // own providers; the sections that follow carry titles because they say something the
+            // page name does not.
+            Section {
                 SettingsNavigationRow(
                     title: "Claude",
                     subtitle: model.claudeProviderSummary,
                     action: { model.drill(into: .providersClaude) })
             }
 
-            // MARK: Sessions (spans providers — reads the local client's state)
-            Section {
-                VStack(alignment: .leading, spacing: 4) {
-                    // "Detect", not "Show": this switch turns the **feature** on — the watcher that
-                    // reads the local client's session files. Where the result appears is a separate
-                    // question, answered by the Menu bar page's own row (#341). Naming both "Show …"
-                    // made them look like the same switch listed twice.
-                    Toggle("Detect sessions waiting for input", isOn: Binding(
-                        get: { model.awaitingInputEnabled },
-                        set: { model.setAwaitingInputEnabled($0) }))
-                    SettingsHint(text: "Finds sessions that asked you something and are waiting for "
-                        + "an answer.")
-                }
-            } header: {
-                // The watcher is gated on the real network: a stub is a frozen frame, and reading the
-                // live ~/.claude trees would let real waiting sessions leak into it. `TOKENPACE_AWAITING=N`
-                // exercises the indicator with synthetic sessions instead.
-                // "Sessions", not "Session status": the neighbouring sections watch a status **page**,
-                // and reusing that word here pointed the reader at the wrong subsystem.
-                SectionHeaderWithHint(title: "Sessions",
-                                      hint: model.stubScenarioActive ? SettingsStubHint.text : nil)
-            }
-
-            // MARK: Incidents (one threshold for every monitored service)
-            Section("Incidents") {
+            // MARK: Monitored service incidents (one threshold for every monitored service)
+            //
+            // Directly under the provider rows, and ahead of `Sessions`: this section is about the
+            // providers listed above — their services, their incidents — whereas `Sessions` is about
+            // the local client. Reading top-down now goes provider → provider → this machine.
+            Section("Monitored service incidents") {
                 // #279: the incident age cut-off filters what the *popup shows*, not what gets
                 // delivered — which is why it sits with the display settings rather than with the
                 // notification toggles. It applies to every provider's services at once, so it stays
@@ -74,12 +60,38 @@ struct ProvidersPane: View {
                     }
                     SettingsHint(
                         text: "Some incidents stay open for days after the services behind them "
-                            + "recovered. This keeps those out of the popup.")
+                            + "recovered.")
                 }
             }
 
-            // MARK: Sessions backup
-            Section("Sessions backup") {
+            // MARK: Sessions (spans providers — reads the local client's state)
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    // "Detect", not "Show": this switch turns the **feature** on — the watcher that
+                    // reads the local client's session files. Where the result appears is a separate
+                    // question, answered by the Menu bar page's own row (#341). Naming both "Show …"
+                    // made them look like the same switch listed twice.
+                    Toggle("Detect sessions waiting for input", isOn: Binding(
+                        get: { model.awaitingInputEnabled },
+                        set: { model.setAwaitingInputEnabled($0) }))
+                    SettingsHint(text: "Finds sessions that asked you something and are waiting for "
+                        + "an answer.")
+                }
+            } header: {
+                // The watcher is gated on the real network: a stub is a frozen frame, and reading the
+                // live ~/.claude trees would let real waiting sessions leak into it. `TOKENPACE_AWAITING=N`
+                // exercises the indicator with synthetic sessions instead.
+                // "Sessions", not "Session status": the section above watches a status **page**, and
+                // reusing that word here pointed the reader at the wrong subsystem.
+                SectionHeaderWithHint(title: "Sessions",
+                                      hint: model.stubScenarioActive ? SettingsStubHint.text : nil)
+            }
+
+            // MARK: Backup
+            //
+            // "Backup", not "Sessions backup": the section above is now called `Sessions`, and the
+            // longer name read as its subsection rather than as a separate thing (#341).
+            Section("Backup") {
                 Toggle("Archive session logs daily", isOn: Binding(
                     get: { model.archiveEnabled },
                     set: { model.setArchiveEnabled($0) }))

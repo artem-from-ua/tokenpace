@@ -604,7 +604,7 @@ swift run
 
 #### Гейти резервного копіювання ([#306](https://github.com/artem-from-ua/tokenpace/issues/306))
 
-Коли бекап сесій не йде, секція **Providers → Sessions backup** пояснює причину ⚠-рядком під
+Коли бекап сесій не йде, секція **Providers → Backup** пояснює причину ⚠-рядком під
 статусом «Last archived …». Обидва стани — з трикутником: рядок, що повідомляє про умову, яка **не
 пускає фічу**, це попередження, незалежно від того, чи мине воно саме. Різниця між ними в тексті
 («free up space» проти «will resume when you plug in»), не в іконці. Без трикутника в проєкті
@@ -720,8 +720,8 @@ Dropdown** / Notifications. Розділення саме таке, щоб пе�
 рахує сторінки **в порядку показу**, а не за raw-значенням. Невідома секція чи дитина тепер **пишеться
 в лог** (`settings hook: unknown …`), а не ігнорується мовчки.
 
-(Monitored services тепер живе в **Providers › Claude** разом із тумблером Usage API, #341. Session
-status, Incidents і Sessions backup лишились на батьківській **Providers** — вони не належать жодному
+(Monitored services тепер живе в **Providers › Claude** разом із тумблером Claude Usage API, #341.
+Monitored service incidents, Sessions і Backup лишились на батьківській **Providers** — вони не належать жодному
 провайдеру. Секція «Usage history» — у General, #317.)
 
 ```sh

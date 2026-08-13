@@ -131,25 +131,18 @@ struct MenuBarPane: View {
                 // Bar style, menu-bar copy (#224, rescaled in #307, per-surface since #329). All three
                 // show the pacing state by colour and differ in *scale*: Progress marks positions in
                 // the window, Pressure measures the gap against the time left, Gauge measures the same
-                // thing from a centred zero so the underpace side is drawn too. The full explanation
-                // lives here; the Dropdown page's copy points back at it rather than repeating it.
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Bar style")
-                        Spacer()
-                        SegmentedControl(
-                            segments: AppearanceBarStyle.segments,
-                            active: model.menuBarStyle,
-                            onSelect: { model.setMenuBarStyle($0) })
-                    }
-                    SettingsHint(text: "*Progress* puts two marks on the window: where you are in "
-                        + "time, and how much you have spent.")
-                    SettingsHint(text: "*Pressure* grows as you get ahead of pace and shrinks back "
-                        + "as time catches up. The tick marks exactly on pace; a full bar means the "
-                        + "limit is spent.")
-                    SettingsHint(text: "*Gauge* starts from the middle: it grows right as you get "
-                        + "ahead of pace and left as you fall behind, so the quota you are not "
-                        + "getting to spend shows up too.")
+                // thing from a centred zero so the underpace side is drawn too.
+                //
+                // No hints under the row (#341): three paragraphs describing the styles cost more
+                // vertical space than they bought — the live dropdown preview beside the window
+                // (ADR-0083) shows each style the moment it is picked, which no amount of prose does.
+                HStack {
+                    Text("Bar style")
+                    Spacer()
+                    SegmentedControl(
+                        segments: AppearanceBarStyle.segments,
+                        active: model.menuBarStyle,
+                        onSelect: { model.setMenuBarStyle($0) })
                 }
 
                 // Calm non-critical colors (#224) — a three-way choice (merged the old Calm + Work
@@ -272,19 +265,14 @@ struct DropdownPane: View {
         Form {
             Section {
                 // Bar style, dropdown copy (#329) — the same three styles as the menu bar, chosen
-                // separately. One hint instead of the three on the Menu bar page: repeating the full
-                // descriptions would pad the page without adding anything.
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Bar style")
-                        Spacer()
-                        SegmentedControl(
-                            segments: AppearanceBarStyle.segments,
-                            active: model.dropdownStyle,
-                            onSelect: { model.setDropdownStyle($0) })
-                    }
-                    SettingsHint(text: "The same three styles, picked separately for the dropdown. "
-                        + "The roomier bars here can carry a denser style than the menu bar.")
+                // separately. No hint, as on the Menu bar page (#341): the preview shows the choice.
+                HStack {
+                    Text("Bar style")
+                    Spacer()
+                    SegmentedControl(
+                        segments: AppearanceBarStyle.segments,
+                        active: model.dropdownStyle,
+                        onSelect: { model.setDropdownStyle($0) })
                 }
 
                 // No `SettingsHint` under either row: the segment labels ("Always" / "Non-calm only" /
