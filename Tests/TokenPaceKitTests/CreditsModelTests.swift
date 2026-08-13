@@ -65,6 +65,19 @@ struct SpendInfoDecodeTests {
         #expect(spend.decimalPlaces == 2)
     }
 
+    /// ``Money/isZero`` tests the integer minor units, so it is exact at any exponent and in any
+    /// currency — including a zero-exponent currency, where `amountMinor` *is* the major amount. This
+    /// is the predicate behind the Extra-usage `.aboveZero` gate, so a false "zero" would hide real
+    /// spend.
+    @Test func moneyKnowsWhenItIsZero() {
+        #expect(Money(amountMinor: 0, currency: "EUR", exponent: 2).isZero)
+        #expect(!Money(amountMinor: 1, currency: "EUR", exponent: 2).isZero)      // one cent counts
+        #expect(!Money(amountMinor: 1077, currency: "EUR", exponent: 2).isZero)
+        #expect(Money(amountMinor: 0, currency: "JPY", exponent: 0).isZero)       // exponent-agnostic
+        #expect(!Money(amountMinor: 5, currency: "JPY", exponent: 0).isZero)
+        #expect(Money(amountMinor: 0, currency: "", exponent: 0).isZero)          // degraded decode
+    }
+
     /// State 2 — enabled within a €15.00 limit. Both `used` and `limit` are money objects; the
     /// currency travels with them (EUR, not USD).
     @Test func enabledWithinLimit() throws {

@@ -275,14 +275,15 @@ struct DropdownPane: View {
                         onSelect: { model.setDropdownStyle($0) })
                 }
 
-                // No `SettingsHint` under either row: the segment labels ("Always" / "Non-calm only" /
-                // "With ⌥ Option") already say when the group shows, and a hint repeating that would
-                // crowd two rows that sit directly above the plain "Show ticks" toggle.
+                // No `SettingsHint` under either row: the segment labels ("Always" / "Above zero" /
+                // "Non-calm only" / "With ⌥ Option") already say when the group shows, and a hint
+                // repeating that would crowd two rows that sit directly above the plain "Show ticks"
+                // toggle. The two rows offer *different* segment sets — see the constants below.
                 HStack {
                     Text("Show model & service limits")
                     Spacer()
                     SegmentedControl(
-                        segments: Self.visibilitySegments,
+                        segments: Self.modelLimitsSegments,
                         active: model.modelLimitsVisibility,
                         onSelect: { model.setModelLimitsVisibility($0) })
                 }
@@ -291,7 +292,7 @@ struct DropdownPane: View {
                     Text("Show extra usage")
                     Spacer()
                     SegmentedControl(
-                        segments: Self.visibilitySegments,
+                        segments: Self.extraUsageSegments,
                         active: model.extraUsageVisibility,
                         onSelect: { model.setExtraUsageVisibility($0) })
                 }
@@ -303,11 +304,21 @@ struct DropdownPane: View {
         .formStyle(.grouped)
     }
 
-    /// The three ``PopupSectionVisibility`` segments, shared by both rows above so they can never
-    /// drift apart. Labels are deliberately terse — three segments plus a full-width row title leave
-    /// no room for prose, which lives in each row's `SettingsHint` instead.
-    private static let visibilitySegments: [SegmentedControl<PopupSectionVisibility>.Segment] =
-        PopupSectionVisibility.allCases.map { .init(value: $0, title: $0.displayName) }
+    /// The two rows above offer **different** segment sets, so neither is built from `allCases` — both
+    /// are spelled out here, the way `AppearanceBarStyle.segments` is. Order is the declaration order
+    /// either way: loudest ("Always") to quietest ("With ⌥ Option").
+    ///
+    /// Labels are deliberately terse — four segments plus a full-width row title leave no room for
+    /// prose, and these rows carry no `SettingsHint` at all.
+    private static let modelLimitsSegments: [SegmentedControl<PopupSectionVisibility>.Segment] =
+        [.always, .aboveZero, .nonCalm, .optionOnly].map { .init(value: $0, title: $0.displayName) }
+
+    /// Extra usage omits `.nonCalm`. Credits severity comes from `credits.bar`, which is `nil` on an
+    /// **unlimited** money cap — so that mode would hide a paying user's spend forever — and when a cap
+    /// does exist, "spent > 0" always fires before orange, leaving the mode no behaviour of its own.
+    /// `.aboveZero` is what it becomes; stored `.nonCalm` values are migrated over in `PersistedConfig`.
+    private static let extraUsageSegments: [SegmentedControl<PopupSectionVisibility>.Segment] =
+        [.always, .aboveZero, .optionOnly].map { .init(value: $0, title: $0.displayName) }
 }
 
 // MARK: - Shared across the surface panes

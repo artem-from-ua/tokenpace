@@ -170,6 +170,23 @@ struct AppearancePresetValuesCodableTests {
         }
     }
 
+    /// The `.aboveZero` visibility crosses the wire as its own raw string. Covered indirectly by the
+    /// round-trip above (it is the shipped Extra-usage default), but pinned literally here: the raw is
+    /// storage, so a typo in it would silently reset everyone's choice on the next launch.
+    @Test func aboveZeroCrossesTheWireAsItsRawString() throws {
+        let json = """
+        { "showTicks" : true, "menuBarStyle" : "pressure", "dropdownStyle" : "pressure",
+          "calmColorMode" : "off", "calmBarHiding" : "never",
+          "pauseHidesBars" : false, "showExtraUsage" : true,
+          "showServiceStatusDot" : true, "awaitingInputInMenuBar" : true,
+          "modelLimitsVisibility" : "aboveZero", "extraUsageVisibility" : "aboveZero",
+          "resetCountdownModeMenuBar" : "always" }
+        """
+        let decoded = try JSONDecoder().decode(AppearancePresetValues.self, from: Data(json.utf8))
+        #expect(decoded.modelLimitsVisibility == .aboveZero)
+        #expect(decoded.extraUsageVisibility == .aboveZero)
+    }
+
     /// Decoding ignores key order (JSON objects are unordered), so a dump someone re-formatted or
     /// re-ordered by hand still reads back correctly.
     @Test func decodingIsOrderIndependent() throws {
