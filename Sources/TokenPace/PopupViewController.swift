@@ -959,10 +959,16 @@ final class SubscribeRowView: NSView {
         //
         // The text then starts where every service/incident name starts (dot width + gap), so the
         // two columns hold across the whole block.
+        //
+        // The glyph carries its own side bearing, so centring its box on the dots' axis still reads a
+        // touch left of them; `subscribeGlyphNudge` corrects that by eye (#351). The label keeps its
+        // own leading constant, so nudging the icon does not move the text column.
         let dotDiameter = PopupViewController.Metrics.statusDotDiameter
         let gap = PopupViewController.Metrics.statusDotGap
+        let glyphNudge = PopupViewController.Metrics.subscribeGlyphNudge
         NSLayoutConstraint.activate([
-            iconView.centerXAnchor.constraint(equalTo: leadingAnchor, constant: dotDiameter / 2),
+            iconView.centerXAnchor.constraint(
+                equalTo: leadingAnchor, constant: dotDiameter / 2 + glyphNudge),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: dotDiameter + gap),
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
@@ -1345,11 +1351,16 @@ final class PopupViewController: NSViewController {
         /// `sectionSpacing` so the limit list reads as a group without the header's larger breathing room.
         static let limitSpacing: CGFloat = 10
         static let textSize: CGFloat = dropdownTextSize
-        /// Diameter of the service-status glow dot (#188), the gap between it and the component name, and
-        /// the extra leading inset that pushes the dot in from the card's left edge.
+        /// Diameter of the service-status glow dot (#188) and the gap between it and the component name.
         static let statusDotDiameter: CGFloat = 9
         static let statusDotGap: CGFloat = 10
-        static let statusRowLeadingInset: CGFloat = 15
+        /// Optical nudge to the right for the status/incident dot, and for the subscribe row's glyph
+        /// (#351), measured from where each sat before. Both are aligned by eye against the left edge
+        /// of the text in the rows above ("5-hour", "7-day"): a round dot and a glyph with side
+        /// bearing each read as sitting slightly left of that column even when their boxes are flush —
+        /// and by different amounts, the bell needing twice the dot's correction.
+        static let statusDotNudge: CGFloat = 0.5
+        static let subscribeGlyphNudge: CGFloat = 1
         /// The inner content column width for fixed-width rows/labels — the popup width minus the card's
         /// outer inset on both sides minus the inner horizontal padding on both sides. Held constant at
         /// 252 pt (296 − 2·8 − 2·14) so bar/label wrapping is identical to before the card was added.
@@ -2219,9 +2230,13 @@ final class PopupViewController: NSViewController {
         let leadingLabel = NSStackView(views: [dot, nameLabel])
         leadingLabel.orientation = .horizontal
         leadingLabel.alignment = .centerY
-        leadingLabel.spacing = Metrics.statusDotGap
-        // Dot flush-left with the rest of the widget's text (no extra leading inset), so the status
-        // rows align on the same left edge as "5-hour"/"7-day" and the per-project rows (#233).
+        // The nudge moves the dot alone: it is taken out of the gap that follows, so the name still
+        // starts at `statusDotDiameter + statusDotGap` and the text column does not move (#351).
+        leadingLabel.spacing = Metrics.statusDotGap - Metrics.statusDotNudge
+        leadingLabel.edgeInsets = NSEdgeInsets(
+            top: 0, left: Metrics.statusDotNudge, bottom: 0, right: 0)
+        // Dot flush-left with the rest of the widget's text (bar the optical nudge above), so the
+        // status rows align on the same left edge as "5-hour"/"7-day" and the per-project rows (#233).
 
         // Trailing half, pinned flush-right: how long the component has been in this state, then the
         // status word. Operational → plain dimmed text (no link); otherwise → underlined link colour,
@@ -2411,7 +2426,10 @@ final class PopupViewController: NSViewController {
         let row = NSStackView(views: [dot, label])
         row.orientation = .horizontal
         row.alignment = .top
-        row.spacing = Metrics.statusDotGap
+        // Same optical nudge as the service rows, taken out of the following gap so the description
+        // column stays put — it is also what `incidentTextWidth` and the right tab stop assume.
+        row.spacing = Metrics.statusDotGap - Metrics.statusDotNudge
+        row.edgeInsets = NSEdgeInsets(top: 0, left: Metrics.statusDotNudge, bottom: 0, right: 0)
         row.translatesAutoresizingMaskIntoConstraints = false
         // Centre the dot on the **first line** of the wrapped description, so it sits against the
         // text exactly as a service row's dot does — those rows get it from `.centerY`, which a
