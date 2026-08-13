@@ -22,10 +22,7 @@ extension AppearancePresetValues: Codable {
     enum CodingKeys: String, CodingKey {
         case menuBarStyle               // Menu Bar Widget → "Bar style"
         case calmColorMode              // "Calm non-critical colors"
-        case awaitingInputInMenuBar     // "Show awaiting-input icon in the menu bar"
-        case pauseHidesBars             // "Pause icon hides bars"
-        case showExtraUsage             // "Show extra-usage credits icon"
-        case calmBarHiding              // "Hide the calm bar" (5-hour / 7-day / Never)
+        case calmBarHiding              // "Hide 5h (top) bar" (When it's calm / Never)
         case resetCountdownModeMenuBar  // "Show reset countdown"
         case showServiceStatusDot       // "Show service status dot on issues"
         case dropdownStyle              // Dropdown Widget → "Bar style"
@@ -55,9 +52,6 @@ extension AppearancePresetValues: Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(menuBarStyle, forKey: .menuBarStyle)
         try c.encode(calmColorMode, forKey: .calmColorMode)
-        try c.encode(awaitingInputInMenuBar, forKey: .awaitingInputInMenuBar)
-        try c.encode(pauseHidesBars, forKey: .pauseHidesBars)
-        try c.encode(showExtraUsage, forKey: .showExtraUsage)
         try c.encode(calmBarHiding, forKey: .calmBarHiding)
         try c.encode(resetCountdownModeMenuBar, forKey: .resetCountdownModeMenuBar)
         try c.encode(showServiceStatusDot, forKey: .showServiceStatusDot)
@@ -79,9 +73,13 @@ extension AppearancePresetValues: Codable {
     ///   importing an old dump and upgrading in place agree. A `"mixed"` dump therefore lands as
     ///   Pressure + Progress, exactly what that build drew.
     /// - **Before ADR-0086** the calm-bar choice was the boolean `hideCalmSevenDayBar`. It maps onto the
-    ///   tri-state through `CalmBarHiding.migrated(fromLegacyHide:)` — again the same call the
-    ///   `UserDefaults` migration makes. A dump with neither key falls back to `.sevenDay`, the
-    ///   semantics any build old enough to omit both was drawing.
+    ///   enum through `CalmBarHiding.migrated(fromLegacyHide:)` — again the same call the `UserDefaults`
+    ///   migration makes. A dump with neither key falls back to `.fiveHour`: any build old enough to
+    ///   omit both was drawing one bar while calm, which is what that case still means.
+    ///
+    /// Keys retired by ADR-0090 (`pauseHidesBars`, `showExtraUsage`, `awaitingInputInMenuBar`) need no
+    /// case at all — `Codable` ignores unknown JSON keys, so a dump written by an older build still
+    /// imports, exactly as the retired `farBehindInterval` key does.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
 
@@ -95,15 +93,12 @@ extension AppearancePresetValues: Codable {
         let legacyHide = try c.decodeIfPresent(Bool.self, forKey: .hideCalmSevenDayBar)
         let calmBarHiding = try c.decodeIfPresent(CalmBarHiding.self, forKey: .calmBarHiding)
             ?? legacyHide.map(CalmBarHiding.migrated(fromLegacyHide:))
-            ?? .sevenDay
+            ?? .fiveHour
 
         self.init(
             calmColorMode: try c.decode(CalmColorMode.self, forKey: .calmColorMode),
             calmBarHiding: calmBarHiding,
-            pauseHidesBars: try c.decode(Bool.self, forKey: .pauseHidesBars),
-            showExtraUsage: try c.decode(Bool.self, forKey: .showExtraUsage),
             showServiceStatusDot: try c.decode(Bool.self, forKey: .showServiceStatusDot),
-            awaitingInputInMenuBar: try c.decode(Bool.self, forKey: .awaitingInputInMenuBar),
             modelLimitsVisibility: try c.decode(PopupSectionVisibility.self, forKey: .modelLimitsVisibility),
             extraUsageVisibility: try c.decode(PopupSectionVisibility.self, forKey: .extraUsageVisibility),
             resetCountdownModeMenuBar: try c.decode(ResetCountdownMode.self, forKey: .resetCountdownModeMenuBar),
@@ -123,7 +118,7 @@ extension AppearancePresetValues: Codable {
 /// makes answering "what does your setup look like?" one click instead of a screenshot tour.
 ///
 /// Deliberately **Appearance-only**, unlike the full `PersistedConfig` dump proposed in #256: these
-/// thirteen keys are pure presentation — no filesystem paths, no account names, no working hours —
+/// nine keys are pure presentation — no filesystem paths, no account names, no working hours —
 /// so a dump can be pasted into an issue without reading it first. Widening this to other panes
 /// requires a per-key privacy pass first (#256).
 ///
@@ -136,7 +131,7 @@ public enum AppearanceConfigExport {
     /// never disappears from the dump.
     public static let customPresetName = "custom"
 
-    /// Build the clipboard JSON: the app version and active preset as metadata, and the thirteen
+    /// Build the clipboard JSON: the app version and active preset as metadata, and the nine
     /// Appearance values under `appearance` **in pane order** (see the `Codable` extension above).
     ///
     /// No export timestamp on purpose: it would make two dumps of an unchanged config differ, which
@@ -170,9 +165,6 @@ public enum AppearanceConfigExport {
         let appearance: [(String, String)] = [
             ("menuBarStyle", jsonString(v.menuBarStyle.rawValue)),
             ("calmColorMode", jsonString(v.calmColorMode.rawValue)),
-            ("awaitingInputInMenuBar", jsonBool(v.awaitingInputInMenuBar)),
-            ("pauseHidesBars", jsonBool(v.pauseHidesBars)),
-            ("showExtraUsage", jsonBool(v.showExtraUsage)),
             ("calmBarHiding", jsonString(v.calmBarHiding.rawValue)),
             ("resetCountdownModeMenuBar", jsonString(v.resetCountdownModeMenuBar.rawValue)),
             ("showServiceStatusDot", jsonBool(v.showServiceStatusDot)),

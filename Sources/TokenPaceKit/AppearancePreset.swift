@@ -7,7 +7,7 @@ import Foundation
 /// visibility (#215, #224, #329).
 /// Generalises the single "Reset to defaults" row from #214: `.chill` is the calm, quiet look
 /// (simplified bars), `.workHarder` is `.chill` plus the coloured far-behind blue, `.controlFreak`
-/// turns everything on (dense pacing bars). Applying a preset writes all thirteen keys at once via
+/// turns everything on (dense pacing bars). Applying a preset writes all nine keys at once via
 /// `PersistedConfig.apply(_:)`.
 ///
 /// Each preset picks **one** ``BarStyle`` and gives it to both surfaces (#329) — the presets are the
@@ -33,7 +33,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
     /// **Progress** bars with the time marker (#224).
     case controlFreak = "controlFreak"
 
-    /// The fixed value set this preset writes to the thirteen Appearance keys. Stored in the **as-persisted**
+    /// The fixed value set this preset writes to the nine Appearance keys. Stored in the **as-persisted**
     /// sense, matching `PersistedConfig`. Since ADR-0086 every value here is stored exactly as the pane
     /// shows it — the old `hideCalmSevenDayBar` was the last inverted one ("Show …" in the UI, *hide* in
     /// storage), and its tri-state replacement `calmBarHiding` names the hidden bar directly.
@@ -46,10 +46,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
             return AppearancePresetValues(
                 calmColorMode: .yellowGreenBlue,   // greens/yellows AND far-behind blue all mute
                 calmBarHiding: .fiveHour,   // quiet 5h steps aside; the weekly bar is the one that stays
-                pauseHidesBars: true,   // when blocked, show only the pause icon (bars hidden)
-                showExtraUsage: true,
                 showServiceStatusDot: true,
-                awaitingInputInMenuBar: false,   // calm look: awaiting hand stays in the popup only
                 // The dropdown stays quiet too, but the two groups are quiet about different things:
                 // per-model rows wait for orange/red, credits only for the first cent actually spent
                 // (money has no calm/loud reading, and an unlimited cap has no severity at all).
@@ -68,10 +65,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
             return AppearancePresetValues(
                 calmColorMode: .yellowGreen,   // greens/yellows mute; far-behind blue stays coloured
                 calmBarHiding: .fiveHour,   // same quiet default as `.chill` — and the factory default
-                pauseHidesBars: false,   // when blocked, keep the bars beside the pause icon
-                showExtraUsage: true,
                 showServiceStatusDot: true,
-                awaitingInputInMenuBar: true,   // work harder: surface the awaiting hand in the menu bar
                 // Same quiet dropdown as `.chill` — the extra loudness of this preset is in the menu
                 // bar (blue far-behind, ticks), not in permanently expanded popup sections.
                 modelLimitsVisibility: .nonCalm,
@@ -87,10 +81,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
             return AppearancePresetValues(
                 calmColorMode: .off,   // nothing muted — every state keeps its colour (loud)
                 calmBarHiding: .never,   // both bars always on screen, however calm
-                pauseHidesBars: false,   // when blocked, keep the bars beside the pause icon
-                showExtraUsage: true,
                 showServiceStatusDot: true,
-                awaitingInputInMenuBar: true,   // control freak: everything on, incl. the awaiting hand
                 // Nothing in the dropdown is ever folded away — every row on screen, always.
                 modelLimitsVisibility: .always,
                 extraUsageVisibility: .always,
@@ -132,31 +123,22 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
 
 // MARK: - AppearancePresetValues
 
-/// The thirteen Appearance-pane values a preset sets, in the same **as-persisted** sense as
-/// `PersistedConfig` — which, since ADR-0086, is also exactly what each pane row shows (`pauseHidesBars`
-/// included; the inverted `hideCalmSevenDayBar` was the last exception).
+/// The nine Appearance-pane values a preset sets, in the same **as-persisted** sense as
+/// `PersistedConfig` — which is also exactly what each pane row shows (the inverted
+/// `hideCalmSevenDayBar` was the last exception, retired with ADR-0086).
 public struct AppearancePresetValues: Sendable, Equatable {
     public let calmColorMode: CalmColorMode
     /// Which menu-bar bar steps aside while it is calm (ADR-0086). Replaced the boolean that could only
     /// hide the 7-day one; the calmer presets now hide the **5-hour** bar, so the weekly context is what
     /// stays on screen when nothing needs attention.
     public let calmBarHiding: CalmBarHiding
-    /// When the user is fully blocked (`CreditsPacing.isBlocked`), whether the red pause icon **hides**
-    /// the pacing bars (`true` → icon only) or keeps them beside it (`false` → icon + bars). The pause
-    /// icon itself is always drawn when blocked, independent of this flag (#199, #227).
-    public let pauseHidesBars: Bool
-    public let showExtraUsage: Bool
     public let showServiceStatusDot: Bool
-    /// Whether the awaiting-input `hand.raised` indicator is shown in the menu bar (#233). The popup
-    /// always shows it while the feature is on; this only governs the menu-bar copy. Meaningful only
-    /// when the master toggle (`awaitingInputEnabled`, on the Appearance page) is on.
-    public let awaitingInputInMenuBar: Bool
     /// When the **dropdown** lists the per-model / per-service 7-day rows (#211). Was a boolean opt-out
     /// before the tri-state; the calmer presets now use `.nonCalm` so the rows surface only when one of
     /// them turns orange/red (or ⌥ is held).
     public let modelLimitsVisibility: PopupSectionVisibility
     /// When the **dropdown** shows the "Extra usage" credits section. Independent of
-    /// ``showExtraUsage``, which governs the menu-bar credits icon.
+    /// the menu-bar credits icon, which is data-driven and has no user gate (ADR-0090).
     public let extraUsageVisibility: PopupSectionVisibility
     public let resetCountdownModeMenuBar: ResetCountdownMode
     /// How the **menu-bar** widget draws its bars (#329). Chosen independently of ``dropdownStyle``:
@@ -172,10 +154,7 @@ public struct AppearancePresetValues: Sendable, Equatable {
     public init(
         calmColorMode: CalmColorMode,
         calmBarHiding: CalmBarHiding,
-        pauseHidesBars: Bool,
-        showExtraUsage: Bool,
         showServiceStatusDot: Bool,
-        awaitingInputInMenuBar: Bool,
         modelLimitsVisibility: PopupSectionVisibility,
         extraUsageVisibility: PopupSectionVisibility,
         resetCountdownModeMenuBar: ResetCountdownMode,
@@ -185,10 +164,7 @@ public struct AppearancePresetValues: Sendable, Equatable {
     ) {
         self.calmColorMode = calmColorMode
         self.calmBarHiding = calmBarHiding
-        self.pauseHidesBars = pauseHidesBars
-        self.showExtraUsage = showExtraUsage
         self.showServiceStatusDot = showServiceStatusDot
-        self.awaitingInputInMenuBar = awaitingInputInMenuBar
         self.modelLimitsVisibility = modelLimitsVisibility
         self.extraUsageVisibility = extraUsageVisibility
         self.resetCountdownModeMenuBar = resetCountdownModeMenuBar

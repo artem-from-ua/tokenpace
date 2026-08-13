@@ -475,17 +475,14 @@ final class StatusItemView: NSView {
     /// window and at the exact moment the user is already looking at the widget for that reason, so
     /// their jump explains itself and stays as it is.
     ///
-    /// This changes what the existing toggle means: "Show in menu bar" reserves the slot rather than
-    /// describing what is on screen this second. Users who keep the indicator off pay nothing.
+    /// So switching the feature on means "reserve the slot", not "the hand is on screen this second".
+    /// Users who keep the indicator off pay nothing.
     ///
-    /// **Both** flags, not just the placement one. Turning the Extra-features master off only
-    /// *disables* the Appearance toggle — its stored value stays `true` — so reading the placement
-    /// flag alone would keep ≈18 pt reserved for a feature the user has switched off entirely. The
-    /// condition this replaced happened to cover that case through the data (`awaitingInput` is
-    /// always nil while the master is off), which is exactly why it needs restating now that the
-    /// reservation no longer looks at the data.
+    /// One flag since ADR-0090: the separate Appearance placement toggle is gone, so detecting waiting
+    /// sessions and showing them in the menu bar are the same decision. The reservation therefore keys
+    /// off the master switch alone — which is also the flag that makes the ≈18 pt worth paying for.
     private var reservesAwaitingSlot: Bool {
-        PersistedConfig.awaitingInputEnabled && PersistedConfig.awaitingInputInMenuBar
+        PersistedConfig.awaitingInputEnabled
     }
 
     /// Draw the small service-status dot at the **right edge** of `rect`, vertically centred — the

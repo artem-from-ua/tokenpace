@@ -150,11 +150,6 @@ final class SettingsWindowController: NSWindowController {
         get { model.onServiceDotChange } set { model.onServiceDotChange = newValue }
     }
 
-    /// Called when the user toggles "Show extra-usage credits icon" (#146), with the new state.
-    var onExtraUsageChange: ((Bool) -> Void)? {
-        get { model.onExtraUsageChange } set { model.onExtraUsageChange = newValue }
-    }
-
     /// Called when the user changes when "Show model & service limits" appears (#211), with the new mode.
     var onModelLimitsVisibilityChange: ((PopupSectionVisibility) -> Void)? {
         get { model.onModelLimitsVisibilityChange } set { model.onModelLimitsVisibilityChange = newValue }
@@ -168,12 +163,6 @@ final class SettingsWindowController: NSWindowController {
     /// Called when the user picks a "Hide the calm bar" segment (ADR-0086), with the new mode.
     var onCalmBarHidingChange: ((CalmBarHiding) -> Void)? {
         get { model.onCalmBarHidingChange } set { model.onCalmBarHidingChange = newValue }
-    }
-
-    /// Called when the user toggles "Pause icon hides bars" (#194, #227), with the new state — `true`
-    /// hides the bars when fully blocked (pause icon only), `false` keeps them beside the icon.
-    var onPauseHidesBarsChange: ((Bool) -> Void)? {
-        get { model.onPauseHidesBarsChange } set { model.onPauseHidesBarsChange = newValue }
     }
 
     /// Called when the user toggles "Pause polling while the screen is locked" (#114).

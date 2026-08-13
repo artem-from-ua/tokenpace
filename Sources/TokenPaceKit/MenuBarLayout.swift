@@ -95,9 +95,10 @@ public enum MenuBarMode: Sendable, Equatable {
     ///   - fiveHour: The 5-hour bar (drawn on top), or `nil` when it is **hidden** because it is calm
     ///     and the user picked `CalmBarHiding.fiveHour`. An **idle** 5-hour bar counts as calm, so it is
     ///     hidden too — between sessions the widget then shows the 7-day bar alone.
-    ///   - sevenDay: The 7-day bar (drawn below), or `nil` when it is hidden for the same reason under
-    ///     `CalmBarHiding.sevenDay` (the #94 behaviour). Independent of `resetToShow`: hiding a bar does
-    ///     not change which reset is shown — `selectReset` runs on the true severities either way.
+    ///   - sevenDay: The 7-day bar (drawn below). Never elided since ADR-0090 — the calm-hiding choice
+    ///     names only the 5-hour bar — but kept optional so the shape still mirrors ``error``, whose
+    ///     `nil` means absent data. Independent of `resetToShow`: hiding a bar does not change which
+    ///     reset is shown — `selectReset` runs on the true severities either way.
     ///   - resetToShow: The countdown to draw and which window drives it, or `nil` to draw no
     ///     countdown. Computed by `MenuBarLayout.selectReset` from the 5h×7d severity table and the
     ///     user's `ResetCountdownMode` (#103, ADR-0029) — the view just draws what it is given.
@@ -286,7 +287,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// can't cover — no path to work), always — the icon is not user-optional. The view draws it left of
     /// the bars in ``MenuBarMode/expanded`` and left of the countdown in the bars-less
     /// ``MenuBarMode/blockedReset`` (#194). Whether the bars are kept beside it or hidden is the separate
-    /// `PersistedConfig.pauseHidesBars` toggle (decided in `make` before this decoration). Never `true`
+    /// bars-less answer `make` already chose before this decoration. Never `true`
     /// for the diagnostic ``MenuBarMode/error`` state. Orthogonal to `mode` — a leading decoration,
     /// computed at the health-aware `make` seam like `credits`. When `false`, no glyph is drawn and no
     /// width is reserved.
@@ -652,7 +653,7 @@ public struct MenuBarLayout: Sendable, Equatable {
 
     /// A copy of this layout carrying `serviceProblem`, `credits`, and `blockedPause` (the `mode` is
     /// unchanged) — the decorations grafted onto the usage `mode` computed by
-    /// ``usageMode(from:health:now:resetMode:hideCalmBar:pauseHidesBars:)``.
+    /// ``usageMode(from:health:now:resetMode:hideCalmBar:monitoringAnything:)``.
     func with(serviceProblem: ServiceStatus?, credits: CreditsMarker?, blockedPause: Bool,
               awaitingInput: AwaitingSessions? = nil) -> MenuBarLayout {
         MenuBarLayout(mode: mode, serviceProblem: serviceProblem, credits: credits,

@@ -793,37 +793,6 @@ struct MenuBarLayoutHideCalmBarTests {
         #expect(e.seven?.isCalm == true)
     }
 
-    // MARK: .sevenDay (the #94 behaviour)
-
-    @Test func calmSevenDayIsHidden() {
-        // Calm 7-day + `.sevenDay` → 7-day dropped, 5h bar alone.
-        let layout = MenuBarLayout.expandedBars(
-            for: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), now: now, hideCalmBar: .sevenDay)
-        guard let e = expanded(layout) else { return }
-        #expect(e.seven == nil)
-        #expect(e.five?.window == .fiveHour)
-        #expect(e.five?.idle == false)
-    }
-
-    @Test func orangeSevenDayStaysVisible() {
-        // Ahead-of-pace (orange) 7-day is noisy → kept even when it is the chosen bar.
-        let layout = MenuBarLayout.expandedBars(
-            for: snapshot(fiveHourUtil: 50, sevenDayUtil: 55, sevenDayResetsIn: 6 * 24 * 3600),
-            now: now, hideCalmBar: .sevenDay)
-        guard let e = expanded(layout) else { return }
-        #expect(e.seven != nil)
-        #expect(e.seven?.severity == .ahead)
-    }
-
-    @Test func redSevenDayStaysVisible() {
-        // Exhausted (red) 7-day is noisy → kept even when it is the chosen bar.
-        let layout = MenuBarLayout.expandedBars(
-            for: snapshot(fiveHourUtil: 50, sevenDayUtil: 100), now: now, hideCalmBar: .sevenDay)
-        guard let e = expanded(layout) else { return }
-        #expect(e.seven != nil)
-        #expect(e.seven?.severity == .exhausted)
-    }
-
     // MARK: .fiveHour (the mirror image)
 
     @Test func calmFiveHourIsHidden() {
@@ -854,24 +823,6 @@ struct MenuBarLayoutHideCalmBarTests {
     }
 
     // MARK: session-idle
-
-    @Test func sessionIdleWithCalmSevenDayLeavesOnlyIdleFive() {
-        // Session-idle 5h + calm 7-day + `.sevenDay` → only the idle 5h bar, centred (7-day dropped).
-        let layout = MenuBarLayout.expandedBars(
-            for: idleSnapshot(sevenDayUtil: 20), now: now, hideCalmBar: .sevenDay)
-        guard let e = expanded(layout) else { return }
-        #expect(e.seven == nil)
-        #expect(e.five?.idle == true)
-    }
-
-    @Test func sessionIdleWithNoisySevenDayKeepsIt() {
-        // Session-idle 5h + a noisy (red) 7-day + `.sevenDay` → the 7-day bar stays; 5h idle rides above.
-        let layout = MenuBarLayout.expandedBars(
-            for: idleSnapshot(sevenDayUtil: 100), now: now, hideCalmBar: .sevenDay)
-        guard let e = expanded(layout) else { return }
-        #expect(e.seven != nil)
-        #expect(e.five?.idle == true)
-    }
 
     @Test func idleFiveHourIsHiddenToo() {
         // The deliberate no-exemption case (ADR-0086): an idle 5h bar reports `.calm`, so `.fiveHour`
@@ -941,17 +892,6 @@ struct MenuBarLayoutHideCalmBarTests {
     }
 
     // MARK: reset selection
-
-    @Test func resetSelectionUnaffectedByHidingSevenDay() {
-        // Hiding the calm 7-day bar does not change the reset countdown: 5h noisy + 7d calm → 5h reset,
-        // identical whether or not the bar is elided.
-        let snap = snapshot(fiveHourUtil: 50, sevenDayUtil: 30)
-        let hidden = MenuBarLayout.expandedBars(for: snap, now: now, hideCalmBar: .sevenDay)
-        let shown = MenuBarLayout.expandedBars(for: snap, now: now, hideCalmBar: .never)
-        guard let eh = expanded(hidden), let es = expanded(shown) else { return }
-        #expect(eh.resetToShow?.which == .fiveHour)
-        #expect(eh.resetToShow == es.resetToShow)   // same countdown, bar presence aside
-    }
 
     @Test func resetSelectionUnaffectedByHidingFiveHour() {
         // Mirror image: eliding the calm 5h bar leaves the countdown exactly as it was — `selectReset`

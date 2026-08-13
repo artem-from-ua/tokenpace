@@ -201,7 +201,7 @@ public struct BarLayout: Sendable, Equatable {
     /// Edge cases:
     /// - **`u >= 1` (exhausted)** is a full bar at any `t`. Deliberate: a shrinking red bar reads as
     ///   "the problem is easing" while work is still blocked. Time-to-reset is carried by the
-    ///   countdown, the pause glyph and `pauseHidesBars`.
+    ///   countdown and the pause glyph.
     /// - **`t = 1`** (reset due/past) would divide by zero. No time is left to press against, so the
     ///   bar is full — including the `u == t == 1` tie, which the exhausted check above catches first.
     ///

@@ -35,17 +35,16 @@ final class SettingsModel {
     var onDropdownStyleChange: ((BarStyle) -> Void)?
     var onShowTicksChange: ((Bool) -> Void)?
     var onServiceDotChange: ((Bool) -> Void)?
-    var onExtraUsageChange: ((Bool) -> Void)?
     var onModelLimitsVisibilityChange: ((PopupSectionVisibility) -> Void)?
     var onExtraUsageVisibilityChange: ((PopupSectionVisibility) -> Void)?
     var onCalmBarHidingChange: ((CalmBarHiding) -> Void)?
-    var onPauseHidesBarsChange: ((Bool) -> Void)?
     var onPausePollingChange: ((Bool) -> Void)?
     /// Master toggle for the awaiting-input indicator flipped (#233) — the shell starts/stops the
     /// `AwaitingInputWatcher` and re-renders.
     var onAwaitingInputEnabledChange: ((Bool) -> Void)?
-    /// An awaiting-input **appearance** option changed (e.g. left-of-pause placement, #233) — the
-    /// shell just re-renders from the last snapshot; no watcher restart needed.
+    /// An awaiting-input **appearance** option changed — the shell just re-renders from the last
+    /// snapshot; no watcher restart needed. Still fired after a preset/reset (#233): the reserved slot
+    /// follows `awaitingInputEnabled`, which those can flip.
     var onAwaitingInputAppearanceChange: (() -> Void)?
     var onArchiveNow: (() -> Void)?
     var onBackToWorkEnabled: ((@escaping @MainActor (BackToWorkNotifier.AuthState) -> Void) -> Void)?
@@ -194,8 +193,6 @@ final class SettingsModel {
     /// Which menu-bar bar steps aside while it is calm (ADR-0086) — the tri-state that replaced the
     /// boolean "Show 7-day bar when calm" checkbox.
     var calmBarHiding: CalmBarHiding = .fiveHour
-    var pauseHidesBars = false
-    var showExtraUsage = false
     /// When the popup lists the per-model 7-day limit rows (Opus/Sonnet/scoped, #211). A popup
     /// concern, not a menu-bar one — shown under the separate "Dropdown Widget" section of the pane.
     var modelLimitsVisibility: PopupSectionVisibility = .nonCalm
@@ -287,7 +284,6 @@ final class SettingsModel {
     /// Appearance option: also show the indicator in the menu bar (first leading element, bare icon,
     /// no count), in addition to the popup. Default-off. Only meaningful while ``awaitingInputEnabled``
     /// is on.
-    var awaitingInputInMenuBar = false
 
     // MARK: About / Updates (#37)
 
@@ -406,10 +402,7 @@ final class SettingsModel {
         AppearancePresetValues(
             calmColorMode: calmColorMode,
             calmBarHiding: calmBarHiding,
-            pauseHidesBars: pauseHidesBars,
-            showExtraUsage: showExtraUsage,
             showServiceStatusDot: showServiceDot,
-            awaitingInputInMenuBar: awaitingInputInMenuBar,
             modelLimitsVisibility: modelLimitsVisibility,
             extraUsageVisibility: extraUsageVisibility,
             resetCountdownModeMenuBar: ResetCountdownMode.from(radio: resetRadio),
@@ -531,8 +524,6 @@ final class SettingsModel {
 
         calmColorMode = PersistedConfig.calmColorMode
         calmBarHiding = PersistedConfig.calmBarHiding
-        pauseHidesBars = PersistedConfig.pauseHidesBars
-        showExtraUsage = PersistedConfig.showExtraUsage
         modelLimitsVisibility = PersistedConfig.modelLimitsVisibility
         extraUsageVisibility = PersistedConfig.extraUsageVisibility
         showServiceDot = PersistedConfig.showServiceStatusDot
@@ -568,7 +559,6 @@ final class SettingsModel {
         refreshArchiveStatus()
 
         awaitingInputEnabled = PersistedConfig.awaitingInputEnabled
-        awaitingInputInMenuBar = PersistedConfig.awaitingInputInMenuBar
 
         journalEnabled = PersistedConfig.journalEnabled
     }
@@ -596,12 +586,6 @@ final class SettingsModel {
         AppLogger.lifecycle.notice("journal: enabled set \(on, privacy: .public)")
     }
 
-    func setAwaitingInputInMenuBar(_ on: Bool) {
-        awaitingInputInMenuBar = on
-        PersistedConfig.awaitingInputInMenuBar = on
-        onAwaitingInputAppearanceChange?()
-    }
-
     func setCalmColorMode(_ mode: CalmColorMode) {
         calmColorMode = mode
         PersistedConfig.calmColorMode = mode
@@ -614,20 +598,6 @@ final class SettingsModel {
         PersistedConfig.calmBarHiding = mode
         AppLogger.lifecycle.notice("hide-calm-bar: menu-bar set \(mode.rawValue, privacy: .public)")
         onCalmBarHidingChange?(mode)
-    }
-
-    func setPauseHidesBars(_ on: Bool) {
-        pauseHidesBars = on
-        PersistedConfig.pauseHidesBars = on
-        AppLogger.lifecycle.notice("pause-hides-bars: menu-bar set \(on, privacy: .public)")
-        onPauseHidesBarsChange?(on)
-    }
-
-    func setShowExtraUsage(_ on: Bool) {
-        showExtraUsage = on
-        PersistedConfig.showExtraUsage = on
-        AppLogger.lifecycle.notice("extra-usage-icon: menu-bar set \(on, privacy: .public)")
-        onExtraUsageChange?(on)
     }
 
     func setModelLimitsVisibility(_ mode: PopupSectionVisibility) {
@@ -753,8 +723,6 @@ final class SettingsModel {
     private func fireAppearanceCallbacks() {
         onCalmColorModeChange?(calmColorMode)
         onCalmBarHidingChange?(calmBarHiding)
-        onPauseHidesBarsChange?(pauseHidesBars)
-        onExtraUsageChange?(showExtraUsage)
         onModelLimitsVisibilityChange?(modelLimitsVisibility)
         onExtraUsageVisibilityChange?(extraUsageVisibility)
         onServiceDotChange?(showServiceDot)
