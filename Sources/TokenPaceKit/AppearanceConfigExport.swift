@@ -25,7 +25,7 @@ extension AppearancePresetValues: Codable {
         case awaitingInputInMenuBar     // "Show awaiting-input icon in the menu bar"
         case pauseHidesBars             // "Pause icon hides bars"
         case showExtraUsage             // "Show extra-usage credits icon"
-        case hideCalmSevenDayBar        // "Show 7-day bar when calm" (stored inverted, as a *hide* flag)
+        case calmBarHiding              // "Hide the calm bar" (5-hour / 7-day / Never)
         case resetCountdownModeMenuBar  // "Show reset countdown"
         case showServiceStatusDot       // "Show service status dot on issues"
         case dropdownStyle              // Dropdown Widget → "Bar style"
@@ -37,6 +37,12 @@ extension AppearancePresetValues: Codable {
         /// exported by an older build still imports, splitting into the two per-surface keys via
         /// `BarStyle.legacySurfaceStyles(for:)`.
         case barStyle
+
+        /// The pre-ADR-0086 boolean "hide the calm 7-day bar" key, read-only. Not emitted — it exists so
+        /// a config exported by an older build still imports, mapping onto the tri-state via
+        /// `CalmBarHiding.migrated(fromLegacyHide:)` (the same call the `UserDefaults` migration makes,
+        /// so importing an old dump and upgrading in place agree).
+        case hideCalmSevenDayBar
 
         // A retired `farBehindInterval` key needs no case at all: `Codable` ignores unknown JSON keys,
         // so a config exported before the far-behind width was fixed still imports cleanly.
@@ -52,7 +58,7 @@ extension AppearancePresetValues: Codable {
         try c.encode(awaitingInputInMenuBar, forKey: .awaitingInputInMenuBar)
         try c.encode(pauseHidesBars, forKey: .pauseHidesBars)
         try c.encode(showExtraUsage, forKey: .showExtraUsage)
-        try c.encode(hideCalmSevenDayBar, forKey: .hideCalmSevenDayBar)
+        try c.encode(calmBarHiding, forKey: .calmBarHiding)
         try c.encode(resetCountdownModeMenuBar, forKey: .resetCountdownModeMenuBar)
         try c.encode(showServiceStatusDot, forKey: .showServiceStatusDot)
         try c.encode(dropdownStyle, forKey: .dropdownStyle)
@@ -65,11 +71,17 @@ extension AppearancePresetValues: Codable {
     /// mirror the key names. Present so a dump round-trips back into a value set — the guarantee that
     /// the export really describes the config.
     ///
-    /// The one place it does more than mirror: a config exported **before #329** carries a single
-    /// `barStyle` key instead of the per-surface pair. It is split here — the level that knows which
-    /// key belongs to which surface — through `BarStyle.legacySurfaceStyles(for:)`, the same call the
-    /// `UserDefaults` migration makes, so importing an old dump and upgrading in place agree. A
-    /// `"mixed"` dump therefore lands as Pressure + Progress, exactly what that build drew.
+    /// The two places it does more than mirror, both for configs exported by older builds:
+    ///
+    /// - **Before #329** a single `barStyle` key stood in for the per-surface pair. It is split here —
+    ///   the level that knows which key belongs to which surface — through
+    ///   `BarStyle.legacySurfaceStyles(for:)`, the same call the `UserDefaults` migration makes, so
+    ///   importing an old dump and upgrading in place agree. A `"mixed"` dump therefore lands as
+    ///   Pressure + Progress, exactly what that build drew.
+    /// - **Before ADR-0086** the calm-bar choice was the boolean `hideCalmSevenDayBar`. It maps onto the
+    ///   tri-state through `CalmBarHiding.migrated(fromLegacyHide:)` — again the same call the
+    ///   `UserDefaults` migration makes. A dump with neither key falls back to `.sevenDay`, the
+    ///   semantics any build old enough to omit both was drawing.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
 
@@ -80,9 +92,14 @@ extension AppearancePresetValues: Codable {
         let dropdownStyle = try c.decodeIfPresent(BarStyle.self, forKey: .dropdownStyle)
             ?? legacy?.dropdown ?? AppearancePreset.defaultValues.dropdownStyle
 
+        let legacyHide = try c.decodeIfPresent(Bool.self, forKey: .hideCalmSevenDayBar)
+        let calmBarHiding = try c.decodeIfPresent(CalmBarHiding.self, forKey: .calmBarHiding)
+            ?? legacyHide.map(CalmBarHiding.migrated(fromLegacyHide:))
+            ?? .sevenDay
+
         self.init(
             calmColorMode: try c.decode(CalmColorMode.self, forKey: .calmColorMode),
-            hideCalmSevenDayBar: try c.decode(Bool.self, forKey: .hideCalmSevenDayBar),
+            calmBarHiding: calmBarHiding,
             pauseHidesBars: try c.decode(Bool.self, forKey: .pauseHidesBars),
             showExtraUsage: try c.decode(Bool.self, forKey: .showExtraUsage),
             showServiceStatusDot: try c.decode(Bool.self, forKey: .showServiceStatusDot),
@@ -156,7 +173,7 @@ public enum AppearanceConfigExport {
             ("awaitingInputInMenuBar", jsonBool(v.awaitingInputInMenuBar)),
             ("pauseHidesBars", jsonBool(v.pauseHidesBars)),
             ("showExtraUsage", jsonBool(v.showExtraUsage)),
-            ("hideCalmSevenDayBar", jsonBool(v.hideCalmSevenDayBar)),
+            ("calmBarHiding", jsonString(v.calmBarHiding.rawValue)),
             ("resetCountdownModeMenuBar", jsonString(v.resetCountdownModeMenuBar.rawValue)),
             ("showServiceStatusDot", jsonBool(v.showServiceStatusDot)),
             ("dropdownStyle", jsonString(v.dropdownStyle.rawValue)),

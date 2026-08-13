@@ -82,18 +82,26 @@ public struct BarView: Sendable, Equatable {
 public enum MenuBarMode: Sendable, Equatable {
     /// Full widget: 5h bar, 7d bar, and an optional reset countdown.
     ///
+    /// Either bar may be `nil` — whichever one the user chose to hide while it is calm
+    /// (``CalmBarHiding``, ADR-0086; the boolean predecessor could only ever hide the 7-day one).
+    /// A `nil` here **never** means "no data": both windows always resolve on this path, so it means
+    /// "deliberately not drawn". That is the opposite of ``error``, where `nil` *is* absent data.
+    ///
+    /// **Invariant: at most one of the two is `nil`.** `CalmBarHiding` names a single window, so it can
+    /// elide at most one bar whatever the severities are — the widget never renders empty, and the view's
+    /// "no bars at all" branch is unreachable. See `CalmBarHiding`'s own note for the argument.
+    ///
     /// - Parameters:
-    ///   - fiveHour: The 5-hour bar (drawn on top, or alone and vertically centred when `sevenDay`
-    ///     is `nil`).
-    ///   - sevenDay: The 7-day bar (drawn below), or `nil` when it is **hidden** because it is calm
-    ///     and the user opted into the quieter single-bar look (`hideCalmSevenDay`, #94). The view
-    ///     then draws only the 5h bar, vertically centred. `nil` never means "no data" — an absent
-    ///     7-day window is impossible here (both windows always resolve); it means "deliberately not
-    ///     drawn". Independent of `resetToShow`: hiding the bar does not change which reset is shown.
+    ///   - fiveHour: The 5-hour bar (drawn on top), or `nil` when it is **hidden** because it is calm
+    ///     and the user picked `CalmBarHiding.fiveHour`. An **idle** 5-hour bar counts as calm, so it is
+    ///     hidden too — between sessions the widget then shows the 7-day bar alone.
+    ///   - sevenDay: The 7-day bar (drawn below), or `nil` when it is hidden for the same reason under
+    ///     `CalmBarHiding.sevenDay` (the #94 behaviour). Independent of `resetToShow`: hiding a bar does
+    ///     not change which reset is shown — `selectReset` runs on the true severities either way.
     ///   - resetToShow: The countdown to draw and which window drives it, or `nil` to draw no
     ///     countdown. Computed by `MenuBarLayout.selectReset` from the 5h×7d severity table and the
     ///     user's `ResetCountdownMode` (#103, ADR-0029) — the view just draws what it is given.
-    case expanded(fiveHour: BarView, sevenDay: BarView?, resetToShow: ResetToShow?)
+    case expanded(fiveHour: BarView?, sevenDay: BarView?, resetToShow: ResetToShow?)
     /// Blocked state with **no bars** — just the reset countdown, with the leading red pause icon
     /// (#194, #227). Shown only when the user has "Pause icon hides bars" on (`pauseHidesBars`) **and**
     /// is fully blocked (`CreditsPacing.isBlocked` — every main window exhausted **and** paid credits
@@ -319,13 +327,14 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///   - snapshot: A decoded usage poll (`UsageClient`/#9).
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
     ///   - resetMode: How to pick/hide the reset countdown (#103, ADR-0029). Default `.smart`.
-    ///   - hideCalmSevenDay: When `true`, the 7-day bar is dropped (`sevenDay == nil`) whenever it is
-    ///     **calm** (`BarView.isCalm` — green on-pace/behind or mild-ahead yellow), leaving the 5h bar
-    ///     as the single, vertically-centred bar (#94, opt-out `PersistedConfig.hideCalmSevenDayBar`).
-    ///     An orange/red 7-day bar is always kept. Default `false` (both bars) so existing callers and
-    ///     tests are unaffected. This only elides the *bar*; `selectReset` still runs on the true
-    ///     severities, so the reset countdown is unchanged (a hidden calm 7-day never drove it anyway).
-    ///     In the session-idle state a calm 7-day is likewise dropped, leaving only the idle 5h bar.
+    ///   - hideCalmBar: Which bar to drop while it is **calm** (`BarView.isCalm` — green on-pace/behind,
+    ///     mild-ahead yellow, or far-behind blue), leaving the other one as the single, vertically-centred
+    ///     bar (ADR-0086, `PersistedConfig.calmBarHiding`). An orange/red bar is always kept, and at most
+    ///     one bar is ever elided, so the widget never ends up empty. Default `.never` (both bars) so
+    ///     existing callers and tests are unaffected. This only elides the *bar*; `selectReset` still runs
+    ///     on the true severities, so the reset countdown is unchanged (a hidden calm bar never drove it
+    ///     anyway). In the session-idle state the inert 5h bar counts as calm and is dropped under
+    ///     `.fiveHour`, leaving the 7-day bar alone; under `.sevenDay` a calm 7-day is dropped as before.
     ///   - pauseHidesBars: When `true` **and** the user is fully blocked (`CreditsPacing.isBlocked` —
     ///     every main window exhausted **and** paid credits can't cover), drop *both* bars and return
     ///     ``MenuBarMode/blockedReset(reset:which:)`` — just the blocking-reset countdown
@@ -339,7 +348,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///     diagnostic stale bars are never dropped.
     public static func make(
         from snapshot: UsageSnapshot, now: Date, resetMode: ResetCountdownMode = .smart,
-        hideCalmSevenDay: Bool = false, pauseHidesBars: Bool = false
+        hideCalmBar: CalmBarHiding = .never, pauseHidesBars: Bool = false
     ) -> MenuBarLayout {
         // The weekly gate, resolved once for every exit path below: the 5-hour bar may only go blue
         // while the 7-day window itself has headroom (`PacingModel.weeklyHasHeadroom`). The 7-day bar
@@ -347,9 +356,10 @@ public struct MenuBarLayout: Sendable, Equatable {
         let weeklyHeadroom = PacingModel.weeklyHasHeadroom(in: snapshot, now: now)
         let seven = bar(for: snapshot.sevenDay, window: .sevenDay, now: now, blueAllowed: true)
         let sevenResetsAt = ResetClock.parse(snapshot.sevenDay.resetsAt)
-        // Elide the 7-day bar when it is calm and the user opted in (#94). `selectReset` below still
-        // sees the real `seven.severity`, so the reset-countdown logic is untouched.
-        let sevenToShow: BarView? = (hideCalmSevenDay && seven.isCalm) ? nil : seven
+        // Elide the 7-day bar when it is calm and the user picked it (ADR-0086). `selectReset` below
+        // still sees the real `seven.severity`, so the reset-countdown logic is untouched. The 5h side
+        // gets the mirror-image treatment on each path that builds it (active and idle alike).
+        let sevenToShow: BarView? = hideCalmBar.hides(.sevenDay, isCalm: seven.isCalm) ? nil : seven
 
         // Blocked → no bars, just the countdown (#194, #227). Checked before the idle/active bar-building
         // branches below so it short-circuits both. Gated by `pauseHidesBars` (the pause icon hides the
@@ -376,13 +386,18 @@ public struct MenuBarLayout: Sendable, Equatable {
                 layout: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0, windowDurationSeconds: 0, blueAllowed: false),
                 indicator: .neutral, window: .fiveHour, idle: true, blocked: blocked,
                 weeklyHeadroom: weeklyHeadroom)
+            // An idle 5h bar reports `.calm` unconditionally (`BarView.severity`), so `.fiveHour` hides
+            // it here too — deliberately, with no idle exemption (ADR-0086): between sessions the widget
+            // then shows the 7-day bar alone. Nothing else on this path reads `five`; the `selectReset`
+            // call below passes `.calm`/`nil` as literals, so eliding the bar cannot move the countdown.
+            let fiveToShow: BarView? = hideCalmBar.hides(.fiveHour, isCalm: five.isCalm) ? nil : five
             // In the idle state the 5h window is legitimately date-less (ADR-0027, not an error), but the
             // 7-day window is real: if it reports usage yet its `resets_at` is unparseable, that is the
             // same broken-payload data error as on the active path (#167, ADR-0043) → ⚠️.
             // `hasBrokenActiveReset` already excludes the idle 5h, so it checks only the real 7-day here.
             if snapshot.hasBrokenActiveReset {
                 return MenuBarLayout(mode: .error(
-                    fiveHour: five, sevenDay: sevenToShow, reset: nil, which: nil))
+                    fiveHour: fiveToShow, sevenDay: sevenToShow, reset: nil, which: nil))
             }
             let resetToShow: ResetToShow?
             if blocked, let choice = BlockingReset.forBlocked(snapshot: snapshot, now: now) {
@@ -403,15 +418,19 @@ public struct MenuBarLayout: Sendable, Equatable {
                 case .show(let r): resetToShow = r
                 case .dataError:
                     return MenuBarLayout(mode: .error(
-                        fiveHour: five, sevenDay: sevenToShow, reset: nil, which: nil))
+                        fiveHour: fiveToShow, sevenDay: sevenToShow, reset: nil, which: nil))
                 }
             }
             return MenuBarLayout(mode: .expanded(
-                fiveHour: five, sevenDay: sevenToShow, resetToShow: resetToShow))
+                fiveHour: fiveToShow, sevenDay: sevenToShow, resetToShow: resetToShow))
         }
 
         let five = bar(for: snapshot.fiveHour, window: .fiveHour, now: now, blueAllowed: weeklyHeadroom)
         let fiveResetsAt = ResetClock.parse(snapshot.fiveHour.resetsAt)
+        // Mirror of `sevenToShow` above: drop the 5h bar while it is calm under `.fiveHour`. Only the
+        // *drawn* bar is elided — `five.severity` still feeds `selectReset` below, exactly as the 7-day
+        // side has worked since #94.
+        let fiveToShow: BarView? = hideCalmBar.hides(.fiveHour, isCalm: five.isCalm) ? nil : five
 
         // API data error (#167, ADR-0043): a window the server reports as **active** (real usage) but
         // with a present-yet-unparseable `resets_at` is a malformed payload — surface the ⚠️ error state
@@ -419,7 +438,7 @@ public struct MenuBarLayout: Sendable, Equatable {
         // `bar(for:)` masks a broken date as `elapsedFraction == 1.0` / `.calm` (which would otherwise
         // hide the inconsistency). Shared with the popup via `UsageSnapshot.hasBrokenActiveReset`.
         if snapshot.hasBrokenActiveReset {
-            return MenuBarLayout(mode: .error(fiveHour: five, sevenDay: sevenToShow, reset: nil, which: nil))
+            return MenuBarLayout(mode: .error(fiveHour: fiveToShow, sevenDay: sevenToShow, reset: nil, which: nil))
         }
 
         // Pick which reset countdown to show (or hide) from the 5h×7d severity table + mode (ADR-0029).
@@ -428,15 +447,15 @@ public struct MenuBarLayout: Sendable, Equatable {
             sevenSeverity: seven.severity, sevenResetsAt: sevenResetsAt,
             now: now, mode: resetMode) {
         case .hide:
-            return MenuBarLayout(mode: .expanded(fiveHour: five, sevenDay: sevenToShow, resetToShow: nil))
+            return MenuBarLayout(mode: .expanded(fiveHour: fiveToShow, sevenDay: sevenToShow, resetToShow: nil))
         case .show(let resetToShow):
             return MenuBarLayout(mode: .expanded(
-                fiveHour: five, sevenDay: sevenToShow, resetToShow: resetToShow))
+                fiveHour: fiveToShow, sevenDay: sevenToShow, resetToShow: resetToShow))
         case .dataError:
             // Defensive: a chosen (noisy) window with no valid instant. In practice
             // `hasBrokenActiveReset` above already promotes this to `.error` before the severity table
             // runs, but keep the branch coherent — an unparseable date is never a countdown.
-            return MenuBarLayout(mode: .error(fiveHour: five, sevenDay: sevenToShow, reset: nil, which: nil))
+            return MenuBarLayout(mode: .error(fiveHour: fiveToShow, sevenDay: sevenToShow, reset: nil, which: nil))
         }
     }
 
@@ -463,9 +482,9 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///   - serviceProblem: The worst non-operational Claude service state (issue #31), or `nil` when
     ///     all services are operational / unknown-cold. Threaded onto the result so the view can draw
     ///     the trailing dot; it does not affect the usage `mode`.
-    ///   - hideCalmSevenDay: Elide the calm 7-day bar on the **healthy/stale** path (#94) — see the
-    ///     plain ``make(from:now:resetMode:hideCalmSevenDay:)``. The error state (⚠️ + stale bars)
-    ///     ignores it: the 7-day bar is diagnostic there and always kept.
+    ///   - hideCalmBar: Elide the chosen calm bar on the **healthy/stale** path (ADR-0086) — see the
+    ///     plain ``make(from:now:resetMode:hideCalmBar:pauseHidesBars:)``. The error state (⚠️ + stale
+    ///     bars) ignores it: both bars are diagnostic there and always kept.
     ///   - showCredits: Whether to compute the money-credits icon (#144), gated by the user's
     ///     `PersistedConfig.showExtraUsage` toggle. When `false`, the credits marker is always `nil`
     ///     (no icon, no width) regardless of the snapshot — the gate is honoured here, at the top, so
@@ -477,7 +496,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///   - pauseHidesBars: When the user is fully blocked (`CreditsPacing.isBlocked`), whether the red
     ///     pause icon **hides** the bars — drop the bars and show only the blocking-reset countdown on the
     ///     **healthy/stale** path (#194, #227, `PersistedConfig.pauseHidesBars`) — see the plain
-    ///     ``make(from:now:resetMode:hideCalmSevenDay:pauseHidesBars:)``. `false` keeps the bars beside
+    ///     ``make(from:now:resetMode:hideCalmBar:pauseHidesBars:)``. `false` keeps the bars beside
     ///     the icon. The error state (⚠️ + stale bars) ignores it: the bars are diagnostic there and
     ///     always kept. Default `false`. Note: the pause icon itself is drawn whenever blocked,
     ///     independent of this flag (see below).
@@ -487,7 +506,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     public static func make(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
         serviceProblem: ServiceStatus? = nil, resetMode: ResetCountdownMode = .smart,
-        hideCalmSevenDay: Bool = false, showCredits: Bool = false, pauseHidesBars: Bool = false,
+        hideCalmBar: CalmBarHiding = .never, showCredits: Bool = false, pauseHidesBars: Bool = false,
         monitoringAnything: Bool = true
     ) -> MenuBarLayout {
         // The credits marker rides on the snapshot, which is stale in both new modes (#341) — money
@@ -496,7 +515,7 @@ public struct MenuBarLayout: Sendable, Equatable {
         let credits = (showCredits && dataIsLive)
             ? snapshot.flatMap { creditsMarker(for: $0, now: now) } : nil
         let layout = usageMode(from: snapshot, health: health, now: now,
-                               resetMode: resetMode, hideCalmSevenDay: hideCalmSevenDay,
+                               resetMode: resetMode, hideCalmBar: hideCalmBar,
                                pauseHidesBars: pauseHidesBars,
                                monitoringAnything: monitoringAnything)
         // Pause icon: drawn whenever the user is fully blocked (`CreditsPacing.isBlocked` — no path to
@@ -541,7 +560,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// so ``make(from:health:now:serviceProblem:resetMode:)`` can graft the service dot onto its result.
     private static func usageMode(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
-        resetMode: ResetCountdownMode, hideCalmSevenDay: Bool, pauseHidesBars: Bool,
+        resetMode: ResetCountdownMode, hideCalmBar: CalmBarHiding, pauseHidesBars: Bool,
         monitoringAnything: Bool = true
     ) -> MenuBarLayout {
         // #341, checked before anything else: these two states are user choices, not poll outcomes,
@@ -556,19 +575,20 @@ public struct MenuBarLayout: Sendable, Equatable {
         // poll resolves; with no data to draw, fall back to the bare ⚠️ error glyph.
         guard let age = health.failureAge(now: now) else {
             return snapshot.map { make(from: $0, now: now, resetMode: resetMode,
-                                       hideCalmSevenDay: hideCalmSevenDay, pauseHidesBars: pauseHidesBars) }
+                                       hideCalmBar: hideCalmBar, pauseHidesBars: pauseHidesBars) }
                 ?? MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
         }
         if let snapshot, age <= UsageHealth.glyphAfter {
             return make(from: snapshot, now: now, resetMode: resetMode,
-                        hideCalmSevenDay: hideCalmSevenDay, pauseHidesBars: pauseHidesBars)
+                        hideCalmBar: hideCalmBar, pauseHidesBars: pauseHidesBars)
         }
 
         // Failing past the glyph threshold. Keep the bars only in the 30–60 min stale window and
         // only if we have a snapshot; otherwise the glyph stands alone. The countdown here is
         // **diagnostic** ("data is stale, last reset was …"), so it always shows the nearest reset,
-        // independent of `resetMode`'s selection table (ADR-0029). The 7-day bar is diagnostic too —
-        // rebuild with `hideCalmSevenDay: false` so a calm 7-day is never elided in the error state.
+        // independent of `resetMode`'s selection table (ADR-0029). Both bars are diagnostic too —
+        // rebuild **without** `hideCalmBar` (so it defaults to `.never`) and neither bar is ever elided
+        // in the error state, whichever one the user hides while healthy.
         // `pauseHidesBars` is likewise **not** forwarded (defaults to `false`): an exhausted-yet-stale
         // state must keep its diagnostic bars, and this `case let .expanded` destructuring relies on
         // `make` never returning `.blockedReset` here (#194).
@@ -589,7 +609,7 @@ public struct MenuBarLayout: Sendable, Equatable {
 
     /// A copy of this layout carrying `serviceProblem`, `credits`, and `blockedPause` (the `mode` is
     /// unchanged) — the decorations grafted onto the usage `mode` computed by
-    /// ``usageMode(from:health:now:resetMode:hideCalmSevenDay:pauseHidesBars:)``.
+    /// ``usageMode(from:health:now:resetMode:hideCalmBar:pauseHidesBars:)``.
     func with(serviceProblem: ServiceStatus?, credits: CreditsMarker?, blockedPause: Bool,
               awaitingInput: AwaitingSessions? = nil) -> MenuBarLayout {
         MenuBarLayout(mode: mode, serviceProblem: serviceProblem, credits: credits,

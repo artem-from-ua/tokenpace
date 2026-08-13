@@ -161,8 +161,10 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         switch self {
         case .about: return CapsuleTint(dark: 0x0D81FA, light: 0x41A6FF)
         case .general: return CapsuleTint(dark: 0x5E5E5F, light: 0xC0C0C4)
-        // UI presets keeps the measured Appearance green — it is what that pane became.
-        case .uiPresets: return CapsuleTint(dark: 0x2ED149, light: 0x63E977)
+        // UI presets keeps the measured Appearance green — it is what that pane became — darkened by
+        // ~23% on both endpoints, which holds the hue and the gradient's spread while letting the chip
+        // sit less brightly among its neighbours.
+        case .uiPresets: return CapsuleTint(dark: 0x23A238, light: 0x4DB45C)
         // The two surfaces are flat black and white rather than a hue: the chips *depict* what they
         // configure — the dark strip along the top of the screen, and the light panel that drops
         // below it. Fixed tones, not semantic ones: flipping them with the appearance would destroy

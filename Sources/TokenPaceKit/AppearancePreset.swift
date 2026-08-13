@@ -34,8 +34,9 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
     case controlFreak = "controlFreak"
 
     /// The fixed value set this preset writes to the thirteen Appearance keys. Stored in the **as-persisted**
-    /// sense, matching `PersistedConfig` — note `hideCalmSevenDay` is a *hide* flag (the pane shows it
-    /// inverted as "Show …"). `pauseHidesBars` is stored as-is (the pane's toggle is not inverted).
+    /// sense, matching `PersistedConfig`. Since ADR-0086 every value here is stored exactly as the pane
+    /// shows it — the old `hideCalmSevenDayBar` was the last inverted one ("Show …" in the UI, *hide* in
+    /// storage), and its tri-state replacement `calmBarHiding` names the hidden bar directly.
     public var values: AppearancePresetValues {
         switch self {
         case .chill:
@@ -44,7 +45,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
             // mutes with the rest of the calm colours.
             return AppearancePresetValues(
                 calmColorMode: .yellowGreenBlue,   // greens/yellows AND far-behind blue all mute
-                hideCalmSevenDayBar: true,
+                calmBarHiding: .fiveHour,   // quiet 5h steps aside; the weekly bar is the one that stays
                 pauseHidesBars: true,   // when blocked, show only the pause icon (bars hidden)
                 showExtraUsage: true,
                 showServiceStatusDot: true,
@@ -64,7 +65,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
             // beside the pause icon.
             return AppearancePresetValues(
                 calmColorMode: .yellowGreen,   // greens/yellows mute; far-behind blue stays coloured
-                hideCalmSevenDayBar: true,
+                calmBarHiding: .fiveHour,   // same quiet default as `.chill` — and the factory default
                 pauseHidesBars: false,   // when blocked, keep the bars beside the pause icon
                 showExtraUsage: true,
                 showServiceStatusDot: true,
@@ -83,7 +84,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
             // When blocked, keep the bars beside the pause icon.
             return AppearancePresetValues(
                 calmColorMode: .off,   // nothing muted — every state keeps its colour (loud)
-                hideCalmSevenDayBar: false,
+                calmBarHiding: .never,   // both bars always on screen, however calm
                 pauseHidesBars: false,   // when blocked, keep the bars beside the pause icon
                 showExtraUsage: true,
                 showServiceStatusDot: true,
@@ -130,11 +131,14 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
 // MARK: - AppearancePresetValues
 
 /// The thirteen Appearance-pane values a preset sets, in the same **as-persisted** sense as
-/// `PersistedConfig` (`hideCalmSevenDayBar` is the stored *hide* form, not the pane's inverted "Show …";
-/// `pauseHidesBars` is stored as-is).
+/// `PersistedConfig` — which, since ADR-0086, is also exactly what each pane row shows (`pauseHidesBars`
+/// included; the inverted `hideCalmSevenDayBar` was the last exception).
 public struct AppearancePresetValues: Sendable, Equatable {
     public let calmColorMode: CalmColorMode
-    public let hideCalmSevenDayBar: Bool
+    /// Which menu-bar bar steps aside while it is calm (ADR-0086). Replaced the boolean that could only
+    /// hide the 7-day one; the calmer presets now hide the **5-hour** bar, so the weekly context is what
+    /// stays on screen when nothing needs attention.
+    public let calmBarHiding: CalmBarHiding
     /// When the user is fully blocked (`CreditsPacing.isBlocked`), whether the red pause icon **hides**
     /// the pacing bars (`true` → icon only) or keeps them beside it (`false` → icon + bars). The pause
     /// icon itself is always drawn when blocked, independent of this flag (#199, #227).
@@ -165,7 +169,7 @@ public struct AppearancePresetValues: Sendable, Equatable {
 
     public init(
         calmColorMode: CalmColorMode,
-        hideCalmSevenDayBar: Bool,
+        calmBarHiding: CalmBarHiding,
         pauseHidesBars: Bool,
         showExtraUsage: Bool,
         showServiceStatusDot: Bool,
@@ -178,7 +182,7 @@ public struct AppearancePresetValues: Sendable, Equatable {
         showTicks: Bool
     ) {
         self.calmColorMode = calmColorMode
-        self.hideCalmSevenDayBar = hideCalmSevenDayBar
+        self.calmBarHiding = calmBarHiding
         self.pauseHidesBars = pauseHidesBars
         self.showExtraUsage = showExtraUsage
         self.showServiceStatusDot = showServiceStatusDot
