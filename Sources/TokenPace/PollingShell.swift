@@ -419,8 +419,11 @@ actor StubUsageTransport: UsageTransport {
     ///  • `.recovery` — a **silent** recovery driven by the poll counter: degraded for the first two
     ///    polls, then `operational` with no further update, exactly as `mgp99sn4ynd4` behaved. The
     ///    one frame where an updates-driven listener would have stayed quiet for 43 minutes.
+    ///  • `.wrapped`  — a name whose **last wrapped line is too full to share** with the `age · stage`
+    ///    chip, so the chip drops to a line of its own (#351). The alignment case: on its own line the
+    ///    chip must still sit flush right, which the tab stop alone does not deliver.
     enum IncidentFrame: Equatable {
-        case active, green, two, recovery
+        case active, green, two, recovery, wrapped
     }
 
     /// A money-credits state for the `=credits-*` verification stubs (#144). Each supplies the raw
@@ -808,6 +811,25 @@ actor StubUsageTransport: UsageTransport {
                 "incident_updates":[\
                 {"id":"upd-b1","status":"investigating","body":"We have identified the cause of \
                 elevated errors and are working on a fix.","created_at":"\(isoStamp(minutesAgo: 12))"}],\
+                "components":\(mirrored)}
+                """)
+            }
+
+            if frame == .wrapped {
+                // The name from #351, whose third wrapped line ends ~29 pt short of the trailing edge
+                // — too little for a `13m · investigating` chip (~113 pt), so the chip takes a line of
+                // its own. Paired with the fixed incident above, whose short last line *does* have
+                // room: one screenshot then shows both placements, and the shared-line case proves the
+                // fix did not push every chip onto its own line.
+                incidents.append("""
+                {"id":"n4tq8zv2hb6c","name":"Elevated errors for Claude Mythos 5, Claude Fable 5, \
+                and Claude Sonnet 5","status":"investigating","impact":"minor",\
+                "shortlink":"https://stspg.io/w9r3ptmc5xkd",\
+                "created_at":"\(isoStamp(minutesAgo: 13))","started_at":"\(isoStamp(minutesAgo: 13))",\
+                "monitoring_at":null,"resolved_at":null,\
+                "incident_updates":[\
+                {"id":"upd-c1","status":"investigating","body":"We are investigating elevated error \
+                rates across several models.","created_at":"\(isoStamp(minutesAgo: 13))"}],\
                 "components":\(mirrored)}
                 """)
             }

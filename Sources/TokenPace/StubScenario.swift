@@ -70,6 +70,7 @@ enum StubScenario: String, CaseIterable {
     case incidentGreen = "incident-green"
     case incidentTwo = "incident-two"
     case incidentRecovery = "incident-recovery"
+    case incidentWrapped = "incident-wrapped"
 
     /// The env id (`TOKENPACE_STUB` value), including `"real"` for ``realNetwork``.
     var id: String { rawValue }
@@ -187,6 +188,7 @@ enum StubScenario: String, CaseIterable {
         case .incidentGreen:       return "Incident · open but components green"
         case .incidentTwo:         return "Incident · two at once"
         case .incidentRecovery:    return "Incident · silent recovery"
+        case .incidentWrapped:     return "Incident · chip on its own line"
         }
     }
 
@@ -360,6 +362,11 @@ enum StubScenario: String, CaseIterable {
             return "Silent recovery: the first two polls carry a degraded incident with an update, then "
                  + "the components go `operational` with NO further update — the `mgp99sn4ynd4` case an "
                  + "updates-driven listener would have missed for 43 minutes. Watch the rows vanish."
+        case .incidentWrapped:
+            return "Two incidents chosen for how their names WRAP (#351). Hold \u{2325} Option: the first "
+                 + "ends its last line early, so `2h7m · identified` shares that line; the second fills "
+                 + "its last line, so `13m · investigating` drops to a line of its own. Both chips must "
+                 + "sit flush RIGHT — the wrapped one used to fall back to the left edge."
         }
     }
 
@@ -419,6 +426,7 @@ enum StubScenario: String, CaseIterable {
         case .incidentGreen:       return StubUsageTransport(mode: .incident(.green), now: now)
         case .incidentTwo:         return StubUsageTransport(mode: .incident(.two), now: now)
         case .incidentRecovery:    return StubUsageTransport(mode: .incident(.recovery), now: now)
+        case .incidentWrapped:     return StubUsageTransport(mode: .incident(.wrapped), now: now)
         }
     }
 

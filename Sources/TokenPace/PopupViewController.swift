@@ -2385,31 +2385,13 @@ final class PopupViewController: NSViewController {
         dot.toolTip = Self.word(incident.severity)
 
         let meta = Self.incidentMetaText(incident, now: now)
-        let text = NSMutableAttributedString(
-            string: incident.name + "\t",
-            attributes: [.font: font, .foregroundColor: ColorStore.shared.color(.label)])
-
-        let ageAndSeparator = meta.age.map { "\($0) · " } ?? ""
-        if !ageAndSeparator.isEmpty {
-            text.append(NSAttributedString(
-                string: ageAndSeparator, attributes: [.font: font, .foregroundColor: Self.dimmedLabelColor]))
-        }
-        let stageStart = text.length
-        text.append(NSAttributedString(string: meta.stage, attributes: incident.shortlink != nil
-            ? [.font: font, .foregroundColor: ColorStore.shared.color(.link),
-               .underlineStyle: NSUnderlineStyle.single.rawValue]
-            : [.font: font, .foregroundColor: Self.dimmedLabelColor]))
-
-        // A right tab stop at the content's trailing edge pulls everything after the tab flush right;
-        // the description wraps ahead of it and the chip settles on whatever line it lands on.
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: Self.incidentTextWidth)]
-        // Word-wrapping, **not** truncating: a truncating line-break mode in the paragraph style
-        // suppresses wrapping outright, so the description collapsed to a single elided line no
-        // matter what `maximumNumberOfLines` said (measured: 16 pt tall for an 87-character name).
-        // The line cap is enforced by `maximumNumberOfLines`, which still elides the last line.
-        paragraph.lineBreakMode = .byWordWrapping
-        text.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: text.length))
+        let built = Self.incidentText(
+            name: incident.name, meta: meta, isLinked: incident.shortlink != nil, font: font)
+        let text = built.text
+        let stageStart = built.stageStart
+        // The chip's own line is not one of the description's, so the cap gains it back — otherwise a
+        // three-line description would push the chip onto a fourth line and the label would elide it.
+        let maxLines = Self.maxIncidentDescriptionLines + (built.chipOnOwnLine ? 1 : 0)
 
         let label = StatusLineLabel(labelWithAttributedString: text)
         // `labelWithAttributedString` hands back a single-line field, and `usesSingleLineMode`
@@ -2419,7 +2401,7 @@ final class PopupViewController: NSViewController {
         label.usesSingleLineMode = false
         label.cell?.wraps = true
         label.cell?.isScrollable = false
-        label.maximumNumberOfLines = Self.maxIncidentDescriptionLines
+        label.maximumNumberOfLines = maxLines
         label.preferredMaxLayoutWidth = Self.incidentTextWidth
         if let shortlink = incident.shortlink {
             label.linkRange = NSRange(location: stageStart, length: (meta.stage as NSString).length)
@@ -2453,6 +2435,101 @@ final class PopupViewController: NSViewController {
     /// location of the right tab stop the `age · stage` chip aligns to.
     static var incidentTextWidth: CGFloat {
         Metrics.contentWidth - Metrics.statusDotDiameter - Metrics.statusDotGap
+    }
+
+    /// The incident row's attributed text: the description, then the `age · stage` chip set flush
+    /// right — on the description's last line when it fits there, on a line of its own when it does
+    /// not. Returns the chip's stage offset too, which the label needs for its link range.
+    ///
+    /// Two mechanisms, because one alone gets the wrapped case wrong. A right tab stop only aligns
+    /// text that still shares the line the tab sits on; once the chip is pushed past the stop it wraps
+    /// to the next line, where the stop is behind the caret and no longer pulls anything — the chip
+    /// then sat flush **left** under the description (#351). So the fit is measured up front: when the
+    /// chip does not fit after the description's last line, the tab is replaced by a hard newline and
+    /// the chip's own paragraph is right-aligned, which needs no tab stop to reach the trailing edge.
+    static func incidentText(
+        name: String,
+        meta: (age: String?, stage: String),
+        isLinked: Bool,
+        font: NSFont
+    ) -> (text: NSMutableAttributedString, stageStart: Int, chipOnOwnLine: Bool) {
+        let ageAndSeparator = meta.age.map { "\($0) · " } ?? ""
+        let chip = ageAndSeparator + meta.stage
+        let separator = chipFitsAfterDescription(name: name, chip: chip, font: font) ? "\t" : "\n"
+
+        let text = NSMutableAttributedString(
+            string: name + separator,
+            attributes: [.font: font, .foregroundColor: ColorStore.shared.color(.label)])
+        if !ageAndSeparator.isEmpty {
+            text.append(NSAttributedString(
+                string: ageAndSeparator, attributes: [.font: font, .foregroundColor: dimmedLabelColor]))
+        }
+        let stageStart = text.length
+        text.append(NSAttributedString(string: meta.stage, attributes: isLinked
+            ? [.font: font, .foregroundColor: ColorStore.shared.color(.link),
+               .underlineStyle: NSUnderlineStyle.single.rawValue]
+            : [.font: font, .foregroundColor: dimmedLabelColor]))
+
+        // A right tab stop at the content's trailing edge pulls everything after the tab flush right;
+        // the description wraps ahead of it and the chip settles on whatever line it lands on.
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: incidentTextWidth)]
+        // Word-wrapping, **not** truncating: a truncating line-break mode in the paragraph style
+        // suppresses wrapping outright, so the description collapsed to a single elided line no
+        // matter what `maximumNumberOfLines` said (measured: 16 pt tall for an 87-character name).
+        // The line cap is enforced by `maximumNumberOfLines`, which still elides the last line.
+        paragraph.lineBreakMode = .byWordWrapping
+        text.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: text.length))
+
+        if separator == "\n" {
+            // The chip is on its own line: right-align that paragraph outright. Applied from the
+            // newline onwards so the description's paragraph keeps its natural left alignment — a
+            // paragraph style covers whole paragraphs, and the newline terminates the first one.
+            let chipParagraph = NSMutableParagraphStyle()
+            chipParagraph.alignment = .right
+            chipParagraph.lineBreakMode = .byWordWrapping
+            let newlineIndex = (name as NSString).length
+            text.addAttribute(
+                .paragraphStyle, value: chipParagraph,
+                range: NSRange(location: newlineIndex, length: text.length - newlineIndex))
+        }
+        return (text, stageStart, separator == "\n")
+    }
+
+    /// Whether `chip` still fits on the last line the description wraps onto, at the incident text
+    /// width. Laid out with `TextKit` rather than estimated: the description's own wrapping decides
+    /// where its last line ends, and only a layout pass knows that.
+    ///
+    /// The cap on description lines is applied here too — a description that overruns it is elided on
+    /// its last line, which leaves no room to share, so the chip goes to its own line.
+    private static func chipFitsAfterDescription(name: String, chip: String, font: NSFont) -> Bool {
+        let storage = NSTextStorage(string: name, attributes: [.font: font])
+        let layoutManager = NSLayoutManager()
+        let container = NSTextContainer(size: CGSize(width: incidentTextWidth, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        container.lineBreakMode = .byWordWrapping
+        layoutManager.addTextContainer(container)
+        storage.addLayoutManager(layoutManager)
+        layoutManager.ensureLayout(for: container)
+
+        var lineCount = 0
+        var lastLineWidth: CGFloat = 0
+        var index = 0
+        let glyphCount = layoutManager.numberOfGlyphs
+        while index < glyphCount {
+            var lineRange = NSRange()
+            let rect = layoutManager.lineFragmentUsedRect(forGlyphAt: index, effectiveRange: &lineRange)
+            lineCount += 1
+            lastLineWidth = rect.maxX
+            index = NSMaxRange(lineRange)
+        }
+        guard lineCount <= maxIncidentDescriptionLines else { return false }
+
+        // A minimum gap so the chip never butts against the description; the tab stop would otherwise
+        // allow them to touch when the last line ends a hair short of the chip's start.
+        let gap: CGFloat = 12
+        let chipWidth = (chip as NSString).size(withAttributes: [.font: font]).width
+        return lastLineWidth + gap + chipWidth <= incidentTextWidth
     }
 
     /// How many lines an incident description may occupy before truncating. Three covers the longest
