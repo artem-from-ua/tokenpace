@@ -1,11 +1,16 @@
 ---
-status: accepted
+status: superseded
 date: 2026-07-24
 supersedes: [0028]
-superseded_by: [0042, 0043, 0044]
+superseded_by: [0042, 0043, 0044, 0091]
 ---
 
 # ADR-0029: Вибір reset-часу в menu bar за станами 5h × 7d + режим-радіогрупа
+
+> **Витіснено [ADR-0091](0091-countdown-only-where-work-is-not-running.md).** Відлік живе лише в
+> безсмужкових станах, тож таблиці вибору 5h × 7d немає чого обирати: `MenuBarLayout.selectReset`,
+> `ResetSelection`, `ResetToShow`, поле `MenuBarMode.expanded.resetToShow` і сам режим
+> `ResetCountdownMode` (разом з опцією Settings «Show reset countdown») видалено.
 
 > **Поріг yellow→orange частково суперсіднуто [ADR-0044](0044-dynamic-pacing-threshold.md).** Легенда
 > severity нижче («ahead `< 15` пт» / «ahead `>= 15` пт») описувала статичний поріг `0.15`; тепер це

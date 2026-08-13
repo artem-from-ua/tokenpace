@@ -167,10 +167,15 @@ public struct PollState: Sendable, Equatable {
     }
 
     /// The `UsageHealth` view-model input derived from this state.
+    ///
+    /// `pollInterval` carries the cadence polls are currently attempted at, because the menu bar's ⚠️
+    /// threshold is expressed in *attempts*, not wall-clock minutes (`UsageHealth.glyphAfter(for:)`) —
+    /// 15 min means five failures during a session and one while idle, and only the second of those
+    /// deserves a warning.
     public var health: UsageHealth {
         UsageHealth(
             lastSuccess: lastSuccess, failingSince: failingSince, reason: reason,
-            notPolling: notPolling)
+            notPolling: notPolling, pollInterval: PollingEngine.effectiveInterval(self))
     }
 }
 
@@ -376,7 +381,15 @@ public struct PollingEngine: Sendable {
 
         case let .usageError(error):
             if case let .rateLimited(retryAfter) = error {
+                // A 429 is the server saying "not so fast", not "the data is unavailable". It gets the
+                // backoff hold and the popup's reason line, but it does **not** start (or extend) the
+                // failure run that ages the menu bar into ⚠️ — a `Retry-After` of several minutes would
+                // otherwise trip the glyph threshold on its own, reporting a fault where the system is
+                // working exactly as designed (ADR-0091).
                 next.backoff = previous.backoff.honoring(retryAfter: retryAfter)
+                next.reason = FailureReason(error)
+                next.failingSince = previous.failingSince   // preserved, never started
+                break
             }
             recordFailure(into: &next, previous: previous, reason: FailureReason(error), now: now)
 

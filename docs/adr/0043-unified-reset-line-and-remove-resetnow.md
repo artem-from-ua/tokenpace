@@ -2,9 +2,16 @@
 status: accepted
 date: 2026-07-27
 supersedes: [0030]
+superseded_by: [0091]
 ---
 
 # ADR-0043: Уніфікований рядок «часу до ресету» в дропдауні + прибрання стану `.resetNow`
+
+> **Частково витіснено [ADR-0091](0091-countdown-only-where-work-is-not-running.md).** Правило
+> «зламаний `resets_at` → ⚠️ замість смужок» лишилось, але шлях до нього інший: **вичерпане** вікно
+> зі зламаною датою більше не провалюється на шлях зі смужками, а дає окремий кейс
+> `MenuBarMode.exhaustedUnknownReset` — **самотній ⚠️**; `ResetSelection` видалено разом із
+> `selectReset`. Чинними лишаються `ResetClock.resetLine` і видалення `TimeToReset.resetNow`.
 
 > Заміщає рішення **D5** [ADR-0030](0030-optimistic-reset-and-exact-timer.md) («`.resetNow` лишається
 > safety-net»): кейс тепер **видалено**, а три його джерела розрулено явно (див. нижче).

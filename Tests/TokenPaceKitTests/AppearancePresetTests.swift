@@ -8,7 +8,7 @@ import Foundation
 struct AppearancePresetTests {
 
     /// Chill = the calm look: every menu-bar Bool on, the dropdown's two sections folded away until
-    /// they turn orange/red, countdown smart, simplified bars (#224). Guards against a preset value
+    /// they turn orange/red, simplified bars (#224). Guards against a preset value
     /// drifting from the documented matrix.
     @Test func chillIsCalmLook() {
         let v = AppearancePreset.chill.values
@@ -19,14 +19,13 @@ struct AppearancePresetTests {
         // Credits fold until money is actually spent, not until they turn orange: an unlimited cap has
         // no bar and hence no severity, so `.nonCalm` would hide the spend forever.
         #expect(v.extraUsageVisibility == .aboveZero)
-        #expect(v.resetCountdownModeMenuBar == .smart)
         #expect(v.menuBarStyle == .pressure)   // the quietest style, and on both surfaces (#329)
         #expect(v.dropdownStyle == .pressure)
         #expect(!v.showTicks)   // the quiet look drops the tick ruler
     }
 
     /// Work harder! = Chill but with Work harder on, ticks on, and **Gauge** bars. The calm menu-bar
-    /// toggles / countdown / per-model rows all still match `.chill`.
+    /// toggles and per-model rows all still match `.chill`.
     @Test func workHarderIsChillPlusWorkHarderTicksAndGauge() {
         let wh = AppearancePreset.workHarder.values
         let chill = AppearancePreset.chill.values
@@ -44,11 +43,10 @@ struct AppearancePresetTests {
         #expect(wh.modelLimitsVisibility == chill.modelLimitsVisibility)   // both .nonCalm (#211)
         #expect(wh.extraUsageVisibility == chill.extraUsageVisibility)
         #expect(wh.extraUsageVisibility == .aboveZero)   // pinned, not just "same as Chill"
-        #expect(wh.resetCountdownModeMenuBar == chill.resetCountdownModeMenuBar)
     }
 
     /// Control freak = everything loud: calm off, nothing hidden, every glyph/dot/credits/per-model
-    /// row on, countdown always, dense pacing bars.
+    /// row on, dense pacing bars.
     @Test func controlFreakShowsEverything() {
         let v = AppearancePreset.controlFreak.values
         #expect(v.calmColorMode == .off)   // nothing muted — every state loud
@@ -57,7 +55,6 @@ struct AppearancePresetTests {
         // Nothing in the dropdown folds away — both sections pinned open (#211).
         #expect(v.modelLimitsVisibility == .always)
         #expect(v.extraUsageVisibility == .always)
-        #expect(v.resetCountdownModeMenuBar == .always)
         #expect(v.menuBarStyle == .progress)
         #expect(v.dropdownStyle == .progress)
         #expect(v.showTicks)
@@ -113,7 +110,6 @@ struct AppearancePresetTests {
             showServiceStatusDot: chill.showServiceStatusDot,
             modelLimitsVisibility: chill.modelLimitsVisibility,
             extraUsageVisibility: chill.extraUsageVisibility,
-            resetCountdownModeMenuBar: chill.resetCountdownModeMenuBar,
             // Only the *dropdown* is flipped: Chill is Pressure on both, so this mismatched pair is
             // off every preset — and it is the mix a preset can no longer express (#329).
             menuBarStyle: chill.menuBarStyle,

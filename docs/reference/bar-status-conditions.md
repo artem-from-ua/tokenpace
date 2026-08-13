@@ -10,6 +10,8 @@
 > розійшлися — правий код, а документ треба виправити тим самим PR.
 
 Пов'язані документи: [ui-state-truth.md](ui-state-truth.md) (анатомія й метрики бару),
+[menu-bar-signals.md](menu-bar-signals.md) (обернена задача — як читати те, що вже на екрані:
+спершу «чи є число», і лише потім смужки),
 [users-and-goals.md](users-and-goals.md) (навіщо статус узагалі існує),
 [ADR-0061](../adr/0061-far-behind-blue-pacing-zone.md) (синя зона),
 [ADR-0044](../adr/0044-dynamic-pacing-threshold.md) (динамічний ahead-поріг),

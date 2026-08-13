@@ -23,7 +23,6 @@ extension AppearancePresetValues: Codable {
         case menuBarStyle               // Menu Bar Widget → "Bar style"
         case calmColorMode              // "Calm non-critical colors"
         case calmBarHiding              // "Hide 5h (top) bar" (When it's calm / Never)
-        case resetCountdownModeMenuBar  // "Show reset countdown"
         case showServiceStatusDot       // "Show service status dot on issues"
         case dropdownStyle              // Dropdown Widget → "Bar style"
         case modelLimitsVisibility      // "Show model & service limits"
@@ -53,7 +52,6 @@ extension AppearancePresetValues: Codable {
         try c.encode(menuBarStyle, forKey: .menuBarStyle)
         try c.encode(calmColorMode, forKey: .calmColorMode)
         try c.encode(calmBarHiding, forKey: .calmBarHiding)
-        try c.encode(resetCountdownModeMenuBar, forKey: .resetCountdownModeMenuBar)
         try c.encode(showServiceStatusDot, forKey: .showServiceStatusDot)
         try c.encode(dropdownStyle, forKey: .dropdownStyle)
         try c.encode(modelLimitsVisibility, forKey: .modelLimitsVisibility)
@@ -101,7 +99,6 @@ extension AppearancePresetValues: Codable {
             showServiceStatusDot: try c.decode(Bool.self, forKey: .showServiceStatusDot),
             modelLimitsVisibility: try c.decode(PopupSectionVisibility.self, forKey: .modelLimitsVisibility),
             extraUsageVisibility: try c.decode(PopupSectionVisibility.self, forKey: .extraUsageVisibility),
-            resetCountdownModeMenuBar: try c.decode(ResetCountdownMode.self, forKey: .resetCountdownModeMenuBar),
             menuBarStyle: menuBarStyle,
             dropdownStyle: dropdownStyle,
             showTicks: try c.decode(Bool.self, forKey: .showTicks))
@@ -166,7 +163,6 @@ public enum AppearanceConfigExport {
             ("menuBarStyle", jsonString(v.menuBarStyle.rawValue)),
             ("calmColorMode", jsonString(v.calmColorMode.rawValue)),
             ("calmBarHiding", jsonString(v.calmBarHiding.rawValue)),
-            ("resetCountdownModeMenuBar", jsonString(v.resetCountdownModeMenuBar.rawValue)),
             ("showServiceStatusDot", jsonBool(v.showServiceStatusDot)),
             ("dropdownStyle", jsonString(v.dropdownStyle.rawValue)),
             ("modelLimitsVisibility", jsonString(v.modelLimitsVisibility.rawValue)),

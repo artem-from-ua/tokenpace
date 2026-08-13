@@ -123,11 +123,6 @@ final class SettingsWindowController: NSWindowController {
         get { model.onCalmColorModeChange } set { model.onCalmColorModeChange = newValue }
     }
 
-    /// Called when the user changes the menu-bar "Reset countdown" mode (#103), with the new mode.
-    var onResetCountdownModeMenuBarChange: ((ResetCountdownMode) -> Void)? {
-        get { model.onResetCountdownModeMenuBarChange } set { model.onResetCountdownModeMenuBarChange = newValue }
-    }
-
     /// Called when the user changes the **Menu Bar Widget** section's "Bar style" control (#224,
     /// #329), with the new style. Menu bar only — the dropdown has its own callback.
     var onMenuBarStyleChange: ((BarStyle) -> Void)? {

@@ -267,46 +267,10 @@ struct ResetLineClockTests {
     }
 }
 
-// MARK: - resetDisplay (end-to-end)
-
-@Suite("ResetClock.resetDisplay")
-struct ResetDisplayTests {
-
-    // Reset strings phrased relative to a fixed reference instant so the bands are stable.
-    // Reference "now" for this suite: 2026-06-21T05:30:00Z.
-    private static let ref = Date(timeIntervalSince1970: 1_782_019_800)
-
-    @Test func picksNearestAndFormatsMinutes() {
-        // 5h resets in ~45 min, 7d in ~6 days → 5h is nearest.
-        let five  = "2026-06-21T06:15:00.123456+00:00" // ref + 45 min
-        let seven = "2026-06-27T05:30:00+00:00"
-        let got = ResetClock.resetDisplay(fiveHourResetsAt: five, sevenDayResetsAt: seven, now: Self.ref)
-        #expect(got?.which == .fiveHour)
-        #expect(got?.display == "45m")
-    }
-
-    @Test func picksNearestWhenBothAreHoursOut() {
-        // Both far off; 7d sooner than the 5h → 7d wins. Formerly the "absolute band" case; since
-        // #284 the distance no longer changes the shape, so this pins the *selection* instead.
-        let five  = "2026-06-21T10:00:00+00:00"  // ref + 4.5 h
-        let seven = "2026-06-21T08:00:00+00:00"  // ref + 2.5 h, nearer
-        let got = ResetClock.resetDisplay(
-            fiveHourResetsAt: five, sevenDayResetsAt: seven, now: Self.ref)
-        #expect(got?.which == .sevenDay)
-        #expect(got?.display == "3h")            // 2.5 h rounds to the nearest hour
-    }
-
-    @Test func oneUnparseableFallsBackToOther() {
-        let got = ResetClock.resetDisplay(
-            fiveHourResetsAt: "null", sevenDayResetsAt: "2026-06-21T06:00:00+00:00", now: Self.ref)
-        #expect(got?.which == .sevenDay)
-    }
-
-    @Test func bothUnparseableReturnsNil() {
-        let got = ResetClock.resetDisplay(fiveHourResetsAt: nil, sevenDayResetsAt: "garbage", now: Self.ref)
-        #expect(got == nil)
-    }
-}
+// The `ResetClock.resetDisplay` suite was removed with the function itself (ADR-0091) — its only caller
+// was the menu bar's `.expanded` countdown, which no longer exists. Every part it exercised is still
+// covered where it now lives: the parse-both/nearest-of-two selection in the `nearestReset` suite above,
+// and the formatting in `timeToReset`/`relativeRounded` below.
 
 // MARK: - relativeRounded (popup "resets in …", single-unit, nearest-rounded)
 

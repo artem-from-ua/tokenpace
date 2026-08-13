@@ -18,7 +18,7 @@ import Foundation
 /// two booleans from here instead of from two separate persisted keys.
 ///
 /// Stored raw-string in `UserDefaults` with a forward-compatible decode (an unknown raw falls back to
-/// ``yellowGreenBlue``, the shipped calm default), mirroring `BarStyle` / `ResetCountdownMode`.
+/// ``yellowGreenBlue``, the shipped calm default), mirroring `BarStyle` / `CalmBarHiding`.
 public enum CalmColorMode: String, Sendable, Equatable, Codable, CaseIterable {
     /// Nothing muted — every state keeps its colour.
     case off = "off"
@@ -50,7 +50,7 @@ public enum CalmColorMode: String, Sendable, Equatable, Codable, CaseIterable {
     public func mutesIdlePill(isBlue: Bool) -> Bool { mutesCalm && !(isBlue && !mutesBlue) }
 
     /// Forward-compatible decode: an unrecognised raw string falls back to ``yellowGreenBlue`` (the
-    /// shipped calm default) instead of throwing. Mirrors `BarStyle` / `ResetCountdownMode`.
+    /// shipped calm default) instead of throwing. Mirrors `BarStyle` / `CalmBarHiding`.
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
         self = CalmColorMode(rawValue: raw) ?? .yellowGreenBlue

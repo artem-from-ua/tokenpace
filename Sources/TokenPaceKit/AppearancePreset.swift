@@ -3,11 +3,11 @@ import Foundation
 // MARK: - AppearancePreset (#215)
 
 /// A named, one-click bundle of every **Appearance** pane setting — the menu-bar widget toggles, the
-/// reset-countdown mode, the bar presentation style of each surface, and the dropdown's section
+/// the bar presentation style of each surface, and the dropdown's section
 /// visibility (#215, #224, #329).
 /// Generalises the single "Reset to defaults" row from #214: `.chill` is the calm, quiet look
 /// (simplified bars), `.workHarder` is `.chill` plus the coloured far-behind blue, `.controlFreak`
-/// turns everything on (dense pacing bars). Applying a preset writes all nine keys at once via
+/// turns everything on (dense pacing bars). Applying a preset writes all eight keys at once via
 /// `PersistedConfig.apply(_:)`.
 ///
 /// Each preset picks **one** ``BarStyle`` and gives it to both surfaces (#329) — the presets are the
@@ -19,7 +19,7 @@ import Foundation
 /// ``displayName`` shown on it. ``matching(_:)`` powers the control's "Custom" indicator segment: it
 /// lights up when the live config matches no preset.
 public enum AppearancePreset: String, Sendable, CaseIterable {
-    /// The calm, quiet look: every menu-bar toggle calm, countdown `.smart`, and the left-anchored
+    /// The calm, quiet look: every menu-bar toggle calm and the left-anchored
     /// **Pressure** ribbon on both surfaces (#224) — the quietest of the three styles, since every
     /// calm state collapses onto one minimum pill.
     case chill = "chill"
@@ -29,18 +29,18 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
     /// default — including **Gauge** bars on both surfaces (#329).
     case workHarder = "workHarder"
     /// Everything on and loud: calm colours off, all bars/dots/glyphs shown, the dropdown's credits and
-    /// per-model sections pinned open (`.always`), the reset countdown always visible, and the dense
+    /// per-model sections pinned open (`.always`), and the dense
     /// **Progress** bars with the time marker (#224).
     case controlFreak = "controlFreak"
 
-    /// The fixed value set this preset writes to the nine Appearance keys. Stored in the **as-persisted**
+    /// The fixed value set this preset writes to the eight Appearance keys. Stored in the **as-persisted**
     /// sense, matching `PersistedConfig`. Since ADR-0086 every value here is stored exactly as the pane
     /// shows it — the old `hideCalmSevenDayBar` was the last inverted one ("Show …" in the UI, *hide* in
     /// storage), and its tri-state replacement `calmBarHiding` names the hidden bar directly.
     public var values: AppearancePresetValues {
         switch self {
         case .chill:
-            // The calm look: per-model rows on, countdown smart, simplified bars, and — when fully
+            // The calm look: per-model rows on, simplified bars, and — when fully
             // blocked — only the red pause icon (bars hidden). Work harder off — the far-behind blue
             // mutes with the rest of the calm colours.
             return AppearancePresetValues(
@@ -53,7 +53,6 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 // ⌥ Option still reveals either on demand.
                 modelLimitsVisibility: .nonCalm,
                 extraUsageVisibility: .aboveZero,
-                resetCountdownModeMenuBar: .smart,
                 menuBarStyle: .pressure,
                 dropdownStyle: .pressure,
                 showTicks: false)   // the quiet look drops the under-bar tick ruler too
@@ -70,13 +69,12 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 // bar (blue far-behind, ticks), not in permanently expanded popup sections.
                 modelLimitsVisibility: .nonCalm,
                 extraUsageVisibility: .aboveZero,
-                resetCountdownModeMenuBar: .smart,
                 menuBarStyle: .gauge,
                 dropdownStyle: .gauge,
                 showTicks: true)
         case .controlFreak:
             // Show everything: calm off; nothing hidden; every glyph/dot/credits/per-model row on;
-            // countdown always; dense pacing bars. Work harder on so the far-behind blue stays loud too.
+            // dense pacing bars. Work harder on so the far-behind blue stays loud too.
             // When blocked, keep the bars beside the pause icon.
             return AppearancePresetValues(
                 calmColorMode: .off,   // nothing muted — every state keeps its colour (loud)
@@ -85,7 +83,6 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 // Nothing in the dropdown is ever folded away — every row on screen, always.
                 modelLimitsVisibility: .always,
                 extraUsageVisibility: .always,
-                resetCountdownModeMenuBar: .always,
                 menuBarStyle: .progress,
                 dropdownStyle: .progress,
                 showTicks: true)
@@ -123,7 +120,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
 
 // MARK: - AppearancePresetValues
 
-/// The nine Appearance-pane values a preset sets, in the same **as-persisted** sense as
+/// The eight Appearance-pane values a preset sets, in the same **as-persisted** sense as
 /// `PersistedConfig` — which is also exactly what each pane row shows (the inverted
 /// `hideCalmSevenDayBar` was the last exception, retired with ADR-0086).
 public struct AppearancePresetValues: Sendable, Equatable {
@@ -140,7 +137,6 @@ public struct AppearancePresetValues: Sendable, Equatable {
     /// When the **dropdown** shows the "Extra usage" credits section. Independent of
     /// the menu-bar credits icon, which is data-driven and has no user gate (ADR-0090).
     public let extraUsageVisibility: PopupSectionVisibility
-    public let resetCountdownModeMenuBar: ResetCountdownMode
     /// How the **menu-bar** widget draws its bars (#329). Chosen independently of ``dropdownStyle``:
     /// the compact bar and the roomy popup can carry different presentations, which is what the old
     /// single `barStyle` key could only express through its one `mixed` case.
@@ -157,7 +153,6 @@ public struct AppearancePresetValues: Sendable, Equatable {
         showServiceStatusDot: Bool,
         modelLimitsVisibility: PopupSectionVisibility,
         extraUsageVisibility: PopupSectionVisibility,
-        resetCountdownModeMenuBar: ResetCountdownMode,
         menuBarStyle: BarStyle,
         dropdownStyle: BarStyle,
         showTicks: Bool
@@ -167,7 +162,6 @@ public struct AppearancePresetValues: Sendable, Equatable {
         self.showServiceStatusDot = showServiceStatusDot
         self.modelLimitsVisibility = modelLimitsVisibility
         self.extraUsageVisibility = extraUsageVisibility
-        self.resetCountdownModeMenuBar = resetCountdownModeMenuBar
         self.menuBarStyle = menuBarStyle
         self.dropdownStyle = dropdownStyle
         self.showTicks = showTicks

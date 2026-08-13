@@ -28,8 +28,12 @@
 - [conventions.md](reference/conventions.md) — конвенції розробки: мова, стиль, логування, версіонування.
 - [users-and-goals.md](reference/users-and-goals.md) — для кого застосунок, який біль розв'язує,
   перевірка «чи сигнал корисний», дефіцитні ресурси, що користувач контролює сам.
+- [menu-bar-signals.md](reference/menu-bar-signals.md) — як читати menu bar **із боку користувача**:
+  чи є число, що означає гліф поруч, як читаються смужки, і чого віджет не каже.
 - [ui-state-truth.md](reference/ui-state-truth.md) — джерело істини для рендерів поза застосунком:
   метрики, анатомія бару, як обчислюється колір, таблиця неможливих комбінацій.
+- [bar-status-conditions.md](reference/bar-status-conditions.md) — вичерпний довідник: за яких саме
+  умов кожен тип бару набуває кожного статусу/кольору, з посиланням на рядок коду.
 - [log-messages.md](reference/log-messages.md) — повний перелік кожного лог-повідомлення, згрупований за файлом.
 - [performance.md](reference/performance.md) — гейти пʼяти періодичних завдань в одній таблиці: що
   зупиняє screen lock, sleep, батарея, metered-мережа; які гейти відсутні.

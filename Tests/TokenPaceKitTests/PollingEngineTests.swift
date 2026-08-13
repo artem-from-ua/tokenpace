@@ -138,9 +138,35 @@ struct AdvanceFailureTests {
             claudeActive: true, now: t0)
         #expect(next.backoff.isHolding == true)
         #expect(next.backoff.interval == 180)      // no hint → base hold
-        #expect(next.failingSince == t0)
-        #expect(next.reason == .serverProblem)
+        #expect(next.reason == .serverProblem)     // the popup still explains it in words
         #expect(next.lastSnapshot == snap(five: 40, seven: 75))  // stale data preserved
+    }
+
+    @Test func rateLimitedDoesNotStartTheFailureRun() {
+        // A 429 is the server saying "not so fast", not "the data is unavailable" (ADR-0091). It takes the
+        // backoff hold and the popup's reason line, but it must **not** start `failingSince` — that clock
+        // is what ages the menu bar into the bare ⚠️, and a `Retry-After` of several minutes would trip
+        // the glyph threshold on its own, reporting a fault where the system is working as designed.
+        let next = PollingEngine.advance(
+            previous: PollState(lastSnapshot: snap(five: 40, seven: 75)),
+            outcome: .usageError(.rateLimited(retryAfter: 700)),
+            claudeActive: true, now: t0)
+        #expect(next.failingSince == nil)
+        #expect(next.health.isFailing == false)   // …so the ⚠️ threshold never starts counting
+    }
+
+    @Test func rateLimitedPreservesAnExistingFailureRun() {
+        // The other half of "never started": a 429 arriving mid-outage must not *clear* the run either.
+        // Only a success does that — otherwise a rate-limited retry during a real failure would reset the
+        // menu bar's staleness clock and hide an outage that is still ongoing.
+        let earlier = t0.addingTimeInterval(-600)
+        let failing = PollingEngine.advance(
+            previous: PollState(), outcome: .usageError(.transport(message: "offline", code: .notConnectedToInternet)),
+            claudeActive: true, now: earlier)
+        let next = PollingEngine.advance(
+            previous: failing, outcome: .usageError(.rateLimited(retryAfter: nil)),
+            claudeActive: true, now: t0)
+        #expect(next.failingSince == earlier)   // carried through untouched, not re-stamped at t0
     }
 
     @Test func rateLimitedHonoursRetryAfterExactly() {

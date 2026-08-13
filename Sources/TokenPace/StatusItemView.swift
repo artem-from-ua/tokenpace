@@ -420,19 +420,24 @@ final class StatusItemView: NSView {
         }
 
         switch layout.mode {
-        case let .expanded(fiveHour, sevenDay, resetToShow):
-            drawExpanded(fiveHour: fiveHour, sevenDay: sevenDay, reset: resetToShow?.display, in: contentRect)
+        case let .expanded(fiveHour, sevenDay):
+            drawExpanded(fiveHour: fiveHour, sevenDay: sevenDay, in: contentRect)
         case let .iconOnlyReset(reset, _):
             drawBlockedReset(reset, in: contentRect)
+        case .exhaustedUnknownReset:
+            // Same shape as `.iconOnlyReset` — leading glyph, then the label slot — but the slot holds a
+            // ⚠️ instead of a countdown: the state is known, only its end is not (ADR-0091).
+            drawUnknownReset(in: contentRect)
         case let .error(fiveHour, sevenDay, reset, _):
             drawError(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, in: contentRect)
         case .usagePollingOff:
             // #341: `zzz` alone. The status dot above is deliberately still drawn — in this mode it
             // is the item's only live signal, so suppressing it would leave a widget saying nothing.
-            drawGlyphAlone("zzz", accessibilityDescription: "usage monitoring off", in: contentRect)
+            drawGlyphAlone("zzz", accessibilityDescription: "usage monitoring off",
+                           atX: contentRect.minX + Metrics.hPadding, in: contentRect)
         case .nothingMonitored:
             drawGlyphAlone("exclamationmark.triangle", accessibilityDescription: "monitoring off",
-                           in: contentRect)
+                           atX: contentRect.minX + Metrics.hPadding, in: contentRect)
         }
     }
 
@@ -708,12 +713,22 @@ final class StatusItemView: NSView {
 
     // MARK: Expanded
 
-    private func drawExpanded(fiveHour: BarView?, sevenDay: BarView?, reset: String?, in rect: NSRect) {
+    private func drawExpanded(fiveHour: BarView?, sevenDay: BarView?, in rect: NSRect) {
         // Leading decorations first (#199, #227): the red pause glyph (when blocked) then the credits
         // icon (when present), each shifting the bars right past it — the same leading pattern the ⚠️
         // error state uses. Order: pause → credits → bars.
         let originX = drawLeadingDecorations(in: rect)
-        drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset, originX: originX, in: rect)
+        drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: nil, originX: originX, in: rect)
+    }
+
+    /// The "a window is exhausted but its reset instant is broken" draw (ADR-0091): a **lone ⚠️**.
+    ///
+    /// No pause or currency glyph precedes it, even though the model knows which of the two applies —
+    /// `MenuBarLayout` suppresses both for this mode. A glyph stating the situation beside a warning
+    /// disowning it reads as a broken widget rather than as a state, so contradictory data gets one
+    /// signal. The awaiting-input hand is likewise absent, since `drawLeadingDecorations` is skipped.
+    private func drawUnknownReset(in rect: NSRect) {
+        drawErrorGlyph(atX: rect.minX + Metrics.hPadding, in: rect)
     }
 
     /// Draw the red "pause" glyph at leading `x`, vertically centred on `rect`, and return its right-edge
@@ -812,38 +827,62 @@ final class StatusItemView: NSView {
 
     // MARK: Error (issue #12)
 
-    /// Draw the error state: the ⚠️ glyph at the left, and — during the 30–60 min stale phase —
-    /// the last known bars + reset beside it (all bars `nil` past 60 min / cold start → glyph alone).
+    /// Draw the error state: the "no data" glyph alone. Since ADR-0091 it never carries bars — data
+    /// stale enough to reach this state is not shown at all — so `fiveHour`/`sevenDay`/`reset` are
+    /// always `nil` here and the parameters are kept only so the case pattern stays honest.
     private func drawError(fiveHour: BarView?, sevenDay: BarView?, reset: String?, in rect: NSRect) {
-        let glyphRight = drawErrorGlyph(in: rect)
-        if let fiveHour, let sevenDay, let reset {
-            drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: reset,
-                     originX: glyphRight + Metrics.errorGlyphGap, in: rect)
-        }
+        drawNoDataGlyph(in: rect)
     }
 
-    /// Draw the ⚠️ glyph (`exclamationmark.triangle`) at the left of `rect`, in the **foreground
-    /// (label) colour** so it matches the menu-bar text, and return its right edge x so the caller
-    /// can place stale bars beside it. The non-`.fill` outline keeps the exclamation mark legible
-    /// even as a single-colour fill. Centred on `rect.midY` (the bars block's vertical centre) and
-    /// drawn with `respectFlipped: true` — this view is `isFlipped`, so a plain `draw(in:)` mirrors
-    /// the image vertically (the triangle came out upside-down / crooked); the flag fixes that.
-    @discardableResult
-    private func drawErrorGlyph(in rect: NSRect) -> CGFloat {
-        drawGlyphAlone("exclamationmark.triangle", accessibilityDescription: "error", in: rect)
-    }
-
-    /// Draw a single leading glyph in the menu-bar foreground colour and return its right edge x.
+    /// Draw the **"no data"** glyph — a slashed antenna, not the ⚠️ triangle.
     ///
-    /// Factored out of ``drawErrorGlyph`` so the states that show a lone glyph — the error ⚠️, and
-    /// the two monitoring states of #341 — share one measurement and one drawing path. The width
-    /// counterpart is ``glyphWidth(_:)``, which must use the same `SymbolConfiguration` or the item
-    /// will reserve a width it does not draw into.
+    /// The two aftermaths look nothing alike to the model and used to look identical on screen: "we
+    /// cannot reach the API" and "a window is exhausted but its `resets_at` is broken" both rendered
+    /// the same triangle, distinguished only by an 11 pt pause glyph beside it (ADR-0091). Polling
+    /// failures are routine and exhausted-with-a-broken-date is a rare server bug, so the frequent
+    /// state now gets its own symbol and ⚠️ is reserved for "the data contradicts itself".
+    @discardableResult
+    private func drawNoDataGlyph(in rect: NSRect) -> CGFloat {
+        drawGlyphAlone(Self.noDataSymbolName, accessibilityDescription: "no data",
+                       atX: rect.minX + Metrics.hPadding, in: rect)
+    }
+
+    /// `antenna.radiowaves.left.and.right.slash` where available (macOS 12+), falling back to the
+    /// triangle if a future OS drops it — resolved once, because `NSImage(systemSymbolName:)` returning
+    /// `nil` for a symbol that does not exist is exactly the failure `ui-state-truth.md` warns about.
+    static let noDataSymbolName: String = {
+        let preferred = "antenna.radiowaves.left.and.right.slash"
+        return NSImage(systemSymbolName: preferred, accessibilityDescription: nil) != nil
+            ? preferred : "exclamationmark.triangle"
+    }()
+
+    /// Draw the ⚠️ glyph (`exclamationmark.triangle`) at `x`, in the **foreground (label) colour** so it
+    /// matches the menu-bar text, and return its right edge x. The non-`.fill` outline keeps the
+    /// exclamation mark legible even as a single-colour fill. Centred on `rect.midY` and drawn with
+    /// `respectFlipped: true` — this view is `isFlipped`, so a plain `draw(in:)` mirrors the image
+    /// vertically (the triangle came out upside-down / crooked); the flag fixes that.
+    ///
+    /// Since ADR-0091 this means one thing only: **the data contradicts itself** — a window is provably
+    /// exhausted while its reset instant is missing or unparseable. Unreachable-API is
+    /// ``drawNoDataGlyph(in:)``.
+    @discardableResult
+    private func drawErrorGlyph(atX x: CGFloat, in rect: NSRect) -> CGFloat {
+        drawGlyphAlone("exclamationmark.triangle", accessibilityDescription: "reset time unknown",
+                       atX: x, in: rect)
+    }
+
+    /// Draw a single glyph in the menu-bar foreground colour at `x` and return its right edge x.
+    ///
+    /// Factored out so every lone-glyph state — the no-data symbol, the ⚠️, and the two monitoring
+    /// states of #341 — shares one measurement and one drawing path. `atX` exists because the ⚠️ is not
+    /// always leading: in ``drawUnknownReset(in:)`` it follows the pause or currency glyph, and hard-coding
+    /// `rect.minX` would stack the two in the same place. The width counterpart is ``glyphWidth(_:)``,
+    /// which must use the same `SymbolConfiguration` or the item will reserve a width it does not draw into.
     @discardableResult
     private func drawGlyphAlone(
-        _ symbolName: String, accessibilityDescription: String, in rect: NSRect
+        _ symbolName: String, accessibilityDescription: String, atX x: CGFloat, in rect: NSRect
     ) -> CGFloat {
-        let originX = rect.minX + Metrics.hPadding
+        let originX = x
         let config = NSImage.SymbolConfiguration(pointSize: Metrics.errorGlyphSize, weight: .semibold)
             .applying(.init(paletteColors: [bright(Palette.foreground)]))   // labelColor at text opacity
         guard let symbol = NSImage(systemSymbolName: symbolName,
@@ -1237,33 +1276,27 @@ final class StatusItemView: NSView {
             // No layout at all — the very first draw, before the first poll resolves. Credits is
             // trailing here, as in every glyph-only state.
             return Metrics.height + dotInset + creditsInset
-        case let .expanded(_, _, resetToShow):
-            return dotInset + Metrics.hPadding + leadingInset
-                + barsBlockWidth(reset: resetToShow?.display) + Metrics.hPadding
+        case .expanded:
+            // Bars, never a countdown (ADR-0091) — and one bar is exactly as wide as two, since both
+            // draw into the same `barWidth` column.
+            return dotInset + Metrics.hPadding + leadingInset + Metrics.barWidth + Metrics.hPadding
         case let .iconOnlyReset(reset, _):
             // No bars (#194): the item hugs the leading decorations (pause + credits) plus the countdown.
             return dotInset + Metrics.hPadding + leadingInset + resetLabelWidth(reset) + Metrics.hPadding
-        case let .error(five, _, reset, _):
-            // ⚠️ alone (cold start / >60 min) → compact; ⚠️ + stale bars (30–60 min) → glyph + bars.
-            // Credits stays **trailing** in the error state (no leading pause sequence).
-            guard five != nil, let reset else { return Metrics.height + dotInset + creditsInset }
-            return dotInset + creditsInset + Metrics.hPadding + errorGlyphWidth() + Metrics.errorGlyphGap
-                + barsBlockWidth(reset: reset) + Metrics.hPadding
+        case .exhaustedUnknownReset:
+            // A lone ⚠️, same compact width as the other glyph-only states — no leading sequence, since
+            // `MenuBarLayout` suppresses the pause and currency icons here (ADR-0091).
+            return Metrics.height + dotInset + creditsInset
+        case .error:
+            // The lone no-data glyph — never bars since ADR-0091. Credits stays **trailing** here
+            // (no leading pause sequence in this state).
+            return Metrics.height + dotInset + creditsInset
         case .usagePollingOff, .nothingMonitored:
-            // A lone glyph in both (#341) — same compact width as the glyph-only error phases. The
-            // credits inset is structurally zero here (`make` suppresses the marker in these modes),
-            // but it is kept in the sum so this branch cannot drift from the others.
+            // A lone glyph in both (#341) — same compact width as the error state. The credits inset is
+            // structurally zero here (`make` suppresses the marker in these modes), but it is kept in
+            // the sum so this branch cannot drift from the others.
             return Metrics.height + dotInset + creditsInset
         }
-    }
-
-    /// Width of the bars block + (optionally) its reset label (no outer padding) — shared by the
-    /// expanded and error-with-bars widths so they stay in sync with
-    /// ``drawBars(fiveHour:sevenDay:reset:originX:in:)``. A `nil` `reset` omits the label (and its
-    /// leading gap), so the item hugs just the bars (ADR-0029); the error path always passes non-nil.
-    private func barsBlockWidth(reset: String?) -> CGFloat {
-        guard let reset else { return Metrics.barWidth }
-        return Metrics.barWidth + Metrics.labelGap + resetLabelWidth(reset)
     }
 
     /// The font the reset countdown is both **measured** and **drawn** in. One constant rather than a

@@ -380,7 +380,7 @@ actor StubUsageTransport: UsageTransport {
         case pacing(PacingFrame)
         /// The broken-`resets_at` frame (#167, ADR-0043): a healthy poll whose 5h window is **noisy**
         /// (exhausted, 100 %) but carries `resets_at: null` — an API data error on the chosen window.
-        /// `selectReset` returns `.dataError(.fiveHour)` and the menu bar promotes to the ⚠️ error state
+        /// `hasBrokenActiveReset` fires and the menu bar promotes to the ⚠️ error state
         /// (glyph + last bars) instead of inventing a countdown — the same treatment as other API errors.
         case brokenReset
         /// Calm bars + a **degraded** (yellow) service dot (#…): the usage side mirrors
@@ -1012,7 +1012,7 @@ actor StubUsageTransport: UsageTransport {
         }
 
         // Broken-`resets_at` frame (#167, ADR-0043): a healthy 200 whose **noisy** 5h window (100 %)
-        // carries `resets_at: null`. `selectReset` chooses the noisy 5h, finds no valid instant →
+        // carries `resets_at: null`. The 5h window is noisy with no valid instant →
         // `.dataError(.fiveHour)`, so `make(...)` promotes the layout to the ⚠️ error state (glyph +
         // the last bars) rather than a fabricated "<1m". The 7-day window is calm with a valid reset,
         // so it is not the data-error source — the error comes purely from the chosen 5h.

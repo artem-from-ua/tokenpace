@@ -100,17 +100,19 @@ public enum FailureReason: Sendable, Equatable {
 /// poll results; #12 only defines it, the thresholds, and the rendering. `AppDelegate` builds a
 /// mock to exercise the states under `swift run`.
 ///
-/// ## Menu-bar phases (SPEC "Стан помилок", refined with the user)
+/// ## Menu-bar phases (SPEC "Стан помилок"; two phases since ADR-0091)
 /// The widget reacts to the **duration** of an unbroken failure run, `now - failingSince`:
 /// | Phase | Condition | Menu bar |
 /// |---|---|---|
-/// | fresh-ish | `≤ 30 min` and a last snapshot exists | stale bars + reset, **no** ⚠️ |
-/// | stale | `30 min < age ≤ 60 min` | ⚠️ **plus** stale bars + reset |
-/// | dead | `> 60 min`, or cold start (no snapshot) | ⚠️ **only** (data too old / absent) |
+/// | fresh-ish | within ``glyphAfter(for:)`` and a last snapshot exists | stale bars, **no** ⚠️ |
+/// | dead | past it, or cold start (no snapshot) | ⚠️ **only** — no bars, no countdown |
+///
+/// The middle phase (⚠️ *beside* stale bars, 30–60 min) is gone: bars that old invite a reading they
+/// cannot support, and the popup already explains the failure in words.
 ///
 /// The popup, by contrast, warns **immediately** on any failure (no threshold) — `isFailing`
 /// drives `PopupLayout.warning`. The phase logic itself lives in `MenuBarLayout.make`; this type
-/// owns only the inputs and the thresholds.
+/// owns only the inputs and the threshold.
 ///
 /// ## The third state: `notPolling` (#341)
 /// "We are deliberately not asking" is neither healthy nor failing, and both attempts to encode it
@@ -138,16 +140,22 @@ public struct UsageHealth: Sendable, Equatable {
     /// and leaving it does not clear one. While it is `true`, `failingSince` is `nil` and
     /// `lastSuccess` is whatever it was — stale, and the UI must not present it as fresh.
     public let notPolling: Bool
+    /// The cadence polls are currently attempted at, which is what makes the ⚠️ threshold meaningful:
+    /// see ``glyphAfter(for:)``. Defaults to `PollingEngine.baseInterval` so the many construction
+    /// sites that predate this — and every test that does not care — keep the healthy-cadence answer.
+    public let pollInterval: TimeInterval
 
     /// Defaulted so the many existing construction sites — production and test alike — keep meaning
     /// "we are polling", and only the polling engine's service-only path opts in.
     public init(
-        lastSuccess: Date?, failingSince: Date?, reason: FailureReason?, notPolling: Bool = false
+        lastSuccess: Date?, failingSince: Date?, reason: FailureReason?, notPolling: Bool = false,
+        pollInterval: TimeInterval = PollingEngine.baseInterval
     ) {
         self.lastSuccess = lastSuccess
         self.failingSince = failingSince
         self.reason = reason
         self.notPolling = notPolling
+        self.pollInterval = pollInterval
     }
 
     /// Healthy state: the last poll succeeded at `at`, no failure in progress.
@@ -163,13 +171,29 @@ public struct UsageHealth: Sendable, Equatable {
 
     // MARK: thresholds
 
-    /// Failures must run **longer than** this before the menu bar adds the ⚠️ glyph next to the
-    /// (now stale) bars. SPEC "Стан помилок": "Якщо авторизація не працює > 30 хв". 1800 s.
-    public static let glyphAfter: TimeInterval = 30 * 60
+    /// The floor for ``glyphAfter(for:)`` — 15 min. Chosen so the widget gives up on data noticeably
+    /// sooner than the old 30-min step, without turning a single hiccup into a ⚠️.
+    public static let glyphAfterFloor: TimeInterval = 15 * 60
 
-    /// Failures longer than this drop the bars entirely — the data is too stale to show — leaving
-    /// only the ⚠️ glyph (user decision, beyond the SPEC's single 30-min step). 3600 s.
-    public static let hideBarsAfter: TimeInterval = 60 * 60
+    /// How many polls must fail before the ⚠️ is warranted, when the cadence is slow enough that the
+    /// floor would not cover even that many. Three is the smallest count that cannot be reached by one
+    /// unlucky request plus one retry.
+    public static let glyphAfterAttempts: Double = 3
+
+    /// Failures must run **longer than** this before the menu bar drops to the bare ⚠️.
+    ///
+    /// **Why this is not a constant.** A wall-clock threshold silently means different things at
+    /// different cadences, and the cadence varies by a factor of five (`PollingEngine`, ADR-0032):
+    /// 180 s while a Claude Code session is running, but **900 s** while none is — which is exactly the
+    /// 15-minute floor. At that cadence a flat 15 min would raise the ⚠️ after a *single* missed poll,
+    /// on a machine that is merely idle. Scaling by the interval keeps the promise the number is
+    /// meant to make ("we tried, repeatedly, and could not get data") true at any cadence.
+    ///
+    /// So: the floor, or three attempts' worth of the current interval, whichever is longer — 15 min
+    /// during an active session, 45 min while idle.
+    public static func glyphAfter(for health: UsageHealth) -> TimeInterval {
+        max(glyphAfterFloor, glyphAfterAttempts * health.pollInterval)
+    }
 
     // MARK: derived state
 

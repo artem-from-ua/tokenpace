@@ -13,7 +13,6 @@ private let paneOrderedKeys = [
     "menuBarStyle",               // Menu Bar Widget → "Bar style"
     "calmColorMode",              // "Calm non-critical colors"
     "calmBarHiding",              // "Hide 5h (top) bar"
-    "resetCountdownModeMenuBar",  // "Show reset countdown"
     "showServiceStatusDot",       // "Show service status dot on issues"
     "dropdownStyle",              // Dropdown Widget → "Bar style"
     "modelLimitsVisibility",      // "Show model & service limits"
@@ -48,7 +47,6 @@ private let customValues = AppearancePresetValues(
     showServiceStatusDot: false,
     modelLimitsVisibility: .optionOnly,
     extraUsageVisibility: .always,
-    resetCountdownModeMenuBar: .never,
     // Deliberately mismatched surfaces — the pair no preset can express (#329), and the shape the
     // retired `"mixed"` value used to name.
     menuBarStyle: .pressure,
@@ -89,7 +87,10 @@ struct AppearanceConfigExportOrderTests {
     /// Every Appearance value reaches the dump — catches a property added to `AppearancePresetValues`
     /// whose `encode` call was forgotten, which would otherwise drop it silently.
     @Test func everyValueIsExported() {
-        #expect(appearanceKeysInOrder(export(customValues, preset: nil)).count == 9)
+        // Counted against `paneOrderedKeys` rather than a literal: the literal had to be edited by hand
+        // every time a key came or went, and a stale one fails here for a reason that has nothing to do
+        // with the rule under test.
+        #expect(appearanceKeysInOrder(export(customValues, preset: nil)).count == paneOrderedKeys.count)
     }
 }
 
@@ -124,7 +125,6 @@ struct AppearanceConfigExportPayloadTests {
         #expect(json.contains("\"menuBarStyle\" : \"pressure\""))
         #expect(json.contains("\"dropdownStyle\" : \"progress\""))
         #expect(json.contains("\"calmColorMode\" : \"off\""))
-        #expect(json.contains("\"resetCountdownModeMenuBar\" : \"never\""))
         #expect(json.contains("\"calmBarHiding\" : \"never\""))
     }
 
@@ -196,7 +196,6 @@ struct AppearancePresetValuesCodableTests {
             AppearancePresetValues.self, from: Data(json.utf8))
         #expect(decoded.menuBarStyle == .pressure)   // the pre-#307 raw still maps, per surface
         #expect(decoded.dropdownStyle == .gauge)
-        #expect(decoded.resetCountdownModeMenuBar == .always)
         #expect(decoded.modelLimitsVisibility == .always)
         #expect(decoded.extraUsageVisibility == .optionOnly)
         #expect(decoded.showTicks)
@@ -221,7 +220,9 @@ struct AppearancePresetValuesCodableTests {
         }
         // `true` hid the calm 7-day bar; `false` kept both. The 7-day mode retired with ADR-0090, so
         // `true` lands on `.fiveHour` — still one bar while calm, which is what that user asked for.
-        // Note the fixture also carries the three keys ADR-0090 retired: they must be ignored, not throw.
+        // Note the fixture also carries the keys ADR-0090/ADR-0091 retired — including
+        // `resetCountdownModeMenuBar`, whose setting is gone now that a countdown only ever accompanies
+        // the bars-less modes. They must be ignored, not throw.
         #expect(try decode("\"hideCalmSevenDayBar\" : true").calmBarHiding == .fiveHour)
         #expect(try decode("\"hideCalmSevenDayBar\" : false").calmBarHiding == .never)
         // The new key wins when both are present — an old key left in a hand-edited dump can't override

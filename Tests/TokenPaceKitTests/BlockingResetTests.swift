@@ -149,6 +149,60 @@ struct SubscriptionExhaustedWhileCoveredTests {
 
 // MARK: - BlockingReset.forSubscriptionExhausted (#193)
 
+// MARK: - BlockingReset.forBlocked (the snapshot bridge the menu bar reads)
+
+/// The "both windows exhausted → the **later** reset wins" rule used to be pinned only through the menu
+/// bar's retired `selectReset` severity table (`bothExhaustedShowsLater`). The rule itself did not go
+/// anywhere — it lives in `BlockingReset`, which is now the sole decider of the countdown — so it is
+/// pinned here instead, against the snapshot bridge the layout actually calls.
+@Suite("BlockingReset.forBlocked")
+struct ForBlockedTests {
+    private let now = Date(timeIntervalSince1970: 1_000_000)
+    private func iso(_ seconds: TimeInterval) -> String {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]
+        return f.string(from: now.addingTimeInterval(seconds))
+    }
+
+    @Test func bothExhaustedPicksTheLaterReset() {
+        // 5h resets in 2 h, 7d in 4 d, no credits → you are blocked until the *later* one clears, so the
+        // 7-day row (index 1) is the answer. The 5h refilling underneath a blocking 7d changes nothing.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 100, resetsAt: iso(2 * 3600)),
+            sevenDay: UsageWindow(utilization: 100, resetsAt: iso(4 * 24 * 3600)))
+        #expect(BlockingReset.forBlocked(snapshot: snap, now: now)
+                == .token(id: 1, resetsAt: now.addingTimeInterval(4 * 24 * 3600)))
+    }
+
+    @Test func bothExhaustedPicksTheLaterResetWhenFiveHourIsLater() {
+        // The mirror, so the test cannot pass by always naming the 7-day window: with the 5h reset the
+        // later of the two (contrived, but the ordering is what is under test), index 0 wins.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 100, resetsAt: iso(5 * 24 * 3600)),
+            sevenDay: UsageWindow(utilization: 100, resetsAt: iso(2 * 3600)))
+        #expect(BlockingReset.forBlocked(snapshot: snap, now: now)
+                == .token(id: 0, resetsAt: now.addingTimeInterval(5 * 24 * 3600)))
+    }
+
+    @Test func onlyOneExhaustedPicksThatWindow() {
+        // A single exhausted window is trivially the latest — the countdown names it, not the healthy one.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 40, resetsAt: iso(2 * 3600)),
+            sevenDay: UsageWindow(utilization: 100, resetsAt: iso(4 * 24 * 3600)))
+        #expect(BlockingReset.forBlocked(snapshot: snap, now: now)
+                == .token(id: 1, resetsAt: now.addingTimeInterval(4 * 24 * 3600)))
+    }
+
+    @Test func anExhaustedWindowWithABrokenResetIsNoCandidate() {
+        // A window whose `resets_at` does not parse cannot anchor a countdown, so it drops out — and with
+        // nothing left, `forBlocked` returns nil. That nil is exactly what routes the layout to
+        // `.exhaustedUnknownReset` (the ⚠️-where-the-number-goes case), so this is the input side of it.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 30, resetsAt: iso(2 * 3600)),
+            sevenDay: UsageWindow(utilization: 100, resetsAt: "not-a-date"))
+        #expect(BlockingReset.forBlocked(snapshot: snap, now: now) == nil)
+    }
+}
+
 @Suite("BlockingReset.forSubscriptionExhausted")
 struct ForSubscriptionExhaustedTests {
     private let now = Date(timeIntervalSince1970: 1_000_000)

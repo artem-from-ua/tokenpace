@@ -64,18 +64,24 @@ Persistent-стан (переживає рестарт, окрім прости�
 ```sh
 git diff "${LAST}..HEAD" -- \
   Sources/TokenPaceKit/MonitoredServices.swift \
-  Sources/TokenPaceKit/ResetCountdownMode.swift \
-  Sources/TokenPaceKit/SuppressDays.swift
+  Sources/TokenPaceKit/SuppressDays.swift \
+  Sources/TokenPaceKit/CalmBarHiding.swift \
+  Sources/TokenPaceKit/CalmColorMode.swift \
+  Sources/TokenPaceKit/BarStyle.swift \
+  Sources/TokenPaceKit/PopupSectionVisibility.swift
 ```
 
 - `MonitoredServices` (`Codable`) серіалізується як JSON-блоб у `monitoredServices`.
   `MonitoredServicesTests.swift` пінить raw-рядки саме тому, що вони персистяться.
-- `ResetCountdownMode`, `SuppressDays` — raw-string enums, зберігаються за raw-значенням.
-- **Правило сумісності:** усі троє декодуються **forward-compatible** — несумісний/невідомий
+- `SuppressDays`, `CalmBarHiding`, `CalmColorMode`, `BarStyle`, `PopupSectionVisibility` —
+  raw-string enums, зберігаються за raw-значенням. (`ResetCountdownMode` був тут до
+  [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md) — тип видалено, ключ
+  `resetCountdownModeMenuBar` ретировано й підмітається.)
+- **Правило сумісності:** усі декодуються **forward-compatible** — несумісний/невідомий
   raw тихо падає в дефолт (не креш). Якщо міняєш форму (нове/перейменоване поле, інший
   raw) — **збережи цю властивість**: старий блоб має або коректно декодуватись, або
   безпечно відкотитись у дефолт. Легенду legacy-значень тримай у коментарях типу (як уже
-  зроблено для `show_distant_7d`/`hide_distant_7d` → `.smart`).
+  зроблено для `CalmBarHiding.migrated(fromLegacyHide:)` і `BarStyle.legacySurfaceStyles`).
 
 Також перевір edge-detect / update / archive стан (`backToWorkWasBlocked`,
 `pendingWhatsNewVersion`, `lastFailedInstallVersion`, `lastUpdateCheck`,
