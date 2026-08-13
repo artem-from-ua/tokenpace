@@ -419,9 +419,10 @@ actor StubUsageTransport: UsageTransport {
     ///  • `.recovery` — a **silent** recovery driven by the poll counter: degraded for the first two
     ///    polls, then `operational` with no further update, exactly as `mgp99sn4ynd4` behaved. The
     ///    one frame where an updates-driven listener would have stayed quiet for 43 minutes.
-    ///  • `.wrapped`  — a name whose **last wrapped line is too full to share** with the `age · stage`
-    ///    chip, so the chip drops to a line of its own (#351). The alignment case: on its own line the
-    ///    chip must still sit flush right, which the tab stop alone does not deliver.
+    ///  • `.wrapped`  — three names covering every placement the chip can take (#351): one that
+    ///    **shares** its last line, one that wraps to two lines and pushes the chip to a third, and a
+    ///    **single-line** name that still has too little room, so its chip sits alone on line two. On
+    ///    its own line the chip must still be flush right, which the tab stop alone does not deliver.
     enum IncidentFrame: Equatable {
         case active, green, two, recovery, wrapped
     }
@@ -816,11 +817,9 @@ actor StubUsageTransport: UsageTransport {
             }
 
             if frame == .wrapped {
-                // The name from #351, whose third wrapped line ends ~29 pt short of the trailing edge
-                // — too little for a `13m · investigating` chip (~113 pt), so the chip takes a line of
-                // its own. Paired with the fixed incident above, whose short last line *does* have
-                // room: one screenshot then shows both placements, and the shared-line case proves the
-                // fix did not push every chip onto its own line.
+                // The name from #351: it wraps to two lines whose second ends ~29 pt short of the
+                // trailing edge — too little for a `13m · investigating` chip (~113 pt), so the chip
+                // takes a third line of its own.
                 incidents.append("""
                 {"id":"n4tq8zv2hb6c","name":"Elevated errors for Claude Mythos 5, Claude Fable 5, \
                 and Claude Sonnet 5","status":"investigating","impact":"minor",\
@@ -830,6 +829,24 @@ actor StubUsageTransport: UsageTransport {
                 "incident_updates":[\
                 {"id":"upd-c1","status":"investigating","body":"We are investigating elevated error \
                 rates across several models.","created_at":"\(isoStamp(minutesAgo: 13))"}],\
+                "components":\(mirrored)}
+                """)
+
+                // The clearest form of the same case: a name that fits on ONE line (ends at ~185 pt)
+                // yet still leaves too little for the chip, so the second line carries the chip
+                // ALONE. The wrapped names above end close to the trailing edge, where a chip on its
+                // own line reads almost like a continuation of the description; here the gap after
+                // the name is wide and obvious, so the chip's right alignment is unmistakable — this
+                // is the row that showed the bug most plainly.
+                incidents.append("""
+                {"id":"q7vd3knm8ptb","name":"Elevated error rates on the API",\
+                "status":"investigating","impact":"minor",\
+                "shortlink":"https://stspg.io/j2xh6bqw4rvn",\
+                "created_at":"\(isoStamp(minutesAgo: 6))","started_at":"\(isoStamp(minutesAgo: 6))",\
+                "monitoring_at":null,"resolved_at":null,\
+                "incident_updates":[\
+                {"id":"upd-d1","status":"investigating","body":"We are investigating an elevated rate \
+                of errors on the API.","created_at":"\(isoStamp(minutesAgo: 6))"}],\
                 "components":\(mirrored)}
                 """)
             }

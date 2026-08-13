@@ -128,6 +128,10 @@ let cases: [(name: String, chip: String, expectOwnLine: Bool)] = [
     ("Degraded performance of multiple models", "2h7m · identified", false),
     ("Elevated errors for Claude Mythos 5, Claude Fable 5, and Claude Sonnet 5",
      "13m · investigating", true),
+    // Single-line name, chip still homeless: the name ends ~185 pt in, leaving 67 pt where the chip
+    // needs 113. The clearest case, and the one a line-count heuristic would get wrong — one line of
+    // description does not mean the chip fits on it.
+    ("Elevated error rates on the API", "6m · investigating", true),
     ("Elevated errors for Claude Fable 5, Claude Sonnet 5, Claude Haiku 4.5, and other models",
      "12m · investigating", false),
 ]

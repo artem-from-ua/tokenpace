@@ -363,10 +363,12 @@ enum StubScenario: String, CaseIterable {
                  + "the components go `operational` with NO further update — the `mgp99sn4ynd4` case an "
                  + "updates-driven listener would have missed for 43 minutes. Watch the rows vanish."
         case .incidentWrapped:
-            return "Two incidents chosen for how their names WRAP (#351). Hold \u{2325} Option: the first "
-                 + "ends its last line early, so `2h7m · identified` shares that line; the second fills "
-                 + "its last line, so `13m · investigating` drops to a line of its own. Both chips must "
-                 + "sit flush RIGHT — the wrapped one used to fall back to the left edge."
+            return "Three incidents chosen for how their names WRAP (#351) — every placement the chip "
+                 + "can take. Hold \u{2325} Option: the first ends its last line early, so `2h7m · "
+                 + "identified` SHARES that line; the second wraps to two lines and pushes `13m · "
+                 + "investigating` onto a third; the third fits on ONE line yet still has no room, so "
+                 + "`6m · investigating` sits ALONE on line two — the clearest form, with a wide gap "
+                 + "after the name. Every chip must be flush RIGHT; the wrapped ones fell to the left."
         }
     }
 
