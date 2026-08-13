@@ -731,6 +731,20 @@ actor StubUsageTransport: UsageTransport {
         var webStatus = failing ? "partial_outage" : "operational"
         let coworkStatus = failing ? "degraded_performance" : "operational"
 
+        // How long ago the WEB/Desktop components last changed state.
+        //
+        // This used to be a flat 12 minutes for every scenario, which put `claude.ai` and `Cowork`
+        // permanently **inside** the recently-recovered window (`PopupViewController.recoveryWindow`).
+        // The consequence was silent: every stub — including the ones whose subject is something else
+        // entirely — rendered a green "Web/Desktop · operational" row, because a recently-recovered
+        // component is shown alongside the problem rows by design. In a mode where that row is the
+        // only one on screen (#341's services-only popup) it read as though Web/Desktop were the sole
+        // monitored service.
+        //
+        // A recent recovery is now opt-in, carried only by the frames that are *about* recovery.
+        // Everything else stamps these components as long-settled, like `Claude Code` and the API.
+        let webChangedMinutesAgo = mode == .incident(.recovery) ? 12 : 127
+
         var incidents: [String] = []
 
         if case let .incident(frame) = mode {
@@ -788,8 +802,8 @@ actor StubUsageTransport: UsageTransport {
         "components":[\
         {"name":"Claude Code","status":"\(codeStatus)","updated_at":"\(isoStamp(minutesAgo: 127))"},\
         {"name":"Claude API (api.anthropic.com)","status":"\(apiStatus)","updated_at":"\(isoStamp(minutesAgo: 127))"},\
-        {"name":"claude.ai","status":"\(webStatus)","updated_at":"\(isoStamp(minutesAgo: 12))"},\
-        {"name":"Claude Cowork","status":"\(coworkStatus)","updated_at":"\(isoStamp(minutesAgo: 12))"}],\
+        {"name":"claude.ai","status":"\(webStatus)","updated_at":"\(isoStamp(minutesAgo: webChangedMinutesAgo))"},\
+        {"name":"Claude Cowork","status":"\(coworkStatus)","updated_at":"\(isoStamp(minutesAgo: webChangedMinutesAgo))"}],\
         "incidents":[\(incidents.joined(separator: ","))],\
         "scheduled_maintenances":[]}
         """.data(using: .utf8)!

@@ -1568,7 +1568,20 @@ final class PopupViewController: NSViewController {
         if showStatusRows, let status {
             var lastRow: NSView?
             let now = self.now()
-            if optionHeld, !layout.incidents.isEmpty {
+            if optionHeld, layout.incidents.isEmpty, servicesAreTheContent {
+                // ⌥ asks "what is broken", and here the answer is "nothing" — which is a different
+                // statement from `All services · operational`, the answer to "is everything up".
+                // Keeping the operational row under ⌥ would answer the previous question; hiding the
+                // section (what every other mode does when this dimension is empty) would empty the
+                // popup, since in the services-only mode these rows are all it has (#341).
+                lastRow = addServiceStatusRow(
+                    label: "No ongoing incidents",
+                    status: .operational,
+                    age: layout.lastUpdateAge > 0 ? layout.lastUpdateAge : nil,
+                    // The label already is the statement; `operational` beside it would answer the
+                    // service dimension in a row that belongs to the incident one.
+                    showsStatusWord: false)
+            } else if optionHeld, !layout.incidents.isEmpty {
                 // ⌥ switches the **dimension**, not the level of detail (ADR-0071 §2): the service
                 // rows are replaced by the incidents behind them. Green service lines are not shown
                 // here — under ⌥ the question is "what is broken", and a green row does not answer it.
@@ -1588,26 +1601,29 @@ final class PopupViewController: NSViewController {
                 // popup that looks identical to "nothing ever happened".
                 let components = status.checks.flatMap(\.components)
                     .filter { $0.status.isProblem || Self.isRecentlyRecovered($0, now: now) }
-                // #341: showing the section is not enough — this filter would still drop every row
-                // when all services are green, which is the normal case in the services-only mode.
-                // One summary row then stands for the lot: it is what the mode is reporting.
-                if servicesAreTheContent, components.isEmpty, !optionHeld {
+                // #341: in the services-only mode this section is the popup's entire content, so the
+                // question it answers is "is anything wrong", and the answer while nothing is —
+                // **one** summary row standing for the lot.
+                //
+                // The condition is `worstProblem == nil`, not `components.isEmpty`: the filter above
+                // also keeps components that went green within the recovery window, so a service that
+                // recovered minutes ago would otherwise replace the summary with a lone green row
+                // ("Web/Desktop · operational") that reads as though it were the only thing watched.
+                // A recent recovery is worth showing when it sits among real rows; it is not worth
+                // standing in for the whole section.
+                //
+                // **Not gated on `optionHeld`.** ⌥ switches the dimension to incidents (the branch
+                // above), and when there are none it changes nothing at all — this section keeps
+                // answering the same question either way. Expanding the summary into a per-component
+                // list under ⌥ would make it a level-of-detail control, which is exactly what
+                // ADR-0071 §2 says it is not.
+                if servicesAreTheContent, status.worstProblem == nil {
                     lastRow = addServiceStatusRow(
                         label: "All services",
-                        status: status.worstProblem ?? .operational,
+                        status: .operational,
                         age: layout.lastUpdateAge > 0 ? layout.lastUpdateAge : nil)
-                }
-                for component in components {
-                    lastRow = addServiceStatusRow(
-                        label: Self.displayName(component),
-                        status: component.status,
-                        age: component.stateAge(at: now))
-                }
-                // Under ⌥ the per-component rows are the detail this summary stands in for; when the
-                // filter kept nothing and ⌥ is held, fall back to listing every monitored component
-                // rather than an empty section.
-                if servicesAreTheContent, components.isEmpty, optionHeld {
-                    for component in status.checks.flatMap(\.components) {
+                } else {
+                    for component in components {
                         lastRow = addServiceStatusRow(
                             label: Self.displayName(component),
                             status: component.status,
@@ -2174,8 +2190,15 @@ final class PopupViewController: NSViewController {
     /// `addWarningTitle`'s symbol-attachment technique (`circle.fill` tinted via `paletteColors`);
     /// the link, when present, is handled explicitly by `StatusLineLabel` because `NSTextField`'s
     /// built-in `.link` handling is unreliable inside an `NSMenu`-hosted view.
+    ///
+    /// `showsStatusWord: false` keeps the dot and the age but drops the word — for a row whose label
+    /// is already the whole statement. "No ongoing incidents · operational" reads as an answer to two
+    /// different questions at once: the label answers the incident dimension, the word answers the
+    /// service one (#341).
     @discardableResult
-    private func addServiceStatusRow(label: String, status: ServiceStatus, age: TimeInterval? = nil) -> NSView {
+    private func addServiceStatusRow(
+        label: String, status: ServiceStatus, age: TimeInterval? = nil, showsStatusWord: Bool = true
+    ) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
 
         // Leading half: the colour dot (#130) as a glowing layer-backed subview (#188 — re-resolves on a
@@ -2201,12 +2224,22 @@ final class PopupViewController: NSViewController {
         // a component can be degraded by more than one incident at once (measured — two incidents
         // named the same four components), so there is no single right target here. The per-incident
         // link lives on the incident row, where the question "which one" has an answer (ADR-0071 §3).
-        let wordLabel = Self.makeLinkWord(
-            Self.word(status),
-            url: status == .operational ? nil : StatusHealth.pageURL,
-            prefix: age.map { Self.durationMinutes(Int($0)) + " · " })
+        let trailing: NSView
+        if showsStatusWord {
+            trailing = Self.makeLinkWord(
+                Self.word(status),
+                url: status == .operational ? nil : StatusHealth.pageURL,
+                prefix: age.map { Self.durationMinutes(Int($0)) + " · " })
+        } else {
+            // Age alone, in the same dimmed tone the word's prefix uses, so the column still lines up
+            // with the rows that do carry a word.
+            let ageLabel = NSTextField(labelWithString: age.map { Self.durationMinutes(Int($0)) } ?? "")
+            ageLabel.font = font
+            ageLabel.textColor = Self.dimmedLabelColor
+            trailing = ageLabel
+        }
 
-        return addSplitRow(leadingView: leadingLabel, rightView: wordLabel)
+        return addSplitRow(leadingView: leadingLabel, rightView: trailing)
     }
 
     /// The popup's status dot: a glowing, layer-backed circle whose colour re-resolves through the
