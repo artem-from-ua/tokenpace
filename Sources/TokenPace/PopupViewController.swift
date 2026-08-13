@@ -1340,11 +1340,6 @@ final class PopupViewController: NSViewController {
         /// rounded edge).
         static let bottomPadding: CGFloat = 12
         static let rowSpacing: CGFloat = 3
-        /// Gap after an incident row (#279). Larger than ``rowSpacing`` because an incident is a
-        /// wrapped block rather than a single line: at 3 pt two incidents run together and read as
-        /// one paragraph. Applied after **every** incident, so the distance between two of them and
-        /// the distance from the last one to the subscribe row are the same.
-        static let incidentRowSpacing: CGFloat = 8
         static let sectionSpacing: CGFloat = 14
         /// Gap **between limit blocks** (after each section's bar) — a touch tighter than
         /// `sectionSpacing` so the limit list reads as a group without the header's larger breathing room.
@@ -1595,14 +1590,15 @@ final class PopupViewController: NSViewController {
                 // rows are replaced by the incidents behind them. Green service lines are not shown
                 // here — under ⌥ the question is "what is broken", and a green row does not answer it.
                 for incident in layout.incidents {
-                    let row = addIncidentRow(incident, now: now)
-                    // One gap for the whole block: the same distance between two incidents as
-                    // between the last incident and the subscribe row. The default `rowSpacing`
-                    // alone does not achieve that — a wrapped, multi-line description carries
-                    // trailing line leading that the single-line subscribe row does not, so equal
-                    // spacing values render as visibly unequal gaps.
-                    stack.setCustomSpacing(Metrics.incidentRowSpacing, after: row)
-                    lastRow = row
+                    // Plain `rowSpacing`, the same gap the service rows use. ⌥ swaps one dimension
+                    // for the other in place, so a different rhythm here makes the switch jump.
+                    //
+                    // #279 set this to 8 pt on the theory that a wrapped description carries trailing
+                    // line leading a single-line row does not, making equal values render unequal.
+                    // Measured, it does not: the system font at 13 pt has `leading == 0` and every
+                    // line box is exactly 16 pt, wrapped or not, so the 5 pt was simply extra space
+                    // after incidents and before the subscribe row (#351).
+                    lastRow = addIncidentRow(incident, now: now)
                 }
             } else {
                 // Default: only the non-operational components — plus any that went green within the

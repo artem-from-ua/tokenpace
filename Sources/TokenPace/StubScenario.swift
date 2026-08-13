@@ -71,6 +71,7 @@ enum StubScenario: String, CaseIterable {
     case incidentTwo = "incident-two"
     case incidentRecovery = "incident-recovery"
     case incidentWrapped = "incident-wrapped"
+    case incidentSpacing = "incident-spacing"
 
     /// The env id (`TOKENPACE_STUB` value), including `"real"` for ``realNetwork``.
     var id: String { rawValue }
@@ -189,6 +190,7 @@ enum StubScenario: String, CaseIterable {
         case .incidentTwo:         return "Incident · two at once"
         case .incidentRecovery:    return "Incident · silent recovery"
         case .incidentWrapped:     return "Incident · chip on its own line"
+        case .incidentSpacing:     return "Incident · row spacing vs services"
         }
     }
 
@@ -369,6 +371,12 @@ enum StubScenario: String, CaseIterable {
                  + "investigating` onto a third; the third fits on ONE line yet still has no room, so "
                  + "`6m · investigating` sits ALONE on line two — the clearest form, with a wide gap "
                  + "after the name. Every chip must be flush RIGHT; the wrapped ones fell to the left."
+        case .incidentSpacing:
+            return "Two degraded services and two SHORT, single-line incidents — the frame for judging "
+                 + "vertical rhythm (#351). Tap \u{2325} Option on and off: two rows swap for two rows of "
+                 + "the same height, so the gaps must not change. All four must match — incident to "
+                 + "incident, incident to subscribe, service to service, service to subscribe. Until "
+                 + "#351 the incident gaps were 8 pt against the services' 3 pt."
         }
     }
 
@@ -429,6 +437,7 @@ enum StubScenario: String, CaseIterable {
         case .incidentTwo:         return StubUsageTransport(mode: .incident(.two), now: now)
         case .incidentRecovery:    return StubUsageTransport(mode: .incident(.recovery), now: now)
         case .incidentWrapped:     return StubUsageTransport(mode: .incident(.wrapped), now: now)
+        case .incidentSpacing:     return StubUsageTransport(mode: .incident(.spacing), now: now)
         }
     }
 
