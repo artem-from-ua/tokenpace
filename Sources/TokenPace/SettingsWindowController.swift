@@ -46,9 +46,19 @@ final class SettingsWindowController: NSWindowController {
         /// keep the opening size comfortable.
         static let defaultContentHeight: CGFloat = 732
         /// Smallest content height the user can drag to. Matches ``SettingsRootView``'s own floor
-        /// (passed to it explicitly below, so the two cannot drift): below it SwiftUI stops shrinking
-        /// and would clip the detail pane instead of letting the grouped `Form` scroll.
-        static let minContentHeight: CGFloat = 480
+        /// (passed to it explicitly below, so the two cannot drift).
+        ///
+        /// **Was 480** — the app's first fixed window height, kept as the floor by ADR-0069 because it
+        /// was already there, not because anything measured it, and taller than the system's own.
+        ///
+        /// 470 is System Settings' minimum, read off the window server (`CGWindowListCopyWindowInfo`)
+        /// with that window dragged to its floor: **857 × 470**. The number is a *frame* height and is
+        /// used here as a *content* height on purpose — both windows are `.fullSizeContentView`, so the
+        /// title bar overlays the content instead of adding to it, and the two are the same measurement.
+        /// (Deriving it from a screenshot first gave 443, because that subtracted a title bar which does
+        /// not exist here; the live window measured 792 × 440 for a 440 content height, which is what
+        /// proves the identity.)
+        static let minContentHeight: CGFloat = 470
     }
 
     /// The single observable state object, alive for the controller's lifetime (so background
@@ -70,6 +80,13 @@ final class SettingsWindowController: NSWindowController {
     /// Prefix for the runtime subclass that neutralises the sidebar divider (see `claimDividerCursor`).
     /// Also the marker that makes that pass idempotent.
     private static let fixedDividerClassPrefix = "TokenPaceFixedDivider_"
+
+    /// The detail column's live scroll view and split item, plus the bounds observation driving the
+    /// titlebar separator over that column (see `driveDetailTitlebarSeparator()`). Weak: both belong
+    /// to the SwiftUI tree and are replaced wholesale on a pane switch.
+    private weak var separatorScroll: NSScrollView?
+    private weak var separatorItem: NSSplitViewItem?
+    private var separatorObserver: NSObjectProtocol?
 
 
     // MARK: Public callbacks (the AppDelegate contract — forwarded into the model, unchanged surface)
@@ -271,6 +288,17 @@ final class SettingsWindowController: NSWindowController {
         // pinned and the height is the user's, and a NavigationSplitView's ideal would otherwise
         // collapse the window to a sliver.
         hosting.sizingOptions = []
+        // And don't hand SwiftUI the window-chrome safe area either. The bridged
+        // `NavigationSplitView` mis-propagates it (rdar://122947424, confirmed by an Apple Frameworks
+        // Engineer): with the toolbar's 52 pt visible to SwiftUI, the split's platform view laid
+        // itself out 26 pt taller than this view at every window height — measured directly on
+        // `PlatformViewHost`, 496 pt in a 470 pt window — so every pane's tail and the scroller's
+        // bottom end hung below the window edge, unreachable (#346). With the safe area cut off at
+        // the hosting boundary the split sizes itself to the window exactly, and nothing is lost:
+        // the columns' scroll views keep their 52 pt toolbar inset (measured after the change — the
+        // bridge derives it from the window, not from this safe area), so content still rests below
+        // the toolbar and scrolls under it.
+        hosting.safeAreaRegions = []
         window.contentViewController = hosting
         // Bounds go on **after** the hosting controller: assigning a `contentViewController`
         // re-derives them from the SwiftUI tree and would overwrite anything set earlier. They are
@@ -418,6 +446,56 @@ final class SettingsWindowController: NSWindowController {
         return nil
     }
 
+    /// Drive the titlebar separator over the detail column by hand (#346).
+    ///
+    /// System behaviour: no line while the pane rests at its top, a hairline the moment content
+    /// scrolls under the toolbar. AppKit's `.automatic` style cannot deliver it here — its tracking
+    /// never binds to the SwiftUI-bridged scroll view, whether the bridge's manual insets are left
+    /// alone or `automaticallyAdjustsContentInsets` is forced back on (both measured: the line just
+    /// stays on). So the one thing the automatic mode would do is done explicitly: watch the clip
+    /// view's origin and flip the detail `NSSplitViewItem` between `.none` and `.line`.
+    ///
+    /// Re-hooked on every pane change (a switch rebuilds the scroll view) — from `show()` and the
+    /// toolbar-state observer, the same discipline as `pinSidebarSplit()`.
+    private func driveDetailTitlebarSeparator() {
+        guard let window, let themeFrame = window.contentView?.superview else { return }
+        let sidebarWidth = model.sidebarIcons.sidebarWidth
+        var detailScroll: NSScrollView?
+        var splitView: NSSplitView?
+        func walk(_ v: NSView) {
+            if let split = v as? NSSplitView { splitView = split }
+            if let scroll = v as? NSScrollView, scroll.frame.width > sidebarWidth {
+                detailScroll = scroll
+                return
+            }
+            v.subviews.forEach(walk)
+        }
+        walk(themeFrame)
+        guard let scroll = detailScroll, let split = splitView,
+              let controller = splitController(for: split),
+              let item = controller.splitViewItems.last else { return }
+
+        separatorScroll = scroll
+        separatorItem = item
+        if let separatorObserver { NotificationCenter.default.removeObserver(separatorObserver) }
+        scroll.contentView.postsBoundsChangedNotifications = true
+        separatorObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyDetailSeparator() }
+        }
+        applyDetailSeparator()
+    }
+
+    /// The separator rule itself: at rest (content top sitting exactly at its inset) — no line;
+    /// anything past it — the system hairline.
+    private func applyDetailSeparator() {
+        guard let scroll = separatorScroll, let item = separatorItem else { return }
+        let atRest = scroll.contentView.bounds.origin.y <= -scroll.contentInsets.top + 0.5
+        let style: NSTitlebarSeparatorStyle = atRest ? .none : .line
+        if item.titlebarSeparatorStyle != style { item.titlebarSeparatorStyle = style }
+    }
+
     private func mergeSidebarTitlebarStrip() {
         guard let window, let themeFrame = window.contentView?.superview else { return }
         let sidebarWidth = model.sidebarIcons.sidebarWidth
@@ -475,9 +553,11 @@ final class SettingsWindowController: NSWindowController {
         // because the first pass can land before the columns have their final width.
         mergeSidebarTitlebarStrip()
         pinSidebarSplit()
+        driveDetailTitlebarSeparator()
         DispatchQueue.main.async { [weak self] in
             self?.mergeSidebarTitlebarStrip()
             self?.pinSidebarSplit()
+            self?.driveDetailTitlebarSeparator()
         }
         // Last: the preview parks against the parent's *final* frame, and everything above can still
         // move it (restore, centre, the section hook). Attaching earlier would align it to the
@@ -527,7 +607,13 @@ final class SettingsWindowController: NSWindowController {
                                      canGoBack: model.canGoBack,
                                      canGoForward: model.canGoForward)
         } onChange: { [weak self] in
-            Task { @MainActor in self?.observeToolbarState() }
+            Task { @MainActor in
+                self?.observeToolbarState()
+                // A pane change rebuilt the detail column's scroll view; re-bind the separator
+                // driver to the new one (#346). One turn later, so SwiftUI has actually swapped the
+                // view by the time the walk runs.
+                DispatchQueue.main.async { self?.driveDetailTitlebarSeparator() }
+            }
         }
     }
 

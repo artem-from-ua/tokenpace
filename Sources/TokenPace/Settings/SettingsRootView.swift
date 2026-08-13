@@ -17,11 +17,10 @@ struct SettingsRootView: View {
     /// too-narrow sidebar that truncates, plus dead space on the right of the detail).
     ///
     /// Both must match the window's `contentMinSize`, and `SettingsWindowController` passes them
-    /// explicitly so they cannot drift: if the window could be dragged shorter than this, SwiftUI would
-    /// clip the detail pane instead of letting its grouped `Form` scroll. The defaults here are only a
-    /// fallback for previews — the live values come from `Metrics`.
+    /// explicitly so they cannot drift. The defaults here are only a fallback for previews — the live
+    /// values come from `Metrics`.
     var minWidth: CGFloat = 792
-    var minHeight: CGFloat = 480
+    var minHeight: CGFloat = 470
 
     var body: some View {
         NavigationSplitView {
@@ -46,18 +45,30 @@ struct SettingsRootView: View {
             .toolbar(removing: .sidebarToggle)
         } detail: {
             // No header row here: the ‹ › buttons and the pane name live in the window's toolbar,
-            // where System Settings keeps them (`SettingsToolbarController`). The column therefore
-            // starts straight at the `Form`, whose own top inset is left at the system default — the
-            // negative offsets this used to need existed only to cancel the strip an empty toolbar
-            // reserved above the old header row.
+            // where System Settings keeps them (`SettingsToolbarController`).
+            //
+            // The top margin lands the first card at System Settings' own offset. Instrumented, not
+            // eyeballed: the grouped `Form` keeps 18 pt of leading padding inside its scroll document
+            // (measured on the live cards, and no public API removes it — `defaultMinListHeaderHeight`
+            // was tried and does nothing), so the scroll inset is trimmed to 52 − 18 = 34 and the
+            // card tops out at the system's 52 (#311, #346).
+            //
+            // The margin makes the bridge manage the inset by hand, which kills AppKit's automatic
+            // titlebar separator — but that was dead anyway: measured with pristine insets *and* with
+            // `automaticallyAdjustsContentInsets` forced back on, the automatic line never tracks the
+            // bridged scroll view and just stays drawn. The separator over this column is driven
+            // explicitly instead — `SettingsWindowController.driveDetailTitlebarSeparator()`.
             detailPane
-                // The grouped `Form` opens with more headroom than System Settings leaves: measured
-                // pixel-for-pixel against a real VPN pane at the same size, its first card starts at
-                // y=52 pt where ours started at 72. `.contentMargins` is the supported way to
-                // override a scrollable's own inset.
                 .contentMargins(.top, Metrics.formTopMargin, for: .scrollContent)
         }
         .frame(minWidth: minWidth, maxWidth: .infinity, minHeight: minHeight, maxHeight: .infinity)
+    }
+
+    private enum Metrics {
+        /// Top inset for the grouped `Form`, replacing its default (#311, #346). The form's document
+        /// carries 18 pt of its own leading padding (measured), so 52 − 18 puts the first card at
+        /// System Settings' measured 52 pt.
+        static let formTopMargin: CGFloat = -18
     }
 
     /// One sidebar row for a section — the tinted chip plus the title, tagged for selection. Shared
@@ -74,12 +85,6 @@ struct SettingsRootView: View {
         .tag(section)
     }
 
-    private enum Metrics {
-        /// Top inset for the grouped `Form`, replacing its default. Measured against the system's VPN
-        /// pane: its first card's top edge sits at y=52 pt, ours at 72, so this removes the extra 20.
-        static let formTopMargin: CGFloat = -20
-    }
-
     /// The detail column's content — the child page when one is drilled into, else the section's pane.
     ///
     /// Most panes sit at one level: the UI trio (presets, menu bar, dropdown) are sidebar rows of
@@ -88,9 +93,9 @@ struct SettingsRootView: View {
     /// `Providers` is the exception (#341, ADR-0084): its children are per-provider, so the list grows
     /// with each provider added, which is exactly the shape the sidebar cannot absorb.
     ///
-    /// The child branch is checked **first and in the same switch**, deliberately flat: wrapping the
-    /// panes in a container here would break `.contentMargins(.top, formTopMargin)`, which the detail
-    /// column applies to the pane's own scroll view.
+    /// The child branch is checked **first and in the same switch**, so a drilled-in page replaces the
+    /// section's pane rather than stacking with it, and the switch stays flat: `.contentMargins` has
+    /// to land on the pane's own scroll view, so nothing may wrap the panes in a container here.
     @ViewBuilder
     private var detailPane: some View {
         if let child = model.childPage {
