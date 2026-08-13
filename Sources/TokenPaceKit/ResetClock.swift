@@ -165,30 +165,12 @@ public enum ResetClock {
         relativeRounded(resetsAt: resetsAt, now: now) ?? "<1m"
     }
 
-    // MARK: resetDisplay (convenience)
-
-    /// Convenience: parse both raw `resets_at` strings, pick the nearest, and format it in
-    /// one call — so `UsageClient` / the view-model can wire raw API fields straight to the
-    /// view without re-deriving the same selection + formatting logic.
-    ///
-    /// Returns `nil` only when **neither** string parses. `which` tells the caller which
-    /// limit drives the countdown (for the accompanying bar/label).
-    ///
-    /// - Parameters:
-    ///   - fiveHourResetsAt: Raw `five_hour.resets_at` (may be `nil`).
-    ///   - sevenDayResetsAt: Raw `seven_day.resets_at` (may be `nil`).
-    ///   - now: Current instant.
-    public static func resetDisplay(
-        fiveHourResetsAt: String?,
-        sevenDayResetsAt: String?,
-        now: Date
-    ) -> (which: LimitWindow, display: String)? {
-        guard let nearest = nearestReset(
-            fiveHour: parse(fiveHourResetsAt),
-            sevenDay: parse(sevenDayResetsAt)
-        ) else { return nil }
-        return (nearest.window, timeToReset(resetsAt: nearest.resetsAt, now: now))
-    }
+    // `resetDisplay` — the "parse both, pick the nearest, format it" convenience — was removed with
+    // ADR-0091. Its only caller was the menu bar's `.expanded` countdown, and the countdown now
+    // accompanies the bars-less modes alone, where the reset is chosen by `BlockingReset` (which window
+    // is *blocking*) rather than by nearness. Keeping an unused nearest-of-two formatter around invites
+    // exactly the reimplementation the rule retired. `nearestReset` itself stays — `nextResetInstant`
+    // still schedules the optimistic-reset timer off it.
 
     // MARK: - Shared countdown core (both surfaces)
 

@@ -120,11 +120,11 @@ struct WeeklyGateFiveHourTests {
 
     /// The menu bar applies the identical gate, so the two surfaces cannot disagree.
     @Test func menuBarAppliesTheSameGate() {
-        guard case let .expanded(openFive, _, _) = MenuBarLayout.make(
+        guard case let .expanded(openFive, _) = MenuBarLayout.make(
             from: snapshot(sevenDayUtil: 25), now: now).mode else {
             Issue.record("expected expanded mode"); return
         }
-        guard case let .expanded(closedFive, _, _) = MenuBarLayout.make(
+        guard case let .expanded(closedFive, _) = MenuBarLayout.make(
             from: snapshot(sevenDayUtil: 70), now: now).mode else {
             Issue.record("expected expanded mode"); return
         }
@@ -188,7 +188,7 @@ struct WeeklyGateIdleTests {
     /// The menu bar's idle bar carries the same verdict, so the two surfaces cannot disagree.
     @Test func menuBarIdleBarCarriesTheVerdict() {
         func idleBar(_ snap: UsageSnapshot) -> BarView? {
-            guard case let .expanded(five, _, _) = MenuBarLayout.make(from: snap, now: now).mode else { return nil }
+            guard case let .expanded(five, _) = MenuBarLayout.make(from: snap, now: now).mode else { return nil }
             return five
         }
         #expect(idleBar(snapshot(sevenDayUtil: 25, sessionIdle: true))?.weeklyHeadroom == true)

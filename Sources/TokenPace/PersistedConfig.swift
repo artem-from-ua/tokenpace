@@ -61,9 +61,12 @@ enum PersistedConfig {
         /// stored as the raw `CalmColorMode` string. Replaces the old `calmMenuBarColors` +
         /// `workHarderColors` pair — see the property.
         static let calmColorMode = "calmColorMode"
-        /// How the menu-bar widget picks/hides the reset countdown (#103), stored as the raw
-        /// `ResetCountdownMode` string. Default `.smart` — see the property.
-        static let resetCountdownModeMenuBar = "resetCountdownModeMenuBar"
+        /// Retired by ADR-0091. Was "Show reset countdown: Always / Smart / Never" (#103), the raw
+        /// `ResetCountdownMode` string deciding when a countdown appeared beside the bars. The countdown
+        /// now appears only where there are no bars, so there is nothing left to choose. Kept as a
+        /// constant so an Appearance reset still sweeps a stored value, as ``retiredFarBehindInterval``
+        /// does.
+        static let retiredResetCountdownModeMenuBar = "resetCountdownModeMenuBar"
         /// How the **menu-bar widget** presents its pacing bars (#224, split per surface in #329),
         /// stored as the raw `BarStyle` string. Default `.gauge` (from the `.workHarder` preset) —
         /// see the property.
@@ -354,16 +357,6 @@ enum PersistedConfig {
         set { defaults.set(newValue.rawValue, forKey: Key.calmColorMode) }
     }
 
-    /// How the **menu-bar** widget picks or hides the reset countdown (#103, ADR-0029). Named for the
-    /// menu bar specifically because the popup has its own countdown logic. Stored as the raw
-    /// `ResetCountdownMode` string; an absent key or an unrecognised value (a newer build's value, or a
-    /// legacy `show_distant_7d`/`hide_distant_7d` from before #168) reads as the default
-    /// ``ResetCountdownMode/smart`` — so an older build never trips on a future value.
-    static var resetCountdownModeMenuBar: ResetCountdownMode {
-        get { ResetCountdownMode(rawValue: defaults.string(forKey: Key.resetCountdownModeMenuBar) ?? "") ?? AppearancePreset.defaultValues.resetCountdownModeMenuBar }
-        set { defaults.set(newValue.rawValue, forKey: Key.resetCountdownModeMenuBar) }
-    }
-
     /// How the **menu-bar widget** presents its pacing bars (#224, per-surface since #329). Stored as
     /// the raw `BarStyle` string; an absent key or an unrecognised value (a newer build's) reads as
     /// the preset default — ``BarStyle/gauge``, from `.workHarder`. Render-only: never changes the
@@ -459,7 +452,6 @@ enum PersistedConfig {
     static func resetAppearanceToDefaults() {
         for key in [
             Key.calmColorMode,
-            Key.resetCountdownModeMenuBar,
             Key.showServiceStatusDot,
             Key.calmBarHiding,
             // Cleared too, for the same reason as `legacyBarStyle` below: a Reset must also sweep a
@@ -480,6 +472,7 @@ enum PersistedConfig {
             Key.retiredPauseHidesBars,
             Key.retiredShowExtraUsage,
             Key.retiredAwaitingInputInMenuBar,
+            Key.retiredResetCountdownModeMenuBar,
             // The pre-#227 pair the retired pause key once inherited from — swept here too, since the
             // migration that used to clear them retired along with it.
             Key.legacyHideBarsWhenBlocked,
@@ -516,6 +509,20 @@ enum PersistedConfig {
     /// dropdown. On the menu bar the shipped calm default still mutes it to white.
     static func retireFarBehindIntervalIfNeeded() {
         defaults.removeObject(forKey: Key.retiredFarBehindInterval)
+    }
+
+    /// Retire the "Show reset countdown" key (ADR-0091). The option is gone: a countdown now appears
+    /// exactly where there are no bars — blocked, or paying — and nowhere else, so none of its three
+    /// values has anything left to select.
+    ///
+    /// **No successor to seed**, like ``retireFarBehindIntervalIfNeeded()``: every stored value maps onto
+    /// the one remaining behaviour. Idempotent; runs on every launch and does nothing once the key is gone.
+    ///
+    /// Worth knowing when reading a `defaults export` afterwards: this is visible to *everyone*, not
+    /// just to whoever changed the setting. On the shipped default (`smart`) a countdown used to appear
+    /// beside the bars whenever a window ran well ahead of pace; it no longer does.
+    static func retireResetCountdownModeIfNeeded() {
+        defaults.removeObject(forKey: Key.retiredResetCountdownModeMenuBar)
     }
 
     /// One-time upgrade of the boolean "Show model & service limits" opt-out to the tri-state
@@ -683,7 +690,6 @@ enum PersistedConfig {
         showServiceStatusDot = v.showServiceStatusDot
         modelLimitsVisibility = v.modelLimitsVisibility
         extraUsageVisibility = v.extraUsageVisibility
-        resetCountdownModeMenuBar = v.resetCountdownModeMenuBar
         menuBarStyle = v.menuBarStyle
         dropdownStyle = v.dropdownStyle
         showTicks = v.showTicks
@@ -700,7 +706,6 @@ enum PersistedConfig {
             showServiceStatusDot: showServiceStatusDot,
             modelLimitsVisibility: modelLimitsVisibility,
             extraUsageVisibility: extraUsageVisibility,
-            resetCountdownModeMenuBar: resetCountdownModeMenuBar,
             menuBarStyle: menuBarStyle,
             dropdownStyle: dropdownStyle,
             showTicks: showTicks)

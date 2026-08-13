@@ -311,7 +311,7 @@ public struct BarLayout: Sendable, Equatable {
     /// than green, never noisier. The menu bar uses this to mute colours (#105) and to drop the
     /// reset-countdown label when both bars are calm (#103, ADR-0028/0029). Note: the reset-countdown
     /// *noisy* test keys off `.ahead`/`.exhausted` directly (not `!isCalm`), so `.farBehind` never
-    /// forces a countdown — see `MenuBarLayout.selectReset`.
+    /// is ever flagged: `CalmBarHiding` hides a blue bar exactly as it hides a green one.
     public var isCalm: Bool { severity == .calm || severity == .farBehind }
 }
 

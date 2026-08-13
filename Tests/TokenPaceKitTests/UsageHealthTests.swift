@@ -134,8 +134,29 @@ struct UsageHealthStateTests {
         #expect(h.failureAge(now: now) == 0)
     }
 
-    @Test func thresholdsAreThirtyAndSixtyMinutes() {
-        #expect(UsageHealth.glyphAfter == 30 * 60)
-        #expect(UsageHealth.hideBarsAfter == 60 * 60)
+    @Test func glyphThresholdScalesWithTheCadence() {
+        // The threshold is expressed in *attempts*, not wall-clock minutes: three failed polls, floored
+        // at 15 min. That is the only way one number can mean the same thing at both cadences the engine
+        // uses (180 s during a session, 900 s while idle) — a flat 15 min would raise the ⚠️ after a
+        // single missed poll on a merely idle machine.
+        let active = UsageHealth(lastSuccess: nil, failingSince: nil, reason: nil, pollInterval: 180)
+        let idle = UsageHealth(lastSuccess: nil, failingSince: nil, reason: nil, pollInterval: 900)
+        #expect(UsageHealth.glyphAfter(for: active) == 15 * 60)    // 3 × 180 = 540 < floor → floor wins
+        #expect(UsageHealth.glyphAfter(for: idle) == 45 * 60)      // 3 × 900 = 2700 > floor → attempts win
+    }
+
+    @Test func glyphThresholdConstantsAreTheFloorAndAttemptCount() {
+        // Pinned separately from the formula so a change to either input is a deliberate edit, not a
+        // silent side effect of touching `glyphAfter(for:)`.
+        #expect(UsageHealth.glyphAfterFloor == 15 * 60)
+        #expect(UsageHealth.glyphAfterAttempts == 3)
+    }
+
+    @Test func defaultPollIntervalIsTheEngineBase() {
+        // Every construction site that predates the field — production and test alike — must keep
+        // meaning "the healthy session cadence", so the default is what makes the floor the answer.
+        let h = UsageHealth(lastSuccess: nil, failingSince: nil, reason: nil)
+        #expect(h.pollInterval == PollingEngine.baseInterval)
+        #expect(UsageHealth.glyphAfter(for: h) == UsageHealth.glyphAfterFloor)
     }
 }

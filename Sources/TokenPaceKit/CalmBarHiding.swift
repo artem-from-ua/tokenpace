@@ -4,7 +4,7 @@ import Foundation
 
 /// Which of the two menu-bar pacing bars is dropped from the widget **while it is calm** — chosen by a
 /// segmented control in Settings → Menu bar ("Hide the calm bar") and threaded into
-/// ``MenuBarLayout/make(from:now:resetMode:hideCalmBar:)``.
+/// ``MenuBarLayout/make(from:now:hideCalmBar:)``.
 ///
 /// Replaced the boolean `hideCalmSevenDayBar` opt-out of ADR-0034 / #94, which could only ever hide the
 /// **7-day** bar; ADR-0086 briefly made the choice three-way, and ADR-0090 settled it on the one window
@@ -15,7 +15,7 @@ import Foundation
 /// ## What "calm" means here
 /// ``BarView/isCalm`` — `.calm` **or** `.farBehind`. The far-behind blue counts as calm and is hidden
 /// along with green and yellow (ADR-0061), so this deliberately is *not* the `.ahead`/`.exhausted` test
-/// that `MenuBarLayout.selectReset` and `PopupSectionVisibility` use. Only orange and red keep a bar on
+/// that `PopupSectionVisibility` uses. Only orange and red keep a bar on
 /// screen. An **idle** 5-hour bar reports `.calm` unconditionally (``BarView/severity``), so ``fiveHour``
 /// hides it between sessions too — a deliberate choice, not an oversight: see the note on the invariant
 /// below and ADR-0086.
@@ -27,7 +27,7 @@ import Foundation
 /// widget can never render empty. This is a property of the type rather than a check in `MenuBarLayout`,
 /// so it cannot drift out of sync with the call site.
 ///
-/// Stored raw-string in `UserDefaults` (like `ResetCountdownMode` / `CalmColorMode` / `BarStyle`) with a
+/// Stored raw-string in `UserDefaults` (like `CalmColorMode` / `BarStyle`) with a
 /// forward-compatible decode, so a newer build's value never makes an older build fail.
 public enum CalmBarHiding: String, Sendable, Equatable, Codable, CaseIterable {
     /// **Default** (`.chill` / `.workHarder`). Hide the 5-hour bar while it is calm, leaving the 7-day
@@ -90,7 +90,7 @@ public enum CalmBarHiding: String, Sendable, Equatable, Codable, CaseIterable {
     }
 
     /// Forward-compatible decode: an unrecognised raw string falls back to ``fiveHour`` instead of
-    /// throwing. Mirrors `ResetCountdownMode` / `CalmColorMode` / `BarStyle` / `PopupSectionVisibility`.
+    /// throwing. Mirrors `CalmColorMode` / `BarStyle` / `PopupSectionVisibility`.
     ///
     /// The fallback resolves the retired `"sevenDay"` raw as well, and lands on the same value its
     /// migration does: a config written when that mode existed described a *one bar while calm* world,

@@ -30,7 +30,6 @@ final class SettingsModel {
     var onCheckForUpdatesNow: (() -> Void)?
     var onInstallUpdateNow: (() -> Void)?
     var onCalmColorModeChange: ((CalmColorMode) -> Void)?
-    var onResetCountdownModeMenuBarChange: ((ResetCountdownMode) -> Void)?
     var onMenuBarStyleChange: ((BarStyle) -> Void)?
     var onDropdownStyleChange: ((BarStyle) -> Void)?
     var onShowTicksChange: ((Bool) -> Void)?
@@ -200,8 +199,6 @@ final class SettingsModel {
     /// governs the menu-bar credits icon.
     var extraUsageVisibility: PopupSectionVisibility = .nonCalm
     var showServiceDot = false
-    /// The reset-countdown choice (always / smart / never), shown as a menu picker.
-    var resetRadio: ResetRadio = .smart
     /// The **menu-bar widget**'s bar presentation style, shown as a segmented control in that
     /// section (#224, per-surface since #329).
     var menuBarStyle: BarStyle = .progress
@@ -405,7 +402,6 @@ final class SettingsModel {
             showServiceStatusDot: showServiceDot,
             modelLimitsVisibility: modelLimitsVisibility,
             extraUsageVisibility: extraUsageVisibility,
-            resetCountdownModeMenuBar: ResetCountdownMode.from(radio: resetRadio),
             menuBarStyle: menuBarStyle,
             dropdownStyle: dropdownStyle,
             showTicks: showTicks)
@@ -527,7 +523,6 @@ final class SettingsModel {
         modelLimitsVisibility = PersistedConfig.modelLimitsVisibility
         extraUsageVisibility = PersistedConfig.extraUsageVisibility
         showServiceDot = PersistedConfig.showServiceStatusDot
-        resetRadio = PersistedConfig.resetCountdownModeMenuBar.radio
         menuBarStyle = PersistedConfig.menuBarStyle
         dropdownStyle = PersistedConfig.dropdownStyle
         showTicks = PersistedConfig.showTicks
@@ -619,14 +614,6 @@ final class SettingsModel {
         PersistedConfig.showServiceStatusDot = on
         AppLogger.lifecycle.notice("service-status-dot: menu-bar set \(on, privacy: .public)")
         onServiceDotChange?(on)
-    }
-
-    /// Map the picker choice to a `ResetCountdownMode`, persist, and fire the callback.
-    func commitResetCountdownMode() {
-        let mode = ResetCountdownMode.from(radio: resetRadio)
-        PersistedConfig.resetCountdownModeMenuBar = mode
-        AppLogger.lifecycle.notice("reset-countdown: menu-bar mode set \(mode.rawValue, privacy: .public)")
-        onResetCountdownModeMenuBarChange?(mode)
     }
 
     /// Persist the **menu-bar** bar style (#224, #329) and fire the callback. The segmented control in
@@ -726,7 +713,6 @@ final class SettingsModel {
         onModelLimitsVisibilityChange?(modelLimitsVisibility)
         onExtraUsageVisibilityChange?(extraUsageVisibility)
         onServiceDotChange?(showServiceDot)
-        onResetCountdownModeMenuBarChange?(ResetCountdownMode.from(radio: resetRadio))
         onMenuBarStyleChange?(menuBarStyle)
         onDropdownStyleChange?(dropdownStyle)
         onShowTicksChange?(showTicks)

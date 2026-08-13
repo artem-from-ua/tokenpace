@@ -179,26 +179,8 @@ struct MenuBarPane: View {
                             onSelect: { model.setCalmBarHiding($0) })
                     }
                     SettingsHint(text: "The 5-hour bar is hidden while it's calm and comes back as soon "
-                        + "as it needs attention (orange or red). The 7-day bar is always shown.")
-                }
-
-                // Reset-countdown mode: a segmented control matching the page's other three-way rows,
-                // with the "Smart" behaviour explained on the line below.
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Show reset countdown")
-                        Spacer()
-                        SegmentedControl(
-                            segments: [
-                                .init(value: ResetRadio.always, title: "Always"),
-                                .init(value: ResetRadio.smart, title: "Smart"),
-                                .init(value: ResetRadio.never, title: "Never"),
-                            ],
-                            active: model.resetRadio,
-                            onSelect: { model.resetRadio = $0; model.commitResetCountdownMode() })
-                    }
-                    SettingsHint(text: "*Smart* shows the countdown only when you're pacing well ahead "
-                        + "or a limit is reached.")
+                        + "as it needs attention. Once a limit is actually reached, both bars give way "
+                        + "to the countdown to it.")
                 }
 
                 Toggle("Show service status dot on issues", isOn: Binding(

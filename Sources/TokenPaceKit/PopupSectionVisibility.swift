@@ -35,7 +35,7 @@ import Foundation
 /// ## What "non-calm" means here
 /// **Orange or red** — `PacingSeverity.ahead` or `.exhausted`. Deliberately *not* `!BarLayout.isCalm`:
 /// that would also catch `.farBehind` (blue), which is *calmer* than green and must never force a group
-/// on screen. This mirrors `MenuBarLayout.selectReset`, whose "noisy" test keys off `.ahead`/`.exhausted`
+/// on screen. The same `.ahead`/`.exhausted` test the menu bar's `CalmBarHiding` inverts, keying off
 /// for exactly the same reason (see `PacingModel`'s note on `isCalm`).
 ///
 /// ## ⌥ Option is always an escape hatch
@@ -44,7 +44,7 @@ import Foundation
 /// service-component filter all read `optionHeld || <problem>`). ``optionOnly`` is the strict form: the
 /// group is hidden regardless of severity and only ⌥ brings it up.
 ///
-/// Stored raw-string in `UserDefaults` (like `ResetCountdownMode` / `CalmColorMode` / `BarStyle`) with a
+/// Stored raw-string in `UserDefaults` (like `CalmColorMode` / `BarStyle`) with a
 /// forward-compatible decode, so a newer build's value never makes an older build fail — an unknown raw
 /// falls back to ``nonCalm``.
 public enum PopupSectionVisibility: String, Sendable, Equatable, Codable, CaseIterable {
@@ -98,7 +98,7 @@ public enum PopupSectionVisibility: String, Sendable, Equatable, Codable, CaseIt
     }
 
     /// Forward-compatible decode: an unrecognised raw string falls back to ``nonCalm`` (the default)
-    /// instead of throwing. Mirrors `ResetCountdownMode` / `CalmColorMode` / `BarStyle`.
+    /// instead of throwing. Mirrors `CalmColorMode` / `BarStyle`.
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
         self = PopupSectionVisibility(rawValue: raw) ?? .nonCalm

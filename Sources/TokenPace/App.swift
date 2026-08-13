@@ -618,11 +618,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if self?.lastOutput == nil { self?.refreshStatusImage() }
                 else { self?.reRenderForCurrentTime() }
             }
-            wc.onResetCountdownModeMenuBarChange = { [weak self] _ in
-                // The mode changes the layout (which countdown to draw), not just a colour — rebuild
-                // the menu-bar layout from the last poll (render reads PersistedConfig for the mode).
-                self?.reRenderForCurrentTime()
-            }
             wc.onMenuBarStyleChange = { [weak self] style in
                 // Render-only, menu bar only (#224, #329). The bar occupies the same rect whichever
                 // style it is (no width rebuild), so a re-snapshot suffices.
@@ -945,6 +940,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // …and drop the retired "Far behind pace interval" key: the green→blue width is fixed now, and
         // whether blue applies is decided by the weekly data rather than by a preference.
         PersistedConfig.retireFarBehindIntervalIfNeeded()
+        // …and the retired "Show reset countdown" key (ADR-0091): the countdown now appears only where
+        // there are no bars, so none of its three values selects anything.
+        PersistedConfig.retireResetCountdownModeIfNeeded()
         // Record the running version so the next launch compares against it.
         PersistedConfig.lastRunVersion = current
     }
@@ -2179,7 +2177,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // real worst problem, subject to the "Show service status dot" toggle (#31).
             serviceProblem: PersistedConfig.showServiceStatusDot
                 ? (colorCycleStatus ?? lastStatusHealth?.worstProblem) : nil,
-            resetMode: PersistedConfig.resetCountdownModeMenuBar,   // #103: which reset countdown to show
             // ADR-0086: honour the "Hide the calm bar" choice — drops whichever bar the user picked while
             // it is calm, centring the one that remains. `.never` keeps both.
             hideCalmBar: PersistedConfig.calmBarHiding,
