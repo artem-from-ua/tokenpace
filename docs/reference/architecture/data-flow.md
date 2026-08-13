@@ -134,7 +134,9 @@ Fired --> Armed : fireOptimisticReset\n(roll snapshot forward: utilization=0,\nn
 сірий трек + мінімальна пігулка на нулі, а Progress додає зверху маркер часу на нулі. Від варіанта
 залежить лише **колір** пігулки:
 
-- **Ready** — 7d має квоту (або credits покривають): **синя** пігулка, «ready to start».
+- **Ready** — 7d має квоту (або credits покривають): **синя** пігулка, «ready to start». Якщо ж
+  тиждень попереду темпу (`weeklyHasHeadroom == false`, [ADR-0081](../../adr/0081-weekly-capacity-gate-for-blue.md))
+  — пігулка **зелена** з тим самим словом: працювати можна, але розганяти нема чого.
 - **Blocked** — немає квоти 5h (idle або 5h≥100), 7d вичерпано (`≥100`) **і** credits не покривають (`CreditsPacing.isBlocked`:
   вимкнені / capped / відсутні): **сіра** пігулка (той самий тон, що трек — бар читається порожнім),
   статус «waiting for limit reset». На попапі
@@ -160,14 +162,14 @@ state Idle {
   [*] --> Ready : 7d has quota\nor credits cover
   Ready --> Blocked : 7d exhausted &&\nno credits cover
   Blocked --> Ready : 7d / credits reset
-  Ready : blue zero-pill on grey track\n"ready to start" (calm: soft grey, not white)
+  Ready : blue zero-pill on grey track\n"ready to start" (green if the week has no headroom)\ncalm: white, except blue under Yellow + Green
   Blocked : base-grey zero-pill\n"waiting for limit reset"\n+ red blocking-reset badge (last-stand)
 }
 Idle : 7d-only reset selection (ready)
 @enduml
 ```
 
-![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/PP9DJiCm48NtFiMeYoe18bQeKXUei6CBowP2RZnfhBfsiISDBMBB2P0u43VX94oS9kLdbsY-zsRUZ6U1fATwOmHfCWWF689sDjEAVxxUta4Mf7S8fT5RIAugQBHLhad5_6m1MNODDrrz2aCDAXd0Oq0AZvB44MZPkzPqscDo6T1IRXFhJZXeszUjys3qHbEOBr8HjRyQ7Z6FShj5wKFhX0s4BW74OAXICGYM335k5NeelTj0JTheWoJ6JrGSXLqC5cq1QZPimtr-m4G9TYNiWhm8W7uBzoZLdiKJ5TC_rOvatWOeF2fE08NReMT11xQIM-EADQfEXC-Lh0EF2-DnRdaXVtKz_QVPvG36iOS67DRK20VqBjjgOu23h3pkWRmirhaT-OYHwzOqWgIGPZE5u4gAu0Mldw2fD67wetsxn81Pj1hCsQwHchHTGTdVh9jdbDjp_b8y3UiPoBhjBgLQ8IH61ifu0CjNUXN7rp5HcRDc_-yEIHmv5JC-8B_NRm00)
+![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/PP9DJkGm48NtFaMf5oW1ebcXbbWWXWrYown6125tNDsnsh63NI7JeDdE2P0u43VX99JjJlYPNQBwNjLxLJuF93qDdH6aoI3ymX2qivLM_FFsxnbaG_e1OMrq3yL92wEsoesbk3cyXQewWv-vVWfp3LePm6D02dUIn1w8x5LiUZfXSXNGKcqBwpvmq7QgM-V1w4vJkBajHT9-6RZ7FCg-H-b3x8GZX9m0KZ1KfPW5AuOOjmezhBthO21jzACanZ-eP8Mx66nY0GPk6CEzli1I2UvAc8Cy2O1f2zSerOx5IvNItm-EP1q3D1uL9u36FQ1dGGQZvCAuPeigY_1FAuV0Tk7WeBQyaE-wYVusxCSC9jlp00vh1eH7zAxgjJ70GJOUTq1UDjlQBdp2oEKrBQ3WAbhGQw0MOKJSfY3if6NIEzULjMsawNZlhIOyPiiDzfJd36cdlz4OFiWHNCPUdqp7rGUiae7P4fiOfIPjDx2UBfrJB6fxn5-AUxEUWIhVP2NL1g4mCb35jYtVzg_Olwcbgfmrk_-kLwIWfJZdi_ChVmS0)
 
 ## Стани помилок / health (#12, ADR-0010)
 

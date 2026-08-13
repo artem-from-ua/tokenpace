@@ -34,6 +34,21 @@ public enum CalmColorMode: String, Sendable, Equatable, Codable, CaseIterable {
     /// keeps blue coloured (the old "work harder" behaviour is `mutesBlue == false`).
     public var mutesBlue: Bool { self == .yellowGreenBlue }
 
+    /// Whether the **idle** "ready to start" pill mutes to the calm neutral (#343).
+    ///
+    /// The blue pill carries the same exemption the far-behind pacing blue gets: under ``yellowGreen``
+    /// the user has asked for blue to stay coloured, and the idle blue is literally the same
+    /// `ColorRole.blue` the pacing gap draws (ADR-0081 merged the two roles), so muting one while
+    /// keeping the other contradicts the segment's own label.
+    ///
+    /// The **green** pill — idle with no weekly headroom (ADR-0081 §4) — mutes under *both* muting
+    /// modes: green is precisely what this mode is named after. Only `isBlue` is exempt.
+    ///
+    /// Idle cannot express this through `severity` the way `gapColorTarget` does: `BarView.severity`
+    /// is hard-wired to `.calm` for an idle bar and its placeholder layout carries `blueAllowed:
+    /// false`, so `.farBehind` is unreachable there. The caller passes the pill's blue-ness directly.
+    public func mutesIdlePill(isBlue: Bool) -> Bool { mutesCalm && !(isBlue && !mutesBlue) }
+
     /// Forward-compatible decode: an unrecognised raw string falls back to ``yellowGreenBlue`` (the
     /// shipped calm default) instead of throwing. Mirrors `BarStyle` / `ResetCountdownMode`.
     public init(from decoder: any Decoder) throws {

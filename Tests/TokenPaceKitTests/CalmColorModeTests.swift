@@ -30,6 +30,42 @@ struct CalmColorModeTests {
         #expect(CalmColorMode.yellowGreenBlue.mutesBlue)
     }
 
+    /// The idle pill honours the same blue exemption the pacing bars get (#343).
+    ///
+    /// The full truth table. Only one cell distinguishes this from a bare `mutesCalm` test — the
+    /// **blue** pill under `.yellowGreen` — and that cell is the bug: the segment is labelled
+    /// "Yellow + Green" precisely to say blue is *not* included, yet the idle path used to mute it.
+    ///
+    /// The **green** pill (idle with no weekly headroom, ADR-0081 §4) must keep muting in both muting
+    /// modes: green is exactly what these modes are named after. Exempting the whole idle bar rather
+    /// than just its blue would break that.
+    @Test func idlePillHonoursTheBlueExemption() {
+        // Nothing is muted at all.
+        #expect(!CalmColorMode.off.mutesIdlePill(isBlue: true))
+        #expect(!CalmColorMode.off.mutesIdlePill(isBlue: false))
+
+        // "Yellow + Green": green mutes, blue stays coloured.
+        #expect(!CalmColorMode.yellowGreen.mutesIdlePill(isBlue: true))
+        #expect(CalmColorMode.yellowGreen.mutesIdlePill(isBlue: false))
+
+        // "+ Blue": the quietest look mutes both.
+        #expect(CalmColorMode.yellowGreenBlue.mutesIdlePill(isBlue: true))
+        #expect(CalmColorMode.yellowGreenBlue.mutesIdlePill(isBlue: false))
+    }
+
+    /// The idle rule is the pacing rule (`gapColorTarget`) restricted to idle: substitute `isCalm` =
+    /// true (an idle bar is always calm) and `severity == .farBehind` = `isBlue`, and the two
+    /// expressions coincide. Pinning the equivalence keeps the two paths from drifting apart again —
+    /// they already did once, which is what #343 was.
+    @Test func idleRuleMatchesThePacingRule() {
+        for mode in CalmColorMode.allCases {
+            for isBlue in [true, false] {
+                let pacing = mode.mutesCalm && !(isBlue && !mode.mutesBlue)
+                #expect(mode.mutesIdlePill(isBlue: isBlue) == pacing)
+            }
+        }
+    }
+
     /// A known raw value round-trips through `Codable`.
     @Test func decodesKnownRawValue() throws {
         let data = Data(#""yellowGreen""#.utf8)

@@ -48,7 +48,6 @@ enum ColorRole: String, CaseIterable {
     // MARK: Calm mode (menu-bar)
 
     case calmWhite
-    case idleCalmGrey
 
     // MARK: Brand (Claude accent stays sRGB)
 
@@ -72,7 +71,7 @@ enum ColorRole: String, CaseIterable {
             return .chrome
         case .foreground, .dimmedLabel, .label, .link, .pillText:
             return .text
-        case .calmWhite, .idleCalmGrey:
+        case .calmWhite:
             return .calm
         case .claudeBrand:
             return .brand
@@ -101,7 +100,6 @@ enum ColorRole: String, CaseIterable {
         case .link:          return "Link"
         case .pillText:      return "Pill text"
         case .calmWhite:     return "Calm neutral"
-        case .idleCalmGrey:  return "Idle calm grey"
         case .claudeBrand:   return "Claude brand"
         }
     }
@@ -165,8 +163,6 @@ enum ColorRole: String, CaseIterable {
         case .calmWhite:
             return "Calm-mode neutral for on-pace marker / gap / credits / degraded status dot in the "
                  + "menu bar. Follows labelColor (re-alpha'd by bright())."
-        case .idleCalmGrey:
-            return "Calm-mode replacement for the idle blue on a ready idle bar."
         case .claudeBrand:
             return "Popup \"Claude Code\" header accent (#d97757)."
         }
@@ -179,7 +175,7 @@ enum ColorRole: String, CaseIterable {
         switch self {
         case .green, .yellow, .orange, .red, .blue, .gray,
              .indicatorRing, .tick, .centreTick, .inUsePill, .link, .label, .foreground,
-             .calmWhite, .idleCalmGrey:
+             .calmWhite:
             return "Default is a dynamic system colour (flips light/dark, honours Increase Contrast); "
                  + "a picked colour replaces it flat and loses that adaptation."
         case .barTrack:
@@ -222,7 +218,6 @@ enum ColorRole: String, CaseIterable {
         case .link:          return .linkColor
         case .pillText:      return .white
         case .calmWhite:     return .labelColor            // calm neutral — re-alpha'd by bright()
-        case .idleCalmGrey:  return .secondaryLabelColor   // calm idle track — quiet, still flips
         case .claudeBrand:   return NSColor(srgbRed: 0xd9/255, green: 0x77/255, blue: 0x57/255, alpha: 1)
         }
     }
