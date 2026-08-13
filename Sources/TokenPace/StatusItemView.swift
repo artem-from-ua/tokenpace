@@ -721,16 +721,14 @@ final class StatusItemView: NSView {
         drawBars(fiveHour: fiveHour, sevenDay: sevenDay, reset: nil, originX: originX, in: rect)
     }
 
-    /// The bars-less "we know the state, not the moment" draw (ADR-0091): the same leading glyph
-    /// sequence as ``drawBlockedReset(_:in:)``, then a ⚠️ **in the countdown's slot** rather than a
-    /// label.
+    /// The "a window is exhausted but its reset instant is broken" draw (ADR-0091): a **lone ⚠️**.
     ///
-    /// Drawing it in the label slot (rather than in place of the whole content) is what keeps the item
-    /// from twitching as a server payload alternates between a good and a broken `resets_at`: the
-    /// widget's width is the same either way.
+    /// No pause or currency glyph precedes it, even though the model knows which of the two applies —
+    /// `MenuBarLayout` suppresses both for this mode. A glyph stating the situation beside a warning
+    /// disowning it reads as a broken widget rather than as a state, so contradictory data gets one
+    /// signal. The awaiting-input hand is likewise absent, since `drawLeadingDecorations` is skipped.
     private func drawUnknownReset(in rect: NSRect) {
-        let originX = drawLeadingDecorations(in: rect)
-        drawErrorGlyph(atX: originX, in: rect)
+        drawErrorGlyph(atX: rect.minX + Metrics.hPadding, in: rect)
     }
 
     /// Draw the red "pause" glyph at leading `x`, vertically centred on `rect`, and return its right-edge
@@ -1286,11 +1284,9 @@ final class StatusItemView: NSView {
             // No bars (#194): the item hugs the leading decorations (pause + credits) plus the countdown.
             return dotInset + Metrics.hPadding + leadingInset + resetLabelWidth(reset) + Metrics.hPadding
         case .exhaustedUnknownReset:
-            // Identical to `.iconOnlyReset` except the label slot holds a ⚠️. Reserving
-            // `max(slot, glyph)` is what keeps the width steady while a server payload flips between a
-            // good and a broken `resets_at` — the glyph sits *in* the number's place, not instead of it.
-            return dotInset + Metrics.hPadding + leadingInset
-                + max(Self.resetLabelSlot, errorGlyphWidth()) + Metrics.hPadding
+            // A lone ⚠️, same compact width as the other glyph-only states — no leading sequence, since
+            // `MenuBarLayout` suppresses the pause and currency icons here (ADR-0091).
+            return Metrics.height + dotInset + creditsInset
         case .error:
             // The lone no-data glyph — never bars since ADR-0091. Credits stays **trailing** here
             // (no leading pause sequence in this state).

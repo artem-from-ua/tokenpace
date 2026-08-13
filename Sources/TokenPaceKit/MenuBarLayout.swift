@@ -133,16 +133,19 @@ public enum MenuBarMode: Sendable, Equatable {
     ///     7-day-cadence or credits/monthly reset). Informational since ADR-0074 made the label
     ///     format identical on both surfaces.
     case iconOnlyReset(reset: String, which: LimitWindow)
-    /// The same bars-less shape as ``iconOnlyReset``, but the countdown **cannot be computed**: a main
-    /// window is exhausted while its `resets_at` is missing or unparseable, so we know the state
-    /// exactly and only the *when* is lost (#167, ADR-0091). The view draws the same leading glyph
-    /// (pause or currency) with a ⚠️ where the number would be.
+    /// A main window is exhausted while its `resets_at` is missing or unparseable (#167, ADR-0091): the
+    /// state is known but its end is not. Drawn as a **lone ⚠️** — no bars, and no pause or currency
+    /// glyph beside it.
     ///
-    /// A distinct case rather than an optional `reset` on ``iconOnlyReset``: an optional would stop the
-    /// type from guaranteeing a countdown, and `which` would be meaningless without one. It is also
-    /// deliberately **not** ``error`` — that case means "the data cannot be trusted", whereas here the
-    /// snapshot is fresh and a window is provably at 100 %. Keeping them apart is what lets
-    /// ``MenuBarLayout/blockedPause`` stay `false` for stale data while still marking this state.
+    /// Suppressing the glyph is deliberate, and it is the one place this case differs from
+    /// ``iconOnlyReset`` in more than its label. A pause icon asserts "you are blocked" while the ⚠️
+    /// asserts "do not trust this"; nothing on screen says the distrust covers only the *time*, so the
+    /// pair reads as a malfunction instead of a state. Contradictory data gets one signal, and the
+    /// honest one is the warning.
+    ///
+    /// Still distinct from ``error`` despite looking identical: that case means the data is stale or
+    /// absent, this one that a fresh snapshot contradicts itself. They differ in what the app should do
+    /// next (retry vs. report), and `.error` uses a different symbol, so the two never collide visually.
     ///
     /// - Parameter which: Which exhausted window the missing reset belongs to, or `nil` when several
     ///   are exhausted and none has a usable date. Informational only — the view draws no label.
@@ -501,23 +504,22 @@ public struct MenuBarLayout: Sendable, Equatable {
                                hideCalmBar: hideCalmBar,
                                monitoringAnything: monitoringAnything)
         // Pause icon: drawn whenever the user is fully blocked (`CreditsPacing.isBlocked` — no path to
-        // work). On the healthy path that means ``MenuBarMode/iconOnlyReset``, or
-        // ``MenuBarMode/exhaustedUnknownReset`` when the blocking window's `resets_at` is broken — the
-        // icon must mark that state too, since what is missing there is only the *when* (ADR-0091).
+        // work). On the healthy path that means ``MenuBarMode/iconOnlyReset``.
         //
         // `.expanded` can no longer be blocked (an exhausted window never reaches the bars path), but it
         // stays listed as a harmless belt-and-braces: `isBlocked` is the authority, and if the two ever
         // disagreed, marking the state is the safer failure.
         //
-        // The freshness split is the point of keeping `.exhaustedUnknownReset` separate from `.error`:
-        // the former rests on a **fresh** snapshot with a provably exhausted window, the latter on data
-        // that is stale or absent, where a pause icon would assert a "blocked right now" that nothing is
-        // confirming (#341). #199, #227, ADR-0090, ADR-0091.
+        // **Not `.exhaustedUnknownReset`**, even though the snapshot there is fresh and the window is
+        // provably at 100 %. The pause glyph asserts "you are blocked" and the ⚠️ beside it asserts
+        // "don't trust me"; on screen there is nothing to say the distrust covers only the *time*, so
+        // the pair reads as a malfunction rather than as a state. One signal, and the honest one for
+        // contradictory data is the warning. #199, #227, ADR-0090, ADR-0091.
         let blockedPause: Bool = {
             guard let snapshot, CreditsPacing.isBlocked(in: snapshot) else { return false }
             switch layout.mode {
-            case .expanded, .iconOnlyReset, .exhaustedUnknownReset: return true
-            case .error, .usagePollingOff, .nothingMonitored: return false
+            case .expanded, .iconOnlyReset: return true
+            case .exhaustedUnknownReset, .error, .usagePollingOff, .nothingMonitored: return false
             }
         }()
         // The pause icon and the currency icon are **mutually exclusive** (ADR-0090, restoring the
@@ -526,7 +528,15 @@ public struct MenuBarLayout: Sendable, Equatable {
         // while `creditsCanCover` is `enabled && !spend_limit_reached`, so the user was also blocked.
         // Two icons then answered "can we work?" with contradictory halves — the pause wins, because
         // "no path to work" is the answer and a red ¤ is a detail of *why*.
-        let credits = blockedPause ? nil : liveCredits
+        //
+        // The currency icon is suppressed in `.exhaustedUnknownReset` for the same reason the pause is
+        // (above): a glyph that states the situation, beside a ⚠️ that disowns it, reads as a broken
+        // widget. Contradictory data gets the warning alone.
+        let credits: CreditsMarker? = {
+            if blockedPause { return nil }
+            if case .exhaustedUnknownReset = layout.mode { return nil }
+            return liveCredits
+        }()
         return layout.with(serviceProblem: serviceProblem, credits: credits, blockedPause: blockedPause)
     }
 

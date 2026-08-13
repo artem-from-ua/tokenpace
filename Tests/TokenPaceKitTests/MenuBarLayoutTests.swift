@@ -979,8 +979,11 @@ struct MenuBarLayoutCanWeWorkTests {
             sevenDay: UsageWindow(utilization: 100, resetsAt: "not-a-date"))
         let layout = MenuBarLayout.make(from: snap, health: .healthy(lastSuccess: now), now: now)
         #expect(layout.mode == .exhaustedUnknownReset(which: .sevenDay))
-        // The pause icon still marks the state: what is missing is only the *when*, not the block itself.
-        #expect(layout.blockedPause == true)
+        // **No pause glyph**, even though `isBlocked` is true and we could justify one from the model's
+        // side. On screen a pause asserting "you are blocked" beside a ⚠️ asserting "don't trust me"
+        // reads as a broken widget — nothing there says the distrust covers only the *time*. So the
+        // warning stands alone (ADR-0091); this is the one state where `isBlocked` does not draw it.
+        #expect(layout.blockedPause == false)
     }
 
     @Test func fiveHourExhaustedWithBrokenResetNamesTheFiveHourWindow() {
@@ -1003,10 +1006,13 @@ struct MenuBarLayoutCanWeWorkTests {
                 == .exhaustedUnknownReset(which: nil))
     }
 
-    @Test func payingWithBrokenResetIsExhaustedUnknownResetWithoutPause() {
-        // Same shape on the paying side — but **not** a pause: credits still cover, so work continues.
-        // The two states share a mode and are told apart by `blockedPause`, which is what keeps the
-        // currency icon and the pause glyph mutually exclusive (ADR-0090).
+    @Test func payingWithBrokenResetDrawsNeitherGlyph() {
+        // The paying side reaches the same mode — and, like the blocked side, sheds its glyph. The
+        // currency icon would state "work continues, on money" next to a ⚠️ disowning the payload;
+        // suppressing it is the same call as suppressing the pause, for the same reason (ADR-0091).
+        //
+        // So this mode is the one place where neither icon appears despite `mainWindowExhausted`, and
+        // the pair stays mutually exclusive trivially: both are off.
         let snap = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 30, resetsAt: resetsAt(inSeconds: 4 * 3600)),
             sevenDay: UsageWindow(utilization: 100, resetsAt: "not-a-date"),
@@ -1014,8 +1020,8 @@ struct MenuBarLayoutCanWeWorkTests {
         let layout = MenuBarLayout.make(
             from: snap, health: .healthy(lastSuccess: now), now: now, showCredits: true)
         #expect(layout.mode == .exhaustedUnknownReset(which: .sevenDay))
-        #expect(layout.blockedPause == false)   // currency, not pause
-        #expect(layout.credits != nil)          // …and the icon that says *why* work continues
+        #expect(layout.blockedPause == false)
+        #expect(layout.credits == nil)
     }
 
     @Test func exhaustedUnknownResetNeverCarriesBars() {
