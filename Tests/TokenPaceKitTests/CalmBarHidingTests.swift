@@ -106,9 +106,10 @@ struct CalmBarHidingTests {
         #expect(CalmBarHiding.never.displayName == "Never")
     }
 
-    /// `UIPanes` builds the segmented control from `allCases`, so the declaration order *is* the on-screen
-    /// order: the two windows first, the opt-out last.
+    /// `UIPanes` builds the segmented control from `allCases`, so the declaration order *is* the
+    /// on-screen order: 7-day, then 5-hour, then the opt-out — longest window first, then the shorter
+    /// one, then nothing hidden.
     @Test func caseOrderDrivesSegmentOrder() {
-        #expect(CalmBarHiding.allCases == [.fiveHour, .sevenDay, .never])
+        #expect(CalmBarHiding.allCases == [.sevenDay, .fiveHour, .never])
     }
 }

@@ -30,13 +30,17 @@ import Foundation
 /// Stored raw-string in `UserDefaults` (like `ResetCountdownMode` / `CalmColorMode` / `BarStyle`) with a
 /// forward-compatible decode, so a newer build's value never makes an older build fail.
 public enum CalmBarHiding: String, Sendable, Equatable, Codable, CaseIterable {
+    /// Hide the 7-day bar while it is calm, leaving the 5-hour bar alone. The pre-#94 behaviour of the
+    /// boolean this enum replaces, and what an explicit `hideCalmSevenDayBar = true` migrates to.
+    ///
+    /// Declared first because the order here *is* the on-screen segment order (`UIPanes` builds the
+    /// control from `allCases`), and the row reads as a scale of how much the widget keeps: the longer
+    /// window's bar goes first, then the shorter one, then nothing.
+    case sevenDay = "sevenDay"
     /// **Default** (`.chill` / `.workHarder`). Hide the 5-hour bar while it is calm, leaving the 7-day
     /// bar as the single, vertically-centred bar — including in the session-idle state, where the 5-hour
     /// bar is the inert "ready to start" placeholder and counts as calm.
     case fiveHour = "fiveHour"
-    /// Hide the 7-day bar while it is calm, leaving the 5-hour bar alone. The pre-#94 behaviour of the
-    /// boolean this enum replaces, and what an explicit `hideCalmSevenDayBar = true` migrates to.
-    case sevenDay = "sevenDay"
     /// Never hide either bar — both are always drawn, whatever their severity (`.controlFreak`).
     case never = "never"
 

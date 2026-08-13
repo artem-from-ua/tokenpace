@@ -338,8 +338,8 @@ enum AppearanceBarStyle {
 }
 
 /// The three ``CalmBarHiding`` segments for the Menu bar pane's "Hide the calm bar" row (ADR-0086).
-/// Built from `allCases` so the on-screen order *is* the declaration order — the two windows first,
-/// the opt-out last — and a new case can never be left out of the control.
+/// Built from `allCases` so the on-screen order *is* the declaration order — 7-day, 5-hour, then the
+/// opt-out — and a new case can never be left out of the control.
 @MainActor
 enum AppearanceCalmBarHiding {
     static let segments: [SegmentedControl<CalmBarHiding>.Segment] =
