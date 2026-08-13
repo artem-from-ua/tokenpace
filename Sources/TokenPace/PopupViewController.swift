@@ -1519,6 +1519,10 @@ final class PopupViewController: NSViewController {
         // everything is green, leaving a popup with nothing in it but a brand title, so this mode
         // shows them unconditionally.
         let servicesAreTheContent = layout.monitoringMode == .servicesOnly
+        // `hasRecentRecovery` keeps the section up under ⌥ as well, which is what makes the
+        // "No ongoing incidents" row reachable right after a fix lands: the service rows say a
+        // component just recovered, so the incident dimension must answer for the same moment rather
+        // than go blank (the ⌥ half would otherwise look broken beside a populated non-⌥ half).
         let showStatusRows = status != nil
             && (servicesAreTheContent || status?.worstProblem != nil || hasRecentRecovery
                 || (optionHeld && !layout.incidents.isEmpty))
@@ -1568,12 +1572,17 @@ final class PopupViewController: NSViewController {
         if showStatusRows, let status {
             var lastRow: NSView?
             let now = self.now()
-            if optionHeld, layout.incidents.isEmpty, servicesAreTheContent {
-                // ⌥ asks "what is broken", and here the answer is "nothing" — which is a different
-                // statement from `All services · operational`, the answer to "is everything up".
-                // Keeping the operational row under ⌥ would answer the previous question; hiding the
-                // section (what every other mode does when this dimension is empty) would empty the
-                // popup, since in the services-only mode these rows are all it has (#341).
+            if optionHeld, layout.incidents.isEmpty {
+                // ⌥ asks "what is broken", and here the answer is "nothing" — a different statement
+                // from `operational`, which answers "is everything up". Saying it out loud beats
+                // dropping the rows: this section is already on screen (something is wrong, or
+                // something just recovered), so an empty dimension would read as a glitch rather than
+                // as an answer.
+                //
+                // This is the shape ADR-0071 §4 produces on purpose — an incident whose components
+                // have gone green is hidden, because the popup's question is "can I work" and green
+                // already answers it. Alternative K there (show it as "recovering") stays rejected;
+                // this row reports the *absence*, it does not bring the incident back.
                 lastRow = addServiceStatusRow(
                     label: "No ongoing incidents",
                     status: .operational,

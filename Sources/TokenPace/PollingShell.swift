@@ -731,21 +731,32 @@ actor StubUsageTransport: UsageTransport {
         var webStatus = failing ? "partial_outage" : "operational"
         let coworkStatus = failing ? "degraded_performance" : "operational"
 
-        // How long ago the WEB/Desktop components last changed state.
+        // How long ago the WEB/Desktop components last changed state — the same long-settled stamp
+        // `Claude Code` and the API carry.
         //
-        // This used to be a flat 12 minutes for every scenario, which put `claude.ai` and `Cowork`
-        // permanently **inside** the recently-recovered window (`PopupViewController.recoveryWindow`).
-        // The consequence was silent: every stub — including the ones whose subject is something else
-        // entirely — rendered a green "Web/Desktop · operational" row, because a recently-recovered
-        // component is shown alongside the problem rows by design. In a mode where that row is the
-        // only one on screen (#341's services-only popup) it read as though Web/Desktop were the sole
-        // monitored service.
+        // It used to be 12 minutes, inside the recently-recovered window
+        // (`PopupViewController.recoveryWindow`, 15). That put `claude.ai` and `Cowork` permanently in
+        // the "just recovered" bucket, so **every** stub — including the ones whose subject is
+        // something else entirely — rendered a green "Web/Desktop · operational" row, since a
+        // recently-recovered component is shown alongside the problem rows by design. Where other
+        // rows surround it that is merely noise; in the services-only popup (#341) it was the only
+        // row, and read as though Web/Desktop were the only thing monitored.
         //
-        // A recent recovery is now opt-in, carried only by the frames that are *about* recovery.
-        // Everything else stamps these components as long-settled, like `Claude Code` and the API.
-        let webChangedMinutesAgo = mode == .incident(.recovery) ? 12 : 127
+        // No scenario wants it on WEB/Desktop. The one frame that *is* about recovery —
+        // `.incident(.recovery)` — demonstrates it on `Claude Code` and the API, which go green from
+        // the third poll and are the only components the incident names; `claude.ai` is `operational`
+        // throughout and takes no part in it. A recovery stamp here would decorate a component that
+        // never fell over. Those two get their own stamp below, when they actually recover.
+        let settledMinutesAgo = 127
 
         var incidents: [String] = []
+
+        // How long ago `Claude Code` / the API last changed state. Same settled default as everything
+        // else, **except** at the moment `.incident(.recovery)` turns them green: `updated_at` is what
+        // `isRecentlyRecovered` measures the 15-minute grace from, so a component that just recovered
+        // while still claiming it has not moved in two hours loses its row instantly — which is the
+        // exact "reads like nothing was ever wrong" failure that grace exists to prevent.
+        var incidentPairChangedMinutesAgo = settledMinutesAgo
 
         if case let .incident(frame) = mode {
             // `.recovery` is the only time-dependent frame: the components go green from the third
@@ -757,6 +768,11 @@ actor StubUsageTransport: UsageTransport {
             codeStatus = green ? "operational" : "degraded_performance"
             apiStatus = green ? "operational" : "degraded_performance"
             webStatus = "operational"
+
+            // Stamp the recovery as just-happened so the grace window opens. Only for the silent
+            // recovery: `.green` is a *fixed* frame whose point is the long-settled "formally open,
+            // actually fine" gap, and a fresh stamp there would make it time-dependent.
+            if recovered { incidentPairChangedMinutesAgo = 1 }
 
             // An incident's `components[]` mirrors live status — that is what the green gate reads.
             let mirrored = """
@@ -800,10 +816,10 @@ actor StubUsageTransport: UsageTransport {
         return """
         {"status":{"indicator":"major","description":"Degraded"},\
         "components":[\
-        {"name":"Claude Code","status":"\(codeStatus)","updated_at":"\(isoStamp(minutesAgo: 127))"},\
-        {"name":"Claude API (api.anthropic.com)","status":"\(apiStatus)","updated_at":"\(isoStamp(minutesAgo: 127))"},\
-        {"name":"claude.ai","status":"\(webStatus)","updated_at":"\(isoStamp(minutesAgo: webChangedMinutesAgo))"},\
-        {"name":"Claude Cowork","status":"\(coworkStatus)","updated_at":"\(isoStamp(minutesAgo: webChangedMinutesAgo))"}],\
+        {"name":"Claude Code","status":"\(codeStatus)","updated_at":"\(isoStamp(minutesAgo: incidentPairChangedMinutesAgo))"},\
+        {"name":"Claude API (api.anthropic.com)","status":"\(apiStatus)","updated_at":"\(isoStamp(minutesAgo: incidentPairChangedMinutesAgo))"},\
+        {"name":"claude.ai","status":"\(webStatus)","updated_at":"\(isoStamp(minutesAgo: settledMinutesAgo))"},\
+        {"name":"Claude Cowork","status":"\(coworkStatus)","updated_at":"\(isoStamp(minutesAgo: settledMinutesAgo))"}],\
         "incidents":[\(incidents.joined(separator: ","))],\
         "scheduled_maintenances":[]}
         """.data(using: .utf8)!
