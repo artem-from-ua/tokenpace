@@ -88,7 +88,7 @@ swift run          # запуск
   [agent-workflow.md § «Діагностика layout-багів у вікнах»](docs/guides/agent-workflow.md#діагностика-layout-багів-у-вікнах).
 - **SwiftUI дивно поводиться біля window chrome → першим перевір межу хостингу**
   (`sizingOptions`/`safeAreaRegions`), а не SwiftUI-модифікатори —
-  [ADR-0087](docs/adr/0087-settings-hosting-safe-area-and-manual-separator.md).
+  [ADR-0088](docs/adr/0088-settings-hosting-safe-area-and-manual-separator.md).
 
 ## Критичні правила
 

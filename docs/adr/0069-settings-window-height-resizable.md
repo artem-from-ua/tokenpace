@@ -5,7 +5,7 @@ date: 2026-08-04
 
 # ADR-0069: Вікно Settings — resizable по висоті, вертикальний zoom, персистентний фрейм із валідацією
 
-> **Постскриптум ([ADR-0087](0087-settings-hosting-safe-area-and-manual-separator.md), 2026-08-13).**
+> **Постскриптум ([ADR-0088](0088-settings-hosting-safe-area-and-manual-separator.md), 2026-08-13).**
 > Два уточнення. (1) Твердження §2 «нижче за цю межу grouped-`Form` скролить сам (перевірено вживу
 > на висоті 300 pt)» описувало збірку **до** [#311](https://github.com/artem-from-ua/tokenpace/issues/311):
 > доданий там тулбар із `.fullSizeContentView` увімкнув баг пропагації safe area

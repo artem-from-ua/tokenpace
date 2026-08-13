@@ -138,7 +138,7 @@
   і контракт `NSHostingController` (`sizingOptions`, `safeAreaRegions`, `contentLayoutRect`)
   впливає на layout сильніше за будь-який SwiftUI-модифікатор. У #346 шість варіантів
   margins/padding програли одному рядку `safeAreaRegions = []` —
-  [ADR-0087](../adr/0087-settings-hosting-safe-area-and-manual-separator.md).
+  [ADR-0088](../adr/0088-settings-hosting-safe-area-and-manual-separator.md).
 - **Бінарний підбір константи об скріншоти = механізм не знайдено.** Якщо число доводиться
   підганяти (17→32→24→28…), латається симптом не в тому шарі — стоп, назад до заміру.
 - **Висновок у докблок чи звіт — лише після верифікації.** Формулювання «працює як у системі»

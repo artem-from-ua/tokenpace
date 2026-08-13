@@ -9,8 +9,28 @@ import Foundation
 ///
 /// Generalises the old boolean `showModelSpecificLimits` opt-out: "off" forced a group to be invisible
 /// even when it was the thing you needed to see, while "on" kept calm rows on screen permanently. The
-/// middle mode — ``nonCalm`` — shows a group only while it is actually worth attention, which is the
-/// same "quiet until it matters" idea the menu bar already applies via ``CalmBarHiding``.
+/// hiding modes show a group only while it is actually worth looking at, which is the same "quiet until
+/// it matters" idea the menu bar already applies via ``CalmBarHiding``.
+///
+/// ## Two ways to be "worth looking at"
+/// The two middle modes gate on opposite sides of the pacing model, and that is the whole point of
+/// having both:
+///
+/// - ``aboveZero`` reads the **value** — has this group been touched at all? A group sitting at a flat
+///   zero is not something the user needs on screen; the first byte spent (or the first cent) is.
+/// - ``nonCalm`` reads the model's **verdict** — has the pacing turned orange or red?
+///
+/// Value-in, colour-out: a percentage says *what happened*, a severity says *what we think of it*. They
+/// are not interchangeable, and the gap between them is why ``aboveZero`` exists. A 7-day window early
+/// in its cycle paces as `.ahead` (orange) at 2–4 % usage — formally correct, but it drags the whole
+/// per-model group on screen at the exact moment the numbers are least interesting. ``aboveZero`` keeps
+/// the group folded until something is actually in it.
+///
+/// Not every group can offer both. The Extra-usage section drops ``nonCalm`` from its Settings control:
+/// its severity comes from `credits.bar`, which is `nil` on an **unlimited** money cap, so `nonCalm`
+/// would leave a paying user with no cap permanently blind to their own spend. And when a cap *does*
+/// exist, "spent > 0" always precedes orange — so for money the mode had no reachable behaviour of its
+/// own. The case stays in this enum (old stored values must keep decoding), it is simply not offered.
 ///
 /// ## What "non-calm" means here
 /// **Orange or red** — `PacingSeverity.ahead` or `.exhausted`. Deliberately *not* `!BarLayout.isCalm`:
@@ -30,19 +50,30 @@ import Foundation
 public enum PopupSectionVisibility: String, Sendable, Equatable, Codable, CaseIterable {
     /// Always show the group, whatever its severity and whether or not ⌥ is held.
     case always = "always"
-    /// **Default.** Show the group while any of its rows is orange/red — or while ⌥ Option is held.
+    /// **Default for Extra usage.** Show the group once anything in it is non-zero — any per-model row
+    /// past 0 %, or any money spent — or while ⌥ Option is held.
+    case aboveZero = "aboveZero"
+    /// **Default for model & service limits.** Show the group while any of its rows is orange/red — or
+    /// while ⌥ Option is held. Not offered for Extra usage (see the type's note on unlimited caps).
     case nonCalm = "nonCalm"
     /// Never show the group on its own; only while ⌥ Option is held.
     case optionOnly = "optionOnly"
 
     /// Whether the group is drawn right now.
     ///
+    /// Both data predicates are always passed, even though any one call uses at most one of them: the
+    /// caller has both to hand from ``PopupLayout``, and taking them unconditionally keeps this a total
+    /// function of the mode. Neither gets a default value — a defaulted parameter would let a new call
+    /// site silently pass a permanently-`false` predicate and quietly break a mode.
+    ///
     /// - Parameters:
     ///   - isNonCalm: Whether any row in this group is orange/red (`.ahead` / `.exhausted`).
+    ///   - isAboveZero: Whether anything in this group is non-zero (usage past 0 %, or money spent).
     ///   - optionHeld: Whether ⌥ Option is currently held (ADR-0020's modifier-poll timer).
-    public func shows(isNonCalm: Bool, optionHeld: Bool) -> Bool {
+    public func shows(isNonCalm: Bool, isAboveZero: Bool, optionHeld: Bool) -> Bool {
         switch self {
         case .always:     return true
+        case .aboveZero:  return isAboveZero || optionHeld
         case .nonCalm:    return isNonCalm || optionHeld
         case .optionOnly: return optionHeld
         }
@@ -50,14 +81,17 @@ public enum PopupSectionVisibility: String, Sendable, Equatable, Codable, CaseIt
 
     /// The segment label shown in Settings → Appearance. English UI string.
     ///
-    /// These carry the whole explanation — the two Dropdown-Widget rows deliberately have **no**
-    /// `SettingsHint` beneath them, so the labels must be self-describing. Hence "only" on the middle
+    /// These carry the whole explanation — the Dropdown-Widget rows deliberately have **no**
+    /// `SettingsHint` beneath them, so the labels must be self-describing. Hence "only" on the non-calm
     /// segment: without it, "Non-calm" reads as *also* showing when non-calm rather than *only* then.
+    /// "Above zero" needs no such qualifier — a threshold phrase is already exclusive — and it stays two
+    /// short words because the model-limits row fits four segments beside a long title.
     /// "With ⌥ Option" keeps the preposition (the segment is a *condition*, not a key reference) while
     /// the glyph names the key the way every macOS menu does.
     public var displayName: String {
         switch self {
         case .always:     return "Always"
+        case .aboveZero:  return "Above zero"
         case .nonCalm:    return "Non-calm only"
         case .optionOnly: return "With ⌥ Option"
         }

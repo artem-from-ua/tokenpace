@@ -102,9 +102,16 @@ enum PersistedConfig {
         /// string. Default `.nonCalm` — see the property.
         static let modelLimitsVisibility = "modelLimitsVisibility"
         /// When the popup shows the "Extra usage" credits section, stored as the raw
-        /// `PopupSectionVisibility` string. Default `.nonCalm` — see the property. Distinct from
+        /// `PopupSectionVisibility` string. Default `.aboveZero` — see the property. Distinct from
         /// ``showExtraUsage``, which governs the **menu-bar** credits icon.
         static let extraUsageVisibility = "extraUsageVisibility"
+        /// Marker set once ``PersistedConfig/migrateExtraUsageVisibilityIfNeeded()`` has run, so the
+        /// one-way `.nonCalm` → `.aboveZero` rewrite cannot re-fire and undo a later deliberate choice.
+        ///
+        /// A marker is needed because, unlike the legacy migrations around it, this one has no old key
+        /// to delete as its own evidence of completion: it rewrites a *value* of a key that stays in
+        /// use, and `.nonCalm` remains a legal value for the other row.
+        static let extraUsageVisibilityMigrated = "extraUsageVisibilityMigratedFromNonCalm"
         /// Legacy pre-tri-state key (the boolean "Show model & service limits" opt-out), read once by
         /// ``PersistedConfig/migrateModelLimitsVisibilityIfNeeded()`` to seed
         /// ``modelLimitsVisibility``, then cleared. Do not read elsewhere.
@@ -450,6 +457,11 @@ enum PersistedConfig {
     /// ``showExtraUsage``, because the two surfaces answer different questions: the icon is a
     /// glanceable badge, this is the detail section the user opened the dropdown to read.
     /// An absent or unrecognised value falls back to the factory preset's value.
+    ///
+    /// This row offers `.always` / `.aboveZero` / `.optionOnly` — **no** `.nonCalm`. Money has no calm
+    /// reading to gate on: an unlimited cap yields no bar and hence no severity at all, and with a cap
+    /// "spent > 0" always precedes orange. Values stored before that was true are rewritten once by
+    /// ``migrateExtraUsageVisibilityIfNeeded()``.
     static var extraUsageVisibility: PopupSectionVisibility {
         get { PopupSectionVisibility(rawValue: defaults.string(forKey: Key.extraUsageVisibility) ?? "") ?? AppearancePreset.defaultValues.extraUsageVisibility }
         set { defaults.set(newValue.rawValue, forKey: Key.extraUsageVisibility) }
@@ -594,6 +606,30 @@ enum PersistedConfig {
             modelLimitsVisibility = legacyShow ? .always : .optionOnly
         }
         defaults.removeObject(forKey: Key.legacyShowModelSpecificLimits)
+    }
+
+    /// Rewrite a stored `.nonCalm` **Extra usage** choice to `.aboveZero`, once.
+    ///
+    /// `.nonCalm` used to be this row's default, so it sits in most existing installs — but the segment
+    /// is gone from the control, and the mode was never a good fit for money: on an unlimited cap
+    /// (`spend.limit == null`) there is no bar, hence no severity, hence the section would stay hidden
+    /// no matter how much was spent. `.aboveZero` keeps the intent that made `.nonCalm` the default
+    /// ("stay folded until there's something to see") and delivers it in every billing configuration.
+    ///
+    /// Only `.nonCalm` is touched: `.always` and `.optionOnly` are still offered and are deliberate
+    /// choices, and an absent key is left absent so it keeps tracking the preset default.
+    ///
+    /// Idempotent via its own marker key rather than by consuming a legacy key — there isn't one here,
+    /// and `.nonCalm` stays a legal value for the sibling row. Without the marker, a user who later
+    /// re-picked `.nonCalm` through an export/import round-trip would have it silently rewritten again.
+    static func migrateExtraUsageVisibilityIfNeeded() {
+        guard !defaults.bool(forKey: Key.extraUsageVisibilityMigrated) else { return }
+        defaults.set(true, forKey: Key.extraUsageVisibilityMigrated)
+        guard defaults.string(forKey: Key.extraUsageVisibility) == PopupSectionVisibility.nonCalm.rawValue
+        else { return }
+        extraUsageVisibility = .aboveZero
+        AppLogger.lifecycle.notice(
+            "extra-usage-section: migrated nonCalm → \(PopupSectionVisibility.aboveZero.rawValue, privacy: .public)")
     }
 
     /// Split the pre-#329 single `barStyle` key into the per-surface ``menuBarStyle`` /
