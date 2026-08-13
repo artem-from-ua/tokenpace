@@ -85,25 +85,26 @@ enum PersistedConfig {
         /// by ``PersistedConfig/migrateCalmBarHidingIfNeeded()`` to seed ``calmBarHiding``, then cleared.
         /// Do not read elsewhere.
         static let legacyHideCalmSevenDayBar = "hideCalmSevenDayBar"
-        /// Whether the red "pause" icon **hides** the pacing bars while the user is fully blocked
-        /// (`CreditsPacing.isBlocked`), leaving only the reset countdown beside the icon (#194, #227).
-        /// `true` → icon only; `false` → icon + bars. The pause icon itself is always drawn when blocked.
-        /// See the property. Replaces the pre-#227 `hideBarsWhenBlocked` + `showBlockedPause` pair.
-        static let pauseHidesBars = "pauseHidesBars"
-        /// Legacy pre-#227 keys, read once by ``PersistedConfig/migratePauseKeysIfNeeded()`` to seed
-        /// ``pauseHidesBars`` for existing users, then cleared. Do not read elsewhere.
+        /// **Retired** (ADR-0090). Whether the red "pause" icon hid the pacing bars while fully blocked
+        /// (#194, #227). Hiding is now the only behaviour — a red 100 % bar carries no pacing
+        /// information — so the choice is gone. The key is kept only so the Appearance reset can sweep
+        /// away a stored value, as ``retiredFarBehindInterval`` does.
+        static let retiredPauseHidesBars = "pauseHidesBars"
+        /// Legacy pre-#227 keys. Their successor is retired too, so nothing reads them any more — they
+        /// are swept by the Appearance reset alongside it. Do not read elsewhere.
         static let legacyHideBarsWhenBlocked = "hideBarsWhenBlocked"
         static let legacyShowBlockedPause = "showBlockedPause"
-        /// Whether the menu-bar widget draws the money-credits ("extra usage") icon when credits are
-        /// active and a base limit is exhausted (#144). Default-on (opt-out) — see the property.
-        static let showExtraUsage = "showExtraUsage"
+        /// **Retired** (ADR-0090). Whether the menu-bar widget drew the money-credits icon (#144). The
+        /// icon is now decided by the data alone — it is already silent until credits are active and a
+        /// base limit is exhausted — so the opt-out bought nothing. Swept, never read.
+        static let retiredShowExtraUsage = "showExtraUsage"
         /// When the popup shows the per-model 7-day limit rows (`Opus`/`Sonnet`/`weekly_scoped`,
         /// e.g. `Fable`) below the `5h`/`7d` rows (#211), stored as the raw `PopupSectionVisibility`
         /// string. Default `.nonCalm` — see the property.
         static let modelLimitsVisibility = "modelLimitsVisibility"
         /// When the popup shows the "Extra usage" credits section, stored as the raw
-        /// `PopupSectionVisibility` string. Default `.aboveZero` — see the property. Distinct from
-        /// ``showExtraUsage``, which governs the **menu-bar** credits icon.
+        /// `PopupSectionVisibility` string. Default `.aboveZero` — see the property. Distinct from the
+        /// **menu-bar** credits icon, which is data-driven and has no key of its own (ADR-0090).
         static let extraUsageVisibility = "extraUsageVisibility"
         /// Marker set once ``PersistedConfig/migrateExtraUsageVisibilityIfNeeded()`` has run, so the
         /// one-way `.nonCalm` → `.aboveZero` rewrite cannot re-fire and undo a later deliberate choice.
@@ -132,10 +133,10 @@ enum PersistedConfig {
         /// Whether the "sessions awaiting input" indicator is shown (#233). Default-off (opt-in) —
         /// master toggle on the Appearance page; placement on its Menu bar child page. See the property.
         static let awaitingInputEnabled = "awaitingInputEnabled"
-        /// Whether the awaiting-input indicator also appears in the menu bar (as the first leading
-        /// element), in addition to the popup (#233). Default-off (opt-in). An Appearance option, but
-        /// deliberately **not** part of the appearance presets. See the property.
-        static let awaitingInputInMenuBar = "awaitingInputInMenuBar"
+        /// **Retired** (ADR-0090). Whether the awaiting-input indicator also appeared in the menu bar
+        /// (#233). Switching the feature on now places it on both surfaces: the separate placement
+        /// choice asked the user to decide twice about one thing. Swept, never read.
+        static let retiredAwaitingInputInMenuBar = "awaitingInputInMenuBar"
         /// Filesystem path of the user-chosen archive folder (#110), or absent if not yet set.
         static let archiveDestination = "archiveDestination"
         /// Instant of the last **successful** archive sync (#110), gating the 24 h cadence.
@@ -410,34 +411,6 @@ enum PersistedConfig {
         set { defaults.set(newValue.rawValue, forKey: Key.calmBarHiding) }
     }
 
-    /// Whether the red "pause" icon **hides** the **menu-bar** pacing bars while the user is *fully
-    /// blocked* — every main window (5h or 7d) exhausted **and** paid credits can't cover
-    /// (`CreditsPacing.isBlocked`), so there is no path to work (#194, #227, `MenuBarMode.blockedReset`).
-    /// `true` → only the red pause icon + reset countdown; `false` → pause icon + the (red 100 %) bars.
-    /// The pause icon itself is drawn whenever blocked, independent of this flag. While credits still
-    /// cover an exhausted window it is not a block: the bars stay regardless. **Default follows the
-    /// factory preset** (`.workHarder` → `false`, i.e. keep the bars). `object(forKey:) as? Bool`
-    /// distinguishes "unset" (→ preset default) from an explicit value the user chose. Menu-bar only:
-    /// the popup keeps its full bars. See ``migratePauseKeysIfNeeded()`` for the pre-#227 upgrade path.
-    static var pauseHidesBars: Bool {
-        get { defaults.object(forKey: Key.pauseHidesBars) as? Bool ?? AppearancePreset.defaultValues.pauseHidesBars }
-        set { defaults.set(newValue, forKey: Key.pauseHidesBars) }
-    }
-
-    /// Whether the **menu-bar** widget draws the money-credits ("extra usage") icon — the trailing
-    /// currency glyph (¤) shown when paid credits are active **and** a base limit is exhausted (#144,
-    /// `MenuBarLayout.creditsMarker`). **Default-on** (opt-out): an absent key reads as `true`, so the
-    /// icon appears out of the box, matching the service-status dot's default. `object(forKey:) as?
-    /// Bool ?? true` distinguishes "unset" (→ true) from an explicit `false` the user chose —
-    /// `bool(forKey:)` would collapse both to `false` and silently defeat the opt-out default.
-    ///
-    /// - Note: The Settings toggle for this lives in #146; until then the gate is read from this
-    ///   default-on property, so the icon is on for everyone with credits.
-    static var showExtraUsage: Bool {
-        get { defaults.object(forKey: Key.showExtraUsage) as? Bool ?? AppearancePreset.defaultValues.showExtraUsage }
-        set { defaults.set(newValue, forKey: Key.showExtraUsage) }
-    }
-
     /// When the **popup** lists the per-model 7-day limit rows — the legacy `Opus`/`Sonnet`
     /// sub-windows and the `weekly_scoped` models from `limits[]` (e.g. `Fable`, #65) — below the
     /// `5h`/`7d` rows (#211). Governs the popup only; the menu-bar widget is unaffected.
@@ -493,8 +466,6 @@ enum PersistedConfig {
             // pre-ADR-0086 boolean the migration may not have reached yet, or it would sit there ready
             // to re-seed `calmBarHiding` on a later launch.
             Key.legacyHideCalmSevenDayBar,
-            Key.pauseHidesBars,
-            Key.showExtraUsage,
             Key.modelLimitsVisibility,
             Key.extraUsageVisibility,
             Key.menuBarStyle,
@@ -503,39 +474,31 @@ enum PersistedConfig {
             // reached yet — otherwise it would be waiting to re-seed the two keys on a later launch.
             Key.legacyBarStyle,
             Key.showTicks,
-            // Retired (see `Key.retiredFarBehindInterval`), still swept so a Reset also clears it for
-            // anyone who never launched the retiring build.
+            // Retired keys, still swept so a Reset also clears them for anyone who never launched the
+            // retiring build (see each `Key.retired…` for what it used to mean).
             Key.retiredFarBehindInterval,
-            Key.awaitingInputInMenuBar,
+            Key.retiredPauseHidesBars,
+            Key.retiredShowExtraUsage,
+            Key.retiredAwaitingInputInMenuBar,
+            // The pre-#227 pair the retired pause key once inherited from — swept here too, since the
+            // migration that used to clear them retired along with it.
+            Key.legacyHideBarsWhenBlocked,
+            Key.legacyShowBlockedPause,
         ] {
             defaults.removeObject(forKey: key)
         }
     }
 
-    /// One-time upgrade of the pre-#227 pause settings to the unified ``pauseHidesBars`` key. Before #227
-    /// two independent keys existed: `hideBarsWhenBlocked` (hide the bars when blocked) and
-    /// `showBlockedPause` (draw the pause glyph). #227 merged them into a single "Pause icon hides bars"
-    /// toggle where the icon is always shown and the flag only controls the bars — so the new key inherits
-    /// the old **hide-bars** choice. Runs on every launch and is idempotent: it does nothing once the new
-    /// key exists (or once both legacy keys are gone). `showBlockedPause` has no successor and is simply
-    /// cleared.
+    /// Sweep away the pause-related keys retired by ADR-0090 — the unified `pauseHidesBars` and the two
+    /// pre-#227 booleans it once inherited from (`hideBarsWhenBlocked`, `showBlockedPause`).
     ///
-    /// Only migrates an **explicit** legacy value: if `hideBarsWhenBlocked` was never set (the user kept
-    /// the default), nothing is written and `pauseHidesBars` falls back to the factory-preset default via
-    /// its getter — the correct behaviour for someone who never touched the old toggle.
-    static func migratePauseKeysIfNeeded() {
-        // Already migrated (or new key explicitly set) → nothing to do.
-        guard defaults.object(forKey: Key.pauseHidesBars) == nil else {
-            clearLegacyPauseKeys()
-            return
-        }
-        if let legacyHide = defaults.object(forKey: Key.legacyHideBarsWhenBlocked) as? Bool {
-            defaults.set(legacyHide, forKey: Key.pauseHidesBars)
-        }
-        clearLegacyPauseKeys()
-    }
-
-    private static func clearLegacyPauseKeys() {
+    /// Nothing reads any of them any more: hiding the bars while blocked is the only behaviour, so the
+    /// choice they encoded no longer exists. This is the same shape as ``retireFarBehindIntervalIfNeeded()``
+    /// — an unconditional `removeObject`, idempotent by construction, kept so an upgrading install does
+    /// not carry dead values forever. It also inherits the legacy pair's only cleaner: the migration that
+    /// used to sweep them is gone with the key it fed.
+    static func retirePauseKeysIfNeeded() {
+        defaults.removeObject(forKey: Key.retiredPauseHidesBars)
         defaults.removeObject(forKey: Key.legacyHideBarsWhenBlocked)
         defaults.removeObject(forKey: Key.legacyShowBlockedPause)
     }
@@ -717,10 +680,7 @@ enum PersistedConfig {
     static func applyValues(_ v: AppearancePresetValues) {
         calmColorMode = v.calmColorMode
         calmBarHiding = v.calmBarHiding
-        pauseHidesBars = v.pauseHidesBars
-        showExtraUsage = v.showExtraUsage
         showServiceStatusDot = v.showServiceStatusDot
-        awaitingInputInMenuBar = v.awaitingInputInMenuBar
         modelLimitsVisibility = v.modelLimitsVisibility
         extraUsageVisibility = v.extraUsageVisibility
         resetCountdownModeMenuBar = v.resetCountdownModeMenuBar
@@ -737,10 +697,7 @@ enum PersistedConfig {
         AppearancePresetValues(
             calmColorMode: calmColorMode,
             calmBarHiding: calmBarHiding,
-            pauseHidesBars: pauseHidesBars,
-            showExtraUsage: showExtraUsage,
             showServiceStatusDot: showServiceStatusDot,
-            awaitingInputInMenuBar: awaitingInputInMenuBar,
             modelLimitsVisibility: modelLimitsVisibility,
             extraUsageVisibility: extraUsageVisibility,
             resetCountdownModeMenuBar: resetCountdownModeMenuBar,
@@ -861,18 +818,6 @@ enum PersistedConfig {
     static var awaitingInputEnabled: Bool {
         get { defaults.object(forKey: Key.awaitingInputEnabled) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.awaitingInputEnabled) }
-    }
-
-    /// Whether the awaiting-input indicator also renders in the menu bar (as the **first leading**
-    /// element, a bare icon with no `×N`), in addition to the popup — #233. Part of the Appearance
-    /// **presets**: absent key falls back to the factory-default preset's value (`.workHarder` → on),
-    /// so `chill` = off, `workHarder`/`controlFreak` = on. The popup always shows the indicator while
-    /// the feature is on; this only governs the menu-bar copy, and is meaningful only while
-    /// ``awaitingInputEnabled`` is on.
-    static var awaitingInputInMenuBar: Bool {
-        get { defaults.object(forKey: Key.awaitingInputInMenuBar) as? Bool
-                ?? AppearancePreset.defaultValues.awaitingInputInMenuBar }
-        set { defaults.set(newValue, forKey: Key.awaitingInputInMenuBar) }
     }
 
     /// Filesystem path of the archive folder the user chose (#110), or `nil` if none picked yet.

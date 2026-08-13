@@ -646,11 +646,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // menu-bar layout from the last poll (render reads PersistedConfig for the toggle).
                 self?.reRenderForCurrentTime()
             }
-            wc.onExtraUsageChange = { [weak self] _ in
-                // The credits icon changes the layout (drawn + item width), not just a colour — rebuild
-                // from the last poll (render reads PersistedConfig.showExtraUsage for the gate).
-                self?.reRenderForCurrentTime()
-            }
             wc.onModelLimitsVisibilityChange = { [weak self] mode in
                 // Popup-only (#211): the VC owns the gate because it depends on the live ⌥ state. Its
                 // `didSet` rebuilds, which re-measures the hosted view.
@@ -666,11 +661,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Changing this changes the layout (which bar is drawn, and whether the survivor is
                 // vertically centred), not just a colour — rebuild from the last poll (render reads
                 // PersistedConfig.calmBarHiding).
-                self?.reRenderForCurrentTime()
-            }
-            wc.onPauseHidesBarsChange = { [weak self] _ in
-                // Toggling this swaps the whole mode when blocked (pause icon alone vs. pause icon + bars),
-                // not just a colour — rebuild from the last poll (render reads PersistedConfig.pauseHidesBars).
                 self?.reRenderForCurrentTime()
             }
             wc.onPausePollingChange = { [weak self] on in
@@ -936,8 +926,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Future from→to migrations run here. Empty scaffold for now (#71).
         }
         // Idempotent per-key migrations that must catch an upgrade from *any* prior version (not gated
-        // on the version diff above): merge the pre-#227 pause settings into the unified key.
-        PersistedConfig.migratePauseKeysIfNeeded()
+        // on the version diff above): sweep away the pause keys retired by ADR-0090.
+        PersistedConfig.retirePauseKeysIfNeeded()
         // …and carry the boolean "Show model & service limits" opt-out onto its tri-state successor.
         PersistedConfig.migrateModelLimitsVisibilityIfNeeded()
         // …and move an "Extra usage" section still set to `.nonCalm` onto `.aboveZero`: that segment is
@@ -2193,13 +2183,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // ADR-0086: honour the "Hide the calm bar" choice — drops whichever bar the user picked while
             // it is calm, centring the one that remains. `.never` keeps both.
             hideCalmBar: PersistedConfig.calmBarHiding,
-            // #144: honour the "Show extra-usage credits" toggle — draws the ¤ icon when credits are
-            // active and a base limit is exhausted; false hides it and reclaims its width.
-            showCredits: PersistedConfig.showExtraUsage,
-            // #194, #227: honour the "Pause icon hides bars" toggle — when fully blocked (isBlocked), true
-            // drops both bars for a countdown-only widget beside the red pause icon; false keeps the (red)
-            // bars beside it. The pause icon itself is drawn whenever blocked, independent of this flag.
-            pauseHidesBars: PersistedConfig.pauseHidesBars,
+            // #144: the ¤ icon shows whenever credits are active and a base limit is exhausted. No user
+            // gate since ADR-0090 — the data decides, and it is already silent until money is in play.
+            showCredits: true,
             // #341: with nothing monitored the widget reports that, rather than the last thing it saw.
             monitoringAnything: providerMonitoring.isMonitoringAnything)
             .withAwaitingInput(awaitingInput)   // #233: graft the awaiting-input indicator (trailing)

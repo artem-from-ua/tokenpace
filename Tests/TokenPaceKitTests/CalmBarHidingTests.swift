@@ -19,14 +19,6 @@ struct CalmBarHidingTests {
         #expect(!mode.hides(.sevenDay, isCalm: false))
     }
 
-    @Test func sevenDayHidesOnlyTheCalmSevenDayBar() {
-        let mode = CalmBarHiding.sevenDay
-        #expect(mode.hides(.sevenDay, isCalm: true))
-        #expect(!mode.hides(.sevenDay, isCalm: false))
-        #expect(!mode.hides(.fiveHour, isCalm: true))
-        #expect(!mode.hides(.fiveHour, isCalm: false))
-    }
-
     @Test func neverHidesNothing() {
         for window in [LimitWindow.fiveHour, .sevenDay] {
             for isCalm in [true, false] {
@@ -57,24 +49,24 @@ struct CalmBarHidingTests {
     /// The same invariant one level down, at its source: each value names at most one window.
     @Test func hiddenWindowNamesAtMostOneWindow() {
         #expect(CalmBarHiding.fiveHour.hiddenWindow == .fiveHour)
-        #expect(CalmBarHiding.sevenDay.hiddenWindow == .sevenDay)
         #expect(CalmBarHiding.never.hiddenWindow == nil)
     }
 
     // MARK: legacy mapping
 
-    @Test func legacyTrueMapsToSevenDayAndFalseToNever() {
-        // `true` hid the calm 7-day bar; `false` kept both. Each preserves what the user was looking at.
-        #expect(CalmBarHiding.migrated(fromLegacyHide: true) == .sevenDay)
+    /// `true` hid the calm 7-day bar; `false` kept both. The 7-day mode is gone (ADR-0090), so `true`
+    /// lands on `.fiveHour`: that user asked for **fewer** bars while calm, and this still grants it —
+    /// one bar in the calm state, both back on orange/red.
+    @Test func legacyTrueMapsToFiveHourAndFalseToNever() {
+        #expect(CalmBarHiding.migrated(fromLegacyHide: true) == .fiveHour)
         #expect(CalmBarHiding.migrated(fromLegacyHide: false) == .never)
     }
 
-    /// The new default is deliberately *not* reachable by migrating an explicit legacy value — it is what
-    /// someone with no stored value picks up from the preset. Guards against a future "helpful" edit that
-    /// maps `true` onto the new default and silently flips the widget for people who chose the old one.
-    @Test func legacyMappingNeverYieldsTheNewDefault() {
-        #expect(CalmBarHiding.migrated(fromLegacyHide: true) != .fiveHour)
-        #expect(CalmBarHiding.migrated(fromLegacyHide: false) != .fiveHour)
+    /// The direction that matters: an explicit "hide the calm bar" must never migrate into the
+    /// show-everything case. Guards against a future edit that reads the retired 7-day mode as "no
+    /// longer expressible → hide nothing", which would hand those users the opposite of their request.
+    @Test func legacyHideNeverYieldsShowEverything() {
+        #expect(CalmBarHiding.migrated(fromLegacyHide: true) != .never)
     }
 
     // MARK: coding
@@ -91,25 +83,31 @@ struct CalmBarHidingTests {
         #expect(String(decoding: data, as: UTF8.self) == "\"fiveHour\"")
     }
 
-    /// Forward compatibility: a value written by a newer build must not make this one throw. Falls back
-    /// to `.sevenDay` — the semantics any pre-enum dump described — rather than to today's default.
-    @Test func unknownRawFallsBackToSevenDay() throws {
+    /// Forward compatibility: a value written by a newer build must not make this one throw.
+    @Test func unknownRawFallsBackToFiveHour() throws {
         let data = Data("\"someFutureMode\"".utf8)
-        #expect(try JSONDecoder().decode(CalmBarHiding.self, from: data) == .sevenDay)
+        #expect(try JSONDecoder().decode(CalmBarHiding.self, from: data) == .fiveHour)
+    }
+
+    /// The retired `"sevenDay"` raw decodes through the same fallback, and must land where its migration
+    /// does: a dump written when that mode existed described one bar while calm, which `.fiveHour` still
+    /// is — `.never` would misread it as "show everything".
+    @Test func retiredSevenDayRawDecodesAsFiveHour() throws {
+        let data = Data("\"sevenDay\"".utf8)
+        #expect(try JSONDecoder().decode(CalmBarHiding.self, from: data) == .fiveHour)
     }
 
     // MARK: UI labels
 
     @Test func displayNamesMatchTheSettingsSegments() {
-        #expect(CalmBarHiding.fiveHour.displayName == "5-hour")
-        #expect(CalmBarHiding.sevenDay.displayName == "7-day")
+        // The row names the bar ("Hide 5h (top) bar"), so the segments only say *when*.
+        #expect(CalmBarHiding.fiveHour.displayName == "When it's calm")
         #expect(CalmBarHiding.never.displayName == "Never")
     }
 
     /// `UIPanes` builds the segmented control from `allCases`, so the declaration order *is* the
-    /// on-screen order: 7-day, then 5-hour, then the opt-out — longest window first, then the shorter
-    /// one, then nothing hidden.
+    /// on-screen order: hide the top bar while it is quiet, then the opt-out.
     @Test func caseOrderDrivesSegmentOrder() {
-        #expect(CalmBarHiding.allCases == [.sevenDay, .fiveHour, .never])
+        #expect(CalmBarHiding.allCases == [.fiveHour, .never])
     }
 }

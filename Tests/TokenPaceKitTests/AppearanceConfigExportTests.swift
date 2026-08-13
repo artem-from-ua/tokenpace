@@ -12,10 +12,7 @@ import Foundation
 private let paneOrderedKeys = [
     "menuBarStyle",               // Menu Bar Widget → "Bar style"
     "calmColorMode",              // "Calm non-critical colors"
-    "awaitingInputInMenuBar",     // "Show awaiting-input icon in the menu bar"
-    "pauseHidesBars",             // "Pause icon hides bars"
-    "showExtraUsage",             // "Show extra-usage credits icon"
-    "calmBarHiding",              // "Hide the calm bar"
+    "calmBarHiding",              // "Hide 5h (top) bar"
     "resetCountdownModeMenuBar",  // "Show reset countdown"
     "showServiceStatusDot",       // "Show service status dot on issues"
     "dropdownStyle",              // Dropdown Widget → "Bar style"
@@ -45,13 +42,10 @@ private func appearanceKeysInOrder(_ json: String) -> [String] {
 /// A value set that deliberately matches **no** preset, so `preset` exports as "custom".
 private let customValues = AppearancePresetValues(
     calmColorMode: .off,
-    // `.sevenDay` belongs to no preset since ADR-0086 (the calm ones hide the 5-hour bar, Control freak
-    // hides neither), which suits a deliberately preset-less value set.
-    calmBarHiding: .sevenDay,
-    pauseHidesBars: true,
-    showExtraUsage: false,
+    // `.never` with calm colours off would be Control freak, so the rest of the set pulls it away from
+    // every preset — a deliberately preset-less combination.
+    calmBarHiding: .never,
     showServiceStatusDot: false,
-    awaitingInputInMenuBar: false,
     modelLimitsVisibility: .optionOnly,
     extraUsageVisibility: .always,
     resetCountdownModeMenuBar: .never,
@@ -95,7 +89,7 @@ struct AppearanceConfigExportOrderTests {
     /// Every Appearance value reaches the dump — catches a property added to `AppearancePresetValues`
     /// whose `encode` call was forgotten, which would otherwise drop it silently.
     @Test func everyValueIsExported() {
-        #expect(appearanceKeysInOrder(export(customValues, preset: nil)).count == 12)
+        #expect(appearanceKeysInOrder(export(customValues, preset: nil)).count == 9)
     }
 }
 
@@ -131,7 +125,7 @@ struct AppearanceConfigExportPayloadTests {
         #expect(json.contains("\"dropdownStyle\" : \"progress\""))
         #expect(json.contains("\"calmColorMode\" : \"off\""))
         #expect(json.contains("\"resetCountdownModeMenuBar\" : \"never\""))
-        #expect(json.contains("\"calmBarHiding\" : \"sevenDay\""))
+        #expect(json.contains("\"calmBarHiding\" : \"never\""))
     }
 
     /// `calmBarHiding` exports as the raw string naming the **hidden** bar — the same sense
@@ -225,16 +219,17 @@ struct AppearancePresetValuesCodableTests {
             """
             return try JSONDecoder().decode(AppearancePresetValues.self, from: Data(json.utf8))
         }
-        // `true` hid the calm 7-day bar; `false` kept both.
-        #expect(try decode("\"hideCalmSevenDayBar\" : true").calmBarHiding == .sevenDay)
+        // `true` hid the calm 7-day bar; `false` kept both. The 7-day mode retired with ADR-0090, so
+        // `true` lands on `.fiveHour` — still one bar while calm, which is what that user asked for.
+        // Note the fixture also carries the three keys ADR-0090 retired: they must be ignored, not throw.
+        #expect(try decode("\"hideCalmSevenDayBar\" : true").calmBarHiding == .fiveHour)
         #expect(try decode("\"hideCalmSevenDayBar\" : false").calmBarHiding == .never)
         // The new key wins when both are present — an old key left in a hand-edited dump can't override
         // the current one.
         #expect(try decode("\"calmBarHiding\" : \"fiveHour\", \"hideCalmSevenDayBar\" : true")
             .calmBarHiding == .fiveHour)
-        // Neither key (a dump older still) falls back to the pre-enum semantics rather than today's
-        // default, so an ancient config is not silently reinterpreted.
-        #expect(try decode("\"unrelated\" : 1").calmBarHiding == .sevenDay)
+        // Neither key (a dump older still) falls back to the same one-bar-while-calm reading.
+        #expect(try decode("\"unrelated\" : 1").calmBarHiding == .fiveHour)
     }
 
     // MARK: Pre-#329 configs — one `barStyle` key for both surfaces

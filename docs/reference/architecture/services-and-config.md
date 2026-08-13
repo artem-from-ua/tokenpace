@@ -59,7 +59,7 @@ live-оновленням щополу: update interval + токен (read/expir
 
 | Компонент | Відповідальність |
 |---|---|
-| **PersistedConfig** | Перший persistence-шар (#71, ADR-0023) — тонка `@MainActor`-обгортка над `UserDefaults.standard`. Фаза 1 почалась з `lastRunVersion`; шов розширено ключами: `calmMenuBarColors` (#105), `resetCountdownModeMenuBar` (#103), `showServiceStatusDot` (#31), `showExtraUsage` (default-ON, #144/#146 — **меню-барна** іконка ¤), видимість секцій дропдауна
+| **PersistedConfig** | Перший persistence-шар (#71, ADR-0023) — тонка `@MainActor`-обгортка над `UserDefaults.standard`. Фаза 1 почалась з `lastRunVersion`; шов розширено ключами: `calmMenuBarColors` (#105), `resetCountdownModeMenuBar` (#103), `showServiceStatusDot` (#31), ~~`showExtraUsage`~~ (retired, ADR-0090 — меню-барну іконку ¤ вирішують дані), видимість секцій дропдауна
 (`modelLimitsVisibility` / `extraUsageVisibility`, raw `PopupSectionVisibility`, дефолти `.nonCalm` і
 `.aboveZero` відповідно, #211/ADR-0072 + ADR-0087 — попап; перший мігрує з булевого
 `showModelSpecificLimits`, другий — з `.nonCalm` на `.aboveZero`, ідемпотентно через власний маркер

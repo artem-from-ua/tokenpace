@@ -166,49 +166,20 @@ struct MenuBarPane: View {
                         + "always stay colored.")
                 }
 
-                // Awaiting-input in the menu bar (#233). The feature itself is switched on in
-                // Providers › Sessions, which is what puts the count in the dropdown; this row decides
-                // whether the menu bar carries it too (a leading hand icon). Meaningless while the
-                // feature is off, so it is disabled — with a ⚠️ hint — then. A data stub is a third
-                // state: the watcher never runs, so the hint says so.
-                //
-                // "Show", against Providers' "Detect" (#341): that page decides whether we look, this
-                // one decides where the answer appears.
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Show waiting sessions", isOn: Binding(
-                        get: { model.awaitingInputInMenuBar },
-                        set: { model.setAwaitingInputInMenuBar($0) }))
-                    .disabled(!model.awaitingInputEnabled)
-                    SettingsHint(text: awaitingInputHint, warning: awaitingInputHintIsWarning)
-                }
-
-                // #194, #227 — the single "blocked" control. When fully blocked a red pause icon is
-                // always shown; this toggle only decides whether it hides the bars or keeps them beside it.
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Pause icon hides bars", isOn: Binding(
-                        get: { model.pauseHidesBars }, set: { model.setPauseHidesBars($0) }))
-                    SettingsHint(text: "When every limit is exhausted and extra-usage credits can't "
-                        + "cover, a red pause icon appears. On shows only the icon and the reset "
-                        + "countdown; off keeps the pacing bars beside it.")
-                }
-
-                Toggle("Show extra-usage credits icon", isOn: Binding(
-                    get: { model.showExtraUsage }, set: { model.setShowExtraUsage($0) }))
-
-                // Which bar steps aside while it is calm (ADR-0086) — a three-way choice replacing the
-                // old inverted "Show 7-day bar when calm" checkbox. The segment names the bar that gets
-                // *hidden*, so the row reads as one sentence: "Hide the calm bar — 7-day".
+                // Whether the top (5-hour) bar steps aside while it is calm (ADR-0086, narrowed to one
+                // window by ADR-0090). The row names the bar, so the segments only say *when* — which
+                // makes it read as one sentence: "Hide 5h (top) bar — When it's calm".
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Hide the calm bar")
+                        Text("Hide 5h (top) bar")
                         Spacer()
                         SegmentedControl(
                             segments: AppearanceCalmBarHiding.segments,
                             active: model.calmBarHiding,
                             onSelect: { model.setCalmBarHiding($0) })
                     }
-                    SettingsHint(text: "The bar you pick is hidden while it's calm and comes back as "
-                        + "soon as it needs attention (orange or red). The other one is always shown.")
+                    SettingsHint(text: "The 5-hour bar is hidden while it's calm and comes back as soon "
+                        + "as it needs attention (orange or red). The 7-day bar is always shown.")
                 }
 
                 // Reset-countdown mode: a segmented control matching the page's other three-way rows,
@@ -237,21 +208,6 @@ struct MenuBarPane: View {
         .formStyle(.grouped)
     }
 
-    /// The hint under the awaiting-input row, in priority order: the feature is off (nothing to place
-    /// anywhere) → a stub is driving the app (the watcher doesn't run at all) → the plain
-    /// description. The first two are ⚠️ states; see ``awaitingInputHintIsWarning``.
-    private var awaitingInputHint: String {
-        guard model.awaitingInputEnabled else {
-            return "Enable *Detect sessions waiting for input* in Providers › Sessions first."
-        }
-        if model.stubScenarioActive { return SettingsStubHint.text }
-        return "Adds a hand icon when sessions are waiting. "
-            + "The count itself is shown only in the dropdown."
-    }
-
-    private var awaitingInputHintIsWarning: Bool {
-        !model.awaitingInputEnabled || model.stubScenarioActive
-    }
 }
 
 // MARK: - DropdownPane (#333)
@@ -339,9 +295,9 @@ enum AppearanceBarStyle {
     ]
 }
 
-/// The three ``CalmBarHiding`` segments for the Menu bar pane's "Hide the calm bar" row (ADR-0086).
-/// Built from `allCases` so the on-screen order *is* the declaration order — 7-day, 5-hour, then the
-/// opt-out — and a new case can never be left out of the control.
+/// The ``CalmBarHiding`` segments for the Menu bar pane's "Hide 5h (top) bar" row (ADR-0086, narrowed
+/// to one window by ADR-0090). Built from `allCases` so the on-screen order *is* the declaration order
+/// — hide it while calm, or never — and a new case can never be left out of the control.
 @MainActor
 enum AppearanceCalmBarHiding {
     static let segments: [SegmentedControl<CalmBarHiding>.Segment] =

@@ -14,10 +14,7 @@ struct AppearancePresetTests {
         let v = AppearancePreset.chill.values
         #expect(v.calmColorMode == .yellowGreenBlue)   // greens/yellows AND far-behind blue all mute
         #expect(v.calmBarHiding == .fiveHour)   // quiet 5h steps aside; the weekly bar stays (ADR-0086)
-        #expect(v.pauseHidesBars)   // Chill: when blocked, show only the pause icon (bars hidden)
-        #expect(v.showExtraUsage)
         #expect(v.showServiceStatusDot)
-        #expect(!v.awaitingInputInMenuBar)   // Chill: awaiting hand stays in the popup only (#233)
         #expect(v.modelLimitsVisibility == .nonCalm)   // quiet dropdown: fold until orange/red (#211)
         // Credits fold until money is actually spent, not until they turn orange: an unlimited cap has
         // no bar and hence no severity, so `.nonCalm` would hide the spend forever.
@@ -41,14 +38,9 @@ struct AppearancePresetTests {
         #expect(wh.menuBarStyle == .gauge)
         #expect(wh.dropdownStyle == .gauge)
         #expect(chill.menuBarStyle == .pressure)
-        #expect(!wh.pauseHidesBars)    // difference 5 — Work harder keeps the bars beside the pause icon
-        #expect(chill.pauseHidesBars)  // …Chill hides them (icon only)
         // The rest matches Chill.
         #expect(wh.calmBarHiding == chill.calmBarHiding)   // both `.fiveHour` (ADR-0086)
-        #expect(wh.showExtraUsage == chill.showExtraUsage)
         #expect(wh.showServiceStatusDot == chill.showServiceStatusDot)
-        #expect(wh.awaitingInputInMenuBar)          // difference 6 — Work harder shows the hand in the menu bar
-        #expect(!chill.awaitingInputInMenuBar)      // …Chill keeps it popup-only (#233)
         #expect(wh.modelLimitsVisibility == chill.modelLimitsVisibility)   // both .nonCalm (#211)
         #expect(wh.extraUsageVisibility == chill.extraUsageVisibility)
         #expect(wh.extraUsageVisibility == .aboveZero)   // pinned, not just "same as Chill"
@@ -61,10 +53,7 @@ struct AppearancePresetTests {
         let v = AppearancePreset.controlFreak.values
         #expect(v.calmColorMode == .off)   // nothing muted — every state loud
         #expect(v.calmBarHiding == .never)   // both bars always on screen, however calm
-        #expect(!v.pauseHidesBars)   // Control freak: when blocked, keep the bars beside the pause icon
-        #expect(v.showExtraUsage)
         #expect(v.showServiceStatusDot)
-        #expect(v.awaitingInputInMenuBar)   // Control freak: awaiting hand in the menu bar too (#233)
         // Nothing in the dropdown folds away — both sections pinned open (#211).
         #expect(v.modelLimitsVisibility == .always)
         #expect(v.extraUsageVisibility == .always)
@@ -121,10 +110,7 @@ struct AppearancePresetTests {
         let custom = AppearancePresetValues(
             calmColorMode: chill.calmColorMode,
             calmBarHiding: chill.calmBarHiding,
-            pauseHidesBars: chill.pauseHidesBars,
-            showExtraUsage: chill.showExtraUsage,
             showServiceStatusDot: chill.showServiceStatusDot,
-            awaitingInputInMenuBar: chill.awaitingInputInMenuBar,
             modelLimitsVisibility: chill.modelLimitsVisibility,
             extraUsageVisibility: chill.extraUsageVisibility,
             resetCountdownModeMenuBar: chill.resetCountdownModeMenuBar,
@@ -134,5 +120,21 @@ struct AppearancePresetTests {
             dropdownStyle: .progress,
             showTicks: chill.showTicks)
         #expect(AppearancePreset.matching(custom) == nil)
+    }
+
+    /// The three presets stay **pairwise distinct**, which is what makes `matching(_:)` able to name
+    /// one — and the "Custom" segment able to mean anything.
+    ///
+    /// Worth its own test since ADR-0090: the value set lost three fields, and two of them
+    /// (`pauseHidesBars`, `awaitingInputInMenuBar`) were the only things separating `Chill` from
+    /// `Work harder!` beyond palette, bar style and ticks. Retire one more and the two presets collapse
+    /// into the same value set, at which point `matching` silently returns whichever comes first in
+    /// `allCases` and the control starts lying about which preset is active.
+    @Test func presetsRemainPairwiseDistinct() {
+        for a in AppearancePreset.allCases {
+            for b in AppearancePreset.allCases where a != b {
+                #expect(a.values != b.values, "\(a.rawValue) and \(b.rawValue) have identical values")
+            }
+        }
     }
 }

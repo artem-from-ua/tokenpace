@@ -396,8 +396,9 @@ return (usage - time) < 0.16 * (1 - time) ? .calm : .ahead
 |---|---|
 | **Синій 5h при 7d ∈ {yellow, orange, red}** | weekly-capacity gate ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md)): `blueAllowed == false`, тож бік «позаду» лишається зеленим за будь-якого запасу. Стосується і пейсингового бару, і idle-пігулки |
 | **Синя idle-пігулка при гарячому тижні** | той самий gate — пігулка зелена; сіра лишається лише для `isBlocked` |
-| Pause-гліф **і** символ валюти разом | `blockedPause` вимагає `CreditsPacing.isBlocked` — «немає шляху працювати»; кредити, що покривають ліміт, і є тим шляхом |
+| Pause-гліф **і** символ валюти разом | Гарантія [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md): маркер кредитів занулюється, поки `blockedPause`. Донедавна пара **була** досяжна — при `spend_limit_reached` іконку вмикав `isActive` (`enabled \|\| spendLimitReached`), а блокування давав `!creditsCanCover` (`enabled && !spendLimitReached`); стара мотивація тут плутала «кредити активні» з «кредити покривають» |
 | Вичерпаний ліміт **без жодного** з них | Зворотний бік того самого: при `mainWindowExhausted` стани вичерпні — або `creditsCanCover` (символ валюти), або `isBlocked` (pause-гліф). Порожнього варіанту не буває |
+| Смужки під pause-гліфом або під символом валюти | Обидві відповіді «не на підписці» дають `MenuBarMode.iconOnlyReset` — кейс без поля смужок ([ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)), тож намалювати їх нічим. **Виняток — діагностика:** stale-шлях (30–60 хв) будує смужки через `expandedBars` і тримає їх біля ⚠️ |
 | 100% кредитів + «well ahead of pace» | `creditsStatusText` при `usage >= 1` повертає `"limit reached"` |
 | 100% кредитів без червоного бейджа ресету | Це стан блокування — бейдж є |
 | Idle 5-hour + другий рядок | `if !row.sessionIdle` — детальної лінії немає |
