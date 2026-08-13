@@ -17,10 +17,10 @@ struct ProvidersClaudePane: View {
 
     var body: some View {
         Form {
-            // MARK: Usage — the data behind the bars
-            Section("Usage") {
+            // MARK: Token limits usage — the data behind the bars
+            Section("Token limits usage") {
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Collect usage data", isOn: Binding(
+                    Toggle("Claude Usage API", isOn: Binding(
                         get: { model.usageApiEnabled },
                         set: { model.usageApiEnabled = $0; model.commitProviderMonitoring() }))
                     SettingsHint(

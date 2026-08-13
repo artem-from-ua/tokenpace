@@ -28,28 +28,26 @@ struct ProvidersPane: View {
                     action: { model.drill(into: .providersClaude) })
             }
 
-            // MARK: Session status (spans providers — reads the local client's state)
+            // MARK: Sessions (spans providers — reads the local client's state)
             Section {
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Show sessions awaiting input", isOn: Binding(
+                    // "Detect", not "Show": this switch turns the **feature** on — the watcher that
+                    // reads the local client's session files. Where the result appears is a separate
+                    // question, answered by the Menu bar page's own row (#341). Naming both "Show …"
+                    // made them look like the same switch listed twice.
+                    Toggle("Detect sessions waiting for input", isOn: Binding(
                         get: { model.awaitingInputEnabled },
                         set: { model.setAwaitingInputEnabled($0) }))
-                    SettingsHint(text: "Shows how many Claude Code sessions are waiting for your reply "
-                        + "in the dropdown. Whether it also appears in the menu bar is configured in "
-                        + "*Menu bar*.")
-                    // Unlike the stub caveat in the header, this one is unconditional: the feature
-                    // reads Claude Code's private state files (ADR-0066), so the fragility is a
-                    // permanent property of it rather than a state we detect. Declaring it here is
-                    // what we do instead of failing loudly on an unparseable format (#243).
-                    SettingsHint(text: "Experimental. This reads Claude Code's internal files, which are "
-                        + "undocumented and may be changed on Anthropic's side at any time. If that happens, "
-                        + "the count may stop appearing and disappearing properly.", warning: true)
+                    SettingsHint(text: "Finds sessions that asked you something and are waiting for "
+                        + "an answer.")
                 }
             } header: {
                 // The watcher is gated on the real network: a stub is a frozen frame, and reading the
                 // live ~/.claude trees would let real waiting sessions leak into it. `TOKENPACE_AWAITING=N`
                 // exercises the indicator with synthetic sessions instead.
-                SectionHeaderWithHint(title: "Session status",
+                // "Sessions", not "Session status": the neighbouring sections watch a status **page**,
+                // and reusing that word here pointed the reader at the wrong subsystem.
+                SectionHeaderWithHint(title: "Sessions",
                                       hint: model.stubScenarioActive ? SettingsStubHint.text : nil)
             }
 

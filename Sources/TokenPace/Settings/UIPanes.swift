@@ -173,13 +173,16 @@ struct MenuBarPane: View {
                         + "always stay colored.")
                 }
 
-                // Awaiting-input in the menu bar (#233). The feature itself is switched on in Extra
-                // features, which is what puts the count in the dropdown; this row decides whether the
-                // menu bar carries it too (a leading hand icon). Meaningless while the feature is off,
-                // so it is disabled — with a ⚠️ hint — then. A data stub is a third state: the watcher
-                // never runs, so the hint says so.
+                // Awaiting-input in the menu bar (#233). The feature itself is switched on in
+                // Providers › Sessions, which is what puts the count in the dropdown; this row decides
+                // whether the menu bar carries it too (a leading hand icon). Meaningless while the
+                // feature is off, so it is disabled — with a ⚠️ hint — then. A data stub is a third
+                // state: the watcher never runs, so the hint says so.
+                //
+                // "Show", against Providers' "Detect" (#341): that page decides whether we look, this
+                // one decides where the answer appears.
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Show sessions awaiting input", isOn: Binding(
+                    Toggle("Show waiting sessions", isOn: Binding(
                         get: { model.awaitingInputInMenuBar },
                         set: { model.setAwaitingInputInMenuBar($0) }))
                     .disabled(!model.awaitingInputEnabled)
@@ -246,10 +249,10 @@ struct MenuBarPane: View {
     /// description. The first two are ⚠️ states; see ``awaitingInputHintIsWarning``.
     private var awaitingInputHint: String {
         guard model.awaitingInputEnabled else {
-            return "Enable *Show sessions awaiting input* in Providers › Session status first."
+            return "Enable *Detect sessions waiting for input* in Providers › Sessions first."
         }
         if model.stubScenarioActive { return SettingsStubHint.text }
-        return "Adds a hand icon to the menu bar (leading) when sessions are waiting. "
+        return "Adds a hand icon when sessions are waiting. "
             + "The count itself is shown only in the dropdown."
     }
 

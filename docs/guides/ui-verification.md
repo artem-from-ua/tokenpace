@@ -744,9 +744,10 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=7.0 swift run   # одра�
 3. **Custom** — зміни будь-що вручну, застосуй пресет, тоді натисни `Custom`: має повернутись твій
    сетап. На чистій інсталяції (нічого не збережено) сегмент неклікабельний і пояснює себе попапом.
 4. **Copy config** — кнопка на *UI presets* збирає значення з усіх трьох панів.
-5. **Awaiting-input** — вимкни «Show sessions awaiting input» у *Providers → Session status*, зайди
-   на *Menu bar*: тамтешній однойменний тумблер має бути **disabled**, а хінт читатись
-   «…in Providers › Session status first».
+5. **Awaiting-input** — вимкни «Detect sessions waiting for input» у *Providers → Sessions*, зайди
+   на *Menu bar*: тамтешній «Show waiting sessions» має бути **disabled**, а хінт читатись
+   «…in Providers › Sessions first». Назви навмисно різні (#341): на Providers вмикається саме
+   **виявлення**, на Menu bar — лише **показ** іконки.
    Глобальний вмикач керує долонею в дропдауні, цей — у menu bar.
 
 **Джерело істини складу й індексів** — `enum SettingsSection: Int` (raw-значення) плюс
@@ -944,21 +945,25 @@ Wi-Fi, battery) має **суворий метод**, вироблений бо�
 ### Індикатор «sessions awaiting input» (#233, ADR-0066)
 
 Лічильник сесій Claude Code, що очікують вводу користувача, у menu bar та попапі. Фіча **opt-in**
-(Settings → Providers → Session status → «Show sessions awaiting input», дефолт OFF); показ у menu bar —
+(Settings → Providers → Sessions → «Detect sessions waiting for input», дефолт OFF); показ у menu bar —
 Settings → Menu bar.
 
-Під тумблером — **постійний ⚠️-рядок** «Experimental. This reads Claude Code's internal files…»
-(#243, ADR-0066): фіча стоїть на приватному форматі, який може змінитися на боці Anthropic. Він
-видимий **завжди** — при увімкненому й вимкненому тумблері, у стуб- і в релізній збірці, — на
-відміну від умовної ⚠️ «Stubbed in this development build.» у **заголовку** секції. Побачивши обидва
-⚠️ одночасно під стубом, не вважай це регресією: вони про різне.
+Під тумблером — **один** нейтральний рядок-опис («Shows how many Claude Code sessions are waiting for
+your reply in the dropdown.»). Постійне ⚠️-попередження «Experimental. This reads Claude Code's
+internal files…» (#243) **прибрано в #341**: воно описувало властивість усього застосунку, а не цієї
+однієї фічі, тож своєї роботи — виділити ризиковану опцію серед звичайних — не виконувало. Те, що
+фіча стоїть на приватному форматі Claude Code, лишається зафіксованим в
+[ADR-0066](../adr/0066-detect-sessions-awaiting-input.md).
+
+Умовна ⚠️ «Stubbed in this development build.» у **заголовку** секції лишається — вона про стан
+збірки, і під стубом має бути видимою.
 
 > **Під будь-яким `TOKENPACE_STUB` watcher не працює взагалі.** Стуб — це заморожений відтворюваний
 > кадр, а watcher читає **живі** `~/.claude/sessions|jobs`, тож на стубі в кадр протікали б реальні
 > сесії, що випадково чекають вводу в момент зйомки. Гейт той самий, що в журналу
 > (`currentScenario == .realNetwork`), і він перераховується при **живому** перемиканні стуба в
 > dev-tools. Наслідки: під стубом без `TOKENPACE_AWAITING` індикатора нема **навіть із увімкненим
-> тумблером**, а в Settings (Providers → Session status і Menu bar) видно ⚠️ «Stubbed in this
+> тумблером**, а в Settings (Providers → Sessions і Menu bar) видно ⚠️ «Stubbed in this
 > development build.».
 >
 > **Живого watcher'а мало бути в `.realNetwork` — цей live має бути обраний явно (#267).** Тобто
@@ -1011,8 +1016,9 @@ TOKENPACE_STUB=1 TOKENPACE_AWAITING=8 TOKENPACE_AWAITING_DAYS=3,28,10,5,25,12,20
     видно **обрізані** кінчики пальців, нічого не вилазить за віджет і не налазить на pause-гліф.
     Без fade, без зміни ширини.
   - **Опція OFF** — ширина така сама, як була до #283 (жодного зарезервованого місця). Перевір
-    **обидва** тумблери окремо: і Appearance-опцію, і master «Show sessions awaiting input» в Extra
-    features. Вимикання master'а лише дизейблить Appearance-тумблер, не скидаючи його значення, тож
+    **обидва** тумблери окремо: і «Show waiting sessions» на *Menu bar*, і master
+    «Detect sessions waiting for input» у *Providers → Sessions*. Вимикання master'а лише дизейблить
+    менюбарний тумблер, не скидаючи його значення, тож
     слот мусить звільнятись і від нього — інакше ≈18 pt тримаються під вимкнену фічу.
   - **Колір на виході** — з `TOKENPACE_AWAITING_DAYS=3` червона долоня лишається червоною дорогою
     вниз (не сіріє посеред руху). Без `_DAYS` вона нейтральна = **біла**.
@@ -1030,9 +1036,9 @@ TOKENPACE_STUB=1 TOKENPACE_AWAITING=8 TOKENPACE_AWAITING_DAYS=3,28,10,5,25,12,20
   **inline-розбивка по проєктах**: `project ..... 2✋ 1✋ 6✋` (по одній долоні на непорожній бакет,
   порядок нейтр→оранж→червон, завжди з числом вкл. 1). Наведення на кожну руку → tooltip бакета
   («<7d/<15d/>15d till deletion»). (Попап показує індикатор завжди, поки фіча ON.)
-- **Appearance-опція** «Show awaiting-input icon in the menu bar» (після «Calm non-critical
-  colors»): ON → долоня в барі (leading); OFF → лише в попапі. Активна лише коли master ON; інакше
-  недоступна з **⚠️-підказкою** «Enable *Show sessions awaiting input* in Providers › Session status first.».
+- **Menu bar-опція** «Show waiting sessions»: ON → долоня в барі (leading); OFF → лише в попапі.
+  Активна лише коли master ON; інакше недоступна з **⚠️-підказкою**
+  «Enable *Detect sessions waiting for input* in Providers › Sessions first.».
 
 Реальний (не-стуб) шлях: watcher читає `~/.claude/sessions` + `jobs/` через FSEvents; щоб побачити
 живий лічильник, запусти кілька Claude-сесій, що чекають на дозвіл/план (**обов'язково без стуба**, з
