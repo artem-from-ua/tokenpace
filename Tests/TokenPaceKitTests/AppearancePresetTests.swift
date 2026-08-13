@@ -13,7 +13,7 @@ struct AppearancePresetTests {
     @Test func chillIsCalmLook() {
         let v = AppearancePreset.chill.values
         #expect(v.calmColorMode == .yellowGreenBlue)   // greens/yellows AND far-behind blue all mute
-        #expect(v.hideCalmSevenDayBar)
+        #expect(v.calmBarHiding == .fiveHour)   // quiet 5h steps aside; the weekly bar stays (ADR-0086)
         #expect(v.pauseHidesBars)   // Chill: when blocked, show only the pause icon (bars hidden)
         #expect(v.showExtraUsage)
         #expect(v.showServiceStatusDot)
@@ -42,7 +42,7 @@ struct AppearancePresetTests {
         #expect(!wh.pauseHidesBars)    // difference 5 — Work harder keeps the bars beside the pause icon
         #expect(chill.pauseHidesBars)  // …Chill hides them (icon only)
         // The rest matches Chill.
-        #expect(wh.hideCalmSevenDayBar == chill.hideCalmSevenDayBar)
+        #expect(wh.calmBarHiding == chill.calmBarHiding)   // both `.fiveHour` (ADR-0086)
         #expect(wh.showExtraUsage == chill.showExtraUsage)
         #expect(wh.showServiceStatusDot == chill.showServiceStatusDot)
         #expect(wh.awaitingInputInMenuBar)          // difference 6 — Work harder shows the hand in the menu bar
@@ -57,7 +57,7 @@ struct AppearancePresetTests {
     @Test func controlFreakShowsEverything() {
         let v = AppearancePreset.controlFreak.values
         #expect(v.calmColorMode == .off)   // nothing muted — every state loud
-        #expect(!v.hideCalmSevenDayBar)
+        #expect(v.calmBarHiding == .never)   // both bars always on screen, however calm
         #expect(!v.pauseHidesBars)   // Control freak: when blocked, keep the bars beside the pause icon
         #expect(v.showExtraUsage)
         #expect(v.showServiceStatusDot)
@@ -117,7 +117,7 @@ struct AppearancePresetTests {
         let chill = AppearancePreset.chill.values
         let custom = AppearancePresetValues(
             calmColorMode: chill.calmColorMode,
-            hideCalmSevenDayBar: chill.hideCalmSevenDayBar,
+            calmBarHiding: chill.calmBarHiding,
             pauseHidesBars: chill.pauseHidesBars,
             showExtraUsage: chill.showExtraUsage,
             showServiceStatusDot: chill.showServiceStatusDot,

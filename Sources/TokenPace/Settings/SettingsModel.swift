@@ -38,7 +38,7 @@ final class SettingsModel {
     var onExtraUsageChange: ((Bool) -> Void)?
     var onModelLimitsVisibilityChange: ((PopupSectionVisibility) -> Void)?
     var onExtraUsageVisibilityChange: ((PopupSectionVisibility) -> Void)?
-    var onHideCalmSevenDayChange: ((Bool) -> Void)?
+    var onCalmBarHidingChange: ((CalmBarHiding) -> Void)?
     var onPauseHidesBarsChange: ((Bool) -> Void)?
     var onPausePollingChange: ((Bool) -> Void)?
     /// Master toggle for the awaiting-input indicator flipped (#233) — the shell starts/stops the
@@ -149,7 +149,9 @@ final class SettingsModel {
     // MARK: Appearance (menu-bar widget)
 
     var calmColorMode: CalmColorMode = .yellowGreenBlue
-    var hideCalmSevenDay = false
+    /// Which menu-bar bar steps aside while it is calm (ADR-0086) — the tri-state that replaced the
+    /// boolean "Show 7-day bar when calm" checkbox.
+    var calmBarHiding: CalmBarHiding = .fiveHour
     var pauseHidesBars = false
     var showExtraUsage = false
     /// When the popup lists the per-model 7-day limit rows (Opus/Sonnet/scoped, #211). A popup
@@ -332,7 +334,7 @@ final class SettingsModel {
     private var liveAppearanceValues: AppearancePresetValues {
         AppearancePresetValues(
             calmColorMode: calmColorMode,
-            hideCalmSevenDayBar: hideCalmSevenDay,
+            calmBarHiding: calmBarHiding,
             pauseHidesBars: pauseHidesBars,
             showExtraUsage: showExtraUsage,
             showServiceStatusDot: showServiceDot,
@@ -457,7 +459,7 @@ final class SettingsModel {
         pausePolling = PersistedConfig.pausePollingWhenScreenLocked
 
         calmColorMode = PersistedConfig.calmColorMode
-        hideCalmSevenDay = PersistedConfig.hideCalmSevenDayBar
+        calmBarHiding = PersistedConfig.calmBarHiding
         pauseHidesBars = PersistedConfig.pauseHidesBars
         showExtraUsage = PersistedConfig.showExtraUsage
         modelLimitsVisibility = PersistedConfig.modelLimitsVisibility
@@ -532,11 +534,11 @@ final class SettingsModel {
         onCalmColorModeChange?(mode)
     }
 
-    func setHideCalmSevenDay(_ on: Bool) {
-        hideCalmSevenDay = on
-        PersistedConfig.hideCalmSevenDayBar = on
-        AppLogger.lifecycle.notice("hide-calm-7d: menu-bar set \(on, privacy: .public)")
-        onHideCalmSevenDayChange?(on)
+    func setCalmBarHiding(_ mode: CalmBarHiding) {
+        calmBarHiding = mode
+        PersistedConfig.calmBarHiding = mode
+        AppLogger.lifecycle.notice("hide-calm-bar: menu-bar set \(mode.rawValue, privacy: .public)")
+        onCalmBarHidingChange?(mode)
     }
 
     func setPauseHidesBars(_ on: Bool) {
@@ -675,7 +677,7 @@ final class SettingsModel {
     /// reset and preset paths, which both mutate all keys at once and then re-render as a batch.
     private func fireAppearanceCallbacks() {
         onCalmColorModeChange?(calmColorMode)
-        onHideCalmSevenDayChange?(hideCalmSevenDay)
+        onCalmBarHidingChange?(calmBarHiding)
         onPauseHidesBarsChange?(pauseHidesBars)
         onExtraUsageChange?(showExtraUsage)
         onModelLimitsVisibilityChange?(modelLimitsVisibility)

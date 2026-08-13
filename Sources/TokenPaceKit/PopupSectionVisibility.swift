@@ -10,7 +10,7 @@ import Foundation
 /// Generalises the old boolean `showModelSpecificLimits` opt-out: "off" forced a group to be invisible
 /// even when it was the thing you needed to see, while "on" kept calm rows on screen permanently. The
 /// middle mode — ``nonCalm`` — shows a group only while it is actually worth attention, which is the
-/// same "quiet until it matters" idea the menu bar already applies via `hideCalmSevenDayBar`.
+/// same "quiet until it matters" idea the menu bar already applies via ``CalmBarHiding``.
 ///
 /// ## What "non-calm" means here
 /// **Orange or red** — `PacingSeverity.ahead` or `.exhausted`. Deliberately *not* `!BarLayout.isCalm`:
