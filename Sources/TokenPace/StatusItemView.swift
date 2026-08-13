@@ -254,11 +254,6 @@ final class StatusItemView: NSView {
         /// pacing state. `.systemBlue`, so it flips light/dark and honours Increase Contrast like the
         /// native icons; the unified `blue` role, shared with the popup idle bar and maintenance dot.
         static var idleBlue: NSColor { ColorStore.shared.color(.blue) }
-        /// The **calm-colours** replacement for the "ready to start" idle blue (#105/#158): under Calm
-        /// colours the idle blue mutes to this quieter neutral rather than the plain `calmWhite`. Only the
-        /// *ready* idle bar uses it; a *blocked* idle bar is the base track grey in both colour modes (see
-        /// `drawBar`). `secondaryLabelColor` — a semantic neutral that flips with the bar.
-        static var idleCalmGrey: NSColor { ColorStore.shared.color(.idleCalmGrey) }
         /// Idle glyph + reset label — follow the menu-bar foreground.
         static var foreground: NSColor { ColorStore.shared.color(.foreground) }
 
@@ -865,14 +860,23 @@ final class StatusItemView: NSView {
             //
             // Calm uses the same `calmWhite` neutral as every muted pacing bar, not a dimmer tone of
             // its own (#307): idle sitting quieter than the calm bars beside it made the "nothing is
-            // happening" state read as "something is wrong with this bar".
+            // happening" state read as "something is wrong with this bar". `bright()` is what makes it
+            // the *same* tone — the neutral is `labelColor`, and every other muted surface here
+            // re-alphas it to `brightAlpha`; drawn raw, idle came out louder than its neighbours (#343).
             // Blue only while the week has headroom (`PacingModel.weeklyHasHeadroom`): the "ready to
             // start" blue claims quota to burn, which is wrong once the week runs ahead of pace — it
             // degrades to green there, the same way the pacing blue does. Grey still means blocked.
-            let idleReady = bar.weeklyHeadroom ? Palette.idleBlue : Palette.gapGreen
+            //
+            // The blue pill honours the same `mutesBlue` exemption the pacing blue gets, so
+            // "Yellow + Green" keeps it coloured while the green pill still mutes (#343). Only the
+            // calm branch is brightened: `unusedGrey` is a 22 %-alpha track colour, and re-alphaing it
+            // to 0.865 would render the *blocked* bar nearly opaque.
+            let idleIsBluePill = bar.weeklyHeadroom
+            let idleReady = idleIsBluePill ? Palette.idleBlue : Palette.gapGreen
             let idleTarget: NSColor = bar.blocked
                 ? Palette.unusedGrey
-                : (calmColorMode.mutesCalm ? Palette.calmWhite : accent(idleReady))
+                : (calmColorMode.mutesIdlePill(isBlue: idleIsBluePill)
+                    ? bright(Palette.calmWhite) : accent(idleReady))
             // Animated like any other bar colour, so idle→active (blue→green) and the blocked grey
             // swap fade rather than snap.
             let fill = animated(idleTarget, window: bar.window, part: .fill)
