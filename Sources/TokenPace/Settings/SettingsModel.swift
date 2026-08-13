@@ -655,7 +655,7 @@ final class SettingsModel {
     }
 
     /// Apply a named Appearance **preset** (#215, #224) — the general form of
-    /// `resetAppearanceToDefaults()`. Writes all twelve keys from the preset's fixed value set, re-syncs
+    /// `resetAppearanceToDefaults()`. Writes all eight keys from the preset's fixed value set, re-syncs
     /// the model so the controls repaint (the preset segmented control re-lights via `activePreset`),
     /// then fires each pane callback so both surfaces rebuild. The segmented control in `UIPresetsPane`
     /// calls this.

@@ -1,9 +1,17 @@
 ---
 status: accepted
 date: 2026-06-22
+superseded_by: [0091]
 ---
 
 # ADR-0010: UsageHealth — стани помилок (⚠️ menu bar + банер popup + stale)
+
+> **Частково витіснено [ADR-0091](0091-countdown-only-where-work-is-not-running.md).** Три фази
+> помилки стали двома: середню («⚠️ поряд зі старими смужками», 30–60 хв) скасовано разом із
+> `hideBarsAfter`, а поріг гліфа тепер рахується у спробах — `UsageHealth.glyphAfter(for:)` =
+> `max(15 хв, 3 × pollInterval)` замість пласких 30 хв; 429 більше не пише `failingSince`.
+> Чинними лишаються `FailureReason`, «попап попереджає одразу, без порогу» і сама двовхідна модель
+> (`UsageSnapshot` + `UsageHealth`).
 
 ## Контекст
 

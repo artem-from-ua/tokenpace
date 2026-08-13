@@ -2,9 +2,17 @@
 status: accepted
 date: 2026-08-13
 supersedes: [0063, 0086]
+superseded_by: [0091]
 ---
 
 # ADR-0090: Меню-бар відповідає на одне питання — чи можемо ми працювати
+
+> **Частково витіснено [ADR-0091](0091-countdown-only-where-work-is-not-running.md).** Два fallback'и
+> на смужки прибрано: нерозвʼязний ресет вичерпаного вікна тепер дає `exhaustedUnknownReset`
+> (самотній ⚠️), а stale-фаза більше не перебудовує діагностичних смужок біля гліфа. Відлік зник із
+> `.expanded` узагалі, тож `AppearancePresetValues` — з девʼяти полів до восьми. Чинними лишаються
+> три взаємовиключні стани, `subscriptionExhaustedWhileCovered` як предикат ховання смужок і
+> взаємовиключність «пауза ↔ валюта».
 
 > Замінює [ADR-0063](0063-unified-pause-hides-bars.md) (єдиний тумблер «Pause icon hides bars») і
 > [ADR-0086](0086-tri-state-calm-bar-hiding.md) (трипозиційне ховання спокійної смужки). Обидва
