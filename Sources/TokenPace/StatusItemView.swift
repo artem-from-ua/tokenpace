@@ -161,6 +161,11 @@ final class StatusItemView: NSView {
         /// 34 pt bar cannot be mistaken for the Progress time marker: only its ends show, it never
         /// moves, and it carries no colour.
         static let centreTickWidth: CGFloat = 1
+        /// Height of the **Gauge** centre tick — 1 pt taller than ``tickHeight``, so the ends showing
+        /// from under the track stay legible at a fifth of the marker's width. Its own metric rather
+        /// than the marker's: the two shapes are sized for opposite jobs, and matching heights was only
+        /// ever a coincidence of the first draft.
+        static let centreTickHeight: CGFloat = 10
         /// How far the transparent gutter under a yellow strip extends past it on each side (#326).
         /// 1.25 pt against this 5 pt bar — the popup's 1.5 pt scaled to the shorter track.
         static let yellowGutter: CGFloat = 1.25
@@ -238,11 +243,12 @@ final class StatusItemView: NSView {
         /// Ring around the time-indicator marker so it stays distinct over any coloured zone —
         /// `.separatorColor`, so the ring flips with the bar (dark ring on a light bar and vice versa).
         static var indicatorStroke: NSColor { ColorStore.shared.color(.indicatorRing) }
-        /// The **Gauge** centre tick (#326) — `secondaryLabelColor` by default, brighter than both the
-        /// marker's `indicatorRing` and the popup ruler's `tick`. It gets its own role because it
-        /// carries more weight than either: it is the only fixed landmark on the centred scale, and
-        /// the direction the ribbon leaves it in *is* the reading. A dimmer tone made the zero hard to
-        /// locate on the 34 pt bar, and everything the style says is relative to it.
+        /// The **Gauge** centre tick (#326) — the *calm fill's* own tone by default (``calmWhite`` =
+        /// `labelColor`, re-alpha'd through ``bright(_:)`` at the draw site, exactly as the calm bar
+        /// fill is). That is the menu bar's mono foreground: white on a dark bar, black on a light one,
+        /// flipping with the appearance. The zero is furniture of the scale, not a status, so it takes
+        /// the neutral foreground rather than a grey a step down from it. It keeps its own role, so the
+        /// tuner can pull the tick away from the calm fill.
         static var centreTick: NSColor { ColorStore.shared.color(.centreTick) }
         /// The neutral grey track of a menu-bar bar — the whole-bar background, i.e. BOTH the `used`
         /// head and the future/unused tail on either side of the coloured pacing gap. `labelColor` at
@@ -1026,12 +1032,13 @@ final class StatusItemView: NSView {
     private func drawCentreTick(in rect: NSRect) {
         let cx = PopupBarView.scaleX(0.5, in: rect).rounded()
         let w = Metrics.centreTickWidth
-        let h = Metrics.tickHeight
-        // Neutral `centreTick` (secondaryLabelColor) — never a pacing colour: this is scale furniture,
-        // not data. Its own role rather than the marker's ring or the popup ruler's tick, both of
-        // which sit dimmer: those only ever separate or annotate shapes that are already visible,
-        // whereas this is the sole landmark the whole reading is relative to.
-        Palette.centreTick.setFill()
+        let h = Metrics.centreTickHeight
+        // Neutral `centreTick` — never a pacing colour: this is scale furniture, not data. It defaults
+        // to the calm fill's own tone (`calmWhite` = `labelColor`, re-alpha'd by `bright()` exactly as
+        // the calm bar fill is): the mono white-on-dark / black-on-light the menu bar already uses for
+        // everything that is foreground rather than status. Still its own role, so the tuner can pull
+        // it away from the calm fill.
+        bright(Palette.centreTick).setFill()
         NSRect(x: cx - w / 2, y: rect.midY - h / 2, width: w, height: h).fill()
     }
 

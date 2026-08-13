@@ -141,8 +141,9 @@ enum ColorRole: String, CaseIterable {
         case .centreTick:
             return "The Gauge style's centre tick on the MENU BAR only (#326) — the fixed zero its "
                  + "ribbon grows out of, drawn 1 pt wide under the track so only its ends show. The "
-                 + "popup's Gauge tick is the ruler above, not this. Default secondaryLabelColor: "
-                 + "brighter than the ruler, because on a 34 pt bar every reading is relative to it."
+                 + "popup's Gauge tick is the ruler above, not this. Default labelColor — the calm "
+                 + "fill's own mono tone (white on a dark bar, black on a light one), re-alpha'd by "
+                 + "bright() at the draw site, so the zero reads as foreground rather than as status."
         case .inUsePill:
             return "Popup \"in use\" plaque beside the Extra usage heading while credits are actively "
                  + "spending (#146, #254). The currency glyph is knocked out of this fill, so the popup "
@@ -210,7 +211,7 @@ enum ColorRole: String, CaseIterable {
         case .barTrack:      return NSColor.labelColor.withAlphaComponent(0.22)   // the moon: a ~22% labelColor silhouette; the bar shows through 78%, so it dims AND breathes the wallpaper/menu tint
         case .indicatorRing: return .quaternaryLabelColor
         case .tick:          return .tertiaryLabelColor
-        case .centreTick:    return .secondaryLabelColor
+        case .centreTick:    return .labelColor           // the calm fill's tone (see .calmWhite) — re-alpha'd by bright() at the draw site
         case .inUsePill:     return .labelColor           // #254: a mode marker, not a status colour
         case .foreground:    return .labelColor            // reset text / ⚠️ — re-alpha'd by bright()
         case .dimmedLabel:   return PopupViewController.defaultDimmedLabel
