@@ -13,7 +13,11 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "TokenPace",
-            dependencies: ["TokenPaceKit"]
+            dependencies: ["TokenPaceKit"],
+            // Bar-style preview thumbnails shown by the Settings picker. `.process` puts them in a
+            // `TokenPace_TokenPace.bundle` reachable via `Bundle.module`; `scripts/build-app.sh`
+            // copies that bundle into the `.app`, which it does not do for free.
+            resources: [.process("Resources")]
         ),
         .target(
             name: "TokenPaceKit"
