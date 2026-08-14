@@ -62,6 +62,7 @@ enum StubScenario: String, CaseIterable {
     case creditsNoLimit = "credits-no-limit"
     case creditsZeroSpent = "credits-zero-spent"
     case creditsWideAmounts = "credits-wide-amounts"
+    case creditsMonthEnd = "credits-month-end"
     case justUnblocked = "just-unblocked"
     case creditsOnset = "credits-onset"
     case resetGrace = "reset-grace"
@@ -181,6 +182,7 @@ enum StubScenario: String, CaseIterable {
         case .creditsNoLimit:      return "Credits · no limit (neutral)"
         case .creditsZeroSpent:    return "Credits · nothing spent yet"
         case .creditsWideAmounts:  return "Credits · wide amounts (⌥ drops reset)"
+        case .creditsMonthEnd:     return "Credits · late in the month (time marker near the end)"
         case .justUnblocked:       return "Back to work! edge"
         case .creditsOnset:        return "Extra Usage Credit onset"
         case .resetGrace:          return "Reset-boundary idle grace"
@@ -332,6 +334,12 @@ enum StubScenario: String, CaseIterable {
                  + "gate also fires on plain `credits-active` (281 pt) — this stub is the extreme, not "
                  + "the only case. 7d is left un-exhausted on purpose: a blocking reset is a red badge "
                  + "and is never dropped."
+        case .creditsMonthEnd:
+            return "The Extra-usage bar's captioned month ruler with the time marker near its right "
+                 + "end: same €15 cap and €10.77 spent as `credits-active`, but the clock is pinned to "
+                 + "Jan 28 (~90 % of the month elapsed), so the marker sits close to the \"Jan 31\" "
+                 + "caption. Checks that the two never collide and that the caption stays readable "
+                 + "beside the marker's glow — the crowded end of this bar's geometry."
         case .justUnblocked:
             return "Back-to-work edge (#160): first poll blocked (7d 100 %), then workable → fires the "
                  + "\"Back to work!\" notification once (quiet hours + authorization permitting)."
@@ -426,6 +434,7 @@ enum StubScenario: String, CaseIterable {
         case .creditsNoLimit:      return StubUsageTransport(mode: .credits(.noLimit), now: now)
         case .creditsZeroSpent:    return StubUsageTransport(mode: .credits(.zeroSpent), now: now)
         case .creditsWideAmounts:  return StubUsageTransport(mode: .credits(.wideAmounts), now: now)
+        case .creditsMonthEnd:     return StubUsageTransport(mode: .credits(.active), now: now)
         case .justUnblocked:       return StubUsageTransport(mode: .justUnblocked, now: now)
         case .creditsOnset:        return StubUsageTransport(mode: .creditsOnset, now: now)
         case .resetGrace:          return StubUsageTransport(mode: .resetGrace, now: now)
@@ -458,7 +467,11 @@ enum StubScenario: String, CaseIterable {
     /// matching "<1d" reset line — bar and text driven by the same clock, so they never disagree.
     var stubClock: Date? {
         guard !usesRealClock, self != .realNetwork else { return nil }
-        return self == .screenshot ? Self.screenshotAnchor : Self.defaultAnchor
+        switch self {
+        case .screenshot:      return Self.screenshotAnchor
+        case .creditsMonthEnd: return Self.monthEndAnchor
+        default:               return Self.defaultAnchor
+        }
     }
 
     /// Whether this scenario must run off the **real** wall clock because its observable behaviour is
@@ -499,4 +512,11 @@ enum StubScenario: String, CaseIterable {
     /// The ``screenshot`` anchor: **2026-01-31 22:00:00 UTC** — late in the month (≈99 % elapsed) so the
     /// extra-usage bar is a long green and its reset line reads "<1d", consistent with the bar.
     private static let screenshotAnchor = Date(timeIntervalSince1970: 1_769_896_800)
+
+    /// The ``creditsMonthEnd`` anchor: **2026-01-28 21:36:00 UTC** — exactly **90 %** through January,
+    /// so the Extra-usage bar's time marker lands near (but not on) the right-hand "Jan 31" caption.
+    /// That is the crowded end of the captioned month ruler: close enough to test that the marker and
+    /// its caption coexist, short of the degenerate 100 % case where the marker sits on the boundary
+    /// itself.
+    private static let monthEndAnchor = Date(timeIntervalSince1970: 1_769_636_160)
 }

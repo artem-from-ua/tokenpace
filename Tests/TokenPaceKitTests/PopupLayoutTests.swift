@@ -701,6 +701,28 @@ struct PopupLayoutCreditsTests {
                 == ResetClock.resetLine(resetsAt: monthEnd, now: now, verbose: true))
     }
 
+    /// Limit set: the bar's two ends carry the month's boundary captions, precomputed in the layout so
+    /// the view formats no dates (ADR-0009). They name the same UTC month the bar's `timeFraction` is
+    /// measured against.
+    @Test func limitSetCarriesMonthBoundaryCaptions() {
+        let spend = SpendInfo(used: eur(1077), limit: eur(1500), enabled: true)
+        let p = layout(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 20, spend: spend))
+        let credits = try! #require(p.credits)
+        let expected = try! #require(CreditsPacing.monthBoundaryLabels(now: now))
+        #expect(credits.monthBounds?.start == expected.start)
+        #expect(credits.monthBounds?.end == expected.end)
+    }
+
+    /// Unlimited: no bar to caption, so no captions either — the view must not draw a ruler around a
+    /// bar that does not exist.
+    @Test func unlimitedHasNoMonthBoundaryCaptions() {
+        let spend = SpendInfo(used: eur(1077), limit: nil, enabled: true)
+        let p = layout(from: snapshot(fiveHourUtil: 10, sevenDayUtil: 20, spend: spend))
+        let credits = try! #require(p.credits)
+        #expect(credits.bar == nil)
+        #expect(credits.monthBounds == nil)
+    }
+
     /// Cap reached: `spend_limit_reached` forces a full bar (red rung) even below the raw fraction.
     @Test func limitReachedForcesFullBar() {
         let spend = SpendInfo(

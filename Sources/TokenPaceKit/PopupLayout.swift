@@ -131,15 +131,35 @@ public struct CreditsRow: Sendable, Equatable {
     /// merely *active* (enabled/reached), but the badge appears only while the plan limit is actually
     /// overflowing into credits.
     public let inUse: Bool
+    /// The captions for the credits bar's two boundary ticks — the money window's first and last day,
+    /// `("Aug 1", "Aug 31")`, from `CreditsPacing.monthBoundaryLabels`. `nil` when there is no
+    /// bar to caption (unlimited) or the calendar could not resolve the bounds; the view then draws the
+    /// bar without a ruler rather than inventing labels.
+    ///
+    /// Precomputed here, like ``resetLine``, so the view formats no dates (ADR-0009). These name the
+    /// **UTC** month bounds that define the bar's own `0` and `1` — see
+    /// `CreditsPacing.monthBoundaryLabels` for why they do not follow ``resetLine``'s local zone.
+    public let monthBounds: (start: String, end: String)?
 
     public init(spent: Money, limit: Money?, bar: BarLayout?, resetLine: String?,
-                resetLineVerbose: String? = nil, inUse: Bool = false) {
+                resetLineVerbose: String? = nil, inUse: Bool = false,
+                monthBounds: (start: String, end: String)? = nil) {
         self.spent = spent
         self.limit = limit
         self.bar = bar
         self.resetLine = resetLine
         self.resetLineVerbose = resetLineVerbose
         self.inUse = inUse
+        self.monthBounds = monthBounds
+    }
+
+    /// Hand-written because a tuple property has no synthesised `==` (tuples are not `Equatable`).
+    public static func == (lhs: CreditsRow, rhs: CreditsRow) -> Bool {
+        lhs.spent == rhs.spent && lhs.limit == rhs.limit && lhs.bar == rhs.bar
+            && lhs.resetLine == rhs.resetLine && lhs.resetLineVerbose == rhs.resetLineVerbose
+            && lhs.inUse == rhs.inUse
+            && lhs.monthBounds?.start == rhs.monthBounds?.start
+            && lhs.monthBounds?.end == rhs.monthBounds?.end
     }
 }
 
@@ -629,9 +649,11 @@ public struct PopupLayout: Sendable, Equatable {
         // isn't blocked and nothing has overflowed onto the paid tier yet.
         let inUse = CreditsPacing.isSpending(
             spend, baseLimitExhausted: CreditsPacing.mainWindowExhausted(in: snapshot))
+        // Boundary captions for the bar's own ruler — only when there *is* a bar to caption.
+        let monthBounds = bar == nil ? nil : CreditsPacing.monthBoundaryLabels(now: now)
         return CreditsRow(
             spent: spent, limit: spend.limit, bar: bar, resetLine: resetLine,
-            resetLineVerbose: resetLineVerbose, inUse: inUse)
+            resetLineVerbose: resetLineVerbose, inUse: inUse, monthBounds: monthBounds)
     }
 
     /// The amount spent as a ``Money``, preferring the exact `spend.used` object and falling back to a
