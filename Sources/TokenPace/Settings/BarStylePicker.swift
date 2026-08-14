@@ -26,6 +26,10 @@ struct BarStylePicker: View {
     /// the small lift the system picker gives its thumbnails.
     @State private var hovered: BarStyle?
 
+    /// Which tile the mouse is currently held down on, if any. Purely transient: it is set on mouse-
+    /// down and cleared on mouse-up, so the grey press layer it drives leaves nothing behind.
+    @State private var pressed: BarStyle?
+
     /// Tile geometry. The picture is shown at its **natural** size inside a roomier tile rather than
     /// scaled up: the whole point of the preview is "this is what lands in my menu bar", and a
     /// doubled widget answers a question nobody asked. Upscaling a 5 pt bar would also blur the very
@@ -41,6 +45,19 @@ struct BarStylePicker: View {
         static let activeBorder: CGFloat = 3
         static let idleBorder: CGFloat = 1
         static let hoverBorder: CGFloat = 1.5
+        /// The grey a pressed tile's black is raised to. Composited with `.lighten`, which keeps
+        /// whichever is brighter per channel, so it acts as a **floor**: the black plate comes up to
+        /// this grey, while the preview's greens, yellows and oranges are already brighter and pass
+        /// through untouched.
+        ///
+        /// A plain translucent layer cannot do this. Alpha lifts every pixel in proportion, so the
+        /// black — the part meant to change — barely moves while the bright bars visibly wash out:
+        /// exactly backwards. Hence a blend rather than an opacity.
+        ///
+        /// Tuned by eye down a ladder of rejected takes — 0.34, 0.26, 0.20 — each of which turned the
+        /// plate into a grey tile rather than a black one acknowledging a click. The press should be
+        /// felt, not announced.
+        static let pressGrey = Color(white: 0.16)
     }
 
     var body: some View {
@@ -81,6 +98,22 @@ struct BarStylePicker: View {
                     }
                 }
                 .frame(width: Tile.width, height: Tile.height)
+                // The click feedback: one grey layer over the whole tile, for exactly as long as the
+                // mouse is down. It covers plate and picture together — that is the point, since the
+                // capture is opaque (`hasAlpha: no`) and only 54×33 pt of the 80×48 pt tile, so any
+                // layer that reaches one but not the other splits the tile into two blacks.
+                //
+                // Nothing persists after mouse-up: selection is said by the ring, and a picture shown
+                // as a specimen of what lands in the menu bar must not keep a colour cast the widget
+                // never draws.
+                .overlay(
+                    RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
+                        .fill(Tile.pressGrey)
+                        .blendMode(.lighten)
+                        .opacity(pressed == style ? 1 : 0))
+                // `.lighten` compares against the layer below, so the tile has to be its own
+                // compositing group — without this the blend would reach the pane behind it too.
+                .compositingGroup()
                 .overlay(
                     RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
                         .strokeBorder(isActive ? Color.accentColor
@@ -88,7 +121,11 @@ struct BarStylePicker: View {
                                       lineWidth: borderWidth))
 
                 Text(title)
-                    .font(.callout)
+                    // A step down from the pane's body text, but not the caption size: `.caption`
+                    // read as visibly tiny here and `.callout` as heavier than the pictures it
+                    // labels. The caption names what the picture already shows, so it should sit
+                    // just below the row's own label rather than match it.
+                    .font(.subheadline)
                     .fontWeight(isActive ? .semibold : .regular)
                     .foregroundStyle(isActive ? Color.primary : Color.secondary)
                     .lineLimit(1)
@@ -98,7 +135,11 @@ struct BarStylePicker: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        // Not `.plain`: that style dims the whole label — picture, caption and all — and its dimming
+        // multiplies against the opaque capture differently than against the plate around it, so a
+        // held-down tile visibly split into two blacks. This one dims nothing and only reports the
+        // press, which the label above paints as a single grey layer over the tile.
+        .buttonStyle(PressReportingButtonStyle(isPressed: $pressed, value: style))
         .onHover { inside in
             if inside { hovered = style } else if hovered == style { hovered = nil }
         }
@@ -173,5 +214,35 @@ struct BarStylePicker: View {
         case .gauge:    return "bar-style-gauge"
         case .progress: return "bar-style-progress"
         }
+    }
+}
+
+// MARK: - PressReportingButtonStyle
+
+/// A button style that draws its label unchanged and merely **reports** whether it is being pressed.
+///
+/// `.plain` — the obvious choice for a picture-shaped button — dims the entire label on press. That is
+/// wrong here twice over: the label includes the caption, which should not move with the click, and the
+/// dimming multiplies against an opaque screen capture differently than against the plate around it, so
+/// a held-down tile came apart into two blacks with a seam between them.
+///
+/// Reporting instead of drawing lets the caller put one flat layer over the tile alone, where it covers
+/// picture and plate identically. `isPressed` is bound out rather than handed to a closure so the press
+/// can drive ordinary view state; it is written on both edges, so mouse-up always clears it.
+struct PressReportingButtonStyle<Value: Equatable>: ButtonStyle {
+    /// Set to `value` while this button is held down, and cleared back to `nil` on release.
+    @Binding var isPressed: Value?
+    /// Identifies this button among its siblings — the row shares one `isPressed` binding.
+    let value: Value
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .onChange(of: configuration.isPressed) { _, nowPressed in
+                if nowPressed {
+                    isPressed = value
+                } else if isPressed == value {
+                    isPressed = nil
+                }
+            }
     }
 }
