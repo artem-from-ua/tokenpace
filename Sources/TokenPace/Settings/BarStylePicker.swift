@@ -41,10 +41,12 @@ struct BarStylePicker: View {
         static let activeBorder: CGFloat = 3
         static let idleBorder: CGFloat = 1
         static let hoverBorder: CGFloat = 1.5
-        /// Opacity of the accent wash over the selected tile. Deliberately light: the wash covers the
-        /// preview's own green/yellow/orange, which carry the pacing meaning the pictures exist to
-        /// show, and anything heavier starts recolouring them into something the widget never draws.
-        static let activeTint: CGFloat = 0.22
+        /// Padding between the option's content and the edge of its grey backing, and the backing's
+        /// own corner radius. Applied to every tile, selected or not, so the row's geometry does not
+        /// move when the selection does — only the backing's opacity changes.
+        static let backingInsetX: CGFloat = 8
+        static let backingInsetY: CGFloat = 6
+        static let backingRadius: CGFloat = 8
     }
 
     var body: some View {
@@ -85,18 +87,15 @@ struct BarStylePicker: View {
                     }
                 }
                 .frame(width: Tile.width, height: Tile.height)
-                // The accent wash of the selected tile, laid OVER everything — plate and picture
-                // alike. It has to be over: the pictures are opaque captures (`hasAlpha: no`) that
-                // cover only the middle 54×33 pt of an 80×48 pt tile, so a wash placed *under* them
-                // reaches nothing but the margin, and the tile reads as two different blacks with a
-                // seam between them rather than as one selected thing.
+                // Nothing is laid over the picture — not an accent wash, not a tint. System Settings →
+                // Appearance leaves its selected thumbnail's artwork completely untouched and says
+                // "selected" with the ring alone; anything painted on top here fights the preview's own
+                // pacing colours, which are the whole reason the picture is shown.
                 //
-                // Clipped to the tile's own shape so the wash follows the rounded corners instead of
-                // squaring them off under the ring.
-                .overlay(
-                    RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
-                        .fill(Color.accentColor)
-                        .opacity(isActive ? Tile.activeTint : 0))
+                // It also cannot be done cleanly: the pictures are opaque captures (`hasAlpha: no`)
+                // covering only the middle 54×33 pt of an 80×48 pt tile, so a wash under them reaches
+                // only the margin, and one over them lands on top of `.plain`'s own pressed dimming —
+                // either way the tile shows two different blacks with a seam down the middle.
                 .overlay(
                     RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
                         .strokeBorder(isActive ? Color.accentColor
@@ -112,9 +111,23 @@ struct BarStylePicker: View {
                     // it the row shifts a little on every click.
                     .frame(width: Tile.width)
             }
+            // The selected option's grey backing, sized to the whole option — picture and caption
+            // together — the way System Settings tints the row of the choice you are on. Grey rather
+            // than the accent colour: the accent already speaks once, in the ring, and a second
+            // accent surface behind a black plate only muddies it.
+            .padding(.horizontal, Tile.backingInsetX)
+            .padding(.vertical, Tile.backingInsetY)
+            .background(
+                RoundedRectangle(cornerRadius: Tile.backingRadius, style: .continuous)
+                    .fill(Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
+                    .opacity(isActive ? 1 : 0))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        // Not `.plain`: that style dims the entire label while the mouse is held down, and the dimming
+        // multiplies against the opaque picture differently than against the plate around it, so a
+        // held-down tile visibly splits into two blacks. This style changes nothing on press — the
+        // picture is a specimen being shown, and specimens should not shift colour when poked.
+        .buttonStyle(UndimmedTileButtonStyle())
         .onHover { inside in
             if inside { hovered = style } else if hovered == style { hovered = nil }
         }
@@ -189,5 +202,22 @@ struct BarStylePicker: View {
         case .gauge:    return "bar-style-gauge"
         case .progress: return "bar-style-progress"
         }
+    }
+}
+
+// MARK: - UndimmedTileButtonStyle
+
+/// A button style that renders its label unchanged, including while pressed.
+///
+/// `.plain` — the obvious choice for a picture-shaped button — dims its whole label on press. Here the
+/// label is an opaque screen capture sitting inside a black plate, and the dimming multiplies against
+/// the two differently: the picture visibly separates from its surround for as long as the mouse is
+/// held. The press is already acknowledged by the selection moving, which happens on mouse-up anyway.
+///
+/// Deliberately no hover or press affordance of its own — ``BarStylePicker`` draws both itself, in the
+/// ring and the backing, where they can be tuned against the pictures.
+struct UndimmedTileButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
     }
 }
