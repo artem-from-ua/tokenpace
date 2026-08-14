@@ -3,8 +3,10 @@ import TokenPaceKit
 
 // MARK: - GeneralPane (#168, ADR-0042)
 
-/// Settings → General: how the app lives on this Mac — launch-at-login, screen-lock polling pause,
-/// and the usage journal.
+/// Settings → General: how the app lives on this Mac — launch-at-login and the usage journal.
+///
+/// The screen-lock polling pause used to sit here; it moved to `Providers`, where the polling it
+/// suspends is configured.
 ///
 /// **Usage history belongs here rather than with a provider** (#317): the journal is a feature of
 /// the app — it feeds the Insights window (ADR-0067) — and providers are merely sources of records
@@ -23,10 +25,6 @@ struct GeneralPane: View {
                     .disabled(!model.launchToggleEnabled)
                     SettingsHint(text: model.launchHint.text, warning: model.launchHint.devBuild)
                 }
-
-                Toggle("Pause usage API polling while the screen is locked", isOn: Binding(
-                    get: { model.pausePolling },
-                    set: { model.setPausePolling($0) }))
             }
 
             // MARK: Usage history (usage journal collector, #242 — moved here by #317)

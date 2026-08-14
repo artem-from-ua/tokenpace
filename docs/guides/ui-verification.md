@@ -1182,7 +1182,7 @@ TOKENPACE_DEVTOOLS=1 TOKENPACE_STUB=real swift run
 4. Розблокуй → `awaiting-input: resumed (screen available)`, одразу за ним `awaiting-input N → M`, і
    menu bar актуальний **без** 45-секундної затримки.
 5. **Безумовність** — головна перевірка: повтори кроки 2–4 з **вимкненим** чекбоксом Settings →
-   General → «Pause usage API polling while the screen is locked». `awaiting-input: parked/resumed`
+   Providers → «Pause usage API polling while the screen is locked». `awaiting-input: parked/resumed`
    мають бути на місці, а `screen-lock-pause:`-рядків — **жодного** (усе-таки usage-полл на паузу не
    йде). Це доводить, що вотчер їде окремим негейтованим шляхом.
 6. Системний сон: `pmset sleepnow` → прокинути → `parked (system sleep)` / `resumed (screen available)`.
