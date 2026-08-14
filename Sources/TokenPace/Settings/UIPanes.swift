@@ -203,10 +203,12 @@ struct DropdownPane: View {
         Form {
             Section {
                 // Bar style, dropdown copy (#329) — the same three styles as the menu bar, chosen
-                // separately. The one hint on this page states the Extra-usage exception: that bar is
-                // always Progress, whatever is picked here, so a Progress bar sitting under a column of
-                // Pressure/Gauge bars is documented behaviour rather than something to report as a bug.
-                // Its window is a calendar month, which its two captioned ends name on the bar itself.
+                // separately. The one hint on this page states the Extra-usage exception, and states
+                // only the fact: that bar is always Progress whatever is picked here, so a Progress bar
+                // sitting under a column of Pressure/Gauge bars reads as documented behaviour rather
+                // than a bug worth reporting. The reasons stay here rather than in the hint — its
+                // window is a calendar month, which the bar's two captioned ends already name on the
+                // bar itself, so a user who wonders why has the answer in front of them.
                 HStack {
                     Text("Bar style")
                     Spacer()
@@ -215,9 +217,7 @@ struct DropdownPane: View {
                         active: model.dropdownStyle,
                         onSelect: { model.setDropdownStyle($0) })
                 }
-                SettingsHint(text: "*Extra usage* always draws as *Progress*, whichever style you "
-                    + "pick: it paces a calendar month, and its ends are marked with the month's "
-                    + "first and last day.")
+                SettingsHint(text: "*Extra usage* always draws in *Progress* style.")
 
                 // No `SettingsHint` under either row: the segment labels ("Always" / "Above zero" /
                 // "Non-calm only" / "With ⌥ Option") already say when the group shows, and a hint
