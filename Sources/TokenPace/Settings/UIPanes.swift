@@ -229,7 +229,11 @@ struct DropdownPane: View {
                         SegmentedControl(
                             segments: AppearanceBarStyle.segments,
                             active: model.dropdownStyle,
-                            onSelect: { model.setDropdownStyle($0) })
+                            onSelect: { model.setDropdownStyle($0) },
+                            // Matches the captions under the pictures on the Menu bar page: it is the
+                            // same setting for the other surface, so the two should not name the three
+                            // styles at two different sizes.
+                            titleFont: .caption)
                     }
                     SettingsHint(text: "*Extra usage* bar always draws in *Progress* style.")
                 }

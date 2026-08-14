@@ -45,15 +45,18 @@ struct BarStylePicker: View {
         static let activeBorder: CGFloat = 3
         static let idleBorder: CGFloat = 1
         static let hoverBorder: CGFloat = 1.5
-        /// The click layer's colour and strength. A mid grey, not a semantic colour: `labelColor` and
-        /// friends flip with the theme, and in dark mode a near-white layer reads as the tile lighting
-        /// up rather than greying. Black would only deepen a plate that is already black — the tile has
-        /// nowhere darker to go, which is why dimming it looks like the whole thing dropping out.
+        /// The grey a pressed tile's black is raised to. Composited with `.lighten`, which keeps
+        /// whichever is brighter per channel, so it acts as a **floor**: the black plate comes up to
+        /// this grey, while the preview's greens, yellows and oranges are already brighter and pass
+        /// through untouched.
         ///
-        /// Kept faint, and lifted just off pure black so the plate turns a touch grey while the mouse
-        /// is down without the preview's pacing colours visibly shifting under it.
-        static let pressGrey = Color(white: 0.55)
-        static let pressTint: CGFloat = 0.14
+        /// A plain translucent layer cannot do this. Alpha lifts every pixel in proportion, so the
+        /// black — the part meant to change — barely moves while the bright bars visibly wash out:
+        /// exactly backwards. Hence a blend rather than an opacity.
+        ///
+        /// High enough that the greying is unmistakable at a glance, while the plate still reads as a
+        /// dark surface rather than turning into a light one.
+        static let pressGrey = Color(white: 0.34)
     }
 
     var body: some View {
@@ -105,7 +108,11 @@ struct BarStylePicker: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
                         .fill(Tile.pressGrey)
-                        .opacity(pressed == style ? Tile.pressTint : 0))
+                        .blendMode(.lighten)
+                        .opacity(pressed == style ? 1 : 0))
+                // `.lighten` compares against the layer below, so the tile has to be its own
+                // compositing group — without this the blend would reach the pane behind it too.
+                .compositingGroup()
                 .overlay(
                     RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
                         .strokeBorder(isActive ? Color.accentColor
@@ -113,7 +120,9 @@ struct BarStylePicker: View {
                                       lineWidth: borderWidth))
 
                 Text(title)
-                    .font(.callout)
+                    // Smaller than the pane's body text: the caption only names what the picture
+                    // above it already shows, so it should not compete with the row's own label.
+                    .font(.caption)
                     .fontWeight(isActive ? .semibold : .regular)
                     .foregroundStyle(isActive ? Color.primary : Color.secondary)
                     .lineLimit(1)
