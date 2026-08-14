@@ -120,9 +120,10 @@ enum PersistedConfig {
         /// ``PersistedConfig/migrateModelLimitsVisibilityIfNeeded()`` to seed
         /// ``modelLimitsVisibility``, then cleared. Do not read elsewhere.
         static let legacyShowModelSpecificLimits = "showModelSpecificLimits"
-        /// Whether the popup draws the under-bar tick ruler on the pacing bars (#224). Default-on
-        /// (opt-out) — see the property.
-        static let showTicks = "showTicks"
+        /// **Retired.** Whether the popup draws the under-bar tick ruler on the pacing bars (#224).
+        /// The ruler is no longer optional — it draws in every dropdown bar — so there is nothing left
+        /// to store. The key is kept only so the Appearance reset can sweep a stored value away.
+        static let retiredShowTicks = "showTicks"
         /// **Retired.** The far-behind (green→blue) threshold interval (#224) — the green→blue width is
         /// now the fixed shipped ×2 (`PacingModel.farBehindWidthMultiplier`), and whether blue applies
         /// at all is decided by the data (`PacingModel.weeklyHasHeadroom`), not by a preference. The key
@@ -433,16 +434,6 @@ enum PersistedConfig {
         set { defaults.set(newValue.rawValue, forKey: Key.extraUsageVisibility) }
     }
 
-    /// Whether the **popup** draws the under-bar tick ruler on the pacing bars (#224). Gates
-    /// `PopupBarView.drawTicks` only; the menu-bar widget has no tick ruler. Falls back to the factory
-    /// default (`AppearancePreset.default`) when the key is absent, so the out-of-the-box value tracks
-    /// the default preset. `object(forKey:) as? Bool` distinguishes "unset" from an explicit choice.
-    static var showTicks: Bool {
-        get { defaults.object(forKey: Key.showTicks) as? Bool ?? AppearancePreset.defaultValues.showTicks }
-        set { defaults.set(newValue, forKey: Key.showTicks) }
-    }
-
-
     /// Revert every setting the **Appearance** pane owns to its factory default — the menu-bar widget
     /// toggles, the wallpaper-brightness theme, the reset-countdown mode, and the dropdown's per-model
     /// toggle. Done by **removing** each key (not writing an explicit default), so each property's getter
@@ -465,9 +456,9 @@ enum PersistedConfig {
             // Cleared too, so a reset also sweeps away a pre-#329 value the migration may not have
             // reached yet — otherwise it would be waiting to re-seed the two keys on a later launch.
             Key.legacyBarStyle,
-            Key.showTicks,
             // Retired keys, still swept so a Reset also clears them for anyone who never launched the
             // retiring build (see each `Key.retired…` for what it used to mean).
+            Key.retiredShowTicks,
             Key.retiredFarBehindInterval,
             Key.retiredPauseHidesBars,
             Key.retiredShowExtraUsage,
@@ -692,7 +683,6 @@ enum PersistedConfig {
         extraUsageVisibility = v.extraUsageVisibility
         menuBarStyle = v.menuBarStyle
         dropdownStyle = v.dropdownStyle
-        showTicks = v.showTicks
     }
 
     /// The live Appearance config assembled into an `AppearancePresetValues` — the read-mirror of
@@ -707,8 +697,7 @@ enum PersistedConfig {
             modelLimitsVisibility: modelLimitsVisibility,
             extraUsageVisibility: extraUsageVisibility,
             menuBarStyle: menuBarStyle,
-            dropdownStyle: dropdownStyle,
-            showTicks: showTicks)
+            dropdownStyle: dropdownStyle)
     }
 
     /// Whether polling pauses while the screen is **locked, off, or running a screensaver** (#114,

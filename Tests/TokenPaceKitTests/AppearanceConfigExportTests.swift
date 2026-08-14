@@ -17,7 +17,6 @@ private let paneOrderedKeys = [
     "dropdownStyle",              // Dropdown Widget → "Bar style"
     "modelLimitsVisibility",      // "Show model & service limits"
     "extraUsageVisibility",       // "Show extra usage"
-    "showTicks",                  // "Show ticks on bars"
 ]
 
 /// The keys of the `appearance` object **in the order they appear in the JSON text**. Works on the raw
@@ -50,8 +49,7 @@ private let customValues = AppearancePresetValues(
     // Deliberately mismatched surfaces — the pair no preset can express (#329), and the shape the
     // retired `"mixed"` value used to name.
     menuBarStyle: .pressure,
-    dropdownStyle: .progress,
-    showTicks: false)
+    dropdownStyle: .progress)
 
 private func export(_ values: AppearancePresetValues, preset: AppearancePreset?) -> String {
     AppearanceConfigExport.json(values: values, preset: preset, appVersion: "9.9.9")
@@ -198,7 +196,6 @@ struct AppearancePresetValuesCodableTests {
         #expect(decoded.dropdownStyle == .gauge)
         #expect(decoded.modelLimitsVisibility == .always)
         #expect(decoded.extraUsageVisibility == .optionOnly)
-        #expect(decoded.showTicks)
         // This fixture also predates ADR-0086, so it exercises the legacy boolean: `false` → `.never`.
         #expect(decoded.calmBarHiding == .never)
     }
@@ -222,7 +219,8 @@ struct AppearancePresetValuesCodableTests {
         // `true` lands on `.fiveHour` — still one bar while calm, which is what that user asked for.
         // Note the fixture also carries the keys ADR-0090/ADR-0091 retired — including
         // `resetCountdownModeMenuBar`, whose setting is gone now that a countdown only ever accompanies
-        // the bars-less modes. They must be ignored, not throw.
+        // the bars-less modes — and `showTicks`, retired when the tick ruler stopped being optional.
+        // They must be ignored, not throw.
         #expect(try decode("\"hideCalmSevenDayBar\" : true").calmBarHiding == .fiveHour)
         #expect(try decode("\"hideCalmSevenDayBar\" : false").calmBarHiding == .never)
         // The new key wins when both are present — an old key left in a hand-edited dump can't override

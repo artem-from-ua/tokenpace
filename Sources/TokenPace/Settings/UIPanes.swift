@@ -236,8 +236,8 @@ struct DropdownPane: View {
 
                 // No `SettingsHint` under either row: the segment labels ("Always" / "Above zero" /
                 // "Non-calm only" / "With ⌥ Option") already say when the group shows, and a hint
-                // repeating that would crowd two rows that sit directly above the plain "Show ticks"
-                // toggle. The two rows offer *different* segment sets — see the constants below.
+                // repeating that would crowd the two rows that close the section. The two rows offer
+                // *different* segment sets — see the constants below.
                 HStack {
                     Text("Show model & service limits")
                     Spacer()
@@ -255,9 +255,6 @@ struct DropdownPane: View {
                         active: model.extraUsageVisibility,
                         onSelect: { model.setExtraUsageVisibility($0) })
                 }
-
-                Toggle("Show ticks on bars", isOn: Binding(
-                    get: { model.showTicks }, set: { model.setShowTicks($0) }))
             }
         }
         .formStyle(.grouped)

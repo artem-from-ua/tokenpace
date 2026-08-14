@@ -92,7 +92,7 @@ enum ColorRole: String, CaseIterable {
         case .barTrack:      return "Bar track"
         case .indicatorRing: return "Indicator ring"
         case .tick:          return "Tick ruler"
-        case .centreTick:    return "Gauge centre tick"
+        case .centreTick:    return "Zero tick (Gauge/Pressure)"
         case .inUsePill:     return "\"In use\" pill"
         case .foreground:    return "Foreground"
         case .dimmedLabel:   return "Dimmed label"
@@ -139,11 +139,13 @@ enum ColorRole: String, CaseIterable {
         case .tick:
             return "Tick-ruler marks below the popup bar. Default tertiaryLabelColor."
         case .centreTick:
-            return "The Gauge style's centre tick on the MENU BAR only (#326) — the fixed zero its "
-                 + "ribbon grows out of, drawn 1 pt wide under the track so only its ends show. The "
-                 + "popup's Gauge tick is the ruler above, not this. Default labelColor — the calm "
-                 + "fill's own mono tone (white on a dark bar, black on a light one), re-alpha'd by "
-                 + "bright() at the draw site, so the zero reads as foreground rather than as status."
+            return "The zero tick of the two marker-less styles — Gauge's centre (#326) and Pressure's "
+                 + "origin — on BOTH surfaces: the fixed zero each ribbon grows out of, struck through "
+                 + "the bar under the track so only its ends show. Progress has none (its time marker "
+                 + "already carries a position). Shared by the menu bar and the popup on purpose: it is "
+                 + "the same mark, scaled to each track. Not the popup's under-bar ruler — that is Tick. "
+                 + "Default labelColor — the calm fill's own mono tone (white on a dark bar, black on a "
+                 + "light one), re-alpha'd at the draw site, so the zero reads as foreground not status."
         case .inUsePill:
             return "Popup \"in use\" plaque beside the Extra usage heading while credits are actively "
                  + "spending (#146, #254). The currency glyph is knocked out of this fill, so the popup "

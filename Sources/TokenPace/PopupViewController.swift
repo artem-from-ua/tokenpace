@@ -102,11 +102,20 @@ final class PopupBarView: NSView {
         }
     }
 
-    /// Whether the under-bar tick ruler is drawn (#224). Pushed in from `PopupViewController.addBar`.
-    /// Default `true`.
-    var showTicks: Bool = true {
+    /// Whether ⌥ Option is currently held — the gate on the under-bar ruler (teeth *and* the credits
+    /// bar's month captions). Pushed in from `PopupViewController.addBar`, whose own `optionHeld`
+    /// rebuilds every bar the moment the modifier changes, so the ruler appears and disappears live
+    /// while the dropdown is open.
+    ///
+    /// The ruler is on-demand rather than permanent because it explains a scale the reader only needs
+    /// while interrogating a bar: at rest the coloured strip and its marker carry the reading on their
+    /// own, and a permanent row of teeth under every bar is the densest thing in an otherwise quiet
+    /// popup. ⌥ already means "show me the detail behind this number" everywhere else in this surface
+    /// (verbose reset lines, data age, folded sections), so the ruler joins that tier instead of
+    /// carrying a preference of its own.
+    var optionHeld: Bool = false {
         didSet {
-            guard showTicks != oldValue else { return }
+            guard optionHeld != oldValue else { return }
             needsDisplay = true
         }
     }
@@ -162,6 +171,34 @@ final class PopupBarView: NSView {
         static let tickLength: CGFloat = 5
         static let tickGap: CGFloat = 2
         static let tickWidth: CGFloat = 2
+        /// Width of the **zero tick** — the permanent mark for the zero each marker-less ribbon grows
+        /// out of: Gauge's centre and Pressure's origin. Documented here, computed at the draw site.
+        ///
+        /// A **fraction of the zero pill's width** rather than a constant: the tick marks the position
+        /// that pill sits at, so it is sized against the pill and follows it if the bar's height ever
+        /// moves. At a flat 1.5 pt it read as a thin sliver poking out from behind a wider shape; at the
+        /// pill's full 3.5 pt it read as a slab. Five sevenths (2.5 pt on the shipped 6 pt bar) sits
+        /// where it looks like the pill continued past the track's edges — clearly the same vertical,
+        /// visibly narrower than the shape it belongs to.
+        ///
+        /// Still well under the time marker's 7 pt, so the mark that identifies Pressure/Gauge cannot be
+        /// confused with the one that identifies Progress — and the rest of the argument (neutral,
+        /// static, hidden under the track) is untouched by the width.
+        static let zeroTickPillFraction: CGFloat = 5.0 / 7.0
+        /// How many times its own track the zero tick stands — the menu bar's proportion
+        /// (`StatusItemView.Metrics`: a 10 pt mark over a 5 pt bar), carried here as a ratio rather than
+        /// read from that type, which keeps its metrics private. Change it there and this comment is the
+        /// thing to check.
+        static let zeroTickHeightRatio: CGFloat = 10.0 / 5.0
+        /// Height of the **zero tick**, **scaled** from the menu bar's rather than offset from the bar:
+        /// the popup's 6 pt track earns 12 pt by the same ratio its 5 pt track earns 10. Scaling rather
+        /// than copying the 2 pt per-side overhang is what keeps the mark looking like *the same mark* on
+        /// a taller bar — a fixed overhang would read progressively stubbier as the track grows.
+        static let zeroTickHeight: CGFloat = barHeight * zeroTickHeightRatio
+        /// How much of the tick ink's own alpha the zero tick keeps — the popup's copy of
+        /// `StatusItemView.Metrics.zeroTickAlpha`, for the same reason: scale furniture must settle
+        /// behind the one mark on the bar that actually moves.
+        static let zeroTickAlpha: CGFloat = 0.55
         /// Point size of the credits bar's boundary captions (`"Aug 1"` / `"Aug 31"`) — deliberately
         /// smaller than the popup's own `textSize` (11): these caption the *ruler*, and must not
         /// compete with the row's actual text.
@@ -261,6 +298,34 @@ final class PopupBarView: NSView {
         /// flips light/dark and reads weaker than the indicator dot.
         static var tick: NSColor { ColorStore.shared.color(.tick) }
 
+        /// The **zero tick** struck through the bar — the same `centreTick` role the menu bar's mark
+        /// uses, not the `.tick` ruler tone beside it. Deliberately shared: the two surfaces draw the
+        /// *same* piece of scale furniture, so they must move together under the tuner rather than
+        /// drifting apart the first time either tone is adjusted.
+        ///
+        /// Faded to ``Metrics/zeroTickAlpha`` through a **dynamic** `NSColor(name:)` that applies the
+        /// alpha *inside* `performAsCurrentDrawingAppearance`, for the same reason ``monochromeGrey``
+        /// does its blend there: the role's default is the dynamic `labelColor`, and calling
+        /// `withAlphaComponent` on it at the draw site resolves it against whatever appearance happens
+        /// to be current — which, in an `NSMenu`-hosted view, is not reliably the one being drawn. That
+        /// bakes the dark tone into the light theme and vice-versa. Resolving per appearance is what
+        /// makes the mark follow the system's light/dark setting, exactly as the menu bar's does.
+        ///
+        /// A tuner-supplied override keeps its own alpha as the base, so pulling the role somewhere else
+        /// still fades by the same proportion.
+        static var zeroTick: NSColor {
+            let role = ColorStore.shared.color(.centreTick)
+            return NSColor(name: nil) { appearance in
+                var faded = role
+                appearance.performAsCurrentDrawingAppearance {
+                    let resolved = role.usingColorSpace(.sRGB) ?? role
+                    faded = resolved.withAlphaComponent(
+                        resolved.alphaComponent * Metrics.zeroTickAlpha)
+                }
+                return faded
+            }
+        }
+
         /// The monochrome base-zone grey (the bar's `used` + future/unused zones). **Popup-only**: a tone
         /// **half-way between** `tertiaryLabelColor` and the dimmest `quaternaryLabelColor` — dimmer than
         /// the menu bar's `barTrack` (`labelColor@0.22`) so the popup track recedes into the NSMenu
@@ -337,13 +402,15 @@ final class PopupBarView: NSView {
             let idleTarget = blocked ? Self.monochromeGrey
                 : (weeklyHeadroom ? Palette.idleBlue : ColorStore.shared.color(.green))
             let idleColor = blocked ? idleTarget : animated(idleTarget, part: .fill)
+            // The zero tick goes down BEFORE the track: the track then covers its middle and only the
+            // ends stand proud, which is what keeps it from reading as a time marker.
+            drawZeroTick(in: rect)
             // The grey track goes down first, exactly as the pacing path does — without it the mark
             // hangs in empty space while every neighbouring row shows a track.
             Self.monochromeGrey.setFill()
             NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner).fill()
             // Gauge's zero is the centre, so its idle pill sits there (ADR-0078's shape, drawn on this
-            // style's own scale). The centre tick itself comes from `drawTicks` below — in the popup
-            // the ruler already sits under the bar, so no separate under-track mark is needed.
+            // style's own scale) — struck through by the zero tick laid down just above.
             if let idleShape = Self.pillRect(at: effectiveScale == .centred ? 0.5 : 0, in: rect) {
                 // Same corner as the track and every other strip (#326) — idle is a zero-length ribbon,
                 // so it must not be shaped differently from one.
@@ -372,6 +439,11 @@ final class PopupBarView: NSView {
         // Pacing-gap colour, routed through the transition layer so a threshold crossing fades
         // instead of blinking (ADR-0070).
         let gapColor = animated(gapColorTarget(l), part: .fill)
+
+        // 0. The zero tick, struck through the bar BEFORE the track so the track covers its middle and
+        //    only the ends stand proud — the same order the menu bar draws it in, and what stops a
+        //    vertical mark from reading as the time marker.
+        drawZeroTick(in: rect)
 
         // 1. Full-length grey track (rounded), drawn first as the base.
         Self.monochromeGrey.setFill()
@@ -639,16 +711,17 @@ final class PopupBarView: NSView {
     ///   would mark nothing the scale defines, and the direction the ribbon leaves the centre in is
     ///   the reading, not its distance along a ruler (#326, ADR-0079).
     ///
-    /// These are the **popup's** teeth. The menu bar draws its own mark for the two marker-less
-    /// scales — `StatusItemView.drawZeroTick` — and it is not this ruler: it marks each scale's
-    /// **zero** (Gauge's centre, Pressure's ribbon origin), never the 0.20 landmark, because a tooth
-    /// there would sit a couple of points from the pill on a 34 pt bar and read as noise.
+    /// Both marker-less scales also mark their **zero** (``zeroTickFraction``) — the position the ribbon
+    /// grows out of, which is what makes a length a length, and what tells Gauge from Pressure at a
+    /// glance. Gauge's zero *is* its 0.5 landmark, so its one tooth serves both readings and this list
+    /// is empty for it; Pressure's zero is `0`, so the 0.20 tooth listed here is genuinely a second
+    /// mark. The zero is the same mark the menu bar draws (`StatusItemView.drawZeroTick`) — that surface
+    /// carries only the identifying half, since ⌥ cannot reach it.
     ///
-    /// The original objection to a menu-bar tick under Pressure — a lone vertical tooth on a 34 pt bar
-    /// is exactly what the Progress time marker looks like, so the styles would stop being
-    /// distinguishable — is answered by **construction** rather than by omission: a fifth the width, in
-    /// the neutral tick tone, drawn *under* the track so only its ends show, and never moving. That is
-    /// what lets Pressure carry one too, on the same terms Gauge always has.
+    /// The original objection to a tick under Pressure — a lone vertical tooth is exactly what the
+    /// Progress time marker looks like, so the styles would stop being distinguishable — is answered by
+    /// **construction** rather than by omission: a fifth the width, in the neutral tick tone, drawn
+    /// *under* the track so only its ends show, and never moving.
     ///
     /// - **Credits** (``monthBounds`` set) draws **no teeth at all** — its month ruler is the pair of
     ///   captions alone (``drawBoundaryCaptions(in:)``). Interior subdivisions are wrong there (months
@@ -663,37 +736,104 @@ final class PopupBarView: NSView {
         // Credits: captions only — the month ruler carries no teeth.
         if monthBounds != nil { return [] }
         switch effectiveScale {
+        // "Exactly on pace" — the landmark the ribbon is measured against. Its zero is drawn separately
+        // (``zeroTickFraction``), because that one identifies the style and so is never hidden.
         case .remaining: return [0.20]
-        case .centred: return [0.5]
+        // Gauge's zero *is* its only landmark, so it is drawn as the zero tick alone — listing it here
+        // too would stack two teeth on the same x.
+        case .centred: return []
         case .window:
             guard subdivisions >= 2 else { return [] }
             return (1 ..< subdivisions).map { CGFloat($0) / CGFloat(subdivisions) }
         }
     }
 
+    /// The scale's **zero** — the position the ribbon grows out of, or `nil` for a style that has none
+    /// to show. Gauge's is its centre, Pressure's the left end of the renormalised track; **Progress is
+    /// deliberately untouched**, since its time marker already carries a position and a second vertical
+    /// mark beside it would read as a competing one.
+    ///
+    /// Drawn **unconditionally**, unlike the rest of the ruler: this mark is what tells the two
+    /// marker-less styles apart at a glance — a line through the middle is Gauge, a line at the left end
+    /// is Pressure — so hiding it behind ⌥ would take away the thing that identifies the style. The
+    /// landmarks that merely *explain* the scale stay on demand.
+    ///
+    /// Credits is excluded with the rest of the ruler: it is pinned to Progress and its scale is a
+    /// calendar month, which has no zero a ribbon grows from.
+    private var zeroTickFraction: CGFloat? {
+        guard monthBounds == nil else { return nil }
+        switch effectiveScale {
+        case .remaining: return 0
+        case .centred:   return 0.5
+        case .window:    return nil
+        }
+    }
+
+    /// Draw the **zero tick**: a line struck through the whole bar at ``zeroTickFraction``, in the
+    /// neutral tick tone, drawn *under* the track so only its protruding ends show. The popup's copy of
+    /// `StatusItemView.drawZeroTick` — same construction, same proportions, so the mark that identifies
+    /// Gauge and Pressure looks like itself on both surfaces.
+    ///
+    /// Called **before** the track on every path (idle and pacing alike), which is what turns a full
+    /// stroke into a pair of ends: the track paints over its middle. Drawing it after would put a solid
+    /// bar across the ribbon and read as data rather than as furniture. It draws in every state, idle
+    /// included — a length needs something to be a length from.
+    ///
+    /// **Where Pressure's zero actually is:** the drawn centre of the zero-length pill, read back out of
+    /// ``pillRect(at:in:)`` rather than restated here, exactly as the menu bar does — a zero-length
+    /// ribbon is floored to the min-width pill and snapped flush to the track's left cap, so its centre
+    /// sits half a pill-width in from the edge.
+    private func drawZeroTick(in rect: NSRect) {
+        guard let fraction = zeroTickFraction else { return }
+        // Take the whole *rect* of the zero-length pill, not just a centre: at fraction 0 the pill is
+        // asymmetric about `scaleX(0)` — `pillRect` snaps its left cap flush to the track's edge — so a
+        // tick centred on the scale position sits visibly off the pill it marks. Matching the pill's own
+        // span makes the two concentric by construction, whichever way that snap resolves.
+        let pill = Self.pillRect(at: fraction, in: rect)
+        // Sized against the zero pill, a touch narrower — see `Metrics.zeroTickPillFraction`.
+        let w = Self.minStripWidth(rect) * Metrics.zeroTickPillFraction
+        let h = Metrics.zeroTickHeight
+        // Snap width and left edge to the **half-point** grid, not the whole-point one: the popup draws
+        // on 2× displays, where half a point is a whole device pixel, and rounding to whole points would
+        // quantise the 2.5 pt width down to 2 — a third of the mark lost to rounding. Snapping both the
+        // edge and the width keeps each flank on a device pixel, so neither renders softer than the
+        // other (which reads as the tick being off-centre rather than merely blurry).
+        let cx = pill?.midX ?? Self.scaleX(fraction, in: rect)
+        let snapped = (w * 2).rounded() / 2
+        let x = ((cx - snapped / 2) * 2).rounded() / 2
+        // Already faded, and faded per-appearance — see `Palette.zeroTick`.
+        Palette.zeroTick.setFill()
+        NSRect(x: x, y: rect.midY - h / 2, width: snapped, height: h).fill()
+    }
+
     /// Draw the under-bar tick ruler: vertical teeth at each fraction in ``tickFractions``,
     /// pixel-snapped on x, plus the credits bar's boundary captions. No-op when there is nothing to
     /// mark.
     ///
+    /// This is the ⌥-on-demand half of the ruler — the marks that *explain* the scale. The half that
+    /// *identifies* it is the zero struck through the bar (``drawZeroTick(in:)``), which is always
+    /// visible and drawn on a different layer entirely (under the track, not below the bar).
+    ///
     /// The captions are drawn **before** the empty-fractions bail-out: the credits ruler is captions
     /// *without* teeth, so gating them on a non-empty tooth list would erase the whole ruler.
     private func drawTicks(in barRect: NSRect) {
-        guard showTicks else { return }                    // #224 — tick ruler opt-out
+        guard optionHeld else { return }                   // the explanatory half is ⌥-on-demand
         drawBoundaryCaptions(in: barRect)
-        let fractions = tickFractions
-        guard !fractions.isEmpty else { return }
+        for f in tickFractions { drawTick(at: f, in: barRect) }
+    }
+
+    /// One tooth of the ruler, below the bar and aligned to the same inset scale as the coloured strip.
+    private func drawTick(at fraction: CGFloat, in barRect: NSRect) {
         let top = barRect.maxY + Metrics.tickGap           // flipped: just below the bar
         let bottom = top + Metrics.tickLength
         Palette.tick.setFill()
+        // Pixel-snap the tooth's centre so it stays crisp at @1x and @2x. Mapped through the same
+        // inset scale as the coloured strip / marker so the ruler stays aligned with them.
+        let cx = Self.scaleX(fraction, in: barRect).rounded()
+        let rect = NSRect(x: cx - Metrics.tickWidth / 2, y: top, width: Metrics.tickWidth, height: bottom - top)
         // Rounded (capsule) teeth — corner = half the width so the ends read soft, not blocky.
         let corner = Metrics.tickWidth / 2
-        for f in fractions {
-            // Pixel-snap the tooth's centre so it stays crisp at @1x and @2x. Mapped through the same
-            // inset scale as the coloured strip / marker so the ruler stays aligned with them (#…).
-            let cx = Self.scaleX(f, in: barRect).rounded()
-            let rect = NSRect(x: cx - Metrics.tickWidth / 2, y: top, width: Metrics.tickWidth, height: bottom - top)
-            NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner).fill()
-        }
+        NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner).fill()
     }
 
     /// Caption the credits bar's two boundary teeth with the money window's first and last day —
@@ -1420,15 +1560,6 @@ final class PopupViewController: NSViewController {
     var barStyle: BarStyle = .progress {
         didSet {
             guard isViewLoaded, barStyle != oldValue else { return }
-            rebuild()
-        }
-    }
-
-    /// Whether the under-bar tick ruler is drawn on the pacing bars (#224). Pushed into each
-    /// `PopupBarView` during `rebuild()` → `addBar`, like `barStyle`. Default `true`.
-    var showTicks: Bool = true {
-        didSet {
-            guard isViewLoaded, showTicks != oldValue else { return }
             rebuild()
         }
     }
@@ -2334,9 +2465,9 @@ final class PopupViewController: NSViewController {
         view.weeklyHeadroom = weeklyHeadroom   // green instead of blue when the week has no headroom
         view.isBaseLimit = isBaseLimit   // only base 5h/7d rows render the far-behind blue zone
         view.barStyle = barStyle   // Progress (gap+marker) vs Pressure/Gauge (marker-less ribbons) — #224
+        view.optionHeld = optionHeld   // the under-bar ruler (teeth + month captions) is ⌥-on-demand
         // Credits only: captions the month's ends and pins the bar to Progress, overriding `barStyle`.
         view.monthBounds = monthBounds
-        view.showTicks = showTicks   // under-bar tick ruler on/off — #224
         view.translatesAutoresizingMaskIntoConstraints = false
         view.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
         // A captioned ruler needs room for its text line; every other bar keeps the shipped height.

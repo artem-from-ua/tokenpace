@@ -32,7 +32,6 @@ final class SettingsModel {
     var onCalmColorModeChange: ((CalmColorMode) -> Void)?
     var onMenuBarStyleChange: ((BarStyle) -> Void)?
     var onDropdownStyleChange: ((BarStyle) -> Void)?
-    var onShowTicksChange: ((Bool) -> Void)?
     var onServiceDotChange: ((Bool) -> Void)?
     var onModelLimitsVisibilityChange: ((PopupSectionVisibility) -> Void)?
     var onExtraUsageVisibilityChange: ((PopupSectionVisibility) -> Void)?
@@ -205,9 +204,6 @@ final class SettingsModel {
     /// The **dropdown popup**'s bar presentation style, chosen independently of ``menuBarStyle``
     /// and shown in the "Dropdown Widget" section (#329).
     var dropdownStyle: BarStyle = .progress
-    /// Whether the popup draws the under-bar tick ruler on the pacing bars (#224). A popup concern,
-    /// shown under the "Dropdown Widget" section.
-    var showTicks = false
 
     // MARK: Provider monitoring (#89, #341)
 
@@ -403,8 +399,7 @@ final class SettingsModel {
             modelLimitsVisibility: modelLimitsVisibility,
             extraUsageVisibility: extraUsageVisibility,
             menuBarStyle: menuBarStyle,
-            dropdownStyle: dropdownStyle,
-            showTicks: showTicks)
+            dropdownStyle: dropdownStyle)
     }
 
     /// Which preset the live config matches, or `nil` for the "Custom" state (#215, #224). Drives the
@@ -525,7 +520,6 @@ final class SettingsModel {
         showServiceDot = PersistedConfig.showServiceStatusDot
         menuBarStyle = PersistedConfig.menuBarStyle
         dropdownStyle = PersistedConfig.dropdownStyle
-        showTicks = PersistedConfig.showTicks
 
         // Straight assignments, not the `set…` methods — see the ordering invariant above: a re-sync
         // must not re-persist or re-fire `onProviderMonitoringChange`, or every open of the Settings
@@ -635,14 +629,6 @@ final class SettingsModel {
         onDropdownStyleChange?(style)
     }
 
-    /// Persist the popup tick-ruler toggle (#224) and fire the callback.
-    func setShowTicks(_ on: Bool) {
-        showTicks = on
-        PersistedConfig.showTicks = on
-        AppLogger.lifecycle.notice("show-ticks: popup set \(on, privacy: .public)")
-        onShowTicksChange?(on)
-    }
-
     /// Revert every Appearance-pane setting to its factory default (the "Reset" button). Clears the
     /// stored keys, re-syncs the model so the controls repaint, then fires each pane callback with the
     /// now-default value so the menu-bar widget rebuilds — the same notifications the individual setters
@@ -655,7 +641,7 @@ final class SettingsModel {
     }
 
     /// Apply a named Appearance **preset** (#215, #224) — the general form of
-    /// `resetAppearanceToDefaults()`. Writes all eight keys from the preset's fixed value set, re-syncs
+    /// `resetAppearanceToDefaults()`. Writes all seven keys from the preset's fixed value set, re-syncs
     /// the model so the controls repaint (the preset segmented control re-lights via `activePreset`),
     /// then fires each pane callback so both surfaces rebuild. The segmented control in `UIPresetsPane`
     /// calls this.
@@ -715,7 +701,6 @@ final class SettingsModel {
         onServiceDotChange?(showServiceDot)
         onMenuBarStyleChange?(menuBarStyle)
         onDropdownStyleChange?(dropdownStyle)
-        onShowTicksChange?(showTicks)
         onAwaitingInputAppearanceChange?()   // #233: a preset/reset may flip the menu-bar copy
     }
 

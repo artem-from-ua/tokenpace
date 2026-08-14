@@ -21,19 +21,16 @@ struct AppearancePresetTests {
         #expect(v.extraUsageVisibility == .aboveZero)
         #expect(v.menuBarStyle == .pressure)   // the quietest style, and on both surfaces (#329)
         #expect(v.dropdownStyle == .pressure)
-        #expect(!v.showTicks)   // the quiet look drops the tick ruler
     }
 
-    /// Work harder! = Chill but with Work harder on, ticks on, and **Gauge** bars. The calm menu-bar
+    /// Work harder! = Chill but with Work harder on and **Gauge** bars. The calm menu-bar
     /// toggles and per-model rows all still match `.chill`.
-    @Test func workHarderIsChillPlusWorkHarderTicksAndGauge() {
+    @Test func workHarderIsChillPlusWorkHarderAndGauge() {
         let wh = AppearancePreset.workHarder.values
         let chill = AppearancePreset.chill.values
         #expect(wh.calmColorMode == .yellowGreen)       // difference 1 — far-behind blue stays coloured
         #expect(chill.calmColorMode == .yellowGreenBlue)
-        #expect(wh.showTicks)          // difference 2 — ticks on for every preset but Chill
-        #expect(!chill.showTicks)
-        // Difference 3 — Gauge on both surfaces (#329; was the per-surface `.mixed` pair before).
+        // Difference 2 — Gauge on both surfaces (#329; was the per-surface `.mixed` pair before).
         #expect(wh.menuBarStyle == .gauge)
         #expect(wh.dropdownStyle == .gauge)
         #expect(chill.menuBarStyle == .pressure)
@@ -57,7 +54,6 @@ struct AppearancePresetTests {
         #expect(v.extraUsageVisibility == .always)
         #expect(v.menuBarStyle == .progress)
         #expect(v.dropdownStyle == .progress)
-        #expect(v.showTicks)
     }
 
     /// Every preset gives both surfaces the **same** style (#329). The presets are the three coherent
@@ -113,19 +109,19 @@ struct AppearancePresetTests {
             // Only the *dropdown* is flipped: Chill is Pressure on both, so this mismatched pair is
             // off every preset — and it is the mix a preset can no longer express (#329).
             menuBarStyle: chill.menuBarStyle,
-            dropdownStyle: .progress,
-            showTicks: chill.showTicks)
+            dropdownStyle: .progress)
         #expect(AppearancePreset.matching(custom) == nil)
     }
 
     /// The three presets stay **pairwise distinct**, which is what makes `matching(_:)` able to name
     /// one — and the "Custom" segment able to mean anything.
     ///
-    /// Worth its own test since ADR-0090: the value set lost three fields, and two of them
-    /// (`pauseHidesBars`, `awaitingInputInMenuBar`) were the only things separating `Chill` from
-    /// `Work harder!` beyond palette, bar style and ticks. Retire one more and the two presets collapse
-    /// into the same value set, at which point `matching` silently returns whichever comes first in
-    /// `allCases` and the control starts lying about which preset is active.
+    /// Worth its own test since ADR-0090: the value set keeps losing fields — three there
+    /// (`pauseHidesBars`, `awaitingInputInMenuBar`, `showExtraUsage`), then `showTicks` when the tick
+    /// ruler stopped being optional. `Chill` and `Work harder!` are now separated by palette and bar
+    /// style alone. Retire one more and the two presets collapse into the same value set, at which point
+    /// `matching` silently returns whichever comes first in `allCases` and the control starts lying
+    /// about which preset is active.
     @Test func presetsRemainPairwiseDistinct() {
         for a in AppearancePreset.allCases {
             for b in AppearancePreset.allCases where a != b {
