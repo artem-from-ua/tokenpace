@@ -155,14 +155,23 @@ final class StatusItemView: NSView {
         static let tickCorner: CGFloat = 1.5
         /// Width of the dark ring around the time-indicator marker.
         static let tickStroke: CGFloat = 1
-        /// Width of the **Gauge** centre tick (#326) — the permanent mark for the zero the ribbon
-        /// grows out of. Deliberately a fifth of ``tickWidth``, and drawn *under* the track in the
-        /// neutral tick tone rather than over it in the pacing colour, so a lone vertical mark on a
-        /// 34 pt bar cannot be mistaken for the Progress time marker: only its ends show, it never
-        /// moves, and it carries no colour.
-        static let centreTickWidth: CGFloat = 1
-        /// Height of the **Gauge** centre tick — 1 pt taller than ``tickHeight``, so the ends showing
-        /// from under the track stay legible at a fifth of the marker's width. Its own metric rather
+        /// Width of the **zero tick** — the permanent mark for the zero each marker-less ribbon grows
+        /// out of: Gauge's centre (#326) and Pressure's origin. Drawn *under* the track in the neutral
+        /// tick tone rather than over it in the pacing colour, so a lone vertical mark on a 34 pt bar
+        /// cannot be mistaken for the Progress time marker: only its ends show, it never moves, and it
+        /// carries no colour.
+        ///
+        /// Widened 1 → 1.5 pt: at a single point the ends reading out from under the track were too
+        /// fine to find at a glance, especially once ``zeroTickAlpha`` faded them. Still **less than a
+        /// third** of ``tickWidth`` (5 pt), which is what keeps the "cannot be mistaken for the marker"
+        /// argument intact — that argument rests on the whole construction (thin, neutral, under the
+        /// track, static), and the width only has to stay clearly out of the marker's league.
+        ///
+        /// Half-point on purpose: the bar is drawn into a 2× menu-bar image, so 1.5 pt is a whole 3
+        /// device pixels there, and the draw site pixel-snaps the tick's centre.
+        static let centreTickWidth: CGFloat = 1.5
+        /// Height of the **zero tick** — 1 pt taller than ``tickHeight``, so the ends showing from
+        /// under the track stay legible at a fraction of the marker's width. Its own metric rather
         /// than the marker's: the two shapes are sized for opposite jobs, and matching heights was only
         /// ever a coincidence of the first draft.
         static let centreTickHeight: CGFloat = 10
@@ -1108,7 +1117,13 @@ final class StatusItemView: NSView {
         // still fades by the same proportion.
         let tickInk = bright(Palette.centreTick)
         tickInk.withAlphaComponent(tickInk.alphaComponent * Metrics.zeroTickAlpha).setFill()
-        NSRect(x: cx - w / 2, y: rect.midY - h / 2, width: w, height: h).fill()
+        // Snap the LEFT EDGE to the 2× device grid rather than centring on the rounded `cx`. At a
+        // half-point width, `cx − w/2` lands mid-pixel, and the resulting half-pixel of coverage on one
+        // side renders the tick softer on that flank than on the other — visible on a mark this thin,
+        // and the reason it stayed 1 pt while the centring was naive. Rounding to the nearest half-point
+        // keeps both flanks on whole device pixels at 2×, which is where the menu-bar image is drawn.
+        let x = ((cx - w / 2) * 2).rounded() / 2
+        NSRect(x: x, y: rect.midY - h / 2, width: w, height: h).fill()
     }
 
     /// The time-indicator marker: a slim, lightly-rounded vertical bar rather than a dot — reads as a
