@@ -196,10 +196,10 @@ final class SettingsPreviewWindowController {
         resizeToFit()
     }
 
-    /// Re-read the four dropdown knobs the popup VC does not read for itself (it is deliberately
+    /// Re-read the three dropdown knobs the popup VC does not read for itself (it is deliberately
     /// config-free — `AppDelegate` pushes them into the live instance the same way).
     ///
-    /// Reading `PersistedConfig` rather than taking four more callbacks is safe because `SettingsModel`
+    /// Reading `PersistedConfig` rather than taking three more callbacks is safe because `SettingsModel`
     /// persists *before* it fires (`persist first, then callback`), so by the time a change has
     /// travelled to a re-render the stored value is already the new one.
     ///
@@ -207,7 +207,6 @@ final class SettingsPreviewWindowController {
     /// baked into `PopupLayout`. Adding it here would change nothing.
     private func syncPresentation() {
         previewVC.barStyle = PersistedConfig.dropdownStyle
-        previewVC.showTicks = PersistedConfig.showTicks
         previewVC.modelLimitsVisibility = PersistedConfig.modelLimitsVisibility
         previewVC.extraUsageVisibility = PersistedConfig.extraUsageVisibility
     }

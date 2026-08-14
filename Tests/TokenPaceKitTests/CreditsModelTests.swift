@@ -309,8 +309,14 @@ struct CreditsMonthBoundaryLabelTests {
         return cal.date(from: DateComponents(year: y, month: mo, day: d, hour: h, minute: mi))!
     }
 
+    /// Every test that is not *about* the display zone pins it to UTC, so the expectations describe the
+    /// window itself rather than the machine the suite happens to run on.
+    private func labels(_ now: Date) -> (start: String, end: String)? {
+        CreditsPacing.monthBoundaryLabels(now: now, timeZone: Self.utc, displayTimeZone: Self.utc)
+    }
+
     @Test func labelsTheMonthsFirstAndLastDay() {
-        let labels = CreditsPacing.monthBoundaryLabels(now: utcDate(2026, 8, 14), timeZone: Self.utc)
+        let labels = labels(utcDate(2026, 8, 14))
         #expect(labels?.start == "Aug 1")
         #expect(labels?.end == "Aug 31")
     }
@@ -318,33 +324,60 @@ struct CreditsMonthBoundaryLabelTests {
     @Test func endLabelIsTheLastDayNotTheFirstOfNextMonth() {
         // A 30-day month must end on the 30th — the caption names the last day the window covers,
         // not the reset instant that follows it.
-        let labels = CreditsPacing.monthBoundaryLabels(now: utcDate(2026, 4, 10), timeZone: Self.utc)
-        #expect(labels?.end == "Apr 30")
+        #expect(labels(utcDate(2026, 4, 10))?.end == "Apr 30")
     }
 
     @Test func februaryLengthComesFromTheCalendar() {
-        #expect(CreditsPacing.monthBoundaryLabels(now: utcDate(2026, 2, 5), timeZone: Self.utc)?.end
-            == "Feb 28")
+        #expect(labels(utcDate(2026, 2, 5))?.end == "Feb 28")
         // 2028 is a leap year — the same code must yield the 29th without a special case.
-        #expect(CreditsPacing.monthBoundaryLabels(now: utcDate(2028, 2, 5), timeZone: Self.utc)?.end
-            == "Feb 29")
+        #expect(labels(utcDate(2028, 2, 5))?.end == "Feb 29")
     }
 
     @Test func labelsAreEnglishRegardlessOfDeviceLocale() {
         // The formatter is pinned to en_US_POSIX, mirroring `ResetClock.weekdayString`: the
         // localisation seam is ADR-0009, not the date formatter.
-        let labels = CreditsPacing.monthBoundaryLabels(now: utcDate(2026, 5, 20), timeZone: Self.utc)
-        #expect(labels?.start == "May 1")
+        #expect(labels(utcDate(2026, 5, 20))?.start == "May 1")
     }
 
-    @Test func labelsFollowTheSameZoneAsTheBarsGeometry() {
-        // At 2026-08-01T02:00 UTC it is still July 31 in UTC-3. The captions must name the month the
-        // bar is actually measuring, so they take the same zone `monthElapsedFraction` does — proven
-        // here by the two zones disagreeing.
+    @Test func theWindowItselfIsTakenInTheResetZone() {
+        // At 2026-08-01T02:00 UTC it is still July 31 in UTC-3. Which month the bar *measures* is a
+        // property of the limit, which resets in UTC — so `timeZone` decides the window, and the two
+        // zones disagreeing here is what proves it is honoured.
         let instant = utcDate(2026, 8, 1, 2, 0)
-        #expect(CreditsPacing.monthBoundaryLabels(now: instant, timeZone: Self.utc)?.start == "Aug 1")
         #expect(CreditsPacing.monthBoundaryLabels(
-            now: instant, timeZone: TimeZone(secondsFromGMT: -3 * 3600)!)?.start == "Jul 1")
+            now: instant, timeZone: Self.utc, displayTimeZone: Self.utc)?.start == "Aug 1")
+        #expect(CreditsPacing.monthBoundaryLabels(
+            now: instant,
+            timeZone: TimeZone(secondsFromGMT: -3 * 3600)!,
+            displayTimeZone: Self.utc)?.start == "Jul 1")
+    }
+
+    @Test func boundaryInstantsAreRenderedOnTheReadersClock() {
+        // Same UTC window, three readers. The window opens at 00:00 UTC on the 1st and closes an
+        // instant before 00:00 UTC on the 1st of the next month; each reader sees those two instants
+        // on their own clock, which west of UTC lands on the previous local day.
+        let now = utcDate(2026, 8, 14)
+        let utcLabels = CreditsPacing.monthBoundaryLabels(
+            now: now, timeZone: Self.utc, displayTimeZone: Self.utc)
+        #expect(utcLabels?.start == "Aug 1")
+        #expect(utcLabels?.end == "Aug 31")
+
+        // UTC+3: the opening instant is 03:00 on the 1st, the closing one 02:59:59 on Sep 1 — both
+        // still name a day inside the reader's own August-into-September boundary.
+        let east = CreditsPacing.monthBoundaryLabels(
+            now: now, timeZone: Self.utc, displayTimeZone: TimeZone(secondsFromGMT: 3 * 3600)!)
+        #expect(east?.start == "Aug 1")
+        #expect(east?.end == "Sep 1")
+
+        // UTC-5: the window opened at 19:00 on Jul 31 local — the reader's spend month really did
+        // begin the previous evening, and the caption says so rather than claiming Aug 1. The closing
+        // instant (23:59:59 UTC on the 31st) is 18:59:59 on that same 31st here, so only the opening
+        // caption shifts a day: west of UTC the window is Jul 31 → Aug 31, a day longer on the local
+        // calendar than the UTC month it tracks.
+        let west = CreditsPacing.monthBoundaryLabels(
+            now: now, timeZone: Self.utc, displayTimeZone: TimeZone(secondsFromGMT: -5 * 3600)!)
+        #expect(west?.start == "Jul 31")
+        #expect(west?.end == "Aug 31")
     }
 }
 

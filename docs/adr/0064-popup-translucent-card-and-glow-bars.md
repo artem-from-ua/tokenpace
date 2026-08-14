@@ -62,6 +62,6 @@ default-off, поза пресетами), що повертав рідний me
 - [ADR-0022](0022-popup-bar-transparency-and-contrast-experiment.md) — попереднє рішення про суцільний фон
   (superseded цим ADR).
 - [ADR-0060](0060-popup-native-semantic-colours.md) — системні semantic-кольори попап-барів.
-- [ADR-0062](0062-configurable-bar-presentation.md) — `barStyle`/`showTicks`, які тут малюються на новій
+- [ADR-0062](0062-configurable-bar-presentation.md) — `barStyle`, який тут малюється на новій
   композиції.
 - [ADR-0046](0046-dev-color-tuner-override-layer.md) — dev color-tuner, чиє preview тепер форсує Vibrant.

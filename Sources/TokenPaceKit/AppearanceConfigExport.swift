@@ -27,7 +27,6 @@ extension AppearancePresetValues: Codable {
         case dropdownStyle              // Dropdown Widget → "Bar style"
         case modelLimitsVisibility      // "Show model & service limits"
         case extraUsageVisibility       // "Show extra usage"
-        case showTicks                  // "Show ticks on bars"
 
         /// The pre-#329 single "Bar style" key, read-only. Not emitted — it exists so a config
         /// exported by an older build still imports, splitting into the two per-surface keys via
@@ -40,8 +39,9 @@ extension AppearancePresetValues: Codable {
         /// so importing an old dump and upgrading in place agree).
         case hideCalmSevenDayBar
 
-        // A retired `farBehindInterval` key needs no case at all: `Codable` ignores unknown JSON keys,
-        // so a config exported before the far-behind width was fixed still imports cleanly.
+        // Retired keys (`farBehindInterval`, `showTicks`) need no case at all: `Codable` ignores
+        // unknown JSON keys, so a config exported before the far-behind width was fixed — or before
+        // the tick ruler stopped being optional — still imports cleanly.
     }
 
     /// Written out (rather than left to the compiler) only so the key list appears in pane order in
@@ -56,7 +56,6 @@ extension AppearancePresetValues: Codable {
         try c.encode(dropdownStyle, forKey: .dropdownStyle)
         try c.encode(modelLimitsVisibility, forKey: .modelLimitsVisibility)
         try c.encode(extraUsageVisibility, forKey: .extraUsageVisibility)
-        try c.encode(showTicks, forKey: .showTicks)
     }
 
     /// Decoding is order-independent (JSON objects are unordered by definition), so this only has to
@@ -100,8 +99,7 @@ extension AppearancePresetValues: Codable {
             modelLimitsVisibility: try c.decode(PopupSectionVisibility.self, forKey: .modelLimitsVisibility),
             extraUsageVisibility: try c.decode(PopupSectionVisibility.self, forKey: .extraUsageVisibility),
             menuBarStyle: menuBarStyle,
-            dropdownStyle: dropdownStyle,
-            showTicks: try c.decode(Bool.self, forKey: .showTicks))
+            dropdownStyle: dropdownStyle)
     }
 }
 
@@ -115,7 +113,7 @@ extension AppearancePresetValues: Codable {
 /// makes answering "what does your setup look like?" one click instead of a screenshot tour.
 ///
 /// Deliberately **Appearance-only**, unlike the full `PersistedConfig` dump proposed in #256: these
-/// nine keys are pure presentation — no filesystem paths, no account names, no working hours —
+/// seven keys are pure presentation — no filesystem paths, no account names, no working hours —
 /// so a dump can be pasted into an issue without reading it first. Widening this to other panes
 /// requires a per-key privacy pass first (#256).
 ///
@@ -128,7 +126,7 @@ public enum AppearanceConfigExport {
     /// never disappears from the dump.
     public static let customPresetName = "custom"
 
-    /// Build the clipboard JSON: the app version and active preset as metadata, and the nine
+    /// Build the clipboard JSON: the app version and active preset as metadata, and the seven
     /// Appearance values under `appearance` **in pane order** (see the `Codable` extension above).
     ///
     /// No export timestamp on purpose: it would make two dumps of an unchanged config differ, which
@@ -167,7 +165,6 @@ public enum AppearanceConfigExport {
             ("dropdownStyle", jsonString(v.dropdownStyle.rawValue)),
             ("modelLimitsVisibility", jsonString(v.modelLimitsVisibility.rawValue)),
             ("extraUsageVisibility", jsonString(v.extraUsageVisibility.rawValue)),
-            ("showTicks", jsonBool(v.showTicks)),
         ]
 
         // Two-space indent and `" : "` around the colon match `JSONSerialization.prettyPrinted`, so

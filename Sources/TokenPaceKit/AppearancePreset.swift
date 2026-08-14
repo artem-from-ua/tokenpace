@@ -7,7 +7,7 @@ import Foundation
 /// visibility (#215, #224, #329).
 /// Generalises the single "Reset to defaults" row from #214: `.chill` is the calm, quiet look
 /// (simplified bars), `.workHarder` is `.chill` plus the coloured far-behind blue, `.controlFreak`
-/// turns everything on (dense pacing bars). Applying a preset writes all eight keys at once via
+/// turns everything on (dense pacing bars). Applying a preset writes all seven keys at once via
 /// `PersistedConfig.apply(_:)`.
 ///
 /// Each preset picks **one** ``BarStyle`` and gives it to both surfaces (#329) — the presets are the
@@ -33,7 +33,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
     /// **Progress** bars with the time marker (#224).
     case controlFreak = "controlFreak"
 
-    /// The fixed value set this preset writes to the eight Appearance keys. Stored in the **as-persisted**
+    /// The fixed value set this preset writes to the seven Appearance keys. Stored in the **as-persisted**
     /// sense, matching `PersistedConfig`. Since ADR-0086 every value here is stored exactly as the pane
     /// shows it — the old `hideCalmSevenDayBar` was the last inverted one ("Show …" in the UI, *hide* in
     /// storage), and its tri-state replacement `calmBarHiding` names the hidden bar directly.
@@ -54,24 +54,22 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 modelLimitsVisibility: .nonCalm,
                 extraUsageVisibility: .aboveZero,
                 menuBarStyle: .pressure,
-                dropdownStyle: .pressure,
-                showTicks: false)   // the quiet look drops the under-bar tick ruler too
+                dropdownStyle: .pressure)
         case .workHarder:
             // `.chill` with Work harder on and **Gauge** bars on both surfaces (#329) — the style that
             // renders the underpace half, so an unspendable surplus is visible rather than flattened;
-            // far-behind blue stays coloured under calm colours; ticks on. When blocked, keep the bars
+            // far-behind blue stays coloured under calm colours. When blocked, keep the bars
             // beside the pause icon.
             return AppearancePresetValues(
                 calmColorMode: .yellowGreen,   // greens/yellows mute; far-behind blue stays coloured
                 calmBarHiding: .fiveHour,   // same quiet default as `.chill` — and the factory default
                 showServiceStatusDot: true,
                 // Same quiet dropdown as `.chill` — the extra loudness of this preset is in the menu
-                // bar (blue far-behind, ticks), not in permanently expanded popup sections.
+                // bar (blue far-behind), not in permanently expanded popup sections.
                 modelLimitsVisibility: .nonCalm,
                 extraUsageVisibility: .aboveZero,
                 menuBarStyle: .gauge,
-                dropdownStyle: .gauge,
-                showTicks: true)
+                dropdownStyle: .gauge)
         case .controlFreak:
             // Show everything: calm off; nothing hidden; every glyph/dot/credits/per-model row on;
             // dense pacing bars. Work harder on so the far-behind blue stays loud too.
@@ -84,8 +82,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 modelLimitsVisibility: .always,
                 extraUsageVisibility: .always,
                 menuBarStyle: .progress,
-                dropdownStyle: .progress,
-                showTicks: true)
+                dropdownStyle: .progress)
         }
     }
 
@@ -120,7 +117,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
 
 // MARK: - AppearancePresetValues
 
-/// The eight Appearance-pane values a preset sets, in the same **as-persisted** sense as
+/// The seven Appearance-pane values a preset sets, in the same **as-persisted** sense as
 /// `PersistedConfig` — which is also exactly what each pane row shows (the inverted
 /// `hideCalmSevenDayBar` was the last exception, retired with ADR-0086).
 public struct AppearancePresetValues: Sendable, Equatable {
@@ -143,9 +140,9 @@ public struct AppearancePresetValues: Sendable, Equatable {
     public let menuBarStyle: BarStyle
     /// How the **dropdown** popup draws its bars (#329). Also decides that surface's tick ruler —
     /// window subdivisions off the window scale mean nothing, so the ruler falls back to the one
-    /// landmark the chosen scale has.
+    /// landmark the chosen scale has. The ruler itself is not optional: it draws in every dropdown
+    /// bar, and the style only picks which landmarks it carries.
     public let dropdownStyle: BarStyle
-    public let showTicks: Bool
 
     public init(
         calmColorMode: CalmColorMode,
@@ -154,8 +151,7 @@ public struct AppearancePresetValues: Sendable, Equatable {
         modelLimitsVisibility: PopupSectionVisibility,
         extraUsageVisibility: PopupSectionVisibility,
         menuBarStyle: BarStyle,
-        dropdownStyle: BarStyle,
-        showTicks: Bool
+        dropdownStyle: BarStyle
     ) {
         self.calmColorMode = calmColorMode
         self.calmBarHiding = calmBarHiding
@@ -164,6 +160,5 @@ public struct AppearancePresetValues: Sendable, Equatable {
         self.extraUsageVisibility = extraUsageVisibility
         self.menuBarStyle = menuBarStyle
         self.dropdownStyle = dropdownStyle
-        self.showTicks = showTicks
     }
 }

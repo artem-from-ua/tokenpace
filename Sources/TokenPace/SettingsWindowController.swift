@@ -135,11 +135,6 @@ final class SettingsWindowController: NSWindowController {
         get { model.onDropdownStyleChange } set { model.onDropdownStyleChange = newValue }
     }
 
-    /// Called when the user toggles "Show ticks on bars" (#224), with the new state. Popup-only.
-    var onShowTicksChange: ((Bool) -> Void)? {
-        get { model.onShowTicksChange } set { model.onShowTicksChange = newValue }
-    }
-
     /// Called when the user toggles "Show service status dot on issues" (#31), with the new state.
     var onServiceDotChange: ((Bool) -> Void)? {
         get { model.onServiceDotChange } set { model.onServiceDotChange = newValue }

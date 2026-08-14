@@ -433,7 +433,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         popupVC.loadView()   // realise the view so it can be sized before the menu measures it
         popupVC.barStyle = PersistedConfig.dropdownStyle   // this surface's own style (#224, #329)
-        popupVC.showTicks = PersistedConfig.showTicks   // apply the saved tick-ruler choice from launch (#224)
         // The dropdown's two section-visibility modes (#211), likewise applied from launch.
         popupVC.modelLimitsVisibility = PersistedConfig.modelLimitsVisibility
         popupVC.extraUsageVisibility = PersistedConfig.extraUsageVisibility
@@ -629,12 +628,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // which is how the new style reaches each `PopupBarView`.
                 self?.popupVC.barStyle = style
                 self?.reRenderForCurrentTime()   // also push the new style into the dev-tuner preview
-            }
-            wc.onShowTicksChange = { [weak self] on in
-                // Popup-only (#224): the tick ruler lives in `PopupBarView`; the VC's `showTicks` didSet
-                // rebuilds so each child bar picks up the new value. No menu-bar change.
-                self?.popupVC.showTicks = on
-                self?.reRenderForCurrentTime()   // also push the tick-ruler change into the preview
             }
             wc.onServiceDotChange = { [weak self] _ in
                 // The dot changes the layout (drawn + item width), not just a colour — rebuild the

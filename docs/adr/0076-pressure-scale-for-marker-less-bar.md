@@ -21,7 +21,7 @@ supersedes: []
 > Частково витісняє [ADR-0062](0062-configurable-bar-presentation.md) (§1 `BarStyle`): стрічка
 > без маркера більше **не** дорівнює ширині пейсинг-gap (`gapEnd − gapStart`) — вона рахується в
 > перенормованій шкалі `[now .. reset]`. Решта 0062 (per-surface вибір, `CalmColorMode`,
-> `FarBehindInterval`, `showTicks`, пресети) лишається чинною.
+> `FarBehindInterval`, пресети) лишається чинною (§4 `showTicks` витіснено [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md)).
 
 ## Контекст
 

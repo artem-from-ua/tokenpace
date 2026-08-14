@@ -167,7 +167,6 @@ final class DevToolsWindowController: NSWindowController {
             // Seed the bar presentation so the first frame matches the current settings (updatePreview
             // keeps them in sync on every refresh thereafter).
             previewVC.barStyle = PersistedConfig.dropdownStyle
-            previewVC.showTicks = PersistedConfig.showTicks
             // Borderless: attached as a child of the tuner, it has no title bar / close button — it can't
             // be closed on its own and always travels with the tuner. Its own "Popup Preview" heading is
             // drawn inside the content instead.
@@ -301,10 +300,9 @@ final class DevToolsWindowController: NSWindowController {
     /// update dots so their `ColorRole`s track edits. No-op if not open.
     func updatePreview(_ layout: PopupLayout) {
         guard let preview = previewWindow, preview.isVisible else { return }
-        // Keep the bar presentation in sync so a Bar style / tick-ruler change re-renders the preview
-        // (each is a no-op didSet unless it actually changed).
+        // Keep the bar presentation in sync so a Bar style change re-renders the preview (a no-op
+        // didSet unless it actually changed).
         previewVC.barStyle = PersistedConfig.dropdownStyle
-        previewVC.showTicks = PersistedConfig.showTicks
         // Section visibility too, for the same reason: without it the preview keeps the controller's
         // `.nonCalm` default and silently drops the model-limit and Extra-usage sections whenever they
         // are calm — so a stub staged precisely to show one of them renders without it, which reads as

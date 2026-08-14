@@ -1116,6 +1116,12 @@ final class StatusItemView: NSView {
         let cx: CGFloat = barStyle.scale == .centred
             ? PopupBarView.scaleX(0.5, in: rect).rounded()
             : (PopupBarView.pillRect(at: 0, in: rect)?.midX ?? PopupBarView.scaleX(0, in: rect)).rounded()
+        // Only the zero, never the popup's 0.20 on-pace landmark. Not an oversight: ⌥ never reaches
+        // this surface (the modifier is only observable while the menu is open, and then the reader is
+        // looking at the popup), so a second tick here could only be permanent — and a permanent pair
+        // of teeth on a 34 pt bar is the noise the single mark was carefully constructed to avoid.
+        // The menu bar therefore carries the identifying half of the ruler; the explaining half lives
+        // in the dropdown, under ⌥ (`PopupBarView.drawTicks`).
         let w = Metrics.centreTickWidth
         let h = Metrics.centreTickHeight
         // Neutral `centreTick` — never a pacing colour: this is scale furniture, not data. It defaults
