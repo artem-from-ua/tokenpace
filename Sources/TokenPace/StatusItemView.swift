@@ -950,7 +950,9 @@ final class StatusItemView: NSView {
             // pacing path does: the tick is drawn in *every* state, which is what makes the zero
             // findable at all.
             let idleZero = barStyle.scale == .centred ? 0.5 : 0.0
-            if barStyle.scale == .centred { drawCentreTick(in: rect) }
+            // Progress is the one style with no zero tick: its marker already carries a position, and
+            // a second vertical mark beside it would read as a competing one.
+            if barStyle.scale != .window { drawZeroTick(in: rect) }
             // Zero pressure — the same pill `fillZone(floorEmptyToPill:)` draws for a zero ribbon.
             // The grey track goes down first, exactly as the pacing path does: without it the pill
             // would hang in empty space while every neighbouring bar shows a track.
@@ -969,9 +971,10 @@ final class StatusItemView: NSView {
         let l = bar.layout
         let w = rect.width
 
-        // Gauge's centre tick goes down BEFORE the track (#326): the track then covers its middle and
-        // only the ends stand proud, which is what keeps it from reading as a Progress time marker.
-        if barStyle.scale == .centred { drawCentreTick(in: rect) }
+        // The zero tick goes down BEFORE the track (#326): the track then covers its middle and only
+        // the ends stand proud, which is what keeps it from reading as a Progress time marker. True of
+        // Pressure's origin tick for exactly the same reason it is of Gauge's centre one.
+        if barStyle.scale != .window { drawZeroTick(in: rect) }
 
         // Whole-bar rounded grey track (drawn first; the gap paints over it). Both flanks of the gap —
         // the used head and the future/unused tail — are this one tone, so they read identical.
@@ -1053,9 +1056,9 @@ final class StatusItemView: NSView {
                        in: rect)
     }
 
-    /// The **Gauge** centre tick (#326, ADR-0079): a permanent 1 pt vertical mark at the bar's
-    /// midpoint, in the neutral tick tone, drawn **under** the track so only its protruding ends
-    /// show.
+    /// The **zero tick**: a permanent 1 pt vertical mark at the zero the ribbon grows out of, in the
+    /// neutral tick tone, drawn **under** the track so only its protruding ends show. Gauge's zero is
+    /// the bar's midpoint (#326, ADR-0079); Pressure's is the left-anchored ribbon's own origin.
     ///
     /// Deliberately *not* built on ``drawTimeMarker(at:colour:in:)`` despite the similar shape — the
     /// semantics are opposite, and every difference here is doing work. That marker is data (it moves
@@ -1063,10 +1066,21 @@ final class StatusItemView: NSView {
     /// outline); this is a fixed rule of the scale. Drawing it under the track in grey at a fifth the
     /// width is what stops a lone vertical mark on a 34 pt bar from reading as Progress's marker —
     /// the objection that kept ticks out of the menu bar entirely under Pressure (see
-    /// `PopupBarView.tickFractions`). It is drawn in **every** Gauge state, idle included: a direction
-    /// needs something to be a direction from.
-    private func drawCentreTick(in rect: NSRect) {
-        let cx = PopupBarView.scaleX(0.5, in: rect).rounded()
+    /// `PopupBarView.tickFractions`). That objection is answered by *construction*, not by omission,
+    /// which is what lets Pressure carry the mark too. It is drawn in **every** state of both styles,
+    /// idle included: a length needs something to be a length from.
+    ///
+    /// **Where Pressure's zero actually is.** Not `scaleX(0)`, and not the track's left edge: a
+    /// zero-length ribbon is floored to the min-width pill, and that pill's left cap is then snapped
+    /// flush to `rect.minX` by ``PopupBarView/pillRect(at:in:)``. Its drawn centre therefore sits half
+    /// a pill-width in from the edge. Reading the position back out of `pillRect` keeps the tick under
+    /// the pill it marks however that snap resolves, instead of restating the arithmetic here and
+    /// drifting from it the next time the inset geometry moves (`minStripWidth` is the one knob).
+    private func drawZeroTick(in rect: NSRect) {
+        // Gauge measures from the middle; Pressure from the zero pill's centre.
+        let cx: CGFloat = barStyle.scale == .centred
+            ? PopupBarView.scaleX(0.5, in: rect).rounded()
+            : (PopupBarView.pillRect(at: 0, in: rect)?.midX ?? PopupBarView.scaleX(0, in: rect)).rounded()
         let w = Metrics.centreTickWidth
         let h = Metrics.centreTickHeight
         // Neutral `centreTick` — never a pacing colour: this is scale furniture, not data. It defaults
