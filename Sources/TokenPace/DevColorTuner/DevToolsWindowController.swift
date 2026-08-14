@@ -194,6 +194,10 @@ final class DevToolsWindowController: NSWindowController {
             positionPreview()
             if preview.parent == nil { main.addChildWindow(preview, ordered: .above) }
         }
+        // Re-force on every show: the window is built once but outlives its visibility, so a theme flip
+        // that happens while it is hidden would otherwise leave it in the vibrancy it latched at build
+        // time. Same reason as `SettingsPreviewWindowController.attach(to:)`.
+        previewWindow?.appearance = PreviewChrome.vibrantAppearance
         previewWindow?.orderFront(nil)
     }
 
