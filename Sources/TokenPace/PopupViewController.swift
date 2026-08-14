@@ -237,7 +237,13 @@ final class PopupBarView: NSView {
         // dropped. The glyph box then runs one line height further down.
         let captionTop = overhang + Metrics.barHeight + Metrics.tickGap
             + (Metrics.tickLength - font.ascender + font.descender) / 2 + Metrics.boundaryCaptionDrop
-        return captionTop + font.boundingRectForFont.height
+        // Rounded up to a whole point. Both terms are built from font metrics, which are deeply
+        // fractional (`boundingRectForFont.height` is 11.09 at 9 pt, and the ascender/descender pair
+        // adds its own fraction), so the raw sum lands on 25.5. This view is inside the popup's vertical
+        // stack, and a fractional row height propagates to every row below it — visible in the Settings
+        // preview as the whole card shifting by half a point whenever ⌥ reveals the credits section.
+        // The live dropdown hides it because its hosting view is given a whole-number frame outright.
+        return ceil(captionTop + font.boundingRectForFont.height)
     }
 
     // MARK: - Effective presentation
@@ -2161,6 +2167,23 @@ final class PopupViewController: NSViewController {
             systemSymbolName: "hand.raised", accessibilityDescription: "sessions awaiting input")?
             .withSymbolConfiguration(config)
         iconView.contentTintColor = tint
+        // Pin the symbol to a **whole-point** box. An `NSImageView` holding an SF Symbol reports a
+        // fractional intrinsic size — measured on this machine, `hand.raised` comes out 16 pt wide but
+        // `clock` 15.5 and `exclamationmark.triangle` 16.5 — and this chip is the right-hand slot of the
+        // `.firstBaseline` header row, the top row of the card. Half a point there is inherited by every
+        // row below it, so the whole popup appears to shift when the badge comes or goes (⌥ swaps it for
+        // an empty view). The labels were never the culprit: `NSTextField` rounds its own metrics to
+        // whole points, image views do not.
+        //
+        // The constraint has to live on the image view, not on the row: `NSStackView` creates its
+        // alignment constraints at `NSLayoutPriorityDefaultLow` and documents them as "overridable for
+        // individual views using external constraints" (`NSStackView.h`), which is why pinning the row's
+        // height had no effect while this does.
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            iconView.widthAnchor.constraint(equalToConstant: ceil(size) + 3),
+            iconView.heightAnchor.constraint(equalToConstant: ceil(size) + 3),
+        ])
 
         let stack = NSStackView()
         // Count **before** the icon — reads as "N sessions" (numeral + noun), the natural English
