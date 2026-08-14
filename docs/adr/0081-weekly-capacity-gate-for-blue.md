@@ -10,7 +10,7 @@ supersedes: []
 > часової ширини» — поріг лишається фіксованим, але множник більше не конфігурований) і
 > [ADR-0062](0062-configurable-bar-presentation.md) (§3 `FarBehindInterval` — опцію прибрано).
 > Чинними лишаються: синій severity-case `farBehind`, 20-хв start-override, обсяг 5h/7d,
-> `CalmColorMode`, `showTicks`, пресети як єдине джерело дефолтів.
+> `CalmColorMode`, пресети як єдине джерело дефолтів.
 
 ## Контекст
 

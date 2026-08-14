@@ -2,11 +2,16 @@
 status: superseded
 date: 2026-08-02
 supersedes: []
-superseded_by: [0076, 0080, 0081]
+superseded_by: [0076, 0080, 0081, 0098]
 ---
 
 # ADR-0062: Конфігурована подача пейсинг-барів — Bar style, Calm-режим, поріг far-behind
 
+> **Частково витіснений [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md)**: §4
+> більше не чинний — `showTicks` видалено з Settings, пресетів і експорту. Лінійка поділена за
+> роботою кожної позначки: риска нуля видима завжди, решта — під ⌥ Option. Чинними лишаються §2
+> `CalmColorMode` і пресети як єдине джерело дефолтів.
+>
 > **Частково витіснений [ADR-0081](0081-weekly-capacity-gate-for-blue.md)**: §3 більше не чинний —
 > `FarBehindInterval` прибрано з Settings, множник зафіксовано на ×2, а `BarLayout.behindMultiplier`
 > замінено на `blueAllowed`, що несе weekly-capacity gate. Решта (§2 `CalmColorMode`, §4 `showTicks`,
@@ -97,7 +102,11 @@ AppKit-колір читають те саме** — не розходяться
 `PersistedConfig.farBehindInterval.multiplier ?? 0` у `barLayout(...)` через `MenuBarLayout.make` /
 `PopupLayout.make`.
 
-### 4. `showTicks` — засічки під баром у попапі (opt-out)
+### 4. ~~`showTicks` — засічки під баром у попапі (opt-out)~~
+
+> **Витіснено [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md).** Опції більше
+> немає: лінійка поділена за роботою кожної позначки — риска нуля (впізнати стиль) видима завжди,
+> решта (пояснити шкалу) — під ⌥ Option.
 
 Bool-гейт на `PopupBarView.drawTicks`. Menu bar засічок не має, тож опція popup-only.
 
