@@ -190,10 +190,15 @@ struct SettingsRowBadge: Equatable {
 /// Draws a ``SettingsRowBadge``: a white glyph on a flat rounded rect, sized for a `Form` row rather
 /// than for the sidebar.
 ///
-/// Shares the sidebar chip's 5 pt continuous corner radius so the two read as the same family of
-/// object, but is a size smaller (20 pt against the sidebar's 26): this chip sits beside a row of
-/// body text, not a 15 pt sidebar label, and at the sidebar's size it out-weighed the title it
-/// belongs to.
+/// Sized off **Internet Accounts**, the pane this row is modelled on: there the account badge is
+/// noticeably larger than a sidebar chip, spanning both the account name and its state line rather
+/// than sitting beside the title alone. Ours does the same at 26 pt — the sidebar chip's size, which
+/// on a two-line row reads as the row's icon rather than as a bullet in front of its text.
+///
+/// Keeps the sidebar chip's 5 pt continuous corner radius so the two read as the same family of
+/// object. The glyph is a touch smaller in proportion than the sidebar's (16 pt in 26, against
+/// 17 in 26): a cloud fills its box more than a gear does, and matching the sidebar ratio left it
+/// crowding the corners.
 private struct SettingsRowBadgeView: View {
     let badge: SettingsRowBadge
     /// Same reasoning as the sidebar chip: a flat tint takes no part in vibrancy, so it would stay at
@@ -212,8 +217,8 @@ private struct SettingsRowBadgeView: View {
     }
 
     private enum Metrics {
-        static let chip: CGFloat = 20
-        static let symbol: CGFloat = 12
+        static let chip: CGFloat = 26
+        static let symbol: CGFloat = 16
         /// The sidebar chip's radius, unchanged — see the type doc.
         static let corner: CGFloat = 5
         static let inactiveAlpha: Double = 0.5
