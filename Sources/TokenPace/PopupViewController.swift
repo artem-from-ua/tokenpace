@@ -185,15 +185,22 @@ final class PopupBarView: NSView {
     /// the hosted bar's height constraint to the same value the view draws into.
     static var viewHeight: CGFloat { Metrics.height }
 
-    /// The view height for a **credits** bar. The captions sit *level with* the teeth, inside the
-    /// ruler's existing band, so the bar needs extra room only if the caption's line box is taller than
-    /// the teeth it sits beside — at the shipped sizes (9 pt text, 5 pt teeth) it is, by a couple of
-    /// points. Computed rather than hard-coded so a change to either metric stays correct.
+    /// The view height for a **credits** bar: measured from where its captions actually end, not from
+    /// the tick-ruler band.
+    ///
+    /// ``Metrics/height`` reserves `tickGap + tickLength` for teeth this bar does not draw, so adding
+    /// the caption's own box on top of it paid for the teeth *and* the words — leaving a visible gap
+    /// under the row that no other section has. Measuring the caption's real bottom instead
+    /// (`captionTop + line height`, matched to the y `drawBoundaryCaptions` uses) closes it, and stays
+    /// correct if the point size or the drop changes.
     static var creditsViewHeight: CGFloat {
-        let captionHeight = NSFont.systemFont(ofSize: Metrics.boundaryCaptionSize).boundingRectForFont.height
-        // The drop pushes the caption's box below the teeth, so both the overhang *and* the drop have
-        // to be paid for — otherwise the frame clips the descenders of the very words it added room for.
-        return Metrics.height + max(0, captionHeight - Metrics.tickLength) + Metrics.boundaryCaptionDrop
+        let font = NSFont.systemFont(ofSize: Metrics.boundaryCaptionSize)
+        let overhang = max(0, (Metrics.indicatorHeight - Metrics.barHeight) / 2)
+        // Mirrors `drawBoundaryCaptions`: bar bottom → tick gap → centred on the (absent) tooth band →
+        // dropped. The glyph box then runs one line height further down.
+        let captionTop = overhang + Metrics.barHeight + Metrics.tickGap
+            + (Metrics.tickLength - font.ascender + font.descender) / 2 + Metrics.boundaryCaptionDrop
+        return captionTop + font.boundingRectForFont.height
     }
 
     // MARK: - Effective presentation
@@ -698,14 +705,17 @@ final class PopupBarView: NSView {
     /// once the ends are named, a tooth under each word is a mark with nothing left to say, and the
     /// one at `1` crowds a late-month time marker besides.
     ///
-    /// Drawn in `secondaryLabelColor`, flush to the track's ends, and dropped clear of the bar. No-op on
-    /// every non-credits bar.
+    /// Drawn in ``PopupViewController/dimmedLabelColor`` — the **same ink as the money line above**
+    /// ("€10.8 of €15") and as
+    /// every other secondary row in the popup, so the ruler joins that tier instead of introducing a
+    /// third weight of grey between it and the track. Flush to the track's ends, and dropped clear of
+    /// the bar. No-op on every non-credits bar.
     private func drawBoundaryCaptions(in barRect: NSRect) {
         guard let bounds = monthBounds else { return }
         let font = NSFont.systemFont(ofSize: Metrics.boundaryCaptionSize)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.secondaryLabelColor,
+            .foregroundColor: PopupViewController.dimmedLabelColor,
         ]
         // Vertically centred on the teeth, then dropped by `boundaryCaptionDrop` so the words clear the
         // teeth and the marker's glow instead of sitting shoulder-to-shoulder with them.
