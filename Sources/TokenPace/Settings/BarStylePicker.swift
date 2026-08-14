@@ -41,6 +41,10 @@ struct BarStylePicker: View {
         static let activeBorder: CGFloat = 3
         static let idleBorder: CGFloat = 1
         static let hoverBorder: CGFloat = 1.5
+        /// Opacity of the accent wash over the selected tile. Deliberately light: the wash covers the
+        /// preview's own green/yellow/orange, which carry the pacing meaning the pictures exist to
+        /// show, and anything heavier starts recolouring them into something the widget never draws.
+        static let activeTint: CGFloat = 0.22
     }
 
     var body: some View {
@@ -81,6 +85,18 @@ struct BarStylePicker: View {
                     }
                 }
                 .frame(width: Tile.width, height: Tile.height)
+                // The accent wash of the selected tile, laid OVER everything — plate and picture
+                // alike. It has to be over: the pictures are opaque captures (`hasAlpha: no`) that
+                // cover only the middle 54×33 pt of an 80×48 pt tile, so a wash placed *under* them
+                // reaches nothing but the margin, and the tile reads as two different blacks with a
+                // seam between them rather than as one selected thing.
+                //
+                // Clipped to the tile's own shape so the wash follows the rounded corners instead of
+                // squaring them off under the ring.
+                .overlay(
+                    RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
+                        .fill(Color.accentColor)
+                        .opacity(isActive ? Tile.activeTint : 0))
                 .overlay(
                     RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
                         .strokeBorder(isActive ? Color.accentColor
