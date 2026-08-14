@@ -60,10 +60,15 @@ struct BarStylePicker: View {
         /// black — the part meant to change — barely moves while the bright bars visibly wash out:
         /// exactly backwards. Hence a blend rather than an opacity.
         ///
-        /// Tuned by eye down a ladder of rejected takes — 0.34, 0.26, 0.20 — each of which turned the
-        /// plate into a grey tile rather than a black one acknowledging a click. The press should be
-        /// felt, not announced.
-        static let pressGrey = Color(white: 0.16)
+        /// Tuned by eye down a ladder of rejected takes — 0.34, 0.26, 0.20, 0.16 — each of which
+        /// turned the plate into a grey tile rather than a black one acknowledging a click. The press
+        /// should be felt, not announced.
+        ///
+        /// The last step down came with the live render (#373). The specimen is smaller than the
+        /// captures it replaced (38×22 pt against 54×33), so proportionally more of the tile is bare
+        /// plate — and the same grey therefore covers more area and reads louder than it did when it
+        /// was chosen, even though the value had not changed.
+        static let pressGrey = Color(white: 0.12)
     }
 
     var body: some View {
