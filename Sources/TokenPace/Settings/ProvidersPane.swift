@@ -11,10 +11,10 @@ import TokenPaceKit
 /// adds a row rather than a rethink.
 ///
 /// The sections **below** the provider list stay on this parent page because they belong to no
-/// single provider: awaiting-input reads local Claude Code state and would apply to any provider
-/// with a local client, the incident age cut-off filters the popup for every service at once, and
-/// there is one archiver. Pushing them down into `Claude` would claim a per-provider granularity
-/// that does not exist.
+/// single provider: the screen-lock pause suspends every provider's polling, awaiting-input reads
+/// local Claude Code state and would apply to any provider with a local client, the incident age
+/// cut-off filters the popup for every service at once, and there is one archiver. Pushing them
+/// down into `Claude` would claim a per-provider granularity that does not exist.
 struct ProvidersPane: View {
     @Bindable var model: SettingsModel
 
@@ -31,6 +31,18 @@ struct ProvidersPane: View {
                     title: "Claude",
                     subtitle: model.claudeProviderSummary,
                     action: { model.drill(into: .providersClaude) })
+            }
+
+            // MARK: Polling — unlabelled on purpose
+            //
+            // A second title-less section rather than a row inside the provider list: the pause
+            // applies to every provider's polling at once, so it belongs to no single provider row.
+            // It carries no header because a one-switch section titled "Polling" would say nothing
+            // the switch itself does not already say.
+            Section {
+                Toggle("Pause usage API polling while the screen is locked", isOn: Binding(
+                    get: { model.pausePolling },
+                    set: { model.setPausePolling($0) }))
             }
 
             // MARK: Monitored service incidents (one threshold for every monitored service)
