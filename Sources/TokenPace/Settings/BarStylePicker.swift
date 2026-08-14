@@ -54,9 +54,9 @@ struct BarStylePicker: View {
         /// black — the part meant to change — barely moves while the bright bars visibly wash out:
         /// exactly backwards. Hence a blend rather than an opacity.
         ///
-        /// High enough that the greying is unmistakable at a glance, while the plate still reads as a
-        /// dark surface rather than turning into a light one.
-        static let pressGrey = Color(white: 0.34)
+        /// Tuned by eye between two rejected takes: 0.22 barely registered, 0.34 turned the plate into
+        /// a grey tile rather than a black one acknowledging a click.
+        static let pressGrey = Color(white: 0.26)
     }
 
     var body: some View {
@@ -120,9 +120,11 @@ struct BarStylePicker: View {
                                       lineWidth: borderWidth))
 
                 Text(title)
-                    // Smaller than the pane's body text: the caption only names what the picture
-                    // above it already shows, so it should not compete with the row's own label.
-                    .font(.caption)
+                    // The size System Settings → Appearance uses under its own preview thumbnails —
+                    // the same as the pane's other text, not a smaller one. Those captions look
+                    // smaller than they are because of their weight and colour, not their point size;
+                    // shrinking them to `.caption` to match that impression made them visibly tiny.
+                    .font(.callout)
                     .fontWeight(isActive ? .semibold : .regular)
                     .foregroundStyle(isActive ? Color.primary : Color.secondary)
                     .lineLimit(1)

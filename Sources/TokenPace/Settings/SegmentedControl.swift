@@ -32,10 +32,6 @@ struct SegmentedControl<Value: Hashable>: View {
     let active: Value
     /// Called when the user taps a **selectable** segment.
     let onSelect: (Value) -> Void
-    /// Segment label font. Defaults to the size every other row on these pages uses; the Bar style row
-    /// overrides it so its wording matches the picture-based picker of the same setting on the Menu bar
-    /// page, which sets its captions smaller than body text.
-    var titleFont: Font = .callout
 
     /// Which segment's `inactiveHelp` popover is open (by value), or nil.
     @State private var helpShownFor: Value?
@@ -56,7 +52,7 @@ struct SegmentedControl<Value: Hashable>: View {
                     }
                 } label: {
                     Text(segment.title)
-                        .font(titleFont)
+                        .font(.callout)
                         .lineLimit(1)
                         .fixedSize()
                         .padding(.vertical, 3)
