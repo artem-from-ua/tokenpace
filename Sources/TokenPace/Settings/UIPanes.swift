@@ -206,7 +206,9 @@ struct DropdownPane: View {
                 // separately. Its hint states the Extra-usage exception, and states only the fact: that
                 // bar is always Progress whatever is picked here, so a Progress bar sitting under a
                 // column of Pressure/Gauge bars reads as documented behaviour rather than a bug worth
-                // reporting. The reasons stay here rather than in the hint — its window is a calendar
+                // reporting. The hint names the *bar*, not the section: this page sets how bars are
+                // drawn, and the section also carries text and a badge that this exception says nothing
+                // about. The reasons stay here rather than in the hint — its window is a calendar
                 // month, which the bar's two captioned ends already name on the bar itself, so a user
                 // who wonders why has the answer in front of them.
                 //
@@ -223,7 +225,7 @@ struct DropdownPane: View {
                             active: model.dropdownStyle,
                             onSelect: { model.setDropdownStyle($0) })
                     }
-                    SettingsHint(text: "*Extra usage* always draws in *Progress* style.")
+                    SettingsHint(text: "*Extra usage* bar always draws in *Progress* style.")
                 }
 
                 // No `SettingsHint` under either row: the segment labels ("Always" / "Above zero" /
