@@ -130,11 +130,38 @@ struct BarStylePicker: View {
     /// moves. They depend on `StatusItemView.Metrics.barWidth` / `.barHeight` / `.barGap` and on the
     /// pacing colours; change any of those and these files need re-capturing.
     private static let images: [BarStyle: NSImage] = {
+        guard let bundle = resourceBundle else { return [:] }
         var loaded: [BarStyle: NSImage] = [:]
         for style in BarStyle.allCases {
-            loaded[style] = Bundle.module.image(forResource: resourceName(for: style))
+            loaded[style] = bundle.image(forResource: resourceName(for: style))
         }
         return loaded
+    }()
+
+    /// The target's SwiftPM resource bundle — deliberately **not** `Bundle.module`.
+    ///
+    /// SwiftPM's generated accessor looks for the bundle next to `Bundle.main.bundleURL` and calls
+    /// `fatalError` when it is absent. Inside a real `.app` that URL *is* the app bundle, so it
+    /// probes `/Applications/TokenPace_TokenPace.bundle` — while the resources correctly live in
+    /// `Contents/Resources/`. The generated fallback is an absolute path into the developer's
+    /// `.build` directory, which no installed copy has. Both miss, and the app dies the first time
+    /// this pane is opened — the crash behind the `.app`-only trap that `swift run` never shows.
+    ///
+    /// So the lookup is done here: `Contents/Resources/` first (how a shipped `.app` is laid out),
+    /// then beside the executable (how `swift run` lays it out). A miss returns `nil` and the tiles
+    /// render without pictures — a decorative preview must never take the app down.
+    private static let resourceBundle: Bundle? = {
+        let name = "TokenPace_TokenPace.bundle"
+        let candidates = [
+            Bundle.main.resourceURL,
+            Bundle.main.bundleURL,
+            Bundle.main.executableURL?.deletingLastPathComponent(),
+        ]
+        for base in candidates.compactMap({ $0 }) {
+            if let bundle = Bundle(url: base.appendingPathComponent(name)) { return bundle }
+        }
+        // Resources may also be flattened straight into the app's own bundle.
+        return Bundle.main
     }()
 
     /// Resource base name per style. A `switch` without `default` so a fourth `BarStyle` case fails

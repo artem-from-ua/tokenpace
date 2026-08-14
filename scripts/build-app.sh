@@ -41,11 +41,14 @@ mkdir -p "${MACOS_DIR}" "${RES_DIR}"
 lipo -create "${SLICES[@]}" -output "${MACOS_DIR}/${APP_NAME}"
 echo "==> lipo archs: $(lipo -archs "${MACOS_DIR}/${APP_NAME}")"
 
-# SwiftPM resource bundle (`Bundle.module`) — the bar-style preview thumbnails.
+# SwiftPM resource bundle — the bar-style preview thumbnails.
 # `swift run` finds it beside the binary, so a missing copy here is invisible until someone opens
 # Settings in a real .app. Resources are architecture-independent, so both slices produce identical
 # bundles and the first one is enough — there is no lipo-style merge for resources.
 # Must happen BEFORE codesign: a bundle added after signing breaks the seal.
+#
+# `Contents/Resources/` is where the app looks (see `BarStylePicker.resourceBundle`); note this is
+# NOT where SwiftPM's own `Bundle.module` looks, which is why the app does not use it.
 BUNDLE_NAME="${APP_NAME}_${APP_NAME}.bundle"
 BUNDLE_SRC="$(dirname "${SLICES[0]}")/${BUNDLE_NAME}"
 [ -d "${BUNDLE_SRC}" ] || {
@@ -54,7 +57,15 @@ BUNDLE_SRC="$(dirname "${SLICES[0]}")/${BUNDLE_NAME}"
     exit 1
 }
 cp -R "${BUNDLE_SRC}" "${RES_DIR}/"
-echo "==> bundled resources: ${BUNDLE_NAME}"
+
+# An empty bundle copies without error and fails only at runtime, in the UI — assert the pictures
+# actually arrived. One file per BarStyle case.
+BUNDLED_PNGS="$(find "${RES_DIR}/${BUNDLE_NAME}" -name '*.png' | wc -l | tr -d ' ')"
+[ "${BUNDLED_PNGS}" -ge 3 ] || {
+    echo "error: expected at least 3 preview PNGs in ${BUNDLE_NAME}, found ${BUNDLED_PNGS}" >&2
+    exit 1
+}
+echo "==> bundled resources: ${BUNDLE_NAME} (${BUNDLED_PNGS} images)"
 
 # Info.plist with version/build substituted from template.
 sed -e "s/__VERSION__/${VERSION}/g" -e "s/__BUILD__/${BUILD}/g" \
