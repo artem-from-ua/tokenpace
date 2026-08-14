@@ -45,10 +45,15 @@ struct BarStylePicker: View {
         static let activeBorder: CGFloat = 3
         static let idleBorder: CGFloat = 1
         static let hoverBorder: CGFloat = 1.5
-        /// Opacity of the grey layer drawn over a tile while the mouse is held down on it. Enough to
-        /// read as "this one is being clicked" against a black plate without washing out the preview's
-        /// pacing colours during the press.
-        static let pressTint: CGFloat = 0.18
+        /// The click layer's colour and strength. A mid grey, not a semantic colour: `labelColor` and
+        /// friends flip with the theme, and in dark mode a near-white layer reads as the tile lighting
+        /// up rather than greying. Black would only deepen a plate that is already black — the tile has
+        /// nowhere darker to go, which is why dimming it looks like the whole thing dropping out.
+        ///
+        /// Kept faint, and lifted just off pure black so the plate turns a touch grey while the mouse
+        /// is down without the preview's pacing colours visibly shifting under it.
+        static let pressGrey = Color(white: 0.55)
+        static let pressTint: CGFloat = 0.14
     }
 
     var body: some View {
@@ -99,7 +104,7 @@ struct BarStylePicker: View {
                 // never draws.
                 .overlay(
                     RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
-                        .fill(Color(nsColor: .labelColor))
+                        .fill(Tile.pressGrey)
                         .opacity(pressed == style ? Tile.pressTint : 0))
                 .overlay(
                     RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
