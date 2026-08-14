@@ -301,6 +301,12 @@ final class DevToolsWindowController: NSWindowController {
         // (each is a no-op didSet unless it actually changed).
         previewVC.barStyle = PersistedConfig.dropdownStyle
         previewVC.showTicks = PersistedConfig.showTicks
+        // Section visibility too, for the same reason: without it the preview keeps the controller's
+        // `.nonCalm` default and silently drops the model-limit and Extra-usage sections whenever they
+        // are calm — so a stub staged precisely to show one of them renders without it, which reads as
+        // the section being broken rather than merely hidden.
+        previewVC.modelLimitsVisibility = PersistedConfig.modelLimitsVisibility
+        previewVC.extraUsageVisibility = PersistedConfig.extraUsageVisibility
         previewVC.layout = layout
         for (dot, role) in previewUpdateDots { dot.contentTintColor = ColorStore.shared.color(role) }
         // The container is Auto Layout; size the window to its fitting size (popup width + footer height).

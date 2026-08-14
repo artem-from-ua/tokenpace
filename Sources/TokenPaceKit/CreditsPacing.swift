@@ -285,6 +285,53 @@ public enum CreditsPacing {
         return calendar.date(byAdding: .month, value: 1, to: monthStart)
     }
 
+    // MARK: - Month-boundary labels (the credits bar's own ruler)
+
+    /// The two **calendar-month boundary labels** the credits bar's ruler is captioned with — the
+    /// month's first and last day, e.g. `("Aug 1", "Aug 31")`.
+    ///
+    /// The credits bar is the one bar whose window is a calendar month rather than a rolling limit
+    /// window, and the one bar drawn as **Progress** regardless of the user's `BarStyle`. Two
+    /// captioned ticks at the ends of its track say which window this is, so it cannot be mistaken for
+    /// a token bar's window scale or for a marker-less ribbon — the whole point of captioning them.
+    ///
+    /// **Computed in ``resetTimeZone`` (UTC), deliberately.** The captions name the very boundaries
+    /// that define ``monthElapsedFraction``, i.e. the bar's own 0 and 1; taking them in the device's
+    /// zone would let the caption disagree with the geometry it labels (a local-zone "Sep 1" while the
+    /// bar still measures August). This is the same reason `timeFraction` is computed in UTC, and it is
+    /// the opposite convention to ``CreditsRow/resetLine``, which renders the *instant* of the reset in
+    /// the user's local zone — an instant is a point everyone shares, a month label is a property of
+    /// the window's own calendar.
+    ///
+    /// The month name is fixed **English** (`en_US_POSIX`, literal `"MMM d"`), matching
+    /// `ResetClock.weekdayString`'s convention — the localisation seam is ADR-0009, not the formatter.
+    /// Returns `nil` only if the calendar cannot resolve the month's bounds (never in practice).
+    ///
+    /// - Parameters:
+    ///   - now: Current instant (inject for deterministic tests; do **not** call `Date()` here).
+    ///   - timeZone: Wall-clock zone whose month bounds are labelled. Default ``resetTimeZone`` (UTC).
+    public static func monthBoundaryLabels(
+        now: Date,
+        timeZone: TimeZone = CreditsPacing.resetTimeZone
+    ) -> (start: String, end: String)? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        guard
+            let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)),
+            let nextMonth = calendar.date(byAdding: .month, value: 1, to: monthStart),
+            // The *last day* of this month, not the first of the next: the right-hand caption marks the
+            // final day the window covers ("Aug 31"), which is where the bar's `1.0` lands.
+            let lastDay = calendar.date(byAdding: .day, value: -1, to: nextMonth)
+        else {
+            return nil
+        }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")   // fixed English month names, never localised
+        f.timeZone = timeZone
+        f.dateFormat = "MMM d"
+        return (f.string(from: monthStart), f.string(from: lastDay))
+    }
+
     /// The `used / limit` fraction (spent share of the money cap), or `nil` when there is **no**
     /// usable cap to pace against — `limit == nil` (unlimited) or a limit of zero minor units.
     ///

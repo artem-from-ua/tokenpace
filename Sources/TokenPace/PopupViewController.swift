@@ -127,6 +127,18 @@ final class PopupBarView: NSView {
     /// colour changes on screen. Mirrors `StatusItemView.frozenStripFraction`; `nil` everywhere else.
     var frozenStripFraction: Double?
 
+    /// The captions for a **credits** bar's two boundary ticks — the money window's first and last day
+    /// (`"Aug 1"`, `"Aug 31"`), precomputed in `CreditsRow.monthBounds`. Non-`nil` **only** on the
+    /// Extra-usage bar, where it is also what puts the view into its calendar-month presentation:
+    ///
+    /// - the bar draws as **Progress** regardless of the user's `BarStyle` (see ``effectiveScale``), and
+    /// - the tick ruler is replaced by two captioned boundary teeth instead of window subdivisions.
+    ///
+    /// Both halves come from the same fact — this bar's window is a calendar month, not a rolling limit
+    /// window — so they are driven by one property rather than by two independently-settable flags that
+    /// could disagree. `nil` leaves every existing bar exactly as it was.
+    var monthBounds: (start: String, end: String)?
+
     private enum Metrics {
         /// Height of the pacing bar itself (the coloured zones + indicator dot).
         static let barHeight: CGFloat = 6
@@ -150,6 +162,17 @@ final class PopupBarView: NSView {
         static let tickLength: CGFloat = 5
         static let tickGap: CGFloat = 2
         static let tickWidth: CGFloat = 2
+        /// Point size of the credits bar's boundary captions (`"Aug 1"` / `"Aug 31"`) — deliberately
+        /// smaller than the popup's own `textSize` (11): these caption the *ruler*, and must not
+        /// compete with the row's actual text.
+        static let boundaryCaptionSize: CGFloat = 9
+        /// Minimum horizontal breathing space between the two captions — only ever applied by the
+        /// anti-overlap clamp on a hypothetically narrow bar; at the shipped width the captions sit
+        /// flush to the track's ends and never come near each other.
+        static let boundaryCaptionGap: CGFloat = 3
+        /// How far below the ruler's centre line the captions are dropped, so the words clear both the
+        /// teeth and the time marker's glow rather than crowding them.
+        static let boundaryCaptionDrop: CGFloat = 5
         /// Total view height: tall enough for the bar + under-bar tick ruler **and** for the marker,
         /// which is centred on the bar and so overhangs it by `indicatorHeight/2 − barHeight/2`
         /// on top; without that headroom a taller marker would be clipped by the view's frame.
@@ -161,6 +184,47 @@ final class PopupBarView: NSView {
     /// The fixed view height (bar + under-bar tick ruler), exposed so `PopupViewController` can pin
     /// the hosted bar's height constraint to the same value the view draws into.
     static var viewHeight: CGFloat { Metrics.height }
+
+    /// The view height for a **credits** bar: measured from where its captions actually end, not from
+    /// the tick-ruler band.
+    ///
+    /// ``Metrics/height`` reserves `tickGap + tickLength` for teeth this bar does not draw, so adding
+    /// the caption's own box on top of it paid for the teeth *and* the words — leaving a visible gap
+    /// under the row that no other section has. Measuring the caption's real bottom instead
+    /// (`captionTop + line height`, matched to the y `drawBoundaryCaptions` uses) closes it, and stays
+    /// correct if the point size or the drop changes.
+    static var creditsViewHeight: CGFloat {
+        let font = NSFont.systemFont(ofSize: Metrics.boundaryCaptionSize)
+        let overhang = max(0, (Metrics.indicatorHeight - Metrics.barHeight) / 2)
+        // Mirrors `drawBoundaryCaptions`: bar bottom → tick gap → centred on the (absent) tooth band →
+        // dropped. The glyph box then runs one line height further down.
+        let captionTop = overhang + Metrics.barHeight + Metrics.tickGap
+            + (Metrics.tickLength - font.ascender + font.descender) / 2 + Metrics.boundaryCaptionDrop
+        return captionTop + font.boundingRectForFont.height
+    }
+
+    // MARK: - Effective presentation
+
+    /// The scale this bar is actually **drawn** on — the user's `BarStyle` choice, except on the
+    /// credits bar, which is always the **window** scale (i.e. Progress).
+    ///
+    /// Extra usage is the one bar whose window is a calendar month. Money spends in bursts once a plan
+    /// limit is exhausted, so a pace-relative ribbon says little about it, whereas "how much of the cap,
+    /// how far into the month" is exactly the pair of positions the window scale marks. Its two
+    /// captioned boundary ticks (``monthBounds``) name that window on the bar itself, which is what
+    /// keeps a Progress bar sitting in a Pressure/Gauge column from reading as a bug: it is visibly a
+    /// *different ruler*, not the same one behaving oddly.
+    ///
+    /// Every render branch reads this rather than `barStyle.scale` — a mixed pair would draw a
+    /// ribbon on one scale and its marker on another.
+    private var effectiveScale: BarScale {
+        monthBounds != nil ? .window : barStyle.scale
+    }
+
+    /// Whether this bar draws the time-indicator marker, derived from ``effectiveScale`` exactly as
+    /// `BarStyle.showsTimeMarker` derives it from the style's scale: the marker has a position
+    /// **only** on the window scale.
+    private var effectiveShowsTimeMarker: Bool { effectiveScale == .window }
 
     // Statusline 256-colour palette (ADR-0005), appearance-aware in the popup: on a dark theme the
     // bars keep the exact menu-bar colours; on a light theme the dark zones (used grey, future
@@ -280,7 +344,7 @@ final class PopupBarView: NSView {
             // Gauge's zero is the centre, so its idle pill sits there (ADR-0078's shape, drawn on this
             // style's own scale). The centre tick itself comes from `drawTicks` below — in the popup
             // the ruler already sits under the bar, so no separate under-track mark is needed.
-            if let idleShape = Self.pillRect(at: barStyle.scale == .centred ? 0.5 : 0, in: rect) {
+            if let idleShape = Self.pillRect(at: effectiveScale == .centred ? 0.5 : 0, in: rect) {
                 // Same corner as the track and every other strip (#326) — idle is a zero-length ribbon,
                 // so it must not be shaped differently from one.
                 let corner = min(Metrics.corner, min(idleShape.width, idleShape.height) / 2)
@@ -299,7 +363,7 @@ final class PopupBarView: NSView {
             }
             drawTicks(in: rect)
             // Progress keeps its identifying mark even here: the marker sits at `timeFraction` = 0.
-            if barStyle.showsTimeMarker { drawTimeMarker(at: 0, colour: idleColor, in: rect) }
+            if effectiveShowsTimeMarker { drawTimeMarker(at: 0, colour: idleColor, in: rect) }
             return
         }
 
@@ -327,7 +391,7 @@ final class PopupBarView: NSView {
         let gaugeFar = 0.5 + (frozenStripFraction.map { $0 * 2 - 1 } ?? l.gaugeOffset) / 2
         let stripFrom: Double
         let stripTo: Double
-        switch barStyle.scale {
+        switch effectiveScale {
         case .window:
             stripFrom = frozenStripFraction != nil ? 0 : l.gapStart
             stripTo = frozenStripFraction ?? l.gapEnd
@@ -352,9 +416,9 @@ final class PopupBarView: NSView {
         // both ends on the zero). `pinsStart` stays exclusive to Progress — on the centred scale both
         // edges are data and the floor must grow symmetrically about the zero.
         let span = Self.stripRect(from: stripFrom, to: stripTo, in: rect,
-                                  pinsStart: frozenStripFraction == nil && barStyle.scale == .window,
-                                  anchoredAt: barStyle.scale == .centred ? 0.5 : nil)
-            ?? (barStyle.scale == .window ? nil : Self.pillRect(at: stripFrom, in: rect))
+                                  pinsStart: frozenStripFraction == nil && effectiveScale == .window,
+                                  anchoredAt: effectiveScale == .centred ? 0.5 : nil)
+            ?? (effectiveScale == .window ? nil : Self.pillRect(at: stripFrom, in: rect))
         if let stripRect = span {
             // The track's corner, not a capsule's (#326) — two shapes in one bar share one corner.
             let capsule = min(Metrics.corner, min(stripRect.width, stripRect.height) / 2)
@@ -388,7 +452,7 @@ final class PopupBarView: NSView {
         drawTicks(in: rect)
 
         // Simple style (#224): no time marker — the ribbon above already conveys pacing by colour + length.
-        if !barStyle.showsTimeMarker { return }
+        if !effectiveShowsTimeMarker { return }
 
         // 4. Time-indicator marker at `timeFraction`. 5. It carries a stronger ambient glow.
         // Under the `color-cycle` stub the marker parks at the pinned strip's end, so Progress keeps
@@ -581,10 +645,19 @@ final class PopupBarView: NSView {
     /// rather than by omission — a fifth the width, in the neutral tick tone, drawn *under* the track
     /// so only its ends show, and never moving (`StatusItemView.drawCentreTick`).
     ///
-    /// Keyed off `barStyle` alone: `drawTicks` also runs for the **idle** bar, which has no
+    /// - **Credits** (``monthBounds`` set) draws **no teeth at all** — its month ruler is the pair of
+    ///   captions alone (``drawBoundaryCaptions(in:)``). Interior subdivisions are wrong there (months
+    ///   are 28–31 days, so no equal split lands on a real boundary), and boundary teeth turned out to
+    ///   be redundant once the ends were named: the words already sit at the ends they label, so the
+    ///   teeth added marks without adding information — and a tooth at `1` sits close enough to a
+    ///   late-month time marker to read as clutter beside it.
+    ///
+    /// Keyed off the bar's presentation alone: `drawTicks` also runs for the **idle** bar, which has no
     /// `BarLayout` to consult.
     private var tickFractions: [CGFloat] {
-        switch barStyle.scale {
+        // Credits: captions only — the month ruler carries no teeth.
+        if monthBounds != nil { return [] }
+        switch effectiveScale {
         case .remaining: return [0.20]
         case .centred: return [0.5]
         case .window:
@@ -594,9 +667,14 @@ final class PopupBarView: NSView {
     }
 
     /// Draw the under-bar tick ruler: vertical teeth at each fraction in ``tickFractions``,
-    /// pixel-snapped on x. No-op when there is nothing to mark.
+    /// pixel-snapped on x, plus the credits bar's boundary captions. No-op when there is nothing to
+    /// mark.
+    ///
+    /// The captions are drawn **before** the empty-fractions bail-out: the credits ruler is captions
+    /// *without* teeth, so gating them on a non-empty tooth list would erase the whole ruler.
     private func drawTicks(in barRect: NSRect) {
         guard showTicks else { return }                    // #224 — tick ruler opt-out
+        drawBoundaryCaptions(in: barRect)
         let fractions = tickFractions
         guard !fractions.isEmpty else { return }
         let top = barRect.maxY + Metrics.tickGap           // flipped: just below the bar
@@ -611,6 +689,60 @@ final class PopupBarView: NSView {
             let rect = NSRect(x: cx - Metrics.tickWidth / 2, y: top, width: Metrics.tickWidth, height: bottom - top)
             NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner).fill()
         }
+    }
+
+    /// Caption the credits bar's two boundary teeth with the money window's first and last day —
+    /// `"Aug 1"` to the **right** of the left tooth, `"Aug 31"` to the **left** of the right one, both
+    /// facing inwards so neither can overhang the bar's own width.
+    ///
+    /// This is what makes the Extra-usage bar legible as a *calendar month* rather than as a token
+    /// window: two ticks alone would just be an unusually sparse ruler, and a Progress bar sitting in a
+    /// column of Pressure/Gauge bars would read as a glitch. Named ends say "this ruler is a different
+    /// ruler" outright, which is the whole reason the captions exist rather than bare teeth.
+    ///
+    /// These **are** the credits bar's ruler — it draws no teeth (see ``tickFractions``). Two words at
+    /// the two ends mark the window and name it in one stroke, where teeth could only have marked it;
+    /// once the ends are named, a tooth under each word is a mark with nothing left to say, and the
+    /// one at `1` crowds a late-month time marker besides.
+    ///
+    /// Drawn in ``PopupViewController/dimmedLabelColor`` — the **same ink as the money line above**
+    /// ("€10.8 of €15") and as
+    /// every other secondary row in the popup, so the ruler joins that tier instead of introducing a
+    /// third weight of grey between it and the track. Flush to the track's ends, and dropped clear of
+    /// the bar. No-op on every non-credits bar.
+    private func drawBoundaryCaptions(in barRect: NSRect) {
+        guard let bounds = monthBounds else { return }
+        let font = NSFont.systemFont(ofSize: Metrics.boundaryCaptionSize)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: PopupViewController.dimmedLabelColor,
+        ]
+        // Vertically centred on the teeth, then dropped by `boundaryCaptionDrop` so the words clear the
+        // teeth and the marker's glow instead of sitting shoulder-to-shoulder with them.
+        let tickTop = barRect.maxY + Metrics.tickGap
+        let y = tickTop + (Metrics.tickLength - font.ascender + font.descender) / 2
+            + Metrics.boundaryCaptionDrop
+
+        let start = bounds.start as NSString
+        let end = bounds.end as NSString
+        let startSize = start.size(withAttributes: attributes)
+        let endSize = end.size(withAttributes: attributes)
+        // Flush to the **track's** own edges, not inset from the boundary teeth: the captions label the
+        // ends of the bar, so they line up with the ends of the bar. Aligning them to the teeth instead
+        // pushed each word inwards by the tooth's half-width plus a gap, which read as a stray indent
+        // against the row's text above — that text is itself flush to the same edges.
+        var startX = barRect.minX
+        var endX = barRect.maxX - endSize.width
+        // On a narrow bar the two captions could meet in the middle; clamp them apart so they never
+        // overlap into an unreadable smear. (At the shipped 200-pt content width they never come close
+        // — this is a guard for future width changes, not a state seen today.)
+        if startX + startSize.width + Metrics.boundaryCaptionGap > endX {
+            let mid = (startX + startSize.width + endX) / 2
+            startX = min(startX, mid - startSize.width - Metrics.boundaryCaptionGap / 2)
+            endX = max(endX, mid + Metrics.boundaryCaptionGap / 2)
+        }
+        start.draw(at: NSPoint(x: startX, y: y), withAttributes: attributes)
+        end.draw(at: NSPoint(x: endX, y: y), withAttributes: attributes)
     }
 
     private func indicatorColor(_ l: BarLayout) -> NSColor {
@@ -1787,10 +1919,12 @@ final class PopupViewController: NSViewController {
             used: Self.creditsAmountText(spent: credits.spent, limit: limit, verbose: optionHeld),
             reset: (optionHeld ? credits.resetLineVerbose : credits.resetLine) ?? "resetting…",
             resetIsBlocking: creditsResetIsBlocking)
-        // Credits pace over the whole calendar month; there is no window-tick ruler like the token bars,
-        // so the bar draws with no subdivisions (a plain pacing bar). `isLast: true` — the credits
-        // section is always the popup's final block, so it sits tight above the menu separator.
-        addBar(bar: bar, subdivisions: 0, idle: false, isLast: true)
+        // Credits pace over the whole calendar month, so the bar carries no window subdivisions —
+        // instead it gets the month's two captioned ends ("Aug 1" … "Aug 31"), which also pin it to
+        // Progress whatever the dropdown's bar style is. `isLast: true` — the credits section is always
+        // the popup's final block, so it sits tight above the menu separator.
+        addBar(bar: bar, subdivisions: 0, idle: false, isLast: true,
+               monthBounds: credits.monthBounds)
     }
 
     /// The section's first line: title and pacing status, both `labelColor` — the same weight and
@@ -2168,12 +2302,17 @@ final class PopupViewController: NSViewController {
 
     /// Add a pacing bar from raw geometry — shared by the token limit rows and the "Extra usage"
     /// credits section (#145), which has no ``LimitRow``. `subdivisions == 0` draws no tick ruler
-    /// (the credits bar paces the whole calendar month, with no window boundaries to mark); `idle`
-    /// draws the solid-blue knobless 5h track (#100). When `bar` is `nil` the view draws nothing —
-    /// but callers only reach here with a real bar (idle uses the flag, not the layout).
+    /// (a calendar month has no equal window boundaries to mark); `idle` draws the solid-blue knobless
+    /// 5h track (#100). When `bar` is `nil` the view draws nothing — but callers only reach here with a
+    /// real bar (idle uses the flag, not the layout).
+    ///
+    /// `monthBounds` is the credits section's alone: it captions the bar's two ends with the money
+    /// window's first and last day **and** puts the bar into its always-Progress presentation, since
+    /// both follow from the same fact — this window is a calendar month.
     private func addBar(bar: BarLayout?, subdivisions: Int, idle: Bool, blocked: Bool = false,
                         weeklyHeadroom: Bool = true,
-                        isLast: Bool, isBaseLimit: Bool = false, tweenRow: String? = nil) {
+                        isLast: Bool, isBaseLimit: Bool = false, tweenRow: String? = nil,
+                        monthBounds: (start: String, end: String)? = nil) {
         let view = PopupBarView()
         view.bar = bar
         // Colour-transition wiring (ADR-0070). `tweenRow` is the row's title for a limit window and
@@ -2190,10 +2329,16 @@ final class PopupViewController: NSViewController {
         view.weeklyHeadroom = weeklyHeadroom   // green instead of blue when the week has no headroom
         view.isBaseLimit = isBaseLimit   // only base 5h/7d rows render the far-behind blue zone
         view.barStyle = barStyle   // Progress (gap+marker) vs Pressure/Gauge (marker-less ribbons) — #224
+        // Credits only: captions the month's ends and pins the bar to Progress, overriding `barStyle`.
+        view.monthBounds = monthBounds
         view.showTicks = showTicks   // under-bar tick ruler on/off — #224
         view.translatesAutoresizingMaskIntoConstraints = false
         view.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
-        view.heightAnchor.constraint(equalToConstant: PopupBarView.viewHeight).isActive = true
+        // A captioned ruler needs room for its text line; every other bar keeps the shipped height.
+        view.heightAnchor.constraint(
+            equalToConstant: monthBounds == nil
+                ? PopupBarView.viewHeight
+                : PopupBarView.creditsViewHeight).isActive = true
         stack.addArrangedSubview(view)
         // Between-section gap after every bar except the last (the last sits above the menu separator).
         if !isLast { stack.setCustomSpacing(Metrics.limitSpacing, after: view) }

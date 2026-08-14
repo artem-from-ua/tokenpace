@@ -296,6 +296,58 @@ struct CreditsMonthFractionTests {
     }
 }
 
+// MARK: - CreditsPacing.monthBoundaryLabels
+
+@Suite("CreditsPacing.monthBoundaryLabels")
+struct CreditsMonthBoundaryLabelTests {
+
+    private static let utc = TimeZone(identifier: "UTC")!
+
+    private func utcDate(_ y: Int, _ mo: Int, _ d: Int, _ h: Int = 0, _ mi: Int = 0) -> Date {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = Self.utc
+        return cal.date(from: DateComponents(year: y, month: mo, day: d, hour: h, minute: mi))!
+    }
+
+    @Test func labelsTheMonthsFirstAndLastDay() {
+        let labels = CreditsPacing.monthBoundaryLabels(now: utcDate(2026, 8, 14), timeZone: Self.utc)
+        #expect(labels?.start == "Aug 1")
+        #expect(labels?.end == "Aug 31")
+    }
+
+    @Test func endLabelIsTheLastDayNotTheFirstOfNextMonth() {
+        // A 30-day month must end on the 30th — the caption names the last day the window covers,
+        // not the reset instant that follows it.
+        let labels = CreditsPacing.monthBoundaryLabels(now: utcDate(2026, 4, 10), timeZone: Self.utc)
+        #expect(labels?.end == "Apr 30")
+    }
+
+    @Test func februaryLengthComesFromTheCalendar() {
+        #expect(CreditsPacing.monthBoundaryLabels(now: utcDate(2026, 2, 5), timeZone: Self.utc)?.end
+            == "Feb 28")
+        // 2028 is a leap year — the same code must yield the 29th without a special case.
+        #expect(CreditsPacing.monthBoundaryLabels(now: utcDate(2028, 2, 5), timeZone: Self.utc)?.end
+            == "Feb 29")
+    }
+
+    @Test func labelsAreEnglishRegardlessOfDeviceLocale() {
+        // The formatter is pinned to en_US_POSIX, mirroring `ResetClock.weekdayString`: the
+        // localisation seam is ADR-0009, not the date formatter.
+        let labels = CreditsPacing.monthBoundaryLabels(now: utcDate(2026, 5, 20), timeZone: Self.utc)
+        #expect(labels?.start == "May 1")
+    }
+
+    @Test func labelsFollowTheSameZoneAsTheBarsGeometry() {
+        // At 2026-08-01T02:00 UTC it is still July 31 in UTC-3. The captions must name the month the
+        // bar is actually measuring, so they take the same zone `monthElapsedFraction` does — proven
+        // here by the two zones disagreeing.
+        let instant = utcDate(2026, 8, 1, 2, 0)
+        #expect(CreditsPacing.monthBoundaryLabels(now: instant, timeZone: Self.utc)?.start == "Aug 1")
+        #expect(CreditsPacing.monthBoundaryLabels(
+            now: instant, timeZone: TimeZone(secondsFromGMT: -3 * 3600)!)?.start == "Jul 1")
+    }
+}
+
 // MARK: - CreditsPacing.barLayout (usage vs. time, same grading as the token bars)
 
 @Suite("CreditsPacing.barLayout")
