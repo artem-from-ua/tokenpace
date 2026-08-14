@@ -507,9 +507,23 @@ final class StatusItemView: NSView {
     /// One flag since ADR-0090: the separate Appearance placement toggle is gone, so detecting waiting
     /// sessions and showing them in the menu bar are the same decision. The reservation therefore keys
     /// off the master switch alone — which is also the flag that makes the ≈18 pt worth paying for.
+    ///
+    /// ``isPreviewSpecimen`` opts out: a specimen renders one fixed frame, and this is the one width
+    /// input that does not come from its `layout`.
     private var reservesAwaitingSlot: Bool {
-        PersistedConfig.awaitingInputEnabled
+        !isPreviewSpecimen && PersistedConfig.awaitingInputEnabled
     }
+
+    /// Whether this view is a **specimen** drawn for the Settings style picker rather than the live
+    /// menu-bar item (`BarStylePreviewRenderer`).
+    ///
+    /// It buys exactly one behaviour: the awaiting-input slot is never reserved. That reservation is
+    /// the sole width input read straight from `PersistedConfig` instead of from ``layout``
+    /// (``reservesAwaitingSlot``, #283), so a specimen built from a fixed frame would still change
+    /// width — and shift its content sideways past an invisible glyph — depending on a setting the
+    /// picker is not showing. Every other input is already carried by the layout, so nothing else
+    /// branches on this.
+    var isPreviewSpecimen = false
 
     /// Draw the small service-status dot at the **right edge** of `rect`, vertically centred — the
     /// trailing element of the widget. `hPadding` keeps it off the very edge, matching the bars'
