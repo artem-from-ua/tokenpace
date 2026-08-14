@@ -122,6 +122,13 @@ final class SettingsPreviewWindowController {
         let win = window ?? makeWindow()
         window = win
 
+        // Re-force the Vibrant appearance on every show, not just when `observeAppearance` sees a flip.
+        // The window outlives its visibility (`isReleasedWhenClosed = false`) while the KVO does not:
+        // it is installed here and torn down in `detach()`. So a theme change that happens *while
+        // Settings is closed* reaches nobody, and the window keeps the vibrancy it latched the last
+        // time it was on screen — a preview built at night still rendering dark the next morning.
+        win.appearance = PreviewChrome.vibrantAppearance
+
         // Paint whatever the dropdown is showing right now, before the window is ordered in — a frame
         // of empty card would otherwise flash until the next render.
         if let lastLayout { apply(lastLayout) }
