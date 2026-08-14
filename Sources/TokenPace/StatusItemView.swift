@@ -166,6 +166,18 @@ final class StatusItemView: NSView {
         /// than the marker's: the two shapes are sized for opposite jobs, and matching heights was only
         /// ever a coincidence of the first draft.
         static let centreTickHeight: CGFloat = 10
+        /// How much of ``brightAlpha`` the zero tick keeps — it is drawn **fainter than the mono text
+        /// beside it**, on both scales.
+        ///
+        /// The tick is scale furniture, not data: it says where the ribbon measures from and never
+        /// changes, so at the reset text's own opacity it competed for attention with the one thing on
+        /// the bar that does move. Fading it settles it into the background while leaving the ends
+        /// findable — the point is to be *available* when you look for the zero, not to announce it.
+        ///
+        /// A multiplier rather than its own absolute alpha, so the tick keeps tracking ``brightAlpha``
+        /// (measured against the system clock on both a light and a dark bar) instead of drifting from
+        /// it the next time that calibration moves.
+        static let zeroTickAlpha: CGFloat = 0.55
         /// How far the transparent gutter under a yellow strip extends past it on each side (#326).
         /// 1.25 pt against this 5 pt bar — the popup's 1.5 pt scaled to the shorter track.
         static let yellowGutter: CGFloat = 1.25
@@ -1088,7 +1100,14 @@ final class StatusItemView: NSView {
         // the calm bar fill is): the mono white-on-dark / black-on-light the menu bar already uses for
         // everything that is foreground rather than status. Still its own role, so the tuner can pull
         // it away from the calm fill.
-        bright(Palette.centreTick).setFill()
+        //
+        // Then faded by `zeroTickAlpha` on top of that, so the mark reads quieter than the text beside
+        // it. Applied here rather than in `bright()` — that alpha is calibrated against the system
+        // clock and is shared with the reset label and the ⚠️ glyph, which must not move with it. A
+        // tuner-supplied colour keeps its own alpha as the base, so pulling the role somewhere else
+        // still fades by the same proportion.
+        let tickInk = bright(Palette.centreTick)
+        tickInk.withAlphaComponent(tickInk.alphaComponent * Metrics.zeroTickAlpha).setFill()
         NSRect(x: cx - w / 2, y: rect.midY - h / 2, width: w, height: h).fill()
     }
 
