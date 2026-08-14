@@ -126,10 +126,12 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         case .menuBar: return "distribute.vertical"
         case .dropdown: return "chart.bar.horizontal.page"
         case .notifications: return "bell.badge.fill"
-        // Providers are remote services, not local hardware — a cloud, not a rack. Verified to
-        // resolve on macOS 15 with `NSImage(systemSymbolName:)`, which returns nil for a name that
-        // does not exist (that check is how we learned `zzz.circle` is not a symbol, #341).
-        case .providers: return "cloud.fill"
+        // Providers are the services TokenPace plugs into — a puzzle piece slotting in, not the
+        // cloud they happen to run on: what the page configures is the connection, and more pieces
+        // fit later. Verified to resolve on macOS 15 with `NSImage(systemSymbolName:)`, which returns
+        // nil for a name that does not exist (that check is how we learned `zzz.circle` is not a
+        // symbol, #341).
+        case .providers: return "puzzlepiece.extension.fill"
         default: return "circle.dashed"
         }
     }
@@ -172,11 +174,11 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         case .menuBar: return CapsuleTint(flat: 0x000000)
         case .dropdown: return CapsuleTint(flat: 0xFFFFFF, glyph: .black, needsBorder: true)
         case .notifications: return CapsuleTint(dark: 0xFB4439, light: 0xFB7A71)
-        // ⚠️ Inherited from the retired Extra features chip (#341) as a **starting value**, not a
-        // measurement of this one: the pair above was metered off a different System Settings pane.
-        // Standing debt — re-check with Digital Color Meter in sRGB against whichever system pane
-        // this ends up resembling, and replace if it reads wrong beside the others.
-        case .providers: return CapsuleTint(dark: 0x5E5CE6, light: 0x8C8AFB)
+        // The same measured gray as `General`, on purpose: both are app-wide settings rather than one
+        // of the UI surfaces, and the sidebar says so by giving them one capsule colour. This replaces
+        // the purple inherited from the retired Extra features chip (#341), which was a starting value
+        // metered off a different System Settings pane and never re-checked for this one.
+        case .providers: return CapsuleTint(dark: 0x5E5E5F, light: 0xC0C0C4)
         default: return CapsuleTint(dark: 0x5E5E5F, light: 0xC0C0C4)
         }
     }

@@ -30,6 +30,7 @@ struct ProvidersPane: View {
                 SettingsNavigationRow(
                     title: "Claude",
                     subtitle: model.claudeProviderSummary,
+                    badge: .claude,
                     action: { model.drill(into: .providersClaude) })
             }
 
