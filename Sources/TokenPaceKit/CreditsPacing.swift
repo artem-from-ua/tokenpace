@@ -295,13 +295,24 @@ public enum CreditsPacing {
     /// captioned ticks at the ends of its track say which window this is, so it cannot be mistaken for
     /// a token bar's window scale or for a marker-less ribbon — the whole point of captioning them.
     ///
-    /// **Computed in ``resetTimeZone`` (UTC), deliberately.** The captions name the very boundaries
-    /// that define ``monthElapsedFraction``, i.e. the bar's own 0 and 1; taking them in the device's
-    /// zone would let the caption disagree with the geometry it labels (a local-zone "Sep 1" while the
-    /// bar still measures August). This is the same reason `timeFraction` is computed in UTC, and it is
-    /// the opposite convention to ``CreditsRow/resetLine``, which renders the *instant* of the reset in
-    /// the user's local zone — an instant is a point everyone shares, a month label is a property of
-    /// the window's own calendar.
+    /// **The window is found in ``resetTimeZone`` (UTC); the labels are rendered in the user's zone.**
+    /// Those are two different jobs and they get two different zones on purpose:
+    ///
+    /// - *Which* month the bar covers is a property of the limit itself — the monthly cap resets at
+    ///   00:00 **UTC** on the 1st (spike #142), and ``monthElapsedFraction`` measures against exactly
+    ///   that. Deriving the window locally would slide the bar's own 0 and 1 by the device's offset.
+    /// - *When those boundaries fall for the reader* is a question about instants, and an instant is a
+    ///   point everyone shares — so it is shown on the reader's own clock, the same convention
+    ///   ``CreditsRow/resetLine`` follows. West of UTC the window opens on the previous local day, so a
+    ///   reader in UTC−5 correctly sees `"Jul 31"` where the UTC calendar says August: their spend
+    ///   window really did start on the evening of the 31st.
+    ///
+    /// The right-hand caption marks the window's **last instant** — one second before the next month
+    /// opens — rather than the start of its final day. Rendered locally the two differ by a whole
+    /// calendar day for any reader west of UTC, and the closing instant is the correct one: it is when
+    /// their spend window actually ends. So a UTC August reads as `Aug 1 … Aug 31` in UTC,
+    /// `Aug 1 … Sep 1` east of it, and `Jul 31 … Aug 31` west of it — a local span that legitimately
+    /// covers parts of 32 days, because a fixed UTC month does.
     ///
     /// The month name is fixed **English** (`en_US_POSIX`, literal `"MMM d"`), matching
     /// `ResetClock.weekdayString`'s convention — the localisation seam is ADR-0009, not the formatter.
@@ -309,27 +320,30 @@ public enum CreditsPacing {
     ///
     /// - Parameters:
     ///   - now: Current instant (inject for deterministic tests; do **not** call `Date()` here).
-    ///   - timeZone: Wall-clock zone whose month bounds are labelled. Default ``resetTimeZone`` (UTC).
+    ///   - timeZone: Wall-clock zone whose month bounds *define the window*. Default ``resetTimeZone``
+    ///     (UTC) — the zone the monthly spend limit actually resets in. Not the labelling zone.
+    ///   - displayTimeZone: Zone the two boundary instants are **rendered** in. Default `.current`, the
+    ///     reader's own clock; inject for deterministic tests.
     public static func monthBoundaryLabels(
         now: Date,
-        timeZone: TimeZone = CreditsPacing.resetTimeZone
+        timeZone: TimeZone = CreditsPacing.resetTimeZone,
+        displayTimeZone: TimeZone = .current
     ) -> (start: String, end: String)? {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         guard
             let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)),
-            let nextMonth = calendar.date(byAdding: .month, value: 1, to: monthStart),
-            // The *last day* of this month, not the first of the next: the right-hand caption marks the
-            // final day the window covers ("Aug 31"), which is where the bar's `1.0` lands.
-            let lastDay = calendar.date(byAdding: .day, value: -1, to: nextMonth)
+            let nextMonth = calendar.date(byAdding: .month, value: 1, to: monthStart)
         else {
             return nil
         }
+        // The window's closing instant, not the start of its final day — see the note above.
+        let monthEnd = nextMonth.addingTimeInterval(-1)
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")   // fixed English month names, never localised
-        f.timeZone = timeZone
+        f.timeZone = displayTimeZone
         f.dateFormat = "MMM d"
-        return (f.string(from: monthStart), f.string(from: lastDay))
+        return (f.string(from: monthStart), f.string(from: monthEnd))
     }
 
     /// The `used / limit` fraction (spent share of the money cap), or `nil` when there is **no**
