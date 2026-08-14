@@ -26,6 +26,10 @@ struct BarStylePicker: View {
     /// the small lift the system picker gives its thumbnails.
     @State private var hovered: BarStyle?
 
+    /// Which tile the mouse is currently held down on, if any. Purely transient: it is set on mouse-
+    /// down and cleared on mouse-up, so the grey press layer it drives leaves nothing behind.
+    @State private var pressed: BarStyle?
+
     /// Tile geometry. The picture is shown at its **natural** size inside a roomier tile rather than
     /// scaled up: the whole point of the preview is "this is what lands in my menu bar", and a
     /// doubled widget answers a question nobody asked. Upscaling a 5 pt bar would also blur the very
@@ -41,12 +45,10 @@ struct BarStylePicker: View {
         static let activeBorder: CGFloat = 3
         static let idleBorder: CGFloat = 1
         static let hoverBorder: CGFloat = 1.5
-        /// Padding between the option's content and the edge of its grey backing, and the backing's
-        /// own corner radius. Applied to every tile, selected or not, so the row's geometry does not
-        /// move when the selection does — only the backing's opacity changes.
-        static let backingInsetX: CGFloat = 8
-        static let backingInsetY: CGFloat = 6
-        static let backingRadius: CGFloat = 8
+        /// Opacity of the grey layer drawn over a tile while the mouse is held down on it. Enough to
+        /// read as "this one is being clicked" against a black plate without washing out the preview's
+        /// pacing colours during the press.
+        static let pressTint: CGFloat = 0.18
     }
 
     var body: some View {
@@ -87,15 +89,18 @@ struct BarStylePicker: View {
                     }
                 }
                 .frame(width: Tile.width, height: Tile.height)
-                // Nothing is laid over the picture — not an accent wash, not a tint. System Settings →
-                // Appearance leaves its selected thumbnail's artwork completely untouched and says
-                // "selected" with the ring alone; anything painted on top here fights the preview's own
-                // pacing colours, which are the whole reason the picture is shown.
+                // The click feedback: one grey layer over the whole tile, for exactly as long as the
+                // mouse is down. It covers plate and picture together — that is the point, since the
+                // capture is opaque (`hasAlpha: no`) and only 54×33 pt of the 80×48 pt tile, so any
+                // layer that reaches one but not the other splits the tile into two blacks.
                 //
-                // It also cannot be done cleanly: the pictures are opaque captures (`hasAlpha: no`)
-                // covering only the middle 54×33 pt of an 80×48 pt tile, so a wash under them reaches
-                // only the margin, and one over them lands on top of `.plain`'s own pressed dimming —
-                // either way the tile shows two different blacks with a seam down the middle.
+                // Nothing persists after mouse-up: selection is said by the ring, and a picture shown
+                // as a specimen of what lands in the menu bar must not keep a colour cast the widget
+                // never draws.
+                .overlay(
+                    RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
+                        .fill(Color(nsColor: .labelColor))
+                        .opacity(pressed == style ? Tile.pressTint : 0))
                 .overlay(
                     RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
                         .strokeBorder(isActive ? Color.accentColor
@@ -111,23 +116,13 @@ struct BarStylePicker: View {
                     // it the row shifts a little on every click.
                     .frame(width: Tile.width)
             }
-            // The selected option's grey backing, sized to the whole option — picture and caption
-            // together — the way System Settings tints the row of the choice you are on. Grey rather
-            // than the accent colour: the accent already speaks once, in the ring, and a second
-            // accent surface behind a black plate only muddies it.
-            .padding(.horizontal, Tile.backingInsetX)
-            .padding(.vertical, Tile.backingInsetY)
-            .background(
-                RoundedRectangle(cornerRadius: Tile.backingRadius, style: .continuous)
-                    .fill(Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
-                    .opacity(isActive ? 1 : 0))
             .contentShape(Rectangle())
         }
-        // Not `.plain`: that style dims the entire label while the mouse is held down, and the dimming
-        // multiplies against the opaque picture differently than against the plate around it, so a
-        // held-down tile visibly splits into two blacks. This style changes nothing on press — the
-        // picture is a specimen being shown, and specimens should not shift colour when poked.
-        .buttonStyle(UndimmedTileButtonStyle())
+        // Not `.plain`: that style dims the whole label — picture, caption and all — and its dimming
+        // multiplies against the opaque capture differently than against the plate around it, so a
+        // held-down tile visibly split into two blacks. This one dims nothing and only reports the
+        // press, which the label above paints as a single grey layer over the tile.
+        .buttonStyle(PressReportingButtonStyle(isPressed: $pressed, value: style))
         .onHover { inside in
             if inside { hovered = style } else if hovered == style { hovered = nil }
         }
@@ -205,19 +200,32 @@ struct BarStylePicker: View {
     }
 }
 
-// MARK: - UndimmedTileButtonStyle
+// MARK: - PressReportingButtonStyle
 
-/// A button style that renders its label unchanged, including while pressed.
+/// A button style that draws its label unchanged and merely **reports** whether it is being pressed.
 ///
-/// `.plain` — the obvious choice for a picture-shaped button — dims its whole label on press. Here the
-/// label is an opaque screen capture sitting inside a black plate, and the dimming multiplies against
-/// the two differently: the picture visibly separates from its surround for as long as the mouse is
-/// held. The press is already acknowledged by the selection moving, which happens on mouse-up anyway.
+/// `.plain` — the obvious choice for a picture-shaped button — dims the entire label on press. That is
+/// wrong here twice over: the label includes the caption, which should not move with the click, and the
+/// dimming multiplies against an opaque screen capture differently than against the plate around it, so
+/// a held-down tile came apart into two blacks with a seam between them.
 ///
-/// Deliberately no hover or press affordance of its own — ``BarStylePicker`` draws both itself, in the
-/// ring and the backing, where they can be tuned against the pictures.
-struct UndimmedTileButtonStyle: ButtonStyle {
+/// Reporting instead of drawing lets the caller put one flat layer over the tile alone, where it covers
+/// picture and plate identically. `isPressed` is bound out rather than handed to a closure so the press
+/// can drive ordinary view state; it is written on both edges, so mouse-up always clears it.
+struct PressReportingButtonStyle<Value: Equatable>: ButtonStyle {
+    /// Set to `value` while this button is held down, and cleared back to `nil` on release.
+    @Binding var isPressed: Value?
+    /// Identifies this button among its siblings — the row shares one `isPressed` binding.
+    let value: Value
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .onChange(of: configuration.isPressed) { _, nowPressed in
+                if nowPressed {
+                    isPressed = value
+                } else if isPressed == value {
+                    isPressed = nil
+                }
+            }
     }
 }
