@@ -104,8 +104,12 @@ enum SettingsStubHint {
 /// Modelled on **Network** / **Internet Accounts**, not General. General's rows ("Storage ›") only
 /// lead somewhere, so they carry a name and nothing else; ours *report* — "Usage API · 3 services
 /// monitored" answers the question the page exists to answer, and reading it should not require
-/// opening the page. That is also why there is no icon: a provider logo is the obvious candidate and
-/// a legally awkward one, and a generic glyph would be decoration standing where information goes.
+/// opening the page.
+///
+/// The leading ``badge`` is optional and stays that way. It carries a **generic glyph on the
+/// provider's brand colour**, never the provider's logo — Internet Accounts' rows are the model here,
+/// and a redrawn wordmark would be the legally awkward candidate the badge exists to avoid. A row
+/// with nothing to identify beyond its own name passes `nil` and keeps the text flush left.
 ///
 /// Built from a plain `Button` with `.buttonStyle(.plain)` rather than a `NavigationLink`: the
 /// window's navigation state is ours (`SettingsModel`'s route plus the AppKit toolbar's ‹ ›), and a
@@ -117,12 +121,15 @@ struct SettingsNavigationRow: View {
     let title: String
     /// The state line under the title. `nil` draws a single-line row.
     let subtitle: String?
+    /// The tinted glyph chip at the leading edge. `nil` draws the row with its text flush left.
+    var badge: SettingsRowBadge? = nil
     /// Invoked on click — the pane hands this straight to `SettingsModel.drill(into:)`.
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: Metrics.chipTextGap) {
+                if let badge { SettingsRowBadgeView(badge: badge) }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                     if let subtitle {
@@ -151,6 +158,65 @@ struct SettingsNavigationRow: View {
         static let chevron: CGFloat = 11
         /// The state line, one step down from the row's own text — System Settings' proportion.
         static let subtitle: CGFloat = 11
+    }
+}
+
+// MARK: - SettingsRowBadge
+
+/// The tinted glyph chip a ``SettingsNavigationRow`` can carry at its leading edge.
+///
+/// Deliberately *not* `SettingsSection.tint`'s `CapsuleTint`: a sidebar capsule is a two-endpoint
+/// gradient measured off a real System Settings pane, and a provider's brand gives us one colour, not
+/// a measured pair. Inventing a second endpoint would put a number in the codebase that no meter ever
+/// produced — the very thing `SettingsSection.tint`'s doc warns about. So this chip is flat, and says
+/// so.
+struct SettingsRowBadge: Equatable {
+    /// The chip's fill — a brand colour, owned by whoever the row identifies.
+    let color: Color
+    /// The SF Symbol drawn on it, always a generic one (see ``SettingsNavigationRow``'s doc on why a
+    /// provider logo is not an option).
+    let symbol: String
+
+    /// Claude's row: Anthropic's terracotta (`#d97757`, confirmed against `anthropics/skills`'
+    /// `brand-guidelines/SKILL.md` — ADR-0021), carrying the cloud that used to sit on the Providers
+    /// section itself before it became a puzzle piece. The colour comes from the same `ColorRole`
+    /// the popup's "Claude Code" header uses, so the two brand marks cannot drift apart.
+    @MainActor
+    static var claude: SettingsRowBadge {
+        SettingsRowBadge(color: Color(nsColor: ColorStore.shared.color(.claudeBrand)), symbol: "cloud.fill")
+    }
+}
+
+/// Draws a ``SettingsRowBadge``: a white glyph on a flat rounded rect, sized for a `Form` row rather
+/// than for the sidebar.
+///
+/// Shares the sidebar chip's 5 pt continuous corner radius so the two read as the same family of
+/// object, but is a size smaller (20 pt against the sidebar's 26): this chip sits beside a row of
+/// body text, not a 15 pt sidebar label, and at the sidebar's size it out-weighed the title it
+/// belongs to.
+private struct SettingsRowBadgeView: View {
+    let badge: SettingsRowBadge
+    /// Same reasoning as the sidebar chip: a flat tint takes no part in vibrancy, so it would stay at
+    /// full strength in an inactive window while every label around it dims. Halving the fill keeps
+    /// the row's parts dimming together.
+    @Environment(\.appearsActive) private var appearsActive
+
+    var body: some View {
+        Image(systemName: badge.symbol)
+            .font(.system(size: Metrics.symbol, weight: .regular))
+            .foregroundStyle(.white)
+            .frame(width: Metrics.chip, height: Metrics.chip)
+            .background(
+                badge.color.opacity(appearsActive ? 1 : Metrics.inactiveAlpha),
+                in: RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous))
+    }
+
+    private enum Metrics {
+        static let chip: CGFloat = 20
+        static let symbol: CGFloat = 12
+        /// The sidebar chip's radius, unchanged — see the type doc.
+        static let corner: CGFloat = 5
+        static let inactiveAlpha: Double = 0.5
     }
 }
 
