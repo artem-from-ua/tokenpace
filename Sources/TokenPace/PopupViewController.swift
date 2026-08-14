@@ -736,12 +736,12 @@ final class PopupBarView: NSView {
         // Credits: captions only — the month ruler carries no teeth.
         if monthBounds != nil { return [] }
         switch effectiveScale {
-        // "Exactly on pace" — the landmark the ribbon is measured against. Its zero is drawn separately
-        // (``zeroTickFraction``), because that one identifies the style and so is never hidden.
-        case .remaining: return [0.20]
-        // Gauge's zero *is* its only landmark, so it is drawn as the zero tick alone — listing it here
-        // too would stack two teeth on the same x.
-        case .centred: return []
+        // Neither marker-less style carries a tooth here: both are marked by their **zero** alone
+        // (``zeroTickFraction``), captioned `0` under ⌥. Pressure's 0.20 "exactly on pace" landmark was
+        // dropped — with a labelled zero already on the bar, a second unlabelled tooth a few points away
+        // read as a stray mark rather than as a second reading, and the boundary it stood for is
+        // carried by the colour change anyway.
+        case .remaining, .centred: return []
         case .window:
             guard subdivisions >= 2 else { return [] }
             return (1 ..< subdivisions).map { CGFloat($0) / CGFloat(subdivisions) }
@@ -819,7 +819,54 @@ final class PopupBarView: NSView {
     private func drawTicks(in barRect: NSRect) {
         guard optionHeld else { return }                   // the explanatory half is ⌥-on-demand
         drawBoundaryCaptions(in: barRect)
+        drawZeroCaption(in: barRect)
         for f in tickFractions { drawTick(at: f, in: barRect) }
+    }
+
+    /// Caption the zero tick with a literal `"0"` — the ⌥ half of the mark whose stroke through the bar
+    /// is always on (``drawZeroTick(in:)``).
+    ///
+    /// The stroke says *there is a zero here*; the digit says *this is what it is*, which is the whole
+    /// difference between the two marker-less styles: Pressure counts up from an origin at the left end,
+    /// Gauge counts out from a zero in the middle. Seeing `0` sitting under the centre of one bar and
+    /// under the left end of another states that difference outright, where two unlabelled strokes could
+    /// only imply it. That is also why it is ⌥-on-demand rather than permanent: it *explains* the scale,
+    /// and everything explanatory in this popup waits for the modifier.
+    ///
+    /// Same font, ink and baseline as the credits bar's month captions
+    /// (``drawBoundaryCaptions(in:)``), so the two labelled rulers read as one convention rather than as
+    /// two typographic ideas — the popup has exactly one voice for "this is what the ruler means".
+    ///
+    /// No-op on Progress (no zero tick to caption) and on the credits bar (its own captions own that
+    /// row of text).
+    private func drawZeroCaption(in barRect: NSRect) {
+        guard let fraction = zeroTickFraction else { return }
+        let font = NSFont.systemFont(ofSize: Metrics.boundaryCaptionSize)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: PopupViewController.dimmedLabelColor,
+        ]
+        let text = "0" as NSString
+        let size = text.size(withAttributes: attributes)
+        // Exactly the baseline the month captions use, `boundaryCaptionDrop` and all — the two labelled
+        // rulers must sit the same distance below their bar or they read as two different conventions.
+        //
+        // That baseline puts the glyph ~4.3 pt past this view's own frame, and it is allowed to: the
+        // credits bar buys the room by being a taller row (`creditsViewHeight`), while here the digit
+        // simply **overhangs into the `limitSpacing` gap** between rows — 10 pt of empty space that no
+        // row draws into. The view is layer-backed without `masksToBounds`, so the overhang renders
+        // rather than clipping, and because it is only ever one short glyph under a mark at the bar's
+        // centre or left end, it cannot collide with the row beneath. Bar positions stay exactly where
+        // they were: nothing is re-laid-out to make space, the caption borrows space already there.
+        let tickTop = barRect.maxY + Metrics.tickGap
+        let y = tickTop + (Metrics.tickLength - font.ascender + font.descender) / 2
+            + Metrics.boundaryCaptionDrop
+        // Centred under the mark it labels, then held inside the track: Pressure's zero sits half a pill
+        // in from the left edge, so a centred glyph would hang past it — and a caption poking out beyond
+        // the bar reads as a layout slip rather than as a label.
+        let cx = Self.pillRect(at: fraction, in: barRect)?.midX ?? Self.scaleX(fraction, in: barRect)
+        let x = min(max(cx - size.width / 2, barRect.minX), barRect.maxX - size.width)
+        text.draw(at: NSPoint(x: x, y: y), withAttributes: attributes)
     }
 
     /// One tooth of the ruler, below the bar and aligned to the same inset scale as the coloured strip.
