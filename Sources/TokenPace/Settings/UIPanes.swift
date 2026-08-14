@@ -133,14 +133,20 @@ struct MenuBarPane: View {
                 // the window, Pressure measures the gap against the time left, Gauge measures the same
                 // thing from a centred zero so the underpace side is drawn too.
                 //
-                // No hints under the row (#341): three paragraphs describing the styles cost more
-                // vertical space than they bought — the live dropdown preview beside the window
-                // (ADR-0083) shows each style the moment it is picked, which no amount of prose does.
-                HStack {
+                // Picked by picture, System-Settings-Appearance style: the difference between the
+                // three is purely visual, so three words never carried it. Prose was tried and cut
+                // (#341) for costing more vertical space than it bought.
+                //
+                // Still no hints under the row, but for a new reason. The old one cited the live
+                // dropdown preview beside the window — which renders the **popup** (ADR-0083) and so
+                // never showed this row's styles at all. Now the preview is in the row itself.
+                // Top-aligned, not centred: the picker is roughly three times the height of a normal
+                // control row, and a vertically centred label floats in the middle of that block
+                // instead of heading it.
+                HStack(alignment: .top) {
                     Text("Bar style")
                     Spacer()
-                    SegmentedControl(
-                        segments: AppearanceBarStyle.segments,
+                    BarStylePicker(
                         active: model.menuBarStyle,
                         onSelect: { model.setMenuBarStyle($0) })
                 }
@@ -279,6 +285,12 @@ struct DropdownPane: View {
 /// The ``BarStyle`` segments, shared by the Menu bar and Dropdown panes (#329) so the two surfaces
 /// always offer the same choices in the same order — now that the two controls live on separate
 /// panes, a shared constant is the only thing keeping them from drifting apart unnoticed.
+///
+/// The two consumers are no longer the same control: Menu bar renders these through
+/// ``BarStylePicker`` (preview pictures), Dropdown still through ``SegmentedControl`` (text). Both
+/// read `value` and `title` from here, so order and wording stay common across the split — including
+/// for the release-notes recipe in `docs/guides/releasing.md`, which greps the titles out of this
+/// file.
 ///
 /// Ordered **Pressure · Gauge · Progress**, not by `allCases`: it reads as a gradient of how much
 /// positional information the bar carries — length alone, then length plus direction, then two

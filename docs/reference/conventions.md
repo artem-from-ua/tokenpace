@@ -20,6 +20,19 @@
 - **Тести:** `swift-testing` (`import Testing`, `@Test func`, `#expect(…)`) — `XCTest` недоступний
   на Command Line Tools без повного Xcode. `swift-testing` вбудований у Swift 6.1 CLT.
 
+### Ресурси (картинки тощо)
+
+Файли лежать у `Sources/TokenPace/Resources/` і підключені як `resources: [.process("Resources")]`
+у `Package.swift`; читаються через `Bundle.module`. `.process` (не `.copy`) — тоді вони лежать
+плоско в корені бандла й доступні за голим іменем. Retina-знімки називати з суфіксом `@2x`:
+`NSImage` тоді сам виставляє правильний логічний розмір, без ручного `image.size`.
+
+**Додаючи ресурс, перевір його в зібраному `.app`, а не лише в `swift run`.** SwiftPM кладе бандл
+поруч із бінарником — там `Bundle.module` його знаходить одразу, тому дефект невидимий у дев-режимі.
+У `.app` бандл потрапляє лише тому, що `scripts/build-app.sh` копіює його в `Contents/Resources`
+(і робить це **до** `codesign` — бандл, доданий після підпису, ламає печатку). Скрипт падає з
+помилкою, якщо бандла немає, щоб перейменування таргету не давало тихо `.app` без ресурсів.
+
 ## Git
 
 - Гілки: `<prefix>/<kebab-case>` (`feature/`, `bugfix/`, `docs/`, `refactor/` …).

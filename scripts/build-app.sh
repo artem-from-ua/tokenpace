@@ -41,6 +41,21 @@ mkdir -p "${MACOS_DIR}" "${RES_DIR}"
 lipo -create "${SLICES[@]}" -output "${MACOS_DIR}/${APP_NAME}"
 echo "==> lipo archs: $(lipo -archs "${MACOS_DIR}/${APP_NAME}")"
 
+# SwiftPM resource bundle (`Bundle.module`) — the bar-style preview thumbnails.
+# `swift run` finds it beside the binary, so a missing copy here is invisible until someone opens
+# Settings in a real .app. Resources are architecture-independent, so both slices produce identical
+# bundles and the first one is enough — there is no lipo-style merge for resources.
+# Must happen BEFORE codesign: a bundle added after signing breaks the seal.
+BUNDLE_NAME="${APP_NAME}_${APP_NAME}.bundle"
+BUNDLE_SRC="$(dirname "${SLICES[0]}")/${BUNDLE_NAME}"
+[ -d "${BUNDLE_SRC}" ] || {
+    echo "error: resource bundle not found at ${BUNDLE_SRC}" >&2
+    echo "       (renamed the package/target? update BUNDLE_NAME above)" >&2
+    exit 1
+}
+cp -R "${BUNDLE_SRC}" "${RES_DIR}/"
+echo "==> bundled resources: ${BUNDLE_NAME}"
+
 # Info.plist with version/build substituted from template.
 sed -e "s/__VERSION__/${VERSION}/g" -e "s/__BUILD__/${BUILD}/g" \
     "${PLIST_IN}" > "${CONTENTS}/Info.plist"
