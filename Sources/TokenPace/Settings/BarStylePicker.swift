@@ -12,9 +12,13 @@ import TokenPaceKit
 /// tried and deliberately removed (#341): three paragraphs describing the styles cost more vertical
 /// space than they bought. A picture is what that gap wanted.
 ///
+/// Each tile is drawn at runtime by the widget's own code (``BarStylePreviewRenderer``), so a preview
+/// cannot drift away from the bar it advertises. It shipped as three captured PNGs first (ADR-0093 §1
+/// named that an interim step and left this seam for exactly this change).
+///
 /// Deliberately **not** generic, unlike ``SegmentedControl``. That one is shared by five different
-/// enums and must stay value-agnostic; this one owns a picture per `BarStyle` case, and making it
-/// generic would push the pictures out to the call site — splitting one responsibility across two
+/// enums and must stay value-agnostic; this one owns a rendered specimen per `BarStyle` case, and
+/// making it generic would push that out to the call site — splitting one responsibility across two
 /// files for no gain. One consumer, one concrete type.
 struct BarStylePicker: View {
     /// The currently selected style — drawn with the accent ring and a heavier caption.
@@ -30,10 +34,11 @@ struct BarStylePicker: View {
     /// down and cleared on mouse-up, so the grey press layer it drives leaves nothing behind.
     @State private var pressed: BarStyle?
 
-    /// Tile geometry. The picture is shown at its **natural** size inside a roomier tile rather than
+    /// Tile geometry. The specimen is shown at its **natural** size inside a roomier tile rather than
     /// scaled up: the whole point of the preview is "this is what lands in my menu bar", and a
     /// doubled widget answers a question nobody asked. Upscaling a 5 pt bar would also blur the very
-    /// slimness `StatusItemView.Metrics.barHeight` is chosen for.
+    /// slimness `StatusItemView.Metrics.barHeight` is chosen for — and the render already arrives at
+    /// a 2× backing, so there is no sharpness to gain by stretching it.
     private enum Tile {
         static let width: CGFloat = 80
         static let height: CGFloat = 48
@@ -47,8 +52,9 @@ struct BarStylePicker: View {
         static let hoverBorder: CGFloat = 1.5
         /// The grey a pressed tile's black is raised to. Composited with `.lighten`, which keeps
         /// whichever is brighter per channel, so it acts as a **floor**: the black plate comes up to
-        /// this grey, while the preview's greens, yellows and oranges are already brighter and pass
-        /// through untouched.
+        /// this grey, while the specimen's greens, yellows and oranges are already brighter and pass
+        /// through untouched. This only works because the plate under the render is opaque — see the
+        /// plate's own note in `tile(for:title:)`.
         ///
         /// A plain translucent layer cannot do this. Alpha lifts every pixel in proportion, so the
         /// black — the part meant to change — barely moves while the bright bars visibly wash out:
@@ -87,25 +93,36 @@ struct BarStylePicker: View {
             VStack(spacing: 4) {
                 ZStack {
                     // Black in BOTH themes, on purpose — not an oversight, and not a semantic colour.
-                    // The pictures are window-mode screen captures, so their transparent margins carry
-                    // a black drop shadow at alpha ≤ 24. Over black that shadow is invisible; over any
-                    // light surface it would show as a grey halo around every preview.
+                    //
+                    // Two reasons, and the second one is structural:
+                    //
+                    // 1. It is the truth about the subject. The menu bar is dark under a light theme
+                    //    too, and the specimen is baked for a dark vibrant surface to match
+                    //    (`BarStylePreviewRenderer`), so a light plate would show it against a backing
+                    //    it never has.
+                    // 2. **The press layer below depends on it.** `.lighten` compares against what is
+                    //    underneath, and the render carries an alpha channel; over a transparent pixel
+                    //    the blend would post `pressGrey` straight out and flood the tile. This opaque
+                    //    plate flattens the render first, which is what keeps the press a floor on the
+                    //    black rather than a wash over everything. Removing it does not simplify the
+                    //    tile — it breaks the click feedback.
                     RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
                         .fill(Color.black)
 
-                    if let image = Self.images[style] {
-                        Image(nsImage: image)
-                    }
+                    // Drawn live by the real widget code rather than loaded from a screenshot (#371),
+                    // so the tiles cannot fall out of step with the bar they advertise. No
+                    // `.resizable()`: the image carries its natural size in points and a 2× backing,
+                    // which is exactly how it should land here.
+                    Image(nsImage: BarStylePreviewRenderer.image(for: style))
                 }
                 .frame(width: Tile.width, height: Tile.height)
                 // The click feedback: one grey layer over the whole tile, for exactly as long as the
-                // mouse is down. It covers plate and picture together — that is the point, since the
-                // capture is opaque (`hasAlpha: no`) and only 54×33 pt of the 80×48 pt tile, so any
-                // layer that reaches one but not the other splits the tile into two blacks.
+                // mouse is down. It covers plate and specimen together — that is the point, since the
+                // widget occupies only its own few dozen points of the 80×48 pt tile, so any layer
+                // that reaches one but not the other splits the tile into two blacks.
                 //
-                // Nothing persists after mouse-up: selection is said by the ring, and a picture shown
-                // as a specimen of what lands in the menu bar must not keep a colour cast the widget
-                // never draws.
+                // Nothing persists after mouse-up: selection is said by the ring, and a specimen of
+                // what lands in the menu bar must not keep a colour cast the widget never draws.
                 .overlay(
                     RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
                         .fill(Tile.pressGrey)
@@ -156,65 +173,6 @@ struct BarStylePicker: View {
         .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
     }
 
-    // MARK: Pictures
-
-    /// Preview picture per style, loaded once.
-    ///
-    /// `Bundle.module` hits the disk on every lookup and `body` re-runs often, so the images are
-    /// resolved a single time here instead.
-    ///
-    /// **This is the seam.** Today a style's picture is a PNG shipped in the target's resource
-    /// bundle; it is expected to become a live render of the real widget later, at which point only
-    /// this property changes — neither the layout nor the selection logic is touched.
-    ///
-    /// Because the pictures are frozen, they silently go stale if the widget's geometry or palette
-    /// moves. They depend on `StatusItemView.Metrics.barWidth` / `.barHeight` / `.barGap` and on the
-    /// pacing colours; change any of those and these files need re-capturing.
-    private static let images: [BarStyle: NSImage] = {
-        guard let bundle = resourceBundle else { return [:] }
-        var loaded: [BarStyle: NSImage] = [:]
-        for style in BarStyle.allCases {
-            loaded[style] = bundle.image(forResource: resourceName(for: style))
-        }
-        return loaded
-    }()
-
-    /// The target's SwiftPM resource bundle — deliberately **not** `Bundle.module`.
-    ///
-    /// SwiftPM's generated accessor looks for the bundle next to `Bundle.main.bundleURL` and calls
-    /// `fatalError` when it is absent. Inside a real `.app` that URL *is* the app bundle, so it
-    /// probes `/Applications/TokenPace_TokenPace.bundle` — while the resources correctly live in
-    /// `Contents/Resources/`. The generated fallback is an absolute path into the developer's
-    /// `.build` directory, which no installed copy has. Both miss, and the app dies the first time
-    /// this pane is opened — the crash behind the `.app`-only trap that `swift run` never shows.
-    ///
-    /// So the lookup is done here: `Contents/Resources/` first (how a shipped `.app` is laid out),
-    /// then beside the executable (how `swift run` lays it out). A miss returns `nil` and the tiles
-    /// render without pictures — a decorative preview must never take the app down.
-    private static let resourceBundle: Bundle? = {
-        let name = "TokenPace_TokenPace.bundle"
-        let candidates = [
-            Bundle.main.resourceURL,
-            Bundle.main.bundleURL,
-            Bundle.main.executableURL?.deletingLastPathComponent(),
-        ]
-        for base in candidates.compactMap({ $0 }) {
-            if let bundle = Bundle(url: base.appendingPathComponent(name)) { return bundle }
-        }
-        // Resources may also be flattened straight into the app's own bundle.
-        return Bundle.main
-    }()
-
-    /// Resource base name per style. A `switch` without `default` so a fourth `BarStyle` case fails
-    /// to compile until it is given a picture — the only guard available, as the app target has no
-    /// test target to assert against.
-    private static func resourceName(for style: BarStyle) -> String {
-        switch style {
-        case .pressure: return "bar-style-pressure"
-        case .gauge:    return "bar-style-gauge"
-        case .progress: return "bar-style-progress"
-        }
-    }
 }
 
 // MARK: - PressReportingButtonStyle
@@ -223,8 +181,8 @@ struct BarStylePicker: View {
 ///
 /// `.plain` — the obvious choice for a picture-shaped button — dims the entire label on press. That is
 /// wrong here twice over: the label includes the caption, which should not move with the click, and the
-/// dimming multiplies against an opaque screen capture differently than against the plate around it, so
-/// a held-down tile came apart into two blacks with a seam between them.
+/// dimming multiplies against the specimen differently than against the plate around it, so a held-down
+/// tile came apart into two blacks with a seam between them.
 ///
 /// Reporting instead of drawing lets the caller put one flat layer over the tile alone, where it covers
 /// picture and plate identically. `isPressed` is bound out rather than handed to a closure so the press

@@ -11,13 +11,13 @@ let package = Package(
         .library(name: "TokenPaceKit", targets: ["TokenPaceKit"]),
     ],
     targets: [
+        // No `resources:`. The bar-style preview thumbnails used to live here as PNGs; they are drawn
+        // at runtime now (`BarStylePreviewRenderer`), so the target ships no resource bundle at all.
+        // Adding one back means re-reading the resource rules in `docs/reference/conventions.md` —
+        // `Bundle.module` does not work inside a real `.app` (ADR-0095).
         .executableTarget(
             name: "TokenPace",
-            dependencies: ["TokenPaceKit"],
-            // Bar-style preview thumbnails shown by the Settings picker. `.process` puts them in a
-            // `TokenPace_TokenPace.bundle` reachable via `Bundle.module`; `scripts/build-app.sh`
-            // copies that bundle into the `.app`, which it does not do for free.
-            resources: [.process("Resources")]
+            dependencies: ["TokenPaceKit"]
         ),
         .target(
             name: "TokenPaceKit"
