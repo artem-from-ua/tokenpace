@@ -639,11 +639,16 @@ final class PopupBarView: NSView {
     ///   would mark nothing the scale defines, and the direction the ribbon leaves the centre in is
     ///   the reading, not its distance along a ruler (#326, ADR-0079).
     ///
-    /// Under Pressure the menu bar gets no tick at all: a lone vertical tooth on a 34 pt bar is
-    /// exactly what the Progress time marker looks like, so the two styles would stop being
-    /// distinguishable there. Gauge's menu-bar centre tick escapes that objection by construction
-    /// rather than by omission — a fifth the width, in the neutral tick tone, drawn *under* the track
-    /// so only its ends show, and never moving (`StatusItemView.drawCentreTick`).
+    /// These are the **popup's** teeth. The menu bar draws its own mark for the two marker-less
+    /// scales — `StatusItemView.drawZeroTick` — and it is not this ruler: it marks each scale's
+    /// **zero** (Gauge's centre, Pressure's ribbon origin), never the 0.20 landmark, because a tooth
+    /// there would sit a couple of points from the pill on a 34 pt bar and read as noise.
+    ///
+    /// The original objection to a menu-bar tick under Pressure — a lone vertical tooth on a 34 pt bar
+    /// is exactly what the Progress time marker looks like, so the styles would stop being
+    /// distinguishable — is answered by **construction** rather than by omission: a fifth the width, in
+    /// the neutral tick tone, drawn *under* the track so only its ends show, and never moving. That is
+    /// what lets Pressure carry one too, on the same terms Gauge always has.
     ///
     /// - **Credits** (``monthBounds`` set) draws **no teeth at all** — its month ruler is the pair of
     ///   captions alone (``drawBoundaryCaptions(in:)``). Interior subdivisions are wrong there (months
