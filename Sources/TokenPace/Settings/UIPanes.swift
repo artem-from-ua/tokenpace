@@ -203,21 +203,28 @@ struct DropdownPane: View {
         Form {
             Section {
                 // Bar style, dropdown copy (#329) — the same three styles as the menu bar, chosen
-                // separately. The one hint on this page states the Extra-usage exception, and states
-                // only the fact: that bar is always Progress whatever is picked here, so a Progress bar
-                // sitting under a column of Pressure/Gauge bars reads as documented behaviour rather
-                // than a bug worth reporting. The reasons stay here rather than in the hint — its
-                // window is a calendar month, which the bar's two captioned ends already name on the
-                // bar itself, so a user who wonders why has the answer in front of them.
-                HStack {
-                    Text("Bar style")
-                    Spacer()
-                    SegmentedControl(
-                        segments: AppearanceBarStyle.segments,
-                        active: model.dropdownStyle,
-                        onSelect: { model.setDropdownStyle($0) })
+                // separately. Its hint states the Extra-usage exception, and states only the fact: that
+                // bar is always Progress whatever is picked here, so a Progress bar sitting under a
+                // column of Pressure/Gauge bars reads as documented behaviour rather than a bug worth
+                // reporting. The reasons stay here rather than in the hint — its window is a calendar
+                // month, which the bar's two captioned ends already name on the bar itself, so a user
+                // who wonders why has the answer in front of them.
+                //
+                // Row and hint share one `VStack`, the same shape every other explained control on
+                // these pages uses. Left as siblings of the `Section` they became two independent rows,
+                // and the hint read as a stray statement about Extra usage rather than as the caveat on
+                // the control directly above it — which is the only thing it is.
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Bar style")
+                        Spacer()
+                        SegmentedControl(
+                            segments: AppearanceBarStyle.segments,
+                            active: model.dropdownStyle,
+                            onSelect: { model.setDropdownStyle($0) })
+                    }
+                    SettingsHint(text: "*Extra usage* always draws in *Progress* style.")
                 }
-                SettingsHint(text: "*Extra usage* always draws in *Progress* style.")
 
                 // No `SettingsHint` under either row: the segment labels ("Always" / "Above zero" /
                 // "Non-calm only" / "With ⌥ Option") already say when the group shows, and a hint
