@@ -19,8 +19,48 @@ import TokenPaceKit
 /// Deliberately **not** generic, unlike ``SegmentedControl``. That one is shared by five different
 /// enums and must stay value-agnostic; this one owns a rendered specimen per `BarStyle` case, and
 /// making it generic would push that out to the call site — splitting one responsibility across two
-/// files for no gain. One consumer, one concrete type.
+/// files for no gain. Two consumers, one concrete type, one ``Surface`` switch.
 struct BarStylePicker: View {
+
+    /// Which widget a tile is a specimen **of**. The two surfaces draw the same three styles but are
+    /// not the same picture, and the differences are not cosmetic (ADR-0097):
+    ///
+    /// - the menu-bar specimen bakes under a fixed `.vibrantDark` on a black plate, because the menu bar
+    ///   is dark under a light theme too;
+    /// - the dropdown specimen bakes under the *current* appearance on the popup card's own colour,
+    ///   because that surface flips with the system.
+    ///
+    /// Modelled as one enum rather than two near-identical views so the parts that genuinely are shared
+    /// — press feedback, the accent ring, hover, accessibility, the caption row — stay written once.
+    enum Surface {
+        case menuBar
+        case dropdown
+
+        /// The tile's plate — the surface the specimen's bars actually sit on.
+        ///
+        /// Black for the menu bar in both themes (and load-bearing for the press blend — see the
+        /// plate's own note in `tile(for:title:)`).
+        ///
+        /// For the dropdown it is the **card's** fill (`cardPlateFillOpaque`, i.e.
+        /// `controlBackgroundColor` — 255 in light, 30 in dark), *not* the menu plate the card floats on
+        /// (236/33). The bars sit on the card, so that is what a specimen of them sits on too. Opaque
+        /// rather than the card's own partial alpha, because a tile has no menu material beneath it to
+        /// blend with.
+        var plate: Color {
+            switch self {
+            case .menuBar:  Color.black
+            case .dropdown: Color(nsColor: .cardPlateFillOpaque)
+            }
+        }
+
+        /// Whether the plate is opaque enough for the `.lighten` press overlay to act as a floor on it
+        /// rather than a wash over everything. Black qualifies; the card colour is a mid grey in dark
+        /// and near-white in light, where lightening reads as a flash instead of a press.
+        var usesLightenPress: Bool { self == .menuBar }
+    }
+
+    /// Which widget these tiles preview.
+    let surface: Surface
     /// The currently selected style — drawn with the accent ring and a heavier caption.
     let active: BarStyle
     /// Called when the user picks a style. The caller persists it (see `SettingsModel`).
@@ -33,6 +73,19 @@ struct BarStylePicker: View {
     /// Which tile the mouse is currently held down on, if any. Purely transient: it is set on mouse-
     /// down and cleared on mouse-up, so the grey press layer it drives leaves nothing behind.
     @State private var pressed: BarStyle?
+
+    /// Read **only** to make this view depend on the theme, so a light/dark flip rebuilds it.
+    ///
+    /// The specimens are baked `NSImage`s: a non-template image does not re-resolve its semantic
+    /// colours when the appearance changes, and SwiftUI has no reason to call `image(for:)` again
+    /// unless something the body reads has changed. Without this the dropdown tile kept whichever
+    /// theme's neutrals it was first drawn under — visibly wrong the moment the system flipped, since
+    /// that surface's palette flips with it. The menu-bar tile never had the problem because its
+    /// specimen is deliberately baked under a fixed `.vibrantDark` (ADR-0097).
+    ///
+    /// It is also what the render is keyed on: `colorScheme` is SwiftUI's view of the *effective*
+    /// appearance here, which is what the specimen must match.
+    @Environment(\.colorScheme) private var colorScheme
 
     /// Tile geometry. The specimen is shown at its **natural** size inside a roomier tile rather than
     /// scaled up: the whole point of the preview is "this is what lands in my menu bar", and a
@@ -69,6 +122,14 @@ struct BarStylePicker: View {
         /// plate — and the same grey therefore covers more area and reads louder than it did when it
         /// was chosen, even though the value had not changed.
         static let pressGrey = Color(white: 0.12)
+
+        /// The dropdown tile's press layer: a neutral scrim at low alpha, composited normally.
+        ///
+        /// `pressGrey`'s `.lighten` trick needs a black plate to act as a floor on; this surface's plate
+        /// is a mid grey in dark and near-white in light, so the same layer would flash in one theme and
+        /// vanish in the other. A translucent neutral darkens both by the same proportion, which is what
+        /// "held down" should look like on a card.
+        static let pressScrim = Color(white: 0, opacity: 0.14)
     }
 
     var body: some View {
@@ -81,7 +142,9 @@ struct BarStylePicker: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Bar style")
+        // Matches the visible row label verbatim — VoiceOver naming the group differently from what the
+        // eye reads is a mismatch, not extra context.
+        .accessibilityLabel("Style")
     }
 
     private func tile(for style: BarStyle, title: String) -> some View {
@@ -111,14 +174,47 @@ struct BarStylePicker: View {
                     //    plate flattens the render first, which is what keeps the press a floor on the
                     //    black rather than a wash over everything. Removing it does not simplify the
                     //    tile — it breaks the click feedback.
+                    // ...and, for the dropdown, the popup card's own colour instead — that surface is a
+                    // Control-Center card which flips with the theme, so a black plate there would show
+                    // the specimen against a backing it never has. Same argument, opposite answer.
                     RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
-                        .fill(Color.black)
+                        .fill(surface.plate)
 
                     // Drawn live by the real widget code rather than loaded from a screenshot (#371),
-                    // so the tiles cannot fall out of step with the bar they advertise. No
-                    // `.resizable()`: the image carries its natural size in points and a 2× backing,
-                    // which is exactly how it should land here.
-                    Image(nsImage: BarStylePreviewRenderer.image(for: style))
+                    // so the tiles cannot fall out of step with the bar they advertise.
+                    //
+                    // The menu-bar specimen carries its natural size in points (no `.resizable()`, and a
+                    // 2× backing, which is exactly how it should land here). The dropdown's has no
+                    // natural size to carry — `PopupBarView` stretches to the popup card — so it is
+                    // rendered *at* the tile's size instead, with the bar width chosen inside the
+                    // renderer.
+                    switch surface {
+                    case .menuBar:
+                        Image(nsImage: BarStylePreviewRenderer.image(for: style))
+                    case .dropdown:
+                        // Baked under the **vibrant** appearance of the current theme, not the plain one.
+                        //
+                        // The live bars are drawn inside an `NSMenu`, which is a vibrant surface, and the
+                        // palette resolves very differently there. Measured, for the bar's track and its
+                        // green: aqua gives `0,0,0 α0.18` and `40,205,65`, vibrantLight `211,211,211
+                        // α1.0` and `30,195,55`. Two things follow. The tones themselves differ — the
+                        // aqua green is the wrong green — and under vibrant the track comes back
+                        // **opaque**, so it no longer depends on whatever plate happens to be behind it.
+                        // 211 is exactly the grey measured off the live preview beside this pane.
+                        //
+                        // This is the same reason `PreviewChrome.vibrantAppearance` exists for the
+                        // dropdown preview window, and the same reason the menu-bar specimen pins
+                        // `.vibrantDark` (ADR-0097) — the difference being that this surface follows the
+                        // theme instead of pinning one.
+                        //
+                        // Passed explicitly rather than read from `NSApp` inside the renderer: this view
+                        // can be hosted under a forced appearance, where `NSApp`'s would be the wrong one.
+                        Image(nsImage: DropdownBarStylePreviewRenderer.image(
+                            for: style,
+                            size: NSSize(width: Tile.width, height: Tile.height),
+                            appearance: NSAppearance(
+                                named: colorScheme == .dark ? .vibrantDark : .vibrantLight)))
+                    }
                 }
                 .frame(width: Tile.width, height: Tile.height)
                 // The click feedback: one grey layer over the whole tile, for exactly as long as the
@@ -128,10 +224,16 @@ struct BarStylePicker: View {
                 //
                 // Nothing persists after mouse-up: selection is said by the ring, and a specimen of
                 // what lands in the menu bar must not keep a colour cast the widget never draws.
+                //
+                // The blend is the **menu bar's**: `.lighten` keeps whichever is brighter per channel,
+                // so it lifts a black plate to `pressGrey` while the bright bars pass through untouched.
+                // That only works against black. The dropdown's plate is a mid grey in dark and
+                // near-white in light, where lightening either does nothing or flashes — so that surface
+                // presses with a plain translucent scrim instead, which reads the same way on both.
                 .overlay(
                     RoundedRectangle(cornerRadius: Tile.cornerRadius, style: .continuous)
-                        .fill(Tile.pressGrey)
-                        .blendMode(.lighten)
+                        .fill(surface.usesLightenPress ? Tile.pressGrey : Tile.pressScrim)
+                        .blendMode(surface.usesLightenPress ? .lighten : .normal)
                         .opacity(pressed == style ? 1 : 0))
                 // `.lighten` compares against the layer below, so the tile has to be its own
                 // compositing group — without this the blend would reach the pane behind it too.

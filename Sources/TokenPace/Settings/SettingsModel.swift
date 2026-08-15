@@ -103,6 +103,34 @@ final class SettingsModel {
     var canGoBack: Bool { history.canGoBack }
     var canGoForward: Bool { history.canGoForward }
 
+    /// A click landed somewhere in the sidebar column — leave any open child page.
+    ///
+    /// The behaviour this exists for: while inside "Appearance › Dropdown", clicking "Appearance" in the
+    /// sidebar should return to Appearance's own page. It did nothing at all before — the sidebar
+    /// highlighted the parent while the detail column kept showing the child, with the toolbar's ‹ as
+    /// the only way out.
+    ///
+    /// Called from `SettingsWindowController`'s local mouse monitor, which is the only thing that sees a
+    /// click on the row that is already selected (SwiftUI's `List` consumes it). The monitor cannot tell
+    /// *which* row was hit without duplicating the list's geometry, and it does not need to:
+    ///
+    /// - clicking a **different** row changes `selection`, whose `didSet` already clears `childPage` —
+    ///   so this call finds nothing to pop and does nothing;
+    /// - clicking the **current** row is exactly the case that needs popping;
+    /// - clicking the column's empty space below the rows pops too, which is right for the same reason
+    ///   the highlighted row does: the sidebar names where you are, and the section is what it names.
+    ///
+    /// `openAt` guards the deferred call against the one ordering that would misfire: the click arrives,
+    /// the List switches to another section, and only then does this run — where popping would discard a
+    /// child page the *new* section legitimately opened. Comparing against the page that was open when
+    /// the click happened makes it pop only that page.
+    ///
+    /// Idempotent otherwise, so it is harmless whenever there is nothing open.
+    func popFromSidebarClick(openAt page: SettingsChildPage?) {
+        guard let page, childPage == page else { return }
+        popToRoot()
+    }
+
     /// Open a child page of the current section, recording it as its own history stop (#341).
     func drill(into page: SettingsChildPage) {
         guard childPage != page else { return }

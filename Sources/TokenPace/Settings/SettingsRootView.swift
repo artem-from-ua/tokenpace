@@ -26,6 +26,10 @@ struct SettingsRootView: View {
         NavigationSplitView {
             // Grouped so dividers separate About (top) and Notifications (bottom) from the standard
             // panes in the middle — a `.sidebar` List renders the gap between `Section`s as the divider.
+            // Bound straight to `selection`, which keeps the parent row highlighted while a child page
+            // is open (System Settings behaves the same way). Clicking the *already-highlighted* row is
+            // handled by the row's own gesture instead — a binding cannot see that click at all, since
+            // the List does not report a selection that did not change. See `sidebarRow(_:)`.
             List(selection: $model.selection) {
                 ForEach(Array(SettingsSection.groups.enumerated()), id: \.offset) { _, group in
                     Section {
@@ -82,6 +86,13 @@ struct SettingsRootView: View {
         }
         // SwiftUI's default Label gap is ~half the System Settings sidebar gap; set it explicitly.
         .labelStyle(SidebarLabelStyle(gap: model.sidebarIcons.chipLabelGap))
+        // Clicking the **already-selected** row pops out of its child page (#374) — but that is handled
+        // in AppKit, not here. Two SwiftUI spellings were tried and instrumented, and neither ever sees
+        // the click: `List(selection:)` does not write the binding when the selection is unchanged, and
+        // a `simultaneousGesture` on the row fired only for a row that was *not* already selected (a log
+        // line in `SettingsModel` recorded exactly one call, on the click that entered the section).
+        // Once a row is current the List consumes the event outright. See
+        // `SettingsWindowController.watchSidebarClicks(in:)`.
         .tag(section)
     }
 

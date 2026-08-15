@@ -77,6 +77,16 @@ final class SettingsWindowController: NSWindowController {
     /// passes update the one constraint instead of stacking a new one on every window show.
     private var sidebarWidthConstraint: NSLayoutConstraint?
 
+    /// Local mouse-down monitor over the sidebar column, so a click on the **already-selected** row can
+    /// pop out of its child page (#374).
+    ///
+    /// SwiftUI cannot see that click. `List(selection:)` does not write the binding when the selection
+    /// does not change, and — measured with a log line in the model — a `simultaneousGesture` on the row
+    /// only ever fired for a row that was *not* already selected: once a row is current, the List
+    /// consumes the event outright. A local monitor runs before the event reaches the view tree, so it
+    /// sees every click regardless.
+    private var sidebarClickMonitor: Any?
+
     /// Prefix for the runtime subclass that neutralises the sidebar divider (see `claimDividerCursor`).
     /// Also the marker that makes that pass idempotent.
     private static let fixedDividerClassPrefix = "TokenPaceFixedDivider_"
@@ -353,11 +363,41 @@ final class SettingsWindowController: NSWindowController {
                     item.maximumThickness = width
                 }
                 self.claimDividerCursor(on: split)
+                self.watchSidebarClicks(in: sidebar)
                 return
             }
             view.subviews.forEach(pin)
         }
         if let themeFrame = window.contentView?.superview { pin(themeFrame) }
+    }
+
+    /// Notice a click on the sidebar row that is **already** selected, and pop out of its child page.
+    ///
+    /// The whole reason this lives in AppKit: a click that does not change the selection never reaches
+    /// SwiftUI's row. `List(selection:)` skips the binding write, and a `simultaneousGesture` on the row
+    /// is not delivered either — instrumented with a log line in `SettingsModel.selectFromSidebar`, it
+    /// fired exactly once, on the first click that *entered* the section, and never again for the row
+    /// that was current. A local monitor runs ahead of the view tree, so it sees the click either way.
+    ///
+    /// The event is passed through untouched (`return event`), so ordinary selection keeps working; this
+    /// only adds a side effect. Cheap to be wrong about: `popToRoot()` no-ops when no child page is
+    /// open, so a click anywhere else in the column does nothing.
+    ///
+    /// The pop is deferred one runloop turn so it lands after the List has finished with the same
+    /// event, whose own handling would otherwise re-enter the section on top of it.
+    private func watchSidebarClicks(in sidebar: NSView) {
+        guard sidebarClickMonitor == nil else { return }
+        sidebarClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self, weak sidebar] event in
+            guard let self, let sidebar, event.window === sidebar.window else { return event }
+            let point = sidebar.convert(event.locationInWindow, from: nil)
+            guard sidebar.bounds.contains(point) else { return event }
+            // Captured now, checked later: the page that was open when the click landed.
+            let openPage = MainActor.assumeIsolated { self.model.childPage }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self.model.popFromSidebarClick(openAt: openPage) }
+            }
+            return event
+        }
     }
 
     /// Stop the divider advertising a drag the pinned sidebar will refuse.

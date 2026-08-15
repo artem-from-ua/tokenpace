@@ -57,6 +57,15 @@ public enum PopupSectionVisibility: String, Sendable, Equatable, Codable, CaseIt
     /// while ⌥ Option is held. Not offered for Extra usage (see the type's note on unlimited caps).
     case nonCalm = "nonCalm"
     /// Never show the group on its own; only while ⌥ Option is held.
+    ///
+    /// **Retired from both Settings controls** (#374), for a reason visible in ``shows(isNonCalm:isAboveZero:optionHeld:)``
+    /// below: ⌥ is OR'd into every other mode, so holding it already reveals the group whatever the mode.
+    /// That left this case offering nothing of its own except *hiding the group when the data is
+    /// interesting* — the one thing none of the others do, and not a thing anyone chose on purpose.
+    ///
+    /// The case stays here because old stored values must keep decoding — the same treatment
+    /// ``nonCalm`` gets on the Extra-usage row (see the type's note). `PersistedConfig` migrates anyone
+    /// holding it to ``aboveZero``, so nothing reaches a control that no longer offers it.
     case optionOnly = "optionOnly"
 
     /// Whether the group is drawn right now.
@@ -84,14 +93,20 @@ public enum PopupSectionVisibility: String, Sendable, Equatable, Codable, CaseIt
     /// These carry the whole explanation — the Dropdown-Widget rows deliberately have **no**
     /// `SettingsHint` beneath them, so the labels must be self-describing. Hence "only" on the non-calm
     /// segment: without it, "Non-calm" reads as *also* showing when non-calm rather than *only* then.
-    /// "Above zero" needs no such qualifier — a threshold phrase is already exclusive — and it stays two
-    /// short words because the model-limits row fits four segments beside a long title.
-    /// "With ⌥ Option" keeps the preposition (the segment is a *condition*, not a key reference) while
-    /// the glyph names the key the way every macOS menu does.
+    ///
+    /// **"Once used"**, not the shipped "Above zero" (#374). Both name the same rule, but a threshold
+    /// phrase describes the *mechanism* — a number crossing zero — while the reader is choosing a
+    /// behaviour: show me this limit from the moment I start using it. "Once" carries the onset the
+    /// mechanism only implies. Dropping the retired ⌥ segment freed the width that made "Above zero"
+    /// have to stay two short words.
+    ///
+    /// ``optionOnly`` keeps a label although no control offers it any more: `displayName` is a total
+    /// function over the enum, and a case that can still arrive from stored data should still be able to
+    /// name itself in a log line or an exported config.
     public var displayName: String {
         switch self {
         case .always:     return "Always"
-        case .aboveZero:  return "Above zero"
+        case .aboveZero:  return "Once used"
         case .nonCalm:    return "Non-calm only"
         case .optionOnly: return "With ⌥ Option"
         }

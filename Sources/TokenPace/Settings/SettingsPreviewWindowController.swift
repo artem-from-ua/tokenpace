@@ -375,7 +375,7 @@ final class SettingsPreviewWindowController {
         // real dropdown. `⌥` is the Unicode key glyph (U+2325), the same one the visibility segments
         // and the dropdown's own captions use — not an SF Symbol, so it renders inline in a label.
         let heading = TitlePlaqueView(title: "Dropdown live preview",
-                                      subtitle: "Alternative view with the ⌥ Option key")
+                                      subtitle: "try alt view with the ⌥ Option key")
         heading.translatesAutoresizingMaskIntoConstraints = false
         self.heading = heading
 

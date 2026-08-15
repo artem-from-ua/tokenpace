@@ -46,12 +46,15 @@ struct ProvidersPane: View {
                     set: { model.setPausePolling($0) }))
             }
 
-            // MARK: Monitored service incidents (one threshold for every monitored service)
+            // MARK: Monitored services (one incident threshold for every monitored service)
             //
             // Directly under the provider rows, and ahead of `Sessions`: this section is about the
             // providers listed above — their services, their incidents — whereas `Sessions` is about
             // the local client. Reading top-down now goes provider → provider → this machine.
-            Section("Monitored service incidents") {
+            //
+            // Titled for the *subject*, not for the one control it currently holds: the section is
+            // about the services being watched, and the incident cut-off is one setting about them.
+            Section("Monitored services") {
                 // #279: the incident age cut-off filters what the *popup shows*, not what gets
                 // delivered — which is why it sits with the display settings rather than with the
                 // notification toggles. It applies to every provider's services at once, so it stays

@@ -70,18 +70,25 @@ struct PopupSectionVisibilityStorageTests {
         #expect(PopupSectionVisibility.optionOnly.rawValue == "optionOnly")
     }
 
-    /// Declaration order — loudest to quietest — which the model-limits control renders as-is. The
-    /// credits control offers a subset (no `.nonCalm`) but keeps this relative order; both lists live
-    /// in `DropdownPane`.
+    /// Declaration order — loudest to quietest. Neither control renders `allCases`: since #374 the
+    /// model-limits row offers `[.always, .aboveZero, .nonCalm]` and the Extra-usage row
+    /// `[.always, .aboveZero]`, both spelled out in `DropdownPane` and both keeping this relative
+    /// order. `.optionOnly` stays last here because it stays in the enum for stored values.
     @Test func casesAreInPaneOrder() {
         #expect(PopupSectionVisibility.allCases == [.always, .aboveZero, .nonCalm, .optionOnly])
     }
 
     /// The labels carry the whole explanation (these rows have no `SettingsHint`), so "only" on the
     /// non-calm segment is load-bearing: without it the label reads as "also when non-calm".
+    ///
+    /// `.aboveZero` reads "Once used" rather than the shipped "Above zero" (#374): the row is a choice
+    /// about behaviour, and "once" names the onset that a threshold phrase only implies.
+    ///
+    /// `.optionOnly` keeps a label although no control offers it any more — `displayName` is total over
+    /// the enum, and the case can still arrive from stored or imported data.
     @Test func displayNames() {
         #expect(PopupSectionVisibility.always.displayName == "Always")
-        #expect(PopupSectionVisibility.aboveZero.displayName == "Above zero")
+        #expect(PopupSectionVisibility.aboveZero.displayName == "Once used")
         #expect(PopupSectionVisibility.nonCalm.displayName == "Non-calm only")
         #expect(PopupSectionVisibility.optionOnly.displayName == "With ⌥ Option")
     }

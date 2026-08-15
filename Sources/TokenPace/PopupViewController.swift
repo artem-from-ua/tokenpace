@@ -222,6 +222,26 @@ final class PopupBarView: NSView {
     /// the hosted bar's height constraint to the same value the view draws into.
     static var viewHeight: CGFloat { Metrics.height }
 
+    /// The width the live bar is drawn at inside the popup card, exposed so the Settings preview can be
+    /// checked against it.
+    static var liveWidth: CGFloat { PopupViewController.Metrics.contentWidth }
+
+    /// The height of the **track** — the bar proper, without the marker's overhang or the ruler's
+    /// reserved strip. This is the shape a reader sees as "the bar", so it is the unit to lay a stack of
+    /// bars out by.
+    static var trackHeight: CGFloat { Metrics.barHeight }
+
+    /// How far the time marker stands proud of the track on each side, which is also the distance from
+    /// the frame ``render(in:)`` is handed to the track it draws inside it.
+    ///
+    /// Exposed together with ``trackHeight`` for callers that position bars by their track rather than
+    /// by their frame — the Settings preview tile, where no ruler is drawn and `viewHeight`'s reserved
+    /// strip would otherwise push the pair off centre. Both restate `Metrics`, which is private, so they
+    /// track it instead of being copied at the call site.
+    static var markerOverhang: CGFloat {
+        max(0, (Metrics.indicatorHeight - Metrics.barHeight) / 2)
+    }
+
     /// The view height for a **credits** bar: measured from where its captions actually end, not from
     /// the tick-ruler band.
     ///
@@ -376,7 +396,15 @@ final class PopupBarView: NSView {
     override var isFlipped: Bool { true }
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: Metrics.height) }
 
-    override func draw(_ dirtyRect: NSRect) {
+    override func draw(_ dirtyRect: NSRect) { render(in: bounds) }
+
+    /// Draw the whole bar into `rect`. Shared by ``draw(_:)`` and ``snapshotImage()``.
+    ///
+    /// Split out of `draw(_:)` for the Settings preview tiles (#374): a specimen baked off `bounds`
+    /// could only ever be the size the live view happens to have, and the tile is narrower. Routing
+    /// both callers through one draughtsman is what stops the preview from drifting away from the live
+    /// bar — the same seam `StatusItemView.render(in:)` provides for the menu-bar tiles (#373).
+    func render(in bounds: NSRect) {
         // The bar sits below a top margin equal to the marker's overhang — the marker is centred on
         // the bar, so a marker taller than the bar sticks out by `(height − barHeight)/2` on each side;
         // the margin keeps that top overhang inside the view (the tick ruler fills the strip below).
@@ -538,6 +566,29 @@ final class PopupBarView: NSView {
         drawTimeMarker(at: frozenStripFraction ?? l.timeFraction, colour: indicatorColor(l), in: rect)
     }
 
+    // MARK: NSImage snapshot
+
+    /// Render this bar to a non-template `NSImage` `width` points wide, for the Settings preview tiles.
+    ///
+    /// Width is a parameter rather than read from the view because ``intrinsicContentSize`` deliberately
+    /// leaves it `noIntrinsicMetric` — the live bar stretches to the popup card (252 pt), while a tile
+    /// specimen is a fraction of that. Height comes from ``Metrics/height``, unscaled: the tile shows the
+    /// bar and marker at their real thickness, so what the picture promises is what the dropdown draws.
+    ///
+    /// Drawn **eagerly** inside the caller's `performAsCurrentDrawingAppearance` block, for the reason
+    /// `StatusItemView.snapshotImage()` documents at length: the lazy `NSImage(size:flipped:)` handler
+    /// resolves dynamic colours whenever the image is later composited, which on this surface would bake
+    /// the wrong theme's neutrals into the tile.
+    func snapshotImage(width: CGFloat) -> NSImage {
+        let size = NSSize(width: width, height: Metrics.height)
+        let image = NSImage(size: size)
+        image.lockFocusFlipped(true)
+        render(in: NSRect(origin: .zero, size: size))
+        image.unlockFocus()
+        image.isTemplate = false
+        return image
+    }
+
     /// The time-indicator marker: a slim rounded vertical bar in `colour`, with a border in the
     /// grey-track tone that separates it from the strip underneath.
     ///
@@ -560,8 +611,23 @@ final class PopupBarView: NSView {
         // inset rounded rect in the marker colour on top — leaving a crisp `bw`-wide even border. The whole
         // thing carries the ambient glow.
         let bw: CGFloat = 1
-        let border = (Self.monochromeGrey.blended(withFraction: 0.4, of: colour) ?? Self.monochromeGrey)
-            .withAlphaComponent(0.9)
+        // A **dynamic** colour, for the same reason `Palette.monochromeGrey` and `Palette.zeroTick` are:
+        // `blended(withFraction:of:)` resolves its receiver against whatever appearance is current *at
+        // the call site*, and this one is built during layout rather than inside a drawing block. The
+        // live popup gets away with it because the view is drawn in its own real appearance; a caller
+        // that renders the same view into an image under an explicitly chosen appearance does not.
+        //
+        // Measured: computed here, the border came out 13,96,26 under **both** themes — the dark tone
+        // baked into the light one. Resolved per appearance it is 185,239,190 in dark against 13,96,26
+        // in light, which is the pair the live bar shows.
+        let border = NSColor(name: nil) { appearance in
+            var blended = Self.monochromeGrey
+            appearance.performAsCurrentDrawingAppearance {
+                blended = (Self.monochromeGrey.blended(withFraction: 0.4, of: colour)
+                    ?? Self.monochromeGrey).withAlphaComponent(0.9)
+            }
+            return blended
+        }
         let innerRect = markerRect.insetBy(dx: bw, dy: bw)
         let inner = NSBezierPath(roundedRect: innerRect,
                                  xRadius: max(0, Metrics.indicatorCorner - bw),
