@@ -86,29 +86,13 @@ struct SettingsRootView: View {
         }
         // SwiftUI's default Label gap is ~half the System Settings sidebar gap; set it explicitly.
         .labelStyle(SidebarLabelStyle(gap: model.sidebarIcons.chipLabelGap))
-        // The row is only as wide as its text without this, so a click in the empty space to the right
-        // of a short title would miss the gesture below and land on the List's own selection handling.
-        .contentShape(Rectangle())
-        // Clicking the **already-selected** row pops out of its child page back to the section (#374).
-        //
-        // This cannot ride on `List(selection:)`: the list does not report a click that leaves the
-        // selection unchanged, so no binding — not even a custom one with a side-effecting setter —
-        // ever sees it. The row has to observe the click itself.
-        //
-        // `simultaneousGesture`, not `onTapGesture`: a plain tap gesture *replaces* the row's own click
-        // handling and the sidebar stops selecting at all. This one runs alongside it, so a click on a
-        // different row still selects through the List while a click on the current row also reaches
-        // `selectFromSidebar`.
-        //
-        // Deferred to the next runloop turn rather than run inline. The gesture and the List's own
-        // selection write race, and their order is not guaranteed: when the List's write lands *after*
-        // the gesture, its `didSet` re-enters the section and can undo a pop that had already happened,
-        // so clicking the highlighted row worked only sometimes. Running last makes the pop the final
-        // word whichever order the two arrive in — and it stays idempotent, so the extra hop is
-        // invisible when there is nothing to pop.
-        .simultaneousGesture(TapGesture().onEnded {
-            DispatchQueue.main.async { model.selectFromSidebar(section) }
-        })
+        // Clicking the **already-selected** row pops out of its child page (#374) — but that is handled
+        // in AppKit, not here. Two SwiftUI spellings were tried and instrumented, and neither ever sees
+        // the click: `List(selection:)` does not write the binding when the selection is unchanged, and
+        // a `simultaneousGesture` on the row fired only for a row that was *not* already selected (a log
+        // line in `SettingsModel` recorded exactly one call, on the click that entered the section).
+        // Once a row is current the List consumes the event outright. See
+        // `SettingsWindowController.watchSidebarClicks(in:)`.
         .tag(section)
     }
 

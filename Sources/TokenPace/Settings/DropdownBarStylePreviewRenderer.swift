@@ -109,20 +109,24 @@ enum DropdownBarStylePreviewRenderer {
 
     /// The specimen drawn in `style` at the tile's size, ready for `Image(nsImage:)`.
     ///
-    /// **The image is transparent apart from the bars**, and what sits behind it is load-bearing rather
-    /// than decorative: the track (`PopupBarView.monochromeGrey`) and the marker's border are both
-    /// *translucent*, so the plate underneath mixes into them. The tile must therefore be backed by the
-    /// same fill the live bars sit on — the popup **card** (`NSColor.cardPlateFillOpaque`), not the menu
-    /// plate the card floats on. Measured with both open side by side in the light theme, the wrong
-    /// backdrop rendered the tile's track 193 grey against the live bar's 211. On the right plate every
-    /// colour matches to within a unit or two of antialiasing:
+    /// **`appearance` must be a vibrant one**, and the caller passes `.vibrantLight`/`.vibrantDark` for
+    /// exactly that reason. The live bars are drawn inside an `NSMenu`, which is a vibrant surface, and
+    /// this palette resolves very differently there — measured on the track and the pacing green:
     ///
-    /// | | tile | live |
+    /// | appearance | track | green |
     /// |---|---|---|
-    /// | track, light | 209,210,209 | 209,209,209 |
-    /// | strip, light | 101,202,85 | 99,202,86 |
-    /// | track, dark | 69,69,69 | 69,69,69 |
-    /// | strip, dark | 108,212,95 | 107,212,95 |
+    /// | aqua | 0,0,0 α0.18 | 40,205,65 |
+    /// | vibrantLight | 211,211,211 α1.0 | 30,195,55 |
+    /// | darkAqua | 255,255,255 α0.17 | 50,215,75 |
+    /// | vibrantDark | 51,51,51 α1.0 | 60,225,85 |
+    ///
+    /// Two consequences. The hues differ outright — the aqua green is simply not the green the popup
+    /// draws — and under vibrant the track resolves **opaque**, so it stops depending on whatever plate
+    /// sits behind it. 211 is the grey measured off the live preview window beside this pane.
+    ///
+    /// The image is still transparent apart from the bars, so the tile is backed by the popup **card**'s
+    /// fill (`NSColor.cardPlateFillOpaque`) rather than the menu plate the card floats on — 255 in light
+    /// and 30 in dark, against the menu plate's 236/33.
     ///
     /// Not cached, for the same reason ``BarStylePreviewRenderer`` is not: three small canvases cost
     /// microseconds, and a cache would have to be invalidated on every colour-role change from the dev

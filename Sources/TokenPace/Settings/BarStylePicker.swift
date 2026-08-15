@@ -42,13 +42,10 @@ struct BarStylePicker: View {
         /// plate's own note in `tile(for:title:)`).
         ///
         /// For the dropdown it is the **card's** fill (`cardPlateFillOpaque`, i.e.
-        /// `controlBackgroundColor`), *not* the menu plate the card floats on. That distinction is not
-        /// cosmetic: the bar's track is a translucent grey (`PopupBarView.monochromeGrey`, a blend of
-        /// tertiary and quaternary label), so whatever is underneath shows through and changes it.
-        /// Measured on a light-theme screenshot with the live preview open, the menu plate made the
-        /// tile's track render 193 grey against the live bar's 211 — visibly darker, side by side, from
-        /// one wrong backdrop. Opaque rather than the card's own partial alpha because a tile has no
-        /// menu material beneath it to blend with.
+        /// `controlBackgroundColor` — 255 in light, 30 in dark), *not* the menu plate the card floats on
+        /// (236/33). The bars sit on the card, so that is what a specimen of them sits on too. Opaque
+        /// rather than the card's own partial alpha, because a tile has no menu material beneath it to
+        /// blend with.
         var plate: Color {
             switch self {
             case .menuBar:  Color.black
@@ -195,14 +192,28 @@ struct BarStylePicker: View {
                     case .menuBar:
                         Image(nsImage: BarStylePreviewRenderer.image(for: style))
                     case .dropdown:
-                        // The appearance is passed explicitly, derived from `colorScheme`, rather than
-                        // read from `NSApp` inside the renderer: this view can be hosted under a forced
-                        // appearance (the dropdown preview window forces one), and `NSApp`'s would then
-                        // bake the wrong palette into a tile sitting on a surface that has another.
+                        // Baked under the **vibrant** appearance of the current theme, not the plain one.
+                        //
+                        // The live bars are drawn inside an `NSMenu`, which is a vibrant surface, and the
+                        // palette resolves very differently there. Measured, for the bar's track and its
+                        // green: aqua gives `0,0,0 α0.18` and `40,205,65`, vibrantLight `211,211,211
+                        // α1.0` and `30,195,55`. Two things follow. The tones themselves differ — the
+                        // aqua green is the wrong green — and under vibrant the track comes back
+                        // **opaque**, so it no longer depends on whatever plate happens to be behind it.
+                        // 211 is exactly the grey measured off the live preview beside this pane.
+                        //
+                        // This is the same reason `PreviewChrome.vibrantAppearance` exists for the
+                        // dropdown preview window, and the same reason the menu-bar specimen pins
+                        // `.vibrantDark` (ADR-0097) — the difference being that this surface follows the
+                        // theme instead of pinning one.
+                        //
+                        // Passed explicitly rather than read from `NSApp` inside the renderer: this view
+                        // can be hosted under a forced appearance, where `NSApp`'s would be the wrong one.
                         Image(nsImage: DropdownBarStylePreviewRenderer.image(
                             for: style,
                             size: NSSize(width: Tile.width, height: Tile.height),
-                            appearance: NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)))
+                            appearance: NSAppearance(
+                                named: colorScheme == .dark ? .vibrantDark : .vibrantLight)))
                     }
                 }
                 .frame(width: Tile.width, height: Tile.height)

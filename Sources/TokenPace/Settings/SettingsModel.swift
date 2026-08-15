@@ -103,29 +103,32 @@ final class SettingsModel {
     var canGoBack: Bool { history.canGoBack }
     var canGoForward: Bool { history.canGoForward }
 
-    /// What the **sidebar** does when a row is clicked — which is not the same as writing ``selection``.
+    /// A click landed somewhere in the sidebar column — leave any open child page.
     ///
-    /// Picking a *different* section behaves exactly as before: the `didSet` clears any child page and
-    /// records the visit. Picking the section you are **already inside a child page of** used to do
-    /// nothing at all: `List(selection:)` does not write the binding when the value is unchanged, and
-    /// even if it did, the `didSet`'s `selection != oldValue` guard would swallow it. So the sidebar
-    /// highlighted "Appearance" while the detail column kept showing "Dropdown", with no way back to the
-    /// parent except the toolbar's ‹.
+    /// The behaviour this exists for: while inside "Appearance › Dropdown", clicking "Appearance" in the
+    /// sidebar should return to Appearance's own page. It did nothing at all before — the sidebar
+    /// highlighted the parent while the detail column kept showing the child, with the toolbar's ‹ as
+    /// the only way out.
     ///
-    /// Clicking the highlighted row now pops to that section's own page. The row you click is the page
-    /// you land on — which is what the highlight has been claiming all along.
+    /// Called from `SettingsWindowController`'s local mouse monitor, which is the only thing that sees a
+    /// click on the row that is already selected (SwiftUI's `List` consumes it). The monitor cannot tell
+    /// *which* row was hit without duplicating the list's geometry, and it does not need to:
     ///
-    /// Called from the row's own tap gesture, which fires on **every** click including one that leaves
-    /// the selection unchanged — the case `List(selection:)` never reports. Both writes below are
-    /// idempotent, so the list's own selection handling running alongside it is harmless: assigning the
-    /// section it already holds is caught by the `didSet` guard, and ``popToRoot()`` no-ops when no
-    /// child page is open.
-    func selectFromSidebar(_ section: SettingsSection) {
-        guard section == selection else {
-            selection = section          // different row: the `didSet` clears the child and records it
-            return
-        }
-        popToRoot()                      // same row, drilled in: back out to the section's own page
+    /// - clicking a **different** row changes `selection`, whose `didSet` already clears `childPage` —
+    ///   so this call finds nothing to pop and does nothing;
+    /// - clicking the **current** row is exactly the case that needs popping;
+    /// - clicking the column's empty space below the rows pops too, which is right for the same reason
+    ///   the highlighted row does: the sidebar names where you are, and the section is what it names.
+    ///
+    /// `openAt` guards the deferred call against the one ordering that would misfire: the click arrives,
+    /// the List switches to another section, and only then does this run — where popping would discard a
+    /// child page the *new* section legitimately opened. Comparing against the page that was open when
+    /// the click happened makes it pop only that page.
+    ///
+    /// Idempotent otherwise, so it is harmless whenever there is nothing open.
+    func popFromSidebarClick(openAt page: SettingsChildPage?) {
+        guard let page, childPage == page else { return }
+        popToRoot()
     }
 
     /// Open a child page of the current section, recording it as its own history stop (#341).
