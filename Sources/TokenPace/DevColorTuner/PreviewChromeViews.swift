@@ -186,14 +186,21 @@ final class ThemedFillView: NSView {
     }
 }
 
-/// The preview window's heading: a centred title sitting directly on the card, with no backing strip.
+/// The preview window's heading: a centred title sitting directly on the card, with no backing strip,
+/// and an optional second line under it.
 ///
 /// It used to draw a subtly darker plaque behind the text, imitating a window title bar. That reads as
 /// *chrome* — a second window inside the window — where the preview should read as the dropdown itself
 /// with a label above it. The text alone says the same thing and keeps the card one continuous surface.
+///
+/// The subtitle is opt-in (`nil` by default), so the dev tuner's heading is unchanged: it has one
+/// preview and no modifier to discover. The Settings preview uses it to say that ⌥ shows a second
+/// composition — a thing the window can *do* that is invisible until someone happens to hold the key.
 @MainActor
 final class TitlePlaqueView: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
+    /// The second line, or `nil` for a heading that has none.
+    private let subtitleLabel: NSTextField?
 
     /// Whether the window this heading belongs to is the active one.
     ///
@@ -209,20 +216,57 @@ final class TitlePlaqueView: NSView {
         }
     }
 
-    init(title: String) {
+    init(title: String, subtitle: String? = nil) {
+        subtitleLabel = subtitle.map { text in
+            let label = NSTextField(labelWithString: text)
+            // A step down from the title, the way a window's proxy subtitle sits under its name: the
+            // line is a hint about a key, and reading as loudly as the heading would make the preview
+            // look like it had two titles. Only *one* step, though — `smallSystemFontSize` (11) put it
+            // at the weight of a footnote, and the ⌥ glyph in particular needs a little more body to
+            // be recognisable as a key rather than as punctuation.
+            label.font = .systemFont(ofSize: Metrics.subtitleSize)
+            label.alignment = .center
+            label.translatesAutoresizingMaskIntoConstraints = false
+            return label
+        }
         super.init(frame: .zero)
         titleLabel.stringValue = title
         titleLabel.font = NSFont.titleBarFont(ofSize: NSFont.systemFontSize)
         titleLabel.alignment = .center
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
+
+        guard let subtitleLabel else {
+            NSLayoutConstraint.activate([
+                titleLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+                titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+            applyTitleColour()
+            return
+        }
+        addSubview(subtitleLabel)
+        // With two lines the pair is pinned top-to-bottom rather than centred: the view's height is
+        // its content's (see `intrinsicContentSize`), so centring each line separately would leave
+        // them overlapping in a box only as tall as one of them.
         NSLayoutConstraint.activate([
             titleLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor),
+            subtitleLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: Metrics.lineGap),
+            subtitleLabel.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         applyTitleColour()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private enum Metrics {
+        /// Title to subtitle. Tight enough that the two read as one heading block rather than as a
+        /// heading and a stray line of text above the card.
+        static let lineGap: CGFloat = 2
+        /// The subtitle's point size: one step under the system size (13) rather than the two steps
+        /// `smallSystemFontSize` (11) would take it down.
+        static let subtitleSize: CGFloat = 12
+    }
 
     /// Both colours re-resolve per appearance on their own. The inactive state uses
     /// `tertiaryLabelColor` rather than `secondary`: this heading sits on the menu material, which is
@@ -230,11 +274,18 @@ final class TitlePlaqueView: NSView {
     /// it — it needs to drop a step further to match the dimmed toolbar title beside it.
     private func applyTitleColour() {
         titleLabel.textColor = isWindowActive ? .labelColor : .tertiaryLabelColor
+        // One tier below the title in both states, so the hierarchy between the two lines survives the
+        // window losing focus instead of collapsing into one flat grey.
+        subtitleLabel?.textColor = isWindowActive ? .secondaryLabelColor : .quaternaryLabelColor
     }
 
-    /// Hugs the label. With the backing strip gone there is nothing to give the heading a height of its
+    /// Hugs the labels. With the backing strip gone there is nothing to give the heading a height of its
     /// own, and a fixed one would add invisible slack that makes the surrounding margins uneven.
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: titleLabel.intrinsicContentSize.height)
+        var height = titleLabel.intrinsicContentSize.height
+        if let subtitleLabel {
+            height += Metrics.lineGap + subtitleLabel.intrinsicContentSize.height
+        }
+        return NSSize(width: NSView.noIntrinsicMetric, height: height)
     }
 }

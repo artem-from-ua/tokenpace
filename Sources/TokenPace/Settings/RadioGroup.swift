@@ -20,8 +20,9 @@ import SwiftUI
 ///
 /// An option may be **shown but not selectable** (``Option/selectable``) — the same requirement that
 /// shaped `SegmentedControl`: "Custom" has to be visible and highlightable while there is nothing
-/// stashed to restore, without becoming pickable. Such an option carries ``Option/inactiveHelp``,
-/// shown as its secondary line in place of the description.
+/// stashed to restore, without becoming pickable. Its description stays put either way — the line
+/// describes the option, not the option's current reachability, so nothing under the pointer reflows
+/// when a click does or does not take.
 struct RadioGroup<Value: Hashable>: View {
     struct Option: Identifiable {
         let value: Value
@@ -29,10 +30,11 @@ struct RadioGroup<Value: Hashable>: View {
         /// The line under the title: what this option does, in the user's terms.
         let summary: String
         /// Whether clicking this option selects it. `false` = visible, highlightable, inert.
+        ///
+        /// It changes only whether the click lands and how the **title** is weighted — never the
+        /// description. An option whose second line rewrote itself on selection would make the list
+        /// reflow under the pointer, and the line stops being a stable description of the option.
         var selectable: Bool = true
-        /// Shown **instead of** ``summary`` while the option is not selectable — it explains how to
-        /// make it reachable rather than describing a state the user cannot currently choose.
-        var inactiveHelp: String? = nil
         var id: Value { value }
     }
 
@@ -66,7 +68,7 @@ struct RadioGroup<Value: Hashable>: View {
                 VStack(alignment: .leading, spacing: Metrics.titleSummaryGap) {
                     Text(option.title)
                         .foregroundStyle(option.selectable ? .primary : .secondary)
-                    Text(.init(secondaryLine(option)))
+                    Text(.init(option.summary))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -79,12 +81,6 @@ struct RadioGroup<Value: Hashable>: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
-    }
-
-    /// The description, or the "how to reach this" line when the option is inert.
-    private func secondaryLine(_ option: Option) -> String {
-        guard !option.selectable, let help = option.inactiveHelp else { return option.summary }
-        return help
     }
 
 }

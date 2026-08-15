@@ -110,18 +110,26 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
     ///   below-pace half instead of flattening it to a minimum pill.
     /// - `.controlFreak` turns muting off entirely, pins both bars on screen (`.never`) and both popup
     ///   sections open (`.always`).
-    /// Two of the three describe **what the widget does**, and the third describes **who it is for**:
-    /// `Chill` and `Work harder!` differ from each other by behaviour a user can picture (quiet until
-    /// it matters vs. also flagging the underspend), while `Control freak` is chosen by a need rather
-    /// than by a signal — the full picture without a click or a held ⌥.
+    /// Each line describes **behaviour the user can picture**, and each stands on its own: an earlier
+    /// draft of `.workHarder` opened "Like Chill, but…", which made the middle option unreadable
+    /// without first reading the one above it — in a list, every entry is someone's first.
+    ///
+    /// `.controlFreak` states the trade rather than only the benefit. Turning off every mute is what
+    /// puts the whole picture on screen, and it is also what makes the picture take longer to read:
+    /// when nothing is quiet, nothing stands out. Naming that is the difference between a description
+    /// and a sales pitch.
+    ///
+    /// It deliberately does **not** promise "the full picture without holding ⌥". The modifier reveals
+    /// hidden rows and captions; it never swaps the bar style, so a Pressure bar stays Pressure under
+    /// ⌥ — a line implying otherwise would describe a swap the key does not perform.
     public var summary: String {
         switch self {
         case .chill:
             return "Stays quiet until a limit actually needs your attention."
         case .workHarder:
-            return "Like Chill, but also flags when you're well below pace and leaving tokens unused."
+            return "Quiet too, but tells you when you're leaving tokens unused."
         case .controlFreak:
-            return "You want the full picture at a glance, without opening or holding ⌥."
+            return "Maximum info, but signals take a bit longer to spot."
         }
     }
 

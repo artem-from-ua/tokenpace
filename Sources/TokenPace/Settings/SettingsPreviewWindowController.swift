@@ -370,7 +370,12 @@ final class SettingsPreviewWindowController {
     private func buildContent() -> NSView {
         previewVC.view.translatesAutoresizingMaskIntoConstraints = false
 
-        let heading = TitlePlaqueView(title: "Dropdown live preview")
+        // The second line advertises ⌥, which is otherwise a feature only a user who happens to hold
+        // the key will ever find: the modifier reveals whole sections here exactly as it does in the
+        // real dropdown. `⌥` is the Unicode key glyph (U+2325), the same one the visibility segments
+        // and the dropdown's own captions use — not an SF Symbol, so it renders inline in a label.
+        let heading = TitlePlaqueView(title: "Dropdown live preview",
+                                      subtitle: "Alternative view with the ⌥ Option key")
         heading.translatesAutoresizingMaskIntoConstraints = false
         self.heading = heading
 

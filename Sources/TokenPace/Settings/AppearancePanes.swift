@@ -48,13 +48,21 @@ struct AppearancePane: View {
             // has nothing to come back to — and says so on its own second line.
             Section {
                 VStack(alignment: .leading, spacing: 10) {
-                    // Heading row: the section's own label, with the copy-config button trailing. The
-                    // radios sit below it rather than beside it — four two-line options are a block,
-                    // not a control that fits at the end of a row.
-                    HStack {
-                        Text("Change appearance preset")
-                        Spacer()
-                        copyConfigButton
+                    // Heading block: the section's own label with the copy-config button trailing, and
+                    // the hint directly under it — the hint explains what picking *any* option below
+                    // does, so it belongs to the heading, not to the last radio. Its own 4 pt spacing
+                    // (rather than the 10 pt between the block and the radios) is what keeps the two
+                    // lines reading as one heading instead of as a fifth entry in the list.
+                    //
+                    // The radios sit below the block rather than beside the label — four two-line
+                    // options are a block, not a control that fits at the end of a row.
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Change appearance preset")
+                            Spacer()
+                            copyConfigButton
+                        }
+                        SettingsHint(text: "Set all the options for *Menu bar* and *Dropdown* at once.")
                     }
                     RadioGroup(
                         options: AppearancePreset.allCases.map {
@@ -66,17 +74,19 @@ struct AppearancePane: View {
                                    // the user maintains, when it is a snapshot the app takes for them
                                    // — and one that a *new* hand-made setup replaces (`apply(_:)`
                                    // re-stashes only when the live config matches no preset).
-                                   summary: "The setup you had before switching to a preset.",
+                                   // Worded to hold in **both** states, because the line never swaps:
+                                   // on a fresh install there is no such setup yet, and the sentence
+                                   // then reads as what the option is *for* rather than as a promise
+                                   // about something that exists. A second wording that appeared only
+                                   // while the option was inert would move the rows under the pointer.
+                                   summary: "The setup you had before switching to a predefined preset.",
                                    // Selectable once there is a setup to go back to (#333); until then
-                                   // it stays the indicator it always was, and explains itself.
-                                   selectable: model.canRestoreCustom,
-                                   inactiveHelp: "Change any option on *Menu bar* or *Dropdown* to "
-                                       + "craft your own setup.")],
+                                   // it stays the indicator it always was.
+                                   selectable: model.canRestoreCustom)],
                         active: model.activePreset,
                         onSelect: { picked in
                             if let preset = picked { model.apply(preset) } else { model.applySavedCustom() }
                         })
-                    SettingsHint(text: "Set all the options for *Menu bar* and *Dropdown* at once.")
                 }
             }
 
@@ -118,11 +128,19 @@ struct AppearancePane: View {
             copyConfigToClipboard()
         } label: {
             Image(systemName: didCopyConfig ? CopyFeedback.confirmedSymbol : CopyFeedback.restingSymbol)
-                // A fixed width keeps the segmented control from shifting sideways when the glyph
-                // swaps to the (narrower) checkmark and back.
-                .frame(width: 16)
+                // A fixed box for **both** dimensions. Width was always needed — the checkmark is
+                // narrower than `doc.on.doc`, so without it the button's neighbours slide sideways on
+                // every click. Height became just as necessary once the button stopped sharing a row
+                // with the segmented control: that control used to set the row's height, and now the
+                // button sets it alone, so the checkmark's shorter glyph shrank the row and jolted
+                // everything below it. Sized off the resting glyph, which is the taller of the two.
+                .frame(width: Self.copyGlyphBox, height: Self.copyGlyphBox)
         }
         .buttonStyle(.borderless)
+        // The swap is a state report, not a transition: SwiftUI's implicit animation cross-fades and
+        // re-measures the two glyphs, which is the second half of the jolt the fixed box addresses.
+        // Same treatment the dependent rows on `ProvidersPane` get, and for the same reason.
+        .animation(nil, value: didCopyConfig)
         .help("Copy \(Self.copyTarget) to the clipboard")
         .accessibilityLabel(didCopyConfig
             ? CopyFeedback.confirmedLabel
@@ -131,6 +149,11 @@ struct AppearancePane: View {
 
     /// What this button copies — used in the tooltip and the accessibility label.
     private static let copyTarget = "appearance settings"
+
+    /// The fixed box the copy glyph draws in, so neither of the two symbols can move the layout when
+    /// they swap. Square: the resting `doc.on.doc` is the larger glyph in both dimensions, and one
+    /// number for both keeps the button reading as a square hit target rather than a slot.
+    private static let copyGlyphBox: CGFloat = 16
 
     /// Write the model's JSON dump to the general pasteboard and show the checkmark. The pasteboard
     /// write lives here rather than in `SettingsModel` so the model stays free of AppKit.
