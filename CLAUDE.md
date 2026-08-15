@@ -101,6 +101,12 @@ swift run          # запуск
 - **Доки — частина коду.** Зміна модуля → оновити `docs/architecture.md`; нове рішення між
   підходами → новий ADR; **зміна логування** (новий/видалений виклик, інший текст меседжа,
   рівень чи категорія) → оновити `docs/log-messages.md` у тому самому коміті.
+- **PR без доків не мержиться — зупинись і скажи.** Перед тим як відкривати PR або мержити його,
+  перевір, чи зміна зачіпає щось із переліку вище (модуль, рішення між підходами, логування, назви
+  UI-рядків, сценарії верифікації). Якщо так, а доків у диффі немає — **зупинись і повідом
+  мейнтейнеру**, замість мержити з наміром «доки потім». Окремий docs-PR після мержу ламає
+  атомарність: у `main` лишається коміт, де код і доки розходяться, і ніщо про це не сигналить.
+  Продовжити без доків можна лише за явним словом мейнтейнера в цій сесії.
 - **Не стверджувати з пам'яті** факти про зовнішні API/інструменти — перевіряти (curl/--help/docs).
 - **`gh release create` runs only after the maintainer's explicit go-ahead.** A direct instruction to publish this release — "релізь", "make release", "publish the release" or equivalent — is required each time. Building, notarizing, tagging and drafting release notes may proceed without it, but the actual `gh release create` waits for that explicit word. This is separate from and additional to the `RELEASE_NOTES_APPROVED=1` notes-approval gate (that gate guards the notes; this rule guards the act of publishing).
 
