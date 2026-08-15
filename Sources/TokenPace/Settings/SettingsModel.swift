@@ -114,6 +114,12 @@ final class SettingsModel {
     ///
     /// Clicking the highlighted row now pops to that section's own page. The row you click is the page
     /// you land on — which is what the highlight has been claiming all along.
+    ///
+    /// Called from the row's own tap gesture, which fires on **every** click including one that leaves
+    /// the selection unchanged — the case `List(selection:)` never reports. Both writes below are
+    /// idempotent, so the list's own selection handling running alongside it is harmless: assigning the
+    /// section it already holds is caught by the `didSet` guard, and ``popToRoot()`` no-ops when no
+    /// child page is open.
     func selectFromSidebar(_ section: SettingsSection) {
         guard section == selection else {
             selection = section          // different row: the `didSet` clears the child and records it

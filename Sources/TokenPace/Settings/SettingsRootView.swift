@@ -26,16 +26,11 @@ struct SettingsRootView: View {
         NavigationSplitView {
             // Grouped so dividers separate About (top) and Notifications (bottom) from the standard
             // panes in the middle — a `.sidebar` List renders the gap between `Section`s as the divider.
-            // Selection is routed through the model rather than bound straight to `model.selection`, so
-            // that clicking the **already-highlighted** row means something: it pops out of a child page
-            // back to the section's own. A plain `$model.selection` cannot express that — `List` skips
-            // the write when the value is unchanged, so the click never reaches the model at all.
-            //
-            // The getter still reports `selection`, which is what keeps the parent row highlighted while
-            // a child page is open (System Settings behaves the same way).
-            List(selection: Binding(
-                get: { model.selection },
-                set: { model.selectFromSidebar($0) })) {
+            // Bound straight to `selection`, which keeps the parent row highlighted while a child page
+            // is open (System Settings behaves the same way). Clicking the *already-highlighted* row is
+            // handled by the row's own gesture instead — a binding cannot see that click at all, since
+            // the List does not report a selection that did not change. See `sidebarRow(_:)`.
+            List(selection: $model.selection) {
                 ForEach(Array(SettingsSection.groups.enumerated()), id: \.offset) { _, group in
                     Section {
                         ForEach(group) { sidebarRow($0) }
@@ -91,6 +86,20 @@ struct SettingsRootView: View {
         }
         // SwiftUI's default Label gap is ~half the System Settings sidebar gap; set it explicitly.
         .labelStyle(SidebarLabelStyle(gap: model.sidebarIcons.chipLabelGap))
+        // The row is only as wide as its text without this, so a click in the empty space to the right
+        // of a short title would miss the gesture below and land on the List's own selection handling.
+        .contentShape(Rectangle())
+        // Clicking the **already-selected** row pops out of its child page back to the section (#374).
+        //
+        // This cannot ride on `List(selection:)`: the list does not report a click that leaves the
+        // selection unchanged, so no binding — not even a custom one with a side-effecting setter —
+        // ever sees it. The row has to observe the click itself.
+        //
+        // `simultaneousGesture`, not `onTapGesture`: a plain tap gesture *replaces* the row's own click
+        // handling and the sidebar stops selecting at all. This one runs alongside it, so a click on a
+        // different row still selects through the List while a click on the current row also reaches
+        // `selectFromSidebar`, which no-ops unless a child page is open.
+        .simultaneousGesture(TapGesture().onEnded { model.selectFromSidebar(section) })
         .tag(section)
     }
 

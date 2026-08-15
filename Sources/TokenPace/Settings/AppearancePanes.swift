@@ -201,6 +201,7 @@ struct MenuBarPane: View {
                     Text("Style")
                     Spacer()
                     BarStylePicker(
+                        surface: .menuBar,
                         active: model.menuBarStyle,
                         onSelect: { model.setMenuBarStyle($0) })
                 }
@@ -277,11 +278,14 @@ struct DropdownPane: View {
                 // and the hint read as a stray statement about Extra usage rather than as the caveat on
                 // the control directly above it — which is the only thing it is.
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack {
+                    // Top-aligned for the same reason the menu-bar row is: the picker is roughly three
+                    // times the height of a normal control row, and a vertically centred label floats in
+                    // the middle of that block instead of heading it.
+                    HStack(alignment: .top) {
                         Text("Style")
                         Spacer()
-                        SegmentedControl(
-                            segments: AppearanceBarStyle.segments,
+                        BarStylePicker(
+                            surface: .dropdown,
                             active: model.dropdownStyle,
                             onSelect: { model.setDropdownStyle($0) })
                     }
