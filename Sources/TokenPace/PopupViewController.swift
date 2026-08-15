@@ -611,8 +611,23 @@ final class PopupBarView: NSView {
         // inset rounded rect in the marker colour on top — leaving a crisp `bw`-wide even border. The whole
         // thing carries the ambient glow.
         let bw: CGFloat = 1
-        let border = (Self.monochromeGrey.blended(withFraction: 0.4, of: colour) ?? Self.monochromeGrey)
-            .withAlphaComponent(0.9)
+        // A **dynamic** colour, for the same reason `Palette.monochromeGrey` and `Palette.zeroTick` are:
+        // `blended(withFraction:of:)` resolves its receiver against whatever appearance is current *at
+        // the call site*, and this one is built during layout rather than inside a drawing block. The
+        // live popup gets away with it because the view is drawn in its own real appearance; a caller
+        // that renders the same view into an image under an explicitly chosen appearance does not.
+        //
+        // Measured: computed here, the border came out 13,96,26 under **both** themes — the dark tone
+        // baked into the light one. Resolved per appearance it is 185,239,190 in dark against 13,96,26
+        // in light, which is the pair the live bar shows.
+        let border = NSColor(name: nil) { appearance in
+            var blended = Self.monochromeGrey
+            appearance.performAsCurrentDrawingAppearance {
+                blended = (Self.monochromeGrey.blended(withFraction: 0.4, of: colour)
+                    ?? Self.monochromeGrey).withAlphaComponent(0.9)
+            }
+            return blended
+        }
         let innerRect = markerRect.insetBy(dx: bw, dy: bw)
         let inner = NSBezierPath(roundedRect: innerRect,
                                  xRadius: max(0, Metrics.indicatorCorner - bw),
