@@ -550,7 +550,9 @@ actor StubUsageTransport: UsageTransport {
         /// suppressed by `PacingModel.standByFloorSeconds`.
         ///
         /// The odd fractional usage is load-bearing. On a seven-day window one whole percent of usage is
-        /// 1 h 41 m of stand-by, so no round percentage can ever produce a sub-20-minute wait — the
+        /// 1 h 40 m of stand-by, so no round percentage can ever produce a sub-20-minute wait — and the
+        /// API only ever emits whole percents for token windows (docs/reference/usage-api-quirks.md), so
+        /// this frame is arithmetically possible but unreachable from real data — the
         /// suppressed case only exists in the window's last two hours, at a fraction of a point of lead.
         case standByFloor
 
