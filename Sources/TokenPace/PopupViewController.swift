@@ -376,7 +376,15 @@ final class PopupBarView: NSView {
     override var isFlipped: Bool { true }
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: Metrics.height) }
 
-    override func draw(_ dirtyRect: NSRect) {
+    override func draw(_ dirtyRect: NSRect) { render(in: bounds) }
+
+    /// Draw the whole bar into `rect`. Shared by ``draw(_:)`` and ``snapshotImage()``.
+    ///
+    /// Split out of `draw(_:)` for the Settings preview tiles (#374): a specimen baked off `bounds`
+    /// could only ever be the size the live view happens to have, and the tile is narrower. Routing
+    /// both callers through one draughtsman is what stops the preview from drifting away from the live
+    /// bar — the same seam `StatusItemView.render(in:)` provides for the menu-bar tiles (#373).
+    func render(in bounds: NSRect) {
         // The bar sits below a top margin equal to the marker's overhang — the marker is centred on
         // the bar, so a marker taller than the bar sticks out by `(height − barHeight)/2` on each side;
         // the margin keeps that top overhang inside the view (the tick ruler fills the strip below).
@@ -536,6 +544,29 @@ final class PopupBarView: NSView {
         // Under the `color-cycle` stub the marker parks at the pinned strip's end, so Progress keeps
         // its full anatomy (strip + marker) while still holding the geometry still.
         drawTimeMarker(at: frozenStripFraction ?? l.timeFraction, colour: indicatorColor(l), in: rect)
+    }
+
+    // MARK: NSImage snapshot
+
+    /// Render this bar to a non-template `NSImage` `width` points wide, for the Settings preview tiles.
+    ///
+    /// Width is a parameter rather than read from the view because ``intrinsicContentSize`` deliberately
+    /// leaves it `noIntrinsicMetric` — the live bar stretches to the popup card (252 pt), while a tile
+    /// specimen is a fraction of that. Height comes from ``Metrics/height``, unscaled: the tile shows the
+    /// bar and marker at their real thickness, so what the picture promises is what the dropdown draws.
+    ///
+    /// Drawn **eagerly** inside the caller's `performAsCurrentDrawingAppearance` block, for the reason
+    /// `StatusItemView.snapshotImage()` documents at length: the lazy `NSImage(size:flipped:)` handler
+    /// resolves dynamic colours whenever the image is later composited, which on this surface would bake
+    /// the wrong theme's neutrals into the tile.
+    func snapshotImage(width: CGFloat) -> NSImage {
+        let size = NSSize(width: width, height: Metrics.height)
+        let image = NSImage(size: size)
+        image.lockFocusFlipped(true)
+        render(in: NSRect(origin: .zero, size: size))
+        image.unlockFocus()
+        image.isTemplate = false
+        return image
     }
 
     /// The time-indicator marker: a slim rounded vertical bar in `colour`, with a border in the

@@ -346,6 +346,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Dev-only (#374): render the dropdown Bar-style tile candidates and exit, before any of the
+        // launch below runs. Temporary scaffolding for picking the tile geometry — see
+        // `DropdownTileMatrix`, which goes away with it.
+        if let path = ProcessInfo.processInfo.environment["TOKENPACE_TILE_MATRIX"] {
+            for file in DropdownTileMatrix.write(to: path) { print(file) }
+            NSApp.terminate(nil)
+            return
+        }
+
         // Run config migrations first — before any UI or polling reads persisted settings — so a
         // future migration can rename keys or clean up stale system state (e.g. old login items)
         // before the rest of launch depends on it (#71, ADR-0023). Phase 1 is a no-op scaffold that
