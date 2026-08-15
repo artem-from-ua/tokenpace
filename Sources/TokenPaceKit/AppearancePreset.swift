@@ -86,12 +86,50 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
         }
     }
 
-    /// The segment label shown in Settings → Appearance. English UI string.
+    /// The radio label shown in Settings → Appearance. English UI string.
     public var displayName: String {
         switch self {
         case .chill:        return "Chill"
         case .workHarder:   return "Work harder!"
         case .controlFreak: return "Control freak"
+        }
+    }
+
+    /// The line under the radio label: **which signals this preset makes loudest**, which is the one
+    /// question three adjective-like names cannot answer on their own (`Chill` vs `Work harder!` reads
+    /// as a mood, not as a behaviour).
+    ///
+    /// Each sentence describes what the user will *see*, derived from ``values`` rather than from the
+    /// preset's mood — a description that outran the value set would be worse than none:
+    ///
+    /// - `.chill` mutes every calm colour (`.yellowGreenBlue`), hides the quiet 5-hour bar and keeps the
+    ///   per-model rows folded until one turns orange (`.nonCalm`), so nothing speaks until a limit
+    ///   actually presses.
+    /// - `.workHarder` differs from `.chill` in exactly two things, and both are about seeing the
+    ///   *underspend*: the far-behind blue stays coloured (`.yellowGreen`), and `Gauge` draws the
+    ///   below-pace half instead of flattening it to a minimum pill.
+    /// - `.controlFreak` turns muting off entirely, pins both bars on screen (`.never`) and both popup
+    ///   sections open (`.always`).
+    /// Each line describes **behaviour the user can picture**, and each stands on its own: an earlier
+    /// draft of `.workHarder` opened "Like Chill, but…", which made the middle option unreadable
+    /// without first reading the one above it — in a list, every entry is someone's first.
+    ///
+    /// `.controlFreak` states the trade rather than only the benefit. Turning off every mute is what
+    /// puts the whole picture on screen, and it is also what makes the picture take longer to read:
+    /// when nothing is quiet, nothing stands out. Naming that is the difference between a description
+    /// and a sales pitch.
+    ///
+    /// It deliberately does **not** promise "the full picture without holding ⌥". The modifier reveals
+    /// hidden rows and captions; it never swaps the bar style, so a Pressure bar stays Pressure under
+    /// ⌥ — a line implying otherwise would describe a swap the key does not perform.
+    public var summary: String {
+        switch self {
+        case .chill:
+            return "Stays quiet until a limit actually needs your attention."
+        case .workHarder:
+            return "Quiet too, but tells you when you're leaving tokens unused."
+        case .controlFreak:
+            return "Maximum info, but signals take a bit longer to spot."
         }
     }
 

@@ -1,14 +1,16 @@
 import SwiftUI
 import TokenPaceKit
 
-// MARK: - The UI panes (#168, ADR-0042; split by surface in #333)
+// MARK: - The Appearance panes (#168, ADR-0042; split by surface in #333, nested back under one
+// section here)
 
-/// The three panes the old Appearance pane became, in sidebar order: ``UIPresetsPane``,
-/// ``MenuBarPane``, ``DropdownPane``. They form one sidebar group, which is what says they belong
-/// together — the split axis is the surface each option configures.
+/// Settings → Appearance, and the two surface pages drilled into from it: ``MenuBarPane``,
+/// ``DropdownPane``. The split axis is unchanged from #333 — the surface each option configures —
+/// but the three are one section again rather than three sidebar rows, so what says they belong
+/// together is the navigation itself instead of a divider between siblings.
 ///
-/// Settings → UI presets: what applies to the whole widget rather than to one surface — the preset
-/// picker and its copy-config button.
+/// The page keeps what applies to the whole widget rather than to one surface: the preset picker and
+/// its copy-config button, then the two navigator rows.
 ///
 /// Bar style is *not* here despite looking like a single setting: since #329 it is two independent
 /// values, one per surface (ADR-0080), so each sits with its own surface.
@@ -16,7 +18,7 @@ import TokenPaceKit
 /// The preset control and the copy button work across the split without knowing about it: both read
 /// `SettingsModel.liveAppearanceValues`, which reads the model's fields directly rather than
 /// anything a view holds.
-struct UIPresetsPane: View {
+struct AppearancePane: View {
     @Bindable var model: SettingsModel
 
     /// Ephemeral "copied!" feedback for the config-copy button (#257): the glyph flips to a checkmark
@@ -31,41 +33,80 @@ struct UIPresetsPane: View {
 
     var body: some View {
         Form {
-            // First section: one-click Appearance presets (#215, #224) — a "Change UI preset" segmented
-            // control. Selecting Chill / Work harder! / Control freak applies that preset (sets every
-            // option on both child pages at once).
+            // First section: one-click Appearance presets (#215, #224) — a **radio group**, one row per
+            // preset. Picking Chill / Work harder! / Control freak applies it (sets every option on both
+            // child pages at once).
             //
-            // The trailing "Custom" segment is a **real slot** since #333, not the pure indicator it
-            // was: applying a preset stashes the setup it overwrites, so Custom can restore it. It
-            // falls back to indicator-only (unselectable, with a popover explaining how to reach it)
-            // while nothing is stashed — a fresh install has nothing to come back to.
+            // Radios rather than the segmented control this was until now: the three names read as
+            // moods, and the question they leave open — *which signals does this make loudest?* — needs
+            // a line of prose per option, which a segment has no room for. `AppearancePreset.summary`
+            // holds those lines, beside the values they describe.
+            //
+            // "Custom" is a **real slot** since #333, not the pure indicator it was: applying a preset
+            // stashes the setup it overwrites, so Custom can restore it. It falls back to
+            // indicator-only (visible, highlightable, inert) while nothing is stashed — a fresh install
+            // has nothing to come back to — and says so on its own second line.
             Section {
-                VStack(alignment: .leading, spacing: 4) {
-                    // Label + control on ONE row (label leading, control trailing — the pane's rhythm),
-                    // then the two hints below (leading). A custom SegmentedControl (not the native
-                    // Picker) so the trailing "Custom" segment can be an indicator that lights up but is
-                    // not selectable; clicking it opens a popover explaining how to reach it.
-                    HStack {
-                        Text("Change UI preset")
-                        Spacer()
-                        copyConfigButton
-                        SegmentedControl(
-                            segments: AppearancePreset.allCases.map {
-                                .init(value: AppearancePreset?.some($0), title: $0.displayName)
-                            } + [.init(value: AppearancePreset?.none, title: "Custom",
-                                       // Selectable once there is a setup to go back to (#333); until
-                                       // then it stays the indicator it always was, and explains itself.
-                                       selectable: model.canRestoreCustom,
-                                       inactiveHelp: "Change any option below to craft your own custom setup.")],
-                            active: model.activePreset,
-                            onSelect: { picked in
-                                if let preset = picked { model.apply(preset) } else { model.applySavedCustom() }
-                            })
+                VStack(alignment: .leading, spacing: 10) {
+                    // Heading block: the section's own label with the copy-config button trailing, and
+                    // the hint directly under it — the hint explains what picking *any* option below
+                    // does, so it belongs to the heading, not to the last radio. Its own 4 pt spacing
+                    // (rather than the 10 pt between the block and the radios) is what keeps the two
+                    // lines reading as one heading instead of as a fifth entry in the list.
+                    //
+                    // The radios sit below the block rather than beside the label — four two-line
+                    // options are a block, not a control that fits at the end of a row.
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Change appearance preset")
+                            Spacer()
+                            copyConfigButton
+                        }
+                        SettingsHint(text: "Set all the options for *Menu bar* and *Dropdown* at once.")
                     }
-                    SettingsHint(text: "Set all the options for *Menu bar* and *Dropdown* at once.")
+                    RadioGroup(
+                        options: AppearancePreset.allCases.map {
+                            .init(value: AppearancePreset?.some($0), title: $0.displayName,
+                                  summary: $0.summary)
+                        } + [.init(value: AppearancePreset?.none, title: "Custom",
+                                   // Names what it actually holds: the setup as it stood the last time
+                                   // a preset overwrote it. Saying "your settings" would imply a slot
+                                   // the user maintains, when it is a snapshot the app takes for them
+                                   // — and one that a *new* hand-made setup replaces (`apply(_:)`
+                                   // re-stashes only when the live config matches no preset).
+                                   // Worded to hold in **both** states, because the line never swaps:
+                                   // on a fresh install there is no such setup yet, and the sentence
+                                   // then reads as what the option is *for* rather than as a promise
+                                   // about something that exists. A second wording that appeared only
+                                   // while the option was inert would move the rows under the pointer.
+                                   summary: "The setup you had before switching to a predefined preset.",
+                                   // Selectable once there is a setup to go back to (#333); until then
+                                   // it stays the indicator it always was.
+                                   selectable: model.canRestoreCustom)],
+                        active: model.activePreset,
+                        onSelect: { picked in
+                            if let preset = picked { model.apply(preset) } else { model.applySavedCustom() }
+                        })
                 }
             }
 
+            // MARK: The two surfaces — unlabelled on purpose
+            //
+            // A header here would have to be called something like "Surfaces", and the two row titles
+            // already say which surface each is. The section's job is the divider above it: it
+            // separates the preset row, which writes to both pages, from the pages it writes to.
+            //
+            // Row order is menu bar then dropdown, which is the order a user meets them: the widget is
+            // on screen at all times, the popup only once clicked.
+            Section {
+                ForEach(SettingsChildPage.pages(of: .appearance)) { page in
+                    SettingsNavigationRow(
+                        title: page.title,
+                        subtitle: model.surfaceSummary(for: page),
+                        badge: .page(page),
+                        action: { model.drill(into: page) })
+                }
+            }
         }
         .formStyle(.grouped)
     }
@@ -87,11 +128,19 @@ struct UIPresetsPane: View {
             copyConfigToClipboard()
         } label: {
             Image(systemName: didCopyConfig ? CopyFeedback.confirmedSymbol : CopyFeedback.restingSymbol)
-                // A fixed width keeps the segmented control from shifting sideways when the glyph
-                // swaps to the (narrower) checkmark and back.
-                .frame(width: 16)
+                // A fixed box for **both** dimensions. Width was always needed — the checkmark is
+                // narrower than `doc.on.doc`, so without it the button's neighbours slide sideways on
+                // every click. Height became just as necessary once the button stopped sharing a row
+                // with the segmented control: that control used to set the row's height, and now the
+                // button sets it alone, so the checkmark's shorter glyph shrank the row and jolted
+                // everything below it. Sized off the resting glyph, which is the taller of the two.
+                .frame(width: Self.copyGlyphBox, height: Self.copyGlyphBox)
         }
         .buttonStyle(.borderless)
+        // The swap is a state report, not a transition: SwiftUI's implicit animation cross-fades and
+        // re-measures the two glyphs, which is the second half of the jolt the fixed box addresses.
+        // Same treatment the dependent rows on `ProvidersPane` get, and for the same reason.
+        .animation(nil, value: didCopyConfig)
         .help("Copy \(Self.copyTarget) to the clipboard")
         .accessibilityLabel(didCopyConfig
             ? CopyFeedback.confirmedLabel
@@ -99,7 +148,12 @@ struct UIPresetsPane: View {
     }
 
     /// What this button copies — used in the tooltip and the accessibility label.
-    private static let copyTarget = "UI settings"
+    private static let copyTarget = "appearance settings"
+
+    /// The fixed box the copy glyph draws in, so neither of the two symbols can move the layout when
+    /// they swap. Square: the resting `doc.on.doc` is the larger glyph in both dimensions, and one
+    /// number for both keeps the button reading as a square hit target rather than a slot.
+    private static let copyGlyphBox: CGFloat = 16
 
     /// Write the model's JSON dump to the general pasteboard and show the checkmark. The pasteboard
     /// write lives here rather than in `SettingsModel` so the model stays free of AppKit.
@@ -120,8 +174,8 @@ struct UIPresetsPane: View {
 
 // MARK: - MenuBarPane (#333)
 
-/// Settings → Menu bar: everything that configures the **menu-bar widget** — its bar style, which
-/// colours it mutes, and which indicators it may draw.
+/// Settings → Appearance › Menu bar: everything that configures the **menu-bar widget** — its bar
+/// style, which colours it mutes, and which indicators it may draw.
 struct MenuBarPane: View {
     @Bindable var model: SettingsModel
 
@@ -200,8 +254,8 @@ struct MenuBarPane: View {
 
 // MARK: - DropdownPane (#333)
 
-/// Settings → Dropdown: everything that configures the **popup** — its bar style and which of its
-/// sections are listed when.
+/// Settings → Appearance › Dropdown: everything that configures the **popup** — its bar style and
+/// which of its sections are listed when.
 struct DropdownPane: View {
     @Bindable var model: SettingsModel
 

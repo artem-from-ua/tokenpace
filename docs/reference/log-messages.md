@@ -244,7 +244,7 @@ token itself never is.
 | — | `lifecycle` | `.notice` | `extra-usage-section: popup set <mode>` | user picked a "Show extra usage" segment — gates the popup's paid-credits section; `<mode>` is the raw `PopupSectionVisibility`, here one of `always`/`aboveZero`/`optionOnly` (this row does not offer `nonCalm` — an unlimited money cap has no bar and hence no severity, ADR-0087). Distinct from `extra-usage-icon`, which is the menu-bar glyph (#211) |
 | — | `lifecycle` | `.notice` | `extra-usage-section: migrated nonCalm → aboveZero` | one-time rewrite of a stored `.nonCalm` Extra-usage choice once that segment left the control (ADR-0087); logged only when the stored value was actually `nonCalm`, and guarded by the `extraUsageVisibilityMigratedFromNonCalm` marker so it cannot re-fire |
 | — | `lifecycle` | `.notice` | `appearance settings reset to defaults` | user cleared the Appearance keys (#214); all **seven** live Appearance keys (`AppearancePresetValues`, down from eight since the "Show ticks on bars" option was removed, and from nine since [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md) retired `resetCountdownModeMenuBar`) cleared to their defaults, plus the legacy/retired keys — the pre-#329 `barStyle`, the pre-ADR-0086 `hideCalmSevenDayBar`, and every `Key.retired…` — swept too so a stale value can't re-seed a live key on a later launch |
-| — | `lifecycle` | `.notice` | `appearance preset applied: <preset>` | user picked a preset segment on the UI presets pane (#215, #224); `<preset>` is the raw `AppearancePreset` (`chill`/`workHarder`/`controlFreak`), or the literal **`custom`** when the user returned to their own saved setup (#333) — either way it sets all **seven** Appearance keys at once (eight before "Show ticks on bars" was removed, nine before [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md) dropped `resetCountdownModeMenuBar`) |
+| — | `lifecycle` | `.notice` | `appearance preset applied: <preset>` | user picked a preset segment on the Appearance pane (#215, #224); `<preset>` is the raw `AppearancePreset` (`chill`/`workHarder`/`controlFreak`), or the literal **`custom`** when the user returned to their own saved setup (#333) — either way it sets all **seven** Appearance keys at once (eight before "Show ticks on bars" was removed, nine before [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md) dropped `resetCountdownModeMenuBar`) |
 | — | `lifecycle` | `.notice` | `screen-lock-pause: setting set <bool>` | user toggled the "Pause polling while the screen is locked" checkbox (#114, ADR-0032) |
 | 439 | `lifecycle` | `.notice` | `update: automatic checks set <bool>` | user toggled the "Check for updates automatically" checkbox (#37) |
 | — | `lifecycle` | `.notice` | `archive: enabled set <bool>` | user toggled the "Archive session logs to a folder" checkbox (#110) |
@@ -268,7 +268,7 @@ UI affordance ran, which is what `ui` is for.
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| — | `ui` | `.notice` | `appearance config copied to clipboard` | user clicked the copy button in the "Change UI preset" row (#257); the JSON body itself is **not** logged — it is on the clipboard, and the log line only needs to establish that the click was handled |
+| — | `ui` | `.notice` | `appearance config copied to clipboard` | user clicked the copy button in the "Change appearance preset" row (#257); the JSON body itself is **not** logged — it is on the clipboard, and the log line only needs to establish that the click was handled |
 
 ## `Sources/TokenPace/BackToWorkNotifier.swift`
 
@@ -424,7 +424,7 @@ One log line per interval change. The format is built by
 | `network` | 29 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `UpdateInstaller` (3), `PollingEngine` (2), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
 | `keychain` | 12 | `ClaudeCLIRefresher` (6), `TokenProvider` (3), `PollingEngine` (1) |
 | `lifecycle` | 116 | `App` (48), `SettingsModel` (30), `UpdateInstaller` (13), `PollingShell` (7), `BackToWorkNotifier` (6), `AwaitingInputWatcher` (5), `PollingEngine` (3), `SettingsWindowController` (2), `ShellEnvironment` (1), `PersistedConfig` (1), `IncidentNotificationDelegate` (1) |
-| `ui` | 1 | `UIPresetsPane` (1) |
+| `ui` | 1 | `AppearancePane` (1) |
 | `archive` | 7 | `App` (5), `LogArchiver` (2) |
 | `journal` | 12 | `UsageJournal` (4), `StatusPayloadLog` (4), `App` (3), `DevToolsWindowController` (1) |
 

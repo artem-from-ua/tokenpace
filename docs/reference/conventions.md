@@ -148,7 +148,7 @@ git config core.hooksPath .githooks
 Запис у буфер обміну **невидимий**: на екрані нічого не змінюється, системного підтвердження немає.
 Тому кожна копі-кнопка на ~1.2 с підміняє свій гліф на `checkmark` і повертає назад. Константи —
 гліфи, тривалість, accessibility-лейбли — лежать у `CopyFeedback` (Kit), бо кнопки зроблені різними
-тулкітами (`UIPresetsPane` — SwiftUI, `TroubleshootWindowController` — AppKit), і константа,
+тулкітами (`AppearancePane` — SwiftUI, `TroubleshootWindowController` — AppKit), і константа,
 продубльована через цей шов, неминуче розійдеться.
 
 **Додаєш нову кнопку копіювання — бери гліфи й тривалість звідти**, не з власного числа. Для AppKit
@@ -157,7 +157,7 @@ git config core.hooksPath .githooks
 
 ### Експорт конфіга: порядок ключів = порядок контролів у панелі
 
-Кнопка «Copy Appearance settings to clipboard» (Settings → UI presets, #257; пан звався Appearance до #333) віддає JSON, у якому
+Кнопка «Copy Appearance settings to clipboard» (Settings → Appearance, #257) віддає JSON, у якому
 ключі в блоці `appearance` йдуть **у тому самому порядку згори вниз, що й контроли на сторінці
 Appearance** — не за алфавітом і не в порядку полів структури. Дамп читають, тримаючи панель перед
 очима: збіг порядку дає відповідність рядок-у-рядок.

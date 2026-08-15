@@ -15,6 +15,10 @@ import TokenPaceKit
 enum SettingsChildPage: Int, CaseIterable, Identifiable {
     /// Providers › Claude — what TokenPace collects and watches for Claude.
     case providersClaude = 50
+    /// Appearance › Menu bar — everything that configures the menu-bar widget.
+    case appearanceMenuBar = 51
+    /// Appearance › Dropdown — everything that configures the popup.
+    case appearanceDropdown = 52
 
     var id: Int { rawValue }
 
@@ -23,6 +27,7 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
     var section: SettingsSection {
         switch self {
         case .providersClaude: return .providers
+        case .appearanceMenuBar, .appearanceDropdown: return .appearance
         }
     }
 
@@ -31,6 +36,50 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .providersClaude: return "Claude"
+        case .appearanceMenuBar: return "Menu bar"
+        case .appearanceDropdown: return "Dropdown"
+        }
+    }
+
+    /// The SF Symbol on the navigator row's leading chip, or `nil` for a row that carries none.
+    ///
+    /// The two surface pages keep the glyphs they wore as sidebar rows (#333) — the lone bar of the
+    /// menu bar, and a page of rows for the dropdown, both picked by rendering the candidates rather
+    /// than by name. `Claude` is the exception in the other direction: its chip is a **brand** badge
+    /// built from a colour rather than from this table (``SettingsRowBadge/claude``), because a
+    /// provider row identifies a company and these two identify a surface.
+    var symbol: String? {
+        switch self {
+        case .providersClaude: return nil
+        case .appearanceMenuBar: return "distribute.vertical"
+        case .appearanceDropdown: return "chart.bar.horizontal.page"
+        }
+    }
+
+    /// Whether the chip draws only the **middle** of its symbol, dropping the rules above and below.
+    ///
+    /// `distribute.vertical` is three shapes — a rounded rectangle between two full-width rules — and
+    /// only the rectangle is wanted: one bar, which is what a menu bar is. There is no SF Symbol of
+    /// just that shape (checked), and the two rules sit in bands the rectangle never enters, so a
+    /// clip keeps exactly the part we want.
+    ///
+    /// Measured on the rendered glyph at 64 pt (91×68 px): rules at y 5–9 and 59–63, rectangle at
+    /// y 23–45, with clean gaps between. Expressed as fractions of the glyph box rather than pixels so
+    /// it holds at every chip size — which is what let the band survive the move from a sidebar chip
+    /// to this larger row badge unchanged.
+    var trimsOuterRules: Bool { self == .appearanceMenuBar }
+
+    /// The two endpoints of the chip's gradient, in the same `CapsuleTint` the sidebar chips use.
+    ///
+    /// The two surfaces are flat black and white rather than a hue: the chips *depict* what they
+    /// configure — the dark strip along the top of the screen, and the light panel that drops below
+    /// it. Fixed tones, not semantic ones: flipping them with the appearance would destroy the only
+    /// thing they say. The white chip needs a hairline to exist on a light form row.
+    var tint: CapsuleTint? {
+        switch self {
+        case .providersClaude: return nil
+        case .appearanceMenuBar: return CapsuleTint(flat: 0x000000)
+        case .appearanceDropdown: return CapsuleTint(flat: 0xFFFFFF, glyph: .black, needsBorder: true)
         }
     }
 

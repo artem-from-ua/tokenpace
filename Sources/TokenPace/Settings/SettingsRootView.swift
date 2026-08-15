@@ -87,11 +87,10 @@ struct SettingsRootView: View {
 
     /// The detail column's content — the child page when one is drilled into, else the section's pane.
     ///
-    /// Most panes sit at one level: the UI trio (presets, menu bar, dropdown) are sidebar rows of
-    /// their own rather than pages drilled into from a parent (#333). The sidebar has room for them,
-    /// and a divider already says they belong together — a parent page would only add a click.
-    /// `Providers` is the exception (#341, ADR-0084): its children are per-provider, so the list grows
-    /// with each provider added, which is exactly the shape the sidebar cannot absorb.
+    /// Two sections are parents rather than leaves. `Providers` (#341, ADR-0084) grows a child page per
+    /// provider. `Appearance` has two, one per rendered surface: they were sidebar rows of their own
+    /// between #333 and this change, which put two of the sidebar's five rows on halves of one topic —
+    /// nesting states the relationship structurally instead of leaning on a divider to imply it.
     ///
     /// The child branch is checked **first and in the same switch**, so a drilled-in page replaces the
     /// section's pane rather than stacking with it, and the switch stays flat: `.contentMargins` has
@@ -100,15 +99,15 @@ struct SettingsRootView: View {
     private var detailPane: some View {
         if let child = model.childPage {
             switch child {
-            case .providersClaude: ProvidersClaudePane(model: model)
+            case .providersClaude:      ProvidersClaudePane(model: model)
+            case .appearanceMenuBar:    MenuBarPane(model: model)
+            case .appearanceDropdown:   DropdownPane(model: model)
             }
         } else {
             switch model.selection {
             case .about:             AboutPane(model: model)
             case .general:           GeneralPane(model: model)
-            case .uiPresets:         UIPresetsPane(model: model)
-            case .menuBar:           MenuBarPane(model: model)
-            case .dropdown:          DropdownPane(model: model)
+            case .appearance:        AppearancePane(model: model)
             case .notifications:     NotificationsPane(model: model)
             case .providers:         ProvidersPane(model: model)
             // Scroll-test filler rows (`TOKENPACE_SIDEBAR_FILLER`) have no pane of their own; they
@@ -177,44 +176,15 @@ private struct SidebarChip: View {
         return appearsActive ? .white : Metrics.inactiveGlyph(for: colorScheme)
     }
 
-    /// The symbol, drawn whole — or, for a section that asks for it, only the middle band of it.
-    ///
-    /// The trim happens on the rendered `NSImage`, not through SwiftUI transforms: the band is cut
-    /// out and the result handed over as a plain image, so it lays out as exactly what it is. The
-    /// `.scaleEffect` + `.mask` spelling looks equivalent and is not — the scale moves the glyph's
-    /// centre relative to the mask, so the surviving strip is not the one that was measured.
+    /// The symbol, drawn whole — or, for a section that asks for it, only the middle band of it
+    /// (``SymbolTrim``, shared with the navigator-row badge so one measured band serves both chips).
     @ViewBuilder
     private var glyph: some View {
-        if section.trimsOuterRules, let trimmed = Self.trimmedSymbol(section.symbol, size: metrics.symbol) {
+        if section.trimsOuterRules, let trimmed = SymbolTrim.middleBand(section.symbol, size: metrics.symbol) {
             Image(nsImage: trimmed)
         } else {
             Image(systemName: section.symbol).font(.system(size: metrics.symbol, weight: .regular))
         }
-    }
-
-    /// Render `name` at `size` and keep only `SettingsSection.trimmedBand` of its height.
-    ///
-    /// `distribute.vertical` is a rounded rectangle between two full-width rules, and only the
-    /// rectangle is wanted — one bar, which is what a menu bar is. No SF Symbol draws that shape
-    /// alone (checked), and the rules sit in bands the rectangle never enters, so the cut is exact.
-    /// The image is left as a template so the chip's own `foregroundStyle` still tints it, including
-    /// the inactive-window tone.
-    private static func trimmedSymbol(_ name: String, size: CGFloat) -> NSImage? {
-        let config = NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
-        guard let full = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-            .withSymbolConfiguration(config) else { return nil }
-        let band = SettingsSection.trimmedBand
-        let kept = NSSize(width: full.size.width, height: full.size.height * (band.upperBound - band.lowerBound))
-        guard kept.height > 0 else { return nil }
-        let out = NSImage(size: kept)
-        out.lockFocus()
-        // Draw the whole glyph shifted down by the discarded lower band, so the kept slice lands in
-        // the canvas and everything outside it falls off the edges.
-        full.draw(in: NSRect(x: 0, y: -full.size.height * band.lowerBound,
-                             width: full.size.width, height: full.size.height))
-        out.unlockFocus()
-        out.isTemplate = true
-        return out
     }
 
     /// System Settings capsules are not flat: a gradient runs from the measured `tint.dark` at the

@@ -87,7 +87,7 @@
 | `screenshot` | стабільний кадр для скриншотів (фіксований час 2026-01-31 22:00 UTC): 5h **зелений** (10 % vs ≈65 % — well behind), 7d **жовтий** (36 % vs ≈29 % — mild ahead, під динамічним порогом `0.16·(1−time)`, навмисно не на amber/orange-межі, де сиділо старе 40 %), Fable **оранжевий** / Mythos **червоний**. **Extra usage** — $1088.00 / $5000.00 (USD, ~22 %) при ≈99 % пройденого місяця → **довгий зелений** бар «on pace», ресет «<1d». Бейджа «active» нема (жоден **базовий** ліміт 5h/7d не вичерпано — лише Mythos, а він не гейтить роботу) |
 | `error` | auth-помилка (401) на холодному старті → у меню-барі **перекреслена антена** (`antenna.radiowaves.left.and.right.slash`, [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)), **не ⚠️**: трикутник лишився виключно за «дані суперечать собі» (`broken-reset`). У попапі — лише банер, без ліміт-рядків |
 | `stale-error` | **stale-while-erroring** (баг відступу): перший полл валідний (повні бари: idle 5h «ready to start», 18 % 7d, Fable-рядок, «Extra usage» €11.7 of €15.0), далі кожен полл — timeout → банер «Claude API connectivity issue» / «Authentication API timeout» **над** усіма барами. **У меню-барі фаз дві, не три** ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)): до порога `max(15 хв, 3 × pollInterval)` — старі смужки **без гліфа**; після — **сама перекреслена антена**, без смужок. Проміжної фази «гліф поряд зі старими смужками» більше немає; якщо побачив її — регресія. (Сам перехід стубом не відтворюється — `failingSince` не перемотати; він покритий unit-тестами.) Перевіряй **горизонтальний відступ між текстом помилки і рядком «5-hour»** (той самий `sectionSpacing`, що після хедера) — без нього блок помилки злипався з «5-hour». API + Code — major outage (червоні крапки) |
-| `idle` | «немає активної 5h-сесії» (#100): 5h-бар «ready to start» (синій), без phantom-ресету, час падає на 7d-ресет («4d»). **За новим дефолтом «Hide the calm bar» = `5-hour`** ([ADR-0086](../adr/0086-tri-state-calm-bar-hiding.md)) idle-5h вважається спокійним і **ховається** → на барі лишається **сама 7d-смужка**, центрована; синю «ready to start» пігулку видно лише в режимі `Never` (у `7-day` при calm-7d — навпаки, одинокий idle-бар, як було за #94). Перемикай через `defaults write com.artem-n.tokenpace calmBarHiding -string fiveHour\|never` або в Settings → Menu bar. **Форма однакова в обох стилях** ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)): сірий трек + мінімальна синя пігулка на нулі; **Progress** додає зверху маркер часу на нулі (він перекриває пігулку), **Pressure** лишає саму пігулку. Суцільної заливки на всю ширину не має бути в жодному стилі — раніше вона читалася як Pressure «на максимумі». Під Calm colours idle на menu bar не має бути ні тьмянішим, ні яскравішим за сусідні calm-бари (той самий `calmWhite` на тій самій альфі). **Перевірка `CalmColorMode`** ([#343](https://github.com/artem-from-ua/cc-timer/issues/343)): Settings → Menu bar → «Calm non-critical colors» — під **Yellow + Green** синя пігулка лишається **синьою**, під **+ Blue** мутиться в білий, під **Off** кольорова. Порівняй із `idle-week-hot`: там пігулка зелена й мутиться в білий у **обох** режимах — глушиться саме зелений, а не «idle взагалі» |
+| `idle` | «немає активної 5h-сесії» (#100): 5h-бар «ready to start» (синій), без phantom-ресету, час падає на 7d-ресет («4d»). **За новим дефолтом «Hide the calm bar» = `5-hour`** ([ADR-0086](../adr/0086-tri-state-calm-bar-hiding.md)) idle-5h вважається спокійним і **ховається** → на барі лишається **сама 7d-смужка**, центрована; синю «ready to start» пігулку видно лише в режимі `Never` (у `7-day` при calm-7d — навпаки, одинокий idle-бар, як було за #94). Перемикай через `defaults write com.artem-n.tokenpace calmBarHiding -string fiveHour\|never` або в Settings → Appearance › Menu bar. **Форма однакова в обох стилях** ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)): сірий трек + мінімальна синя пігулка на нулі; **Progress** додає зверху маркер часу на нулі (він перекриває пігулку), **Pressure** лишає саму пігулку. Суцільної заливки на всю ширину не має бути в жодному стилі — раніше вона читалася як Pressure «на максимумі». Під Calm colours idle на menu bar не має бути ні тьмянішим, ні яскравішим за сусідні calm-бари (той самий `calmWhite` на тій самій альфі). **Перевірка `CalmColorMode`** ([#343](https://github.com/artem-from-ua/cc-timer/issues/343)): Settings → Appearance › Menu bar → «Calm non-critical colors» — під **Yellow + Green** синя пігулка лишається **синьою**, під **+ Blue** мутиться в білий, під **Off** кольорова. Порівняй із `idle-week-hot`: там пігулка зелена й мутиться в білий у **обох** режимах — глушиться саме зелений, а не «idle взагалі» |
 | `idle-blocked` | **заблокований** idle (#158): idle 5h + 7d вичерпано (100 %) без credits → `isBlocked`. **Червоний pause-гліф ліворуч завжди** (#199/#227, ADR-0063) — його вже не вимкнути. Смужок тут **немає взагалі** ([ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)): меню-бар = **pause + countdown**. Тумблера «Pause icon hides bars» більше не існує — ховання безумовне, тож і перемикати нічого. Сірий idle-бар лишився тільки в попапі. Іконка кредитів (€) сидить **між** pause і барами (#227). У попапі — завжди повна картина: статус «waiting for limit reset», 7d-ресет **червоний бейдж** (пігулка). Порівнюй з `idle`: там синій «ready to start», який під Calm глушиться в **білий** (`calmWhite`) — і лише під `+ Blue`, бо `Yellow + Green` синє не чіпає ([#343](https://github.com/artem-from-ua/cc-timer/issues/343)). Тут же сіра пігулка не глушиться ні в якому режимі |
 | `active-blocked` | **активний** blocked (#177): жива 5h-сесія (48 %) при вичерпаному 7d (100 %, `weekly_all` critical) без credits → тижневий cap блокує попри квоту 5h (`isBlocked`). **Червоний pause-гліф ліворуч завжди** (#199/#227, ADR-0063). Смужок **немає** ([ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)): pause + countdown, і тумблера для цього більше немає. Іконка кредитів (€) сидить **між** pause і барами (#227). У попапі — завжди повна картина: 7d-ресет отримує **червоний бейдж** «Effective blocker» |
 | `optimistic-reset` ⏱ | reset-boundary (#36): 5h ресетиться через ~20 с — бар стрибає 60 %→0 % без ⏰ + форс-рефреш. **Реальний годинник** (⏱): таймер має цокнути наживо, тож цей стуб не відірваний від часу |
@@ -143,7 +143,7 @@
 | `credits-limit-reached` | «Extra usage ⟷ limit reached», «€10.8 of €5.00 ⟷ `<reset line>`», **червоний** бар (usage форсовано в 1) |
 | `credits-no-limit` | Лише «Extra usage ⟷ €10.8 spent» (під **⌥** — «€10.77 spent») — **без** бару, **без** рядка ресету (unlimited, немає стелі) |
 | `credits-zero-spent` | «€0 of €15 ⟷ `<reset line>`» — обидві половини гублять нулі, кожна зі своєї причини: спенд бо незайманий (`amountMinor == 0`), cap бо цілий. Під **⌥** — «spent €0.00 of €15.00» (і ресет зникає — не влазить). Cap лишається на рядку навіть при нулі: без нього рядок читався б як безлімітний, а це інша конфігурація білінгу. Бар на нулі |
-| `credits-month-end` | Перевірка **найтіснішого місця** місячної лінійки (ADR-0092): годинник на 90 % місяця, тож маркер часу підходить до правого підпису `Jan 31` найближче. Дивитись треба, що маркер і підпис **не стикаються** і що підпис лишається читабельним попри світіння маркера. Заразом — головна перевірка самого рішення: перемкни Settings → Dropdown → Bar style на **Pressure** і **Gauge**; токенні бари стануть безмаркерними стрічками, а цей лишиться Progress із маркером і підписами — питання в тому, чи читається він як *інший інструмент*, а не як збій |
+| `credits-month-end` | Перевірка **найтіснішого місця** місячної лінійки (ADR-0092): годинник на 90 % місяця, тож маркер часу підходить до правого підпису `Jan 31` найближче. Дивитись треба, що маркер і підпис **не стикаються** і що підпис лишається читабельним попри світіння маркера. Заразом — головна перевірка самого рішення: перемкни Settings → Appearance › Dropdown → Bar style на **Pressure** і **Gauge**; токенні бари стануть безмаркерними стрічками, а цей лишиться Progress із маркером і підписами — питання в тому, чи читається він як *інший інструмент*, а не як збій |
 
 > Перевір, що суми — з валютою **€** (не `$`): форматер бере символ із коду валюти (EUR→€). Бар
 > секції — той самий `PopupBarView`, що бари токенів, але з **власною шкалою й лінійкою**
@@ -470,16 +470,25 @@ Settings → Notifications → **Preview** біля «Claude service incidents»
 Перевіряти на будь-якому pacing-стубі (напр. `far-behind`, `both-red`, `calm-both`):
 `TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2 TOKENPACE_STUB=far-behind swift run`.
 
-- **Change UI preset** (сегментед `Chill | Work harder! | Control freak | Custom`): клік застосовує
-  пресет; `Custom` некликабельний, підсвічується лише коли конфіг не збігається з жодним пресетом
-  (клік → popover-пояснення). **Work harder!** — дефолтний пресет (fresh install / Reset), і з #329
+- **Change appearance preset** (**радіо-група**, чотири рядки `Chill` / `Work harder!` /
+  `Control freak` / `Custom`, кожен із поясненням під назвою — [ADR-0099](../adr/0099-appearance-nests-its-two-surfaces.md)):
+  клік застосовує пресет; клікабельний **весь рядок**, не лише кружечок. `Custom` некликабельний,
+  поки нема збереженого сетапу, але **його опис при цьому не змінюється** — рядок описує опцію, а не
+  її досяжність, тож список не має переверстуватись під курсором. Перевір заразом, що пояснення не
+  обіцяє зайвого: під `Control freak` має стояти «Maximum info, but signals take a bit longer to
+  spot», а **не** щось про «повну картину без ⌥» — ⌥ розкриває рядки, але стиль бару не міняє.
+  **Work harder!** — дефолтний пресет (fresh install / Reset), і з #329
   він ставить **Gauge на обидві поверхні** (був Mixed) — саме тому свіжа інсталяція показує Gauge.
   Кожен пресет дає обом поверхням **один** стиль, і три пресети покривають три стилі рівно по разу:
   Chill → Pressure, Work harder! → Gauge, Control freak → Progress. Перевір, що клік по пресету
   рухає **обидва** рядки Bar style синхронно.
-- **Кнопка копіювання конфіга** (іконка `doc.on.doc` **ліворуч** від сегментеда, #257): клік кладе в
-  буфер pretty-JSON з 7 Appearance-ключами + `preset` + `appVersion`; гліф на ~1.2 с стає
-  `checkmark`, тоді вертається (тултип при наведенні: «Copy Appearance settings to clipboard»).
+- **Кнопка копіювання конфіга** (іконка `doc.on.doc` у **правому краю рядка-заголовка** «Change
+  appearance preset», #257): клік кладе в буфер pretty-JSON з 7 Appearance-ключами + `preset` +
+  `appVersion`; гліф на ~1.2 с стає `checkmark`, тоді вертається (тултип при наведенні: «Copy
+  appearance settings to clipboard»). **Дивись на компонування під час підміни гліфа**: нічого не
+  має смикатися — бокс фіксований по обох вимірах, і неявну анімацію вимкнено. Поки кнопка ділила
+  рядок із сегментедом, висоту тримав той контрол; сама в рядку вона тримає її сама, і нижчий
+  `checkmark` стискав рядок.
   Той самий фідбек має давати копі-кнопка у вікні Troubleshoot — спільні константи в `CopyFeedback`.
   Вставити в редактор і перевірити **порядок ключів — він має збігатися з порядком контролів на
   сторінці згори вниз** (`menuBarStyle` → `calmColorMode` → … →
@@ -488,7 +497,7 @@ Settings → Notifications → **Preview** біля «Claude service incidents»
   списку — кожен на позиції свого рядка в своїй секції, а не поруч; ключа `barStyle` в дампі
   **немає** (він legacy-only, лише для читання старих конфігів). Перемкнути пресет → `"preset"`
   міняється на його raw (`chill`/`workHarder`/`controlFreak`); змінити будь-який тумблер вручну
-  (сегментед показує `Custom`) → `"preset" : "custom"`. Кнопка нічого не зберігає — конфіг після
+  (радіо стає на `Custom`) → `"preset" : "custom"`. Кнопка нічого не зберігає — конфіг після
   кліку не змінюється.
 - **Bar style — ДВА окремі рядки** ([ADR-0080](../adr/0080-per-surface-bar-style.md), #329): перший
   у секції **Menu Bar Widget**, другий у **Dropdown Widget**, обидва `Pressure | Gauge | Progress`.
@@ -803,21 +812,24 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_STUB=screenshot swift run
 |---|---|
 | 0 | About |
 | 1 | General |
-| 2 | UI presets |
+| **2** | **Appearance** |
+| **2.0** | **Appearance › Menu bar** (дочірня сторінка) |
+| **2.1** | **Appearance › Dropdown** (дочірня сторінка) |
 | 3 | Notifications |
 | ~~4~~ | ~~Extra features~~ — пан прибрано ([#341](https://github.com/artem-from-ua/tokenpace/issues/341)); індекс **виведено з обігу й не перевикористано** |
-| 5 | Menu bar |
-| 6 | Dropdown |
+| ~~5~~ | ~~Menu bar~~ — більше не секція, а дитина `Appearance`: адресується `2.0` |
+| ~~6~~ | ~~Dropdown~~ — те саме, `2.1` |
 | **7** | **Providers** |
 | **7.0** | **Providers › Claude** (дочірня сторінка) |
 | 100–108 | scroll-філер (`TOKENPACE_SIDEBAR_FILLER`, див. нижче) |
 
 **Індекси — стабільні ідентифікатори, не порядок рядків** (#333). Порядок у sidebar задає
-`SettingsSection.groups`, і він інший: About / **General · Providers** / **UI presets · Menu bar ·
-Dropdown** / Notifications. Розділення саме таке, щоб перестановка рядків не перенаправляла мовчки
-кожен задокументований рецепт на інший пан; `2` лишилось за `UI presets`, бо це те, чим став
-колишній Appearance, а `4` лишається **дірою**: старі рецепти його досі носять, і напрямити їх на
-інший пан означало б рецепт, що бреше замість падати.
+`SettingsSection.groups`, і він інший: About / **General · Providers** / **Appearance ·
+Notifications**. Розділення саме таке, щоб перестановка рядків не перенаправляла мовчки кожен
+задокументований рецепт на інший пан; `2` лишилось за `Appearance` через усі перейменування —
+це той самий пан. `4`, `5` і `6` лишаються **дірами**: старі рецепти їх досі носять, і напрямити
+їх на інший пан означало б рецепт, що бреше замість падати (`5`/`6` тепер адресуються крапковою
+формою, бо самі сторінки нікуди не поділись — вони переїхали на рівень нижче).
 
 **Крапковий синтаксис — дочірні сторінки** ([#341](https://github.com/artem-from-ua/tokenpace/issues/341),
 [ADR-0084](../adr/0084-settings-drill-in-child-pages.md)): `<секція>.<індекс дитини>`, де індекс
@@ -830,7 +842,7 @@ Monitored service incidents, Sessions і Backup лишились на батьк
 
 ```sh
 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=3 swift run     # відкриє одразу на Notifications
-TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=5 swift run     # одразу на Menu bar
+TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2.0 swift run   # одразу на Appearance › Menu bar
 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=7.0 swift run   # одразу на Providers › Claude
 ```
 
@@ -844,7 +856,7 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=7.0 swift run   # одра�
 (470), і на розтягнутій**.
 
 ```sh
-TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=5 swift run    # Menu bar — найдовша
+TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2.0 swift run  # Menu bar — найдовша
 TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=3 swift run    # Notifications
 TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=7.0 swift run  # drill-in Providers › Claude
 ```
@@ -862,24 +874,38 @@ TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=7.0 swift 
 6. **Ресайз від мінімуму** — плавний, без стрибка розміру.
 7. **Короткі панелі** (About, General) — без фантомного скролу.
 
-### Три UI-пани: що перевіряти (#333)
+### Appearance і дві її поверхні: що перевіряти (#333, вкладено назад під один пан)
 
-Колишній Appearance став трьома панами в одній групі sidebar. Що ламається найлегше:
+Колишні три сусідні рядки sidebar (`UI presets` · `Menu bar` · `Dropdown`) знову один пан
+**Appearance**, а дві поверхні — його **дочірні сторінки** (drill-in, як `Providers › Claude`).
+Що ламається найлегше:
 
-1. **Група й роздільники** — `UI presets`, `Menu bar`, `Dropdown` стоять поруч, відділені
-   роздільниками зверху й знизу, і ділять **один** зелений тінт капсули. Симетрично вище:
-   `General` і `Providers` ділять **один** сірий тінт ([ADR-0094](../adr/0094-provider-row-brand-badge.md)) —
-   якщо чип `Providers` фіолетовий, ти дивишся на стару збірку.
-2. **Пресети дістають обидві поверхні** — застосуй `Chill` на *UI presets*, тоді перевір, що
-   змінились обидва «Bar style» (на *Menu bar* і на *Dropdown*), а не один.
-3. **Custom** — зміни будь-що вручну, застосуй пресет, тоді натисни `Custom`: має повернутись твій
+1. **Sidebar** — рядків **п'ять**, не сім: About / General · Providers / **Appearance ·
+   Notifications**. `Appearance` і `Notifications` стоять **в одній групі, без роздільника між
+   ними**; роздільник лишається лише вище, над парою `General · Providers`. Тінти капсул:
+   `Appearance` — зелений, `Notifications` — червоний, а `General` і `Providers` ділять **один**
+   сірий ([ADR-0094](../adr/0094-provider-row-brand-badge.md)) — якщо чип `Providers` фіолетовий,
+   ти дивишся на стару збірку.
+2. **Два навігаційні рядки** — на `Appearance`, під секцією пресетів: `Menu bar` і `Dropdown`, кожен
+   із чипом (чорний / білий із хайрлайном — ті самі, що були в sidebar) і **шевроном**. Підзаголовок
+   рядка — поточний Bar style тієї поверхні; перемкни стиль усередині й повернись ‹ — підпис має
+   змінитись. Клікабельний **весь рядок**, не лише шеврон.
+3. **Навігація** — drill-in ставить назву сторінки в тулбар (`Menu bar`), ‹ повертає на
+   `Appearance`, а не «крізь» нього; перемикання рядка sidebar із відкритої дитини виходить на
+   корінь нової секції.
+4. **Пресети дістають обидві поверхні** — застосуй `Chill` на *Appearance*, тоді зайди в обидві
+   дитини й перевір, що змінились **обидва** «Bar style», а не один.
+5. **Custom** — зміни будь-що вручну, застосуй пресет, тоді натисни `Custom`: має повернутись твій
    сетап. На чистій інсталяції (нічого не збережено) сегмент неклікабельний і пояснює себе попапом.
-4. **Copy config** — кнопка на *UI presets* збирає значення з усіх трьох панів.
-5. **Awaiting-input** — вимкни «Detect sessions waiting for input» у *Providers → Sessions*, зайди
-   на *Menu bar*: тамтешній «Show waiting sessions» має бути **disabled**, а хінт читатись
-   «…in Providers › Sessions first». Назви навмисно різні (#341): на Providers вмикається саме
-   **виявлення**, на Menu bar — лише **показ** іконки.
+6. **Copy config** — кнопка на *Appearance* збирає значення з **усіх трьох** сторінок, включно з
+   обома дитинами.
+7. **Awaiting-input** — вимкни «Detect sessions waiting for input» у *Providers → Sessions*, зайди
+   на *Appearance › Menu bar*: тамтешній «Show waiting sessions» має бути **disabled**, а хінт
+   читатись «…in Providers › Sessions first». Назви навмисно різні (#341): на Providers вмикається
+   саме **виявлення**, на Menu bar — лише **показ** іконки.
    Глобальний вмикач керує долонею в дропдауні, цей — у menu bar.
+8. **Прев'ю ходить за паном** — див. розділ про «Dropdown live preview» нижче: воно є на
+   `Appearance` та обох її дитинах і **зникає** на About / General / Providers / Notifications.
 
 **Джерело істини складу й індексів** — `enum SettingsSection: Int` (raw-значення) плюс
 `SettingsSection.groups` (порядок і групування); змінюючи склад, онови їх і таблицю вище разом.
@@ -924,7 +950,7 @@ AppKit-версії.
 живий дропдаун.
 
 ```sh
-TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=6 TOKENPACE_STUB=screenshot swift run
+TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2.1 TOKENPACE_STUB=screenshot swift run
 ```
 
 **Своїх станів фіча не має — нового стуба додавати не треба.** Усе, що вона показує, приходить із
@@ -932,8 +958,13 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=6 TOKENPACE_STUB=screenshot
 
 Що ламається найлегше:
 
-1. **Видиме на всіх секціях.** Прев'ю прив'язане до **відкритості вікна**, не до вибраної панелі:
-   поклацай About → General → Notifications — воно має лишатися. Зникнення на якійсь панелі — регресія.
+1. **Видиме лише на Appearance та її дитинах.** Прев'ю прив'язане до **пана**, а не лише до
+   відкритості вікна (`SettingsSection.showsDropdownPreview`): воно є на `Appearance`,
+   `Appearance › Menu bar` і `Appearance › Dropdown`, і **зникає** на About / General / Providers /
+   Notifications. Поклацай туди-сюди кілька разів — воно має щоразу повертатись на те саме місце,
+   а не з'являтись зі зсувом. Заразом: відкрий вікно **на панелі без прев'ю** (`…SECTION=0`) —
+   Settings має бути **відцентроване саме собою**, без зсуву ліворуч на половину прев'ю
+   (`occupiedWidth` = 0, коли прев'ю сховане).
 2. **⌥ Option.** Затисни над Settings → у прев'ю розкриваються рядки моделей/сервісів і вік даних,
    вікно **підростає** (без ре-фіту блок обрізається). Прийди з уже затиснутим ⌥ — має бути розкрито
    одразу (сідинг).

@@ -240,6 +240,23 @@ final class SettingsModel {
         return usageApiEnabled ? "Usage API · \(servicesText)" : servicesText
     }
 
+    /// The state line under a surface's navigator row on the Appearance page — the bar style that
+    /// surface currently draws, which is the one setting both pages open with and the only one whose
+    /// answer differs between them by default.
+    ///
+    /// The name comes from `AppearanceBarStyle.segments`, the same table the picker on the child page
+    /// labels its own segments from: a row reporting "Gauge" while the control inside says something
+    /// else would be worse than a row reporting nothing.
+    func surfaceSummary(for page: SettingsChildPage) -> String? {
+        let style: BarStyle
+        switch page {
+        case .appearanceMenuBar: style = menuBarStyle
+        case .appearanceDropdown: style = dropdownStyle
+        case .providersClaude: return nil
+        }
+        return AppearanceBarStyle.segments.first { $0.value == style }?.title
+    }
+
     // MARK: Notifications (#160)
 
     var backToWorkEnabled = false
@@ -643,7 +660,7 @@ final class SettingsModel {
     /// Apply a named Appearance **preset** (#215, #224) — the general form of
     /// `resetAppearanceToDefaults()`. Writes all seven keys from the preset's fixed value set, re-syncs
     /// the model so the controls repaint (the preset segmented control re-lights via `activePreset`),
-    /// then fires each pane callback so both surfaces rebuild. The segmented control in `UIPresetsPane`
+    /// then fires each pane callback so both surfaces rebuild. The segmented control in `AppearancePane`
     /// calls this.
     func apply(_ preset: AppearancePreset) {
         // Stash the setup being overwritten if it is the user's own (#333). This is the only moment it

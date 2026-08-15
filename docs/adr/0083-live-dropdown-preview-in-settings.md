@@ -1,13 +1,19 @@
 ---
-status: accepted
+status: partially superseded
 date: 2026-08-12
+superseded_by: [0099]
 ---
 
 # ADR-0083: Живе прев'ю дропдауна поруч із вікном Settings
 
+> Розділ «Видиме на всіх секціях» витіснено [ADR-0099](0099-appearance-nests-its-two-surfaces.md):
+> прев'ю тепер прив'язане до пана (`Appearance` і дві її дитини), а не лише до відкритості вікна, і
+> `occupiedWidth` віддає **0**, поки воно сховане. Решта рішення — окреме borderless child-вікно,
+> спільний `PopupLayout`, ⌥-монітор, menu-матеріал, паркування — чинна повністю.
+
 ## Контекст
 
-Панелі `UI presets` / `Menu bar` / `Dropdown` ([#333](https://github.com/artem-from-ua/tokenpace/issues/333))
+Панелі `Appearance` / `Appearance › Menu bar` / `Appearance › Dropdown` ([#333](https://github.com/artem-from-ua/tokenpace/issues/333))
 налаштовують те, що малює дропдаун: `Bar style`, тіки, `Show model & service limits`, `Show extra
 usage`, пресети. Але **побачити результат під час крутіння перемикачів неможливо**: дропдаун живе в
 `NSMenu` статус-айтема, а меню не може лишатися відкритим, поки користувач працює у вікні Settings.
