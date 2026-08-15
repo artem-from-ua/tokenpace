@@ -34,6 +34,10 @@ struct RadioGroup<Value: Hashable>: View {
         /// It changes only whether the click lands and how the **title** is weighted — never the
         /// description. An option whose second line rewrote itself on selection would make the list
         /// reflow under the pointer, and the line stops being a stable description of the option.
+        ///
+        /// The dimming it drives is suppressed on the **active** row: a grey title means "clicking this
+        /// does nothing", which on the option you are already on is both wrong and alarming. See
+        /// ``RadioGroup/row(_:)``.
         var selectable: Bool = true
         var id: Value { value }
     }
@@ -67,7 +71,13 @@ struct RadioGroup<Value: Hashable>: View {
                                               : AnyShapeStyle(.secondary))
                 VStack(alignment: .leading, spacing: Metrics.titleSummaryGap) {
                     Text(option.title)
-                        .foregroundStyle(option.selectable ? .primary : .secondary)
+                        // Dimmed only when the option is both **inert and not the current one**. The
+                        // grey says "clicking this does nothing"; on the selected row that message is
+                        // both wrong and confusing, since selecting it is exactly what already
+                        // happened. "Custom" hit this: `canRestoreCustom` is false once Custom *is*
+                        // the active preset (there is nothing left to restore), so choosing it dimmed
+                        // its own title while every other option stayed bright.
+                        .foregroundStyle(option.selectable || isActive ? .primary : .secondary)
                     Text(.init(option.summary))
                         .font(.callout)
                         .foregroundStyle(.secondary)
