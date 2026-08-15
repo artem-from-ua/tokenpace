@@ -470,16 +470,25 @@ Settings → Notifications → **Preview** біля «Claude service incidents»
 Перевіряти на будь-якому pacing-стубі (напр. `far-behind`, `both-red`, `calm-both`):
 `TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2 TOKENPACE_STUB=far-behind swift run`.
 
-- **Change appearance preset** (сегментед `Chill | Work harder! | Control freak | Custom`): клік застосовує
-  пресет; `Custom` некликабельний, підсвічується лише коли конфіг не збігається з жодним пресетом
-  (клік → popover-пояснення). **Work harder!** — дефолтний пресет (fresh install / Reset), і з #329
+- **Change appearance preset** (**радіо-група**, чотири рядки `Chill` / `Work harder!` /
+  `Control freak` / `Custom`, кожен із поясненням під назвою — [ADR-0099](../adr/0099-appearance-nests-its-two-surfaces.md)):
+  клік застосовує пресет; клікабельний **весь рядок**, не лише кружечок. `Custom` некликабельний,
+  поки нема збереженого сетапу, але **його опис при цьому не змінюється** — рядок описує опцію, а не
+  її досяжність, тож список не має переверстуватись під курсором. Перевір заразом, що пояснення не
+  обіцяє зайвого: під `Control freak` має стояти «Maximum info, but signals take a bit longer to
+  spot», а **не** щось про «повну картину без ⌥» — ⌥ розкриває рядки, але стиль бару не міняє.
+  **Work harder!** — дефолтний пресет (fresh install / Reset), і з #329
   він ставить **Gauge на обидві поверхні** (був Mixed) — саме тому свіжа інсталяція показує Gauge.
   Кожен пресет дає обом поверхням **один** стиль, і три пресети покривають три стилі рівно по разу:
   Chill → Pressure, Work harder! → Gauge, Control freak → Progress. Перевір, що клік по пресету
   рухає **обидва** рядки Bar style синхронно.
-- **Кнопка копіювання конфіга** (іконка `doc.on.doc` **ліворуч** від сегментеда, #257): клік кладе в
-  буфер pretty-JSON з 7 Appearance-ключами + `preset` + `appVersion`; гліф на ~1.2 с стає
-  `checkmark`, тоді вертається (тултип при наведенні: «Copy Appearance settings to clipboard»).
+- **Кнопка копіювання конфіга** (іконка `doc.on.doc` у **правому краю рядка-заголовка** «Change
+  appearance preset», #257): клік кладе в буфер pretty-JSON з 7 Appearance-ключами + `preset` +
+  `appVersion`; гліф на ~1.2 с стає `checkmark`, тоді вертається (тултип при наведенні: «Copy
+  appearance settings to clipboard»). **Дивись на компонування під час підміни гліфа**: нічого не
+  має смикатися — бокс фіксований по обох вимірах, і неявну анімацію вимкнено. Поки кнопка ділила
+  рядок із сегментедом, висоту тримав той контрол; сама в рядку вона тримає її сама, і нижчий
+  `checkmark` стискав рядок.
   Той самий фідбек має давати копі-кнопка у вікні Troubleshoot — спільні константи в `CopyFeedback`.
   Вставити в редактор і перевірити **порядок ключів — він має збігатися з порядком контролів на
   сторінці згори вниз** (`menuBarStyle` → `calmColorMode` → … →
@@ -488,7 +497,7 @@ Settings → Notifications → **Preview** біля «Claude service incidents»
   списку — кожен на позиції свого рядка в своїй секції, а не поруч; ключа `barStyle` в дампі
   **немає** (він legacy-only, лише для читання старих конфігів). Перемкнути пресет → `"preset"`
   міняється на його raw (`chill`/`workHarder`/`controlFreak`); змінити будь-який тумблер вручну
-  (сегментед показує `Custom`) → `"preset" : "custom"`. Кнопка нічого не зберігає — конфіг після
+  (радіо стає на `Custom`) → `"preset" : "custom"`. Кнопка нічого не зберігає — конфіг після
   кліку не змінюється.
 - **Bar style — ДВА окремі рядки** ([ADR-0080](../adr/0080-per-surface-bar-style.md), #329): перший
   у секції **Menu Bar Widget**, другий у **Dropdown Widget**, обидва `Pressure | Gauge | Progress`.
