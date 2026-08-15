@@ -112,6 +112,8 @@
 
 ## Повʼязані документи
 
+- [bar-styles.md](bar-styles.md) — три стилі смужки (Pressure / Gauge / Progress): що кожен каже,
+  як його читати й кому підходить
 - [ui-state-truth.md](ui-state-truth.md) — як малювати стан (метрики, анатомія, неможливі комбінації)
 - [bar-status-conditions.md](bar-status-conditions.md) — за яких даних смужка набуває якого кольору
 - [users-and-goals.md](users-and-goals.md) — критерій «корисного сигналу»
