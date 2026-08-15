@@ -1052,13 +1052,13 @@ final class StatusItemView: NSView {
         if !barStyle.showsTimeMarker {
             // A **zero-length** ribbon still has to read as "zero", not as an empty track. Without a time
             // marker this branch is the bar's only mark, so `stripRect`'s degenerate-span `nil` would
-            // leave the widget completely blank — which is exactly what the reset boundary produces:
-            // `applyIdleGrace`/`suppress` (ADR-0041, ADR-0045) render 0 % against a freshly rolled
-            // `resets_at = now + 5h`, i.e. `usage == time == 0`, so `pressureLength` is *exactly* 0
-            // for the first ticks of every new 5-hour window. A 1-minute-old window already draws the
-            // min-width pill, so flooring the span here keeps 0 looking like 0 instead of blinking the
-            // bar off. Progress is deliberately excluded: there an empty gap means "dead on pace" and
-            // the marker already carries the position.
+            // leave the widget completely blank. Since ADR-0101 that is the common case rather than an
+            // edge one: the ribbon's zero is `t`, so **every** state at or behind pace floors to the
+            // pill — just over half the reachable space. The reset boundary is simply the loudest
+            // instance of it (`applyIdleGrace`/`suppress`, ADR-0041/0045, render 0 % against a freshly
+            // rolled `resets_at = now + 5h`, i.e. `usage == time == 0`). Progress is deliberately
+            // excluded: there an empty gap means "dead on pace" and the marker already carries the
+            // position.
             let ribbon = frozenStrip(for: bar) ?? l.pressureLength
             fillZone(from: 0, to: ribbon, in: rect, width: w,
                      color: calmedGapColor(l, window: bar.window), floorEmptyToPill: true)
@@ -1116,12 +1116,12 @@ final class StatusItemView: NSView {
         let cx: CGFloat = barStyle.scale == .centred
             ? PopupBarView.scaleX(0.5, in: rect).rounded()
             : (PopupBarView.pillRect(at: 0, in: rect)?.midX ?? PopupBarView.scaleX(0, in: rect)).rounded()
-        // Only the zero, never the popup's 0.20 on-pace landmark. Not an oversight: ⌥ never reaches
-        // this surface (the modifier is only observable while the menu is open, and then the reader is
-        // looking at the popup), so a second tick here could only be permanent — and a permanent pair
-        // of teeth on a 34 pt bar is the noise the single mark was carefully constructed to avoid.
-        // The menu bar therefore carries the identifying half of the ruler; the explaining half lives
-        // in the dropdown, under ⌥ (`PopupBarView.drawTicks`).
+        // Only the zero, and on Pressure the zero *is* "exactly on pace" since ADR-0101. A second
+        // permanent tick here was never an option anyway: ⌥ never reaches this surface (the modifier
+        // is only observable while the menu is open, and then the reader is looking at the popup), and
+        // a permanent pair of teeth on a 34 pt bar is the noise the single mark was carefully
+        // constructed to avoid. The menu bar therefore carries the identifying half of the ruler; the
+        // explaining half lives in the dropdown, under ⌥ (`PopupBarView.drawTicks`).
         let w = Metrics.centreTickWidth
         let h = Metrics.centreTickHeight
         // Neutral `centreTick` — never a pacing colour: this is scale furniture, not data. It defaults

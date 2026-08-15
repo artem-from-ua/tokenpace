@@ -222,7 +222,8 @@ struct BarLayoutTests {
 /// compared row by row:
 ///
 /// - **window scale** (`gapEnd - gapStart` = `|u − t|`) — what the marker-less bar drew before #307.
-/// - **remaining scale** (``BarLayout/pressureLength`` = `|u − t| / (1 − t)`) — what it draws now.
+/// - **remaining scale** (``BarLayout/pressureLength`` = `clamp((u − t)/(1 − t), 0, 1)`, i.e. the
+///   ahead half of ``BarLayout/gaugeOffset``) — what it draws now (ADR-0101).
 ///
 /// `minPillFraction` is the renderer's floor expressed as a fraction of the bar: `minStripWidth`
 /// is ¾ of the bar height less 1 pt (2.75 pt at the menu bar's 5 pt, #326) against a 34 pt track
@@ -326,21 +327,21 @@ struct RibbonLengthTests {
     // MARK: - The remaining scale (#307)
 
     /// The renormalised scale, pinned state by state — the counterpart of
-    /// ``windowScaleWidthsPerState``. Five of the thirteen collapse to zero: every state calmer than
-    /// `t − (1 − t)·(k − 1)` sits left of the ribbon's zero.
+    /// ``windowScaleWidthsPerState``. **Six** of the thirteen collapse to zero: every state at or
+    /// behind pace (`u ≤ t`) sits at the ribbon's zero, which is `t` itself (ADR-0101).
     @Test func remainingScaleWidthsPerState() {
         let expected: [String: Double] = [
-            "Deep behind": 0.00,       // computed −1.80 — left of zero
-            "Behind, early": 0.05,
-            "Behind, mid": 0.00,       // computed −0.04 — left of zero
-            "Behind, late": 0.00,      // computed −1.40 — left of zero
-            "Mildly behind": 0.00,
-            "Dead on pace": 0.20,      // u == t is the fixed on-pace position
-            "Mild lead, early": 0.2914,
-            "Mild lead, late": 0.3778,
-            "Ahead, mid-window": 0.52,
-            "Ahead, late": 5.0 / 9,    // 0.5556
-            "Ahead, very late": 0.6571,
+            "Deep behind": 0.00,       // computed −2.50 — behind pace
+            "Behind, early": 0.00,     // computed −0.19 — behind pace
+            "Behind, mid": 0.00,       // computed −0.30 — behind pace
+            "Behind, late": 0.00,      // computed −2.00 — behind pace
+            "Mildly behind": 0.00,     // computed −0.25 — behind pace
+            "Dead on pace": 0.00,      // u == t is the zero
+            "Mild lead, early": 4.0 / 35,   // 0.1143
+            "Mild lead, late": 2.0 / 9,     // 0.2222
+            "Ahead, mid-window": 0.40,
+            "Ahead, late": 4.0 / 9,         // 0.4444
+            "Ahead, very late": 4.0 / 7,    // 0.5714
             "Exhausted, early": 1.00,
             "Exhausted": 1.00,
         ]
@@ -381,19 +382,21 @@ struct RibbonLengthTests {
     }
 
     /// **The severity bands are fixed positions on the bar**, identical at any point in the window —
-    /// the property that makes width alone readable as a state. `u == t` is always 20 %, and the
-    /// yellow→orange crossover always 32.8 %. Checked against the live `aheadThreshold`, not a
-    /// copied constant, so a change to the colour rule fails here rather than drifting silently.
+    /// the property that makes width alone readable as a state. `u == t` is always the zero, and the
+    /// yellow→orange crossover always `0.16` — which is `aheadThreshold` itself, because the drawn
+    /// length *is* the number the colour rule compares (ADR-0101). Checked against the live
+    /// threshold, not a copied constant, so a change to the colour rule fails here rather than
+    /// drifting silently.
     @Test func severityThresholdsSitAtFixedWidths() {
         for timePct in [0.0, 10, 30, 50, 82, 93, 99] {
             let t = timePct / 100
             let onPace = Self.layout(.init(name: "tie", timePct: timePct, utilPct: timePct))
-            #expect(abs(onPace.pressureLength - 0.20) < 1e-9, "on-pace at t=\(timePct)")
+            #expect(onPace.pressureLength == 0, "on-pace at t=\(timePct)")
 
             let threshold = PacingModel.aheadThreshold(timeFraction: t)
             let atOrange = Self.layout(
                 .init(name: "orange", timePct: timePct, utilPct: (t + threshold) * 100))
-            #expect(abs(atOrange.pressureLength - 0.328) < 1e-9, "orange boundary at t=\(timePct)")
+            #expect(abs(atOrange.pressureLength - 0.16) < 1e-9, "orange boundary at t=\(timePct)")
         }
     }
 
@@ -414,19 +417,20 @@ struct RibbonLengthTests {
     }
 
     /// Width alone determines the colour: the bands tile without overlap. Anything the model calls
-    /// `.ahead` (orange) is wider than the yellow band's top; anything at or behind pace is at or
-    /// under the fixed on-pace position. Swept over the reachable grid.
+    /// `.ahead` (orange) is at or past the yellow band's top; anything at or behind pace is **exactly
+    /// zero** — the ribbon's zero is `t` itself, so there is nothing between "behind" and "leading"
+    /// to overlap (ADR-0101). Swept over the reachable grid.
     @Test func widthBandsDoNotOverlapAcrossTheGrid() {
         for timePct in stride(from: 1.0, through: 98.0, by: 1) {
             for utilPct in stride(from: 0.0, through: 99.0, by: 1) {
                 let l = Self.layout(.init(name: "grid", timePct: timePct, utilPct: utilPct))
                 if utilPct <= timePct {
-                    #expect(l.pressureLength <= 0.20 + 1e-9, "calm t=\(timePct) u=\(utilPct)")
+                    #expect(l.pressureLength == 0, "calm t=\(timePct) u=\(utilPct)")
                 }
                 // The 20-min end-of-window override forces orange without a matching lead, so it is
                 // excluded: this is about the dynamic threshold's own geometry.
                 if l.severity == .ahead, l.remainingSeconds > PacingModel.pacingOrangeOverrideSeconds {
-                    #expect(l.pressureLength >= 0.328 - 1e-9, "ahead t=\(timePct) u=\(utilPct)")
+                    #expect(l.pressureLength >= 0.16 - 1e-9, "ahead t=\(timePct) u=\(utilPct)")
                 }
             }
         }
@@ -453,27 +457,26 @@ struct RibbonLengthTests {
         }
     }
 
-    /// `usage == time` is the **fixed on-pace position**, 20 % — not zero. Zero belongs to states
-    /// calmer than that, and means "no pressure" rather than "dead on pace"; the distinction matters
-    /// because the renderers floor zero to a pill, so reading it as the tie would mislabel the mark.
-    @Test func deadOnPaceIsTheFixedOnPacePosition() {
+    /// `usage == time` **is** the ribbon's zero, at any point in the window (ADR-0101). The
+    /// renderers floor it to the minimum pill, so "dead on pace" still draws a mark rather than an
+    /// empty track — but the mark is the zero, not a position a fifth of the way along.
+    @Test func deadOnPaceIsTheZero() {
         for pct in [0.0, 25, 55, 90, 99] {
             let l = Self.layout(.init(name: "tie", timePct: pct, utilPct: pct))
-            #expect(abs(l.pressureLength - 0.20) < 1e-9, "t=u=\(pct)")
+            #expect(l.pressureLength == 0, "t=u=\(pct)")
         }
     }
 
-    /// Everything calmer than the ribbon's zero collapses onto it. The zero sits at
-    /// `t − (1 − t)·(k − 1)`, so at `t = 50 %` it is `u = 37.5 %`: below that the bar is the pill,
-    /// above it the ribbon grows. This is the deliberate cost of #307 — 79 % of calm states share
-    /// one mark, because on the calm side the action is carried by the colour.
-    @Test func calmStatesBelowTheZeroCollapseOntoIt() {
-        let k = PacingModel.pressureScaleCoefficient
+    /// The ribbon's zero sits at `t`, so **everything at or behind pace collapses onto it** and the
+    /// ribbon starts growing the moment usage passes time. At `t = 50 %` that boundary is `u = 50 %`
+    /// exactly. This is the deliberate cost of ADR-0101 — the whole calm side shares one mark,
+    /// because there the action is carried by the colour, and by ``BarStyle/gauge`` for anyone who
+    /// wants the surplus drawn.
+    @Test func calmStatesCollapseOntoTheZeroAtTime() {
         let t = 0.50
-        let zeroAt = t - (1 - t) * (k - 1)          // 0.375
-        for (util, expectZero) in [(20.0, true), (37.0, true), (37.5, true), (38.0, false), (45.0, false)] {
+        for (util, expectZero) in [(20.0, true), (49.0, true), (50.0, true), (50.5, false), (60.0, false)] {
             let l = Self.layout(.init(name: "calm", timePct: t * 100, utilPct: util))
-            #expect((l.pressureLength == 0) == expectZero, "u=\(util) (zero at \(zeroAt * 100) %)")
+            #expect((l.pressureLength == 0) == expectZero, "u=\(util) (zero at t = \(t * 100) %)")
         }
     }
 }
@@ -529,12 +532,12 @@ struct GaugeOffsetTests {
             "Behind, mid":       -0.30,
             "Behind, late":      -1.0,      // r = −2, clamped: the surplus is twice the time left
             "Mildly behind":     -0.25,
-            "Dead on pace":       0.0,      // the centre — not Pressure's 0.20
-            "Mild lead, early":   0.0914,
-            "Mild lead, late":    0.1778,
-            "Ahead, mid-window":  0.32,
-            "Ahead, late":        0.3556,
-            "Ahead, very late":   0.4571,
+            "Dead on pace":       0.0,      // the centre — and Pressure's zero too (ADR-0101)
+            "Mild lead, early":   4.0 / 35,   // 0.1143
+            "Mild lead, late":    2.0 / 9,    // 0.2222
+            "Ahead, mid-window":  0.40,
+            "Ahead, late":        4.0 / 9,    // 0.4444
+            "Ahead, very late":   4.0 / 7,    // 0.5714
             "Exhausted, early":   1.0,
             "Exhausted":          1.0,
         ]
@@ -574,26 +577,36 @@ struct GaugeOffsetTests {
         }
     }
 
-    /// The acceptance criterion from #326: switching Pressure ↔ Gauge must never change what the
-    /// **ahead** side says. Same ordering, same monotonicity — `k` divides that half by a constant,
-    /// so each landmark simply lands at half its Pressure distance, measured from the centre.
-    @Test func aheadHalfMatchesPressureOrdering() {
-        let rows = Self.aheadGroup.map { name -> (String, Double, Double) in
-            let l = Self.layout(Self.states.first { $0.name == name }!)
-            return (name, l.pressureLength, l.gaugeOffset)
-        }
-        #expect(rows.map(\.2) == rows.map(\.2).sorted())            // monotonic, like Pressure's
-        for (name, pressure, gauge) in rows {
-            #expect(gauge > 0, "\(name) is an ahead state")
-            // Pressure is `r/k + (k−1)/k`, Gauge is `r/k` — the same term, shifted by the constant
-            // that puts Pressure's on-pace at 0.20.
-            #expect(abs((pressure - gauge) - 0.20) < 1e-9, "\(name): \(pressure) vs \(gauge)")
+    /// The acceptance criterion from #326, in its final form (ADR-0101): switching Pressure ↔ Gauge
+    /// cannot change what the **ahead** side says, because there is only one expression —
+    /// `pressureLength` *is* `max(0, gaugeOffset)`.
+    ///
+    /// Asserted as an exact identity over the whole reachable grid, with no epsilon: the two are the
+    /// same `Double`, not two derivations that happen to agree. Before this the relationship was a
+    /// constant difference of `0.20` that only held on the ahead group and had to be maintained by
+    /// hand in two parallel formulas.
+    @Test func pressureIsTheGaugeAheadHalf() {
+        for timePct in stride(from: 1.0, through: 98.0, by: 1) {
+            for utilPct in stride(from: 0.0, through: 99.0, by: 1) {
+                let l = Self.layout(.init(name: "grid", timePct: timePct, utilPct: utilPct))
+                #expect(l.pressureLength == max(0, l.gaugeOffset), "t=\(timePct) u=\(utilPct)")
+            }
         }
     }
 
-    /// `u == t` is the **centre**, at any point in the window. Where Pressure gives the tie a fixed
-    /// 20 % (its zero sits left of `t`), here `t` *is* the zero — the renderers floor the degenerate
-    /// span to a centred pill so it still reads as a mark rather than an empty track.
+    /// The ahead group stays strictly widening on this scale, as it does on Pressure's — width can
+    /// be trusted at a glance in both styles.
+    @Test func aheadHalfIsMonotonic() {
+        let offsets = Self.aheadGroup.map { name -> Double in
+            Self.layout(Self.states.first { $0.name == name }!).gaugeOffset
+        }
+        #expect(offsets.allSatisfy { $0 > 0 })
+        #expect(zip(offsets, offsets.dropFirst()).allSatisfy { $0 < $1 }, "\(offsets)")
+    }
+
+    /// `u == t` is the **centre**, at any point in the window — and Pressure's zero as well, since
+    /// that scale is this one's ahead half. The renderers floor the degenerate span to a centred
+    /// pill so it still reads as a mark rather than an empty track.
     @Test func deadOnPaceIsTheCentre() {
         for pct in [0.0, 25, 55, 90, 99] {
             let l = Self.layout(.init(name: "tie", timePct: pct, utilPct: pct))

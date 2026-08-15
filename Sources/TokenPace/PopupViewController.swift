@@ -771,24 +771,18 @@ final class PopupBarView: NSView {
     /// - **Progress** marks each interior window boundary (`k / subdivisions`): the hour lines of a
     ///   5-hour window, the day lines of a 7-day one. Those are real positions on the window scale,
     ///   and the time marker lands among them.
-    /// - **Pressure** draws on the renormalised `[now .. reset]` track, where window subdivisions
-    ///   have no position at all — an hour boundary is not at a fixed fraction of the time remaining.
-    ///   What *is* fixed there is where the severity bands meet, so mark the one that matters:
-    ///   **0.20 is exactly on pace** (`u == t`), at any point in the window (#307,
-    ///   ``TokenPaceKit/BarLayout/pressureLength``). A ribbon short of the tick means headroom, past
-    ///   it means a lead. One tooth, not a ruler — the other boundary (0.328, yellow→orange) is
-    ///   already carried by the colour change, and a second tooth 4 pt away would read as noise.
-    /// - **Gauge** draws on the centred scale, whose one landmark is the zero the ribbon grows out of:
-    ///   **0.5**. Again one tooth. Ticks at ±50 % of each half were considered and dropped — they
-    ///   would mark nothing the scale defines, and the direction the ribbon leaves the centre in is
-    ///   the reading, not its distance along a ruler (#326, ADR-0079).
+    /// - **Pressure** and **Gauge** carry **no teeth at all** (ADR-0098). Window subdivisions have no
+    ///   position on either track — an hour boundary is not at a fixed fraction of the time remaining
+    ///   — and the landmark each scale *does* define is its **zero**, which is already drawn
+    ///   unconditionally by ``drawZeroTick(in:)`` and captioned `0` under ⌥. A second, unlabelled
+    ///   tooth a few points from a labelled zero read as a stray mark rather than as a reading.
     ///
-    /// Both marker-less scales also mark their **zero** (``zeroTickFraction``) — the position the ribbon
-    /// grows out of, which is what makes a length a length, and what tells Gauge from Pressure at a
-    /// glance. Gauge's zero *is* its 0.5 landmark, so its one tooth serves both readings and this list
-    /// is empty for it; Pressure's zero is `0`, so the 0.20 tooth listed here is genuinely a second
-    /// mark. The zero is the same mark the menu bar draws (`StatusItemView.drawZeroTick`) — that surface
-    /// carries only the identifying half, since ⌥ cannot reach it.
+    ///   Pressure's zero is `0` and Gauge's is `0.5` (``zeroTickFraction``) — that mark is also what
+    ///   tells the two styles apart at a glance, and it is the same one the menu bar draws
+    ///   (`StatusItemView.drawZeroTick`); that surface carries only the identifying half, since ⌥
+    ///   cannot reach it. Pressure once marked `0.20` here, back when its zero sat left of `t`; since
+    ///   ADR-0101 the scale's zero *is* `u == t`, so the two marks would coincide even if it had not
+    ///   already been dropped.
     ///
     /// The original objection to a tick under Pressure — a lone vertical tooth is exactly what the
     /// Progress time marker looks like, so the styles would stop being distinguishable — is answered by
@@ -809,10 +803,10 @@ final class PopupBarView: NSView {
         if monthBounds != nil { return [] }
         switch effectiveScale {
         // Neither marker-less style carries a tooth here: both are marked by their **zero** alone
-        // (``zeroTickFraction``), captioned `0` under ⌥. Pressure's 0.20 "exactly on pace" landmark was
-        // dropped — with a labelled zero already on the bar, a second unlabelled tooth a few points away
-        // read as a stray mark rather than as a second reading, and the boundary it stood for is
-        // carried by the colour change anyway.
+        // (``zeroTickFraction``), captioned `0` under ⌥. Pressure's old 0.20 "exactly on pace" landmark
+        // was dropped by ADR-0098 — a second unlabelled tooth a few points from a labelled zero read as
+        // a stray mark — and ADR-0101 moved the scale's zero onto `u == t`, so that landmark is now the
+        // zero itself rather than a separate position.
         case .remaining, .centred: return []
         case .window:
             guard subdivisions >= 2 else { return [] }
