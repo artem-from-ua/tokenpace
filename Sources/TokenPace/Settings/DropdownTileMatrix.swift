@@ -15,33 +15,26 @@ import TokenPaceKit
 @MainActor
 enum DropdownTileMatrix {
 
-    /// One candidate tile geometry.
+    /// One candidate: how long the bar is inside the fixed tile.
     struct Candidate {
         let barWidth: CGFloat
-        let gap: CGFloat
-        let tileWidth: CGFloat
-        let tileHeight: CGFloat
-
-        var label: String {
-            "bar \(Int(barWidth)) · gap \(Int(gap)) · tile \(Int(tileWidth))×\(Int(tileHeight))"
-        }
+        var label: String { "bar \(Int(barWidth)) pt" }
     }
 
-    /// The candidates, spanning the decision the maintainer has to make.
+    /// The tile box is **fixed at the menu-bar tile's own 80×48** (`BarStylePicker.Tile`), so the two
+    /// Settings rows stay a matched pair. The tile is therefore not a free variable — what is left to
+    /// choose is how long the bar inside it should be, which is what the candidates vary.
     ///
-    /// The floor is not free: two bars at `PopupBarView.viewHeight` (20 pt) plus a gap already occupy
-    /// 40 + gap, so a 64 pt tile leaves ~12 pt for the gap and both margins together. Anything below
-    /// that stops being tight and starts clipping the marker's glow.
+    /// 48 pt holds two 20 pt bars only because the spacing is solved symmetrically: `(48 − 40)/3 ≈ 2.7`
+    /// above, between and below.
+    static let tileWidth: CGFloat = 80
+    static let tileHeight: CGFloat = 48
+
     static let candidates: [Candidate] = [
-        // The menu-bar tile's own width, for reference — how cramped 80 pt actually is with two popup bars.
-        Candidate(barWidth: 64, gap: 8, tileWidth: 80, tileHeight: 64),
-        // Wider than the menu-bar specimen, as asked, on the same 64 pt height.
-        Candidate(barWidth: 76, gap: 10, tileWidth: 92, tileHeight: 64),
-        Candidate(barWidth: 88, gap: 12, tileWidth: 104, tileHeight: 64),
-        // Same widths, one notch taller — is 64 genuinely enough, or does the pair need air?
-        Candidate(barWidth: 88, gap: 16, tileWidth: 104, tileHeight: 72),
-        Candidate(barWidth: 100, gap: 12, tileWidth: 116, tileHeight: 64),
-        Candidate(barWidth: 100, gap: 16, tileWidth: 116, tileHeight: 72),
+        Candidate(barWidth: 56),
+        Candidate(barWidth: 62),
+        Candidate(barWidth: 68),
+        Candidate(barWidth: 72),
     ]
 
     // MARK: Specimen
@@ -55,7 +48,7 @@ enum DropdownTileMatrix {
         static let sevenDayRemaining: TimeInterval = 5 * 24 * 3600
     }
 
-    private static func barViews(for style: BarStyle, optionHeld: Bool) -> [(view: PopupBarView, subdivisions: Int)] {
+    private static func barViews(for style: BarStyle) -> [(view: PopupBarView, subdivisions: Int)] {
         let now = Date(timeIntervalSinceReferenceDate: 0)
 
         let fiveHour = PopupBarView(frame: .zero)
@@ -66,7 +59,11 @@ enum DropdownTileMatrix {
         fiveHour.subdivisions = 5
         fiveHour.isBaseLimit = true
         fiveHour.barStyle = style
-        fiveHour.optionHeld = optionHeld
+        // `optionHeld` stays at its `false` default, deliberately: ⌥ must not reach the specimen. In the
+        // live dropdown the modifier reveals the explanatory ruler *while held*, so a tile baked with it
+        // on would advertise a state the row does not sit in. The mark that identifies Pressure from
+        // Gauge is the zero struck through the track, which `drawZeroTick` draws unconditionally — so
+        // nothing distinguishing is lost by leaving the modifier out.
         fiveHour.colorAnimator = nil
 
         let sevenDay = PopupBarView(frame: .zero)
@@ -77,7 +74,6 @@ enum DropdownTileMatrix {
         sevenDay.subdivisions = 7
         sevenDay.isBaseLimit = true
         sevenDay.barStyle = style
-        sevenDay.optionHeld = optionHeld
         sevenDay.colorAnimator = nil
 
         return [(fiveHour, 5), (sevenDay, 7)]
@@ -85,18 +81,16 @@ enum DropdownTileMatrix {
 
     // MARK: Tile
 
-    /// One tile: the dropdown card colour, both bars, at `candidate`'s geometry.
-    static func tileImage(style: BarStyle, candidate: Candidate, appearance: NSAppearance,
-                          optionHeld: Bool) -> NSImage {
-        let size = NSSize(width: candidate.tileWidth, height: candidate.tileHeight)
-        let image = NSImage(size: size)
-        let views = barViews(for: style, optionHeld: optionHeld)
+    /// One tile — the dropdown card colour plus both bars — drawn at `origin` in the **current**
+    /// (flipped) context, which is what the caller's sheet already is.
+    static func drawTile(style: BarStyle, candidate: Candidate, at origin: NSPoint,
+                         appearance: NSAppearance) {
+        let views = barViews(for: style)
 
-        image.lockFocusFlipped(true)
         appearance.performAsCurrentDrawingAppearance {
             // The tile's plate is the dropdown card's own colour — the surface these bars actually sit
             // on — rather than the menu-bar tile's black. Follows the theme by construction.
-            let plate = NSRect(origin: .zero, size: size)
+            let plate = NSRect(x: origin.x, y: origin.y, width: tileWidth, height: tileHeight)
             NSColor.popupMenuMatchedBackground.setFill()
             NSBezierPath(roundedRect: plate, xRadius: 6, yRadius: 6).fill()
             // The unselected tile's hairline, as `BarStylePicker.Tile.idleBorder` draws it — inset by half
@@ -106,31 +100,26 @@ enum DropdownTileMatrix {
             border.lineWidth = 1
             border.stroke()
 
+            // **Symmetric vertical rhythm**: the space between the two bars equals the space above the
+            // first and below the second — one value used three times, rather than a gap tuned
+            // separately from the margins. `(tileHeight − 2·barHeight)/3` is that value, and solving for
+            // it is what centres the pair *and* spaces it evenly; centring alone leaves the outer
+            // margins at whatever happens to be left over.
             let barHeight = PopupBarView.viewHeight
-            let totalHeight = barHeight * 2 + candidate.gap
-            let top = (candidate.tileHeight - totalHeight) / 2
-            let left = (candidate.tileWidth - candidate.barWidth) / 2
+            let spacing = (tileHeight - barHeight * 2) / 3
+            let left = origin.x + (tileWidth - candidate.barWidth) / 2
 
             for (index, entry) in views.enumerated() {
-                let y = top + CGFloat(index) * (barHeight + candidate.gap)
-                let origin = NSPoint(x: left, y: y)
-                NSGraphicsContext.saveGraphicsState()
-                let transform = NSAffineTransform()
-                transform.translateX(by: origin.x, yBy: origin.y)
-                transform.concat()
-                entry.view.render(in: NSRect(x: 0, y: 0, width: candidate.barWidth, height: barHeight))
-                NSGraphicsContext.restoreGraphicsState()
+                let y = origin.y + spacing * CGFloat(index + 1) + barHeight * CGFloat(index)
+                entry.view.render(in: NSRect(x: left, y: y, width: candidate.barWidth, height: barHeight))
             }
         }
-        image.unlockFocus()
-        image.isTemplate = false
-        return image
     }
 
     // MARK: Sheet
 
     /// Render every candidate × every style, in one theme, as a labelled sheet.
-    static func sheet(appearance: NSAppearance, optionHeld: Bool) -> NSImage {
+    static func sheet(appearance: NSAppearance) -> NSImage {
         let styles: [(BarStyle, String)] = [(.pressure, "Pressure"), (.gauge, "Gauge"), (.progress, "Progress")]
         let margin: CGFloat = 24
         let rowGap: CGFloat = 30
@@ -138,9 +127,9 @@ enum DropdownTileMatrix {
         let labelHeight: CGFloat = 18
         let headerHeight: CGFloat = 26
 
-        let widest = candidates.map(\.tileWidth).max() ?? 100
+        let widest = tileWidth
         let sheetWidth = margin * 2 + (widest + colGap) * CGFloat(styles.count) - colGap
-        let rowHeights = candidates.map { $0.tileHeight + labelHeight + rowGap }
+        let rowHeights = candidates.map { _ in tileHeight + labelHeight + rowGap }
         let sheetHeight = margin * 2 + headerHeight + rowHeights.reduce(0, +)
 
         let image = NSImage(size: NSSize(width: sheetWidth, height: sheetHeight))
@@ -177,11 +166,16 @@ enum DropdownTileMatrix {
                 let tileY = y + labelHeight
                 for (column, style) in styles.enumerated() {
                     let x = margin + CGFloat(column) * (widest + colGap)
-                    let tile = tileImage(style: style.0, candidate: candidate, appearance: appearance,
-                                         optionHeld: optionHeld)
-                    tile.draw(at: NSPoint(x: x, y: tileY), from: .zero, operation: .sourceOver, fraction: 1)
+                    // Drawn straight into the sheet, NOT via an intermediate `NSImage`. Compositing a
+                    // flipped image into a flipped context flips it a second time, which mirrored each
+                    // tile vertically — the 7-day bar rendered above the 5-hour one, so the pacing
+                    // colours read as swapped even though a probe showed both bars carrying the right
+                    // `pacing` at the right y. Drawing in place has no second coordinate system to
+                    // disagree with.
+                    drawTile(style: style.0, candidate: candidate,
+                             at: NSPoint(x: x, y: tileY), appearance: appearance)
                 }
-                y += candidate.tileHeight + labelHeight + rowGap
+                y += tileHeight + labelHeight + rowGap
             }
         }
         image.unlockFocus()
@@ -191,18 +185,18 @@ enum DropdownTileMatrix {
     /// A single contact sheet with **both themes side by side** — the form the maintainer actually
     /// judges from, since a tile has to work in light and dark and flipping between two files hides
     /// exactly the differences that matter.
-    static func combinedSheet(optionHeld: Bool) -> NSImage? {
+    static func combinedSheet() -> NSImage? {
         guard let dark = NSAppearance(named: .darkAqua), let light = NSAppearance(named: .aqua) else {
             return nil
         }
-        let left = sheet(appearance: dark, optionHeld: optionHeld)
-        let right = sheet(appearance: light, optionHeld: optionHeld)
+        let left = sheet(appearance: dark)
+        let right = sheet(appearance: light)
         let size = NSSize(width: left.size.width + right.size.width, height: max(left.size.height, right.size.height))
         let image = NSImage(size: size)
-        // NOT `lockFocusFlipped` here. Each sheet is already a finished bitmap drawn top-left-down; a
-        // flipped context flips it a second time on composite, which mirrored the whole sheet
-        // vertically (headers at the bottom, the 5h bar under the 7d one). The flip belongs to the
-        // *drawing* of a sheet, not to pasting two of them side by side.
+        // Unflipped, because each sheet is a finished bitmap rather than live drawing: `NSImage.draw`
+        // pastes it upright here, whereas a flipped context would re-read it bottom-up and mirror the
+        // whole page. (Inside `sheet` the opposite holds — there the tiles are drawn live, so the
+        // context must stay flipped; see `drawTile`.)
         image.lockFocus()
         left.draw(at: .zero, from: .zero, operation: .sourceOver, fraction: 1)
         right.draw(at: NSPoint(x: left.size.width, y: 0), from: .zero, operation: .sourceOver, fraction: 1)
@@ -210,11 +204,11 @@ enum DropdownTileMatrix {
         return image
     }
 
-    /// Write both themes' sheets next to `path` and return the files written.
+    /// Write the contact sheet to `path` and return the files written.
     static func write(to path: String) -> [String] {
         var written: [String] = []
-        for (optionHeld, tag) in [(false, "plain"), (true, "ruler")] {
-            guard let image = combinedSheet(optionHeld: optionHeld),
+        for tag in ["sheet"] {
+            guard let image = combinedSheet(),
                   let tiff = image.tiffRepresentation,
                   let rep = NSBitmapImageRep(data: tiff) else { continue }
             // Pin the pixel size to the point size. `lockFocusFlipped` renders at the main screen's

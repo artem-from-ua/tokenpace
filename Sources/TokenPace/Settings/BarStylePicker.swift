@@ -81,7 +81,9 @@ struct BarStylePicker: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Bar style")
+        // Matches the visible row label verbatim — VoiceOver naming the group differently from what the
+        // eye reads is a mismatch, not extra context.
+        .accessibilityLabel("Style")
     }
 
     private func tile(for style: BarStyle, title: String) -> some View {

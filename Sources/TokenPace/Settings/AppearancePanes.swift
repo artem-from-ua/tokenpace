@@ -198,7 +198,7 @@ struct MenuBarPane: View {
                 // control row, and a vertically centred label floats in the middle of that block
                 // instead of heading it.
                 HStack(alignment: .top) {
-                    Text("Bar style")
+                    Text("Style")
                     Spacer()
                     BarStylePicker(
                         active: model.menuBarStyle,
@@ -278,7 +278,7 @@ struct DropdownPane: View {
                 // the control directly above it — which is the only thing it is.
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Bar style")
+                        Text("Style")
                         Spacer()
                         SegmentedControl(
                             segments: AppearanceBarStyle.segments,

@@ -10,11 +10,11 @@ import Foundation
 /// suite exists to catch. When an Appearance option is added, update the pane, the encoder, and this
 /// list together.
 private let paneOrderedKeys = [
-    "menuBarStyle",               // Menu Bar Widget → "Bar style"
+    "menuBarStyle",               // Menu Bar Widget → "Style"
     "calmColorMode",              // "Calm non-critical colors"
     "calmBarHiding",              // "Hide 5h (top) bar"
     "showServiceStatusDot",       // "Show service status dot on issues"
-    "dropdownStyle",              // Dropdown Widget → "Bar style"
+    "dropdownStyle",              // Dropdown Widget → "Style"
     "modelLimitsVisibility",      // "Show model & service limits"
     "extraUsageVisibility",       // "Show extra usage"
 ]
