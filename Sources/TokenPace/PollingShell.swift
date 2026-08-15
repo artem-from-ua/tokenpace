@@ -590,10 +590,11 @@ actor StubUsageTransport: UsageTransport {
         /// - **5h** — `t ≈ 93 %, u = 97 %`: three points from exhaustion with 7 % of the window left.
         ///   The window scale feeds the renderer 4 % of the bar, below `minStripWidth`, so the most
         ///   urgent state draws the smallest mark the widget can produce. On the Pressure scale it is
-        ///   **66 %** — the sharpest state finally reads as the widest.
-        /// - **7d** — `t = 30 %, u = 38 %`: a mild lead that lands at **29 %**, inside the yellow band
-        ///   (20.8–32.8 %). Paired with the 5h row it shows yellow and orange holding visibly different
-        ///   widths — the property that pins `pressureScaleCoefficient` at 1.25 rather than 2.
+        ///   **57 %** — the sharpest state finally reads as the widest.
+        /// - **7d** — `t = 30 %, u = 38 %`: a mild lead that lands at **11 %**, inside the yellow band
+        ///   (0–16 %) and just clear of the minimum pill (8.1 %). Paired with the 5h row it shows
+        ///   yellow and orange holding visibly different widths — and it is the tightest such pair, so
+        ///   it is the row to look at when judging whether yellow still reads as a lead at all.
         ///
         /// Switch Bar style across Pressure / Mixed / Progress on this frame: Progress must be
         /// pixel-identical to its pre-#307 rendering, Pressure visibly wider on the 5h row.
@@ -609,9 +610,9 @@ actor StubUsageTransport: UsageTransport {
         ///   the Pressure scale `max(0, …)` flattens it to zero outright. This is the state the style
         ///   exists for.
         /// - **7d** — `t = 30 %, u = 38 %`: the same mild lead `pressure-sweep` uses, which puts a
-        ///   short ribbon to the **right** of centre (`+7.2 %` here vs 29 % of the Pressure bar — the
-        ///   ahead half is the same ordering at half the distance). Paired with the 5h row it shows
-        ///   the two directions at once.
+        ///   short ribbon to the **right** of centre (`+11.4 %`, the *same* number the Pressure bar
+        ///   draws — since ADR-0101 Pressure is exactly this half, so switching between the two styles
+        ///   cannot move it). Paired with the 5h row it shows the two directions at once.
         ///
         /// Switch Bar style across all four on this frame: the ahead side must not move between
         /// Pressure and Gauge, and only Gauge draws anything at all on the 5h row.
@@ -655,10 +656,10 @@ actor StubUsageTransport: UsageTransport {
             // ~6 % elapsed of a 5-hour window → well ahead of pace → orange, so the countdown shows.
             case .midBandReset:       return (50, 20, 4 * 3600 + 41 * 60, 5 * 24 * 3600)
             // #307: 5h at t≈93 % (18 000 × 0.07 = 1260 s left) with u=97 → 4 % on the window scale,
-            // **66 %** on the Pressure one — orange, and the state the old geometry drew smallest.
-            // 7d at t=30 % (604 800 × 0.7 left) with u=38 → **29 %**, inside the yellow band
-            // (20.8–32.8 %): the pair proves yellow and orange stay separable, which is what pins
-            // `pressureScaleCoefficient` at 1.25.
+            // **57 %** on the Pressure one — orange, and the state the old geometry drew smallest.
+            // 7d at t=30 % (604 800 × 0.7 left) with u=38 → **11 %**, inside the yellow band (0–16 %)
+            // and just above the 8.1 % minimum pill: the pair proves yellow and orange stay separable,
+            // and the 7d row is the tightest case for that (ADR-0101).
             case .pressureSweep:      return (97, 38, 1_260, 423_360)
             case .gaugeSweep:         return (70, 38, 1_800, 423_360)
             case .barExtremes:        return (5, 20, 3_600, 423_360)

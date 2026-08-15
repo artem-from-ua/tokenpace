@@ -37,16 +37,17 @@ public enum BarScale: String, Sendable, Equatable, CaseIterable {
 /// #326):
 /// - **Progress** draws on the **window** scale — two positional marks on one track: the marker at
 ///   `timeFraction`, and the capsule's far edge, which is always `usageFraction`.
-/// - **Pressure** draws on the **remaining** scale — ``BarLayout/pressureLength``
-///   (`(r + k − 1)/k`, `r = (u − t)/(1 − t)`), whose zero sits left of `t`. Width alone encodes
-///   severity there, at fixed positions: 20 % is exactly on pace, 32.8 % is where yellow turns
-///   orange, 100 % is exhausted. A time marker is impossible: on this track it would sit at zero
-///   forever, which is also why the popup's tick ruler marks 20 % instead of window fractions.
-/// - **Gauge** draws on the **centred** scale — ``BarLayout/gaugeOffset`` (`clamp(r/k, −1, +1)`,
-///   `k` on the ahead half only). Same numerator as Pressure, zero moved to the middle, so the
-///   ribbon's *direction* says ahead-or-behind and its length says by how much. This is the only
-///   scale that renders the underpace half at all: Pressure's `max(0, …)` flattens every calm state
-///   onto one minimum pill, and a surplus you will not get to spend is exactly what that discards.
+/// - **Pressure** draws on the **remaining** scale — ``BarLayout/pressureLength``, which is exactly
+///   the ahead half of the Gauge scale: `max(0, gaugeOffset)` = `clamp(r, 0, 1)`,
+///   `r = (u − t)/(1 − t)`. Its zero is `t` itself. Width alone encodes severity there, at fixed
+///   positions: zero is exactly on pace, `0.16` is where yellow turns orange (the `aheadThreshold`
+///   itself), `1` is exhausted. A time marker is impossible: on this track it would sit at zero
+///   forever.
+/// - **Gauge** draws on the **centred** scale — ``BarLayout/gaugeOffset`` (`clamp(r, −1, +1)`).
+///   Same quantity as Pressure, zero moved to the middle, so the ribbon's *direction* says
+///   ahead-or-behind and its length says by how much. This is the only scale that renders the
+///   underpace half at all: Pressure's `max(0, …)` flattens every calm state onto one minimum pill,
+///   and a surplus you will not get to spend is exactly what that discards.
 ///
 /// **The surface is not part of this type** (#329, ADR-0080). Until then a fourth case, `mixed`,
 /// meant "Pressure in the menu bar, Progress in the dropdown" — the only way to give the two surfaces
@@ -98,8 +99,8 @@ public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
     /// sit at zero forever.
     ///
     /// This also decides the popup's tick ruler: window subdivisions mean nothing off the window
-    /// scale, so `PopupBarView` marks the one landmark each other scale does have — 20 % (exactly on
-    /// pace) on ``BarScale/remaining``, the centre on ``BarScale/centred``.
+    /// scale, so the marker-less scales carry no teeth at all (ADR-0098) — they are identified by
+    /// their **zero** alone, drawn by `PopupBarView.drawZeroTick` and captioned under ⌥.
     public var showsTimeMarker: Bool { scale == .window }
 
     /// The pre-#307 raw values, mapped to the cases that replaced them.

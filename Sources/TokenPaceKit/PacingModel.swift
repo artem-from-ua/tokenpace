@@ -162,107 +162,107 @@ public struct BarLayout: Sendable, Equatable {
     /// Right edge of the gap zone = `max(usageFraction, timeFraction)`.
     public var gapEnd: Double   { max(usageFraction, timeFraction) }
 
-    /// The **Pressure** ribbon's length: how hard spending is pressing against the time left (#307).
+    /// The signed lead `r = (u − t) / (1 − t)` both marker-less scales are built on: how far ahead
+    /// of (positive) or behind (negative) pace the spending is, measured in units of the time left
+    /// before the reset.
+    ///
+    /// `nil` means "saturated regardless of the ratio" — the two cases where the ratio is either
+    /// undefined or answered before it is asked:
+    ///
+    /// - **`u >= 1` (exhausted)** — a full bar at any `t`. Deliberate: a shrinking red bar reads as
+    ///   "the problem is easing" while work is still blocked. Time-to-reset is carried by the
+    ///   countdown and the pause glyph.
+    /// - **`t = 1`** (reset due/past) — would divide by zero. No time is left to press against, so
+    ///   the bar is full for any `u`. The exhausted check runs first, so the `u == t == 1` tie is
+    ///   caught there.
+    ///
+    /// Keeping both guards here means the ordering that makes them safe is a property of one
+    /// function rather than a comment repeated in every caller.
+    private var signedLead: Double? {
+        if usageFraction >= 1 { return nil }
+        let remaining = 1 - timeFraction
+        guard remaining > 0 else { return nil }   // reset due: no time left to press against
+        return (usageFraction - timeFraction) / remaining
+    }
+
+    /// The **Pressure** ribbon's length — the **ahead half of ``gaugeOffset``**, and nothing else
+    /// (#307, rescaled by ADR-0101).
     ///
     ///     r      = (u − t) / (1 − t)          // signed lead, in units of the time remaining
-    ///     length = (r + k − 1) / k            // k = pressureScaleCoefficient
+    ///     length = clamp(r, 0, 1)             // i.e. max(0, gaugeOffset)
     ///
-    /// The ribbon's zero sits `(1 − t) · (k − 1)` to the **left** of `t`, and the ribbon runs from
-    /// there to `u` — **signed, never absolute**. Clipped to `[0, 1]`.
+    /// The ribbon's zero sits **at `t`**: every state at or behind pace is zero, and the renderers
+    /// floor that to the minimum pill. Above pace the ribbon grows to `u` — **signed, never
+    /// absolute**.
     ///
-    /// **Width alone encodes severity.** Because the expression is linear in `r`, and the colour
+    /// **Width alone encodes severity.** The expression is the identity on `r`, and the colour
     /// thresholds are themselves conditions on `r` (the orange one is `(u − t) < 0.16 · (1 − t)`,
-    /// i.e. `r < 0.16` — see ``PacingModel/aheadThreshold(timeFraction:)``), the severity bands
-    /// become **fixed positions on the bar, identical at any point in the window**:
+    /// i.e. `r < 0.16` — see ``PacingModel/aheadThreshold(timeFraction:)``), so the severity bands
+    /// are **fixed positions on the bar, identical at any point in the window**:
     ///
     /// | colour | width |
     /// |---|---|
     /// | blue (far behind) | `0` |
-    /// | green (on pace or behind) | `0 – 0.20` |
-    /// | yellow (mild lead) | `0.208 – 0.328` |
-    /// | orange (ahead) | `0.328 – 0.992` |
+    /// | green (on pace or behind) | `0` |
+    /// | yellow (mild lead) | `0 – 0.16` |
+    /// | orange (ahead) | `0.16 – 1` |
     /// | red (exhausted) | `1` |
     ///
-    /// So `0.20` *is* "exactly on pace" (`u == t`) and `0.328` *is* where yellow turns orange — at
-    /// 10:00 and at 14:00 alike. `PopupBarView` marks the first of those with its single tick.
+    /// The yellow→orange boundary is therefore **`aheadThreshold` itself**, uncomputed: the drawn
+    /// length *is* the number the model compares. Nothing sits between orange's top and red — the
+    /// scale reaches `1` continuously as `u → 1`, rather than stopping short and jumping.
     ///
     /// **Why signed rather than `|u − t|`.** An absolute value cannot tell "ahead" from "behind":
     /// it bottoms out at `u == t` and then climbs back. Trace an early burst followed by silence
     /// (`u` frozen at 40 %) — `|u − t|/(1 − t)` gives `25 % → 0 % → 50 % → 100 %`, ending on a full
-    /// bar for the calmest state of the session. This form gives `40 % → 20 % → 0 % → 0 %`: the
+    /// bar for the calmest state of the session. This form gives `25 % → 0 % → 0 % → 0 %`: the
     /// pressure decays to nothing and stays there, which is what actually happened.
     ///
-    /// **Zero means "no pressure", not "dead on pace".** Roughly 40 % of the reachable state space
-    /// (79 % of calm states) lands on `0` and renders as the minimum pill — every state calmer than
-    /// `t − (1 − t)·(k − 1)`. That is the deliberate trade: on the calm side the action is carried
-    /// by the colour (green "do nothing" vs blue "you can push"), and gradation *within* "do
-    /// nothing" maps to no different action.
-    ///
-    /// Edge cases:
-    /// - **`u >= 1` (exhausted)** is a full bar at any `t`. Deliberate: a shrinking red bar reads as
-    ///   "the problem is easing" while work is still blocked. Time-to-reset is carried by the
-    ///   countdown and the pause glyph.
-    /// - **`t = 1`** (reset due/past) would divide by zero. No time is left to press against, so the
-    ///   bar is full — including the `u == t == 1` tie, which the exhausted check above catches first.
+    /// **Zero means "at or behind pace".** Just over half the reachable state space lands on `0`
+    /// and renders as the minimum pill. That is the deliberate trade: on the calm side the action
+    /// is carried by the colour (green "do nothing" vs blue "you can push"), and gradation *within*
+    /// "do nothing" maps to no different action. The style that *does* draw the calm side is
+    /// ``BarStyle/gauge``, which spends its left half on exactly that quantity.
     ///
     /// Only the marker-less **Pressure** presentation uses this; **Progress** (`BarStyle.progress`)
     /// keeps drawing `gapStart..gapEnd` on the window scale, where its time marker is meaningful.
     /// A marker is impossible here — on this track it would sit at zero forever.
-    public var pressureLength: Double {
-        // Exhausted first: `u >= 1` is a full bar at any `t`, including `t == 1` where the ratio
-        // below is undefined.
-        if usageFraction >= 1 { return 1 }
-        let remaining = 1 - timeFraction
-        guard remaining > 0 else { return 1 }   // reset due: no time left to press against
-        let r = (usageFraction - timeFraction) / remaining
-        let k = PacingModel.pressureScaleCoefficient
-        return min(1, max(0, (r + k - 1) / k))
-    }
+    public var pressureLength: Double { max(0, gaugeOffset) }
 
     /// The **Gauge** ribbon's signed offset from the bar's **centre** (#326, ADR-0079).
     ///
-    ///     r      = (u − t) / (1 − t)          // the same signed lead ``pressureLength`` uses
-    ///     offset = clamp(r / k, −1, +1)       // k = pressureScaleCoefficient on the ahead half only
+    ///     r      = (u − t) / (1 − t)          // the signed lead, in units of the time remaining
+    ///     offset = clamp(r, −1, +1)
     ///
-    /// Same numerator, same denominator, zero moved to the middle. The ribbon runs from the centre
-    /// to `centre + offset · (width/2)`: **right** when spending is ahead of pace, **left** when it
-    /// is behind.
+    /// Zero is the middle. The ribbon runs from the centre to `centre + offset · (width/2)`:
+    /// **right** when spending is ahead of pace, **left** when it is behind.
     ///
-    /// **Why `k` applies only to the right.** `k` exists to keep the *ahead* bands wide enough to
-    /// tell apart on a 34 pt track (see ``PacingModel/pressureScaleCoefficient``). Dividing the
-    /// ahead half by it reproduces every ``pressureLength`` landmark at exactly half its distance —
-    /// 20 %, 32.8 % and 100 % of the Pressure bar become 0 %, 10 % and 80 % of the *right half* — so
-    /// the two styles never disagree about the ahead side. The behind half has no such bands to
-    /// separate (it is one green/blue range), so it takes `r` raw and spends its resolution on the
-    /// quantity that actually varies there: the surplus.
+    /// **Both halves measure the same quantity, symmetrically.** Until ADR-0101 the ahead half was
+    /// divided by a coefficient `k = 1.25` while the behind half took `r` raw. That asymmetry was
+    /// inherited from a Pressure scale whose zero sat left of `t`; once that shift went, the
+    /// coefficient stopped balancing anything and only compressed — it *narrowed* the yellow band
+    /// rather than widening it, and left the top 20 % of the ahead half unreachable by any state
+    /// short of exhaustion (`r < 1` while `u < 1`), so the bar could only enter it by jumping.
     ///
-    /// **Both halves measure against the same thing — the time left before the reset.**
-    /// `offset = −1` means the surplus equals *all* of it: you could not spend it even if you tried.
-    /// At `t = 90 %, u = 70 %` the surplus (20 pp) is twice the time left (10 pp), so the left half
-    /// is full. Algebraically the left half saturates whenever `u ≤ 2t − 1` — impossible before
-    /// `t = 50 %`, then increasingly common. That flatness late in the window mirrors (on the other
-    /// side) the flatness ``pressureLength`` has near its start, and says something true: late on,
-    /// most surpluses genuinely are larger than the time left to spend them.
+    /// **`offset = −1` means the surplus equals all of the time left**: you could not spend it even
+    /// if you tried. At `t = 90 %, u = 70 %` the surplus (20 pp) is twice the time left (10 pp), so
+    /// the left half is full. Algebraically the left half saturates whenever `u ≤ 2t − 1` —
+    /// impossible before `t = 50 %`, then increasingly common. Late in the window most surpluses
+    /// genuinely are larger than the time left to spend them.
     ///
-    /// **`u == t` is exactly `0` here**, not the `0.20` ``pressureLength`` gives it. The two are not
-    /// in conflict: on the Pressure scale zero is shifted left of `t` and "dead on pace" sits a fifth
-    /// of the way along; on this one, `t` *is* the zero. The renderers floor a degenerate ribbon to a
-    /// centred pill so it reads as "on pace", not as an empty track.
+    /// **`u == t` is exactly `0`**, and so is ``pressureLength`` — the two scales agree on the tie
+    /// and on the whole ahead half, because Pressure *is* `max(0, offset)`. The renderers floor a
+    /// degenerate ribbon to a centred pill so it reads as "on pace", not as an empty track.
     ///
-    /// Edge cases match ``pressureLength`` exactly — `u >= 1` is `+1` at any `t` (checked first, so
-    /// `t == 1` never divides by zero), and a due reset (`t = 1`) is `+1` for any `u`.
+    /// Edge cases live in ``signedLead`` — `u >= 1` is `+1` at any `t`, and a due reset (`t = 1`)
+    /// is `+1` for any `u`.
     ///
-    /// Only ``BarStyle/gauge`` uses this; it is a **render-only** alternative geometry, and carries
-    /// no colour of its own — the same `(u, t)` yields the same ``severity`` in all four styles.
+    /// Used directly by ``BarStyle/gauge`` and, through `max(0, …)`, by ``BarStyle/pressure``. It is
+    /// **render-only** geometry and carries no colour of its own — the same `(u, t)` yields the same
+    /// ``severity`` in every style.
     public var gaugeOffset: Double {
-        // Exhausted first, for the same reason `pressureLength` does it: `u >= 1` is the full ahead
-        // half at any `t`, including `t == 1` where the ratio below is undefined.
-        if usageFraction >= 1 { return 1 }
-        let remaining = 1 - timeFraction
-        guard remaining > 0 else { return 1 }   // reset due: no time left to press against
-        let r = (usageFraction - timeFraction) / remaining
-        let k = PacingModel.pressureScaleCoefficient
-        return min(1, max(-1, r >= 0 ? r / k : r))
+        guard let r = signedLead else { return 1 }
+        return min(1, max(-1, r))
     }
 
     /// The bar's pacing **severity** — a three-way grading of the rendered gap colour, computed
@@ -403,22 +403,6 @@ public enum PacingModel {
     public static func limitIndicator(utilization: Double) -> LimitIndicator {
         Int(max(0, utilization)) == 100 ? .critical : .neutral   // truncation toward zero == floor for x ≥ 0
     }
-
-    // MARK: Pressure scale
-
-    /// How far left of `timeFraction` the **Pressure** ribbon's zero sits, in multiples of the time
-    /// remaining: the zero is at `t − (1 − t)·(k − 1)`. See ``BarLayout/pressureLength``.
-    ///
-    /// **`1.25`, and not larger.** The coefficient sets how much of the bar the calm side gets, and
-    /// therefore how wide the yellow band is: yellow spans `(0.16 … 0.328)` of the bar at `k = 1.25`,
-    /// which on the 34 pt menu-bar track is **3.9 pt** — just clear of the 3.75 pt `minStripWidth`
-    /// floor, so it can hold a position distinguishable from orange. At `k = 2` the same band is
-    /// 2.4 pt: below the floor, so yellow and orange would render as the same pill and the colour
-    /// would be the only thing separating them — reintroducing the very defect #307 set out to fix.
-    ///
-    /// A constant rather than a setting: it is not a taste knob but the thing that makes the width
-    /// bands legible, and a user-chosen value could silently collapse two of them.
-    public static let pressureScaleCoefficient: Double = 1.25
 
     // MARK: ahead-of-pace threshold
 
