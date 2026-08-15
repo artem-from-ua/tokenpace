@@ -26,7 +26,16 @@ struct SettingsRootView: View {
         NavigationSplitView {
             // Grouped so dividers separate About (top) and Notifications (bottom) from the standard
             // panes in the middle — a `.sidebar` List renders the gap between `Section`s as the divider.
-            List(selection: $model.selection) {
+            // Selection is routed through the model rather than bound straight to `model.selection`, so
+            // that clicking the **already-highlighted** row means something: it pops out of a child page
+            // back to the section's own. A plain `$model.selection` cannot express that — `List` skips
+            // the write when the value is unchanged, so the click never reaches the model at all.
+            //
+            // The getter still reports `selection`, which is what keeps the parent row highlighted while
+            // a child page is open (System Settings behaves the same way).
+            List(selection: Binding(
+                get: { model.selection },
+                set: { model.selectFromSidebar($0) })) {
                 ForEach(Array(SettingsSection.groups.enumerated()), id: \.offset) { _, group in
                     Section {
                         ForEach(group) { sidebarRow($0) }

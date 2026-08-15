@@ -103,6 +103,25 @@ final class SettingsModel {
     var canGoBack: Bool { history.canGoBack }
     var canGoForward: Bool { history.canGoForward }
 
+    /// What the **sidebar** does when a row is clicked — which is not the same as writing ``selection``.
+    ///
+    /// Picking a *different* section behaves exactly as before: the `didSet` clears any child page and
+    /// records the visit. Picking the section you are **already inside a child page of** used to do
+    /// nothing at all: `List(selection:)` does not write the binding when the value is unchanged, and
+    /// even if it did, the `didSet`'s `selection != oldValue` guard would swallow it. So the sidebar
+    /// highlighted "Appearance" while the detail column kept showing "Dropdown", with no way back to the
+    /// parent except the toolbar's ‹.
+    ///
+    /// Clicking the highlighted row now pops to that section's own page. The row you click is the page
+    /// you land on — which is what the highlight has been claiming all along.
+    func selectFromSidebar(_ section: SettingsSection) {
+        guard section == selection else {
+            selection = section          // different row: the `didSet` clears the child and records it
+            return
+        }
+        popToRoot()                      // same row, drilled in: back out to the section's own page
+    }
+
     /// Open a child page of the current section, recording it as its own history stop (#341).
     func drill(into page: SettingsChildPage) {
         guard childPage != page else { return }

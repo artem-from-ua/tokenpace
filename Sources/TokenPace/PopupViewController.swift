@@ -222,6 +222,22 @@ final class PopupBarView: NSView {
     /// the hosted bar's height constraint to the same value the view draws into.
     static var viewHeight: CGFloat { Metrics.height }
 
+    /// The height of the **track** — the bar proper, without the marker's overhang or the ruler's
+    /// reserved strip. This is the shape a reader sees as "the bar", so it is the unit to lay a stack of
+    /// bars out by.
+    static var trackHeight: CGFloat { Metrics.barHeight }
+
+    /// How far the time marker stands proud of the track on each side, which is also the distance from
+    /// the frame ``render(in:)`` is handed to the track it draws inside it.
+    ///
+    /// Exposed together with ``trackHeight`` for callers that position bars by their track rather than
+    /// by their frame — the Settings preview tile, where no ruler is drawn and `viewHeight`'s reserved
+    /// strip would otherwise push the pair off centre. Both restate `Metrics`, which is private, so they
+    /// track it instead of being copied at the call site.
+    static var markerOverhang: CGFloat {
+        max(0, (Metrics.indicatorHeight - Metrics.barHeight) / 2)
+    }
+
     /// The view height for a **credits** bar: measured from where its captions actually end, not from
     /// the tick-ruler band.
     ///

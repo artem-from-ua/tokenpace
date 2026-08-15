@@ -100,18 +100,28 @@ enum DropdownTileMatrix {
             border.lineWidth = 1
             border.stroke()
 
-            // **Symmetric vertical rhythm**: the space between the two bars equals the space above the
-            // first and below the second — one value used three times, rather than a gap tuned
-            // separately from the margins. `(tileHeight − 2·barHeight)/3` is that value, and solving for
-            // it is what centres the pair *and* spaces it evenly; centring alone leaves the outer
-            // margins at whatever happens to be left over.
-            let barHeight = PopupBarView.viewHeight
-            let spacing = (tileHeight - barHeight * 2) / 3
+            // **The two tracks divide the tile into three equal parts.**
+            //
+            // The measurement that matters is the *track*, not the view's frame and not the marker.
+            // `PopupBarView.viewHeight` (21 pt) reserves `tickGap + tickLength` for a ⌥ ruler this
+            // specimen never draws, and the marker straddles the track by `(14 − 6)/2` on each side —
+            // so spacing by either one leaves the visible pair sitting above centre. Measured on the
+            // render: with the frame as the unit the lower track ended 9 pt above the tile's bottom
+            // against 12.5 pt of clearance at the top.
+            //
+            // So the rhythm is solved over the two tracks — `spacing` above the first, between them and
+            // below the second — and each bar's frame is then offset up by the marker's overhang, which
+            // is where `render(in:)` puts the track relative to the frame it is handed.
+            let frameHeight = PopupBarView.viewHeight
+            let trackHeight = PopupBarView.trackHeight
+            let overhang = PopupBarView.markerOverhang
+            let spacing = (tileHeight - trackHeight * 2) / 3
             let left = origin.x + (tileWidth - candidate.barWidth) / 2
 
             for (index, entry) in views.enumerated() {
-                let y = origin.y + spacing * CGFloat(index + 1) + barHeight * CGFloat(index)
-                entry.view.render(in: NSRect(x: left, y: y, width: candidate.barWidth, height: barHeight))
+                let trackTop = spacing * CGFloat(index + 1) + trackHeight * CGFloat(index)
+                let y = origin.y + trackTop - overhang
+                entry.view.render(in: NSRect(x: left, y: y, width: candidate.barWidth, height: frameHeight))
             }
         }
     }
