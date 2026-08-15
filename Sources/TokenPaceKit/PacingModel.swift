@@ -483,6 +483,12 @@ public enum PacingModel {
     ///
     /// On the seven-day window a wait under 20 min carries no decision — it elapses while the user is
     /// still reading the popup, and the bar greens on its own without anyone pausing for it.
+    ///
+    /// **Currently unreachable, deliberately kept.** The API quantises the seven-day `utilization` to
+    /// whole percent, and one point is 1 h 40 m of stand-by — so the raw values are either zero or
+    /// ≥ 101 min and never land under this floor (docs/reference/usage-api-quirks.md). The floor is a
+    /// guard, not a live filter. It comes back into play once the weekly rate is interpolated from the
+    /// five-hour counter (issue #386), which brings the step down to ~10 min.
     public static let standByFloorSeconds: TimeInterval = 1200
 
     /// ``standBySecondsForGreen(_:)`` filtered by whether the wait earns a line in the popup — the
