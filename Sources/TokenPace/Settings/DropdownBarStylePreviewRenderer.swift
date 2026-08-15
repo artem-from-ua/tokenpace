@@ -109,6 +109,21 @@ enum DropdownBarStylePreviewRenderer {
 
     /// The specimen drawn in `style` at the tile's size, ready for `Image(nsImage:)`.
     ///
+    /// **The image is transparent apart from the bars**, and what sits behind it is load-bearing rather
+    /// than decorative: the track (`PopupBarView.monochromeGrey`) and the marker's border are both
+    /// *translucent*, so the plate underneath mixes into them. The tile must therefore be backed by the
+    /// same fill the live bars sit on — the popup **card** (`NSColor.cardPlateFillOpaque`), not the menu
+    /// plate the card floats on. Measured with both open side by side in the light theme, the wrong
+    /// backdrop rendered the tile's track 193 grey against the live bar's 211. On the right plate every
+    /// colour matches to within a unit or two of antialiasing:
+    ///
+    /// | | tile | live |
+    /// |---|---|---|
+    /// | track, light | 209,210,209 | 209,209,209 |
+    /// | strip, light | 101,202,85 | 99,202,86 |
+    /// | track, dark | 69,69,69 | 69,69,69 |
+    /// | strip, dark | 108,212,95 | 107,212,95 |
+    ///
     /// Not cached, for the same reason ``BarStylePreviewRenderer`` is not: three small canvases cost
     /// microseconds, and a cache would have to be invalidated on every colour-role change from the dev
     /// tuner (`ColorStore.onChange`) *and* on every theme flip — buying two staleness bugs in exchange

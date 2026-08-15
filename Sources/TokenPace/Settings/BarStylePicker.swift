@@ -36,13 +36,23 @@ struct BarStylePicker: View {
         case menuBar
         case dropdown
 
-        /// The tile's plate. Black for the menu bar in both themes (and load-bearing for the press
-        /// blend — see the plate's own note in `tile(for:title:)`); the dropdown card's colour for the
-        /// dropdown, which is the surface those bars actually sit on.
+        /// The tile's plate — the surface the specimen's bars actually sit on.
+        ///
+        /// Black for the menu bar in both themes (and load-bearing for the press blend — see the
+        /// plate's own note in `tile(for:title:)`).
+        ///
+        /// For the dropdown it is the **card's** fill (`cardPlateFillOpaque`, i.e.
+        /// `controlBackgroundColor`), *not* the menu plate the card floats on. That distinction is not
+        /// cosmetic: the bar's track is a translucent grey (`PopupBarView.monochromeGrey`, a blend of
+        /// tertiary and quaternary label), so whatever is underneath shows through and changes it.
+        /// Measured on a light-theme screenshot with the live preview open, the menu plate made the
+        /// tile's track render 193 grey against the live bar's 211 — visibly darker, side by side, from
+        /// one wrong backdrop. Opaque rather than the card's own partial alpha because a tile has no
+        /// menu material beneath it to blend with.
         var plate: Color {
             switch self {
             case .menuBar:  Color.black
-            case .dropdown: Color(nsColor: .popupMenuMatchedBackground)
+            case .dropdown: Color(nsColor: .cardPlateFillOpaque)
             }
         }
 
