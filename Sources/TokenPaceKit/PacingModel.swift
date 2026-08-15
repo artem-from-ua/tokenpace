@@ -467,6 +467,7 @@ public enum PacingModel {
     ///   countdown runs down during the wait too.
     ///
     /// Pure arithmetic on the layout the caller is already drawing — no clock, so no `now` parameter.
+    /// See ADR-0102 for why the threshold stays out of it and why the line is seven-day only.
     public static func standBySecondsForGreen(_ bar: BarLayout) -> TimeInterval? {
         guard bar.severity == .ahead else { return nil }   // green/yellow/blue/red: nothing to wait out
         guard bar.usageFraction < 1 else { return nil }    // exhausted: only the reset helps
