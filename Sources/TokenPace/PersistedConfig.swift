@@ -116,6 +116,10 @@ enum PersistedConfig {
         /// to delete as its own evidence of completion: it rewrites a *value* of a key that stays in
         /// use, and `.nonCalm` remains a legal value for the other row.
         static let extraUsageVisibilityMigrated = "extraUsageVisibilityMigratedFromNonCalm"
+        /// Marker set once ``PersistedConfig/migrateOptionOnlyVisibilityIfNeeded()`` has run, so the
+        /// one-way `.optionOnly` → `.aboveZero` rewrite cannot re-fire on a later deliberate import.
+        /// Covers **both** dropdown groups, which retired the segment together (#374).
+        static let optionOnlyVisibilityMigrated = "sectionVisibilityMigratedFromOptionOnly"
         /// Legacy pre-tri-state key (the boolean "Show model & service limits" opt-out), read once by
         /// ``PersistedConfig/migrateModelLimitsVisibilityIfNeeded()`` to seed
         /// ``modelLimitsVisibility``, then cleared. Do not read elsewhere.
@@ -564,9 +568,42 @@ enum PersistedConfig {
             return
         }
         if let legacyShow = defaults.object(forKey: Key.legacyShowModelSpecificLimits) as? Bool {
-            modelLimitsVisibility = legacyShow ? .always : .optionOnly
+            // `false` used to land on `.optionOnly`, which is no longer offered by the control (#374).
+            // `.nonCalm` is this row's default and the nearest reading of the old intent: the user had
+            // the group switched off, so it should stay folded — but it now comes back on its own when
+            // a row turns orange, instead of only under ⌥.
+            modelLimitsVisibility = legacyShow ? .always : .nonCalm
         }
         defaults.removeObject(forKey: Key.legacyShowModelSpecificLimits)
+    }
+
+    /// Rewrite a stored `.optionOnly` choice — on **either** dropdown group — to a mode still offered.
+    ///
+    /// The segment left both controls in #374: ⌥ is OR'd into every other mode, so it already reveals
+    /// either group whichever one is picked, and `.optionOnly`'s only distinct behaviour was to keep the
+    /// group hidden *when its data had turned interesting*. Without this migration an install holding it
+    /// would open Settings to a segmented control with nothing highlighted.
+    ///
+    /// Both land on `.aboveZero`, which is the closest surviving intent — "stay folded until there is
+    /// something in here" — and, unlike `.nonCalm`, is offered by both rows.
+    ///
+    /// Idempotent via its own marker key, for the same reason `migrateExtraUsageVisibilityIfNeeded` uses
+    /// one: `.optionOnly` remains a legal decoded value (an imported config can still carry it), so
+    /// consuming the key would rewrite a later import a second time.
+    static func migrateOptionOnlyVisibilityIfNeeded() {
+        guard !defaults.bool(forKey: Key.optionOnlyVisibilityMigrated) else { return }
+        defaults.set(true, forKey: Key.optionOnlyVisibilityMigrated)
+        let retired = PopupSectionVisibility.optionOnly.rawValue
+        if defaults.string(forKey: Key.modelLimitsVisibility) == retired {
+            modelLimitsVisibility = .aboveZero
+            AppLogger.lifecycle.notice(
+                "model-limits-section: migrated optionOnly → \(PopupSectionVisibility.aboveZero.rawValue, privacy: .public)")
+        }
+        if defaults.string(forKey: Key.extraUsageVisibility) == retired {
+            extraUsageVisibility = .aboveZero
+            AppLogger.lifecycle.notice(
+                "extra-usage-section: migrated optionOnly → \(PopupSectionVisibility.aboveZero.rawValue, privacy: .public)")
+        }
     }
 
     /// Rewrite a stored `.nonCalm` **Extra usage** choice to `.aboveZero`, once.

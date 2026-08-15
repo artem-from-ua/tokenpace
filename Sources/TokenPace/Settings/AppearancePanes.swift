@@ -205,7 +205,13 @@ struct MenuBarPane: View {
                         active: model.menuBarStyle,
                         onSelect: { model.setMenuBarStyle($0) })
                 }
+            }
 
+            // Everything below sits in its own section (#374). The Style row is three tiles tall, so
+            // sharing a card with ordinary one-line rows made the card read as one long list with an
+            // unexplained gap at the top; a divider says outright that the picture is its own decision
+            // and the rows below are separate ones.
+            Section {
                 // Calm non-critical colors (#224) — a three-way choice (merged the old Calm + Work
                 // harder toggles): which calm colours mute to white. Every segment is always
                 // selectable: the far-behind blue can no longer be switched off, so there is no state
@@ -297,13 +303,24 @@ struct DropdownPane: View {
                         active: model.dropdownStyle,
                         onSelect: { model.setDropdownStyle($0) })
                 }
+            }
 
-                // No `SettingsHint` under either row: the segment labels ("Always" / "Above zero" /
-                // "Non-calm only" / "With ⌥ Option") already say when the group shows, and a hint
-                // repeating that would crowd the two rows that close the section. The two rows offer
-                // *different* segment sets — see the constants below.
+            // The visibility rows get their own section, matching the menu-bar page (#374): the Style
+            // row is three tiles plus a hint tall, and the two rows below are about *which sections
+            // appear at all* rather than about how a bar is drawn — a different decision, so a
+            // different card.
+            Section {
+                // No `SettingsHint` under either row: the segment labels ("Always" / "Once used" /
+                // "Non-calm only") already say when the group shows, and a hint repeating that would
+                // crowd the two rows that close the section. The two rows offer *different* segment
+                // sets — see the constants below.
                 HStack {
-                    Text("Show model & service limits")
+                    // "per-model & per-service", not "model & service": these are the limits belonging to
+                    // one model or one service, as against the 5h/7d windows above them, and the bare
+                    // form left that to inference. The hyphenated "model- & service-specific" says the
+                    // same thing with a harder-to-read chain of hyphens; "per-" is also the code's own
+                    // word for these rows (`PopupLayout.perModelRows`).
+                    Text("Show per-model & per-service limits")
                     Spacer()
                     SegmentedControl(
                         segments: Self.modelLimitsSegments,
@@ -312,7 +329,12 @@ struct DropdownPane: View {
                 }
 
                 HStack {
-                    Text("Show extra usage")
+                    // *Extra usage* is the name of the dropdown's own section, so it is capitalised and
+                    // italicised as one — matching the Style row's hint above, which already refers to
+                    // it that way. `Text(.init(_:))` forces the `LocalizedStringKey` initializer, which
+                    // is what makes inline markdown render (the plain `Text(String)` one would print the
+                    // asterisks); same idiom as `SettingsHint`.
+                    Text(.init("Show *Extra usage*"))
                     Spacer()
                     SegmentedControl(
                         segments: Self.extraUsageSegments,
@@ -326,19 +348,23 @@ struct DropdownPane: View {
 
     /// The two rows above offer **different** segment sets, so neither is built from `allCases` — both
     /// are spelled out here, the way `AppearanceBarStyle.segments` is. Order is the declaration order
-    /// either way: loudest ("Always") to quietest ("With ⌥ Option").
+    /// either way: loudest ("Always") to quietest.
     ///
-    /// Labels are deliberately terse — four segments plus a full-width row title leave no room for
-    /// prose, and these rows carry no `SettingsHint` at all.
+    /// **`.optionOnly` is offered by neither** (#374). ⌥ is OR'd into every other mode, so holding it
+    /// already reveals the group whichever one is picked — leaving that segment with no behaviour of its
+    /// own except hiding the group when its data has turned interesting. The case survives in the enum
+    /// for stored values; `PersistedConfig` migrates anyone holding it onto `.aboveZero`.
     private static let modelLimitsSegments: [SegmentedControl<PopupSectionVisibility>.Segment] =
-        [.always, .aboveZero, .nonCalm, .optionOnly].map { .init(value: $0, title: $0.displayName) }
+        [.always, .aboveZero, .nonCalm].map { .init(value: $0, title: $0.displayName) }
 
-    /// Extra usage omits `.nonCalm`. Credits severity comes from `credits.bar`, which is `nil` on an
+    /// Extra usage omits `.nonCalm` too. Credits severity comes from `credits.bar`, which is `nil` on an
     /// **unlimited** money cap — so that mode would hide a paying user's spend forever — and when a cap
     /// does exist, "spent > 0" always fires before orange, leaving the mode no behaviour of its own.
     /// `.aboveZero` is what it becomes; stored `.nonCalm` values are migrated over in `PersistedConfig`.
+    ///
+    /// Which leaves this row a plain pair: show it always, or from the first cent spent.
     private static let extraUsageSegments: [SegmentedControl<PopupSectionVisibility>.Segment] =
-        [.always, .aboveZero, .optionOnly].map { .init(value: $0, title: $0.displayName) }
+        [.always, .aboveZero].map { .init(value: $0, title: $0.displayName) }
 }
 
 // MARK: - Shared across the surface panes
