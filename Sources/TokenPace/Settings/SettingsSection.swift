@@ -8,23 +8,22 @@ import SwiftUI
 ///
 /// **Raw values are stable identifiers, not display order** (#333): `groups` below owns the order.
 /// Keeping them fixed means a rearranged sidebar doesn't silently repoint every documented
-/// verification recipe at a different pane. `uiPresets` keeps `2` because it is what the Appearance
-/// pane became.
+/// verification recipe at a different pane. `appearance` keeps `2` throughout: it is the pane the
+/// presets were split out of, and the pane they came back to.
 enum SettingsSection: Int, CaseIterable, Identifiable {
     case about = 0
     case general = 1
-    /// Presets and the config-copy button — what the Appearance pane was left holding once the two
-    /// surfaces moved out to panes of their own.
-    case uiPresets = 2
+    /// How the widget looks: the presets and the config-copy button on the page itself, with the two
+    /// surfaces as child pages drilled into from it.
+    case appearance = 2
     case notifications = 3
     // Raw value `4` belonged to `Extra features`, retired in #341. It is deliberately **not** reused:
     // documented verification recipes and dev-hook invocations still carry it, and pointing an old
     // `TOKENPACE_SETTINGS_SECTION=4` at some unrelated pane would be a recipe that lies rather than
     // fails.
-    /// Everything that configures the menu-bar widget (#333).
-    case menuBar = 5
-    /// Everything that configures the dropdown popup (#333).
-    case dropdown = 6
+    // Raw values `5` and `6` belonged to the `Menu bar` and `Dropdown` **sections**. They are child
+    // pages of `Appearance` now, so their dev-hook indices live on `SettingsChildPage` instead —
+    // and, for the same reason as `4`, are not reused here.
     /// What TokenPace monitors, per provider (#341) — a parent page whose provider rows drill into
     /// their own child pages.
     case providers = 7
@@ -48,26 +47,26 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
 
     /// The sidebar groups, **in display order** — a divider is drawn between each (a `.sidebar` List
     /// renders the gap between `Section`s as the divider). `About` sits alone at the top, then
-    /// `General` and `Providers` as the app-wide pair, then the three UI pages as a group of their
-    /// own, then `Notifications` alone at the bottom.
+    /// `General` and `Providers` as the app-wide pair, then `Appearance` and `Notifications`.
     ///
     /// `Providers` sits beside `General` because it answers the same class of question — what the app
     /// does, rather than how it looks. It replaces `Extra features` (#341), which was a drawer with no
     /// organising principle: the things in it had nothing in common except not fitting elsewhere.
     ///
-    /// The UI trio is grouped rather than drilled into (#333): the sidebar is short enough to carry
-    /// three more rows, and a divider says "these three belong together" without costing the extra
-    /// click a parent page would.
+    /// `Menu bar` and `Dropdown` are **not** rows here any more: they are child pages of `Appearance`,
+    /// reached by drilling in from it. #333 split them out of `Appearance` into sidebar rows of their
+    /// own on the grounds that the sidebar had room; what that actually produced was three sibling rows
+    /// whose kinship only a divider expressed, and a top-level list where two of five rows configured
+    /// halves of the same thing. Nesting says it structurally instead — the sidebar names the topic,
+    /// the page names its surfaces.
     ///
-    /// `Notifications` sits below the UI pages in a group of its own rather than beside `General`: it
-    /// configures a surface outside the app's own windows — Notification Center — so it belongs neither
-    /// with the app-wide preferences above it nor with the two rendered surfaces in the UI group. The
-    /// gap on both sides is the point; pairing it with `General` implied a kinship that isn't there.
+    /// `Notifications` shares the group with `Appearance` rather than sitting alone below it: with the
+    /// surfaces nested away, both remaining rows answer "how does the app present itself", and the
+    /// divider that used to separate them was drawing a distinction the two no longer carry.
     static let groups: [[SettingsSection]] = [
         [.about],
         [.general, .providers],
-        [.uiPresets, .menuBar, .dropdown],
-        [.notifications] + filler,
+        [.appearance, .notifications] + filler,
     ]
 
     /// Nine throwaway rows appended after `Notifications` when `TOKENPACE_SIDEBAR_FILLER` is set —
@@ -100,31 +99,34 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         switch self {
         case .about: return "About"
         case .general: return "General"
-        case .uiPresets: return "UI presets"
-        case .menuBar: return "Menu bar"
-        case .dropdown: return "Dropdown"
+        case .appearance: return "Appearance"
         case .notifications: return "Notifications"
         case .providers: return "Providers"
         default: return "ITEM_\(rawValue - Self.fillerBase + 1)"
         }
     }
 
+    /// Whether the live dropdown preview rides beside the window while this section (or a page under
+    /// it) is showing — ADR-0083, narrowed from "always" to this.
+    ///
+    /// `Appearance` and its two surface pages are the sections whose controls change what the preview
+    /// draws, and the preview is a second window claiming real width beside Settings: on `About` or
+    /// `Notifications` it costs that space to answer a question nothing on the page asked. A section
+    /// that later grows a control the dropdown reflects — a Guide/Legend page (#261) — turns it on
+    /// here, in one line.
+    var showsDropdownPreview: Bool { self == .appearance }
+
     /// SF Symbol for the sidebar chip. Names match the real System Settings panes read from their
     /// `.appex` Info.plist (#156): General uses `gear` (not `gearshape`); Notifications is a red bell.
     ///
-    /// The three UI panes picture what they configure: a brush for the presets that repaint
-    /// everything, the lone bar of the menu bar, and a page of rows for the dropdown. Chosen by
-    /// rendering the candidates rather than by name (#333) — `rectangle.inset.filled` variants read
-    /// as record buttons, not popups.
-    ///
-    /// `menuBar` is the one glyph we do not draw as-is: see ``trimsOuterRules``.
+    /// `Appearance` keeps the brush it has always carried — the pane repaints everything, whichever
+    /// surface the option ends up on. The glyphs the two surfaces used as sidebar rows (#333) moved
+    /// with them onto their navigator rows (``SettingsChildPage/symbol``).
     var symbol: String {
         switch self {
         case .about: return "info.circle"
         case .general: return "gear"
-        case .uiPresets: return "paintbrush.fill"
-        case .menuBar: return "distribute.vertical"
-        case .dropdown: return "chart.bar.horizontal.page"
+        case .appearance: return "paintbrush.fill"
         case .notifications: return "bell.badge.fill"
         // Providers are the services TokenPace plugs into — a puzzle piece slotting in, not the
         // cloud they happen to run on: what the page configures is the connection, and more pieces
@@ -138,19 +140,11 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
 
     /// Whether the chip draws only the **middle** of its symbol, dropping the rules above and below.
     ///
-    /// `distribute.vertical` is three shapes — a rounded rectangle between two full-width rules — and
-    /// only the rectangle is wanted: one bar, which is what a menu bar is. There is no SF Symbol of
-    /// just that shape (checked), and the two rules sit in bands the rectangle never enters, so a
-    /// clip keeps exactly the part we want.
-    ///
-    /// Measured on the rendered glyph at 64 pt (91×68 px): rules at y 5–9 and 59–63, rectangle at
-    /// y 23–45, with clean gaps between. Expressed as fractions of the glyph box rather than pixels so
-    /// it holds at every sidebar icon size.
-    var trimsOuterRules: Bool { self == .menuBar }
-
-    /// The slice of the symbol's height the chip keeps when ``trimsOuterRules`` is set — the band
-    /// between the two rules, generous enough to clear the rectangle's rounded corners at any size.
-    static let trimmedBand: ClosedRange<CGFloat> = 0.28...0.72
+    /// No sidebar row asks for this since `Menu bar` became a child page (its glyph is the one that
+    /// needs the trim — see ``SettingsChildPage/trimsOuterRules``), but the property stays on the
+    /// protocol both chips share: the trim is a property of a *glyph*, and the next section to pick a
+    /// symbol whose outer strokes are unwanted gets it here rather than re-deriving the band.
+    var trimsOuterRules: Bool { false }
 
     /// Capsule gradient endpoints of the sidebar icon chip, matching System Settings (#156).
     /// The system capsules are baked icon artwork, not dynamic colors — each pane has its own
@@ -163,16 +157,9 @@ enum SettingsSection: Int, CaseIterable, Identifiable {
         switch self {
         case .about: return CapsuleTint(dark: 0x0D81FA, light: 0x41A6FF)
         case .general: return CapsuleTint(dark: 0x5E5E5F, light: 0xC0C0C4)
-        // UI presets keeps the measured Appearance green — it is what that pane became — darkened by
-        // ~23% on both endpoints, which holds the hue and the gradient's spread while letting the chip
-        // sit less brightly among its neighbours.
-        case .uiPresets: return CapsuleTint(dark: 0x23A238, light: 0x4DB45C)
-        // The two surfaces are flat black and white rather than a hue: the chips *depict* what they
-        // configure — the dark strip along the top of the screen, and the light panel that drops
-        // below it. Fixed tones, not semantic ones: flipping them with the appearance would destroy
-        // the only thing they say. The white chip needs a hairline to exist on a light sidebar.
-        case .menuBar: return CapsuleTint(flat: 0x000000)
-        case .dropdown: return CapsuleTint(flat: 0xFFFFFF, glyph: .black, needsBorder: true)
+        // The measured Appearance green, darkened by ~23% on both endpoints — which holds the hue and
+        // the gradient's spread while letting the chip sit less brightly among its neighbours.
+        case .appearance: return CapsuleTint(dark: 0x23A238, light: 0x4DB45C)
         case .notifications: return CapsuleTint(dark: 0xFB4439, light: 0xFB7A71)
         // The same measured gray as `General`, on purpose: both are app-wide settings rather than one
         // of the UI surfaces, and the sidebar says so by giving them one capsule colour. This replaces

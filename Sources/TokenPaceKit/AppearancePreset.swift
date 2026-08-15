@@ -86,12 +86,42 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
         }
     }
 
-    /// The segment label shown in Settings → Appearance. English UI string.
+    /// The radio label shown in Settings → Appearance. English UI string.
     public var displayName: String {
         switch self {
         case .chill:        return "Chill"
         case .workHarder:   return "Work harder!"
         case .controlFreak: return "Control freak"
+        }
+    }
+
+    /// The line under the radio label: **which signals this preset makes loudest**, which is the one
+    /// question three adjective-like names cannot answer on their own (`Chill` vs `Work harder!` reads
+    /// as a mood, not as a behaviour).
+    ///
+    /// Each sentence describes what the user will *see*, derived from ``values`` rather than from the
+    /// preset's mood — a description that outran the value set would be worse than none:
+    ///
+    /// - `.chill` mutes every calm colour (`.yellowGreenBlue`), hides the quiet 5-hour bar and keeps the
+    ///   per-model rows folded until one turns orange (`.nonCalm`), so nothing speaks until a limit
+    ///   actually presses.
+    /// - `.workHarder` differs from `.chill` in exactly two things, and both are about seeing the
+    ///   *underspend*: the far-behind blue stays coloured (`.yellowGreen`), and `Gauge` draws the
+    ///   below-pace half instead of flattening it to a minimum pill.
+    /// - `.controlFreak` turns muting off entirely, pins both bars on screen (`.never`) and both popup
+    ///   sections open (`.always`).
+    /// Two of the three describe **what the widget does**, and the third describes **who it is for**:
+    /// `Chill` and `Work harder!` differ from each other by behaviour a user can picture (quiet until
+    /// it matters vs. also flagging the underspend), while `Control freak` is chosen by a need rather
+    /// than by a signal — the full picture without a click or a held ⌥.
+    public var summary: String {
+        switch self {
+        case .chill:
+            return "Stays quiet until a limit actually needs your attention."
+        case .workHarder:
+            return "Like Chill, but also flags when you're well below pace and leaving tokens unused."
+        case .controlFreak:
+            return "You want the full picture at a glance, without opening or holding ⌥."
         }
     }
 

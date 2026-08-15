@@ -177,13 +177,22 @@ struct SettingsNavigationRow: View {
 /// much), so any single fraction is a stand-in for a measurement we cannot take on a colour System
 /// Settings never drew.
 struct SettingsRowBadge: Equatable {
-    /// The chip gradient's bottom-right endpoint — the brand colour itself, unmodified.
+    /// The chip gradient's bottom-right endpoint — for a brand badge, the brand colour itself.
     let dark: Color
-    /// Its top-left endpoint: the brand mixed toward white. Derived, never metered — see the type doc.
+    /// Its top-left endpoint. Derived for a brand badge (see the type doc), measured for one built
+    /// from a ``CapsuleTint``.
     let light: Color
     /// The SF Symbol drawn on it, always a generic one (see ``SettingsNavigationRow``'s doc on why a
     /// provider logo is not an option).
     let symbol: String
+    /// The glyph's colour on an active window — white on every brand badge, black on the one white
+    /// chip, which would otherwise draw white on white.
+    var glyph: Color = .white
+    /// Whether the chip needs a hairline to read against the form row behind it. Only the white one
+    /// does; every other badge is darker than the material under it.
+    var needsBorder: Bool = false
+    /// Whether only the middle band of ``symbol`` is drawn — see ``SettingsChildPage/trimsOuterRules``.
+    var trimsOuterRules: Bool = false
 
     /// The mix fraction toward white, averaged over the four measured sidebar capsules (see the type
     /// doc for the per-pane numbers).
@@ -195,6 +204,27 @@ struct SettingsRowBadge: Equatable {
             dark: Color(nsColor: color),
             light: Color(nsColor: color.lightened(by: lightenFraction)),
             symbol: symbol)
+    }
+
+    /// A badge whose gradient is a ``CapsuleTint`` rather than a brand colour — the sidebar's own
+    /// currency, so a page that used to be a sidebar row keeps the exact chip it wore there when it
+    /// becomes a navigator row instead. Nothing is derived here: both endpoints come from the tint.
+    static func tinted(_ tint: CapsuleTint, symbol: String, trimsOuterRules: Bool = false) -> SettingsRowBadge {
+        SettingsRowBadge(
+            dark: tint.dark,
+            light: tint.light,
+            symbol: symbol,
+            glyph: tint.glyph,
+            needsBorder: tint.needsBorder,
+            trimsOuterRules: trimsOuterRules)
+    }
+
+    /// The badge for a child page that declares a chip of its own (``SettingsChildPage/tint``), or
+    /// `nil` for one that carries none — `Claude`, whose badge is a brand colour instead.
+    @MainActor
+    static func page(_ page: SettingsChildPage) -> SettingsRowBadge? {
+        guard let tint = page.tint, let symbol = page.symbol else { return nil }
+        return .tinted(tint, symbol: symbol, trimsOuterRules: page.trimsOuterRules)
     }
 
     /// Claude's row: Anthropic's terracotta (`#d97757`, confirmed against `anthropics/skills`'
@@ -244,11 +274,28 @@ private struct SettingsRowBadgeView: View {
     @Environment(\.appearsActive) private var appearsActive
 
     var body: some View {
-        Image(systemName: badge.symbol)
-            .font(.system(size: Metrics.symbol, weight: .regular))
-            .foregroundStyle(.white)
+        glyph
+            .foregroundStyle(badge.glyph)
             .frame(width: Metrics.chip, height: Metrics.chip)
-            .background(fill, in: RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous))
+            .background(fill, in: Self.shape)
+            // Only the white chip asks for one, for the same reason its sidebar twin does: it is the
+            // single badge lighter than the row behind it, so without a hairline its edge is not there.
+            .overlay { if badge.needsBorder { Self.shape.stroke(Metrics.border, lineWidth: 1) } }
+    }
+
+    /// The chip outline, shared by the fill and the optional border so the two cannot drift.
+    private static let shape = RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous)
+
+    /// The symbol, drawn whole — or, for a badge that asks for it, only the middle band of it
+    /// (`SymbolTrim`, the same renderer the sidebar chip uses).
+    @ViewBuilder
+    private var glyph: some View {
+        if badge.trimsOuterRules,
+           let trimmed = SymbolTrim.middleBand(badge.symbol, size: Metrics.symbol) {
+            Image(nsImage: trimmed)
+        } else {
+            Image(systemName: badge.symbol).font(.system(size: Metrics.symbol, weight: .regular))
+        }
     }
 
     /// Light at the top-left, brand at the bottom-right, on the sidebar capsule's own axis — tilted
@@ -272,6 +319,49 @@ private struct SettingsRowBadgeView: View {
         /// The sidebar capsule's gradient axis, unchanged (`SidebarChip.Metrics`).
         static let gradientLightPoint = UnitPoint(x: 0.25, y: 0)
         static let gradientDarkPoint = UnitPoint(x: 0.75, y: 1)
+        /// Hairline around the white chip — the system separator colour, so it tracks the appearance
+        /// the way every other divider in the window does (`SidebarChip.Metrics.chipBorder`).
+        static let border = Color(nsColor: .separatorColor)
+    }
+}
+
+// MARK: - SymbolTrim
+
+/// Renders an SF Symbol with its outer strokes cut away, keeping only the middle band.
+///
+/// Shared by the sidebar chip and the navigator-row badge: the band is a property of the *glyph*
+/// (`distribute.vertical`'s rounded rectangle between two full-width rules), so it has to survive a
+/// page moving between the two surfaces. Both callers ask for the same slice at their own size.
+enum SymbolTrim {
+
+    /// The slice of the symbol's height that is kept — the band between the two rules, generous
+    /// enough to clear the rectangle's rounded corners at any size. Measured on the rendered glyph at
+    /// 64 pt (91×68 px): rules at y 5–9 and 59–63, rectangle at y 23–45, with clean gaps between.
+    /// Expressed as fractions of the glyph box rather than pixels so it holds at every chip size.
+    static let band: ClosedRange<CGFloat> = 0.28...0.72
+
+    /// Render `name` at `size` and keep only ``band`` of its height.
+    ///
+    /// The trim happens on the rendered `NSImage`, not through SwiftUI transforms: the band is cut out
+    /// and the result handed over as a plain image, so it lays out as exactly what it is. The
+    /// `.scaleEffect` + `.mask` spelling looks equivalent and is not — the scale moves the glyph's
+    /// centre relative to the mask, so the surviving strip is not the one that was measured. The image
+    /// is left as a template so the caller's own `foregroundStyle` still tints it.
+    static func middleBand(_ name: String, size: CGFloat) -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: size, weight: .regular)
+        guard let full = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config) else { return nil }
+        let kept = NSSize(width: full.size.width, height: full.size.height * (band.upperBound - band.lowerBound))
+        guard kept.height > 0 else { return nil }
+        let out = NSImage(size: kept)
+        out.lockFocus()
+        // Draw the whole glyph shifted down by the discarded lower band, so the kept slice lands in
+        // the canvas and everything outside it falls off the edges.
+        full.draw(in: NSRect(x: 0, y: -full.size.height * band.lowerBound,
+                             width: full.size.width, height: full.size.height))
+        out.unlockFocus()
+        out.isTemplate = true
+        return out
     }
 }
 

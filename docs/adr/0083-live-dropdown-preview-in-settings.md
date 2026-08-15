@@ -7,7 +7,7 @@ date: 2026-08-12
 
 ## Контекст
 
-Панелі `UI presets` / `Menu bar` / `Dropdown` ([#333](https://github.com/artem-from-ua/tokenpace/issues/333))
+Панелі `Appearance` / `Appearance › Menu bar` / `Appearance › Dropdown` ([#333](https://github.com/artem-from-ua/tokenpace/issues/333))
 налаштовують те, що малює дропдаун: `Bar style`, тіки, `Show model & service limits`, `Show extra
 usage`, пресети. Але **побачити результат під час крутіння перемикачів неможливо**: дропдаун живе в
 `NSMenu` статус-айтема, а меню не може лишатися відкритим, поки користувач працює у вікні Settings.

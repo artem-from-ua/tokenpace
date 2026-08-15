@@ -16,10 +16,15 @@ import TokenPaceKit
 /// nothing and rides along for free.
 ///
 /// ## Lifetime
-/// Visible for exactly as long as the Settings window is: ``attach(to:)`` from `show(section:)`,
-/// ``detach()`` from `windowWillClose`. Deliberately **not** keyed to the selected section — a future
-/// pane (Guide/Legend, #261) then gets the preview with no code change here, and there is no registry
-/// of "sections that show a preview" to keep in sync with `SettingsSection`.
+/// Bounded by the Settings window — ``attach(to:)`` from `show(section:)`, ``detach()`` from
+/// `windowWillClose` — and **within** that, by where the window is: it rides along on `Appearance` and
+/// its two surface pages, and stays hidden everywhere else (``SettingsSection/showsDropdownPreview``).
+///
+/// It was unconditional until the surfaces became child pages of `Appearance`. The argument then was
+/// that a registry of "sections that show a preview" is one more thing to keep in sync; what settled
+/// it the other way is that the preview is a wide window claiming screen space beside Settings, and on
+/// `About` or `Notifications` it claims that space to answer a question the user is not asking. The
+/// registry is one computed property on the section, which each new pane answers as it is added.
 ///
 /// Not an `NSWindowController`: the window is a borderless child with no independent life, so
 /// `showWindow`/`close` would be the wrong contract.
@@ -106,19 +111,37 @@ final class SettingsPreviewWindowController {
     /// Measured from the built window when there is one; before that it falls back to the nominal
     /// width, which is what the window settles at anyway — the popup is fixed-width and only its
     /// height moves.
+    ///
+    /// Zero while the preview is hidden for the current pane: centring the pair when there is no pair
+    /// would push the Settings window off-centre by half a preview it cannot see.
     var occupiedWidth: CGFloat {
-        (window?.frame.width ?? Metrics.nominalWidth) + Metrics.gap
+        guard isEnabledForCurrentPane else { return 0 }
+        return (window?.frame.width ?? Metrics.nominalWidth) + Metrics.gap
     }
 
     // MARK: - Attach / detach
 
+    /// Whether the pane currently showing in Settings is one the preview belongs beside. Written by
+    /// `SettingsWindowController` from the model's route; `attach(to:)` and this setter both funnel
+    /// into the same show/hide, so arriving on a preview-less pane and navigating to one behave alike.
+    var isEnabledForCurrentPane = true {
+        didSet {
+            guard isEnabledForCurrentPane != oldValue, let parent = parentWindow else { return }
+            if isEnabledForCurrentPane { attach(to: parent) } else { hide() }
+        }
+    }
+
     /// Build (once), park beside `parent`, and start tracking ⌥. Idempotent — a second call on an
     /// already-attached preview just re-parks it.
+    ///
+    /// A no-op beyond remembering the parent while the current pane is not one the preview belongs
+    /// beside: the window is built lazily, so a session spent entirely on `About` never makes one.
     ///
     /// Call at the **end** of `show(section:)`: the parking maths reads the parent's final frame, and
     /// an `NSHostingController`-backed window is a zero-width sliver until its first layout pass.
     func attach(to parent: NSWindow) {
         parentWindow = parent
+        guard isEnabledForCurrentPane else { return }
         let win = window ?? makeWindow()
         window = win
 
@@ -166,6 +189,13 @@ final class SettingsPreviewWindowController {
         heading?.isWindowActive = active
         backdrop?.isWindowActive = active
     }
+
+    /// Take the preview off screen because the pane showing in Settings is not one it belongs beside.
+    ///
+    /// The same teardown as ``detach()`` — the distinction is only in why, and `parentWindow` survives
+    /// both, which is what lets ``isEnabledForCurrentPane`` bring it straight back on the next
+    /// preview-bearing pane without `show(section:)` running again.
+    private func hide() { detach() }
 
     /// Order out, drop the child relationship, and stop tracking. Idempotent: `windowWillClose` can
     /// arrive for a preview that was already detached (e.g. after a miniaturise).

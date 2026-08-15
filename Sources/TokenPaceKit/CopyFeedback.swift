@@ -10,7 +10,7 @@ import Foundation
 /// look. Each button therefore swaps its glyph to a checkmark for ``duration`` and swaps back.
 ///
 /// The values live in the kit rather than in either UI because the two buttons are built with
-/// different toolkits — the Appearance pane's is SwiftUI (`UIPresetsPane`), the Troubleshoot
+/// different toolkits — the Appearance pane's is SwiftUI (`AppearancePane`), the Troubleshoot
 /// window's is AppKit (`TroubleshootWindowController`) — and a constant duplicated across that seam
 /// is exactly the kind that drifts. One gesture should not feel like two features.
 public enum CopyFeedback {

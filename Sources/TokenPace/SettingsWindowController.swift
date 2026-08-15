@@ -575,16 +575,22 @@ final class SettingsWindowController: NSWindowController {
         model.openAtLaunch(pages[childIndex])
     }
 
-    /// Keep the toolbar's title and ‹ › enablement in step with the model.
+    /// Keep the toolbar's title and ‹ › enablement — and the preview's visibility — in step with the
+    /// model.
     ///
     /// `withObservationTracking` fires once per change, so the continuation re-arms itself: the
     /// selection moves whenever the user picks a sidebar row, which is SwiftUI's write, not ours —
     /// there is no single call site to hook instead.
+    ///
+    /// The preview rides here rather than on its own observer because it answers the same question
+    /// this one already reads: *where is the window*. Both the section and the drilled-into page reach
+    /// it through `model.selection`, so a section change and a drill-in are one notification.
     private func observeToolbarState() {
         withObservationTracking {
             toolbarController.update(title: model.currentPaneTitle,
                                      canGoBack: model.canGoBack,
                                      canGoForward: model.canGoForward)
+            preview.isEnabledForCurrentPane = model.selection.showsDropdownPreview
         } onChange: { [weak self] in
             Task { @MainActor in
                 self?.observeToolbarState()
