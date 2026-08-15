@@ -277,19 +277,25 @@ struct DropdownPane: View {
                 // these pages uses. Left as siblings of the `Section` they became two independent rows,
                 // and the hint read as a stray statement about Extra usage rather than as the caveat on
                 // the control directly above it — which is the only thing it is.
-                VStack(alignment: .leading, spacing: 4) {
-                    // Top-aligned for the same reason the menu-bar row is: the picker is roughly three
-                    // times the height of a normal control row, and a vertically centred label floats in
-                    // the middle of that block instead of heading it.
-                    HStack(alignment: .top) {
+                // Top-aligned for the same reason the menu-bar row is: the picker is roughly three times
+                // the height of a normal control row, and a vertically centred label floats in the
+                // middle of that block instead of heading it.
+                //
+                // The hint sits **under the label**, inside the row's left column, rather than under the
+                // whole row. Left below the `HStack` it ran the full pane width *beneath the tiles*,
+                // which put a caveat about one bar's style a long way from the control it qualifies —
+                // and left the picker looking like it had a footnote of its own. In the label's column
+                // it reads as what it is: a note on this setting, next to the setting's name.
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text("Style")
-                        Spacer()
-                        BarStylePicker(
-                            surface: .dropdown,
-                            active: model.dropdownStyle,
-                            onSelect: { model.setDropdownStyle($0) })
+                        SettingsHint(text: "*Extra usage* bar always draws in *Progress* style.")
                     }
-                    SettingsHint(text: "*Extra usage* bar always draws in *Progress* style.")
+                    Spacer()
+                    BarStylePicker(
+                        surface: .dropdown,
+                        active: model.dropdownStyle,
+                        onSelect: { model.setDropdownStyle($0) })
                 }
 
                 // No `SettingsHint` under either row: the segment labels ("Always" / "Above zero" /

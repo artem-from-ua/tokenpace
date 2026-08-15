@@ -222,6 +222,10 @@ final class PopupBarView: NSView {
     /// the hosted bar's height constraint to the same value the view draws into.
     static var viewHeight: CGFloat { Metrics.height }
 
+    /// The width the live bar is drawn at inside the popup card, exposed so the Settings preview can be
+    /// checked against it.
+    static var liveWidth: CGFloat { PopupViewController.Metrics.contentWidth }
+
     /// The height of the **track** — the bar proper, without the marker's overhang or the ruler's
     /// reserved strip. This is the shape a reader sees as "the bar", so it is the unit to lay a stack of
     /// bars out by.

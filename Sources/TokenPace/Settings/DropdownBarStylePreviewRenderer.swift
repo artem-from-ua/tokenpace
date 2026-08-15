@@ -22,18 +22,23 @@ import TokenPaceKit
 @MainActor
 enum DropdownBarStylePreviewRenderer {
 
-    /// How wide the bar is drawn inside the tile.
+    /// How wide the bar is drawn in the tile.
     ///
-    /// Chosen by eye off a contact sheet of candidates (56 / 62 / 68 / 72) rendered by this same code
-    /// at the shipped tile size, in both themes. It is a judgement, not a derivation: a longer bar
-    /// separates the three styles more clearly — they differ by *where* the ink sits along the track —
-    /// while a shorter one leaves the tile more plate. 62 pt keeps 9 pt of plate on each side of an
-    /// 80 pt tile, which reads as a specimen sitting on a surface rather than as a bar crammed into a
-    /// box.
+    /// The bar is drawn **at this width directly**, at 1:1 in both axes: the track keeps its 6 pt, the
+    /// marker its 7×14 and the zero tick its exact size, which is what ADR-0093 §3 requires of a preview
+    /// and what any scaling would blur.
     ///
-    /// The live bar is four times this wide, and that is fine: the tile advertises the *shape* of each
-    /// scale, not its length. What must not be scaled is the bar's thickness — see ``image(for:)``.
-    static let barWidth: CGFloat = 62
+    /// Shortening the bar does *not* misplace the marks, which is the thing to check before accepting
+    /// a length. `scaleX` insets the 0..1 scale by `minStripWidth/2` — a constant 1.75 pt, derived from
+    /// the bar's height rather than its length — at each end. Computed across the two widths, that inset
+    /// costs 5.6 % of a 56 pt bar against 1.4 % of the live 252 pt one, and the largest resulting shift
+    /// in any mark's position is about **2 % of the bar's width**. Visible only if measured; the shapes
+    /// and their order are identical.
+    ///
+    /// Windowing onto the leading slice of a live-width render was tried first and is much worse: on
+    /// this specimen frame both the marker and the coloured strip sit past the first quarter of the bar,
+    /// so the tile showed a bare grey track with neither — measured, not guessed.
+    static let barWidth: CGFloat = 56
 
     /// The specimen frame — the **same** `climbing` first-poll values the menu-bar tiles bake
     /// (`BarStylePreviewRenderer.Specimen`), deliberately.

@@ -67,6 +67,19 @@ struct BarStylePicker: View {
     /// down and cleared on mouse-up, so the grey press layer it drives leaves nothing behind.
     @State private var pressed: BarStyle?
 
+    /// Read **only** to make this view depend on the theme, so a light/dark flip rebuilds it.
+    ///
+    /// The specimens are baked `NSImage`s: a non-template image does not re-resolve its semantic
+    /// colours when the appearance changes, and SwiftUI has no reason to call `image(for:)` again
+    /// unless something the body reads has changed. Without this the dropdown tile kept whichever
+    /// theme's neutrals it was first drawn under — visibly wrong the moment the system flipped, since
+    /// that surface's palette flips with it. The menu-bar tile never had the problem because its
+    /// specimen is deliberately baked under a fixed `.vibrantDark` (ADR-0097).
+    ///
+    /// It is also what the render is keyed on: `colorScheme` is SwiftUI's view of the *effective*
+    /// appearance here, which is what the specimen must match.
+    @Environment(\.colorScheme) private var colorScheme
+
     /// Tile geometry. The specimen is shown at its **natural** size inside a roomier tile rather than
     /// scaled up: the whole point of the preview is "this is what lands in my menu bar", and a
     /// doubled widget answers a question nobody asked. Upscaling a 5 pt bar would also blur the very
@@ -172,8 +185,14 @@ struct BarStylePicker: View {
                     case .menuBar:
                         Image(nsImage: BarStylePreviewRenderer.image(for: style))
                     case .dropdown:
+                        // The appearance is passed explicitly, derived from `colorScheme`, rather than
+                        // read from `NSApp` inside the renderer: this view can be hosted under a forced
+                        // appearance (the dropdown preview window forces one), and `NSApp`'s would then
+                        // bake the wrong palette into a tile sitting on a surface that has another.
                         Image(nsImage: DropdownBarStylePreviewRenderer.image(
-                            for: style, size: NSSize(width: Tile.width, height: Tile.height)))
+                            for: style,
+                            size: NSSize(width: Tile.width, height: Tile.height),
+                            appearance: NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)))
                     }
                 }
                 .frame(width: Tile.width, height: Tile.height)
