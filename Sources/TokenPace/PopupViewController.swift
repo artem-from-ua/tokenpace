@@ -2092,6 +2092,13 @@ final class PopupViewController: NSViewController {
                     used: Self.usedText(row, verbose: optionHeld),
                     reset: Self.resetText(row, verbose: optionHeld),
                     resetIsBlocking: Self.isBlockingRow(index, in: layout))
+                // The ⌥ stand-by line, on the **7-day row only** (`index == 1`, the ordering
+                // fixed just below). Pacing on the 5-hour window is not worth waiting out — it resets
+                // at least twice in a working day and fixes itself; a week does not.
+                if optionHeld, index == Self.sevenDayRowIndex,
+                   let text = Self.standByText(row) {
+                    addStandByLine(text)
+                }
             }
             // No inter-section gap after the **last** bar — but only when there is no credits section
             // below. If the "Extra usage" block follows, this bar is *not* the last thing in the popup,
@@ -2427,6 +2434,29 @@ final class PopupViewController: NSViewController {
         resetLabel.font = font
         resetLabel.textColor = Self.dimmedLabelColor
         return addSplitRow(leftLabel: usedLabel, rightLabel: resetLabel)
+    }
+
+    /// The 7-day row's **stand-by** line: how long to pause for the bar to come back to green,
+    /// e.g. `"stand by 3h for green"` — a third line under the detail line, flush **right** so it
+    /// stacks with the reset above it and the bar's right edge below.
+    ///
+    /// Right-aligned by pinning the label's own trailing edge, not via ``addSplitRow``: that one
+    /// distributes with `.equalSpacing`, which for a single arranged view leaves it flush *left*.
+    ///
+    /// Deliberately **not colour-coded.** The pacing colour is the model's verdict (`severity`), and
+    /// tinting this line orange/green would put a second, competing verdict on the same row — the
+    /// recurring "raise the weight of the input" mistake the bar rules warn about. It stays
+    /// ``dimmedLabelColor``, the same ink as the detail line it hangs off.
+    @discardableResult
+    private func addStandByLine(_ text: String) -> NSView {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: Metrics.textSize)
+        label.textColor = Self.dimmedLabelColor
+        label.alignment = .right
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
+        stack.addArrangedSubview(label)
+        return label
     }
 
     /// A two-column row spanning the full content width: `left` flush against the leading edge,
@@ -3089,6 +3119,28 @@ final class PopupViewController: NSViewController {
     /// `"resetting…"` fallback is already a sentence and is unchanged by the gate.
     static func resetText(_ row: LimitRow, verbose: Bool = false) -> String {
         (verbose ? row.resetLineVerbose : row.resetLine) ?? "resetting…"
+    }
+
+    /// Index of the **7-day** row in `PopupLayout.rows`. The layout always emits the two base windows
+    /// first — `0` = 5-hour, `1` = 7-day — with the per-model rows appended after (the same ordering
+    /// `isBaseLimit: index <= 1` relies on when gating the far-behind blue).
+    static let sevenDayRowIndex = 1
+
+    /// The ⌥ stand-by line: `"stand by 3h for green"` — how long to stop spending for this
+    /// window to come back to green. `nil` whenever there is no such advice to give, which is most of
+    /// the time (see ``PacingModel/displayableStandBySecondsForGreen(_:)``).
+    ///
+    /// **The advice is only true while nothing is spent**, which is exactly what "stand by" asks for.
+    /// The wording carries that condition; a bare `"3h to green"` would read as a forecast and be wrong
+    /// the moment the next request lands.
+    ///
+    /// The duration goes through ``ResetClock/rounded(duration:)`` — the *same* band table the reset
+    /// countdown uses — so this line says `"3h"` in the same minute the line above says `"3h"`, and
+    /// the popup never grows a second duration format (ADR-0074).
+    static func standByText(_ row: LimitRow) -> String? {
+        guard let seconds = PacingModel.displayableStandBySecondsForGreen(row.bar),
+              let duration = ResetClock.rounded(duration: seconds) else { return nil }
+        return "stand by \(duration) for green"
     }
 
     /// Data-age threshold past which the header timestamp is shown **unconditionally** (not just under

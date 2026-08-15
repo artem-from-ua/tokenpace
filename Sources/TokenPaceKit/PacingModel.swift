@@ -437,6 +437,79 @@ public enum PacingModel {
         min(0.16, max(0, 0.16 * (1 - timeFraction)))
     }
 
+    // MARK: stand-by (how long to pause for green)
+
+    /// How long to **stop spending** for an ahead-of-pace window to come back to **green**, in seconds.
+    /// `nil` when there is no such wait to offer.
+    ///
+    /// The bar is orange because usage has outrun the clock. Usage only ever grows, but the elapsed
+    /// fraction grows on its own — so pausing lets `timeFraction` catch up to a frozen `usageFraction`.
+    /// Green is the `usage <= time` side (``PacingState/onPaceOrBehind``), so the wait is exactly the
+    /// lead converted back into window time:
+    ///
+    ///     standBy = windowDurationSeconds · (usageFraction − timeFraction)
+    ///
+    /// **No threshold coefficient appears here, deliberately.** ``aheadThreshold(timeFraction:)``
+    /// (`0.16 · (1 − t)`) is the *yellow→orange* boundary — it lives entirely inside the ahead side,
+    /// where `PopupBarView.aheadColor` picks between yellow and orange. Green is decided by a different
+    /// function (`behindColor`, on the `usage <= time` branch), which never consults it. Solving for
+    /// `severity == .calm` instead would land on **yellow** — `.calm` covers both green and yellow —
+    /// and would under-report the wait, promising green well before it arrives.
+    ///
+    /// Returns `nil` when a pause cannot deliver green:
+    /// - the bar is not orange (``PacingSeverity/ahead``) — nothing to wait out;
+    /// - the window is exhausted (`usage >= 1`, red): only the reset clears it, and `usage` is pinned
+    ///   at the ceiling so the clock can never catch up;
+    /// - the lead has already gone (`standBy <= 0`) — defence against an inconsistent layout;
+    /// - green would land inside the window's last ``pacingOrangeOverrideSeconds`` (20 min), where
+    ///   ``BarLayout/severity`` forces orange regardless of the lead. The check uses the remaining time
+    ///   **at that future moment** (`remainingSeconds − standBy`), not the present one, because the
+    ///   countdown runs down during the wait too.
+    ///
+    /// Pure arithmetic on the layout the caller is already drawing — no clock, so no `now` parameter.
+    /// See ADR-0102 for why the threshold stays out of it and why the line is seven-day only.
+    public static func standBySecondsForGreen(_ bar: BarLayout) -> TimeInterval? {
+        guard bar.severity == .ahead else { return nil }   // green/yellow/blue/red: nothing to wait out
+        guard bar.usageFraction < 1 else { return nil }    // exhausted: only the reset helps
+        let lead = bar.usageFraction - bar.timeFraction
+        guard lead > 0 else { return nil }
+        let standBy = Double(bar.windowDurationSeconds) * lead
+        // The 20-minute end-of-window override would still paint it orange on arrival.
+        guard bar.remainingSeconds - standBy > pacingOrangeOverrideSeconds else { return nil }
+        return standBy
+    }
+
+    /// The shortest stand-by worth putting in front of the user: below this it is noise. 20 minutes.
+    ///
+    /// On the seven-day window a wait under 20 min carries no decision — it elapses while the user is
+    /// still reading the popup, and the bar greens on its own without anyone pausing for it.
+    ///
+    /// **Currently unreachable, deliberately kept.** The API quantises the seven-day `utilization` to
+    /// whole percent, and one point is 1 h 40 m of stand-by — so the raw values are either zero or
+    /// ≥ 101 min and never land under this floor (docs/reference/usage-api-quirks.md). The floor is a
+    /// guard, not a live filter. It comes back into play once the weekly rate is interpolated from the
+    /// five-hour counter (issue #386), which brings the step down to ~10 min.
+    public static let standByFloorSeconds: TimeInterval = 1200
+
+    /// ``standBySecondsForGreen(_:)`` filtered by whether the wait earns a line in the popup — the
+    /// display policy kept out of the view so the threshold is testable on its own.
+    ///
+    /// Only the ``standByFloorSeconds`` noise floor is applied here.
+    ///
+    /// **"Don't show it when the reset is about as soon as the wait" needs no separate rule.** The
+    /// intent — never print a stand-by that duplicates the reset line above it — is already enforced,
+    /// and more strictly, by the end-of-window check inside ``standBySecondsForGreen(_:)``: that one
+    /// requires green to land more than ``pacingOrangeOverrideSeconds`` (20 min) before the reset,
+    /// because otherwise the bar would still be forced orange on arrival. A 10-minute proximity rule
+    /// sits *inside* that 20-minute exclusion, so it could never reject anything the stronger check had
+    /// let through — it would be dead code. A wait that runs past the reset is refused by the same
+    /// check, for the same reason.
+    public static func displayableStandBySecondsForGreen(_ bar: BarLayout) -> TimeInterval? {
+        guard let standBy = standBySecondsForGreen(bar) else { return nil }
+        guard standBy >= standByFloorSeconds else { return nil }
+        return standBy
+    }
+
     /// The fixed scale applied to the base green→blue width (1 h for the 5-hour window, 1 d for the
     /// 7-day one), giving the shipped **2 h / 5 h = 0.40** and **2 d / 7 d ≈ 0.2857** crossovers.
     ///

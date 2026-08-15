@@ -953,3 +953,168 @@ struct BehindThresholdTests {
         #expect(PacingModel.behindThreshold(windowDurationSeconds: -1) == 0)
     }
 }
+
+// MARK: - standBySecondsForGreen
+
+/// A seven-day bar at the given usage/elapsed fractions, far enough from its reset that the 20-minute
+/// end-of-window override never fires unless a test asks for it.
+private func weekly(usage u: Double, elapsed t: Double,
+                    remaining: TimeInterval? = nil) -> BarLayout {
+    let d = LimitWindow.sevenDay.durationSeconds
+    return BarLayout(
+        usageFraction: u,
+        timeFraction: t,
+        pacing: t >= u ? .onPaceOrBehind : .ahead,
+        remainingSeconds: remaining ?? Double(d) * (1 - t),
+        windowDurationSeconds: d)
+}
+
+@Suite("PacingModel.standBySecondsForGreen")
+struct StandBySecondsForGreenTests {
+
+    /// The wait is the lead converted back into window time — no threshold coefficient involved.
+    /// u = 45 %, t = 30 % → 604 800 · 0.15 ≈ 25.2 h. (The lead must clear `aheadThreshold` — 0.112 at
+    /// this point in the window — or the bar would be yellow and offer no wait at all.)
+    @Test func waitIsTheLeadInWindowSeconds() {
+        let bar = weekly(usage: 0.45, elapsed: 0.30)
+        #expect(bar.severity == .ahead)
+        let standBy = try! #require(PacingModel.standBySecondsForGreen(bar))
+        #expect(abs(standBy - 604_800 * 0.15) < 1e-6)
+    }
+
+    /// **The invariant that pins this to the real colour.** Applying the returned wait must land the
+    /// bar on the *green* side (`usage <= time`), and a minute less must not.
+    ///
+    /// Deliberately asserts on `pacing`, NOT on `severity == .calm`: `.calm` covers green **and**
+    /// yellow, so a `.calm` assertion would also pass for a wait that only reaches yellow — exactly
+    /// the under-report this function must never make.
+    @Test func waitingExactlyThatLongReachesGreen() {
+        let u = 0.42, t = 0.25
+        let bar = weekly(usage: u, elapsed: t)
+        let standBy = try! #require(PacingModel.standBySecondsForGreen(bar))
+        let d = Double(LimitWindow.sevenDay.durationSeconds)
+
+        // Having waited the full amount: green (the calm side), not merely `.calm`.
+        let after = weekly(usage: u, elapsed: t + standBy / d)
+        #expect(after.pacing == .onPaceOrBehind)
+
+        // One minute short: still ahead of pace.
+        let justBefore = weekly(usage: u, elapsed: t + (standBy - 60) / d)
+        #expect(justBefore.pacing == .ahead)
+    }
+
+    /// A **yellow** bar (ahead, but by less than `aheadThreshold`) is not orange, so there is no line
+    /// and no wait. This is the regression guard against `0.16` creeping back into the formula: a
+    /// severity-based solve would return a value here.
+    @Test func yellowOffersNoWait() {
+        // t = 0.50 → threshold 0.08; a 0.05 lead stays yellow.
+        let bar = weekly(usage: 0.55, elapsed: 0.50)
+        #expect(bar.severity == .calm)
+        #expect(PacingModel.standBySecondsForGreen(bar) == nil)
+    }
+
+    /// Green, and deep-behind blue, have nothing to wait out.
+    @Test func calmSidesOfferNoWait() {
+        #expect(PacingModel.standBySecondsForGreen(weekly(usage: 0.20, elapsed: 0.30)) == nil)  // green
+        #expect(PacingModel.standBySecondsForGreen(weekly(usage: 0.10, elapsed: 0.60)) == nil)  // blue
+    }
+
+    /// Exhausted (red) is cleared by the reset alone: usage is pinned at the ceiling, so the clock can
+    /// never catch up to it.
+    @Test func exhaustedOffersNoWait() {
+        let bar = weekly(usage: 1.0, elapsed: 0.40)
+        #expect(bar.severity == .exhausted)
+        #expect(PacingModel.standBySecondsForGreen(bar) == nil)
+    }
+
+    /// Inside the last 20 minutes the bar is orange whatever the lead (`pacingOrangeOverrideSeconds`),
+    /// so green is unreachable and no wait is offered — even for a tiny lead.
+    @Test func endOfWindowOverrideOffersNoWait() {
+        let bar = weekly(usage: 0.99, elapsed: 0.985, remaining: 900)   // 15 min left
+        #expect(bar.severity == .ahead)
+        #expect(PacingModel.standBySecondsForGreen(bar) == nil)
+    }
+
+    /// A wait that would end inside that same 20-minute band is refused too — the check looks at the
+    /// remaining time *on arrival*, not at the present moment.
+    @Test func waitLandingInsideTheOverrideIsRefused() {
+        // 40 min left, and the lead needs 30 min to clear → arrival has only 10 min left: still orange.
+        let d = Double(LimitWindow.sevenDay.durationSeconds)
+        let bar = weekly(usage: 0.996 + 1800 / d, elapsed: 0.996, remaining: 2400)
+        #expect(bar.severity == .ahead)
+        #expect(PacingModel.standBySecondsForGreen(bar) == nil)
+    }
+}
+
+// MARK: - displayableStandBySecondsForGreen
+
+@Suite("PacingModel.displayableStandBySecondsForGreen")
+struct DisplayableStandByTests {
+
+    /// A wait comfortably above the floor and far from the reset is shown as-is.
+    @Test func comfortableWaitIsShown() {
+        let bar = weekly(usage: 0.45, elapsed: 0.30)
+        let shown = try! #require(PacingModel.displayableStandBySecondsForGreen(bar))
+        #expect(abs(shown - 604_800 * 0.15) < 1e-6)
+    }
+
+    /// Under 20 minutes it is noise on a seven-day window — the bar greens on its own while the user
+    /// is still reading. The raw arithmetic still returns it; only the display policy drops it.
+    @Test func waitBelowTheFloorIsHidden() {
+        let d = Double(LimitWindow.sevenDay.durationSeconds)
+        // Late in the window (t = 99.5 %) `aheadThreshold` is only ~8 min of window time, so a 15-min
+        // lead is genuinely orange — the one region where a sub-20-minute wait can exist at all.
+        let bar = weekly(usage: 0.995 + 900 / d, elapsed: 0.995)
+        #expect(bar.severity == .ahead)
+        #expect(PacingModel.standBySecondsForGreen(bar) != nil)   // the arithmetic still answers
+        #expect(PacingModel.displayableStandBySecondsForGreen(bar) == nil)   // policy drops it
+    }
+
+    /// Exactly at the floor it is shown (the comparison is `>=`).
+    @Test func waitExactlyAtTheFloorIsShown() {
+        let d = Double(LimitWindow.sevenDay.durationSeconds)
+        // t = 99 % → `aheadThreshold` is ~16 min of window time, so a 20-min lead is orange and the
+        // wait lands just on the floor. Comparison is `>=`, so it is shown.
+        //
+        // The lead is nudged a second past the floor rather than set exactly on it: `usage` can only
+        // be expressed as a fraction, and `floor / d` does not round-trip back to exactly `floor`
+        // seconds. Testing the boundary to sub-second precision would be testing `Double`, not the
+        // policy — `waitBelowTheFloorIsHidden` already covers the reject side.
+        let bar = weekly(usage: 0.99 + (PacingModel.standByFloorSeconds + 1) / d, elapsed: 0.99)
+        #expect(bar.severity == .ahead)
+        let shown = try! #require(PacingModel.displayableStandBySecondsForGreen(bar))
+        #expect(abs(shown - PacingModel.standByFloorSeconds) < 2.0)
+    }
+
+    /// "Green arrives about when the window resets anyway" is never shown — but that is enforced by
+    /// the 20-minute end-of-window check inside `standBySecondsForGreen`, not by a second rule here.
+    ///
+    /// This pins the reasoning: every wait that survives is already more than 20 min clear of the
+    /// reset, so it is necessarily more than 10 min clear too. A separate proximity threshold could
+    /// not reject anything — it would be dead code.
+    @Test func survivingWaitsAreAlwaysWellClearOfTheReset() {
+        let d = Double(LimitWindow.sevenDay.durationSeconds)
+        for elapsed in [0.30, 0.60, 0.90, 0.99] {
+            for leadPoints in [0.02, 0.05, 0.15, 0.40] {
+                let bar = weekly(usage: min(0.999, elapsed + leadPoints), elapsed: elapsed)
+                guard let standBy = PacingModel.displayableStandBySecondsForGreen(bar) else { continue }
+                // Green lands with the whole override band still to spare — hence also the 10 min.
+                #expect(bar.remainingSeconds - standBy > PacingModel.pacingOrangeOverrideSeconds)
+                #expect(bar.remainingSeconds - standBy > 600)
+                _ = d
+            }
+        }
+    }
+
+    /// A lead so large that the window resets first: the reset, not the pause, is what fixes it.
+    @Test func waitOutlastingTheWindowIsHidden() {
+        let d = Double(LimitWindow.sevenDay.durationSeconds)
+        let bar = weekly(usage: 0.60, elapsed: 0.10, remaining: d * 0.20)   // needs 0.50·d, has 0.20·d
+        #expect(PacingModel.displayableStandBySecondsForGreen(bar) == nil)
+    }
+
+    /// The noise floor is the shipped one — a silent change fails here, not in the popup.
+    @Test func policyConstantsArePinned() {
+        #expect(PacingModel.standByFloorSeconds == 1200)            // 20 min
+    }
+}

@@ -196,12 +196,33 @@ public enum ResetClock {
     /// Unlike `timeToReset`, this never switches to an absolute clock — the absolute "at hh:mm" and
     /// "on <weekday>" qualifiers are assembled by ``resetLine(resetsAt:now:locale:timeZone:)``.
     public static func relativeRounded(resetsAt: Date, now: Date) -> String? {
-        let remaining = resetsAt.timeIntervalSince(now)
-        guard remaining > 0 else { return nil }
-        if remaining < 60 { return "<1m" }                                  // sub-minute → "<1m", no seconds
-        if remaining < 50 * 60 { return "\(Int((remaining / 60).rounded()))m" }     // nearest minute
-        if remaining < 23 * 3_600 { return "\(Int((remaining / 3_600).rounded()))h" } // nearest hour
-        return "\(Int((remaining / 86_400).rounded()))d"                    // nearest day
+        rounded(duration: resetsAt.timeIntervalSince(now))
+    }
+
+    /// The band table itself, over a **bare duration** rather than a pair of dates: `"<1m"`, `"45m"`,
+    /// `"5h"`, `"4d"`.
+    ///
+    /// Split out of ``relativeRounded(resetsAt:now:)`` (which is now a one-line wrapper over it) so a
+    /// span that is not a countdown to an instant — the stand-by pause of
+    /// ``PacingModel/standBySecondsForGreen(_:)`` — renders in the **same** format without inventing a
+    /// second one. ADR-0074 makes one duration format the rule across both surfaces; a caller holding
+    /// seconds should not have to fabricate a `Date` to reach it.
+    ///
+    /// Bands (duration → output):
+    /// - `≤ 0`          → `nil` (nothing to count)
+    /// - `< 60 s`       → `"<1m"` (sub-minute — never a seconds value)
+    /// - `< 50 min`     → nearest whole minute
+    /// - `< 23 h`       → nearest whole hour
+    /// - otherwise      → nearest whole day
+    ///
+    /// The 50-min and 23-h cut-offs (rather than 60/24) leave headroom so rounding never prints a value
+    /// that reads as the next unit — 55 min rounds to `1h`, not `60m`.
+    public static func rounded(duration: TimeInterval) -> String? {
+        guard duration > 0 else { return nil }
+        if duration < 60 { return "<1m" }                                  // sub-minute → "<1m", no seconds
+        if duration < 50 * 60 { return "\(Int((duration / 60).rounded()))m" }     // nearest minute
+        if duration < 23 * 3_600 { return "\(Int((duration / 3_600).rounded()))h" } // nearest hour
+        return "\(Int((duration / 86_400).rounded()))d"                    // nearest day
     }
 
     /// The lead-in every reset line carries, so the duration reads as a sentence rather than a bare

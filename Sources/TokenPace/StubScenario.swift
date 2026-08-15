@@ -45,6 +45,7 @@ enum StubScenario: String, CaseIterable {
     case redGreen = "red-green"
     case calm5Orange7 = "calm5-orange7"
     case nearReset = "near-reset"
+    case standByFloor = "standby-floor"
     case midBandReset = "mid-band-reset"
     case calmBoth = "calm-both"
     case farBehind = "far-behind"
@@ -165,6 +166,7 @@ enum StubScenario: String, CaseIterable {
         case .redGreen:            return "Pacing · 5h red, 7d green"
         case .calm5Orange7:        return "Pacing · 5h calm, 7d orange"
         case .nearReset:           return "Pacing · near-reset override"
+        case .standByFloor:        return "Pacing · 7d stand-by below floor"
         case .midBandReset:        return "Pacing · reset 4 h 41 m out (mid band)"
         case .calmBoth:            return "Pacing · both calm"
         case .farBehind:           return "Pacing · both far behind (blue)"
@@ -245,6 +247,9 @@ enum StubScenario: String, CaseIterable {
         case .nearReset:
             return "20-min override (ADR-0044): 5h only ~2 pts ahead but resets in 12 min → forced "
                  + "orange."
+        case .standByFloor:
+            return "Stand-by floor: 7d orange with only a 15-min wait to green, so the ⌥ "
+                 + "stand-by line stays hidden."
         case .midBandReset:
             return "One format for every distance (#284): the 5h reset is 4 h 41 m out — the band "
                  + "that used to print a wall clock (\"20:40\") and now reads \"5h\", the same number "
@@ -419,6 +424,8 @@ enum StubScenario: String, CaseIterable {
         case .redGreen:            return StubUsageTransport(mode: .pacing(.redGreen), now: now)
         case .calm5Orange7:        return StubUsageTransport(mode: .pacing(.calmFiveOrangeSeven), now: now)
         case .nearReset:           return StubUsageTransport(mode: .pacing(.nearResetFiveHour), now: now)
+        case .standByFloor:        return StubUsageTransport(mode: .pacing(.standByFloor), now: now)
+        case .standByFloor:        return StubUsageTransport(mode: .pacing(.standByFloor), now: now)
         case .midBandReset:        return StubUsageTransport(mode: .pacing(.midBandReset), now: now)
         case .calmBoth:            return StubUsageTransport(mode: .pacing(.calmBoth), now: now)
         case .farBehind:           return StubUsageTransport(mode: .pacing(.farBehind), now: now)

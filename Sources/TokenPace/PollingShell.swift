@@ -545,6 +545,17 @@ actor StubUsageTransport: UsageTransport {
         /// stays green. Use this to see the override flip a would-be-calm bar to noisy.
         case nearResetFiveHour
 
+        /// **Stand-by floor** frame: the 7-day window is orange with only a **15-minute** wait to
+        /// green (usage 99.5536 % vs elapsed ~99.40 %, reset in 60 min), so the ⌥ stand-by line is
+        /// suppressed by `PacingModel.standByFloorSeconds`.
+        ///
+        /// The odd fractional usage is load-bearing. On a seven-day window one whole percent of usage is
+        /// 1 h 40 m of stand-by, so no round percentage can ever produce a sub-20-minute wait — and the
+        /// API only ever emits whole percents for token windows (docs/reference/usage-api-quirks.md), so
+        /// this frame is arithmetically possible but unreachable from real data — the
+        /// suppressed case only exists in the window's last two hours, at a fraction of a point of lead.
+        case standByFloor
+
         /// **Far behind** frame (ADR-0061): both base bars deep behind pace with a big surplus, past the
         /// 20-min start override — 5h (usage 5 vs elapsed ~60 % → surplus ~0.55) and 7d (usage 10 vs
         /// elapsed ~71 % → surplus ~0.61), both far above the behind-threshold → **blue**. Use this to
@@ -644,6 +655,8 @@ actor StubUsageTransport: UsageTransport {
             case .calmFiveOrangeSeven: return (10, 55, 4 * 3600, 5 * 24 * 3600)
             case .calmBoth:           return (10, 20, 4 * 3600, 5 * 24 * 3600)
             case .nearResetFiveHour:  return (98, 20, 12 * 60, 5 * 24 * 3600)
+            // 7d: elapsed ≈ 99.4048 %, usage 99.5536 % → 15 min of stand-by, under the 20-min floor.
+            case .standByFloor:       return (10, 99.5536, 4 * 3600, 60 * 60)
             case .farBehind:          return (5, 10, 2 * 3600, 2 * 24 * 3600)
             // 5h: u=5 vs t=60 % → 55 pp surplus (would be blue). 7d exhausted → gate shut.
             case .weeklyGate:         return (5, 100, 2 * 3600, 5 * 24 * 3600)
