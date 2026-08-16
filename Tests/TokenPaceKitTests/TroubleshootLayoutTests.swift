@@ -253,3 +253,46 @@ struct MakeTests {
         #expect(layout.tokenExpiryLine == nil)
     }
 }
+
+// MARK: - Weekly reconstruction disclosure (#386)
+
+@Suite("TroubleshootLayout — weekly reconstruction")
+struct TroubleshootWeeklyTests {
+
+    private func out(_ weekly: WeeklyUtilization?) -> PollOutput {
+        let fetch = FetchDiagnostics(attemptAt: t0, httpStatus: 200, body: "{}", outcome: .success)
+        return PollOutput(
+            snapshot: nil, health: UsageHealth(lastSuccess: t0, failingSince: nil, reason: nil),
+            interval: 180, diagnostics: PollDiagnostics(fetch: fetch, token: nil), weekly: weekly)
+    }
+
+    @Test func disclosesBothNumbersWhenTheyDiffer() {
+        let layout = TroubleshootLayout.make(
+            from: out(WeeklyUtilization(raw: 88, effective: 88.34, source: .interpolated,
+                                        ratio: 9.8, sampleCount: 12)),
+            timeZone: utc)
+        #expect(layout.weeklyLine == "weekly: 88 % raw → 88.34 % est (N ≈ 9.8, 12 samples)")
+    }
+
+    @Test func staysVisibleEvenWhenTheTwoAgree() {
+        // Diagnostic surface: an absent row would read as "nothing to report", which looks exactly
+        // like "the feature is broken" — the confusion an earlier draft actually caused.
+        let layout = TroubleshootLayout.make(
+            from: out(WeeklyUtilization(raw: 88, effective: 88, source: .interpolated,
+                                        ratio: 9.8, sampleCount: 12)),
+            timeZone: utc)
+        #expect(layout.weeklyLine == "weekly: 88 % raw = est (N ≈ 9.8, 12 samples)")
+    }
+
+    @Test func namesTheReasonWhenDegraded() {
+        let layout = TroubleshootLayout.make(
+            from: out(WeeklyUtilization(raw: 88, effective: 88, source: .degraded,
+                                        ratio: 9.8, sampleCount: 12)),
+            timeZone: utc)
+        #expect(layout.weeklyLine == "weekly: 88 % raw (degraded — polling gap)")
+    }
+
+    @Test func absentOnAnOutputWithoutAWeeklyValue() {
+        #expect(TroubleshootLayout.make(from: out(nil), timeZone: utc).weeklyLine == nil)
+    }
+}

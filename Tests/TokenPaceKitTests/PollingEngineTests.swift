@@ -1212,3 +1212,77 @@ struct ApplyIdleGraceTests {
         #expect(s3.lastUtilizationChange == t0.addingTimeInterval(360))
     }
 }
+
+// MARK: - advance: weekly reconstruction (#386)
+
+@Suite("PollingEngine.advance — weekly reconstruction")
+struct AdvanceWeeklyTests {
+
+    @Test func successFoldsThePollIntoTheReconstruction() {
+        let next = PollingEngine.advance(
+            previous: PollState(), outcome: .success(snap(five: 10, seven: 80)),
+            claudeActive: true, now: t0)
+        // The first poll anchors (inherited — no bump observed yet) and starts tracking the counter.
+        #expect(next.weeklyInterpolator.anchoredRaw == 80)
+        #expect(next.weeklyInterpolator.lastFiveHour == 10)
+    }
+
+    @Test func aFailureLeavesTheReconstructionUntouched() {
+        // Only a successful poll carries counters; an error must not be mistaken for a hole or a
+        // reset — the next success measures the gap itself.
+        let seeded = PollingEngine.advance(
+            previous: PollState(), outcome: .success(snap(five: 10, seven: 80)),
+            claudeActive: true, now: t0)
+        let afterError = PollingEngine.advance(
+            previous: seeded, outcome: .usageError(.transport(message: "timed out", code: .timedOut)),
+            claudeActive: true, now: t0.addingTimeInterval(180))
+        #expect(afterError.weeklyInterpolator == seeded.weeklyInterpolator)
+    }
+
+    @Test func anObservedBumpFeedsTheRatioAndFirmsTheAnchor() {
+        var s = PollingEngine.advance(
+            previous: PollState(), outcome: .success(snap(five: 0, seven: 50)),
+            claudeActive: true, now: t0)
+        // Ten points of 5h spend, then the weekly counter ticks: one segment closes at N = 10.
+        s = PollingEngine.advance(
+            previous: s, outcome: .success(snap(five: 10, seven: 50)),
+            claudeActive: true, now: t0.addingTimeInterval(180))
+        s = PollingEngine.advance(
+            previous: s, outcome: .success(snap(five: 10, seven: 51)),
+            claudeActive: true, now: t0.addingTimeInterval(360))
+        #expect(s.weeklyInterpolator.ratio.sampleCount == 1)
+        #expect(s.weeklyInterpolator.isFirm)
+        #expect(s.weeklyInterpolator.value(forRaw: 51).effective == 50.5)   // firm lower edge
+    }
+
+    @Test func theReconstructionReadsTheDecodedSnapshotNotTheIdleGraceRebuild() {
+        // The grace rolls the 5h window forward for the UI; that is presentation, not spend, and
+        // must not reach the estimator. The decoded 5h value is what gets folded in.
+        let s = PollingEngine.advance(
+            previous: PollState(), outcome: .success(snap(five: 42, seven: 60)),
+            claudeActive: true, now: t0)
+        #expect(s.weeklyInterpolator.lastFiveHour == 42)
+    }
+
+    @Test func ratioLogFiresOnTheFirstEstimateAndOnRealMoves() {
+        let cold = PollState()
+        var warm = PollState()
+        warm.weeklyInterpolator = WeeklyInterpolator(ratio: WeeklyRatio(segments: [10, 10, 10]))
+
+        // Seed → first real estimate: worth saying once.
+        #expect(PollingEngine.weeklyRatioLog(previous: cold, next: warm) != nil)
+
+        // A tiny drift stays silent (the median twitches as the window slides).
+        var nudged = warm
+        nudged.weeklyInterpolator = WeeklyInterpolator(ratio: WeeklyRatio(segments: [10, 10, 10.2]))
+        #expect(PollingEngine.weeklyRatioLog(previous: warm, next: nudged) == nil)
+
+        // A promotion-sized move is news.
+        var promoted = warm
+        promoted.weeklyInterpolator = WeeklyInterpolator(ratio: WeeklyRatio(segments: [15, 15, 15]))
+        #expect(PollingEngine.weeklyRatioLog(previous: warm, next: promoted) != nil)
+
+        // Nothing to say while the estimator is still empty.
+        #expect(PollingEngine.weeklyRatioLog(previous: cold, next: cold) == nil)
+    }
+}

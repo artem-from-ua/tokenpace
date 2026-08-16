@@ -1079,6 +1079,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case (false, false): KeychainTokenProvider()
         }
         let refresher: DelegatedRefresher? = scenario.usesStubToken ? nil : ClaudeCLIRefresher()
+
+        // #386: bring the journal up to the current sample format. Started here, before the polling
+        // loop, but what actually makes it safe is that `UsageJournal` is an **actor**: a rewrite and
+        // an append can never run concurrently, so the migration needs no pause flag and the first
+        // poll simply waits its turn if it arrives mid-rewrite. Files already current are detected and
+        // skipped, so this is a no-op read on every launch after the first. Detached and unawaited on
+        // purpose — a journal that cannot be migrated must never stop the app from working.
+        let journalToMigrate = usageJournal
+        Task.detached(priority: .utility) { await journalToMigrate.migrateIfNeeded() }
+
         let engine = PollingEngine(
             transport: transport,
             tokenProvider: tokenProvider,
@@ -1092,7 +1102,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             //
             // The engine calls this from its own task, so it goes through the `nonisolated` reader
             // rather than the main-actor-isolated property — same key, same opt-out default.
-            usageApiEnabled: { PersistedConfig.usageApiEnabledUnsafe() })
+            usageApiEnabled: { PersistedConfig.usageApiEnabledUnsafe() },
+            // #386: the weekly reconstruction's ratio takes ~20 h of active work to settle, so it is
+            // restored across relaunches rather than re-warmed each time. Same `nonisolated` reader
+            // discipline as the switch above — the engine calls these from its own task.
+            restoreWeekly: { PersistedConfig.weeklyInterpolatorUnsafe() },
+            persistWeekly: { PersistedConfig.setWeeklyInterpolatorUnsafe($0) })
 
         // Consume on the main actor — every PollOutput drives the menu bar + popup.
         pollTask = Task { [weak self] in
@@ -1198,7 +1213,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 from: snapshot, now: now,
                 durationMs: output.diagnostics?.fetch.durationMs,
                 plan: output.diagnostics?.token?.subscriptionType,
-                tier: output.diagnostics?.token?.rateLimitTier)
+                tier: output.diagnostics?.token?.rateLimitTier,
+                // #386: the journal records the value the bars were drawn from, the API's value
+                // beside it, and the exchange rate behind both — every poll, not only when they
+                // differ. The log gets the changes; the journal gets the series.
+                weekly: output.weekly)
         } else if let fetch = output.diagnostics?.fetch {
             record = .error(diagnostics: fetch, failure: output.health.reason, now: now)
         } else {
@@ -2160,7 +2179,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // tick) can land in the sub-second gap before it fires — so we apply the same pure overlay here
         // on every render. It is a no-op when nothing has crossed a boundary, and the next authoritative
         // poll overwrites it wholesale (the API stays the source of truth). See ADR-0043.
-        let snapshot = output.snapshot.map { ResetClock.optimisticReset($0, now: now) }
+        // #386: swap the API's quantised 7-day utilization for the value reconstructed from the
+        // five-hour counter, so every surface downstream — bars, colours, the weekly gate — reads one
+        // consistent number. Applied **before** the optimistic reset, not after: that overlay may zero
+        // the weekly window locally ahead of the server, and `applied(to:)` refuses to touch a window
+        // whose raw value no longer matches what the interpolator measured. Running it second would
+        // therefore make it a silent no-op on exactly the boundary polls.
+        let snapshot = output.snapshot
+            .map { output.weekly?.applied(to: $0) ?? $0 }
+            .map { ResetClock.optimisticReset($0, now: now) }
         // #233: the awaiting-input count is `nil` (hidden) unless the feature is on and ≥ 1 session is
         // waiting. Sourced from the watcher (or the `TOKENPACE_AWAITING` stub), independent of the poll.
         let awaitingInput = awaitingInputForDisplay

@@ -50,6 +50,7 @@ enum StubScenario: String, CaseIterable {
     case calmBoth = "calm-both"
     case farBehind = "far-behind"
     case weeklyGate = "weekly-gate"
+    case weeklyInterp = "weekly-interp"
     case idleWeekHot = "idle-week-hot"
     case pressureSweep = "pressure-sweep"
     case gaugeSweep = "gauge-sweep"
@@ -171,6 +172,7 @@ enum StubScenario: String, CaseIterable {
         case .calmBoth:            return "Pacing · both calm"
         case .farBehind:           return "Pacing · both far behind (blue)"
         case .weeklyGate:          return "Pacing · 5h far behind, week spent (gate)"
+        case .weeklyInterp:        return "Pacing · 7d interpolated from the 5h counter"
         case .idleWeekHot:         return "Idle · week ahead of pace (green pill)"
         case .pressureSweep:       return "Pacing · Pressure scale (sharp 5h + clipped 7d)"
         case .gaugeSweep:          return "Pacing · Gauge scale (full-left 5h + short-right 7d)"
@@ -268,6 +270,18 @@ enum StubScenario: String, CaseIterable {
                  + "calm). Check both surfaces, and the popup's 5h row saying \"on pace\" rather than "
                  + "\"far behind pace\". Compare with `far-behind`, where the week is calm and the blue "
                  + "stays."
+        case .weeklyInterp:
+            return "The 7-day reconstruction (#386), as a **sequence** — watch it over ~20 polls "
+                 + "rather than as one frame. The weekly counter stays a whole number throughout (61, "
+                 + "then 62 from poll 8), exactly as the API behaves, while the 5-hour one climbs "
+                 + "1 pp per poll — so every movement of the 7-day bar is the reconstruction's, since "
+                 + "there is no other source. Polls 0–7 run on an inherited anchor: the value creeps "
+                 + "from the bucket centre to its ceiling and holds. Poll 8 brings the single bump, "
+                 + "which firms the anchor at the new bucket's lower edge — and must not move the bar, "
+                 + "because the old ceiling and the new floor are the same point. Polls 9+ creep "
+                 + "61.5 → 62.5 in 0.1 pp steps, then hold (`clipped`) rather than overtake the next "
+                 + "quantum. Troubleshoot discloses both numbers throughout. What to check: nothing "
+                 + "ever steps backwards, least of all at the two handovers."
         case .idleWeekHot:
             return "Idle 5h while the week runs ahead of pace (u = 70 %, t = 29 %). No active session, "
                  + "so the 5h bar is the knobless idle pill — and because the week has no headroom to "
@@ -425,11 +439,11 @@ enum StubScenario: String, CaseIterable {
         case .calm5Orange7:        return StubUsageTransport(mode: .pacing(.calmFiveOrangeSeven), now: now)
         case .nearReset:           return StubUsageTransport(mode: .pacing(.nearResetFiveHour), now: now)
         case .standByFloor:        return StubUsageTransport(mode: .pacing(.standByFloor), now: now)
-        case .standByFloor:        return StubUsageTransport(mode: .pacing(.standByFloor), now: now)
         case .midBandReset:        return StubUsageTransport(mode: .pacing(.midBandReset), now: now)
         case .calmBoth:            return StubUsageTransport(mode: .pacing(.calmBoth), now: now)
         case .farBehind:           return StubUsageTransport(mode: .pacing(.farBehind), now: now)
         case .weeklyGate:          return StubUsageTransport(mode: .pacing(.weeklyGate), now: now)
+        case .weeklyInterp:        return StubUsageTransport(mode: .weeklyInterp, now: now)
         case .idleWeekHot:         return StubUsageTransport(mode: .idleWeekHot, now: now)
         case .pressureSweep:       return StubUsageTransport(mode: .pacing(.pressureSweep), now: now)
         case .gaugeSweep:          return StubUsageTransport(mode: .pacing(.gaugeSweep), now: now)
@@ -497,13 +511,33 @@ enum StubScenario: String, CaseIterable {
     }
 
     /// Emoji badges shown before the scenario's name in the dev-tools dropdown, marking how "live" it
-    /// is: **⚡** = real usage API (``realNetwork``), **⏱** = real wall clock (``usesRealClock``). A
-    /// fully canned, date-decoupled stub carries neither. Empty string when there is nothing to flag.
+    /// is: **⚡** = real usage API (``realNetwork``), **⏱** = real wall clock (``usesRealClock``),
+    /// **⏭** = a sequence that advances one step per poll (``advancesPerPoll``), so **Refresh now**
+    /// steps through it. A fully canned, frozen frame carries none. Empty string when nothing to flag.
     var badges: String {
         var out = ""
         if self == .realNetwork { out += "⚡" }
         if usesRealClock { out += "⏱" }
+        if advancesPerPoll { out += "⏭" }
         return out.isEmpty ? "" : out + " "
+    }
+
+    /// Whether this scenario is a **sequence** whose state advances one step per poll, rather than a
+    /// frozen frame — so it is watched by stepping through it, and **Refresh now** in Troubleshoot is
+    /// the control that does the stepping (each click is one more poll).
+    ///
+    /// Flagged in the dropdown with **⏭** because the difference is invisible otherwise: a frozen
+    /// frame looks identical after a refresh, while these look wrong until you keep going. The
+    /// weekly reconstruction (#386) is the clearest case — its whole subject is motion across polls,
+    /// so a single frame cannot show it at all.
+    var advancesPerPoll: Bool {
+        switch self {
+        case .weeklyInterp, .standByFloor, .optimisticReset, .resetGrace,
+             .justUnblocked, .creditsOnset, .staleError:
+            return true
+        default:
+            return false
+        }
     }
 
     /// This scenario's render/transport clock: the fixed ``stubClock`` when set, else the live `realNow`

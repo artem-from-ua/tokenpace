@@ -15,11 +15,11 @@ struct JournalRecordCodableTests {
     @Test func usageRoundTrips() throws {
         let sample = UsageSample(
             t: "2026-08-03T09:12:04Z", ms: 142, plan: "max", tier: "default_claude_max_5x",
-            h5: WindowSample(util: 41.2, reset: "2026-08-03T11:00:00Z", timePct: 0.62, gap: 20.8, sev: .green),
-            d7: WindowSample(util: 63.8, reset: "2026-08-07T00:00:00Z", timePct: 0.55, gap: -8.8, sev: .orange),
-            opus: WindowSample(util: 12, reset: "2026-08-07T00:00:00Z", timePct: 0.55, gap: 43, sev: .green),
+            h5: WindowSample(util: 41.2, reset: "2026-08-03T11:00:00Z", timePct: 0.62, sev: .green),
+            d7: WindowSample(util: 63.8, reset: "2026-08-07T00:00:00Z", timePct: 0.55, sev: .orange),
+            opus: WindowSample(util: 12, reset: "2026-08-07T00:00:00Z", timePct: 0.55, sev: .green),
             sonnet: nil,
-            scoped: [ScopedSample(name: "Fable", pct: 8, reset: "2026-08-07T00:00:00Z", timePct: 0.55, gap: 47, sev: .green)],
+            scoped: [ScopedSample(name: "Fable", pct: 8, reset: "2026-08-07T00:00:00Z", timePct: 0.55, sev: .green)],
             sessionIdle: false,
             spend: SpendSample(
                 used: MoneySample(minor: 1077, cur: "EUR", exp: 2),

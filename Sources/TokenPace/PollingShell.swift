@@ -350,6 +350,26 @@ actor StubUsageTransport: UsageTransport {
         /// overlay, no ⏰), then the forced refresh lands: from the second poll on the stub returns a
         /// freshly-reset window (0 %, `now + 5h`), mirroring what the real API would report post-reset.
         case optimisticReset
+        /// The 7-day reconstruction (#386) as a **sequence**, because a single frame cannot show it.
+        ///
+        /// The weekly counter is pinned at a whole `62` for the entire run — exactly what the API
+        /// does — while the five-hour one climbs 4 pp per poll and resets at 100. So the only thing
+        /// that can move the 7-day bar is the reconstruction, and any movement seen is proof it works.
+        ///
+        /// The run has three acts, verified by replaying this exact sequence through the interpolator:
+        /// 1. **polls 0–7** — no bump observed yet, so the anchor is *inherited*: it starts at the
+        ///    bucket centre (61.0) and creeps to the ceiling, holding there from poll 6 (`clipped`).
+        ///    Half a bucket is all an inherited anchor can honestly claim.
+        /// 2. **poll 8** — the weekly counter ticks 61 → 62 once. The anchor becomes firm at the new
+        ///    bucket's lower edge (61.5) and the first segment closes, so `N` stops being the seed.
+        ///    Note the value does **not** jump on this handover: the old ceiling and the new floor are
+        ///    the same point.
+        /// 3. **polls 9–19** — the same unchanged `62` drives a bar creeping 61.5 → 62.5 in 0.1 pp
+        ///    steps, then holding at the ceiling rather than overtaking the next quantum.
+        ///
+        /// What to check: the bar never steps backwards, least of all at the two handovers (inherited
+        /// → firm, and interpolated → clipped), and Troubleshoot shows both numbers throughout.
+        case weeklyInterp
         /// The reset-boundary idle-grace frame (ADR-0041, ADR-0045). Watch it as a **sequence**, not as a
         /// single frame: **one** poll returns a 5h window about to expire (92 % used, ~4 min left — its
         /// strip and time marker correctly pinned near the bar's right edge), which also arms the grace
@@ -545,15 +565,22 @@ actor StubUsageTransport: UsageTransport {
         /// stays green. Use this to see the override flip a would-be-calm bar to noisy.
         case nearResetFiveHour
 
-        /// **Stand-by floor** frame: the 7-day window is orange with only a **15-minute** wait to
-        /// green (usage 99.5536 % vs elapsed ~99.40 %, reset in 60 min), so the ⌥ stand-by line is
-        /// suppressed by `PacingModel.standByFloorSeconds`.
+        /// **Stand-by floor** frame: the 7-day window is orange with only a **16-minute** wait to
+        /// green, so the ⌥ stand-by line is suppressed by `PacingModel.standByFloorSeconds`.
         ///
-        /// The odd fractional usage is load-bearing. On a seven-day window one whole percent of usage is
-        /// 1 h 40 m of stand-by, so no round percentage can ever produce a sub-20-minute wait — and the
-        /// API only ever emits whole percents for token windows (docs/reference/usage-api-quirks.md), so
-        /// this frame is arithmetically possible but unreachable from real data — the
-        /// suppressed case only exists in the window's last two hours, at a fraction of a point of lead.
+        /// Rebuilt on a **whole** `utilization` of 99 (#386). It used to carry a fractional 99.5536 %,
+        /// which the API never emits for token windows — the frame was arithmetically possible but
+        /// unreachable from real data. The reconstruction now places the value anywhere inside the
+        /// observed bucket, so the state is reachable, and this stub reproduces it honestly: a raw 99
+        /// rendered at ≈99.30 % against ~99.14 % elapsed.
+        ///
+        /// The band is genuinely narrow, which is why it needed measuring rather than guessing.
+        /// Scanning the whole `(u, reset)` space finds a suppressed stand-by in **18 of 10 064**
+        /// combinations, all with `u` between **99.15 % and 99.40 %** — the smallest *shown* wait
+        /// anywhere else is 20.9 min. The reason is not the quantisation step: `standBy` and the time
+        /// remaining grow together, so the 20-minute end-of-window override
+        /// (`pacingOrangeOverrideSeconds`) eats every frame where the lead is small but the reset is
+        /// still far. Only this sliver survives both filters.
         case standByFloor
 
         /// **Far behind** frame (ADR-0061): both base bars deep behind pace with a big surplus, past the
@@ -655,8 +682,11 @@ actor StubUsageTransport: UsageTransport {
             case .calmFiveOrangeSeven: return (10, 55, 4 * 3600, 5 * 24 * 3600)
             case .calmBoth:           return (10, 20, 4 * 3600, 5 * 24 * 3600)
             case .nearResetFiveHour:  return (98, 20, 12 * 60, 5 * 24 * 3600)
-            // 7d: elapsed ≈ 99.4048 %, usage 99.5536 % → 15 min of stand-by, under the 20-min floor.
-            case .standByFloor:       return (10, 99.5536, 4 * 3600, 60 * 60)
+            // 7d: a **whole** 99 (#386) with the reset 5 200 s out → elapsed ≈ 99.14 %. The frame is
+            // driven through `Mode.standByFloor`'s own sequence so the reconstruction can carry the
+            // value to ≈99.30 %, giving ~16 min of stand-by — under the 20-minute floor, so the ⌥ line
+            // stays hidden. See the case's doc for why the band is this narrow.
+            case .standByFloor:       return (10, 99, 4 * 3600, 5_200)
             case .farBehind:          return (5, 10, 2 * 3600, 2 * 24 * 3600)
             // 5h: u=5 vs t=60 % → 55 pp surplus (would be blue). 7d exhausted → gate shut.
             case .weeklyGate:         return (5, 100, 2 * 3600, 5 * 24 * 3600)
@@ -1112,6 +1142,43 @@ actor StubUsageTransport: UsageTransport {
             return (body, response)
         }
 
+        // Weekly-reconstruction sequence (#386) — see `Mode.weeklyInterp` for the three acts.
+        //
+        // The weekly counter is a whole number throughout (61, then 62 from poll 8 on) precisely
+        // because that is the flaw being fixed: any motion on the 7-day bar is the reconstruction's,
+        // never the API's. The five-hour counter climbs 4 pp per poll and wraps at 100, mirroring the
+        // ~33.6 resets a real week sees.
+        //
+        // 1 pp per poll against a seeded N = 10 moves the weekly value 0.1 pp per poll, so the bucket
+        // takes ~10 polls to cross — slow enough that the creep is legible frame by frame, and it
+        // still reaches the ceiling clip within the run, which is a state a real user would wait
+        // hours for. (4 pp per poll was tried first and crossed the bucket in under three polls,
+        // which read as a jump rather than a creep and pinned the value at `clipped` almost
+        // immediately — verified by replaying this exact sequence through the interpolator.)
+        if mode == .weeklyInterp {
+            let n = calls
+            calls += 1
+            // The five-hour counter climbs 1 pp per poll and wraps, exactly as a real one resets
+            // ~33.6 times a week. The weekly counter ticks **every 8 polls** rather than once: a
+            // single bump left the run with no way out of the ceiling clip, so anyone stepping
+            // through with "Refresh now" (which is how this stub is meant to be watched) saw the bar
+            // freeze after ~8 clicks and stay frozen. Ticking periodically makes the run a loop —
+            // creep, clip, bump, creep — which is also what a real week looks like.
+            let fiveUtil = Double((n * 1) % 100)
+            let weekly = 61.0 + Double(n / 8)
+            let fiveReset = self.resetsAt(inSeconds: 3 * 3600)
+            let sevenReset = self.resetsAt(inSeconds: 4 * 24 * 3600)
+            let body = """
+            {"five_hour":{"utilization":\(fiveUtil),"resets_at":"\(fiveReset)"},\
+            "seven_day":{"utilization":\(weekly),"resets_at":"\(sevenReset)"},\
+            "limits":[{"kind":"weekly_all","group":"weekly","percent":\(weekly),\
+            "severity":"normal","resets_at":"\(sevenReset)","scope":null,"is_active":true}]}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
         // Reset-boundary idle-grace frame (ADR-0041, ADR-0045): active window (polls 0–1) → post-reset
         // **empty** body (polls 2–3, `five_hour.resets_at: null`, no `session` limit → would decode
         // `sessionIdle == true`) → active again (polls 4+). The grace gate holds the 5h bar non-idle
@@ -1261,7 +1328,17 @@ actor StubUsageTransport: UsageTransport {
             // Fixed severity frame for reset-countdown verification (#103). Per-model rows kept as in
             // the climbing default so the popup still has content; only the top-level bars are pinned.
             let v = frame.values
-            five = v.five
+            // The stand-by floor frame is the one pacing frame that needs *motion* (#386): its whole
+            // point is a wait short enough to be suppressed, and reaching that band requires the
+            // reconstruction to carry a whole `99` about 0.8 pp into its bucket. So the five-hour
+            // counter climbs here — 4 pp per poll, ~8 pp per weekly point at the seeded rate — while
+            // every other frame stays deliberately frozen.
+            if frame == .standByFloor {
+                five = min(96.0, v.five + Double(calls) * 4.0)
+                calls += 1
+            } else {
+                five = v.five
+            }
             seven = v.seven
             // Per-model rows are otherwise pinned to the climbing default (60/100) so the popup has
             // content; the near-zero frame instead pins them near-zero too, so every row exercises the

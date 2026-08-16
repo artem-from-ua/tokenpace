@@ -86,40 +86,84 @@ extension JournalRecord: Codable {
 /// One usage window as journalled: its utilisation, raw reset string, elapsed-time fraction, and the
 /// objective pacing colour bucket (``PacingBucket``). Used for `h5`/`d7`/`opus`/`sonnet`.
 public struct WindowSample: Sendable, Equatable, Codable {
-    /// `utilization` percent in [0, 100].
+    /// The utilization the app **acted on** — for the seven-day window that is the value
+    /// reconstructed from the five-hour counter (#386); everywhere else it equals ``raw``.
+    ///
+    /// This is deliberately the *effective* number rather than the API's: every downstream reader
+    /// (charts, #245) wants the series the bars actually drew, and having to know which field to
+    /// prefer is exactly the trap a single field avoids. `v` says which generation a line belongs to,
+    /// so the shift in meaning is legible rather than guessed.
     public let util: Double
+    /// The API's value verbatim, before reconstruction. Equal to ``util`` on every window except a
+    /// reconstructed `seven_day`. Kept so the record stays checkable against the server.
+    public let raw: Double
+    /// How ``util`` was produced (`WeeklyUtilization.Source`), or `nil` where nothing is
+    /// reconstructed — the five-hour window, the per-model rows.
+    public let src: String?
+    /// The 5h↔7d exchange rate in force when this line was written (#386), or `nil` where it does not
+    /// apply. Recorded on **every** sample, not just when it moves: the log gets only the changes
+    /// (that would be ~341 lines a day), the journal gets the series, because a series is what can be
+    /// analysed afterwards.
+    public let n: Double?
     /// Raw `resets_at` ISO-8601 string (empty for an idle/absent reset), forwarded verbatim.
     public let reset: String
     /// Elapsed fraction of the window in [0, 1] (``PacingModel/elapsedFraction(resetsAt:now:window:)``).
     public let timePct: Double
-    /// The pacing **gap** in percentage points: `timePct·100 − util`. Positive = headroom (behind pace,
-    /// spending slower than the clock); negative = ahead of pace (spending faster). Precomputed because
-    /// it is expected to be a common downstream metric (a chart of how far ahead/behind you ran). It is
-    /// derivable from `timePct` and `util`, but stored so a reader need not recompute it per point.
-    public let gap: Double
     /// The objective 5-way pacing colour bucket (``PacingBucket/of(_:)``), CalmColorMode-independent.
     public let sev: PacingBucket
 
-    public init(util: Double, reset: String, timePct: Double, gap: Double, sev: PacingBucket) {
-        self.util = util
+    /// - Parameter windowSeconds: the window this sample describes, which sets how many decimals
+    ///   `timePct` keeps (``JournalPrecision``). Defaults to the seven-day length — the coarser of
+    ///   the two, so a caller that forgets it errs toward *more* precision, never less.
+    public init(
+        util: Double,
+        raw: Double? = nil,
+        src: String? = nil,
+        n: Double? = nil,
+        reset: String,
+        timePct: Double,
+        sev: PacingBucket,
+        windowSeconds: Int = LimitWindow.sevenDay.durationSeconds
+    ) {
+        // Rounded at construction, so every path into the journal is covered — including fixtures
+        // and any future writer that bypasses the domain factory.
+        self.util = JournalPrecision.round(util, decimals: JournalPrecision.percentPoints)
+        self.raw = JournalPrecision.round(raw ?? util, decimals: JournalPrecision.percentPoints)
+        self.src = src
+        self.n = JournalPrecision.round(n, decimals: JournalPrecision.percentPoints)
         self.reset = reset
-        self.timePct = timePct
-        self.gap = gap
+        self.timePct = JournalPrecision.round(
+            timePct, decimals: JournalPrecision.forFraction(ofWindowSeconds: windowSeconds))
         self.sev = sev
     }
 
-    private enum CodingKeys: String, CodingKey { case util, reset, timePct, gap, sev }
+    private enum CodingKeys: String, CodingKey { case util, raw, src, n, reset, timePct, sev }
 
-    /// Tolerant decode — every field defaults so a partial line never fails the whole record. `gap`
-    /// defaults to the derived `timePct·100 − util` when absent (an older line predating the field).
+    /// Tolerant decode — every field defaults so a partial line never fails the whole record.
+    ///
+    /// `raw` falls back to `util`, which is exactly right for a v1 line: before #386 the two were the
+    /// same number. That makes the old shape readable without a version branch here, while `v` on the
+    /// record still tells a *reader* which generation it is looking at.
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.util = try c.decodeIfPresent(Double.self, forKey: .util) ?? 0
+        self.raw = try c.decodeIfPresent(Double.self, forKey: .raw) ?? util
+        self.src = try c.decodeIfPresent(String.self, forKey: .src)
+        self.n = try c.decodeIfPresent(Double.self, forKey: .n)
         self.reset = try c.decodeIfPresent(String.self, forKey: .reset) ?? ""
         self.timePct = try c.decodeIfPresent(Double.self, forKey: .timePct) ?? 0
-        self.gap = try c.decodeIfPresent(Double.self, forKey: .gap) ?? (timePct * 100 - util)
         self.sev = try c.decodeIfPresent(PacingBucket.self, forKey: .sev) ?? .green
     }
+
+    /// The pacing **gap** in percentage points: `timePct·100 − util`. Positive = headroom (behind
+    /// pace); negative = ahead of pace.
+    ///
+    /// **Derived, no longer stored** (#386). It used to be a field, written with fifteen decimals
+    /// while all of its uncertainty sat in a `util` quantised to whole percent — 0.2 MB of a 4.6 MB
+    /// file spent on digits that meant nothing. Nothing read it: it was written and asserted on, and
+    /// never consumed. Now it is computed on demand, which also keeps it honest when `util` is the
+    /// reconstructed value.
+    public var gap: Double { timePct * 100 - util }
 }
 
 // MARK: - ScopedSample
@@ -136,21 +180,23 @@ public struct ScopedSample: Sendable, Equatable, Codable {
     public let reset: String
     /// Elapsed fraction of the (7-day-paced) window in [0, 1].
     public let timePct: Double
-    /// Pacing gap in percentage points: `timePct·100 − pct` (same sign convention as ``WindowSample/gap``).
-    public let gap: Double
     /// Objective 5-way pacing bucket for this model's 7-day-paced bar.
     public let sev: PacingBucket
 
-    public init(name: String, pct: Double, reset: String, timePct: Double, gap: Double, sev: PacingBucket) {
+    public init(name: String, pct: Double, reset: String, timePct: Double, sev: PacingBucket) {
         self.name = name
-        self.pct = pct
+        self.pct = JournalPrecision.round(pct, decimals: JournalPrecision.percentPoints)
         self.reset = reset
-        self.timePct = timePct
-        self.gap = gap
+        // Scoped rows are all seven-day-paced (they borrow that window's reset), so they take the
+        // seven-day precision.
+        self.timePct = JournalPrecision.round(
+            timePct,
+            decimals: JournalPrecision.forFraction(
+                ofWindowSeconds: LimitWindow.sevenDay.durationSeconds))
         self.sev = sev
     }
 
-    private enum CodingKeys: String, CodingKey { case name, pct, reset, timePct, gap, sev }
+    private enum CodingKeys: String, CodingKey { case name, pct, reset, timePct, sev }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -158,9 +204,14 @@ public struct ScopedSample: Sendable, Equatable, Codable {
         self.pct = try c.decodeIfPresent(Double.self, forKey: .pct) ?? 0
         self.reset = try c.decodeIfPresent(String.self, forKey: .reset) ?? ""
         self.timePct = try c.decodeIfPresent(Double.self, forKey: .timePct) ?? 0
-        self.gap = try c.decodeIfPresent(Double.self, forKey: .gap) ?? (timePct * 100 - pct)
         self.sev = try c.decodeIfPresent(PacingBucket.self, forKey: .sev) ?? .green
     }
+
+    /// Pacing gap in percentage points — derived, not stored, for the same reason as
+    /// ``WindowSample/gap``. Scoped rows are **never** reconstructed (a single `N` cannot describe
+    /// windows that meter different spend and have no five-hour counter of their own), so `pct` here
+    /// is always the API's own number.
+    public var gap: Double { timePct * 100 - pct }
 }
 
 // MARK: - MoneySample
@@ -209,11 +260,6 @@ public struct SpendSample: Sendable, Equatable, Codable {
     public let spentFrac: Double?
     /// Elapsed fraction of the calendar month (``CreditsPacing/monthElapsedFraction(now:timeZone:)``).
     public let monthPct: Double
-    /// Credits pacing gap in percentage points: `monthPct·100 − spentFrac·100` (same sign as
-    /// ``WindowSample/gap`` — positive = under budget for the month, negative = overspending pace).
-    /// `nil` when there is **no** monthly cap (`spend.limit == nil`) — a gap needs a limit to pace
-    /// against, matching Artem's "only when a limit was set".
-    public let creditGap: Double?
 
     public init(
         used: MoneySample? = nil,
@@ -224,8 +270,7 @@ public struct SpendSample: Sendable, Equatable, Codable {
         currency: String? = nil,
         decimalPlaces: Int? = nil,
         spentFrac: Double? = nil,
-        monthPct: Double = 0,
-        creditGap: Double? = nil
+        monthPct: Double = 0
     ) {
         self.used = used
         self.limit = limit
@@ -234,14 +279,26 @@ public struct SpendSample: Sendable, Equatable, Codable {
         self.usedCredits = usedCredits
         self.currency = currency
         self.decimalPlaces = decimalPlaces
-        self.spentFrac = spentFrac
-        self.monthPct = monthPct
-        self.creditGap = creditGap
+        self.spentFrac = JournalPrecision.round(spentFrac, decimals: JournalPrecision.moneyFraction)
+        // The month is the window here, so its precision follows the same one-second rule.
+        self.monthPct = JournalPrecision.round(
+            monthPct, decimals: JournalPrecision.forFraction(ofWindowSeconds: 31 * 24 * 3600))
+    }
+
+    /// Credits pacing gap in percentage points: `monthPct·100 − spentFrac·100` (same sign as
+    /// ``WindowSample/gap`` — positive = under budget for the month, negative = overspending pace).
+    /// `nil` when there is **no** monthly cap (`spend.limit == nil`) — a gap needs a limit to pace
+    /// against.
+    ///
+    /// Derived rather than stored, for the same reason as ``WindowSample/gap``: it was written with
+    /// fifteen decimals, read by nothing, and is one subtraction away from the two fields beside it.
+    public var creditGap: Double? {
+        spentFrac.map { monthPct * 100 - $0 * 100 }
     }
 
     private enum CodingKeys: String, CodingKey {
         case used, limit, enabled, spendLimitReached, usedCredits, currency, decimalPlaces
-        case spentFrac, monthPct, creditGap
+        case spentFrac, monthPct
     }
 
     public init(from decoder: any Decoder) throws {
@@ -255,15 +312,12 @@ public struct SpendSample: Sendable, Equatable, Codable {
         self.decimalPlaces = try c.decodeIfPresent(Int.self, forKey: .decimalPlaces)
         self.spentFrac = try c.decodeIfPresent(Double.self, forKey: .spentFrac)
         self.monthPct = try c.decodeIfPresent(Double.self, forKey: .monthPct) ?? 0
-        self.creditGap = try c.decodeIfPresent(Double.self, forKey: .creditGap)
     }
 
     /// Build from a domain ``SpendInfo`` plus the derived credits-pacing numbers.
     init(_ spend: SpendInfo, now: Date) {
         let spentFrac = CreditsPacing.spentFraction(of: spend)
         let monthPct = CreditsPacing.monthElapsedFraction(now: now)
-        // Credit gap only when a cap was set (`spentFrac != nil` iff `spend.limit` has a usable value).
-        let creditGap = spentFrac.map { monthPct * 100 - $0 * 100 }
         self.init(
             used: spend.used.map(MoneySample.init),
             limit: spend.limit.map(MoneySample.init),
@@ -273,8 +327,7 @@ public struct SpendSample: Sendable, Equatable, Codable {
             currency: spend.currency,
             decimalPlaces: spend.decimalPlaces,
             spentFrac: spentFrac,
-            monthPct: monthPct,
-            creditGap: creditGap)
+            monthPct: monthPct)
     }
 }
 

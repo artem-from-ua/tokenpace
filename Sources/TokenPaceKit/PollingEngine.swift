@@ -88,17 +88,26 @@ public struct PollOutput: Sendable, Equatable {
     /// HTTP status, full response body, and token dates. `nil` only for outputs built without a real
     /// attempt (e.g. a hand-constructed test fixture); every live iteration fills it.
     public let diagnostics: PollDiagnostics?
+    /// The weekly utilization in both forms (#386) — the API's quantised integer and the value
+    /// reconstructed from the five-hour counter — for the snapshot above.
+    ///
+    /// `nil` when there is no snapshot to describe. Carried beside `snapshot` rather than folded
+    /// into it so the shell can disclose *both* numbers (Troubleshoot, the journal) while the
+    /// renderers see only the effective one, via ``WeeklyUtilization/applied(to:)``.
+    public let weekly: WeeklyUtilization?
 
     public init(
         snapshot: UsageSnapshot?,
         health: UsageHealth,
         interval: TimeInterval,
-        diagnostics: PollDiagnostics? = nil
+        diagnostics: PollDiagnostics? = nil,
+        weekly: WeeklyUtilization? = nil
     ) {
         self.snapshot = snapshot
         self.health = health
         self.interval = interval
         self.diagnostics = diagnostics
+        self.weekly = weekly
     }
 }
 
@@ -139,6 +148,16 @@ public struct PollState: Sendable, Equatable {
     /// ``UsageHealth/notPolling``; see ``PollingEngine/enteringServiceOnlyMode(_:previous:)`` for why
     /// entering this mode also clears `lastSnapshot`.
     public var notPolling: Bool = false
+    /// The weekly-utilization reconstruction (#386) — the running estimate of the 5h↔7d exchange
+    /// rate plus the accumulation since the last observed weekly bump.
+    ///
+    /// Lives here for the same reason ``lastUtilizationChange`` does: it is a fact about the
+    /// *sequence* of polls, not about any single one, and ``PollingEngine/advance(previous:outcome:refresh:claudeActive:now:)``
+    /// is the one seam that sees two consecutive snapshots. Unlike that stamp, this one is worth
+    /// persisting across relaunches — the ratio takes ~20 h of active work to fill its window, so
+    /// dropping it on every restart would keep the feature permanently cold (see
+    /// ``WeeklyInterpolator/resumed(at:)`` for what survives a break and what does not).
+    public var weeklyInterpolator: WeeklyInterpolator = WeeklyInterpolator()
 
     /// Cold start: healthy backoff (no hold), no data yet. `claudeActive` defaults to `true` so the
     /// very first interval is the responsive 3-min base until the first probe.
@@ -152,7 +171,8 @@ public struct PollState: Sendable, Equatable {
         refreshGate: RefreshGate = RefreshGate(),
         idleSuppressedUntil: Date? = nil,
         lastUtilizationChange: Date? = nil,
-        notPolling: Bool = false
+        notPolling: Bool = false,
+        weeklyInterpolator: WeeklyInterpolator = WeeklyInterpolator()
     ) {
         self.backoff = backoff
         self.claudeActive = claudeActive
@@ -164,6 +184,7 @@ public struct PollState: Sendable, Equatable {
         self.idleSuppressedUntil = idleSuppressedUntil
         self.lastUtilizationChange = lastUtilizationChange
         self.notPolling = notPolling
+        self.weeklyInterpolator = weeklyInterpolator
     }
 
     /// The `UsageHealth` view-model input derived from this state.
@@ -300,6 +321,13 @@ public struct PollingEngine: Sendable {
     /// `.manualRefresh` signal is what makes "the next tick" mean *now* rather than up to an interval
     /// later. Defaults to always-on so every existing construction site reads unchanged.
     let usageApiEnabled: @Sendable () -> Bool
+    /// The weekly reconstruction state to start from (#386) — the shell hands back what it persisted,
+    /// so the ratio survives a relaunch instead of re-warming for ~20 h of active work. Defaults to a
+    /// fresh estimator, so every existing construction site (and every test) reads unchanged.
+    let restoreWeekly: @Sendable () -> WeeklyInterpolator
+    /// Called whenever that state advances, so the shell can persist it. Same seam discipline as
+    /// `usageApiEnabled`: the Kit owns the value, the shell owns the storage. Defaults to a no-op.
+    let persistWeekly: @Sendable (WeeklyInterpolator) -> Void
 
     public init(
         transport: UsageTransport,
@@ -308,7 +336,9 @@ public struct PollingEngine: Sendable {
         scheduler: PollScheduler,
         probe: ClaudeActivityProbe,
         now: @escaping @Sendable () -> Date,
-        usageApiEnabled: @escaping @Sendable () -> Bool = { true }
+        usageApiEnabled: @escaping @Sendable () -> Bool = { true },
+        restoreWeekly: @escaping @Sendable () -> WeeklyInterpolator = { WeeklyInterpolator() },
+        persistWeekly: @escaping @Sendable (WeeklyInterpolator) -> Void = { _ in }
     ) {
         self.transport = transport
         self.tokenProvider = tokenProvider
@@ -317,6 +347,8 @@ public struct PollingEngine: Sendable {
         self.probe = probe
         self.now = now
         self.usageApiEnabled = usageApiEnabled
+        self.restoreWeekly = restoreWeekly
+        self.persistWeekly = persistWeekly
     }
 
     // MARK: Pure transitions
@@ -369,6 +401,10 @@ public struct PollingEngine: Sendable {
             if snapshot.fiveHour.utilization > previousUtil {
                 next.lastUtilizationChange = now
             }
+            // Fold the poll into the weekly reconstruction (#386), reading the **decoded** snapshot
+            // rather than the idle-grace rebuild below: the grace only masks a spurious 5h idle, and
+            // rolling a window forward for the UI must not be mistaken for spend.
+            next.weeklyInterpolator = previous.weeklyInterpolator.advanced(with: snapshot, now: now)
             // Suppress a spurious session-idle in the seconds after a 5h reset (ADR-0041/0045). The
             // rebuilt snapshot (idle held off, or a genuine idle passed through) becomes lastSnapshot.
             let (rendered, until) = Self.applyIdleGrace(
@@ -498,6 +534,33 @@ public struct PollingEngine: Sendable {
         return next.claudeActive ? .claudeActiveResumed : .claudeInactive
     }
 
+    // MARK: Weekly ratio (for logging)
+
+    /// How far the weekly exchange rate must move before it is worth a log line — 5 %.
+    ///
+    /// The estimate is a rolling median over quantised samples, so it twitches by a few percent as
+    /// the window slides; logging every twitch would flood the `network` category. A genuine plan or
+    /// promotion change moves it by tens of percent (the observed "+50 % weekly limit" promo would
+    /// move N from 10 to 15), so this floor separates noise from news.
+    static let weeklyRatioLogThreshold = 0.05
+
+    /// The one line to log when the weekly exchange rate moves materially, or `nil` when it did not
+    /// — the same "only on change" discipline as ``intervalDecision(previous:next:)``.
+    ///
+    /// Also fires on the **first** real estimate (the seed being displaced), because that is the
+    /// moment the reconstruction starts speaking for this user's own data rather than a default.
+    static func weeklyRatioLog(previous: PollState, next: PollState) -> String? {
+        let before = previous.weeklyInterpolator.ratio
+        let after = next.weeklyInterpolator.ratio
+        guard after.sampleCount > 0 else { return nil }
+
+        let moved = abs(after.estimate - before.estimate) / max(before.estimate, 0.001)
+        let firstEstimate = before.sampleCount == 0
+        guard firstEstimate || moved >= weeklyRatioLogThreshold else { return nil }
+
+        return String(format: "weekly ratio N=%.1f (%d samples)", after.estimate, after.sampleCount)
+    }
+
     // MARK: Session-idle transition (for logging)
 
     /// The one-time log line when the 5-hour session-idle state flips (#100, ADR-0027), or `nil` when it
@@ -618,7 +681,9 @@ public struct PollingEngine: Sendable {
     public func run() -> AsyncStream<PollOutput> {
         AsyncStream { continuation in
             let task = Task {
-                var state = PollState()
+                // Restore the weekly reconstruction (#386) and age it for the break since the last
+                // run: the ratio always survives, the accumulation only if the gap was short.
+                var state = PollState(weeklyInterpolator: restoreWeekly().resumed(at: now()))
                 while !Task.isCancelled {
                     let active = probe.isClaudeRunning()
                     let previous = state
@@ -662,10 +727,28 @@ public struct PollingEngine: Sendable {
                         AppLogger.network.notice("five_hour idle suppressed — within reset grace")
                     }
 
+                    // The weekly exchange rate (#386), logged **only when it actually moves** — the
+                    // same discipline as the interval line above. A shifted N is the one observable
+                    // trace of a changed plan/promotion, since the payload announces neither.
+                    if let line = Self.weeklyRatioLog(previous: previous, next: state) {
+                        AppLogger.network.notice("\(line, privacy: .public)")
+                    }
+                    if previous.weeklyInterpolator.isDegraded != state.weeklyInterpolator.isDegraded {
+                        let phase = state.weeklyInterpolator.isDegraded
+                            ? "degraded — polling gap" : "recovered"
+                        AppLogger.network.notice("weekly interpolation \(phase, privacy: .public)")
+                    }
+                    if state.weeklyInterpolator != previous.weeklyInterpolator {
+                        persistWeekly(state.weeklyInterpolator)
+                    }
+
                     let interval = Self.effectiveInterval(state)
                     continuation.yield(PollOutput(
                         snapshot: state.lastSnapshot, health: state.health, interval: interval,
-                        diagnostics: result?.diagnostics))
+                        diagnostics: result?.diagnostics,
+                        weekly: state.lastSnapshot.map {
+                            state.weeklyInterpolator.value(forRaw: $0.sevenDay.utilization)
+                        }))
 
                     // Wait for the next poll, but suppress a **redundant** wake: a `.wake` /
                     // `.networkRestored` that arrives while the cached data is still fresh (last
