@@ -201,7 +201,19 @@ public struct WeeklyInterpolator: Sendable, Equatable, Codable {
         if five >= previousFive {
             next.fiveHourSinceAnchor += five - previousFive
         } else if !isHole {
-            next.fiveHourSinceAnchor += five        // reset between two fresh polls
+            // The counter fell on a fresh poll. The intended reading is "it reset between the two
+            // polls, so the new value is spend that happened after the reset" — true when the drop
+            // lands near zero, which is what a real reset looks like (measured: median 0, p90 2).
+            //
+            // But a drop is not proof of a reset. The same journal holds `49 → 42`, `67 → 21` and
+            // `53 → 51` minutes apart — the server lowering its own counter, not 42 points of spend
+            // in three minutes. Crediting the new value there invents work that never happened, and
+            // a wrapping counter (99 → 0 → 1) hands over its whole value on every lap.
+            //
+            // So the credit is capped at what the five-hour window could physically have burned in
+            // the elapsed gap. Near-zero post-reset values — the overwhelming majority — pass
+            // untouched; the three server-side reductions above are cut to the honest few points.
+            next.fiveHourSinceAnchor += min(five, Self.maxCreditableSpend(over: gap))
         }
 
         // Weekly transition.
@@ -250,6 +262,21 @@ public struct WeeklyInterpolator: Sendable, Equatable, Codable {
             return WeeklyInterpolator(ratio: ratio)
         }
         return self
+    }
+
+    /// The most five-hour percentage points that could honestly have been spent over `gap` seconds.
+    ///
+    /// The window is 100 points of 5 hours, so it cannot burn faster than `100 / 18 000` points per
+    /// second even at full tilt. A generous ×2 covers clock skew and a poll that lands late, and a
+    /// small floor keeps a zero-length gap (a forced refresh, or a stub on a frozen clock) from
+    /// crediting nothing at all when the counter genuinely moved.
+    ///
+    /// This bounds only the **post-reset** credit, where the drop itself is the sole evidence. A
+    /// plain rise needs no cap: the server reported both endpoints, so the difference is measured,
+    /// not inferred.
+    static func maxCreditableSpend(over gap: TimeInterval) -> Double {
+        let full = Double(LimitWindow.fiveHour.durationSeconds)
+        return max(5, 2 * 100 * max(0, gap) / full)
     }
 
     /// The median of the recent intervals, or ``fallbackInterval`` before enough are known.

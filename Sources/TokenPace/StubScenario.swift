@@ -511,13 +511,33 @@ enum StubScenario: String, CaseIterable {
     }
 
     /// Emoji badges shown before the scenario's name in the dev-tools dropdown, marking how "live" it
-    /// is: **⚡** = real usage API (``realNetwork``), **⏱** = real wall clock (``usesRealClock``). A
-    /// fully canned, date-decoupled stub carries neither. Empty string when there is nothing to flag.
+    /// is: **⚡** = real usage API (``realNetwork``), **⏱** = real wall clock (``usesRealClock``),
+    /// **⏭** = a sequence that advances one step per poll (``advancesPerPoll``), so **Refresh now**
+    /// steps through it. A fully canned, frozen frame carries none. Empty string when nothing to flag.
     var badges: String {
         var out = ""
         if self == .realNetwork { out += "⚡" }
         if usesRealClock { out += "⏱" }
+        if advancesPerPoll { out += "⏭" }
         return out.isEmpty ? "" : out + " "
+    }
+
+    /// Whether this scenario is a **sequence** whose state advances one step per poll, rather than a
+    /// frozen frame — so it is watched by stepping through it, and **Refresh now** in Troubleshoot is
+    /// the control that does the stepping (each click is one more poll).
+    ///
+    /// Flagged in the dropdown with **⏭** because the difference is invisible otherwise: a frozen
+    /// frame looks identical after a refresh, while these look wrong until you keep going. The
+    /// weekly reconstruction (#386) is the clearest case — its whole subject is motion across polls,
+    /// so a single frame cannot show it at all.
+    var advancesPerPoll: Bool {
+        switch self {
+        case .weeklyInterp, .standByFloor, .optimisticReset, .resetGrace,
+             .justUnblocked, .creditsOnset, .staleError:
+            return true
+        default:
+            return false
+        }
     }
 
     /// This scenario's render/transport clock: the fixed ``stubClock`` when set, else the live `realNow`

@@ -1158,8 +1158,14 @@ actor StubUsageTransport: UsageTransport {
         if mode == .weeklyInterp {
             let n = calls
             calls += 1
+            // The five-hour counter climbs 1 pp per poll and wraps, exactly as a real one resets
+            // ~33.6 times a week. The weekly counter ticks **every 8 polls** rather than once: a
+            // single bump left the run with no way out of the ceiling clip, so anyone stepping
+            // through with "Refresh now" (which is how this stub is meant to be watched) saw the bar
+            // freeze after ~8 clicks and stay frozen. Ticking periodically makes the run a loop —
+            // creep, clip, bump, creep — which is also what a real week looks like.
             let fiveUtil = Double((n * 1) % 100)
-            let weekly = n < 8 ? 61.0 : 62.0
+            let weekly = 61.0 + Double(n / 8)
             let fiveReset = self.resetsAt(inSeconds: 3 * 3600)
             let sevenReset = self.resetsAt(inSeconds: 4 * 24 * 3600)
             let body = """

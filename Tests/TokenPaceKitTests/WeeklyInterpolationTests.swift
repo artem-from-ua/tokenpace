@@ -260,6 +260,41 @@ struct WeeklyResetTests {
         #expect(!s.isDegraded)
     }
 
+    @Test func aServerSideReductionIsNotCreditedAsSpend() {
+        // Found in the real journal: `49 → 42`, `67 → 21`, `53 → 51`, all minutes apart. Those are the
+        // server lowering its own counter, not 42 points of spend in three minutes — but the
+        // "it fell, so the new value is post-reset spend" rule would credit the whole thing.
+        var s = WeeklyInterpolator()
+        var t = now
+        for five in [40.0, 45, 49] {
+            s = s.advanced(with: snap(five: five, weekly: 50), now: t)
+            t = t.addingTimeInterval(180)
+        }
+        let before = s.fiveHourSinceAnchor
+        s = s.advanced(with: snap(five: 42, weekly: 50), now: t)      // 49 → 42, three minutes later
+        let credited = s.fiveHourSinceAnchor - before
+        #expect(credited < 42, "the whole post-drop value was credited as spend")
+        #expect(credited <= WeeklyInterpolator.maxCreditableSpend(over: 180) + 1e-9)
+    }
+
+    @Test func aWrappingCounterCreditsOnlyTheStepItTook() {
+        // A counter that wraps (96 → 0) used to hand over its whole new value, so each lap added a
+        // phantom jump on top of the real 4 pp step. Caught by the `weekly-interp` stub, whose
+        // five-hour counter wraps by construction. The accumulation itself is *expected* to grow —
+        // what must not grow is the amount credited per poll.
+        var s = WeeklyInterpolator()
+        var t = now
+        var previousAcc = 0.0
+        for n in 0..<120 {
+            s = s.advanced(with: snap(five: Double((n * 4) % 100), weekly: 50), now: t)
+            let credited = s.fiveHourSinceAnchor - previousAcc
+            #expect(credited <= WeeklyInterpolator.maxCreditableSpend(over: 180) + 1e-9,
+                    "poll \(n): credited \(credited) pp in one 3-minute step")
+            previousAcc = s.fiveHourSinceAnchor
+            t = t.addingTimeInterval(180)
+        }
+    }
+
     @Test func aFiveHourResetAcrossAHoleIsNotCredited() {
         // The same drop after a long gap may hide more than one reset, so nothing is credited and
         // the state degrades — the raw value is shown instead of a guess.
