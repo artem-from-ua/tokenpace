@@ -274,13 +274,14 @@ struct TroubleshootWeeklyTests {
         #expect(layout.weeklyLine == "weekly: 88 % raw → 88.34 % est (N ≈ 9.8, 12 samples)")
     }
 
-    @Test func staysHiddenWhenThereIsNothingToExplain() {
-        // The reconstruction agreed with the API — no line, so the row does not appear at all.
+    @Test func staysVisibleEvenWhenTheTwoAgree() {
+        // Diagnostic surface: an absent row would read as "nothing to report", which looks exactly
+        // like "the feature is broken" — the confusion an earlier draft actually caused.
         let layout = TroubleshootLayout.make(
             from: out(WeeklyUtilization(raw: 88, effective: 88, source: .interpolated,
                                         ratio: 9.8, sampleCount: 12)),
             timeZone: utc)
-        #expect(layout.weeklyLine == nil)
+        #expect(layout.weeklyLine == "weekly: 88 % raw = est (N ≈ 9.8, 12 samples)")
     }
 
     @Test func namesTheReasonWhenDegraded() {

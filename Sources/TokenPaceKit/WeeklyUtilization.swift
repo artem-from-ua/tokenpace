@@ -111,22 +111,29 @@ public struct WeeklyUtilization: Sendable, Equatable, Codable {
     // MARK: - Disclosure
 
     /// The Troubleshoot line — the one place both numbers appear together, so the estimate can be
-    /// judged on live data. `nil` when there is nothing to disclose (effective == raw).
+    /// judged on live data.
+    ///
+    /// **Always present**, even when the two numbers agree. This is a diagnostic surface: a missing
+    /// row reads as "nothing to report", which is indistinguishable from "the feature is broken" —
+    /// and that is precisely the confusion an earlier draft caused, when the row vanished on a fresh
+    /// stub and looked like a regression. Showing `= raw` states plainly that the reconstruction ran
+    /// and had nothing to add yet, and it keeps `N` and the sample count visible while they warm up.
     ///
     /// ```
     /// weekly: 88 % raw → 88.34 % est (N ≈ 9.8, 12 samples)
     /// weekly: 88 % raw → 88.49 % est (N ≈ 9.8, 12 samples, clipped)
+    /// weekly: 88 % raw = est (N ≈ 10.0, 0 samples, inherited anchor)
     /// weekly: 88 % raw (degraded — polling gap)
     /// ```
-    public var troubleshootLine: String? {
+    public var troubleshootLine: String {
         guard source != .degraded else {
             return "weekly: \(Self.percent(raw)) raw (degraded — polling gap)"
         }
-        guard effective != raw else { return nil }
         var note = "N ≈ \(Self.ratioText(ratio)), \(sampleCount) sample\(sampleCount == 1 ? "" : "s")"
         if source == .clipped { note += ", clipped" }
         if source == .inherited { note += ", inherited anchor" }
-        return "weekly: \(Self.percent(raw)) raw → \(Self.estimateText(effective)) est (\(note))"
+        let value = effective == raw ? "= est" : "→ \(Self.estimateText(effective)) est"
+        return "weekly: \(Self.percent(raw)) raw \(value) (\(note))"
     }
 
     private static func percent(_ value: Double) -> String { "\(Int(value.rounded())) %" }

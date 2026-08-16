@@ -459,16 +459,22 @@ struct WeeklyUtilizationTests {
 
         let clipped = WeeklyUtilization(raw: 88, effective: 88.49, source: .clipped,
                                         ratio: 9.8, sampleCount: 12)
-        #expect(clipped.troubleshootLine?.hasSuffix("clipped)") == true)
+        #expect(clipped.troubleshootLine.hasSuffix("clipped)"))
 
         let degraded = WeeklyUtilization(raw: 88, effective: 88, source: .degraded,
                                          ratio: 9.8, sampleCount: 12)
         #expect(degraded.troubleshootLine == "weekly: 88 % raw (degraded — polling gap)")
 
-        // Nothing to disclose when the reconstruction did not move the value.
+        // Present even when the two agree: on a diagnostic surface an absent row reads as "nothing
+        // to report", which is indistinguishable from "the feature is broken".
         let identical = WeeklyUtilization(raw: 88, effective: 88, source: .interpolated,
                                           ratio: 9.8, sampleCount: 12)
-        #expect(identical.troubleshootLine == nil)
+        #expect(identical.troubleshootLine == "weekly: 88 % raw = est (N ≈ 9.8, 12 samples)")
+
+        // A fresh state still says what it is doing — and shows N warming up.
+        let fresh = WeeklyUtilization(raw: 61, effective: 61, source: .inherited,
+                                      ratio: 10, sampleCount: 0)
+        #expect(fresh.troubleshootLine == "weekly: 61 % raw = est (N ≈ 10.0, 0 samples, inherited anchor)")
     }
 }
 

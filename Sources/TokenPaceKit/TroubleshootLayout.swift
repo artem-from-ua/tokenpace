@@ -23,9 +23,14 @@ public struct TroubleshootLayout: Sendable, Equatable {
     public let statusLine: String?
     public let intervalLine: String?
     public let nextUpdateLine: String?
-    /// The weekly reconstruction (#386), when it has something to disclose: the API's quantised
-    /// value and the value derived from the five-hour counter, side by side with the exchange rate
-    /// behind it. `nil` when the two agree (nothing to explain) or there is no snapshot.
+    /// The weekly reconstruction (#386): the API's quantised value and the value derived from the
+    /// five-hour counter, side by side with the exchange rate behind it. `nil` only when there is no
+    /// snapshot to describe — **not** when the two numbers agree.
+    ///
+    /// Kept visible even while the reconstruction has nothing to add, because this is a diagnostic
+    /// surface: an absent row reads as "nothing to report", which looks exactly like "the feature is
+    /// broken". It also keeps `N` and the sample count on screen while they warm up, which is the
+    /// slow part worth watching.
     ///
     /// This is the **only** surface showing both numbers at once, and the one place the estimate can
     /// be judged on live data rather than on a stub — which is why it ships a full release before
