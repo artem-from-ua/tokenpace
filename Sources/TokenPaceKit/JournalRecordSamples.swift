@@ -5,6 +5,19 @@ import Foundation
 /// A successful usage poll as journalled — every window, the credits state, and the derived UI
 /// states, so downstream analytics never has to recompute what the app already showed.
 public struct UsageSample: Sendable, Equatable, Codable {
+    /// The sample-format version, written on **every** line and bumped monotonically whenever the
+    /// shape or the meaning of a field changes.
+    ///
+    /// Carried per line rather than once per file because the journal is append-only and spans
+    /// upgrades: a single file legitimately holds lines from several app versions, so a header could
+    /// only ever describe the first of them. With `v` on the line, a reader knows how to interpret it
+    /// without inferring anything from which keys happen to be present.
+    ///
+    /// - **1** — the original shape (implicit: absent `v` decodes as 1). `util` was the API's value;
+    ///   `gap` was a stored field.
+    /// - **2** — #386: `util` carries the value the app **acted on** (reconstructed for `seven_day`),
+    ///   `raw` carries the API's; `src`/`n` describe the reconstruction; `gap` is derived, not stored.
+    public let v: Int
     /// Poll timestamp (ISO-8601, UTC, no fractional seconds — ``ResetClock/isoString(from:)``).
     public let t: String
     /// Usage-API response latency in milliseconds, or `nil` when unmeasured.
@@ -29,7 +42,11 @@ public struct UsageSample: Sendable, Equatable, Codable {
     /// ``BlockingReset/Choice`` — which reset is the blocked countdown, or `nil` when not blocked.
     public let blockingReset: BlockingResetSample?
 
+    /// The version this build writes. Bump together with the case list on ``v``.
+    public static let currentVersion = 2
+
     public init(
+        v: Int = UsageSample.currentVersion,
         t: String,
         ms: Int? = nil,
         plan: String? = nil,
@@ -46,6 +63,7 @@ public struct UsageSample: Sendable, Equatable, Codable {
         brokenReset: Bool = false,
         blockingReset: BlockingResetSample? = nil
     ) {
+        self.v = v
         self.t = t
         self.ms = ms
         self.plan = plan
@@ -64,21 +82,23 @@ public struct UsageSample: Sendable, Equatable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case t, ms, plan, tier, h5, d7, opus, sonnet, scoped, sessionIdle, spend
+        case v, t, ms, plan, tier, h5, d7, opus, sonnet, scoped, sessionIdle, spend
         case blocked, credits, brokenReset, blockingReset
     }
 
     /// Tolerant decode — a partial line (an older/newer schema) fills defaults rather than failing.
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        // An absent `v` is a v1 line — the field did not exist before #386.
+        self.v = try c.decodeIfPresent(Int.self, forKey: .v) ?? 1
         self.t = try c.decodeIfPresent(String.self, forKey: .t) ?? ""
         self.ms = try c.decodeIfPresent(Int.self, forKey: .ms)
         self.plan = try c.decodeIfPresent(String.self, forKey: .plan)
         self.tier = try c.decodeIfPresent(String.self, forKey: .tier)
         self.h5 = try c.decodeIfPresent(WindowSample.self, forKey: .h5)
-            ?? WindowSample(util: 0, reset: "", timePct: 0, gap: 0, sev: .green)
+            ?? WindowSample(util: 0, reset: "", timePct: 0, sev: .green)
         self.d7 = try c.decodeIfPresent(WindowSample.self, forKey: .d7)
-            ?? WindowSample(util: 0, reset: "", timePct: 0, gap: 0, sev: .green)
+            ?? WindowSample(util: 0, reset: "", timePct: 0, sev: .green)
         self.opus = try c.decodeIfPresent(WindowSample.self, forKey: .opus)
         self.sonnet = try c.decodeIfPresent(WindowSample.self, forKey: .sonnet)
         self.scoped = try c.decodeIfPresent([ScopedSample].self, forKey: .scoped) ?? []

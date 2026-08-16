@@ -27,7 +27,7 @@ struct UsageGridTests {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
         iso.timeZone = zone
-        let win = WindowSample(util: 0, reset: "", timePct: 0, gap: 0, sev: .green)
+        let win = WindowSample(util: 0, reset: "", timePct: 0, sev: .green)
         return .usage(UsageSample(
             t: iso.string(from: t), h5: win, d7: win,
             credits: CreditsFlags(active: false, showIcon: false, onCredits: false)))
@@ -177,7 +177,7 @@ struct UsageGridTests {
 
     @Test func unparseableTimestampIsSkipped() {
         let now = date(2026, 6, 15, 23, zone: Self.utc)
-        let win = WindowSample(util: 0, reset: "", timePct: 0, gap: 0, sev: .green)
+        let win = WindowSample(util: 0, reset: "", timePct: 0, sev: .green)
         let bad = JournalRecord.usage(UsageSample(
             t: "not-a-date", h5: win, d7: win,
             credits: CreditsFlags(active: false, showIcon: false, onCredits: false)))

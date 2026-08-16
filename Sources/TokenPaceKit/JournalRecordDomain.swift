@@ -9,25 +9,34 @@ extension JournalRecord {
     /// All the derived states are computed here (in the pure Kit) so the shell stays a thin
     /// serialiser: window pacing via ``PacingModel``/``PacingBucket``, credits via ``CreditsPacing``,
     /// blocked/credits flags, `hasBrokenActiveReset`, and the blocking-reset choice.
+    /// - Parameter weekly: the seven-day reconstruction for this poll (#386). Defaults to `nil` so
+    ///   fixtures and tests that predate it keep compiling; live polls always pass it.
     public static func usage(
         from snapshot: UsageSnapshot,
         now: Date,
         durationMs: Int? = nil,
         plan: String? = nil,
-        tier: String? = nil
+        tier: String? = nil,
+        weekly: WeeklyUtilization? = nil
     ) -> JournalRecord {
-        let credits = CreditsFlags(
-            active: snapshot.spend.map(CreditsPacing.isActive) ?? false,
-            showIcon: snapshot.spend.map {
-                CreditsPacing.shouldShowIcon($0, baseLimitExhausted: CreditsPacing.anyBaseLimitExhausted(in: snapshot))
-            } ?? false,
-            onCredits: ExtraUsageOnset.isOnCredits(snapshot))
-
         // The weekly gate, hoisted **out** of the `UsageSample(...)` literal below: `d7` is built at the
         // same expression level as `h5`, so the 7-day state has to be resolved before the literal or the
         // 5-hour sample could not see it. Recording it here also keeps the journal's bucket identical to
         // the pixel the user saw — the render layer applies the same gate.
-        let weeklyHeadroom = PacingModel.weeklyHasHeadroom(in: snapshot, now: now)
+        //
+        // Computed on the **reconstructed** snapshot (#386), not the raw one: the render layer applies
+        // that overlay before anything reads the weekly window, so a gate derived from the raw value
+        // could disagree with the bar the user was looking at — which is the one thing this line
+        // exists to prevent.
+        let rendered = weekly?.applied(to: snapshot) ?? snapshot
+        let weeklyHeadroom = PacingModel.weeklyHasHeadroom(in: rendered, now: now)
+
+        let credits = CreditsFlags(
+            active: rendered.spend.map(CreditsPacing.isActive) ?? false,
+            showIcon: rendered.spend.map {
+                CreditsPacing.shouldShowIcon($0, baseLimitExhausted: CreditsPacing.anyBaseLimitExhausted(in: rendered))
+            } ?? false,
+            onCredits: ExtraUsageOnset.isOnCredits(rendered))
 
         let sample = UsageSample(
             t: ResetClock.isoString(from: now),
@@ -35,16 +44,21 @@ extension JournalRecord {
             plan: plan,
             tier: tier,
             h5: window(snapshot.fiveHour, window: .fiveHour, now: now, blueAllowed: weeklyHeadroom),
-            d7: window(snapshot.sevenDay, window: .sevenDay, now: now, blueAllowed: true),
+            d7: window(snapshot.sevenDay, window: .sevenDay, now: now, blueAllowed: true,
+                       weekly: weekly),
             opus: snapshot.sevenDayOpus.map { window($0, window: .sevenDay, now: now, blueAllowed: weeklyHeadroom) },
             sonnet: snapshot.sevenDaySonnet.map { window($0, window: .sevenDay, now: now, blueAllowed: weeklyHeadroom) },
             scoped: snapshot.scopedModelWindows.map { scoped($0, now: now, blueAllowed: weeklyHeadroom) },
             sessionIdle: snapshot.sessionIdle,
             spend: snapshot.spend.map { SpendSample($0, now: now) },
-            blocked: CreditsPacing.isBlocked(in: snapshot),
+            // These three read the **rendered** snapshot too, so the record describes one consistent
+            // state. In practice they cannot differ — each keys off `>= 100`, and the reconstruction
+            // provably never carries a value across that line (ADR-0103) — but "provably equal" is a
+            // reason to be consistent, not a reason to mix sources and leave a reader to work it out.
+            blocked: CreditsPacing.isBlocked(in: rendered),
             credits: credits,
-            brokenReset: snapshot.hasBrokenActiveReset,
-            blockingReset: BlockingReset.forBlocked(snapshot: snapshot, now: now).map(BlockingResetSample.init))
+            brokenReset: rendered.hasBrokenActiveReset,
+            blockingReset: BlockingReset.forBlocked(snapshot: rendered, now: now).map(BlockingResetSample.init))
         return .usage(sample)
     }
 
@@ -93,28 +107,43 @@ extension JournalRecord {
     /// When the reset parses, the bucket comes from a real ``BarLayout``; when it doesn't (idle/empty
     /// or malformed reset), fall back to exhausted-or-green from utilisation alone (there is no pacing
     /// gap to colour without a reset instant).
+    /// - Parameter weekly: the reconstruction for this window (#386), when there is one. Only the
+    ///   seven-day window has it; the five-hour and per-model rows pass `nil` and journal the API's
+    ///   value as both `util` and `raw`.
     private static func window(_ w: UsageWindow, window kind: LimitWindow, now: Date,
-                               blueAllowed: Bool) -> WindowSample {
+                               blueAllowed: Bool,
+                               weekly: WeeklyUtilization? = nil) -> WindowSample {
+        // What the app acted on. The bars were drawn from the reconstructed value, so the journal
+        // records that as `util` and keeps the API's number beside it — a line must describe the
+        // pixels that existed, not a parallel reality.
+        let effective = weekly?.effective ?? w.utilization
+        let raw = weekly?.raw ?? w.utilization
+
         guard let resetsAt = ResetClock.parse(w.resetsAt) else {
-            // No parseable reset → no pacing gap to colour; `timePct` 0, `gap` from time(0)−util.
-            return WindowSample(util: w.utilization, reset: w.resetsAt, timePct: 0,
-                                gap: -w.utilization, sev: w.utilization >= 100 ? .red : .green)
+            // No parseable reset → no pacing gap to colour; `timePct` 0, and `gap` derives to −util.
+            return WindowSample(
+                util: effective, raw: raw, src: weekly?.source.rawValue, n: weekly?.ratio,
+                reset: w.resetsAt, timePct: 0, sev: effective >= 100 ? .red : .green,
+                windowSeconds: kind.durationSeconds)
         }
         let layout = PacingModel.barLayout(
-            utilization: w.utilization, resetsAt: resetsAt, now: now,
+            utilization: effective, resetsAt: resetsAt, now: now,
             window: kind, blueAllowed: blueAllowed)
         return WindowSample(
-            util: w.utilization, reset: w.resetsAt,
-            timePct: layout.timeFraction, gap: layout.timeFraction * 100 - w.utilization,
-            sev: PacingBucket.of(layout))
+            util: effective, raw: raw, src: weekly?.source.rawValue, n: weekly?.ratio,
+            reset: w.resetsAt, timePct: layout.timeFraction, sev: PacingBucket.of(layout),
+            windowSeconds: kind.durationSeconds)
     }
 
     /// Journal a scoped per-model window — all 7-day-paced, so it borrows the 7-day pacing math (and
     /// the same weekly gate: a scoped limit spends from the weekly budget too).
+    ///
+    /// Never reconstructed: a scoped window meters different spend and has no five-hour counter of
+    /// its own, so a single `N` cannot describe it (ADR-0103).
     private static func scoped(_ s: ScopedModelWindow, now: Date, blueAllowed: Bool) -> ScopedSample {
         let w = window(s.window, window: .sevenDay, now: now, blueAllowed: blueAllowed)
         return ScopedSample(name: s.name, pct: s.window.utilization, reset: s.window.resetsAt,
-                            timePct: w.timePct, gap: w.gap, sev: w.sev)
+                            timePct: w.timePct, sev: w.sev)
     }
 
     /// Derive the journal `code` and `reason` from a fetch diagnostic (and, for transport failures, the

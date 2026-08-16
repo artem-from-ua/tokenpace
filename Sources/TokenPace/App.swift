@@ -1079,6 +1079,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case (false, false): KeychainTokenProvider()
         }
         let refresher: DelegatedRefresher? = scenario.usesStubToken ? nil : ClaudeCLIRefresher()
+
+        // #386: bring the journal up to the current sample format. Started here, before the polling
+        // loop, but what actually makes it safe is that `UsageJournal` is an **actor**: a rewrite and
+        // an append can never run concurrently, so the migration needs no pause flag and the first
+        // poll simply waits its turn if it arrives mid-rewrite. Files already current are detected and
+        // skipped, so this is a no-op read on every launch after the first. Detached and unawaited on
+        // purpose — a journal that cannot be migrated must never stop the app from working.
+        let journalToMigrate = usageJournal
+        Task.detached(priority: .utility) { await journalToMigrate.migrateIfNeeded() }
+
         let engine = PollingEngine(
             transport: transport,
             tokenProvider: tokenProvider,
@@ -1203,7 +1213,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 from: snapshot, now: now,
                 durationMs: output.diagnostics?.fetch.durationMs,
                 plan: output.diagnostics?.token?.subscriptionType,
-                tier: output.diagnostics?.token?.rateLimitTier)
+                tier: output.diagnostics?.token?.rateLimitTier,
+                // #386: the journal records the value the bars were drawn from, the API's value
+                // beside it, and the exchange rate behind both — every poll, not only when they
+                // differ. The log gets the changes; the journal gets the series.
+                weekly: output.weekly)
         } else if let fetch = output.diagnostics?.fetch {
             record = .error(diagnostics: fetch, failure: output.health.reason, now: now)
         } else {

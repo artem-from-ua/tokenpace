@@ -173,6 +173,12 @@ category (the dev `TOKENPACE_GENERATE_JOURNAL` hook).
 | — | `journal` | `.error` | `journal open failed: errno=<errno>` | `appendLocked` — `open()` on the journal file failed |
 | — | `journal` | `.error` | `journal lock failed: errno=<errno>` | `appendLocked` — `flock(LOCK_EX)` failed; the line is dropped rather than risk an interleaved write |
 | — | `journal` | `.error` | `journal write() failed: errno=<errno>` | `appendLocked` — a `write()` returned ≤ 0 mid-line |
+| — | `journal` | `.notice` | `<file>: journal migrated: <n> rewritten, <m> unchanged[, <k> unparseable][, <j> out of order]` | `migrateIfNeeded` — one journal file was rewritten into the current sample format (#386). One line per file that actually changed; files already current are silent |
+| — | `journal` | `.notice` | `journal migration complete: <n> file(s); originals kept as .v1.bak` | `migrateIfNeeded` — the pass finished and rewrote at least one file. Names the backup suffix because those copies are the only remaining record of the API's own numbers and are **never** deleted by the app |
+| — | `journal` | `.error` | `journal migration: cannot read <file>` | `migrateIfNeeded` — a journal file could not be read; it is left untouched and the pass continues with the next |
+| — | `journal` | `.error` | `journal migration: cannot stage <file>` | `swapIn` — the rewritten contents could not be written beside the original; nothing is swapped |
+| — | `journal` | `.error` | `journal migration: cannot back up <file>` | `swapIn` — the original could not be moved to `.v1.bak`; the staging file is removed and the original left in place |
+| — | `journal` | `.error` | `journal migration: cannot swap in <file>` | `swapIn` — the final rename failed after the original was moved aside; the backup is moved back so the live path is never left empty |
 | — | `journal` | `.notice` | `journal: generating fixture — <days> days, <n> records` | `generateJournalFixture` (App) — the dev `TOKENPACE_GENERATE_JOURNAL` hook started synthesizing a journal |
 | — | `journal` | `.notice` | `journal: fixture written` | `generateJournalFixture` (App) — the fixture was written; the app then terminates |
 
@@ -430,9 +436,9 @@ One log line per interval change. The format is built by
 | `lifecycle` | 116 | `App` (48), `SettingsModel` (30), `UpdateInstaller` (13), `PollingShell` (7), `BackToWorkNotifier` (6), `AwaitingInputWatcher` (5), `PollingEngine` (3), `SettingsWindowController` (2), `ShellEnvironment` (1), `PersistedConfig` (1), `IncidentNotificationDelegate` (1) |
 | `ui` | 1 | `AppearancePane` (1) |
 | `archive` | 7 | `App` (5), `LogArchiver` (2) |
-| `journal` | 12 | `UsageJournal` (4), `StatusPayloadLog` (4), `App` (3), `DevToolsWindowController` (1) |
+| `journal` | 18 | `UsageJournal` (10), `StatusPayloadLog` (4), `App` (3), `DevToolsWindowController` (1) |
 
-**Total: 179 log statements** — `.error` ×46, `.notice` ×115, `.info` ×13, `.debug` ×5.
+**Total: 185 log statements** — `.error` ×50, `.notice` ×117, `.info` ×13, `.debug` ×5.
 
 > Counts recomputed from the source in #275 (the previous figures had drifted over several releases —
 > `SettingsModel` and `BackToWorkNotifier` were missing entirely) and again in #341, where the same

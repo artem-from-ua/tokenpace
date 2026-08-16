@@ -191,4 +191,116 @@ actor UsageJournal {
         let c = calendar.dateComponents([.year, .month], from: instant)
         return String(format: "%04d-%02d", c.year ?? 0, c.month ?? 0)
     }
+
+    // MARK: - Migration (#386)
+
+    /// The suffix a pre-migration copy keeps. **Never deleted by the app** — see ``migrateIfNeeded()``.
+    static let backupSuffix = ".v1.bak"
+
+    /// Bring every journal file up to the current sample format, in chronological order.
+    ///
+    /// Called once at launch, **before the first poll**, so no append can interleave with a rewrite.
+    /// Files already in the current format are detected and skipped without being touched — so this
+    /// costs one read per file on every launch after the first, and nothing else.
+    ///
+    /// Each file is rewritten out-of-place and swapped in with two `rename` calls, which are atomic on
+    /// APFS: a crash at any point leaves either the old file or the new one, never a half-written one.
+    ///
+    /// **The `.v1.bak` copies are kept forever.** After migration `util` is the reconstructed value,
+    /// so the backup is the only remaining record of what the server actually returned — if the
+    /// algorithm turns out to have a flaw, that is the only way to redo the history. The app never
+    /// deletes them; removing them is the maintainer's call.
+    ///
+    /// The reconstruction state is threaded from one file to the next, because the journal is split by
+    /// month and starting each file cold would leave every line of a new month on an inherited anchor
+    /// for no reason.
+    func migrateIfNeeded() {
+        let files = journalFiles()
+        guard !files.isEmpty else { return }
+
+        var state = WeeklyInterpolator()
+        var migratedFiles = 0
+
+        for url in files {
+            guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
+                AppLogger.journal.error(
+                    "journal migration: cannot read \(url.lastPathComponent, privacy: .public)")
+                continue
+            }
+            let (rewritten, carried, outcome) = JournalMigration.migrate(contents: contents, state: state)
+            state = carried
+            guard outcome.changedAnything else { continue }
+
+            if swapIn(rewritten, at: url) {
+                migratedFiles += 1
+                AppLogger.journal.notice(
+                    "\(url.lastPathComponent, privacy: .public): \(outcome.logMessage, privacy: .public)")
+            }
+        }
+        if migratedFiles > 0 {
+            AppLogger.journal.notice(
+                "journal migration complete: \(migratedFiles, privacy: .public) file(s); originals kept as \(Self.backupSuffix, privacy: .public)")
+        }
+    }
+
+    /// Every journal file this instance owns, oldest first — the month suffix sorts chronologically
+    /// as a string, which is the whole reason it is `YYYY-MM`.
+    private func journalFiles() -> [URL] {
+        if let overrideFile {
+            return fileManager.fileExists(atPath: overrideFile.path) ? [overrideFile] : []
+        }
+        let prefix = "usage-journal\(isRelease ? "" : "-dev")-"
+        let all = (try? fileManager.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil)) ?? []
+        return all
+            .filter { $0.lastPathComponent.hasPrefix(prefix) && $0.pathExtension == "jsonl" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    /// Write `contents` beside `url` and swap it in atomically, keeping the original as `.v1.bak`.
+    ///
+    /// Order matters: the new file is fully written and `fsync`ed *before* anything moves, and the
+    /// original is renamed aside rather than overwritten, so at no point does the live path hold a
+    /// partial file. Returns whether the swap happened.
+    private func swapIn(_ contents: String, at url: URL) -> Bool {
+        let staging = url.appendingPathExtension("migrating")
+        let backup = URL(fileURLWithPath: url.path + Self.backupSuffix)
+
+        guard let data = contents.data(using: .utf8) else { return false }
+        do {
+            try data.write(to: staging, options: .atomic)   // writes + renames into place, fsync'd
+        } catch {
+            AppLogger.journal.error(
+                "journal migration: cannot stage \(url.lastPathComponent, privacy: .public)")
+            return false
+        }
+
+        // A backup already present means a previous run migrated this file; never overwrite the
+        // original evidence with an already-migrated copy.
+        if !fileManager.fileExists(atPath: backup.path) {
+            do {
+                try fileManager.moveItem(at: url, to: backup)
+            } catch {
+                try? fileManager.removeItem(at: staging)
+                AppLogger.journal.error(
+                    "journal migration: cannot back up \(url.lastPathComponent, privacy: .public)")
+                return false
+            }
+        } else {
+            try? fileManager.removeItem(at: url)
+        }
+
+        do {
+            try fileManager.moveItem(at: staging, to: url)
+            return true
+        } catch {
+            // The swap failed after the original was moved aside — put it back rather than leaving
+            // the live path empty.
+            try? fileManager.moveItem(at: backup, to: url)
+            try? fileManager.removeItem(at: staging)
+            AppLogger.journal.error(
+                "journal migration: cannot swap in \(url.lastPathComponent, privacy: .public)")
+            return false
+        }
+    }
 }
