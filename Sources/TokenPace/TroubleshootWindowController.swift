@@ -49,6 +49,9 @@ final class TroubleshootWindowController: NSWindowController {
     // Rows of the "Update interval" section (the refresh cadence + next-update estimate).
     private var intervalLabel: NSTextField!
     private var nextUpdateLabel: NSTextField!
+    /// The weekly reconstruction disclosure (#386) — raw vs reconstructed, side by side. Hidden when
+    /// the two agree, so it appears only when there is something to explain.
+    private var weeklyLabel: NSTextField!
     // Rows of the "Auth token" section.
     private var tokenStatusLabel: NSTextField!
     private var tokenExpiryLabel: NSTextField!
@@ -159,7 +162,8 @@ final class TroubleshootWindowController: NSWindowController {
 
         // Vertical stack for the API section's info rows (intrinsic height). The header row sits
         // above it as a separate, full-width subview so the copy button can reach the right edge.
-        let apiStack = NSStackView(views: [timestampLabel, statusLabel])
+        weeklyLabel = Self.infoLabel()
+        let apiStack = NSStackView(views: [timestampLabel, statusLabel, weeklyLabel])
         apiStack.orientation = .vertical
         apiStack.alignment = .leading
         apiStack.spacing = Metrics.rowSpacing
@@ -300,6 +304,8 @@ final class TroubleshootWindowController: NSWindowController {
         intervalLabel.isHidden = layout.intervalLine == nil
         nextUpdateLabel.stringValue = layout.nextUpdateLine ?? ""
         nextUpdateLabel.isHidden = layout.nextUpdateLine == nil
+        weeklyLabel.stringValue = layout.weeklyLine ?? ""
+        weeklyLabel.isHidden = layout.weeklyLine == nil
         tokenStatusLabel.stringValue = layout.tokenStatusLine ?? ""
         tokenStatusLabel.isHidden = layout.tokenStatusLine == nil
         tokenExpiryLabel.stringValue = layout.tokenExpiryLine ?? ""

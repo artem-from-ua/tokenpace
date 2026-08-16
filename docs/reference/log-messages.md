@@ -407,6 +407,8 @@ One log line per interval change. The format is built by
 | — | `lifecycle` | `.notice` | `usage poll off — service status only` | the user turned the usage API off (#341, ADR-0085); emitted **once per transition**, not every tick. From here the heartbeat still runs, but it carries only the status poll — no Keychain read, no usage request |
 | — | `lifecycle` | `.notice` | `usage poll on` | the usage API was switched back on; same call site, once per transition (#341, ADR-0085) |
 | 526 | `network` | `.notice` | `five_hour idle suppressed — within reset grace` | the reset-boundary idle grace armed (`applyIdleGrace`, `idleSuppressedUntil` nil → non-nil); emitted **once per transition**, not every poll. Now arms only when the previous window was active **and** the user was recently working (`claudeActive && utilFresh`, ADR-0045) — a genuine pause no longer arms it |
+| 526 | `network` | `.notice` | `weekly ratio N=<value> (<count> samples)` | the 5h↔7d exchange rate behind the weekly reconstruction moved materially (#386). Emitted **only on change** — on the first real estimate (the seed being displaced) and thereafter when the rolling median shifts by ≥ 5 %. A shifted N is the only observable trace of a changed plan or an Anthropic promotion, since the payload announces neither |
+| 526 | `network` | `.notice` | `weekly interpolation degraded — polling gap` / `weekly interpolation recovered` | the reconstruction lost trust in its accumulation because a poll gap exceeded twice the observed cadence, or regained it on the next healthy poll (#386); one call site emitting one of two strings, **once per transition** |
 | 614 | `keychain` | `.notice` | `token expired, len=<count>` | `pollOnce` — the read credentials are expired (`isExpired` true); moved here from `TokenProvider` with the expiry decision (ADR-0020) |
 
 `<from>`/`<to>` render as whole minutes (`3m`) or fall back to seconds (`90s`).
@@ -423,20 +425,21 @@ One log line per interval change. The format is built by
 
 | Category | Calls | Files |
 |----------|-------|-------|
-| `network` | 29 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `UsageSnapshot` (3), `UpdateInstaller` (3), `PollingEngine` (2), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
+| `network` | 31 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `PollingEngine` (4), `UsageSnapshot` (3), `UpdateInstaller` (3), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
 | `keychain` | 12 | `ClaudeCLIRefresher` (6), `TokenProvider` (3), `PollingEngine` (1) |
 | `lifecycle` | 116 | `App` (48), `SettingsModel` (30), `UpdateInstaller` (13), `PollingShell` (7), `BackToWorkNotifier` (6), `AwaitingInputWatcher` (5), `PollingEngine` (3), `SettingsWindowController` (2), `ShellEnvironment` (1), `PersistedConfig` (1), `IncidentNotificationDelegate` (1) |
 | `ui` | 1 | `AppearancePane` (1) |
 | `archive` | 7 | `App` (5), `LogArchiver` (2) |
 | `journal` | 12 | `UsageJournal` (4), `StatusPayloadLog` (4), `App` (3), `DevToolsWindowController` (1) |
 
-**Total: 177 log statements** — `.error` ×46, `.notice` ×113, `.info` ×13, `.debug` ×5.
+**Total: 179 log statements** — `.error` ×46, `.notice` ×115, `.info` ×13, `.debug` ×5.
 
 > Counts recomputed from the source in #275 (the previous figures had drifted over several releases —
 > `SettingsModel` and `BackToWorkNotifier` were missing entirely) and again in #341, where the same
 > drift had recurred: `SettingsWindowController` and `PersistedConfig` were missing, and `App` /
 > `SettingsModel` / `PollingEngine` had each gained statements the table did not know about.
-> Regenerate with: `grep -rho 'AppLogger\.[a-z]*\.' Sources/ | sort | uniq -c`.
+> Regenerate with: `grep -rho 'AppLogger\.[a-z]*\.' Sources/ | sort | uniq -c`. Recomputed again in
+> #386, which added the two weekly-reconstruction lines to `PollingEngine` network (2 → 4).
 
 The `journal: enabled set <bool>` toggle line (`SettingsModel`) is a `lifecycle` statement (like the
 other Settings-toggle lines), counted under `lifecycle`. The twelve `journal`-category statements are
@@ -449,6 +452,12 @@ The `five_hour idle …` / `window active again` pair is one call site (`session
 emits one of two strings; it is counted once under `PollingEngine` network. The
 `five_hour idle suppressed …` grace line (`applyIdleGrace`, ADR-0041) is a separate call site,
 counted as the second `PollingEngine` network statement.
+
+The two weekly-reconstruction lines (#386) are the third and fourth. Both live in the same `run()`
+iteration as the grace line and follow the same "only on change" discipline — deliberately, because
+the reconstruction updates on **every** poll (~341 per day at the observed cadence) and logging that
+would drown the rare events this category exists for. The per-poll value is recorded in the usage
+journal instead, where it is a series that can be analysed rather than a line to scroll past.
 
 The `usage poll off/on` pair (#341) follows the same shape — one call site emitting one of two
 strings, counted once — but under `lifecycle` rather than `network`: nothing is fetched at that

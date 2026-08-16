@@ -1092,7 +1092,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             //
             // The engine calls this from its own task, so it goes through the `nonisolated` reader
             // rather than the main-actor-isolated property — same key, same opt-out default.
-            usageApiEnabled: { PersistedConfig.usageApiEnabledUnsafe() })
+            usageApiEnabled: { PersistedConfig.usageApiEnabledUnsafe() },
+            // #386: the weekly reconstruction's ratio takes ~20 h of active work to settle, so it is
+            // restored across relaunches rather than re-warmed each time. Same `nonisolated` reader
+            // discipline as the switch above — the engine calls these from its own task.
+            restoreWeekly: { PersistedConfig.weeklyInterpolatorUnsafe() },
+            persistWeekly: { PersistedConfig.setWeeklyInterpolatorUnsafe($0) })
 
         // Consume on the main actor — every PollOutput drives the menu bar + popup.
         pollTask = Task { [weak self] in

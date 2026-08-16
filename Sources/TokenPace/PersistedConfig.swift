@@ -183,6 +183,8 @@ enum PersistedConfig {
         /// The user's subscription to the current status-page episode (#279), as a JSON blob. See
         /// the property.
         static let episodeSubscription = "episodeSubscription"
+        /// The weekly-utilization reconstruction state (#386), as a JSON blob. See the property.
+        static let weeklyInterpolator = "weeklyInterpolator"
         /// Hide incidents older than this many hours; `0` means no limit (#279, ADR-0071 §9).
         static let incidentMaxAgeHours = "incidentMaxAgeHours"
         /// The Settings window's last frame, `[x, y, width, height]` in screen coordinates (ADR-0069).
@@ -787,6 +789,52 @@ enum PersistedConfig {
             guard let data = try? JSONEncoder().encode(newValue) else { return }
             defaults.set(data, forKey: Key.episodeSubscription)
         }
+    }
+
+    /// The weekly-utilization reconstruction state (#386): the rolling estimate of the 5h↔7d
+    /// exchange rate plus the accumulation since the last observed weekly bump.
+    ///
+    /// Persisted rather than held in memory because the ratio window takes **~20 h of active work**
+    /// to fill (measured: 5 segments in 1.9 h, 15 in 20.2 h). An in-memory-only estimate would reset
+    /// on every relaunch — and with 61 polling gaps observed over 13 days, that is often — so the
+    /// feature would spend much of its life cold. That is the same reasoning as
+    /// ``episodeSubscription``: a small record whose value is precisely that it survives a restart.
+    ///
+    /// A JSON blob for the same reason ``monitoredServices`` is one, and a decode failure degrades
+    /// to a fresh estimator (the reconstruction reseeds and warms up again) rather than corrupting
+    /// anything. **Not** stored in the usage journal: that is default-off, and reading it back would
+    /// mean parsing 4.6 MB at launch to recover ~15 numbers.
+    ///
+    /// What survives a long break is decided by ``WeeklyInterpolator/resumed(at:)``, not here: the
+    /// ratio always, the accumulation only if the break was short.
+    static var weeklyInterpolator: WeeklyInterpolator {
+        get {
+            guard let data = defaults.data(forKey: Key.weeklyInterpolator),
+                  let decoded = try? JSONDecoder().decode(WeeklyInterpolator.self, from: data)
+            else { return WeeklyInterpolator() }
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            defaults.set(data, forKey: Key.weeklyInterpolator)
+        }
+    }
+
+    /// ``weeklyInterpolator`` read from the polling engine's own task, which is not main-actor
+    /// isolated — the same `nonisolated` escape hatch (and the same key) as
+    /// ``usageApiEnabledUnsafe()``. A missing or unreadable blob degrades to a fresh estimator.
+    nonisolated static func weeklyInterpolatorUnsafe() -> WeeklyInterpolator {
+        guard let data = UserDefaults.standard.data(forKey: Key.weeklyInterpolator),
+              let decoded = try? JSONDecoder().decode(WeeklyInterpolator.self, from: data)
+        else { return WeeklyInterpolator() }
+        return decoded
+    }
+
+    /// The write half of ``weeklyInterpolatorUnsafe()``, called once per poll that moves the state.
+    /// Failure is silent: losing a persisted estimate costs a warm-up, never correctness.
+    nonisolated static func setWeeklyInterpolatorUnsafe(_ value: WeeklyInterpolator) {
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        UserDefaults.standard.set(data, forKey: Key.weeklyInterpolator)
     }
 
     /// Hide incidents older than this (#279, ADR-0071 §9), or `nil` for no limit.

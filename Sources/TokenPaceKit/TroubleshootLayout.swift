@@ -23,6 +23,14 @@ public struct TroubleshootLayout: Sendable, Equatable {
     public let statusLine: String?
     public let intervalLine: String?
     public let nextUpdateLine: String?
+    /// The weekly reconstruction (#386), when it has something to disclose: the API's quantised
+    /// value and the value derived from the five-hour counter, side by side with the exchange rate
+    /// behind it. `nil` when the two agree (nothing to explain) or there is no snapshot.
+    ///
+    /// This is the **only** surface showing both numbers at once, and the one place the estimate can
+    /// be judged on live data rather than on a stub — which is why it ships a full release before
+    /// anything renders from the reconstructed value.
+    public let weeklyLine: String?
     public let bodyText: String
     /// Whether `bodyText` is pretty-printed JSON (so the shell should syntax-highlight it) rather
     /// than an error/plain payload or a placeholder. Decided here in the tested core — on success,
@@ -38,6 +46,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
         statusLine: String?,
         intervalLine: String?,
         nextUpdateLine: String?,
+        weeklyLine: String? = nil,
         bodyText: String,
         bodyIsJSON: Bool,
         tokenStatusLine: String?,
@@ -47,6 +56,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
         self.statusLine = statusLine
         self.intervalLine = intervalLine
         self.nextUpdateLine = nextUpdateLine
+        self.weeklyLine = weeklyLine
         self.bodyText = bodyText
         self.bodyIsJSON = bodyIsJSON
         self.tokenStatusLine = tokenStatusLine
@@ -148,6 +158,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
             statusLine: statusLine,
             intervalLine: intervalLine,
             nextUpdateLine: nextUpdateLine,
+            weeklyLine: output.weekly?.troubleshootLine,
             bodyText: bodyText,
             bodyIsJSON: bodyIsJSON,
             tokenStatusLine: tokenStatusLine,
