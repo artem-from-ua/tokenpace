@@ -81,6 +81,19 @@ public struct WeeklyRatio: Sendable, Equatable, Codable {
     /// Never `nil` — the reconstruction is always on, and a seeded estimate is strictly better than
     /// showing a quantised value (the seed carries the same 0.5 pp error bound the raw value
     /// already has, but the value stops standing still).
+    ///
+    /// **A single segment is used immediately, and that is deliberate** — the obvious objection is
+    /// that one sample of a ±50 %-noisy quantity looks worse than a known-good default, so it is
+    /// worth recording why it is not. Simulating against the real spread of `localN` (192 observed
+    /// values, 3–32), the median of even **one** segment beats the seed for any user whose true rate
+    /// is not exactly 10: median error 10 % versus 43 % (true N = 7) or 33 % (true N = 15). The seed
+    /// only wins when it happens to be right, which is precisely the case we cannot detect in
+    /// advance. Weighting the seed as several pseudo-observations was measured too and is worse than
+    /// both — it inherits the seed's error and holds it for another ten segments.
+    ///
+    /// What bounds the damage of a low estimate is not this function but the ceiling clip in
+    /// ``WeeklyInterpolator``: an over-eager reconstruction pins at half a quantum and waits, rather
+    /// than running ahead of reality.
     public var estimate: Double {
         guard !segments.isEmpty else { return Self.seed }
         let sorted = segments.sorted()

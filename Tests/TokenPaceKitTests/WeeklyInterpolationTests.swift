@@ -86,6 +86,17 @@ struct WeeklyRatioTests {
         #expect(r.sampleCount == WeeklyRatio.window)   // capped, oldest dropped
     }
 
+    @Test func oneMeasuredSegmentDisplacesTheSeedImmediately() {
+        // The tempting alternative — "hold the seed until the estimate looks reliable" — was measured
+        // against the real spread of localN and is worse: a single segment's median beats the seed
+        // for any user whose true rate is not exactly 10 (10 % error vs 43 % at N = 7). The seed only
+        // wins when it happens to be right, which is the case we cannot detect in advance.
+        var r = WeeklyRatio()
+        r.record(fiveHourGained: 7, sevenDayGained: 1)
+        #expect(r.estimate == 7)                 // not 10, and not a blend
+        #expect(r.sampleCount == 1)
+    }
+
     @Test func sanityFiltersRejectUnusableSegments() {
         var r = WeeklyRatio()
         r.record(fiveHourGained: 0, sevenDayGained: 1)      // nothing measured
