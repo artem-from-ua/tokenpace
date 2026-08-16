@@ -425,7 +425,6 @@ enum StubScenario: String, CaseIterable {
         case .calm5Orange7:        return StubUsageTransport(mode: .pacing(.calmFiveOrangeSeven), now: now)
         case .nearReset:           return StubUsageTransport(mode: .pacing(.nearResetFiveHour), now: now)
         case .standByFloor:        return StubUsageTransport(mode: .pacing(.standByFloor), now: now)
-        case .standByFloor:        return StubUsageTransport(mode: .pacing(.standByFloor), now: now)
         case .midBandReset:        return StubUsageTransport(mode: .pacing(.midBandReset), now: now)
         case .calmBoth:            return StubUsageTransport(mode: .pacing(.calmBoth), now: now)
         case .farBehind:           return StubUsageTransport(mode: .pacing(.farBehind), now: now)
