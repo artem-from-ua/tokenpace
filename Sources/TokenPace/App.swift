@@ -346,6 +346,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Dev-only image export for the docs, before anything else exists: no migrations, no status
+        // item, no polling. `TOKENPACE_EXPORT_DOC_IMAGES=<dir> swift run TokenPace` writes the
+        // bar-style illustrations through the real `StatusItemView` and quits. Unset in every normal
+        // run, so this is a single environment lookup on the launch path.
+        if DocImageExporter.exportIfRequested() {
+            NSApp.terminate(nil)
+            return
+        }
+
         // Run config migrations first — before any UI or polling reads persisted settings — so a
         // future migration can rename keys or clean up stale system state (e.g. old login items)
         // before the rest of launch depends on it (#71, ADR-0023). Phase 1 is a no-op scaffold that
