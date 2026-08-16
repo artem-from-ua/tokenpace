@@ -381,6 +381,28 @@ struct WeeklyResetTests {
         #expect(!s.isDegraded)
     }
 
+    @Test func aFrozenClockDoesNotBreakTheReconstruction() {
+        // Most stubs run on a frozen clock, so every poll carries the *same* instant and every
+        // interval is 0 s. That must not read as a hole (a zero gap is not a gap), and the value must
+        // still advance — the `weekly-interp` stub depends on exactly this.
+        let frozen = Date(timeIntervalSince1970: 1_768_392_000)
+        var s = WeeklyInterpolator()
+        var previous: Double?
+        for n in 0..<26 {
+            let five = Double((n * 1) % 100)
+            let weekly = 61.0 + Double(n / 8)          // the stub ticks the week every 8 polls
+            s = s.advanced(with: snap(five: five, weekly: weekly), now: frozen)
+            let v = s.value(forRaw: weekly)
+            #expect(!s.isDegraded, "poll \(n): a zero-length interval must not read as a hole")
+            if let p = previous, n % 8 != 0 {          // a bump legitimately re-anchors
+                #expect(v.effective >= p - 1e-9, "poll \(n): value went backwards")
+            }
+            previous = v.effective
+        }
+        // Across three buckets the value must have travelled, not sat on the first quantum.
+        #expect(s.value(forRaw: 64).effective > 63)
+    }
+
     @Test func theHoleThresholdAdaptsToTheObservedCadence() {
         // A 15-minute cadence is normal, not a hole — the Pro journal mislabelled 576 of 862 samples
         // when the threshold was anchored to the 3-minute base instead.
