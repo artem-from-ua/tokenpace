@@ -149,7 +149,10 @@ SCENES = [
     ("pressure-mild-lead", 30, 38, "yellow", ["pressure"]),
     ("pressure-ahead", 93, 97, "orange", ["pressure"]),
     ("pressure-exhausted", 70, 100, "red", ["pressure"]),
-    ("gauge-calm", 30, 20, "green", ["gauge"]),
+    # A left ribbon needs a span wider than the min pill, or the floor collapses
+    # it onto the on-pace pill and the illustration says nothing: at t=30 % a
+    # 10 pp surplus is only 2.2 pt. Half the window spent at 30 % gives 6.3 pt.
+    ("gauge-calm", 50, 30, "green", ["gauge"]),
     ("gauge-deep-surplus", 90, 70, "blue", ["gauge"]),
     ("gauge-on-pace", 55, 55, "green", ["gauge"]),
     ("gauge-ahead", 93, 97, "orange", ["gauge"]),
@@ -160,12 +163,35 @@ SCENES = [
 RENDER = {"pressure": pressure_svg, "gauge": gauge_svg, "progress": progress_svg}
 
 
+def floored(style, t, u):
+    """True when the ribbon is narrower than the pill, i.e. indistinguishable
+    from the zero state of that style.
+
+    Worth checking per scene: a scene that floors renders *correctly* but
+    illustrates nothing — two captions promising different things would sit
+    above byte-identical pictures.
+    """
+    if style == "gauge":
+        span = abs(scale_x(0.5 + gauge_offset(t, u) / 2) - scale_x(0.5))
+    elif style == "pressure":
+        span = scale_x(pressure_length(t, u))
+    else:
+        return False
+    return span < MIN_STRIP
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     written = []
+    # Scenes whose whole point IS the floored pill — everything else must not be.
+    EXPECT_FLOORED = {"pressure-calm", "gauge-on-pace"}
+    surprises = []
+
     for name, tp, up, colour, styles in SCENES:
         t, u = tp / 100, up / 100
         for style in styles:
+            if floored(style, t, u) and name not in EXPECT_FLOORED:
+                surprises.append(f"{name} ({style}, t={tp} u={up})")
             svg = RENDER[style](t, u, colour)
             path = os.path.join(OUT, f"{name}.svg")
             with open(path, "w", encoding="utf-8") as fh:
@@ -177,6 +203,12 @@ def main():
     for row in written:
         print(f"{row[0]:24s} {row[1]:4d} {row[2]:4d} {row[3]:>9s} {row[4]:>7s}")
     print(f"\n{len(written)} files → {OUT}/")
+    if surprises:
+        print("\nWARNING — these scenes collapse to the minimum pill, so they")
+        print("illustrate nothing beyond the zero state:")
+        for s in surprises:
+            print(f"  {s}")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
