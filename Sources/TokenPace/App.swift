@@ -2165,7 +2165,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // tick) can land in the sub-second gap before it fires — so we apply the same pure overlay here
         // on every render. It is a no-op when nothing has crossed a boundary, and the next authoritative
         // poll overwrites it wholesale (the API stays the source of truth). See ADR-0043.
-        let snapshot = output.snapshot.map { ResetClock.optimisticReset($0, now: now) }
+        // #386: swap the API's quantised 7-day utilization for the value reconstructed from the
+        // five-hour counter, so every surface downstream — bars, colours, the weekly gate — reads one
+        // consistent number. Applied **before** the optimistic reset, not after: that overlay may zero
+        // the weekly window locally ahead of the server, and `applied(to:)` refuses to touch a window
+        // whose raw value no longer matches what the interpolator measured. Running it second would
+        // therefore make it a silent no-op on exactly the boundary polls.
+        let snapshot = output.snapshot
+            .map { output.weekly?.applied(to: $0) ?? $0 }
+            .map { ResetClock.optimisticReset($0, now: now) }
         // #233: the awaiting-input count is `nil` (hidden) unless the feature is on and ≥ 1 session is
         // waiting. Sourced from the watcher (or the `TOKENPACE_AWAITING` stub), independent of the poll.
         let awaitingInput = awaitingInputForDisplay

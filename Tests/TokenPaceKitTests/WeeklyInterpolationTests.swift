@@ -328,6 +328,24 @@ struct WeeklyResetTests {
         #expect(afterReset.fiveHourSinceAnchor == 0)
     }
 
+    @Test func aZeroLengthIntervalDoesNotPoisonTheThreshold() {
+        // Seen on a real launch: a forced refresh right after the first poll records a 0 s gap. A mean
+        // would drag the expected cadence down and start calling normal polls holes; the median
+        // absorbs it once the window fills.
+        var s = WeeklyInterpolator()
+        var t = now
+        s = s.advanced(with: snap(five: 10, weekly: 50), now: t)
+        s = s.advanced(with: snap(five: 10, weekly: 50), now: t)      // forced refresh, 0 s later
+        for five in [11.0, 12, 13, 14, 15] {
+            t = t.addingTimeInterval(180)
+            s = s.advanced(with: snap(five: five, weekly: 50), now: t)
+        }
+        #expect(!s.isDegraded)
+        // The next normal-cadence poll must still read as normal, not as a hole.
+        s = s.advanced(with: snap(five: 16, weekly: 50), now: t.addingTimeInterval(180))
+        #expect(!s.isDegraded)
+    }
+
     @Test func theHoleThresholdAdaptsToTheObservedCadence() {
         // A 15-minute cadence is normal, not a hole — the Pro journal mislabelled 576 of 862 samples
         // when the threshold was anchored to the 3-minute base instead.

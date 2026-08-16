@@ -50,6 +50,7 @@ enum StubScenario: String, CaseIterable {
     case calmBoth = "calm-both"
     case farBehind = "far-behind"
     case weeklyGate = "weekly-gate"
+    case weeklyInterp = "weekly-interp"
     case idleWeekHot = "idle-week-hot"
     case pressureSweep = "pressure-sweep"
     case gaugeSweep = "gauge-sweep"
@@ -171,6 +172,7 @@ enum StubScenario: String, CaseIterable {
         case .calmBoth:            return "Pacing · both calm"
         case .farBehind:           return "Pacing · both far behind (blue)"
         case .weeklyGate:          return "Pacing · 5h far behind, week spent (gate)"
+        case .weeklyInterp:        return "Pacing · 7d interpolated from the 5h counter"
         case .idleWeekHot:         return "Idle · week ahead of pace (green pill)"
         case .pressureSweep:       return "Pacing · Pressure scale (sharp 5h + clipped 7d)"
         case .gaugeSweep:          return "Pacing · Gauge scale (full-left 5h + short-right 7d)"
@@ -268,6 +270,18 @@ enum StubScenario: String, CaseIterable {
                  + "calm). Check both surfaces, and the popup's 5h row saying \"on pace\" rather than "
                  + "\"far behind pace\". Compare with `far-behind`, where the week is calm and the blue "
                  + "stays."
+        case .weeklyInterp:
+            return "The 7-day reconstruction (#386), as a **sequence** — watch it over ~20 polls "
+                 + "rather than as one frame. The weekly counter stays a whole number throughout (61, "
+                 + "then 62 from poll 8), exactly as the API behaves, while the 5-hour one climbs "
+                 + "1 pp per poll — so every movement of the 7-day bar is the reconstruction's, since "
+                 + "there is no other source. Polls 0–7 run on an inherited anchor: the value creeps "
+                 + "from the bucket centre to its ceiling and holds. Poll 8 brings the single bump, "
+                 + "which firms the anchor at the new bucket's lower edge — and must not move the bar, "
+                 + "because the old ceiling and the new floor are the same point. Polls 9+ creep "
+                 + "61.5 → 62.5 in 0.1 pp steps, then hold (`clipped`) rather than overtake the next "
+                 + "quantum. Troubleshoot discloses both numbers throughout. What to check: nothing "
+                 + "ever steps backwards, least of all at the two handovers."
         case .idleWeekHot:
             return "Idle 5h while the week runs ahead of pace (u = 70 %, t = 29 %). No active session, "
                  + "so the 5h bar is the knobless idle pill — and because the week has no headroom to "
@@ -429,6 +443,7 @@ enum StubScenario: String, CaseIterable {
         case .calmBoth:            return StubUsageTransport(mode: .pacing(.calmBoth), now: now)
         case .farBehind:           return StubUsageTransport(mode: .pacing(.farBehind), now: now)
         case .weeklyGate:          return StubUsageTransport(mode: .pacing(.weeklyGate), now: now)
+        case .weeklyInterp:        return StubUsageTransport(mode: .weeklyInterp, now: now)
         case .idleWeekHot:         return StubUsageTransport(mode: .idleWeekHot, now: now)
         case .pressureSweep:       return StubUsageTransport(mode: .pacing(.pressureSweep), now: now)
         case .gaugeSweep:          return StubUsageTransport(mode: .pacing(.gaugeSweep), now: now)
