@@ -249,11 +249,13 @@ actor UsageJournal {
         if let overrideFile {
             return fileManager.fileExists(atPath: overrideFile.path) ? [overrideFile] : []
         }
-        let prefix = "usage-journal\(isRelease ? "" : "-dev")-"
         let all = (try? fileManager.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: nil)) ?? []
         return all
-            .filter { $0.lastPathComponent.hasPrefix(prefix) && $0.pathExtension == "jsonl" }
+            .filter { JournalMigration.belongsToBuild(fileName: $0.lastPathComponent,
+                                                      isRelease: isRelease) }
+            // Sorted by name, which sorts chronologically — that is the whole reason the suffix is
+            // `YYYY-MM` — so the reconstruction state threads through the months in order.
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 

@@ -145,6 +145,21 @@ struct JournalMigrationTests {
                 "the carried exchange rate should be the one journalled")
     }
 
+    @Test func aReleaseBuildDoesNotAdoptTheDevJournals() {
+        // `usage-journal-` is also a prefix of `usage-journal-dev-…`, so a naive `hasPrefix` lets a
+        // release run migrate files that are not its own. Caught before the first live migration.
+        #expect(JournalMigration.belongsToBuild(fileName: "usage-journal-2026-08.jsonl", isRelease: true))
+        #expect(!JournalMigration.belongsToBuild(fileName: "usage-journal-dev-2026-08.jsonl", isRelease: true))
+
+        #expect(JournalMigration.belongsToBuild(fileName: "usage-journal-dev-2026-08.jsonl", isRelease: false))
+        #expect(!JournalMigration.belongsToBuild(fileName: "usage-journal-2026-08.jsonl", isRelease: false))
+
+        // Neither build touches the backups it just made, nor anything else in the directory.
+        #expect(!JournalMigration.belongsToBuild(fileName: "usage-journal-2026-08.jsonl.v1.bak", isRelease: true))
+        #expect(!JournalMigration.belongsToBuild(fileName: "status-payloads-2026-08.jsonl", isRelease: true))
+        #expect(!JournalMigration.belongsToBuild(fileName: "usage-journal-2026-08.jsonl.migrating", isRelease: true))
+    }
+
     @Test func anEmptyFileIsUnchanged() {
         let (out, _, outcome) = JournalMigration.migrate(contents: "")
         #expect(out == "")

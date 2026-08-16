@@ -69,6 +69,23 @@ public enum JournalMigration {
         }
     }
 
+    /// Whether a journal file belongs to this build — the pure half of picking which files to migrate.
+    ///
+    /// The trap this exists for: `usage-journal-` is also a prefix of `usage-journal-dev-…`, so a
+    /// naive `hasPrefix` lets a **release** build adopt the dev journals and rewrite files that are
+    /// not its own. (Caught before the first live run, on a machine where the dev file happened to
+    /// already be current — so the damage would have been invisible rather than absent.)
+    ///
+    /// A release file's name continues with the year; a dev file's with `dev`.
+    public static func belongsToBuild(fileName: String, isRelease: Bool) -> Bool {
+        guard fileName.hasSuffix(".jsonl") else { return false }
+        let devPrefix = "usage-journal-dev-"
+        if isRelease {
+            return fileName.hasPrefix("usage-journal-") && !fileName.hasPrefix(devPrefix)
+        }
+        return fileName.hasPrefix(devPrefix)
+    }
+
     /// Migrate one file's contents, returning the new contents and what happened.
     ///
     /// - Parameters:
