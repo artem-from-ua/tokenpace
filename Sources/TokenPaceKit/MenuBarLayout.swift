@@ -18,14 +18,15 @@ public struct BarView: Sendable, Equatable {
     /// Which rolling window this bar represents (5h on top, 7d below — see ``MenuBarMode``).
     public let window: LimitWindow
     /// Whether this bar is the **idle** 5-hour bar — the 5h window does not exist server-side (no
-    /// active session, ``UsageSnapshot/sessionIdle``, #100). When `true` the view draws a **solid,
-    /// knobless** track (`StatusItemView` fills it with `Palette.idleBlue`, no zones, no time dot); the
+    /// active session, ``UsageSnapshot/sessionIdle``, #100). When `true` the view draws the **knobless
+    /// zero pill** — grey track plus a green pill at zero, no zones (ADR-0078); Progress additionally
+    /// parks its time marker there. Grey instead of green when `blocked`; the
     /// `layout`/`indicator` are inert placeholders (`usage 0 / time 0`, `.neutral`) that the idle draw
     /// path ignores. `false` on every normal bar, including a genuine 0 %-with-valid-reset 5h window.
     public let idle: Bool
     /// Whether this **idle** 5-hour bar is also **blocked** — the 7-day limit is exhausted and paid
     /// credits cannot cover, so there is no path to start a session (#158, `CreditsPacing.isBlocked`).
-    /// When `true` the view draws the solid idle track in **grey** (not the "ready" blue), meaning
+    /// When `true` the view draws the idle pill in **grey** (not the "ready" green), meaning
     /// "waiting for a limit to reset" rather than "ready to start". Only ever `true` alongside
     /// ``idle``; `false` on every normal bar and on a non-blocked idle bar.
     public let blocked: Bool
@@ -313,10 +314,10 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
     ///   - hideTopBar: Which bar to drop while it is **calm** (`BarView.isCalm` — green on-pace/behind,
     ///     mild-ahead yellow, or far-behind blue), leaving the other one as the single, vertically-centred
-    ///     bar (ADR-0086, `PersistedConfig.calmBarHiding`). An orange/red bar is always kept, and at most
+    ///     bar (ADR-0086, `PersistedConfig.hideTop5hBar`). An orange/red bar is always kept, and at most
     ///     one bar is ever elided, so the widget never ends up empty. Default `.never` (both bars) so
     ///     existing callers and tests are unaffected. In the session-idle state the inert 5h bar counts
-    ///     as calm and is dropped under `.fiveHour`, leaving the 7-day bar alone.
+    ///     as calm and is dropped under `.untilItNeedsAttention`, leaving the 7-day bar alone.
     ///
     /// Both bars-less answers to "can we work?" are produced here: being blocked
     /// (`CreditsPacing.isBlocked`) or paying (`CreditsPacing.subscriptionExhaustedWhileCovered`) returns

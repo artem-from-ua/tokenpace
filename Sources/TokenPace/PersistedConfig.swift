@@ -99,7 +99,7 @@ enum PersistedConfig {
         /// once by ``PersistedConfig/migrateAppearanceKeysIfNeeded()``, then cleared.
         static let legacyCalmBarHiding = "calmBarHiding"
         /// Legacy pre-ADR-0086 key — the boolean "hide the calm **7-day** bar" opt-out (#94). Read once
-        /// by ``PersistedConfig/migrateTopBarHidingIfNeeded()`` to seed ``calmBarHiding``, then cleared.
+        /// by ``PersistedConfig/migrateTopBarHidingIfNeeded()`` to seed ``hideTop5hBar``, then cleared.
         /// Do not read elsewhere.
         static let legacyHideCalmSevenDayBar = "hideCalmSevenDayBar"
         /// **Retired** (ADR-0090). Whether the red "pause" icon hid the pacing bars while fully blocked
@@ -578,17 +578,19 @@ enum PersistedConfig {
     /// one answers "when", so an explicit choice maps onto the two endpoints:
     ///
     /// - `true` (rows were always shown) → ``PopupSectionVisibility/always``
-    /// - `false` (rows were hidden) → ``PopupSectionVisibility/optionOnly`` — still hidden, but ⌥ Option
-    ///   now retrieves them on demand. `.nonCalm` would be a louder popup than the user asked for.
+    /// - `false` (rows were hidden) → ``PopupSectionVisibility/onceUsed``. This used to land on
+    ///   `.optionOnly` (hidden, but ⌥ Option retrieved them); #381 deleted that case, and the legacy
+    ///   raw now resolves through ``PopupSectionVisibility/legacyRawValues`` like every other one.
     ///
     /// Runs on every launch and is idempotent: it does nothing once the new key exists (the legacy key is
     /// cleared either way). Only an **explicit** legacy value migrates — someone who never touched the
-    /// old toggle gets the new `.nonCalm` default from the getter's preset fallback.
+    /// old toggle gets the new ``PopupSectionVisibility/whenItNeedsAttention`` default from the
+    /// getter's preset fallback.
     ///
     /// There is no counterpart for the Extra-usage section: it had no popup-side setting before, so
     /// everyone starts on the preset default.
     /// One-time upgrade of the boolean "hide the calm **7-day** bar" opt-out (#94) to the tri-state
-    /// ``calmBarHiding`` (ADR-0086). The old key could only ever hide the 7-day bar, so an explicit
+    /// ``hideTop5hBar`` (ADR-0086). The old key could only ever hide the 7-day bar, so an explicit
     /// choice maps onto two of the three cases — `true` → `.sevenDay`, `false` → `.never` — each
     /// preserving exactly what the user was looking at. The mapping itself lives in
     /// `TopBarHiding.migrated(fromLegacyHide:)` so it is unit-testable from the Kit and shared with the
@@ -596,7 +598,8 @@ enum PersistedConfig {
     ///
     /// Runs on every launch and is idempotent: it does nothing once the new key exists (the legacy key is
     /// cleared either way). Only an **explicit** legacy value migrates. Someone who never touched the old
-    /// toggle has nothing stored, so they pick up the new `.fiveHour` default from the getter's preset
+    /// toggle has nothing stored, so they pick up the new ``TopBarHiding/untilItNeedsAttention``
+    /// default from the getter's preset
     /// fallback — a deliberate shift of the out-of-the-box look (the 7-day bar now stays and the 5-hour
     /// one steps aside while calm), the same way ADR-0080 moved the factory bar style.
     static func migrateTopBarHidingIfNeeded() {

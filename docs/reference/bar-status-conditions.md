@@ -36,9 +36,9 @@
 | **idle-h5** | плейсхолдер | немає | **ні** — пейсингу не має | menu bar + попап |
 
 **Чому синій лише для h5/d7.** Рендер гейтить його прапорцем `isBaseLimit`, який ставиться за
-індексом рядка `index <= 1` ([PopupViewController.swift:1618](../../Sources/TokenPace/PopupViewController.swift#L1618)).
+індексом рядка `index <= 1` ([PopupViewController.swift:1618](../../Sources/TokenPace/PopupViewController.swift)).
 Per-model і credits проходять гілкою `Palette.gapGreen`
-([PopupViewController.swift:607, 619](../../Sources/TokenPace/PopupViewController.swift#L607)).
+([PopupViewController.swift:607, 619](../../Sources/TokenPace/PopupViewController.swift)).
 Menu bar per-model барів не має взагалі.
 
 **Чому в idle «ні».** Idle-бар не має пейсингу як такого — він не проходить через `severity` і не
@@ -56,12 +56,12 @@ blocked), і тижневий gate до неї більше не входить.
 
 | # | Місце | Що дає | Рядок |
 |---|---|---|---|
-| 1 | `BarLayout.severity` | `PacingSeverity` (Kit) | [PacingModel.swift:265](../../Sources/TokenPaceKit/PacingModel.swift#L265) |
-| 2 | `PacingBucket.of` | бакет для jsonl | [PacingBucket.swift:49](../../Sources/TokenPaceKit/PacingBucket.swift#L49) |
-| 3 | `aheadColor` / `behindColor` | `NSColor` зазору | [PopupViewController.swift:645, 665](../../Sources/TokenPace/PopupViewController.swift#L645) |
-| 4 | `isFarBehind` | слово «far behind pace» | [PopupViewController.swift:2592](../../Sources/TokenPace/PopupViewController.swift#L2592) |
+| 1 | `BarLayout.severity` | `PacingSeverity` (Kit) | [PacingModel.swift:265](../../Sources/TokenPaceKit/PacingModel.swift) |
+| 2 | `PacingBucket.of` | бакет для jsonl | [PacingBucket.swift:49](../../Sources/TokenPaceKit/PacingBucket.swift) |
+| 3 | `aheadColor` / `behindColor` | `NSColor` зазору | [PopupViewController.swift:645, 665](../../Sources/TokenPace/PopupViewController.swift) |
+| 4 | `isFarBehind` | слово «far behind pace» | [PopupViewController.swift:2592](../../Sources/TokenPace/PopupViewController.swift) |
 
-`StatusItemView.gapColorTarget` ([:1043](../../Sources/TokenPace/StatusItemView.swift#L1043)) —
+`StatusItemView.gapColorTarget` ([:1043](../../Sources/TokenPace/StatusItemView.swift)) —
 не п'яте переформулювання: він читає `severity` й делегує в `behindColor`.
 
 ### Константи
@@ -122,7 +122,7 @@ fallback `?? now` дав би `timeFraction = 1.0` і хибно **відкри�
 ### Чотири пастки в цій таблиці
 
 **Пастка 1 — рівність `u == t` спокійна.** Гілка `pacing == .onPaceOrBehind` тестує `t >= u`, тож
-точна рівність іде **вліво**, у спокій ([PacingModel.swift:266](../../Sources/TokenPaceKit/PacingModel.swift#L266)).
+точна рівність іде **вліво**, у спокій ([PacingModel.swift:266](../../Sources/TokenPaceKit/PacingModel.swift)).
 
 **Пастка 2 — 20-хвилинні override'и НЕ симетричні за досяжністю.** Обидва лежать після виходу зі
 спокійної гілки, тож при `u <= t` кінець-override (рядок 5) **недосяжний**. Стан «97 % спожито,
@@ -134,7 +134,7 @@ fallback `?? now` дав би `timeFraction = 1.0` і хибно **відкри�
 **Пастка 4 — вичерпання на спокійному боці не дає `.exhausted`.** Щойно скинуте 100 %-вікно може
 читатися як `u <= t` і піти гілкою 1-3 — тобто `severity` буде `.calm`. `PacingBucket.of` це
 **виправляє окремо** (`if usageFraction >= 1 { return .red }` на спокійному боці,
-[PacingBucket.swift:60](../../Sources/TokenPaceKit/PacingBucket.swift#L60)), а `severity` — ні.
+[PacingBucket.swift:60](../../Sources/TokenPaceKit/PacingBucket.swift)), а `severity` — ні.
 Це розбіжність №2 між UI і журналом.
 
 ### Числові приклади порогів
@@ -156,7 +156,7 @@ Ahead-поріг **звужується** з часом (лід наприкін
 ## 4. Per-model бари (Opus / Sonnet / scoped)
 
 Пейсяться **як 7-денні** — беруть `LimitWindow.sevenDay` і позичають `seven_day.resets_at`, коли
-власного немає ([UsageSnapshot.swift:591](../../Sources/TokenPaceKit/UsageSnapshot.swift#L591)).
+власного немає ([UsageSnapshot.swift:591](../../Sources/TokenPaceKit/UsageSnapshot.swift)).
 
 Таблиця з §3 діє **з одним винятком**: рядок 2 (синій) недосяжний у UI — замість нього завжди
 зелений, бо `isBaseLimit == false`.
@@ -170,7 +170,7 @@ Ahead-поріг **звужується** з часом (лід наприкін
 | 7 | решта | помаранчевий |
 
 Слово «far behind pace» їм теж недоступне — `isFarBehind` гейтиться тим самим прапорцем
-([PopupViewController.swift:2569](../../Sources/TokenPace/PopupViewController.swift#L2569)); вони
+([PopupViewController.swift:2569](../../Sources/TokenPace/PopupViewController.swift)); вони
 показують «on pace».
 
 **У журналі так само.** Вони несуть `blueAllowed = weeklyHasHeadroom`, тож `sev` для них ніколи не
@@ -201,7 +201,7 @@ Ahead-поріг **звужується** з часом (лід наприкін
 
 **Бар відсутній, якщо немає ліміту.** `barLayout(for:now:)` повертає `nil`, коли `spentFraction`
 не визначена (немає cap / необмежено / нульовий ліміт) — попап тоді показує лише витрачену суму
-без бару й кольору ([CreditsPacing.swift:194](../../Sources/TokenPaceKit/CreditsPacing.swift#L194)).
+без бару й кольору ([CreditsPacing.swift:194](../../Sources/TokenPaceKit/CreditsPacing.swift)).
 
 **При досягненні cap `u` форсується в рівно 1**, щоб червоний спрацював попри округлення:
 `spend.spendLimitReached ? 1 : min(1, max(0, rawUsage))`.
@@ -217,12 +217,12 @@ Ahead-поріг **звужується** з часом (лід наприкін
 ## 6. Idle-бар (немає активної 5h-сесії)
 
 `sessionIdle` виникає, коли сервер не віддає 5-годинного вікна — тоді `resetsAt: ""`, а вікно
-**не синтезується** ([UsageSnapshot.swift:439](../../Sources/TokenPaceKit/UsageSnapshot.swift#L439)).
+**не синтезується** ([UsageSnapshot.swift:439](../../Sources/TokenPaceKit/UsageSnapshot.swift)).
 
 Це **окремий код-шлях**: idle-бар не проходить через `barLayout`/`severity` взагалі. Його
 `BarLayout` — інертний плейсхолдер (`u = 0, t = 0, windowDurationSeconds = 0`), який рендер ігнорує
-([PopupLayout.swift:542](../../Sources/TokenPaceKit/PopupLayout.swift#L542),
-[MenuBarLayout.swift:348](../../Sources/TokenPaceKit/MenuBarLayout.swift#L348)).
+([PopupLayout.swift:542](../../Sources/TokenPaceKit/PopupLayout.swift),
+[MenuBarLayout.swift:348](../../Sources/TokenPaceKit/MenuBarLayout.swift)).
 
 Пігулка **двозначна** (з [#381](https://github.com/artem-from-ua/cc-timer/issues/381) — до того була
 тризначною):
@@ -233,16 +233,16 @@ Ahead-поріг **звужується** з часом (лід наприкін
 | `sessionIdle`, не blocked | **зелена** | «ready to start» |
 
 - `isBlocked` = `mainWindowExhausted && !creditsCanCover`
-  ([CreditsPacing.swift:150](../../Sources/TokenPaceKit/CreditsPacing.swift#L150)) — сірий лише коли
+  ([CreditsPacing.swift:150](../../Sources/TokenPaceKit/CreditsPacing.swift)) — сірий лише коли
   головне вікно вичерпане **на 100 %** *і* кредити не покривають: працювати неможливо.
 - **Синьої idle-пігулки більше немає на жодній поверхні**
   ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)). До
   [#381](https://github.com/artem-from-ua/cc-timer/issues/381) вона була синьою при тижневому запасі
   й зеленою без нього — і саме її синій колір розходився з тим, що синій означає на **активному**
   барі. Тепер обидва рендери цілять у зелений безумовно:
-  [PopupViewController.swift:432](../../Sources/TokenPace/PopupViewController.swift#L432)
+  [PopupViewController.swift:432](../../Sources/TokenPace/PopupViewController.swift)
   (`blocked ? monochromeGrey : color(.green)`) і
-  [StatusItemView.swift:995](../../Sources/TokenPace/StatusItemView.swift#L995).
+  [StatusItemView.swift:995](../../Sources/TokenPace/StatusItemView.swift).
 - Разом із кольором пішов і прапорець: полів `LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom`
   **немає** — idle-бару більше нема чого питати про тиждень.
 - `PacingModel.weeklyHasHeadroom` лишається й далі гейтить `blueAllowed` для **активних** барів
@@ -296,10 +296,11 @@ Menu bar зветься **«Colors tell me»**, сегменти — нижче 
 
 **Під Pressure гасіння безумовне.** У menu bar при `menuBarStyle == .pressure` увесь спокійний бік
 (синій/зелений/жовтий) і idle-пігулка глушаться в білий **незалежно від `ColorAdvice`**
-([StatusItemView.swift:995](../../Sources/TokenPace/StatusItemView.swift#L995) — `barStyle ==
-.pressure || colorsTell.mutesCalm`). Саме тому рядок «Colors tell me» під Pressure **ховається** з
-панелі: під цим стилем спокійний бік має нульову довжину, і кольору вже нічого сказати — показувати
-перемикач, який нічого не змінює, було б нечесно.
+([StatusItemView.swift:995](../../Sources/TokenPace/StatusItemView.swift) — `barStyle ==
+.pressure || colorsTell.mutesCalm`). Саме тому рядок «Colors tell me» під Pressure **стає неактивним і
+показує `Slow down`**: під цим стилем кольоровим лишається рівно помаранчевий «витрачаєш зашвидко», а
+це і є той сегмент. Контрол звітує про стан замість пропонувати вибір, який нічого не змінить;
+збережене значення не переписується й повертається на Gauge чи Progress.
 
 **Ці три поверхні більше не читають `ColorAdvice` взагалі**
 ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md),
@@ -339,7 +340,7 @@ Menu bar зветься **«Colors tell me»**, сегменти — нижче 
 | Idle-бар із заливкою на всю ширину | idle — це пігулка на нулі |
 | **Синя idle-пігулка** — за будь-яких налаштувань і будь-якого стану тижня | З [#381](https://github.com/artem-from-ua/cc-timer/issues/381) синього idle немає на жодній поверхні: заливка або зелена, або біла (під гасінням), або сіра (blocked). Виняток `Yellow + Green` для idle, що діяв за [#343](https://github.com/artem-from-ua/cc-timer/issues/343), зник разом із синім |
 | **Кольорова idle-пігулка під Pressure у menu bar** | Під Pressure гасіння безумовне (`barStyle == .pressure \|\| colorsTell.mutesCalm`), тож зелена пігулка там **завжди** біла — незалежно від `ColorAdvice`, який під цим стилем навіть не показується в Settings |
-| **Жовта `degraded` service-крапка в menu bar** | З [#381](https://github.com/artem-from-ua/cc-timer/issues/381) вона там завжди `calmWhite`, безумовно ([StatusItemView.swift:385](../../Sources/TokenPace/StatusItemView.swift#L385)). Жовтою вона лишається **лише в попапі**, де поруч є назва сервісу й текст статусу |
+| **Жовта `degraded` service-крапка в menu bar** | З [#381](https://github.com/artem-from-ua/cc-timer/issues/381) вона там завжди `calmWhite`, безумовно ([StatusItemView.swift:385](../../Sources/TokenPace/StatusItemView.swift)). Жовтою вона лишається **лише в попапі**, де поруч є назва сервісу й текст статусу |
 | Жовтий на спокійному боці | жовтий існує лише при `u > t` |
 | Синій на 5h при `t < 0.40` | `t − u ≤ t`, тож запас не досягне порога |
 | **Синій h5 при d7 ∈ {yellow, orange, red}** | weekly-gate закритий → `blueAllowed == false` |

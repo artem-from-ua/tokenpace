@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-08-17
-supersedes: []
+supersedes: [0087, 0100]
 superseded_by: []
 ---
 

@@ -1,6 +1,7 @@
 ---
 status: accepted
 date: 2026-07-26
+superseded_by: [0105]
 ---
 
 # ADR-0038: Idle «заблоковано» — сірий бар, «waiting for limit reset» і єдиний червоний блокуючий ресет

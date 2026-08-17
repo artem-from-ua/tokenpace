@@ -52,9 +52,11 @@ final class StatusItemView: NSView {
     /// blue/green split used to read this too; all three now answer their own questions without it.
     ///
     /// **And not under Pressure at all.** That style mutes the whole quiet side unconditionally — blue,
-    /// green and yellow all draw white — so this value has no effect there, which is precisely what makes
-    /// hiding its Settings row under Pressure honest. Sizing was never the whole story: a zero-length
-    /// pill still takes a colour, so before this the hidden setting kept tinting a visible mark.
+    /// green and yellow all draw white — so this value has no effect there. That is what lets the
+    /// Settings row sit **disabled on `Slow down`** under Pressure and still tell the truth: only the
+    /// "too fast" orange keeps colour, which is what that segment names. Sizing was never the whole
+    /// story — a zero-length pill still takes a colour, so before this rule the setting kept tinting a
+    /// visible mark from a control that claimed not to apply.
     ///
     /// Set by `AppDelegate` from `PersistedConfig.colorsTell`; the view stays a thin shell and does not
     /// read the config itself. Changing it requests a redraw (no size change).
@@ -106,7 +108,7 @@ final class StatusItemView: NSView {
         bar.window == .fiveHour ? frozenStripFraction : nil
     }
 
-    /// Saturation/vividness of the **colour accents** (pacing gap, service dot, idle blue) — a multiplier
+    /// Saturation/vividness of the **colour accents** (pacing gap, service dot, idle pill) — a multiplier
     /// applied to the resolved `.system*` colour at the draw site. `1.0` = the raw system colour; lower
     /// values mute the accent toward grey so it sits calmer against a busy wallpaper. Kept as a hook for
     /// the accent-tuning pass (the mono formula shipped first); at `1.0` the accents are the plain system
@@ -281,15 +283,10 @@ final class StatusItemView: NSView {
         /// 22 % alpha, so both flanks read identical and the track "breathes" with the wallpaper like a
         /// native icon. The unified `barTrack` role — the popup bar uses the same one.
         static var unusedGrey: NSColor { ColorStore.shared.color(.barTrack) }
-        /// The **idle** 5-hour bar's solid fill (#100, ADR-0027) — the 5h window has no active session,
-        /// so the bar is a knobless solid track meaning "ready to start", not a
-        /// pacing state. `.systemBlue`, so it flips light/dark and honours Increase Contrast like the
-        /// native icons; the unified `blue` role, shared with the popup idle bar and maintenance dot.
-        static var idleBlue: NSColor { ColorStore.shared.color(.blue) }
         /// Idle glyph + reset label — follow the menu-bar foreground.
         static var foreground: NSColor { ColorStore.shared.color(.foreground) }
 
-        /// The "calm colours" replacement (#105): the soft pacing colours (idle blue, on-pace green,
+        /// The quiet-side neutral (#105): the soft pacing colours (idle green, on-pace green,
         /// mild-ahead yellow) — and, since the time-indicator marker now shares its gap's colour, the
         /// marker too — collapse to this when the user opts into a quieter menu bar. `labelColor`, the
         /// same semantic foreground the reset label uses, so the calm signals read as the neutral
@@ -342,7 +339,7 @@ final class StatusItemView: NSView {
         }
     }
 
-    /// Scale a **colour accent** (pacing gap, service dot, idle blue) by ``accentSaturation`` — blend the
+    /// Scale a **colour accent** (pacing gap, service dot, idle pill) by ``accentSaturation`` — blend the
     /// resolved `.system*` colour toward its own grey (luma) so a lower value reads calmer against a busy
     /// wallpaper. At `1.0` the colour is returned unchanged.
     private func accent(_ color: NSColor) -> NSColor {
@@ -356,11 +353,13 @@ final class StatusItemView: NSView {
     /// The dot colour for a non-operational service state. `operational` should never reach here
     /// (the dot is drawn only for a problem) but maps to gray defensively.
     ///
-    /// Calm colours (#105): `.degraded` is the **soft** service signal — the yellow counterpart of
-    /// the mild ahead-of-pace yellow — so it mutes to the calm neutral (`calmWhite` = `labelColor`)
-    /// alongside the pacing colours. The strong states (partial/major outage → orange/red) and the
-    /// neutral ones (maintenance blue, unknown grey) keep their colour, matching how the pacing gap
-    /// keeps orange/red under calm.
+    /// `.degraded` is the **soft** service signal — the yellow counterpart of the mild ahead-of-pace
+    /// yellow — and since #381 it is drawn `calmWhite` (= `labelColor`) **unconditionally**, no longer
+    /// following `Colors tell me`: that setting governs the pacing bars only (ADR-0105), and a dot with
+    /// no text beside it cannot afford a second loud colour. The **popup keeps this one yellow** — there
+    /// the service name and status sit next to the dot, so colour is not the only carrier. The strong
+    /// states (partial/major outage → orange/red) and the neutral ones (maintenance blue, unknown grey)
+    /// keep their colour on both surfaces.
     private func statusDotColor(_ status: ServiceStatus) -> NSColor {
         let target = statusDotTarget(status)
         guard let colorAnimator else { return target }
@@ -973,7 +972,7 @@ final class StatusItemView: NSView {
         // Mirror of `PopupBarView.draw`'s idle branch.
         if bar.idle {
             // Idle bar fill (#100/#158): blocked → base track grey; ready+calm → quiet neutral;
-            // ready+normal → the "ready to start" blue.
+            // ready+normal → green (ADR-0105 retired the "ready to start" blue).
             //
             // Muted uses the same `calmWhite` neutral as every muted pacing bar, not a dimmer tone of
             // its own (#307): idle sitting quieter than the quiet bars beside it made the "nothing is
@@ -996,7 +995,7 @@ final class StatusItemView: NSView {
             let idleTarget: NSColor = bar.blocked
                 ? Palette.unusedGrey
                 : (idleMuted ? bright(Palette.calmWhite) : accent(Palette.gapGreen))
-            // Animated like any other bar colour, so idle→active (blue→green) and the blocked grey
+            // Animated like any other bar colour, so idle→active (green→pacing colour) and the blocked grey
             // swap fade rather than snap.
             let fill = animated(idleTarget, window: bar.window, part: .fill)
             let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
@@ -1223,11 +1222,11 @@ final class StatusItemView: NSView {
         // **Pressure mutes the whole quiet side, unconditionally** (#381): blue, green and yellow all
         // draw white, whatever `colorsTell` says.
         //
-        // This is what makes hiding the "Colors tell me" row under Pressure honest. The row is hidden
-        // there because Pressure draws every quiet state at zero length — but *length* was only half the
-        // story: the zero pill still took its **colour** from here, so a hidden setting kept tinting a
-        // visible mark, and picking Pressure with a stored `slowDownOrSpeedUp` produced a blue pill with
-        // no control on screen to explain it. Found in live verification, not by reasoning.
+        // This is what lets the "Colors tell me" row be disabled under Pressure and still read honestly:
+        // with every quiet state muted, `Slow down` is a true description of the bar, not a placeholder.
+        // *Length* was only half the story — the zero pill still took its **colour** from here, so before
+        // this rule a stored `slowDownOrSpeedUp` produced a blue pill under Pressure with no live control
+        // to explain it. Found in live verification, not by reasoning.
         //
         // Pressure is also where a coloured quiet state says least: with no ribbon to size, the hue is
         // the only channel left, and it is reporting a state the scale itself has decided not to draw.

@@ -313,7 +313,7 @@ actor StubUsageTransport: UsageTransport {
     ///    service-status dots, and the long-message wrapping can all be seen at once.
     ///  • `.idle` (`=idle`)         — the honest "no active 5h session" frame (#100, ADR-0027): the
     ///    `five_hour` window arrives with `resets_at: null` **and** no `session` entry in `limits[]`, so
-    ///    the snapshot decodes `sessionIdle == true`. The 5h bar renders solid blue with no knob and the
+    ///    the snapshot decodes `sessionIdle == true`. The 5h bar renders as the green knobless pill and the
     ///    menu-bar time falls back to the 7-day reset (set ~4.2 days out → "4d" live). The status
     ///    endpoint stays all-operational so the frame is clean.
     ///  • `.idleBlocked` (`=idle-blocked`) — the **blocked** idle frame (#158): the same idle 5h shape,
@@ -999,10 +999,11 @@ actor StubUsageTransport: UsageTransport {
 
         // Idle + hot week frame: the same idle 5h shape as `.idle`, but `seven_day` is **ahead of
         // pace** (70 % used with ~5 days of the week left, i.e. t ≈ 29 %) while still far from
-        // exhausted — so this is NOT `idleBlocked`. The idle pill must therefore read **green**, not
-        // the "ready to start" blue: work is possible, but the week has no headroom to advertise. The
-        // three idle stubs together cover the pill's three states — `idle` (blue), this (green),
-        // `idle-blocked` (grey).
+        // exhausted — so this is NOT `idleBlocked`. The idle pill reads **green**, as every ready idle
+        // pill does since #381 (ADR-0105 dropped the "ready to start" blue — it made the same mark carry
+        // a second claim, "there is room to burn"). So the pill now has **two** states, not three:
+        // green (ready, this and `idle`) and grey (`idle-blocked`). This stub no longer differs from
+        // `idle` in the menu bar — only the popup wording tells them apart.
         if mode == .idleWeekHot {
             let sevenReset = self.resetsAt(inSeconds: 5 * 24 * 3600)   // ≥ 24 h → "5d"
             let body = """

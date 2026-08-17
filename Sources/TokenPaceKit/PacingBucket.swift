@@ -8,7 +8,8 @@ import Foundation
 /// This exists for the usage journal (#242), where each window stores the colour tier it *paces* at.
 /// Two deliberate departures from what the live UI paints:
 ///
-/// 1. **No `CalmColorMode` muting.** The menu bar can mute calm colours to white (``CalmColorMode``).
+/// 1. **No `ColorAdvice` muting.** The menu bar can mute the pacing bars' calm colours to white
+///    (``ColorAdvice``; since ADR-0105 it reaches nothing else).
 ///    That is pure cosmetics — a viewer preference about how loud the widget should look — so the
 ///    journal records the bucket a "control-freak" viewer would see, every colour on, and the series
 ///    stays comparable regardless of what any one user turned off.

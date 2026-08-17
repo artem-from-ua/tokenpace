@@ -40,14 +40,14 @@ public struct LimitRow: Sendable, Equatable {
     /// `nil` in exactly the cases ``resetLine`` is.
     public let resetLineVerbose: String?
     /// Whether this is the **idle** 5-hour row — the 5h window does not exist server-side (no active
-    /// session, ``UsageSnapshot/sessionIdle``, #100). When `true` the view renders a solid-blue knobless
+    /// session, ``UsageSnapshot/sessionIdle``, #100). When `true` the view renders a green knobless
     /// bar, the status word "ready to start", and **no second (utilization + reset) line at all**; the
     /// numeric fields (`utilization`, `pacing`, `indicator`, the three `reset*`) are inert placeholders
     /// the idle render path ignores. `false` on every normal row.
     public let sessionIdle: Bool
     /// Whether this idle 5-hour row is also **blocked** (#158): the 7-day limit is exhausted and paid
     /// credits cannot cover, so there is no path to start a session. When `true` the view draws the
-    /// solid idle bar **grey** (not blue) and shows the status word "waiting for limit reset" instead
+    /// idle pill **grey** (not green) and shows the status word "waiting for limit reset" instead
     /// of "ready to start". Only ever `true` alongside ``sessionIdle``; `false` on every other row.
     public let sessionBlocked: Bool
     // No `weeklyHeadroom` here since #381: the idle "ready to start" pill is **green** whatever the week
@@ -226,7 +226,7 @@ public struct PopupLayout: Sendable, Equatable {
     public let perModelRowsStart: Int
 
     /// Whether any **per-model / per-service** row is orange or red (`PacingSeverity.isNonCalm`) — the
-    /// "is this group worth attention?" input to ``PopupSectionVisibility/shows(isNonCalm:optionHeld:)``.
+    /// "is this group worth attention?" input to ``PopupSectionVisibility/shows(isNonCalm:isAboveZero:optionHeld:)``.
     /// `false` when the group is empty. Computed here (the pure layer) so the view needs no pacing
     /// knowledge, and recomputed on every poll like the rows themselves.
     public let perModelRowsAreNonCalm: Bool

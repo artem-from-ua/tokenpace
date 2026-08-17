@@ -211,32 +211,38 @@ struct MenuBarPane: View {
                 // they want to be told, and "Yellow + Green" / "+ Blue" answered a question about
                 // mechanism instead. Segments run quiet-first, like every other control on the page.
                 //
-                // **Hidden under Pressure**, which is why it shares a card with `Style` rather than
-                // sitting with the row below. Two halves to that, and the second was found only in live
-                // verification: Pressure draws the whole quiet side at zero **length**
-                // (`BarLayout.pressureLength` = `max(0, gaugeOffset)`), *and* `StatusItemView` mutes the
-                // whole quiet side to white there regardless of this value — because a zero-length pill
-                // still takes a **colour**, and without that rule a hidden setting kept tinting a visible
-                // mark (blue pill, no control on screen to explain it).
+                // **Disabled under Pressure, and shown on `Slow down`** — which is why it shares a card
+                // with `Style` rather than sitting with the row below.
                 //
-                // A row that appears and disappears with its neighbour's value has to be next to that
-                // neighbour, or the disappearance reads as a glitch. The stored value is untouched while
-                // hidden — switching back to Gauge or Progress restores the same choice.
-                if model.menuBarStyle != .pressure {
-                    HStack {
-                        Text("Colors tell me")
-                        Spacer()
-                        SegmentedControl(
-                            segments: AppearanceColorAdvice.segments,
-                            active: model.colorsTell,
-                            onSelect: { model.setColorAdvice($0) })
-                    }
-                    // Folds out of the `Style` block above rather than blinking — the shared reveal every
-                    // conditional row in Settings now uses (`SettingsRowReveal`). It matters most here:
-                    // this row is gated by a **picture** two rows up, so without the motion there is
-                    // nothing tying the disappearance to the tile that caused it.
-                    .transition(SettingsRowReveal.transition)
+                // Pressure draws the whole quiet side at zero length (`BarLayout.pressureLength` =
+                // `max(0, gaugeOffset)`) *and* `StatusItemView` mutes it to white there regardless of
+                // this value, so every segment would render the same bar. `Slow down` is the segment
+                // that describes what is actually on screen — only the "too fast" orange keeps colour —
+                // so the control reports the truth instead of offering a choice that does nothing.
+                //
+                // Disabled rather than hidden: a row that vanishes takes its own explanation with it,
+                // and the user is left to guess whether the setting is gone or merely elsewhere. Greyed
+                // out with the honest value showing, the page still answers "what will the colours do?"
+                // — which is the question the row exists for. Same treatment `AboutPane` gives a switch
+                // whose feature cannot work (`installAutoEnabled`).
+                //
+                // **The stored value is never written here.** `displayedColorAdvice` swaps only what is
+                // *drawn*; `PersistedConfig.colorsTell` keeps whatever the user last chose, so switching
+                // back to Gauge or Progress restores it with no bookkeeping of a "previous" value — the
+                // store already is that memory.
+                HStack {
+                    // The title dims with the control below it — `.disabled` sits on the whole `HStack`,
+                    // and `SettingsDisabledLabel` turns that environment flag into AppKit's own
+                    // `disabledControlTextColor`. A plain `Text` is nobody's label as far as SwiftUI is
+                    // concerned, so without it a full-strength title would sit over a greyed control.
+                    SettingsDisabledLabel("Colors tell me")
+                    Spacer()
+                    SegmentedControl(
+                        segments: AppearanceColorAdvice.segments,
+                        active: model.displayedColorAdvice,
+                        onSelect: { model.setColorAdvice($0) })
                 }
+                .disabled(model.menuBarStyle == .pressure)
 
                 // Whether the top (5-hour) bar steps aside until it needs attention (ADR-0086, narrowed
                 // to one window by ADR-0090). The row names the bar, so the segments only say *when* —
@@ -277,9 +283,13 @@ struct MenuBarPane: View {
             }
         }
         .formStyle(.grouped)
-        // Drives the `Colors tell me` row's transition above. Scoped to `menuBarStyle` on purpose: a bare
-        // `.animation(_:)` would also animate every *segment* change on this page, so picking a different
-        // `Hide the top 5h bar` mode would slide its own control around.
+        // Picking a tile moves the `Colors tell me` row's highlight (to `Slow down` under Pressure, back
+        // to the stored choice otherwise) and greys the control out. Animated so the two read as one
+        // consequence of the click rather than as the page flickering.
+        //
+        // Scoped to `menuBarStyle` on purpose: a bare `.animation(_:)` would also animate every *segment*
+        // change on this page, so picking a different `Hide the top 5h bar` mode would slide its own
+        // control around.
         .animation(SettingsRowReveal.animation, value: model.menuBarStyle)
     }
 

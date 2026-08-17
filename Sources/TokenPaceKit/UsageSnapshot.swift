@@ -364,7 +364,7 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
     /// **and** no `limits[]` entry supplies one either: the 5h window is *created* by the first token
     /// spend and *does not exist* until then (verified server mechanics — see ADR-0027), so a missing
     /// reset means "ready to start", not a reset boundary. When `true`, `fiveHour` is
-    /// `UsageWindow(utilization: 0, resetsAt: "")` and the UI renders a solid-blue "ready to start"
+    /// `UsageWindow(utilization: 0, resetsAt: "")` and the UI renders a green "ready to start"
     /// bar with **no synthesized phantom reset** — the bug this flag fixes. `false` on every normal
     /// snapshot (an active 5h window, or a genuine reset-boundary `null` that `limits[]` still
     /// backfills). Applies only to `five_hour`; the 7-day window keeps its local-estimate fallback.
@@ -512,7 +512,7 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
     ///   before then. An exhausted chain therefore means "no active session", not a reset boundary:
     ///   the method returns `(UsageWindow(utilization: <decoded ?? 0>, resetsAt: ""), sessionIdle: true)`
     ///   with **no** local estimate and **no** synthesis log — the honest idle state the UI renders as
-    ///   a solid-blue "ready to start" bar. This is what removes the drifting phantom `now + 5h` reset.
+    ///   a green "ready to start" bar. This is what removes the drifting phantom `now + 5h` reset.
     ///
     /// - Returns: the resolved window plus `sessionIdle` — `true` only in the `five_hour` exhausted-chain
     ///   case above, `false` on every other path (present reset, or a `limits[]`/local-estimate fill).

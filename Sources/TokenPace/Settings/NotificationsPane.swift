@@ -27,34 +27,63 @@ struct NotificationsPane: View {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Back to work")
-                        Spacer()
-                        // "Preview" fires the notification on demand for verification (#193). It sits
-                        // before the on/off switch and is always enabled — even with the feature off:
-                        // the post checks support + authorization itself (a silent no-op if not granted).
+                        // Everything that follows the feature's availability sits inside one `.disabled`
+                        // (#381) — the title, the switch and the hints below. The toggle carries
+                        // `.labelsHidden()`, so SwiftUI never treats this text as its label and would
+                        // leave it at full strength over a greyed switch; and a hint explaining an
+                        // unavailable control is itself unavailable.
+                        //
+                        // "Preview" stays **outside** that group: it fires the notification on demand for
+                        // verification (#193) and works even with the feature off — the post checks
+                        // support + authorization itself (a silent no-op if not granted). Left inside, it
+                        // would be disabled along with the rest; `.disabled` accumulates down the tree and
+                        // a nested `.disabled(false)` is not documented to undo an ancestor's `true`, so
+                        // the button is placed beside the group rather than relying on that.
+                        Group {
+                            SettingsDisabledLabel("Back to work")
+                            Spacer()
+                        }
+                        .disabled(!model.backToWorkMasterEnabled)
+
                         Button("Preview") { model.tryBackToWork() }
+
                         Toggle("Back to work", isOn: Binding(
                             get: { model.backToWorkEnabled },
                             set: { model.setBackToWork($0) }))
                         .labelsHidden()
                         .disabled(!model.backToWorkMasterEnabled)
                     }
-                    SettingsHint(
-                        text: "If you hit a Claude usage limit, notifies you when it resets so you "
-                            + "can get back to work.")
-                    SettingsHint(
-                        text: "It best suits the *Work harder!* and *Control freak* presets on the "
-                            + "*Appearance* page.")
+                    // Descriptive hints dim with the control they describe (#381) …
+                    Group {
+                        SettingsHint(
+                            text: "If you hit a Claude usage limit, notifies you when it resets so you "
+                                + "can get back to work.")
+                        SettingsHint(
+                            text: "It best suits the *Work harder!* and *Control freak* presets on the "
+                                + "*Appearance* page.")
+                    }
+                    .disabled(!model.backToWorkMasterEnabled)
+
+                    // … but this one is the **reason** the switch is unavailable ("Notifications are
+                    // turned off for TokenPace — enable them in System Settings"), so it stays at full
+                    // strength. Dimming the recovery instructions along with the thing they recover is
+                    // exactly backwards.
                     SettingsHint(text: model.backToWorkHint, warning: !model.backToWorkHint.isEmpty)
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Switching to Extra Usage")
-                        Spacer()
-                        // "Preview" fires the banner on demand for verification, mirroring "Back to work" —
-                        // always enabled (the post gates on support + authorization itself).
+                        // Same arrangement as "Back to work" above: the title and the hint follow the
+                        // feature's availability, while "Preview" stays outside the group because it
+                        // works regardless (the post gates on support + authorization itself).
+                        Group {
+                            SettingsDisabledLabel("Switching to Extra Usage")
+                            Spacer()
+                        }
+                        .disabled(!model.backToWorkMasterEnabled)
+
                         Button("Preview") { model.tryExtraUsage() }
+
                         Toggle("Switching to Extra Usage", isOn: Binding(
                             get: { model.extraUsageNotifyEnabled },
                             set: { model.setExtraUsageNotify($0) }))
@@ -64,6 +93,7 @@ struct NotificationsPane: View {
                     SettingsHint(
                         text: "Notifies you the moment work starts running on paid Extra Usage Credit "
                             + "— with the amount spent and your limit, if set.")
+                        .disabled(!model.backToWorkMasterEnabled)
                 }
 
                 // The switch is on and disabled, mirroring the locked "Claude API" row in

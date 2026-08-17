@@ -173,7 +173,7 @@ enum StubScenario: String, CaseIterable {
         case .farBehind:           return "Pacing · both far behind (blue)"
         case .weeklyGate:          return "Pacing · 5h far behind, week spent (gate)"
         case .weeklyInterp:        return "Pacing · 7d interpolated from the 5h counter"
-        case .idleWeekHot:         return "Idle · week ahead of pace (green pill)"
+        case .idleWeekHot:         return "Idle · week ahead of pace (popup wording)"
         case .pressureSweep:       return "Pacing · Pressure scale (sharp 5h + clipped 7d)"
         case .gaugeSweep:          return "Pacing · Gauge scale (full-left 5h + short-right 7d)"
         case .barExtremes:         return "Pacing · fill extremes (full blue 5h + 1 % green 7d)"
@@ -219,8 +219,11 @@ enum StubScenario: String, CaseIterable {
             return "First poll valid (full bars + Extra usage), then every later poll times out → the "
                  + "⚠️ connectivity banner above the held bars (spacing check)."
         case .idle:
-            return "The honest \"no active 5h session\" state (#100): solid-blue 5h bar, no phantom "
-                 + "reset, menu-bar time falls back to the 7-day reset."
+            return "The honest \"no active 5h session\" state (#100): the 5h bar is the knobless green "
+                 + "idle pill, no phantom reset, menu-bar time falls back to the 7-day reset. Since "
+                 + "#381 the pill is green for every ready idle state, so this frame is NOT "
+                 + "distinguishable from `idle-week-hot` in the menu bar — only the popup wording "
+                 + "differs."
         case .idleBlocked:
             return "Blocked idle (#158): idle 5h + 7-day exhausted (100 %), no credits → the idle bar "
                  + "goes grey and the 7-day reset is painted red."
@@ -261,7 +264,7 @@ enum StubScenario: String, CaseIterable {
                  + "dropped and a lone green 5h bar sits centred."
         case .farBehind:
             return "Both base bars far behind pace (ADR-0061): a big surplus past the behind-threshold "
-                 + "→ blue. Turn \"Work harder\" on with Calm colours to keep the blue coloured."
+                 + "→ blue. Set \"Colors tell me\" to `Slow down or speed up` to keep the blue coloured."
         case .weeklyGate:
             return "The weekly-capacity gate. 5h is deep behind pace (u = 5 %, t = 60 %) — a 55 pp "
                  + "surplus, far past the 40 pp threshold, so it WOULD be blue — but the 7-day window "
@@ -284,11 +287,12 @@ enum StubScenario: String, CaseIterable {
                  + "ever steps backwards, least of all at the two handovers."
         case .idleWeekHot:
             return "Idle 5h while the week runs ahead of pace (u = 70 %, t = 29 %). No active session, "
-                 + "so the 5h bar is the knobless idle pill — and because the week has no headroom to "
-                 + "advertise, it must be GREEN, not the \"ready to start\" blue. The status word stays "
-                 + "\"ready to start\" (work IS possible; only the promise of spare quota is withdrawn). "
-                 + "Compare with `idle` (calm week → blue pill) and `idle-blocked` (7d exhausted, no "
-                 + "credits → grey pill, \"waiting for limit reset\")."
+                 + "so the 5h bar is the knobless idle pill — GREEN, like every ready idle state since "
+                 + "#381 (ADR-0105 dropped the \"ready to start\" blue: it was a second claim, \"there "
+                 + "is room to burn\", riding the same mark). The status word stays \"ready to "
+                 + "start\". The pill no longer tells this frame apart from `idle` — check the POPUP "
+                 + "wording instead; `idle-blocked` (7d exhausted, no credits) is still the only idle "
+                 + "frame with a different colour: grey, \"waiting for limit reset\"."
         case .pressureSweep:
             return "Pressure scale (#307, rescaled by ADR-0101): 5h three points from exhaustion with "
                  + "7 % of the window left — 4 % of the bar on the old window scale (below the min "
@@ -315,7 +319,7 @@ enum StubScenario: String, CaseIterable {
                  + "the track; (2) switching Pressure ↔ Gauge leaves the 7d (ahead) ribbon at the very "
                  + "same length — since ADR-0101 Pressure IS this scale's ahead half, so the two "
                  + "cannot disagree; (3) on Gauge the 5h row is the widest thing on screen, on "
-                 + "Pressure it is the narrowest; (4) with Calm colours on, direction is the only cue "
+                 + "Pressure it is the narrowest; (4) with \"Colors tell me\" on `Slow down`, direction is the only cue "
                  + "left — that is the case that decides whether the trade-off is acceptable."
         case .nearZero:
             return "Near-zero fill on fresh windows: tiny usage (5h 0 %, 7d 4 %, Fable/Mythos ~1–4 %) "
@@ -327,8 +331,12 @@ enum StubScenario: String, CaseIterable {
                  + "bar must fill the track end to end — its caps flush against the track's rounded ends, "
                  + "with no grey sliver left past the fill — while 5h shows a pill at the very start."
         case .calmDegraded:
-            return "Calm bars + a degraded (yellow) service dot: with \"Calm colours\" (#105) off the "
-                 + "dot is yellow; turn Calm on and it mutes to white."
+            return "Calm bars + a `degraded_performance` service. Since #381 the menu-bar dot is "
+                 + "**white unconditionally** — no setting brings the yellow back (ADR-0105: degraded is "
+                 + "the soft signal, and the bar has no room for a second loud one). The POPUP keeps it "
+                 + "yellow, on purpose: there the service name and status sit beside the dot, so colour "
+                 + "is not the only carrier. Check both surfaces side by side — and check the white dot "
+                 + "is actually legible on a LIGHT theme against the real menu bar."
         case .allGreen:
             return "Calm bars + every service operational (all green): the popup shows no status rows by "
                  + "default; hold ⌥ Option to reveal the four green rows (API, Code, Web/Desktop, Cowork). "

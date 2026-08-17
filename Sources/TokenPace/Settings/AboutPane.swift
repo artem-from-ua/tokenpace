@@ -125,7 +125,11 @@ struct AboutPane: View {
                                 .disabled(!model.installAutoEnabled)
                             }
                         } label: {
-                            Text("Install updates automatically")
+                            // Dims with the switch (#381): `LabeledContent` disables only what is
+                            // disabled *inside* it, so without this the title would stay at full
+                            // strength above a greyed control.
+                            SettingsDisabledLabel("Install updates automatically")
+                                .disabled(!model.installAutoEnabled)
                         }
                         // Why an available update is sitting unapplied (#221) — every blocking
                         // condition, not just the first, so fixing one doesn't reveal another. The ⚠️

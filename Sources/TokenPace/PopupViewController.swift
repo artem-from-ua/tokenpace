@@ -45,7 +45,7 @@ final class PopupBarView: NSView {
         }
     }
 
-    /// Whether this is the **idle** 5-hour bar (#100, ADR-0027): a solid-blue knobless track (no pacing
+    /// Whether this is the **idle** 5-hour bar (#100, ADR-0027): a green knobless pill (no pacing
     /// zones, no time-indicator dot) for a 5h window with no active session. The under-bar tick ruler
     /// still draws (`subdivisions`), keeping the row's anatomy in family with the active bars.
     var idle: Bool = false {
@@ -56,7 +56,7 @@ final class PopupBarView: NSView {
     }
 
     /// Whether this idle bar is **blocked** (#158): the 7-day limit is exhausted and paid credits cannot
-    /// cover, so the solid track is drawn **grey** (`monochromeGrey`) instead of the "ready" blue —
+    /// cover, so the pill is drawn **grey** (`monochromeGrey`) instead of the "ready" green —
     /// "waiting for a limit to reset", not "ready to start". Only meaningful alongside ``idle``.
     var blocked: Bool = false {
         didSet {
@@ -295,11 +295,6 @@ final class PopupBarView: NSView {
         /// `.systemGreen`; the ahead-of-pace grade is `.systemYellow` (mild lead) → `.systemOrange`
         /// (strong lead) → `.systemRed` (exhausted), via `aheadColor`.
         static var gapGreen: NSColor { ColorStore.shared.color(.green) }
-        /// The **idle** 5-hour bar's solid fill (#100, ADR-0027): the 5h window has no active session, so
-        /// the bar is a knobless solid track meaning "ready to start" — plain
-        /// `.systemBlue`, the appearance-aware pair to the on-pace green; the unified `blue` role, so it
-        /// flips light/dark like the native icons and matches the menu-bar idle bar exactly.
-        static var idleBlue: NSColor { ColorStore.shared.color(.blue) }
         static var gapRed: NSColor { ColorStore.shared.color(.red) }
         static var gapYellow: NSColor { ColorStore.shared.color(.yellow) }
         static var gapOrange: NSColor { ColorStore.shared.color(.orange) }
@@ -418,7 +413,7 @@ final class PopupBarView: NSView {
         // the per-style shapes were meant to prevent. Zero usage is zero on both scales, so zero is what
         // both draw.
         if idle {
-            // Blocked idle (#158) → grey (no path to start); otherwise the "ready to start" blue.
+            // Blocked idle (#158) → grey (no path to start); otherwise green (ADR-0105).
             // Grey (blocked) is an already-translucent neutral — leave it; only the blue hue is tinted (#188).
             // Animated so idle→active reads as a fade (ADR-0070); the glow follows automatically
             // because it is derived from this same colour.
@@ -1816,7 +1811,7 @@ final class PopupViewController: NSViewController {
     private static let claudeCodeSectionTitle = "Claude"
 
     /// The status word shown flush-right on the **idle** 5-hour row (#100, ADR-0027): the 5h window has
-    /// no active session, so the row reads "5-hour  ready to start" with a solid-blue bar and no second
+    /// no active session, so the row reads "5-hour  ready to start" with a green pill and no second
     /// line. The localisation seam (ADR-0009) — like the other status phrases, the English word lives
     /// here, not in the kit.
     static let idleStatusText = "ready to start"
@@ -2645,7 +2640,7 @@ final class PopupViewController: NSViewController {
 
     /// Add a pacing bar from raw geometry — shared by the token limit rows and the "Extra usage"
     /// credits section (#145), which has no ``LimitRow``. `subdivisions == 0` draws no tick ruler
-    /// (a calendar month has no equal window boundaries to mark); `idle` draws the solid-blue knobless
+    /// (a calendar month has no equal window boundaries to mark); `idle` draws the green knobless
     /// 5h track (#100). When `bar` is `nil` the view draws nothing — but callers only reach here with a
     /// real bar (idle uses the flag, not the layout).
     ///
@@ -2666,8 +2661,8 @@ final class PopupViewController: NSViewController {
         // stays a still reference beside the animated one (ADR-0070).
         view.frozenStripFraction = tweenRow == frozenStripRow ? frozenStripFraction : nil
         view.subdivisions = subdivisions
-        view.idle = idle   // solid-blue knobless track when the 5h window is idle (#100)
-        view.blocked = blocked   // grey instead of blue when that idle state is blocked (#158)
+        view.idle = idle   // green knobless pill when the 5h window is idle (#100)
+        view.blocked = blocked   // grey instead of green when that idle state is blocked (#158)
         view.isBaseLimit = isBaseLimit   // only base 5h/7d rows render the far-behind blue zone
         view.barStyle = barStyle   // Progress (gap+marker) vs Pressure/Gauge (marker-less ribbons) — #224
         view.optionHeld = optionHeld   // the under-bar ruler (teeth + month captions) is ⌥-on-demand

@@ -36,6 +36,13 @@ struct SegmentedControl<Value: Hashable>: View {
     /// Which segment's `inactiveHelp` popover is open (by value), or nil.
     @State private var helpShownFor: Value?
 
+    /// Whether the control is interactive — `.disabled(…)` from an enclosing view (#381).
+    ///
+    /// Read explicitly because this control paints its own colours: the active segment is a hard-coded
+    /// accent fill with white text, and SwiftUI dims neither. Without this a disabled control would look
+    /// exactly like a live one and only reveal itself by ignoring clicks — the worst of both.
+    @Environment(\.isEnabled) private var isEnabled
+
     var body: some View {
         HStack(spacing: 2) {
             ForEach(segments) { segment in
@@ -59,12 +66,23 @@ struct SegmentedControl<Value: Hashable>: View {
                         .padding(.horizontal, 10)
                         .frame(maxHeight: .infinity)
                         // Active: accent fill + white text. Inactive: no fill, normal/dimmed text.
-                        .foregroundStyle(isActive ? AnyShapeStyle(.white)
-                                                  : AnyShapeStyle(segment.selectable ? Color.primary : Color.secondary))
+                        //
+                        // Disabled keeps the *shape* — the highlight stays where it is, because a
+                        // disabled control still has to report which value is in force (#381: under
+                        // Pressure the row shows `Slow down`, which is what the bar actually draws). Only
+                        // the ink drops: secondary text on a grey fill, so it reads as "this is the
+                        // state, and you cannot change it here" rather than as an empty control.
+                        .foregroundStyle(
+                            isActive ? AnyShapeStyle(isEnabled ? Color.white : Color.secondary)
+                                     : AnyShapeStyle(segment.selectable && isEnabled ? Color.primary : Color.secondary))
                         .background(
                             RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .fill(isActive ? Color.accentColor : .clear)
-                                .shadow(color: isActive ? .black.opacity(0.15) : .clear, radius: 0.5, y: 0.5)
+                                .fill(isActive
+                                      ? (isEnabled ? Color.accentColor
+                                                   : Color(nsColor: .quaternaryLabelColor))
+                                      : .clear)
+                                .shadow(color: isActive && isEnabled ? .black.opacity(0.15) : .clear,
+                                        radius: 0.5, y: 0.5)
                         )
                         .contentShape(Rectangle())
                 }

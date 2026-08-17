@@ -218,6 +218,22 @@ final class SettingsModel {
     /// What the menu bar's bar colours tell the user — the row "Colors tell me" (#381). Governs the
     /// pacing bars only; the service dot, credits glyph and idle pill no longer read it.
     var colorsTell: ColorAdvice = .slowDown
+
+    /// What the "Colors tell me" control should show — ``colorsTell`` normally, and always
+    /// ``ColorAdvice/slowDown`` while the menu bar is on **Pressure**.
+    ///
+    /// Under that style `StatusItemView` mutes the entire quiet side to white whatever this value says,
+    /// so every segment would draw the same bar and only the "too fast" orange keeps its colour — which
+    /// is exactly what `Slow down` names. The row is disabled there, so this reports the truth rather
+    /// than leaving a segment lit that describes a bar nobody is drawing.
+    ///
+    /// **Read-only, and deliberately not a stored "previous value".** Nothing writes
+    /// `PersistedConfig.colorsTell` on a style change, so the user's own choice sits untouched in the
+    /// store and comes back the moment they pick Gauge or Progress. A remembered-previous field would be
+    /// a second copy of something the store already holds, with the usual failure mode: the two disagree
+    /// after a preset, a reset, or a restart.
+    var displayedColorAdvice: ColorAdvice { menuBarStyle == .pressure ? .slowDown : colorsTell }
+
     /// Whether the **top (5-hour)** bar steps aside until it needs attention (ADR-0086) — the choice
     /// that replaced the boolean "Show 7-day bar when calm" checkbox.
     var hideTop5hBar: TopBarHiding = .untilItNeedsAttention
