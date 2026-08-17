@@ -231,20 +231,11 @@ struct MenuBarPane: View {
                             active: model.colorsTell,
                             onSelect: { model.setColorAdvice($0) })
                     }
-                    // The row slides out of the card edge and fades, rather than blinking in and out.
-                    //
-                    // This is the **opposite** of what every other conditional row in Settings does
-                    // (`GeneralPane`, `ProvidersPane`, `ProvidersClaudePane`, `AboutPane` all carry
-                    // `.animation(nil, …)`), and deliberately so: those rows are gated by a *toggle the
-                    // user just clicked directly above them*, where the causal link is obvious and the
-                    // animation is pure motion. This one is gated by a **picture** two rows up, so the
-                    // motion is doing work — it draws the eye from the tile that was clicked to the row
-                    // that answered, which is what keeps the disappearance from reading as a glitch.
-                    //
-                    // `.top` on the transition, not `.identity`: the row belongs to the block above it,
-                    // so it should look like it folded into `Style` rather than dropping out of the
-                    // card's bottom edge.
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    // Folds out of the `Style` block above rather than blinking — the shared reveal every
+                    // conditional row in Settings now uses (`SettingsRowReveal`). It matters most here:
+                    // this row is gated by a **picture** two rows up, so without the motion there is
+                    // nothing tying the disappearance to the tile that caused it.
+                    .transition(SettingsRowReveal.transition)
                 }
 
                 // Whether the top (5-hour) bar steps aside until it needs attention (ADR-0086, narrowed
@@ -289,11 +280,7 @@ struct MenuBarPane: View {
         // Drives the `Colors tell me` row's transition above. Scoped to `menuBarStyle` on purpose: a bare
         // `.animation(_:)` would also animate every *segment* change on this page, so picking a different
         // `Hide the top 5h bar` mode would slide its own control around.
-        //
-        // 0.2 s matches the tile picker's own press feedback, so the tile and the row read as one gesture
-        // rather than two events; `easeInOut` because the card is changing height, and a spring would
-        // overshoot the neighbouring section.
-        .animation(.easeInOut(duration: 0.2), value: model.menuBarStyle)
+        .animation(SettingsRowReveal.animation, value: model.menuBarStyle)
     }
 
 }

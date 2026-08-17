@@ -51,12 +51,14 @@ struct GeneralPane: View {
                             }
                         }
                     }
+                    .transition(SettingsRowReveal.transition)
                 }
             }
         }
         .formStyle(.grouped)
-        // Show/hide the Location row without an insertion animation (avoids neighbour-height flicker).
-        .animation(nil, value: model.journalEnabled)
+        // The Location row folds out of the toggle above it rather than blinking (#381) — see
+        // `SettingsRowReveal` for why the previous `.animation(nil, …)` was the worse of the two.
+        .animation(SettingsRowReveal.animation, value: model.journalEnabled)
     }
 
     /// The fixed journal directory in Application Support — read-only, revealed via Finder.

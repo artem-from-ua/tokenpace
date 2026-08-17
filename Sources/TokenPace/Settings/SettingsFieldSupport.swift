@@ -34,6 +34,36 @@ extension SettingsModel {
     }
 }
 
+// MARK: - Conditional rows (#381)
+
+/// How a Settings row that appears and disappears with another control's value should move.
+///
+/// Every pane used to suppress this outright (`.animation(nil, value:)`), on the grounds that an
+/// insertion animation made the neighbouring rows flicker as the card changed height. That traded one
+/// problem for another: a row **blinking** in or out gives no clue where it came from, so the change
+/// reads as the window glitching rather than as a consequence of the click just made.
+///
+/// A short slide from the top edge plus a fade answers both. The row visibly folds out of the block it
+/// belongs to, so the eye follows it instead of hunting for what changed; and the 0.2 s is short enough
+/// that the height change reads as one motion rather than as a bounce.
+///
+/// `easeInOut` rather than a spring: the card is resizing, and an overshoot would push the sections
+/// below it past their resting place and back.
+enum SettingsRowReveal {
+    /// The animation to attach to the **container** (the `Form` or `Section`), keyed on the value that
+    /// gates the row. Scoping it to that value matters — a bare `.animation(_:)` would also animate every
+    /// segmented-control change on the page, so picking a different segment would slide its own control.
+    static let animation: Animation = .easeInOut(duration: 0.2)
+
+    /// The transition to attach to the **row**. `.top` rather than the default fade-in-place: the gated
+    /// row always sits under the control that gates it, so folding out of the top edge points back at the
+    /// thing that was just clicked.
+    ///
+    /// Computed rather than stored: `AnyTransition` is not `Sendable`, so a `static let` of it is a
+    /// concurrency error. Rebuilding the value per use costs nothing here.
+    static var transition: AnyTransition { .move(edge: .top).combined(with: .opacity) }
+}
+
 /// A secondary-styled hint line under a control. When `warning` is set, it is prefixed with a
 /// warning-triangle SF Symbol (the dev-build "Unavailable in development builds." treatment, #156).
 struct SettingsHint: View {

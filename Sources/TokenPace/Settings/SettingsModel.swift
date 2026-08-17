@@ -633,35 +633,35 @@ final class SettingsModel {
     func setColorAdvice(_ mode: ColorAdvice) {
         colorsTell = mode
         PersistedConfig.colorsTell = mode
-        AppLogger.lifecycle.notice("calm-color-mode: set \(mode.rawValue, privacy: .public)")
+        AppLogger.lifecycle.notice("colors-tell: set \(mode.rawValue, privacy: .public)")
         onColorAdviceChange?(mode)
     }
 
     func setTopBarHiding(_ mode: TopBarHiding) {
         hideTop5hBar = mode
         PersistedConfig.hideTop5hBar = mode
-        AppLogger.lifecycle.notice("hide-calm-bar: menu-bar set \(mode.rawValue, privacy: .public)")
+        AppLogger.lifecycle.notice("hide-top-5h-bar: set \(mode.rawValue, privacy: .public)")
         onTopBarHidingChange?(mode)
     }
 
     func setModelLimitsVisibility(_ mode: PopupSectionVisibility) {
         showPerModelLimits = mode
         PersistedConfig.showPerModelLimits = mode
-        AppLogger.lifecycle.notice("model-specific-limits: popup set \(mode.rawValue, privacy: .public)")
+        AppLogger.lifecycle.notice("show-per-model-limits: set \(mode.rawValue, privacy: .public)")
         onModelLimitsVisibilityChange?(mode)
     }
 
     func setExtraUsageVisibility(_ mode: PopupSectionVisibility) {
         showExtraUsage = mode
         PersistedConfig.showExtraUsage = mode
-        AppLogger.lifecycle.notice("extra-usage-section: popup set \(mode.rawValue, privacy: .public)")
+        AppLogger.lifecycle.notice("show-extra-usage: set \(mode.rawValue, privacy: .public)")
         onExtraUsageVisibilityChange?(mode)
     }
 
     func setShowServiceDot(_ on: Bool) {
         showServiceDot = on
         PersistedConfig.showServiceStatusDot = on
-        AppLogger.lifecycle.notice("service-status-dot: menu-bar set \(on, privacy: .public)")
+        AppLogger.lifecycle.notice("service-status-dot: set \(on, privacy: .public)")
         onServiceDotChange?(on)
     }
 

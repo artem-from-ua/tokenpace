@@ -554,11 +554,21 @@ final class PopupBarView: NSView {
             // ribbon — leaves the mark looking unlit. Quiet states only; a warning's ribbon has length of
             // its own and does not need lifting.
             let isCollapsedQuietPill = effectiveScale == .remaining && l.isCalm && collapsedToPill
-            withGlow(gapColor,
-                     radius: isCollapsedQuietPill ? Self.pillGlowRadius : Self.gapGlowRadius,
-                     strength: isCollapsedQuietPill ? Self.pillGlowStrength : Self.gapGlowStrength) {
-                gapColor.setFill()
-                stripPath.fill()
+            if isCollapsedQuietPill {
+                // Widest first, then narrower: each pass composites over the last, so the light stacks up
+                // where they overlap and falls off outward. See the radius constants for why three passes
+                // rather than one larger `strength`.
+                for radius in [Self.pillHaloRadius, Self.pillMidGlowRadius, Self.pillGlowRadius] {
+                    withGlow(gapColor, radius: radius, strength: Self.pillGlowStrength) {
+                        gapColor.setFill()
+                        stripPath.fill()
+                    }
+                }
+            } else {
+                withGlow(gapColor, radius: Self.gapGlowRadius, strength: Self.gapGlowStrength) {
+                    gapColor.setFill()
+                    stripPath.fill()
+                }
             }
         }
 
@@ -1131,8 +1141,21 @@ final class PopupBarView: NSView {
     /// own height instead of bleeding across the card, and the pill reads as a lit dot. Only the quiet
     /// colours get this — orange and red already have ribbon length of their own, and lighting them
     /// further would raise a warning's volume rather than restore a quiet mark's legibility.
-    private static let pillGlowRadius: CGFloat = 9
-    private static let pillGlowStrength: CGFloat = 0.85
+    /// The three glow passes for a collapsed Pressure pill, laid down widest-first.
+    ///
+    /// Three rather than one because `withGlow` sets a **shadow alpha**, and `strength` clamps at 1: once
+    /// there, a bigger number buys nothing and the only way left to add light is another pass. Each one
+    /// composites over the last, so the halo builds where they overlap — brightest against the pill,
+    /// falling off outward, which is how a light source actually behaves.
+    ///
+    /// The radii are a spread, not three tries at one value: the wide pass fills the bar's height with
+    /// colour, the mid pass gives the falloff a body, and the tight pass puts a hot core right at the
+    /// pill's edge so the mark reads as lit rather than as a blur with a dot inside it.
+    private static let pillGlowRadius: CGFloat = 10
+    private static let pillMidGlowRadius: CGFloat = 22
+    private static let pillHaloRadius: CGFloat = 40
+    /// Full alpha on every pass — see above for why the count, not this number, is the brightness knob.
+    private static let pillGlowStrength: CGFloat = 1.0
 
     /// Marker glow: a soft halo, kept subtle so the marker doesn't bloom over the card.
     private static let markerGlowRadius: CGFloat = 6
