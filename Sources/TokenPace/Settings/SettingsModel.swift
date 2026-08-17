@@ -29,13 +29,13 @@ final class SettingsModel {
     var onProviderMonitoringChange: ((ProviderMonitoring) -> Void)?
     var onCheckForUpdatesNow: (() -> Void)?
     var onInstallUpdateNow: (() -> Void)?
-    var onCalmColorModeChange: ((CalmColorMode) -> Void)?
+    var onColorAdviceChange: ((ColorAdvice) -> Void)?
     var onMenuBarStyleChange: ((BarStyle) -> Void)?
     var onDropdownStyleChange: ((BarStyle) -> Void)?
     var onServiceDotChange: ((Bool) -> Void)?
     var onModelLimitsVisibilityChange: ((PopupSectionVisibility) -> Void)?
     var onExtraUsageVisibilityChange: ((PopupSectionVisibility) -> Void)?
-    var onCalmBarHidingChange: ((CalmBarHiding) -> Void)?
+    var onTopBarHidingChange: ((TopBarHiding) -> Void)?
     var onPausePollingChange: ((Bool) -> Void)?
     /// Master toggle for the awaiting-input indicator flipped (#233) — the shell starts/stops the
     /// `AwaitingInputWatcher` and re-renders.
@@ -215,16 +215,18 @@ final class SettingsModel {
 
     // MARK: Appearance (menu-bar widget)
 
-    var calmColorMode: CalmColorMode = .yellowGreenBlue
-    /// Which menu-bar bar steps aside while it is calm (ADR-0086) — the tri-state that replaced the
-    /// boolean "Show 7-day bar when calm" checkbox.
-    var calmBarHiding: CalmBarHiding = .fiveHour
+    /// What the menu bar's bar colours tell the user — the row "Colors tell me" (#381). Governs the
+    /// pacing bars only; the service dot, credits glyph and idle pill no longer read it.
+    var colorsTell: ColorAdvice = .slowDown
+    /// Whether the **top (5-hour)** bar steps aside until it needs attention (ADR-0086) — the choice
+    /// that replaced the boolean "Show 7-day bar when calm" checkbox.
+    var hideTop5hBar: TopBarHiding = .untilItNeedsAttention
     /// When the popup lists the per-model 7-day limit rows (Opus/Sonnet/scoped, #211). A popup
-    /// concern, not a menu-bar one — shown under the separate "Dropdown Widget" section of the pane.
-    var modelLimitsVisibility: PopupSectionVisibility = .nonCalm
-    /// When the popup shows the "Extra usage" credits section. Separate from ``showExtraUsage``, which
-    /// governs the menu-bar credits icon.
-    var extraUsageVisibility: PopupSectionVisibility = .nonCalm
+    /// concern, not a menu-bar one — it lives on the separate `Dropdown` child page.
+    var showPerModelLimits: PopupSectionVisibility = .whenItNeedsAttention
+    /// When the popup shows the "Extra usage" credits section. The menu-bar credits icon has no user
+    /// gate at all (ADR-0090), so there is nothing to confuse this with.
+    var showExtraUsage: PopupSectionVisibility = .onceUsed
     var showServiceDot = false
     /// The **menu-bar widget**'s bar presentation style, shown as a segmented control in that
     /// section (#224, per-surface since #329).
@@ -446,11 +448,11 @@ final class SettingsModel {
     /// `AppearancePresetValues` (see `syncFromConfig`).
     private var liveAppearanceValues: AppearancePresetValues {
         AppearancePresetValues(
-            calmColorMode: calmColorMode,
-            calmBarHiding: calmBarHiding,
+            colorsTell: colorsTell,
+            hideTop5hBar: hideTop5hBar,
             showServiceStatusDot: showServiceDot,
-            modelLimitsVisibility: modelLimitsVisibility,
-            extraUsageVisibility: extraUsageVisibility,
+            modelLimitsVisibility: showPerModelLimits,
+            extraUsageVisibility: showExtraUsage,
             menuBarStyle: menuBarStyle,
             dropdownStyle: dropdownStyle)
     }
@@ -566,10 +568,10 @@ final class SettingsModel {
         launchAtLogin = LaunchAtLogin.toggleState(for: status)
         pausePolling = PersistedConfig.pausePollingWhenScreenLocked
 
-        calmColorMode = PersistedConfig.calmColorMode
-        calmBarHiding = PersistedConfig.calmBarHiding
-        modelLimitsVisibility = PersistedConfig.modelLimitsVisibility
-        extraUsageVisibility = PersistedConfig.extraUsageVisibility
+        colorsTell = PersistedConfig.colorsTell
+        hideTop5hBar = PersistedConfig.hideTop5hBar
+        showPerModelLimits = PersistedConfig.showPerModelLimits
+        showExtraUsage = PersistedConfig.showExtraUsage
         showServiceDot = PersistedConfig.showServiceStatusDot
         menuBarStyle = PersistedConfig.menuBarStyle
         dropdownStyle = PersistedConfig.dropdownStyle
@@ -628,30 +630,30 @@ final class SettingsModel {
         AppLogger.lifecycle.notice("journal: enabled set \(on, privacy: .public)")
     }
 
-    func setCalmColorMode(_ mode: CalmColorMode) {
-        calmColorMode = mode
-        PersistedConfig.calmColorMode = mode
+    func setColorAdvice(_ mode: ColorAdvice) {
+        colorsTell = mode
+        PersistedConfig.colorsTell = mode
         AppLogger.lifecycle.notice("calm-color-mode: set \(mode.rawValue, privacy: .public)")
-        onCalmColorModeChange?(mode)
+        onColorAdviceChange?(mode)
     }
 
-    func setCalmBarHiding(_ mode: CalmBarHiding) {
-        calmBarHiding = mode
-        PersistedConfig.calmBarHiding = mode
+    func setTopBarHiding(_ mode: TopBarHiding) {
+        hideTop5hBar = mode
+        PersistedConfig.hideTop5hBar = mode
         AppLogger.lifecycle.notice("hide-calm-bar: menu-bar set \(mode.rawValue, privacy: .public)")
-        onCalmBarHidingChange?(mode)
+        onTopBarHidingChange?(mode)
     }
 
     func setModelLimitsVisibility(_ mode: PopupSectionVisibility) {
-        modelLimitsVisibility = mode
-        PersistedConfig.modelLimitsVisibility = mode
+        showPerModelLimits = mode
+        PersistedConfig.showPerModelLimits = mode
         AppLogger.lifecycle.notice("model-specific-limits: popup set \(mode.rawValue, privacy: .public)")
         onModelLimitsVisibilityChange?(mode)
     }
 
     func setExtraUsageVisibility(_ mode: PopupSectionVisibility) {
-        extraUsageVisibility = mode
-        PersistedConfig.extraUsageVisibility = mode
+        showExtraUsage = mode
+        PersistedConfig.showExtraUsage = mode
         AppLogger.lifecycle.notice("extra-usage-section: popup set \(mode.rawValue, privacy: .public)")
         onExtraUsageVisibilityChange?(mode)
     }
@@ -747,10 +749,10 @@ final class SettingsModel {
     /// menu-bar widget rebuilds — the same notifications the individual setters send. Shared by the
     /// reset and preset paths, which both mutate all keys at once and then re-render as a batch.
     private func fireAppearanceCallbacks() {
-        onCalmColorModeChange?(calmColorMode)
-        onCalmBarHidingChange?(calmBarHiding)
-        onModelLimitsVisibilityChange?(modelLimitsVisibility)
-        onExtraUsageVisibilityChange?(extraUsageVisibility)
+        onColorAdviceChange?(colorsTell)
+        onTopBarHidingChange?(hideTop5hBar)
+        onModelLimitsVisibilityChange?(showPerModelLimits)
+        onExtraUsageVisibilityChange?(showExtraUsage)
         onServiceDotChange?(showServiceDot)
         onMenuBarStyleChange?(menuBarStyle)
         onDropdownStyleChange?(dropdownStyle)

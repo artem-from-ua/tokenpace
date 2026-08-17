@@ -167,32 +167,45 @@ struct WeeklyGateIdleTests {
             .rows.first { $0.sessionIdle }
     }
 
-    /// The idle pill is three-way now: blue while the week has headroom ("ready to start" with quota
-    /// to burn), green once the week runs ahead of pace (ready, but nothing to advertise), and grey
-    /// only when work is impossible. The view picks the colour from these two flags.
-    @Test func idleRowCarriesTheWeeklyVerdict() {
-        #expect(idleRow(snapshot(sevenDayUtil: 25, sessionIdle: true))?.weeklyHeadroom == true)
-        #expect(idleRow(snapshot(sevenDayUtil: 70, sessionIdle: true))?.weeklyHeadroom == false)
-        #expect(idleRow(snapshot(sevenDayUtil: 33, sessionIdle: true))?.weeklyHeadroom == false)
+    /// The idle row carries **no weekly verdict** since #381 — the pill is green whenever ready, on both
+    /// surfaces, so neither layout threads the gate through an inert bar any more.
+    ///
+    /// This replaces three tests that pinned the old three-way pill (blue while the week had headroom,
+    /// green once it ran ahead, grey when blocked). What is pinned instead is the *absence*: whatever the
+    /// week is doing, an idle row differs only by `sessionBlocked`. A future change that reintroduced a
+    /// weekly-dependent idle colour would have to touch this test, which is the point.
+    @Test func idleRowDoesNotVaryWithTheWeek() {
+        let calmWeek = idleRow(snapshot(sevenDayUtil: 25, sessionIdle: true))
+        let hotWeek = idleRow(snapshot(sevenDayUtil: 70, sessionIdle: true))
+        #expect(calmWeek?.sessionIdle == true)
+        #expect(hotWeek?.sessionIdle == true)
+        // Neither is blocked — the only axis idle still has.
+        #expect(calmWeek?.sessionBlocked == false)
+        #expect(hotWeek?.sessionBlocked == false)
+        // And the inert bar is identical, gate or no gate.
+        #expect(calmWeek?.bar.blueAllowed == hotWeek?.bar.blueAllowed)
     }
 
-    /// Blocked is a separate axis and still wins — it means "no path to start" rather than "no
-    /// headroom to advertise".
+    /// Blocked is a separate axis and still wins — it means "no path to start", which is the one thing
+    /// the idle pill still distinguishes (grey rather than green).
     @Test func blockedIdleIsStillItsOwnState() {
-        // 7d exhausted with no credits → blocked, and the gate is closed too.
+        // 7d exhausted with no credits → blocked.
         let blocked = snapshot(sevenDayUtil: 100, sessionIdle: true)
         #expect(idleRow(blocked)?.sessionBlocked == true)
-        #expect(idleRow(blocked)?.weeklyHeadroom == false)
     }
 
-    /// The menu bar's idle bar carries the same verdict, so the two surfaces cannot disagree.
-    @Test func menuBarIdleBarCarriesTheVerdict() {
+    /// The menu bar's idle bar agrees with the popup's: same two states, no weekly verdict on either.
+    /// The surfaces used to carry the flag independently, which is exactly how they could have drifted.
+    @Test func menuBarIdleBarMatchesThePopup() {
         func idleBar(_ snap: UsageSnapshot) -> BarView? {
             guard case let .expanded(five, _) = MenuBarLayout.make(from: snap, now: now).mode else { return nil }
             return five
         }
-        #expect(idleBar(snapshot(sevenDayUtil: 25, sessionIdle: true))?.weeklyHeadroom == true)
-        #expect(idleBar(snapshot(sevenDayUtil: 70, sessionIdle: true))?.weeklyHeadroom == false)
+        for util in [25.0, 70.0] {
+            let snap = snapshot(sevenDayUtil: util, sessionIdle: true)
+            #expect(idleBar(snap)?.idle == true)
+            #expect(idleBar(snap)?.blocked == idleRow(snap)?.sessionBlocked)
+        }
     }
 
     /// An idle bar never renders the pacing blue whatever the week does — it has no pacing at all.
@@ -265,8 +278,13 @@ struct WeeklyGateStubFrameTests {
     }
 
     /// `idle-week-hot`: no 5h session, week at 70 % with ~5 days left (ahead of pace, not exhausted).
-    /// The idle pill must be the green "ready, no headroom" state — not blue, and not the grey blocked
-    /// one (which needs an exhausted week credits cannot cover).
+    /// The idle pill must be green, not the grey blocked one (which needs an exhausted week credits
+    /// cannot cover).
+    ///
+    /// The frame used to be this suite's *differentiator* — green here against blue in the `idle` frame,
+    /// which is what the weekly gate bought on the idle pill. Since #381 the pill is green in both, so
+    /// what this pins now is only that a hot week does not reach the **blocked** state; the pair of stub
+    /// frames is no longer distinguishable by pill colour.
     @Test func idleWeekHotFrameShowsAGreenPill() {
         let snap = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
@@ -277,7 +295,6 @@ struct WeeklyGateStubFrameTests {
         let idle = PopupLayout.make(from: snap, now: now, lastUpdate: now, interval: 60)
             .rows.first { $0.sessionIdle }
         #expect(idle != nil)
-        #expect(idle?.sessionBlocked == false)   // not the grey state
-        #expect(idle?.weeklyHeadroom == false)   // …but not the blue one either → green
+        #expect(idle?.sessionBlocked == false)   // not the grey state → green
     }
 }

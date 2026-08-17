@@ -205,53 +205,66 @@ struct MenuBarPane: View {
                         active: model.menuBarStyle,
                         onSelect: { model.setMenuBarStyle($0) })
                 }
-            }
 
-            // Everything below sits in its own section (#374). The Style row is three tiles tall, so
-            // sharing a card with ordinary one-line rows made the card read as one long list with an
-            // unexplained gap at the top; a divider says outright that the picture is its own decision
-            // and the rows below are separate ones.
-            Section {
-                // Calm non-critical colors (#224) — a three-way choice (merged the old Calm + Work
-                // harder toggles): which calm colours mute to white. Every segment is always
-                // selectable: the far-behind blue can no longer be switched off, so there is no state
-                // where "+ Blue" would have nothing to mute.
-                VStack(alignment: .leading, spacing: 4) {
+                // "Colors tell me" (#224, renamed and rescoped in #381) — which pacing advice keeps its
+                // colour. Named for the advice, not for the hues it mutes: the reader is choosing what
+                // they want to be told, and "Yellow + Green" / "+ Blue" answered a question about
+                // mechanism instead. Segments run quiet-first, like every other control on the page.
+                //
+                // **Hidden under Pressure**, which is why it shares a card with `Style` rather than
+                // sitting with the row below: Pressure draws the whole calm side as zero
+                // (`BarLayout.pressureLength` = `max(0, gaugeOffset)`), so neither muting mode has any
+                // ribbon to colour and the choice cannot show itself. A row that appears and disappears
+                // with its neighbour's value has to be next to that neighbour, or the disappearance
+                // reads as a glitch. The stored value is untouched while hidden — switching back to
+                // Gauge or Progress restores the same choice.
+                if model.menuBarStyle != .pressure {
                     HStack {
-                        Text("Calm non-critical colors")
+                        Text("Colors tell me")
                         Spacer()
                         SegmentedControl(
-                            segments: [
-                                .init(value: CalmColorMode.off, title: "Off"),
-                                .init(value: CalmColorMode.yellowGreen, title: "Yellow + Green"),
-                                .init(value: CalmColorMode.yellowGreenBlue, title: "+ Blue"),
-                            ],
-                            active: model.calmColorMode,
-                            onSelect: { model.setCalmColorMode($0) })
+                            segments: AppearanceColorAdvice.segments,
+                            active: model.colorsTell,
+                            onSelect: { model.setColorAdvice($0) })
                     }
-                    SettingsHint(text: "Which calm colors mute to a neutral white. Orange/red warnings "
-                        + "always stay colored.")
                 }
 
-                // Whether the top (5-hour) bar steps aside while it is calm (ADR-0086, narrowed to one
-                // window by ADR-0090). The row names the bar, so the segments only say *when* — which
-                // makes it read as one sentence: "Hide 5h (top) bar — When it's calm".
+                // Whether the top (5-hour) bar steps aside until it needs attention (ADR-0086, narrowed
+                // to one window by ADR-0090). The row names the bar, so the segments only say *when* —
+                // which makes it read as one sentence: "Hide the top 5h bar — until it needs attention".
+                //
+                // The hint keeps only its second sentence. The first ("hidden while it's calm and comes
+                // back…") now duplicates the segment; this one describes what happens at a limit, which
+                // this row does *not* govern (ADR-0091) and which nothing else in Settings explains —
+                // and both bars vanishing at once is the app's most alarming transition.
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Hide 5h (top) bar")
+                        Text("Hide the top 5h bar")
                         Spacer()
                         SegmentedControl(
-                            segments: AppearanceCalmBarHiding.segments,
-                            active: model.calmBarHiding,
-                            onSelect: { model.setCalmBarHiding($0) })
+                            segments: AppearanceTopBarHiding.segments,
+                            active: model.hideTop5hBar,
+                            onSelect: { model.setTopBarHiding($0) })
                     }
-                    SettingsHint(text: "The 5-hour bar is hidden while it's calm and comes back as soon "
-                        + "as it needs attention. Once a limit is actually reached, both bars give way "
+                    SettingsHint(text: "Either way, once a limit is actually reached both bars give way "
                         + "to the countdown to it.")
                 }
+            }
 
-                Toggle("Show service status dot on issues", isOn: Binding(
-                    get: { model.showServiceDot }, set: { model.setShowServiceDot($0) }))
+            // The service dot gets its own card (#381): the three rows above are about the **pacing
+            // bars** and read `PacingModel`, while this one is about **external incidents** and reads
+            // `ProviderMonitoring`. A single row needs no section header, like the polling-pause section
+            // on `ProvidersPane`.
+            Section {
+                // "on issues" left the label (#381): the dot only ever appears on an issue, so that was
+                // describing the indicator's behaviour rather than offering a choice. The hint says it
+                // instead, and names the link to Providers — nothing on this page defines "service".
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Show service status dot", isOn: Binding(
+                        get: { model.showServiceDot }, set: { model.setShowServiceDot($0) }))
+                    SettingsHint(text: "Appears next to the bars when a monitored service reports an "
+                        + "outage.")
+                }
             }
         }
         .formStyle(.grouped)
@@ -311,7 +324,7 @@ struct DropdownPane: View {
             // different card.
             Section {
                 // No `SettingsHint` under either row: the segment labels ("Always" / "Once used" /
-                // "Non-calm only") already say when the group shows, and a hint repeating that would
+                // "When it needs attention") already say when the group shows, and a hint repeating that would
                 // crowd the two rows that close the section. The two rows offer *different* segment
                 // sets — see the constants below.
                 HStack {
@@ -324,7 +337,7 @@ struct DropdownPane: View {
                     Spacer()
                     SegmentedControl(
                         segments: Self.modelLimitsSegments,
-                        active: model.modelLimitsVisibility,
+                        active: model.showPerModelLimits,
                         onSelect: { model.setModelLimitsVisibility($0) })
                 }
 
@@ -338,7 +351,7 @@ struct DropdownPane: View {
                     Spacer()
                     SegmentedControl(
                         segments: Self.extraUsageSegments,
-                        active: model.extraUsageVisibility,
+                        active: model.showExtraUsage,
                         onSelect: { model.setExtraUsageVisibility($0) })
                 }
             }
@@ -347,24 +360,27 @@ struct DropdownPane: View {
     }
 
     /// The two rows above offer **different** segment sets, so neither is built from `allCases` — both
-    /// are spelled out here, the way `AppearanceBarStyle.segments` is. Order is the declaration order
-    /// either way: loudest ("Always") to quietest.
+    /// are spelled out here, the way `AppearanceBarStyle.segments` is.
     ///
-    /// **`.optionOnly` is offered by neither** (#374). ⌥ is OR'd into every other mode, so holding it
-    /// already reveals the group whichever one is picked — leaving that segment with no behaviour of its
-    /// own except hiding the group when its data has turned interesting. The case survives in the enum
-    /// for stored values; `PersistedConfig` migrates anyone holding it onto `.aboveZero`.
+    /// Ordered **quietest first** (#381), matching every segmented control in Appearance: the leftmost
+    /// option puts the least on screen, the rightmost the most. Before #381 these two ran the other way
+    /// (`Always` leftmost), which made the page's controls disagree about which direction meant "more".
+    ///
+    /// The retired `⌥ Option`-only segment (#374) is gone from the enum entirely as of #381: ⌥ is OR'd
+    /// into every mode, so holding it already reveals the group whichever one is picked, and the mode's
+    /// only distinct behaviour was hiding the group when its data had turned interesting. Stored values
+    /// resolve through `PopupSectionVisibility.legacyRawValues`.
     private static let modelLimitsSegments: [SegmentedControl<PopupSectionVisibility>.Segment] =
-        [.always, .aboveZero, .nonCalm].map { .init(value: $0, title: $0.displayName) }
+        [.whenItNeedsAttention, .onceUsed, .always].map { .init(value: $0, title: $0.displayName) }
 
-    /// Extra usage omits `.nonCalm` too. Credits severity comes from `credits.bar`, which is `nil` on an
-    /// **unlimited** money cap — so that mode would hide a paying user's spend forever — and when a cap
-    /// does exist, "spent > 0" always fires before orange, leaving the mode no behaviour of its own.
-    /// `.aboveZero` is what it becomes; stored `.nonCalm` values are migrated over in `PersistedConfig`.
+    /// Extra usage omits `.whenItNeedsAttention`. Credits severity comes from `credits.bar`, which is
+    /// `nil` on an **unlimited** money cap — so that mode would hide a paying user's spend forever — and
+    /// when a cap does exist, "spent > 0" always fires before orange, leaving the mode no behaviour of
+    /// its own. Stored values of it resolve to `.onceUsed` through the enum's legacy table.
     ///
-    /// Which leaves this row a plain pair: show it always, or from the first cent spent.
+    /// Which leaves this row a plain pair, quietest first: show it from the first cent spent, or always.
     private static let extraUsageSegments: [SegmentedControl<PopupSectionVisibility>.Segment] =
-        [.always, .aboveZero].map { .init(value: $0, title: $0.displayName) }
+        [.onceUsed, .always].map { .init(value: $0, title: $0.displayName) }
 }
 
 // MARK: - Shared across the surface panes
@@ -391,11 +407,29 @@ enum AppearanceBarStyle {
     ]
 }
 
-/// The ``CalmBarHiding`` segments for the Menu bar pane's "Hide 5h (top) bar" row (ADR-0086, narrowed
-/// to one window by ADR-0090). Built from `allCases` so the on-screen order *is* the declaration order
-/// — hide it while calm, or never — and a new case can never be left out of the control.
+/// The ``TopBarHiding`` segments for the Menu bar pane's "Hide the top 5h bar" row (ADR-0086, narrowed
+/// to one window by ADR-0090).
+///
+/// Spelled out rather than mapped from `allCases` (#381), like every other segment list here. The order
+/// on screen is a **presentation** decision — quietest option leftmost — and deriving it from the enum
+/// made the enum's declaration order load-bearing for the UI, so a later re-ordering of the control
+/// would have read as a change to the stored type.
 @MainActor
-enum AppearanceCalmBarHiding {
-    static let segments: [SegmentedControl<CalmBarHiding>.Segment] =
-        CalmBarHiding.allCases.map { .init(value: $0, title: $0.displayName) }
+enum AppearanceTopBarHiding {
+    static let segments: [SegmentedControl<TopBarHiding>.Segment] =
+        [.untilItNeedsAttention, .never].map { .init(value: $0, title: $0.displayName) }
+}
+
+/// The ``ColorAdvice`` segments for the Menu bar pane's "Colors tell me" row (#381).
+///
+/// Quietest first, like its neighbours: `Slow down` keeps colour on one piece of advice, `How it's
+/// going` keeps it on everything. The titles are the advice itself, so the row and a segment read as one
+/// sentence — "Colors tell me — slow down" — and no hint is needed to explain either end.
+@MainActor
+enum AppearanceColorAdvice {
+    static let segments: [SegmentedControl<ColorAdvice>.Segment] = [
+        .init(value: .slowDown, title: "Slow down"),
+        .init(value: .slowDownOrSpeedUp, title: "Slow down or speed up"),
+        .init(value: .howItsGoing, title: "How it's going"),
+    ]
 }

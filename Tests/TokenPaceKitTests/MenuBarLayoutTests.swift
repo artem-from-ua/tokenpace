@@ -83,8 +83,8 @@ struct MenuBarLayoutMakeTests {
 struct MenuBarLayoutExpandedTests {
 
     /// Pull the associated values out of an expanded mode, or fail the test. Both bars are optional in
-    /// the mode (either can be hidden while calm — ``CalmBarHiding``), but these tests all call `make`
-    /// without `hideCalmBar:`, which defaults to `.never`, so the 5h bar is unwrapped here and a `nil`
+    /// the mode (either can be hidden while calm — ``TopBarHiding``), but these tests all call `make`
+    /// without `hideTopBar:`, which defaults to `.never`, so the 5h bar is unwrapped here and a `nil`
     /// is reported as a failure rather than pushed onto every call site. `seven` stays optional.
     private func expanded(_ layout: MenuBarLayout) -> (five: BarView, seven: BarView?)? {
         expanded(layout.mode)
@@ -212,7 +212,7 @@ struct MenuBarLayoutExpandedTests {
 @Suite("MenuBarLayout session-idle")
 struct MenuBarLayoutIdleTests {
 
-    /// As in the expanded-content suite: these all call `make` without `hideCalmBar:` (→ `.never`), so
+    /// As in the expanded-content suite: these all call `make` without `hideTopBar:` (→ `.never`), so
     /// the idle 5h bar is always present and is unwrapped here. The case where `.fiveHour` *does* elide
     /// an idle 5h bar is covered by the hide-calm-bar suite below.
     private func expanded(_ layout: MenuBarLayout) -> (five: BarView, seven: BarView?)? {
@@ -628,7 +628,7 @@ struct MenuBarLayoutHideCalmBarTests {
     @Test func calmFiveHourIsHidden() {
         // Calm 5h + `.fiveHour` → 5h dropped, the 7-day bar stands alone.
         let layout = MenuBarLayout.expandedBars(
-            for: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
+            for: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), now: now, hideTopBar: .untilItNeedsAttention)
         guard let e = expanded(layout) else { return }
         #expect(e.five == nil)
         #expect(e.seven?.window == .sevenDay)
@@ -637,7 +637,7 @@ struct MenuBarLayoutHideCalmBarTests {
     @Test func orangeFiveHourStaysVisible() {
         // Ahead-of-pace (orange) 5h is noisy → kept under `.fiveHour`.
         let layout = MenuBarLayout.expandedBars(
-            for: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
+            for: snapshot(fiveHourUtil: 50, sevenDayUtil: 30), now: now, hideTopBar: .untilItNeedsAttention)
         guard let e = expanded(layout) else { return }
         #expect(e.five != nil)
         #expect(e.five?.severity == .ahead)
@@ -646,7 +646,7 @@ struct MenuBarLayoutHideCalmBarTests {
     @Test func redFiveHourStaysVisible() {
         // Exhausted (red) 5h is noisy → kept under `.fiveHour`.
         let layout = MenuBarLayout.expandedBars(
-            for: snapshot(fiveHourUtil: 100, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
+            for: snapshot(fiveHourUtil: 100, sevenDayUtil: 30), now: now, hideTopBar: .untilItNeedsAttention)
         guard let e = expanded(layout) else { return }
         #expect(e.five != nil)
         #expect(e.five?.severity == .exhausted)
@@ -659,7 +659,7 @@ struct MenuBarLayoutHideCalmBarTests {
         // hides it as well — between sessions the widget shows the 7-day bar alone. This is the most
         // visible consequence of the default, so it is pinned here rather than left implicit.
         let layout = MenuBarLayout.expandedBars(
-            for: idleSnapshot(sevenDayUtil: 20), now: now, hideCalmBar: .fiveHour)
+            for: idleSnapshot(sevenDayUtil: 20), now: now, hideTopBar: .untilItNeedsAttention)
         guard let e = expanded(layout) else { return }
         #expect(e.five == nil)
         #expect(e.seven != nil)
@@ -668,7 +668,7 @@ struct MenuBarLayoutHideCalmBarTests {
     // MARK: the invariant
 
     @Test func atLeastOneBarSurvivesEveryCombination() {
-        // The widget can never render empty: `CalmBarHiding` names one window, so even when *both* bars
+        // The widget can never render empty: `TopBarHiding` names one window, so even when *both* bars
         // are calm only the chosen one goes. Swept over the modes × a calm/noisy grid on both windows,
         // plus the idle path, since that is where "everything is calm" is easiest to hit.
         let snapshots = [
@@ -679,9 +679,9 @@ struct MenuBarLayoutHideCalmBarTests {
             idleSnapshot(sevenDayUtil: 20),                  // idle 5h (always calm) + calm 7d
             idleSnapshot(sevenDayUtil: 100),                 // idle 5h + red 7d
         ]
-        for mode in CalmBarHiding.allCases {
+        for mode in TopBarHiding.allCases {
             for snap in snapshots {
-                let built = MenuBarLayout.expandedBars(for: snap, now: now, hideCalmBar: mode)
+                let built = MenuBarLayout.expandedBars(for: snap, now: now, hideTopBar: mode)
                 guard case let .expanded(five, seven) = built else { continue }
                 #expect(five != nil || seven != nil, "both bars elided under \(mode)")
             }
@@ -692,7 +692,7 @@ struct MenuBarLayoutHideCalmBarTests {
         // The sharpest instance of the invariant: both bars calm and the calm 5h is the chosen one, so
         // exactly one bar is drawn — the 7-day one, calm as it is.
         let layout = MenuBarLayout.expandedBars(
-            for: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), now: now, hideCalmBar: .fiveHour)
+            for: snapshot(fiveHourUtil: 10, sevenDayUtil: 30), now: now, hideTopBar: .untilItNeedsAttention)
         guard let e = expanded(layout) else { return }
         #expect(e.five == nil)
         #expect(e.seven != nil)
@@ -710,15 +710,15 @@ struct MenuBarLayoutHideCalmBarTests {
         let snap = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 10, resetsAt: resetsAt(inSeconds: 4 * 3600)),
             sevenDay: UsageWindow(utilization: 30, resetsAt: "not-a-date"))
-        for mode in CalmBarHiding.allCases {
-            let layout = MenuBarLayout.make(from: snap, now: now, hideCalmBar: mode)
+        for mode in TopBarHiding.allCases {
+            let layout = MenuBarLayout.make(from: snap, now: now, hideTopBar: mode)
             guard case let .error(five, seven, _, _) = layout.mode else {
                 Issue.record("expected .error with bars under \(mode), got \(layout.mode)")
                 continue
             }
-            // Both bars are calm here, so `.fiveHour` elides the 5h one; at least one always survives.
+            // Both bars are calm here, so `.untilItNeedsAttention` elides the 5h one; at least one always survives.
             #expect(five != nil || seven != nil, "both bars elided from the error state under \(mode)")
-            #expect((five == nil) == (mode == .fiveHour), "hideCalmBar ignored on the error path: \(mode)")
+            #expect((five == nil) == (mode == .untilItNeedsAttention), "hideTopBar ignored on the error path: \(mode)")
         }
     }
 }

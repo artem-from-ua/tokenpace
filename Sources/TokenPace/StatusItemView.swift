@@ -37,25 +37,27 @@ final class StatusItemView: NSView {
         }
     }
 
-    /// How much of the **non-critical** pacing palette the widget mutes to a calm neutral (#105, #224,
-    /// ADR-0061) — the single three-way ``CalmColorMode`` that replaces the old `calmMenuBarColors` +
-    /// `workHarderColors` pair. The view reads its two derived flags:
-    /// - ``CalmColorMode/mutesCalm`` — when true, the widget's **soft** signals mute to a calm neutral
-    ///   (a system-matched light grey, `calmWhite`): the idle blue track, the on-pace green gap, the
-    ///   mild ahead-of-pace yellow, and the **degraded (yellow) service dot**; the strong warnings
-    ///   (orange/red), the stronger service states (orange/red/blue/grey), and the ⚠️ glyph keep their
-    ///   colour. The time-indicator marker shares its pacing gap's colour, so it follows the gap into
-    ///   white in the calm states too.
-    /// - ``CalmColorMode/mutesBlue`` — when true, the far-behind **blue** (`.farBehind`) zone mutes
-    ///   with the rest; when false (the old "Work harder" behaviour) it is treated as **non-calm** and
-    ///   stays coloured, so a big surplus reads as a nudge that there's headroom to push. Only visible
-    ///   when `mutesCalm` is on.
+    /// What the widget's **pacing-bar** colours tell the user (#105, #224, ADR-0061; rescoped and renamed
+    /// in #381) — the row "Colors tell me". The view reads its two derived flags:
+    /// - ``ColorAdvice/mutesCalm`` — when true, the widget's **soft** pacing signals mute to a neutral
+    ///   (a system-matched light grey, `calmWhite`): the idle ready pill, the on-pace green gap and the
+    ///   mild ahead-of-pace yellow. Orange keeps its colour always, and an exhausted window is never a
+    ///   bar at all (ADR-0091), so red does not arise. The time-indicator marker shares its pacing gap's
+    ///   colour, so it follows the gap into white too.
+    /// - ``ColorAdvice/mutesBlue`` — when true, the far-behind **blue** (`.farBehind`) zone mutes with
+    ///   the rest; when false it stays coloured, so a big surplus reads as a nudge that there is headroom
+    ///   to push. Only visible when `mutesCalm` is on.
     ///
-    /// Set by `AppDelegate` from `PersistedConfig.calmColorMode`; the view stays a thin shell and does
-    /// not read the config itself. Changing it requests a redraw (no size change).
-    var calmColorMode: CalmColorMode = .yellowGreenBlue {
+    /// **Pacing bars only** since #381. The service-status dot, the credits glyph and the idle pill's
+    /// blue/green split used to read this too; all three now answer their own questions without it —
+    /// which is what lets the Settings row disappear under Pressure, where the bars have no calm side to
+    /// colour, without hiding anything that still works.
+    ///
+    /// Set by `AppDelegate` from `PersistedConfig.colorsTell`; the view stays a thin shell and does not
+    /// read the config itself. Changing it requests a redraw (no size change).
+    var colorsTell: ColorAdvice = .slowDown {
         didSet {
-            guard calmColorMode != oldValue else { return }
+            guard colorsTell != oldValue else { return }
             needsDisplay = true
         }
     }
@@ -368,7 +370,16 @@ final class StatusItemView: NSView {
     /// The dot's colour for a status, before the transition layer.
     private func statusDotTarget(_ status: ServiceStatus) -> NSColor {
         switch status {
-        case .degraded:         return calmColorMode.mutesCalm ? bright(Palette.calmWhite) : accent(Palette.statusYellow)
+        // `degraded` is **always** the neutral since #381, where it used to follow the pacing-colour
+        // setting. Two reasons, and the second is why it is unconditional rather than merely detached:
+        // the dot is not a pacing signal, so a row about bar colours should not reach it; and a yellow
+        // dot in the menu bar is a state with no action attached, which is exactly what this widget's
+        // quiet default is for. The louder service states keep their colour — `partialOutage`,
+        // `majorOutage`, `underMaintenance` and `unknown` all carry something to do.
+        //
+        // The **popup** keeps drawing this state yellow (`PopupViewController.dotColor`): there the dot
+        // sits beside the service's name and status text, so colour is not the only carrier. Here it is.
+        case .degraded:         return bright(Palette.calmWhite)
         case .partialOutage:    return accent(Palette.statusOrange)
         case .majorOutage:      return accent(Palette.statusRed)
         case .underMaintenance: return accent(Palette.statusBlue)
@@ -687,7 +698,12 @@ final class StatusItemView: NSView {
     /// Calm mode (#105) still mutes the calm states to the calm white, which this scale already agrees
     /// with — so the two paths cannot disagree.
     private func creditsIconColor(_ credits: CreditsMarker) -> NSColor {
-        if calmColorMode.mutesCalm && credits.isCalm { return bright(Palette.calmWhite) }
+        // No pacing-colour branch here since #381. The glyph's own scale is already **white → orange →
+        // red** (ADR-0068) — it has no green or yellow rung to mute — so the branch that read the setting
+        // returned the same `calmWhite` this function reaches anyway in every state but one: an
+        // **unlimited** cap (`bar == nil`), where it overrode the neutral foreground. That override was
+        // the only behaviour it had, and "money is moving" is not a pacing verdict for a bar-colour
+        // setting to quiet.
         guard let l = credits.bar else { return bright(Palette.foreground) }   // unlimited → neutral
         // At the cap → red. Otherwise only a *strong* ahead reads as orange; on-pace/behind and the
         // mild-ahead rung (which the bars paint yellow) both render white. The thresholds mirror
@@ -803,7 +819,7 @@ final class StatusItemView: NSView {
     /// Draw the pacing bars starting at `originX`; the reset label is drawn to their right only when
     /// `reset != nil`. Two layouts by **how many** bars are present:
     /// - **both**: 5h on top, 7d below, the pair vertically centred as one block.
-    /// - **one** (the other was hidden while calm — ``CalmBarHiding``, ADR-0086): that bar **alone**,
+    /// - **one** (the other was hidden while calm — ``TopBarHiding``, ADR-0086): that bar **alone**,
     ///   vertically centred on the item — so a single bar sits mid-height, not clinging to the top row.
     ///   The geometry depends on the *count*, not on which window survived, so a lone 7-day bar lands
     ///   exactly where a lone 5-hour bar used to (#94).
@@ -848,7 +864,7 @@ final class StatusItemView: NSView {
                 width: Metrics.barWidth, height: Metrics.barHeight
             ))
         case (nil, nil):
-            // Unreachable: `CalmBarHiding` elides at most one bar, so `.expanded` always carries one
+            // Unreachable: `TopBarHiding` elides at most one bar, so `.expanded` always carries one
             // (see `MenuBarMode.expanded`'s invariant), and the error phase passes both or neither —
             // and the neither case never reaches here (`drawError` draws the glyph alone instead).
             // A silent no-op rather than an assertion: the view stays a thin shell (ADR-0009).
@@ -956,25 +972,23 @@ final class StatusItemView: NSView {
             // Idle bar fill (#100/#158): blocked → base track grey; ready+calm → quiet neutral;
             // ready+normal → the "ready to start" blue.
             //
-            // Calm uses the same `calmWhite` neutral as every muted pacing bar, not a dimmer tone of
-            // its own (#307): idle sitting quieter than the calm bars beside it made the "nothing is
+            // Muted uses the same `calmWhite` neutral as every muted pacing bar, not a dimmer tone of
+            // its own (#307): idle sitting quieter than the quiet bars beside it made the "nothing is
             // happening" state read as "something is wrong with this bar". `bright()` is what makes it
             // the *same* tone — the neutral is `labelColor`, and every other muted surface here
             // re-alphas it to `brightAlpha`; drawn raw, idle came out louder than its neighbours (#343).
-            // Blue only while the week has headroom (`PacingModel.weeklyHasHeadroom`): the "ready to
-            // start" blue claims quota to burn, which is wrong once the week runs ahead of pace — it
-            // degrades to green there, the same way the pacing blue does. Grey still means blocked.
+            // Only the muted branch is brightened: `unusedGrey` is a 22 %-alpha track colour, and
+            // re-alphaing it to 0.865 would render the *blocked* bar nearly opaque.
             //
-            // The blue pill honours the same `mutesBlue` exemption the pacing blue gets, so
-            // "Yellow + Green" keeps it coloured while the green pill still mutes (#343). Only the
-            // calm branch is brightened: `unusedGrey` is a 22 %-alpha track colour, and re-alphaing it
-            // to 0.865 would render the *blocked* bar nearly opaque.
-            let idleIsBluePill = bar.weeklyHeadroom
-            let idleReady = idleIsBluePill ? Palette.idleBlue : Palette.gapGreen
+            // **Always green when ready** (#381), where it used to be blue while the week had headroom.
+            // The blue said "ready to start, and there is quota to burn" — a second claim on top of
+            // "ready", carried by the same pill, needing `PacingModel.weeklyHasHeadroom` threaded through
+            // an inert layout to stay honest. It is dropped: idle answers one question, and the weekly
+            // gate still does its real job on the *active* bar's `blueAllowed` (ADR-0081). Grey still
+            // means blocked. The popup drops the same distinction, so the two surfaces agree.
             let idleTarget: NSColor = bar.blocked
                 ? Palette.unusedGrey
-                : (calmColorMode.mutesIdlePill(isBlue: idleIsBluePill)
-                    ? bright(Palette.calmWhite) : accent(idleReady))
+                : (colorsTell.mutesCalm ? bright(Palette.calmWhite) : accent(Palette.gapGreen))
             // Animated like any other bar colour, so idle→active (blue→green) and the blocked grey
             // swap fade rather than snap.
             let fill = animated(idleTarget, window: bar.window, part: .fill)
@@ -1181,7 +1195,7 @@ final class StatusItemView: NSView {
     }
 
     /// The pacing-gap fill colour, with calm mode (#105) applied. Normally this is the on-pace green
-    /// or the graded ahead colour (`PopupBarView.aheadColor`). When `calmColorMode.mutesCalm` is on, the **calm**
+    /// or the graded ahead colour (`PopupBarView.aheadColor`). When `colorsTell.mutesCalm` is on, the **calm**
     /// states (`BarLayout.isCalm`: on-pace green + mild-ahead yellow) mute to white; the strong warnings
     /// (orange/red) stay coloured.
     ///
@@ -1200,7 +1214,7 @@ final class StatusItemView: NSView {
         // pacing gap is an accent (scaled by accentSaturation). Neither is the dimmed bar track.
         // When `mutesBlue` is off (the old "Work harder") the far-behind blue is exempt from muting so
         // a big surplus stays coloured.
-        if calmColorMode.mutesCalm && l.isCalm && !(l.severity == .farBehind && !calmColorMode.mutesBlue) {
+        if colorsTell.mutesCalm && l.isCalm && !(l.severity == .farBehind && !colorsTell.mutesBlue) {
             return bright(Palette.calmWhite)
         }
         if l.pacing == .ahead {
@@ -1229,7 +1243,7 @@ final class StatusItemView: NSView {
     /// are converted into one colour space first; a dynamic catalogue colour never compares equal to a
     /// resolved one directly.
     private func isYellow(_ colour: NSColor) -> Bool {
-        guard !calmColorMode.mutesCalm else { return false }
+        guard !colorsTell.mutesCalm else { return false }
         guard let a = colour.usingColorSpace(.sRGB),
               let b = ColorStore.shared.color(.yellow).usingColorSpace(.sRGB) else { return false }
         let tolerance = 0.02
@@ -1308,7 +1322,7 @@ final class StatusItemView: NSView {
     /// ``drawResetLabel(_:slotAt:in:)`` so the countdown looks identical whether or not the bars are
     /// hidden; `itemWidth` reserves the same fixed slot (via ``resetLabelWidth(_:)``) the bars mode does,
     /// so the item keeps its width as the digit count changes (#303). The blocked mode carries no pacing
-    /// colour to mute, so `calmColorMode` is irrelevant here — the label is always the neutral foreground.
+    /// colour to mute, so `colorsTell` is irrelevant here — the label is always the neutral foreground.
     ///
     /// When `layout.blockedPause` is set (fully blocked), the red pause glyph is drawn first, then the
     /// credits icon (when present), and the countdown shifts right past them — the same leading pattern

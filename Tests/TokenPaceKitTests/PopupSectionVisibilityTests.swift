@@ -19,7 +19,7 @@ struct PopupSectionVisibilityShowsTests {
     /// `.nonCalm` is the interesting one: severity **or** ⌥ reveals the group, and only the
     /// calm-and-no-modifier cell hides it.
     @Test func nonCalmShowsOnSeverityOrOption() {
-        let mode = PopupSectionVisibility.nonCalm
+        let mode = PopupSectionVisibility.whenItNeedsAttention
         #expect(!mode.shows(isNonCalm: false, isAboveZero: false, optionHeld: false))  // calm → hidden
         #expect(mode.shows(isNonCalm: true, isAboveZero: false, optionHeld: false))    // orange/red
         #expect(mode.shows(isNonCalm: false, isAboveZero: false, optionHeld: true))    // ⌥ escape hatch
@@ -28,7 +28,7 @@ struct PopupSectionVisibilityShowsTests {
 
     /// `.aboveZero` gates on the **value** — anything non-zero in the group — or ⌥.
     @Test func aboveZeroShowsOnValueOrOption() {
-        let mode = PopupSectionVisibility.aboveZero
+        let mode = PopupSectionVisibility.onceUsed
         #expect(!mode.shows(isNonCalm: false, isAboveZero: false, optionHeld: false))  // flat zero
         #expect(mode.shows(isNonCalm: false, isAboveZero: true, optionHeld: false))    // used at all
         #expect(mode.shows(isNonCalm: false, isAboveZero: false, optionHeld: true))    // ⌥ escape hatch
@@ -42,63 +42,91 @@ struct PopupSectionVisibilityShowsTests {
     ///   per-model rows early in a 7-day window pace `.ahead` at a few percent;
     /// - above zero but calm: the ordinary mid-week row, spending steadily and on pace.
     @Test func theTwoPredicatesAreIndependent() {
-        #expect(!PopupSectionVisibility.aboveZero.shows(
+        #expect(!PopupSectionVisibility.onceUsed.shows(
             isNonCalm: true, isAboveZero: false, optionHeld: false))   // severity does not feed aboveZero
-        #expect(!PopupSectionVisibility.nonCalm.shows(
+        #expect(!PopupSectionVisibility.whenItNeedsAttention.shows(
             isNonCalm: false, isAboveZero: true, optionHeld: false))   // value does not feed nonCalm
     }
 
-    /// `.optionOnly` ignores both data predicates — only ⌥ reveals the group. This is what the old
-    /// boolean "off" migrates to, so a user who hid the rows does not get them back when they turn red.
-    @Test func optionOnlyIgnoresData() {
-        let mode = PopupSectionVisibility.optionOnly
-        #expect(!mode.shows(isNonCalm: false, isAboveZero: false, optionHeld: false))
-        #expect(!mode.shows(isNonCalm: true, isAboveZero: true, optionHeld: false))  // hidden while red
-        #expect(mode.shows(isNonCalm: false, isAboveZero: false, optionHeld: true))
-        #expect(mode.shows(isNonCalm: true, isAboveZero: true, optionHeld: true))
+    /// ⌥ reveals the group under **every** mode — the property that made the retired `⌥ Option`-only
+    /// case redundant (#374, removed in #381). Worth pinning: it is the reason no mode can leave a group
+    /// unreachable, so the popup always has an escape hatch.
+    @Test func optionAlwaysReveals() {
+        for mode in PopupSectionVisibility.allCases {
+            #expect(mode.shows(isNonCalm: false, isAboveZero: false, optionHeld: true))
+        }
     }
 }
 
 @Suite("PopupSectionVisibility storage")
 struct PopupSectionVisibilityStorageTests {
 
-    /// Raw values are stable storage identifiers — renaming one silently resets everybody's choice.
+    /// Raw values are stable storage identifiers. Renamed in #381 along with the cases, which is exactly
+    /// why ``legacyRawValues`` exists — a rename without it silently resets everybody's choice.
     @Test func rawValuesAreStable() {
+        #expect(PopupSectionVisibility.whenItNeedsAttention.rawValue == "whenItNeedsAttention")
+        #expect(PopupSectionVisibility.onceUsed.rawValue == "onceUsed")
         #expect(PopupSectionVisibility.always.rawValue == "always")
-        #expect(PopupSectionVisibility.aboveZero.rawValue == "aboveZero")
-        #expect(PopupSectionVisibility.nonCalm.rawValue == "nonCalm")
-        #expect(PopupSectionVisibility.optionOnly.rawValue == "optionOnly")
     }
 
-    /// Declaration order — loudest to quietest. Neither control renders `allCases`: since #374 the
-    /// model-limits row offers `[.always, .aboveZero, .nonCalm]` and the Extra-usage row
-    /// `[.always, .aboveZero]`, both spelled out in `DropdownPane` and both keeping this relative
-    /// order. `.optionOnly` stays last here because it stays in the enum for stored values.
+    /// Declaration order — **quietest to loudest** since #381, matching the on-screen order of every
+    /// segmented control in Appearance. Neither control renders `allCases` (the Extra-usage row omits
+    /// `.whenItNeedsAttention`), so both are spelled out in `DropdownPane`; this pins the enum's own
+    /// order so the two never disagree about direction.
     @Test func casesAreInPaneOrder() {
-        #expect(PopupSectionVisibility.allCases == [.always, .aboveZero, .nonCalm, .optionOnly])
+        #expect(PopupSectionVisibility.allCases == [.whenItNeedsAttention, .onceUsed, .always])
     }
 
-    /// The labels carry the whole explanation (these rows have no `SettingsHint`), so "only" on the
-    /// non-calm segment is load-bearing: without it the label reads as "also when non-calm".
+    /// The labels carry the whole explanation (these rows have no `SettingsHint`), so each has to stand
+    /// alone.
     ///
-    /// `.aboveZero` reads "Once used" rather than the shipped "Above zero" (#374): the row is a choice
-    /// about behaviour, and "once" names the onset that a threshold phrase only implies.
+    /// `.onceUsed` reads "Once used" rather than the pre-#374 "Above zero": the row is a choice about
+    /// behaviour, and "once" names the onset that a threshold phrase only implies.
     ///
-    /// `.optionOnly` keeps a label although no control offers it any more — `displayName` is total over
-    /// the enum, and the case can still arrive from stored or imported data.
+    /// `.whenItNeedsAttention` replaced "Non-calm only" in #381 — a double negative built on a term of
+    /// art. The new wording is what this file's own `PacingSeverity.isNonCalm` calls the threshold
+    /// ("worth attention"), and it matches the menu bar's segment for the same threshold.
     @Test func displayNames() {
+        #expect(PopupSectionVisibility.whenItNeedsAttention.displayName == "When it needs attention")
+        #expect(PopupSectionVisibility.onceUsed.displayName == "Once used")
         #expect(PopupSectionVisibility.always.displayName == "Always")
-        #expect(PopupSectionVisibility.aboveZero.displayName == "Once used")
-        #expect(PopupSectionVisibility.nonCalm.displayName == "Non-calm only")
-        #expect(PopupSectionVisibility.optionOnly.displayName == "With ⌥ Option")
+    }
+
+    /// The pre-#381 raws decode onto the renamed cases **explicitly**, through `legacyRawValues` rather
+    /// than through the unknown-value fallback — the difference between carrying a stored choice over and
+    /// quietly resetting it.
+    ///
+    /// `optionOnly` is in that table although its case is gone: it lands on `.onceUsed`, the closest
+    /// surviving intent ("stay folded until there is something in here"). That mapping is what let #381
+    /// delete the dedicated marker-keyed migration #374 had needed.
+    @Test func decodesLegacyRawValues() throws {
+        let expected: [(String, PopupSectionVisibility)] = [
+            ("aboveZero", .onceUsed),
+            ("nonCalm", .whenItNeedsAttention),
+            ("optionOnly", .onceUsed),
+        ]
+        for (raw, mode) in expected {
+            let data = Data("\"\(raw)\"".utf8)
+            #expect(try JSONDecoder().decode(PopupSectionVisibility.self, from: data) == mode)
+        }
+    }
+
+    /// The legacy table covers exactly the retired raws — a current raw listed there would shadow its own
+    /// case, and a missing one would fall through to the default.
+    @Test func legacyTableCoversOnlyTheRetiredRaws() {
+        #expect(Set(PopupSectionVisibility.legacyRawValues.keys)
+            == ["aboveZero", "nonCalm", "optionOnly"])
+        for key in PopupSectionVisibility.legacyRawValues.keys {
+            #expect(PopupSectionVisibility(rawValue: key) == nil)
+        }
     }
 
     /// Forward-compatible decode: a value written by a newer build must not make this one throw — it
-    /// falls back to the default instead. Mirrors `ResetCountdownMode` / `CalmColorMode` / `BarStyle`.
+    /// falls back to the default instead. Mirrors `ColorAdvice` / `BarStyle`.
     @Test func unknownRawDecodesToDefault() throws {
         let decoded = try JSONDecoder().decode(
             PopupSectionVisibility.self, from: Data("\"whenTheMoonIsFull\"".utf8))
-        #expect(decoded == .nonCalm)
+        #expect(decoded == .whenItNeedsAttention)
     }
 
     @Test func roundTripsThroughJSON() throws {

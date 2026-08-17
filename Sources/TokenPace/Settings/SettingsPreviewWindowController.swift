@@ -237,8 +237,8 @@ final class SettingsPreviewWindowController {
     /// baked into `PopupLayout`. Adding it here would change nothing.
     private func syncPresentation() {
         previewVC.barStyle = PersistedConfig.dropdownStyle
-        previewVC.modelLimitsVisibility = PersistedConfig.modelLimitsVisibility
-        previewVC.extraUsageVisibility = PersistedConfig.extraUsageVisibility
+        previewVC.modelLimitsVisibility = PersistedConfig.showPerModelLimits
+        previewVC.extraUsageVisibility = PersistedConfig.showExtraUsage
     }
 
     // MARK: - ⌥ Option

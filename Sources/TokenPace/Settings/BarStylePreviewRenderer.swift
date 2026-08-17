@@ -57,7 +57,7 @@ enum BarStylePreviewRenderer {
         // comparing them is comparing scales rather than settings. Hence the palette is pinned here
         // instead of read from `PersistedConfig` — `.off` keeps every pacing colour at full strength,
         // which is what a swatch is for.
-        view.calmColorMode = .off
+        view.colorsTell = .howItsGoing
         // No animator: colours resolve straight to their targets. The dev-tools preview does the same
         // (see `StatusItemView.colorAnimator`) — a specimen has no previous value to ease away from.
         view.colorAnimator = nil

@@ -65,15 +65,8 @@ final class PopupBarView: NSView {
         }
     }
 
-    /// Whether the **week** still has headroom (`PacingModel.weeklyHasHeadroom`). Only meaningful
-    /// alongside ``idle``: it picks the "ready" fill between the blue that advertises spare quota and
-    /// the plain green that does not. Defaults to `true` so a bar built without it looks unchanged.
-    var weeklyHeadroom: Bool = true {
-        didSet {
-            guard weeklyHeadroom != oldValue else { return }
-            needsDisplay = true
-        }
-    }
+    // No `weeklyHeadroom` here since #381: the idle "ready" fill is green whatever the week is doing, so
+    // the bar no longer needs the weekly verdict alongside its inert layout.
 
     /// Whether this is a **base** 5h/7d limit row (as opposed to a per-model/per-service row or the
     /// credits bar). Only base bars render the far-behind **blue** zone (``behindColor``); everything
@@ -429,12 +422,14 @@ final class PopupBarView: NSView {
             // Grey (blocked) is an already-translucent neutral — leave it; only the blue hue is tinted (#188).
             // Animated so idle→active reads as a fade (ADR-0070); the glow follows automatically
             // because it is derived from this same colour.
-            // Three-way, not two (#331 follow-up): grey when blocked (no path to start), blue when the
-            // week has headroom ("ready to start" with quota to burn), and green in between — ready,
-            // but with nothing to advertise, so the pill must not promise a full quota the week cannot
-            // fund. Same verdict the pacing blue is gated on (`PacingModel.weeklyHasHeadroom`).
-            let idleTarget = blocked ? Self.monochromeGrey
-                : (weeklyHeadroom ? Palette.idleBlue : ColorStore.shared.color(.green))
+            // Two-way since #381: grey when blocked (no path to start), **green** whenever ready. It was
+            // three-way (#331 follow-up), with blue standing for "ready, and the week has quota to burn"
+            // — a second claim layered onto "ready" and carried by the same pill, which needed
+            // `PacingModel.weeklyHasHeadroom` threaded through an inert row to stay honest. The claim is
+            // dropped rather than moved: idle answers one question. The weekly gate still does its real
+            // work on every *active* row's `blueAllowed` (ADR-0081), and the menu bar drops the same
+            // distinction in the same release, so the two surfaces cannot disagree about idle.
+            let idleTarget = blocked ? Self.monochromeGrey : ColorStore.shared.color(.green)
             let idleColor = blocked ? idleTarget : animated(idleTarget, part: .fill)
             // The zero tick goes down BEFORE the track: the track then covers its middle and only the
             // ends stand proud, which is what keeps it from reading as a time marker.
@@ -1680,7 +1675,7 @@ final class PopupViewController: NSViewController {
     /// When the per-model / per-service rows are shown (#211). The gate lives here rather than in
     /// `PopupLayout` because it depends on ``optionHeld``, which changes while the menu is open and
     /// without a re-poll. Like `barStyle`, a change rebuilds.
-    var modelLimitsVisibility: PopupSectionVisibility = .nonCalm {
+    var modelLimitsVisibility: PopupSectionVisibility = .whenItNeedsAttention {
         didSet {
             guard isViewLoaded, modelLimitsVisibility != oldValue else { return }
             rebuild()
@@ -1689,7 +1684,7 @@ final class PopupViewController: NSViewController {
 
     /// When the "Extra usage" credits section is shown. Independent of the menu-bar credits icon,
     /// which keeps its own boolean gate in `PersistedConfig.showExtraUsage`.
-    var extraUsageVisibility: PopupSectionVisibility = .nonCalm {
+    var extraUsageVisibility: PopupSectionVisibility = .whenItNeedsAttention {
         didSet {
             guard isViewLoaded, extraUsageVisibility != oldValue else { return }
             rebuild()
@@ -2592,7 +2587,7 @@ final class PopupViewController: NSViewController {
     /// ``addBar(bar:subdivisions:idle:isLast:)`` that unpacks the row's geometry.
     private func addBar(_ row: LimitRow, isLast: Bool, isBaseLimit: Bool) {
         addBar(bar: row.bar, subdivisions: row.subdivisions, idle: row.sessionIdle,
-               blocked: row.sessionBlocked, weeklyHeadroom: row.weeklyHeadroom,
+               blocked: row.sessionBlocked,
                isLast: isLast, isBaseLimit: isBaseLimit, tweenRow: row.title)
     }
 
@@ -2606,7 +2601,6 @@ final class PopupViewController: NSViewController {
     /// window's first and last day **and** puts the bar into its always-Progress presentation, since
     /// both follow from the same fact — this window is a calendar month.
     private func addBar(bar: BarLayout?, subdivisions: Int, idle: Bool, blocked: Bool = false,
-                        weeklyHeadroom: Bool = true,
                         isLast: Bool, isBaseLimit: Bool = false, tweenRow: String? = nil,
                         monthBounds: (start: String, end: String)? = nil) {
         let view = PopupBarView()
@@ -2622,7 +2616,6 @@ final class PopupViewController: NSViewController {
         view.subdivisions = subdivisions
         view.idle = idle   // solid-blue knobless track when the 5h window is idle (#100)
         view.blocked = blocked   // grey instead of blue when that idle state is blocked (#158)
-        view.weeklyHeadroom = weeklyHeadroom   // green instead of blue when the week has no headroom
         view.isBaseLimit = isBaseLimit   // only base 5h/7d rows render the far-behind blue zone
         view.barStyle = barStyle   // Progress (gap+marker) vs Pressure/Gauge (marker-less ribbons) — #224
         view.optionHeld = optionHeld   // the under-bar ruler (teeth + month captions) is ⌥-on-demand

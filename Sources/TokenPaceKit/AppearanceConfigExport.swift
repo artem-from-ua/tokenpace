@@ -11,51 +11,79 @@ import Foundation
 /// Settings → Appearance** so a pasted dump reads line-by-line against the pane. `AppearanceConfigExport.json(values:preset:appVersion:)`
 /// therefore writes the text directly; see the note there.
 ///
-/// The `CodingKeys` below are still listed in pane order — decoding ignores order, but keeping the
-/// two lists visually identical makes a mismatch obvious. **When you add an Appearance option**, add
-/// it here *and* in the emitting list, both at the position matching its control in the pane — never
-/// appended at the end. `AppearanceConfigExportTests` asserts the exact emitted sequence.
+/// The key enums below are listed in pane order within each surface group — decoding ignores order, but
+/// keeping the lists visually identical to the emitter makes a mismatch obvious. **When you add an
+/// Appearance option**, add it here *and* in the emitting list, both at the position matching its
+/// control in its pane — never appended at the end. `AppearanceConfigExportTests` asserts the exact
+/// emitted sequence, group order included.
 extension AppearancePresetValues: Codable {
 
-    /// The export keys, in **pane order**. The trailing comments give the control's on-screen label,
-    /// so the mapping can be checked against the pane without opening it.
-    enum CodingKeys: String, CodingKey {
-        case menuBarStyle               // Menu Bar Widget → "Bar style"
-        case calmColorMode              // "Calm non-critical colors"
-        case calmBarHiding              // "Hide 5h (top) bar" (When it's calm / Never)
-        case showServiceStatusDot       // "Show service status dot on issues"
-        case dropdownStyle              // Dropdown Widget → "Bar style"
-        case modelLimitsVisibility      // "Show model & service limits"
-        case extraUsageVisibility       // "Show extra usage"
+    /// The two surface groups the dump nests its keys under (#381). Grouping mirrors the two child pages
+    /// of Settings → Appearance, so a dump can be read against the panes without a key-by-key lookup.
+    enum GroupKeys: String, CodingKey {
+        case menuBar
+        case dropdown
+    }
 
-        /// The pre-#329 single "Bar style" key, read-only. Not emitted — it exists so a config
-        /// exported by an older build still imports, splitting into the two per-surface keys via
-        /// `BarStyle.legacySurfaceStyles(for:)`.
+    /// The keys inside the `menuBar` group, in **pane order**. Trailing comments give the control's
+    /// on-screen label — each key is that label, so the mapping needs no lookup.
+    enum MenuBarKeys: String, CodingKey {
+        case style                  // "Style"
+        case colorsTell             // "Colors tell me"
+        case hideTop5hBar           // "Hide the top 5h bar"
+        case showServiceStatusDot   // "Show service status dot"
+    }
+
+    /// The keys inside the `dropdown` group, in **pane order**.
+    enum DropdownKeys: String, CodingKey {
+        case style                  // "Style"
+        case showPerModelLimits     // "Show per-model & per-service limits"
+        case showExtraUsage         // "Show *Extra usage*"
+    }
+
+    /// The **flat** keys of every dump written before #381, read-only. Not emitted; they exist so a
+    /// config exported by an older build still imports.
+    ///
+    /// Three vintages are covered, each with its own mapping:
+    ///
+    /// - **pre-#381**: the seven flat keys. Values go through each enum's `legacyRawValues`, so a raw
+    ///   like `aboveZero` resolves explicitly rather than falling through to a default.
+    /// - **pre-#329**: a single `barStyle` key stood in for the per-surface pair; split through
+    ///   `BarStyle.legacySurfaceStyles(for:)`.
+    /// - **pre-ADR-0086**: the boolean `hideCalmSevenDayBar`, mapped through
+    ///   `TopBarHiding.migrated(fromLegacyHide:)` — the same call the `UserDefaults` migration makes, so
+    ///   importing an old dump and upgrading in place agree.
+    ///
+    /// Keys retired outright (`farBehindInterval`, `showTicks`, `pauseHidesBars`, `showExtraUsage`,
+    /// `awaitingInputInMenuBar`) need no case at all: `Codable` ignores unknown JSON keys.
+    enum LegacyFlatKeys: String, CodingKey {
+        case menuBarStyle
+        case calmColorMode
+        case calmBarHiding
+        case showServiceStatusDot
+        case dropdownStyle
+        case modelLimitsVisibility
+        case extraUsageVisibility
         case barStyle
-
-        /// The pre-ADR-0086 boolean "hide the calm 7-day bar" key, read-only. Not emitted — it exists so
-        /// a config exported by an older build still imports, mapping onto the tri-state via
-        /// `CalmBarHiding.migrated(fromLegacyHide:)` (the same call the `UserDefaults` migration makes,
-        /// so importing an old dump and upgrading in place agree).
         case hideCalmSevenDayBar
-
-        // Retired keys (`farBehindInterval`, `showTicks`) need no case at all: `Codable` ignores
-        // unknown JSON keys, so a config exported before the far-behind width was fixed — or before
-        // the tick ruler stopped being optional — still imports cleanly.
     }
 
     /// Written out (rather than left to the compiler) only so the key list appears in pane order in
     /// one more place. It does **not** control the output order — nothing in `Codable` can; the
     /// export's order comes from `AppearanceConfigExport.json(values:preset:appVersion:)`.
     public func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(menuBarStyle, forKey: .menuBarStyle)
-        try c.encode(calmColorMode, forKey: .calmColorMode)
-        try c.encode(calmBarHiding, forKey: .calmBarHiding)
-        try c.encode(showServiceStatusDot, forKey: .showServiceStatusDot)
-        try c.encode(dropdownStyle, forKey: .dropdownStyle)
-        try c.encode(modelLimitsVisibility, forKey: .modelLimitsVisibility)
-        try c.encode(extraUsageVisibility, forKey: .extraUsageVisibility)
+        var root = encoder.container(keyedBy: GroupKeys.self)
+
+        var mb = root.nestedContainer(keyedBy: MenuBarKeys.self, forKey: .menuBar)
+        try mb.encode(menuBarStyle, forKey: .style)
+        try mb.encode(colorsTell, forKey: .colorsTell)
+        try mb.encode(hideTop5hBar, forKey: .hideTop5hBar)
+        try mb.encode(showServiceStatusDot, forKey: .showServiceStatusDot)
+
+        var dd = root.nestedContainer(keyedBy: DropdownKeys.self, forKey: .dropdown)
+        try dd.encode(dropdownStyle, forKey: .style)
+        try dd.encode(modelLimitsVisibility, forKey: .showPerModelLimits)
+        try dd.encode(extraUsageVisibility, forKey: .showExtraUsage)
     }
 
     /// Decoding is order-independent (JSON objects are unordered by definition), so this only has to
@@ -70,7 +98,7 @@ extension AppearancePresetValues: Codable {
     ///   importing an old dump and upgrading in place agree. A `"mixed"` dump therefore lands as
     ///   Pressure + Progress, exactly what that build drew.
     /// - **Before ADR-0086** the calm-bar choice was the boolean `hideCalmSevenDayBar`. It maps onto the
-    ///   enum through `CalmBarHiding.migrated(fromLegacyHide:)` — again the same call the `UserDefaults`
+    ///   enum through `TopBarHiding.migrated(fromLegacyHide:)` — again the same call the `UserDefaults`
     ///   migration makes. A dump with neither key falls back to `.fiveHour`: any build old enough to
     ///   omit both was drawing one bar while calm, which is what that case still means.
     ///
@@ -78,26 +106,54 @@ extension AppearancePresetValues: Codable {
     /// case at all — `Codable` ignores unknown JSON keys, so a dump written by an older build still
     /// imports, exactly as the retired `farBehindInterval` key does.
     public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let flat = try decoder.container(keyedBy: LegacyFlatKeys.self)
+        let groups = try decoder.container(keyedBy: GroupKeys.self)
+        let mb = try? groups.nestedContainer(keyedBy: MenuBarKeys.self, forKey: .menuBar)
+        let dd = try? groups.nestedContainer(keyedBy: DropdownKeys.self, forKey: .dropdown)
 
-        let legacy = try c.decodeIfPresent(String.self, forKey: .barStyle)
+        let defaults = AppearancePreset.defaultValues
+
+        // Pre-#329: one `barStyle` for both surfaces. Split at the level that knows which key belongs
+        // to which surface, so a `"mixed"` dump lands as Pressure + Progress — exactly what that build
+        // drew.
+        let legacyPair = try flat.decodeIfPresent(String.self, forKey: .barStyle)
             .flatMap(BarStyle.legacySurfaceStyles(for:))
-        let menuBarStyle = try c.decodeIfPresent(BarStyle.self, forKey: .menuBarStyle)
-            ?? legacy?.menuBar ?? AppearancePreset.defaultValues.menuBarStyle
-        let dropdownStyle = try c.decodeIfPresent(BarStyle.self, forKey: .dropdownStyle)
-            ?? legacy?.dropdown ?? AppearancePreset.defaultValues.dropdownStyle
 
-        let legacyHide = try c.decodeIfPresent(Bool.self, forKey: .hideCalmSevenDayBar)
-        let calmBarHiding = try c.decodeIfPresent(CalmBarHiding.self, forKey: .calmBarHiding)
-            ?? legacyHide.map(CalmBarHiding.migrated(fromLegacyHide:))
-            ?? .fiveHour
+        let menuBarStyle = try mb?.decodeIfPresent(BarStyle.self, forKey: .style)
+            ?? flat.decodeIfPresent(BarStyle.self, forKey: .menuBarStyle)
+            ?? legacyPair?.menuBar ?? defaults.menuBarStyle
+        let dropdownStyle = try dd?.decodeIfPresent(BarStyle.self, forKey: .style)
+            ?? flat.decodeIfPresent(BarStyle.self, forKey: .dropdownStyle)
+            ?? legacyPair?.dropdown ?? defaults.dropdownStyle
 
+        // Pre-ADR-0086: the boolean `hideCalmSevenDayBar`. Mapped through the same function the
+        // `UserDefaults` migration calls, so an import and an in-place upgrade cannot disagree.
+        let legacyHide = try flat.decodeIfPresent(Bool.self, forKey: .hideCalmSevenDayBar)
+        let hideTop5hBar = try mb?.decodeIfPresent(TopBarHiding.self, forKey: .hideTop5hBar)
+            ?? flat.decodeIfPresent(TopBarHiding.self, forKey: .calmBarHiding)
+            ?? legacyHide.map(TopBarHiding.migrated(fromLegacyHide:))
+            ?? defaults.hideTop5hBar
+
+        // Every remaining value: nested key first, then the pre-#381 flat key, then the preset default.
+        // The enums' own `init(from:)` resolve retired raws through their `legacyRawValues`, so a flat
+        // dump carrying `yellowGreen` / `aboveZero` / `optionOnly` decodes to the renamed case rather
+        // than to a default — a silent default here is how a stored choice gets lost.
         self.init(
-            calmColorMode: try c.decode(CalmColorMode.self, forKey: .calmColorMode),
-            calmBarHiding: calmBarHiding,
-            showServiceStatusDot: try c.decode(Bool.self, forKey: .showServiceStatusDot),
-            modelLimitsVisibility: try c.decode(PopupSectionVisibility.self, forKey: .modelLimitsVisibility),
-            extraUsageVisibility: try c.decode(PopupSectionVisibility.self, forKey: .extraUsageVisibility),
+            colorsTell: try mb?.decodeIfPresent(ColorAdvice.self, forKey: .colorsTell)
+                ?? flat.decodeIfPresent(ColorAdvice.self, forKey: .calmColorMode)
+                ?? defaults.colorsTell,
+            hideTop5hBar: hideTop5hBar,
+            showServiceStatusDot: try mb?.decodeIfPresent(Bool.self, forKey: .showServiceStatusDot)
+                ?? flat.decodeIfPresent(Bool.self, forKey: .showServiceStatusDot)
+                ?? defaults.showServiceStatusDot,
+            modelLimitsVisibility: try dd?.decodeIfPresent(
+                PopupSectionVisibility.self, forKey: .showPerModelLimits)
+                ?? flat.decodeIfPresent(PopupSectionVisibility.self, forKey: .modelLimitsVisibility)
+                ?? defaults.modelLimitsVisibility,
+            extraUsageVisibility: try dd?.decodeIfPresent(
+                PopupSectionVisibility.self, forKey: .showExtraUsage)
+                ?? flat.decodeIfPresent(PopupSectionVisibility.self, forKey: .extraUsageVisibility)
+                ?? defaults.extraUsageVisibility,
             menuBarStyle: menuBarStyle,
             dropdownStyle: dropdownStyle)
     }
@@ -108,7 +164,7 @@ extension AppearancePresetValues: Codable {
 /// Serializes the live **Appearance** config to pretty-printed JSON for the clipboard — the payload
 /// behind the copy button in Settings → Appearance (#257).
 ///
-/// The Appearance surface is combinatorial (`BarStyle` × `CalmColorMode` × `FarBehindInterval` × the
+/// The Appearance surface is combinatorial (`BarStyle` × `ColorAdvice` × `FarBehindInterval` × the
 /// toggles), so "it looks wrong on my machine" is more often a config difference than a bug. This
 /// makes answering "what does your setup look like?" one click instead of a screenshot tour.
 ///
@@ -155,22 +211,31 @@ public enum AppearanceConfigExport {
         preset: AppearancePreset?,
         appVersion: String
     ) -> String {
-        // Pane order — keep in sync with `CodingKeys` above, `UIPanes.swift`, and
-        // `AppearanceConfigExportTests`. Insert a new option at its on-screen position; never append.
-        let appearance: [(String, String)] = [
-            ("menuBarStyle", jsonString(v.menuBarStyle.rawValue)),
-            ("calmColorMode", jsonString(v.calmColorMode.rawValue)),
-            ("calmBarHiding", jsonString(v.calmBarHiding.rawValue)),
+        // Pane order, grouped by surface — keep in sync with the `CodingKeys` enums above,
+        // `AppearancePanes.swift`, and `AppearanceConfigExportTests`. Insert a new option at its
+        // on-screen position inside its own group; never append to the end of the dump.
+        let menuBar: [(String, String)] = [
+            ("style", jsonString(v.menuBarStyle.rawValue)),
+            ("colorsTell", jsonString(v.colorsTell.rawValue)),
+            ("hideTop5hBar", jsonString(v.hideTop5hBar.rawValue)),
             ("showServiceStatusDot", jsonBool(v.showServiceStatusDot)),
-            ("dropdownStyle", jsonString(v.dropdownStyle.rawValue)),
-            ("modelLimitsVisibility", jsonString(v.modelLimitsVisibility.rawValue)),
-            ("extraUsageVisibility", jsonString(v.extraUsageVisibility.rawValue)),
+        ]
+        let dropdown: [(String, String)] = [
+            ("style", jsonString(v.dropdownStyle.rawValue)),
+            ("showPerModelLimits", jsonString(v.modelLimitsVisibility.rawValue)),
+            ("showExtraUsage", jsonString(v.extraUsageVisibility.rawValue)),
         ]
 
         // Two-space indent and `" : "` around the colon match `JSONSerialization.prettyPrinted`, so
         // this dump looks like the one the Troubleshoot window shows.
-        let body = appearance
-            .map { "    \"\($0.0)\" : \($0.1)" }
+        func group(_ name: String, _ pairs: [(String, String)]) -> String {
+            let body = pairs
+                .map { "      \"\($0.0)\" : \($0.1)" }
+                .joined(separator: ",\n")
+            return "    \"\(name)\" : {\n\(body)\n    }"
+        }
+
+        let body = [group("menuBar", menuBar), group("dropdown", dropdown)]
             .joined(separator: ",\n")
 
         return """

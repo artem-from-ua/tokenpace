@@ -50,16 +50,10 @@ public struct LimitRow: Sendable, Equatable {
     /// solid idle bar **grey** (not blue) and shows the status word "waiting for limit reset" instead
     /// of "ready to start". Only ever `true` alongside ``sessionIdle``; `false` on every other row.
     public let sessionBlocked: Bool
-    /// Whether the **week** still has room to spend (``PacingModel/weeklyHasHeadroom(in:now:)``), for
-    /// the idle row's fill colour. The idle bar draws no pacing at all, so it cannot read the gate off
-    /// its inert ``bar`` — it needs the verdict passed alongside.
-    ///
-    /// Blue on the idle pill means "ready to start, full quota available". That is the same "there is
-    /// room to push" claim the pacing blue makes, and it is just as wrong while the week runs ahead of
-    /// pace — so the pill degrades to **green** ("ready, but no headroom to advertise"), keeping
-    /// grey for ``sessionBlocked`` (work is impossible) and blue for a genuinely calm week.
-    /// Meaningful only on the idle row; `true` (ungated) on every other row.
-    public let weeklyHeadroom: Bool
+    // No `weeklyHeadroom` here since #381: the idle "ready to start" pill is **green** whatever the week
+    // is doing, on both surfaces, so the fill no longer needs the weekly verdict carried alongside an
+    // inert bar. `PacingModel.weeklyHasHeadroom` is untouched — it still gates `blueAllowed` for every
+    // *active* row, which is what ADR-0081 was about.
 
     public init(
         title: String,
@@ -71,8 +65,7 @@ public struct LimitRow: Sendable, Equatable {
         resetLine: String?,
         resetLineVerbose: String? = nil,
         sessionIdle: Bool = false,
-        sessionBlocked: Bool = false,
-        weeklyHeadroom: Bool = true
+        sessionBlocked: Bool = false
     ) {
         self.title = title
         self.utilization = utilization
@@ -84,7 +77,6 @@ public struct LimitRow: Sendable, Equatable {
         self.resetLineVerbose = resetLineVerbose
         self.sessionIdle = sessionIdle
         self.sessionBlocked = sessionBlocked
-        self.weeklyHeadroom = weeklyHeadroom
     }
 }
 
@@ -597,7 +589,7 @@ public struct PopupLayout: Sendable, Equatable {
         // gates on itself.
         let weeklyHeadroom = PacingModel.weeklyHasHeadroom(in: snapshot, now: now)
         var rows: [LimitRow] = [
-            snapshot.sessionIdle ? idleFiveHourRow(blocked: idleBlocked, weeklyHeadroom: weeklyHeadroom) : row(title: "5-hour", window: snapshot.fiveHour, as: .fiveHour, now: now, blueAllowed: weeklyHeadroom),
+            snapshot.sessionIdle ? idleFiveHourRow(blocked: idleBlocked) : row(title: "5-hour", window: snapshot.fiveHour, as: .fiveHour, now: now, blueAllowed: weeklyHeadroom),
             row(title: "7-day", window: snapshot.sevenDay, as: .sevenDay, now: now, blueAllowed: true),
         ]
         if let opus = snapshot.sevenDayOpus {
@@ -669,10 +661,11 @@ public struct PopupLayout: Sendable, Equatable {
     }
 
     /// The idle 5-hour placeholder row (#100, ADR-0027): title `"5-hour"`, `sessionIdle: true`, the
-    /// reset line `nil`, and an inert zeroed bar (the view fills it solid blue and skips the second
-    /// line). `subdivisions` stays the 5-hour value so the under-bar tick ruler keeps the row's anatomy
-    /// in family with the active rows; the numeric fields are placeholders the idle render path ignores.
-    private static func idleFiveHourRow(blocked: Bool = false, weeklyHeadroom: Bool = true) -> LimitRow {
+    /// reset line `nil`, and an inert zeroed bar (the view draws a grey track plus a zero pill and skips
+    /// the second line). `subdivisions` stays the 5-hour value so the under-bar tick ruler keeps the
+    /// row's anatomy in family with the active rows; the numeric fields are placeholders the idle render
+    /// path ignores.
+    private static func idleFiveHourRow(blocked: Bool = false) -> LimitRow {
         LimitRow(
             title: "5-hour",
             utilization: 0,
@@ -684,8 +677,7 @@ public struct PopupLayout: Sendable, Equatable {
             subdivisions: LimitWindow.fiveHour.subdivisions,
             resetLine: nil,
             sessionIdle: true,
-            sessionBlocked: blocked,
-            weeklyHeadroom: weeklyHeadroom)
+            sessionBlocked: blocked)
     }
 
     /// The blocking reset for the popup (#158) — `nil` unless the snapshot is **blocked** (no path to
