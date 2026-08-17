@@ -516,9 +516,14 @@ final class PopupBarView: NSView {
         // Gauge floors its zero at the centre (`stripFrom == 0.5` there, since a degenerate span has
         // both ends on the zero). `pinsStart` stays exclusive to Progress — on the centred scale both
         // edges are data and the floor must grow symmetrically about the zero.
-        let span = Self.stripRect(from: stripFrom, to: stripTo, in: rect,
-                                  pinsStart: frozenStripFraction == nil && effectiveScale == .window,
-                                  anchoredAt: effectiveScale == .centred ? 0.5 : nil)
+        let ribbon = Self.stripRect(from: stripFrom, to: stripTo, in: rect,
+                                    pinsStart: frozenStripFraction == nil && effectiveScale == .window,
+                                    anchoredAt: effectiveScale == .centred ? 0.5 : nil)
+        // Whether the ribbon degenerated and the pill floor took over — read off the fallback itself
+        // rather than re-measured from the resulting width, which would depend on `minStripWidth`
+        // rounding and quietly stop matching if that floor ever changes.
+        let collapsedToPill = ribbon == nil && effectiveScale != .window
+        let span = ribbon
             ?? (effectiveScale == .window ? nil : Self.pillRect(at: stripFrom, in: rect))
         if let stripRect = span {
             // The track's corner, not a capsule's (#326) — two shapes in one bar share one corner.
@@ -544,7 +549,14 @@ final class PopupBarView: NSView {
                 NSBezierPath(roundedRect: gutter, xRadius: r, yRadius: r).fill()
                 NSGraphicsContext.restoreGraphicsState()
             }
-            withGlow(gapColor, radius: Self.gapGlowRadius, strength: Self.gapGlowStrength) {
+            // A Pressure ribbon that collapsed to its zero pill gets the tighter, brighter halo (#381):
+            // the quiet side has no width to carry colour there, so the ambient glow — sized for a full
+            // ribbon — leaves the mark looking unlit. Quiet states only; a warning's ribbon has length of
+            // its own and does not need lifting.
+            let isCollapsedQuietPill = effectiveScale == .remaining && l.isCalm && collapsedToPill
+            withGlow(gapColor,
+                     radius: isCollapsedQuietPill ? Self.pillGlowRadius : Self.gapGlowRadius,
+                     strength: isCollapsedQuietPill ? Self.pillGlowStrength : Self.gapGlowStrength) {
                 gapColor.setFill()
                 stripPath.fill()
             }
@@ -1105,6 +1117,23 @@ final class PopupBarView: NSView {
 
     private static let gapGlowRadius: CGFloat = 21
     private static let gapGlowStrength: CGFloat = 0.35
+
+    /// Glow for a **Pressure ribbon that has collapsed to its zero pill** (#381) — stronger and tighter
+    /// than the ambient one above.
+    ///
+    /// Pressure measures against the time left, so every quiet state — the far-behind blue and the
+    /// on-pace green alike — draws the same minimum pill: the scale deliberately spends no width on the
+    /// side where there is nothing to act on. That leaves the pill with almost no area to carry its
+    /// colour, and the ambient 21 pt halo is calibrated for a ribbon many times that size, so on a pill
+    /// it reads as a faint smudge rather than as the mark's own light.
+    ///
+    /// A **tighter** radius with **more** strength is what recovers it: the halo stays inside the bar's
+    /// own height instead of bleeding across the card, and the pill reads as a lit dot. Only the quiet
+    /// colours get this — orange and red already have ribbon length of their own, and lighting them
+    /// further would raise a warning's volume rather than restore a quiet mark's legibility.
+    private static let pillGlowRadius: CGFloat = 9
+    private static let pillGlowStrength: CGFloat = 0.85
+
     /// Marker glow: a soft halo, kept subtle so the marker doesn't bloom over the card.
     private static let markerGlowRadius: CGFloat = 6
     private static let markerGlowStrength: CGFloat = 0.5

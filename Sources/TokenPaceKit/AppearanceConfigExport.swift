@@ -37,7 +37,7 @@ extension AppearancePresetValues: Codable {
     /// The keys inside the `dropdown` group, in **pane order**.
     enum DropdownKeys: String, CodingKey {
         case style                  // "Style"
-        case showPerModelLimits     // "Show per-model & per-service limits"
+        case showPerModelLimits     // "Show per-model and per-service limits"
         case showExtraUsage         // "Show *Extra usage*"
     }
 

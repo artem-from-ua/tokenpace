@@ -49,9 +49,12 @@ final class StatusItemView: NSView {
     ///   to push. Only visible when `mutesCalm` is on.
     ///
     /// **Pacing bars only** since #381. The service-status dot, the credits glyph and the idle pill's
-    /// blue/green split used to read this too; all three now answer their own questions without it —
-    /// which is what lets the Settings row disappear under Pressure, where the bars have no calm side to
-    /// colour, without hiding anything that still works.
+    /// blue/green split used to read this too; all three now answer their own questions without it.
+    ///
+    /// **And not under Pressure at all.** That style mutes the whole quiet side unconditionally — blue,
+    /// green and yellow all draw white — so this value has no effect there, which is precisely what makes
+    /// hiding its Settings row under Pressure honest. Sizing was never the whole story: a zero-length
+    /// pill still takes a colour, so before this the hidden setting kept tinting a visible mark.
     ///
     /// Set by `AppDelegate` from `PersistedConfig.colorsTell`; the view stays a thin shell and does not
     /// read the config itself. Changing it requests a redraw (no size change).
@@ -986,9 +989,13 @@ final class StatusItemView: NSView {
             // an inert layout to stay honest. It is dropped: idle answers one question, and the weekly
             // gate still does its real job on the *active* bar's `blueAllowed` (ADR-0081). Grey still
             // means blocked. The popup drops the same distinction, so the two surfaces agree.
+            // Under Pressure the quiet side is muted unconditionally (see `gapColorTarget`), and idle is
+            // the quietest state there is — so the ready pill follows the same rule rather than reading a
+            // setting the page does not show under that style.
+            let idleMuted = barStyle == .pressure || colorsTell.mutesCalm
             let idleTarget: NSColor = bar.blocked
                 ? Palette.unusedGrey
-                : (colorsTell.mutesCalm ? bright(Palette.calmWhite) : accent(Palette.gapGreen))
+                : (idleMuted ? bright(Palette.calmWhite) : accent(Palette.gapGreen))
             // Animated like any other bar colour, so idle→active (blue→green) and the blocked grey
             // swap fade rather than snap.
             let fill = animated(idleTarget, window: bar.window, part: .fill)
@@ -1212,8 +1219,25 @@ final class StatusItemView: NSView {
     private func gapColorTarget(_ l: BarLayout) -> NSColor {
         // Calm neutral is a bright tone (labelColor at the text opacity, via `bright`); the coloured
         // pacing gap is an accent (scaled by accentSaturation). Neither is the dimmed bar track.
-        // When `mutesBlue` is off (the old "Work harder") the far-behind blue is exempt from muting so
-        // a big surplus stays coloured.
+
+        // **Pressure mutes the whole quiet side, unconditionally** (#381): blue, green and yellow all
+        // draw white, whatever `colorsTell` says.
+        //
+        // This is what makes hiding the "Colors tell me" row under Pressure honest. The row is hidden
+        // there because Pressure draws every quiet state at zero length — but *length* was only half the
+        // story: the zero pill still took its **colour** from here, so a hidden setting kept tinting a
+        // visible mark, and picking Pressure with a stored `slowDownOrSpeedUp` produced a blue pill with
+        // no control on screen to explain it. Found in live verification, not by reasoning.
+        //
+        // Pressure is also where a coloured quiet state says least: with no ribbon to size, the hue is
+        // the only channel left, and it is reporting a state the scale itself has decided not to draw.
+        if barStyle == .pressure && l.isCalm {
+            return bright(Palette.calmWhite)
+        }
+
+        // Gauge and Progress honour the setting. When `mutesBlue` is off the far-behind blue is exempt
+        // from muting, so a big surplus stays coloured — there the scale *does* draw the quiet side, so
+        // the colour has a ribbon to qualify.
         if colorsTell.mutesCalm && l.isCalm && !(l.severity == .farBehind && !colorsTell.mutesBlue) {
             return bright(Palette.calmWhite)
         }
@@ -1243,6 +1267,10 @@ final class StatusItemView: NSView {
     /// are converted into one colour space first; a dynamic catalogue colour never compares equal to a
     /// resolved one directly.
     private func isYellow(_ colour: NSColor) -> Bool {
+        // Pressure mutes the whole quiet side (#381), so its mild-lead yellow never reaches the screen —
+        // stated here rather than left to the colour comparison below, which would also return `false`
+        // but only by accident of the rendered tone.
+        guard barStyle != .pressure else { return false }
         guard !colorsTell.mutesCalm else { return false }
         guard let a = colour.usingColorSpace(.sRGB),
               let b = ColorStore.shared.color(.yellow).usingColorSpace(.sRGB) else { return false }

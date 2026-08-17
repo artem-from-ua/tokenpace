@@ -212,12 +212,16 @@ struct MenuBarPane: View {
                 // mechanism instead. Segments run quiet-first, like every other control on the page.
                 //
                 // **Hidden under Pressure**, which is why it shares a card with `Style` rather than
-                // sitting with the row below: Pressure draws the whole calm side as zero
-                // (`BarLayout.pressureLength` = `max(0, gaugeOffset)`), so neither muting mode has any
-                // ribbon to colour and the choice cannot show itself. A row that appears and disappears
-                // with its neighbour's value has to be next to that neighbour, or the disappearance
-                // reads as a glitch. The stored value is untouched while hidden — switching back to
-                // Gauge or Progress restores the same choice.
+                // sitting with the row below. Two halves to that, and the second was found only in live
+                // verification: Pressure draws the whole quiet side at zero **length**
+                // (`BarLayout.pressureLength` = `max(0, gaugeOffset)`), *and* `StatusItemView` mutes the
+                // whole quiet side to white there regardless of this value — because a zero-length pill
+                // still takes a **colour**, and without that rule a hidden setting kept tinting a visible
+                // mark (blue pill, no control on screen to explain it).
+                //
+                // A row that appears and disappears with its neighbour's value has to be next to that
+                // neighbour, or the disappearance reads as a glitch. The stored value is untouched while
+                // hidden — switching back to Gauge or Progress restores the same choice.
                 if model.menuBarStyle != .pressure {
                     HStack {
                         Text("Colors tell me")
@@ -350,12 +354,12 @@ struct DropdownPane: View {
                 // crowd the two rows that close the section. The two rows offer *different* segment
                 // sets — see the constants below.
                 HStack {
-                    // "per-model & per-service", not "model & service": these are the limits belonging to
+                    // "per-model and per-service", not "model and service": these are the limits belonging to
                     // one model or one service, as against the 5h/7d windows above them, and the bare
                     // form left that to inference. The hyphenated "model- & service-specific" says the
                     // same thing with a harder-to-read chain of hyphens; "per-" is also the code's own
                     // word for these rows (`PopupLayout.perModelRows`).
-                    Text("Show per-model & per-service limits")
+                    Text("Show per-model and per-service limits")
                     Spacer()
                     SegmentedControl(
                         segments: Self.modelLimitsSegments,
