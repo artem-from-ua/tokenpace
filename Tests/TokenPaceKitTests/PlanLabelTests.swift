@@ -4,25 +4,25 @@ import Testing
 @Suite("claudePlanLabel")
 struct PlanLabelTests {
     @Test func maps5xTier() {
-        #expect(claudePlanLabel(rateLimitTier: "default_claude_max_5x") == "Max 5x")
+        #expect(claudePlanLabel(rateLimitTier: "default_claude_max_5x") == "Max (5x)")
     }
 
     @Test func maps20xTier() {
-        #expect(claudePlanLabel(rateLimitTier: "default_claude_max_20x") == "Max 20x")
+        #expect(claudePlanLabel(rateLimitTier: "default_claude_max_20x") == "Max (20x)")
     }
 
     /// The multiplier is a pattern, not a fixed list — a future tier resolves without a code change.
     @Test func mapsFutureMultiplierTier() {
-        #expect(claudePlanLabel(rateLimitTier: "default_claude_max_50x") == "Max 50x")
+        #expect(claudePlanLabel(rateLimitTier: "default_claude_max_50x") == "Max (50x)")
     }
 
     @Test func mapsProTier() {
         #expect(claudePlanLabel(rateLimitTier: "default_claude_pro") == "Pro")
     }
 
-    /// The multiplier token keeps its original lowercase `x` (not "5X").
+    /// The multiplier keeps its parentheses and original lowercase `x` (not "5X", not a bare "5x").
     @Test func preservesLowercaseMultiplier() {
-        #expect(claudePlanLabel(rateLimitTier: "default_claude_max_5x")?.hasSuffix("5x") == true)
+        #expect(claudePlanLabel(rateLimitTier: "default_claude_max_5x")?.hasSuffix("(5x)") == true)
     }
 
     /// Whitelist, not best-effort: anything we don't confidently recognise yields `nil` so the header

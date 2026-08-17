@@ -2232,7 +2232,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // the same reason the awaiting-input breakdown is.
             .withIncidents(lastVisibleIncidents)
             .withSubscription(currentSubscriptionState())
-            // Graft the brand-coloured plan label ("Max 5x") from the Keychain rate-limit tier — a
+            // Graft the brand-coloured plan label ("Max (5x)") from the Keychain rate-limit tier — a
             // plan mark, not a secret. `nil` (no tier / unreadable creds) draws just "Claude".
             .withPlanLabel(claudePlanLabel(rateLimitTier: output.diagnostics?.token?.rateLimitTier)))
     }

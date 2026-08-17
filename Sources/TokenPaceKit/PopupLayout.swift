@@ -264,7 +264,7 @@ public struct PopupLayout: Sendable, Equatable {
     /// independent of the usage snapshot, so it's supplied to `make` rather than derived from it.
     public let awaitingInput: AwaitingSessions?
 
-    /// The short plan label shown in brand colour right after "Claude" in the header (e.g. "Max 5x"),
+    /// The short plan label shown in brand colour right after "Claude" in the header (e.g. "Max (5x)"),
     /// or `nil` to draw just "Claude". Derived from the Keychain `rateLimitTier` via
     /// ``claudePlanLabel(rateLimitTier:)`` — like ``awaitingInput``, it comes from a source outside the
     /// usage snapshot (the OAuth payload), so the shell grafts it on via ``withPlanLabel(_:)`` rather

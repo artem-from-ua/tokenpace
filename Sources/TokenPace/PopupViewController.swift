@@ -1840,7 +1840,7 @@ final class PopupViewController: NSViewController {
     }
 
     /// The left half of the "Claude" section header: **"Claude"** in the bold ``menuItemFont``, and —
-    /// when a plan label is present (e.g. "Max 5x", from the Keychain rate-limit tier) — a bold `･`
+    /// when a plan label is present (e.g. "Max (5x)", from the Keychain rate-limit tier) — a bold `･`
     /// separator followed by the plan in the *regular* weight of the same size. All three parts share
     /// ``claudeBrandColor``: the plan reads as part of the same brand mark, distinguished from "Claude"
     /// by weight, not colour (the plan itself is deliberately **not** bold; the `･` separator is, to
@@ -1967,7 +1967,7 @@ final class PopupViewController: NSViewController {
         // across the header the moment the awaiting count dropped to zero or the feature was off.
         // The right slot is reserved for the awaiting-input indicator (hand + count) and stays empty
         // otherwise.
-        // The brand title — "Claude" plus the plan label ("Max 5x") when present, both in brand colour.
+        // The brand title — "Claude" plus the plan label ("Max (5x)") when present, both in brand colour.
         let brand = Self.brandTitleLabel(plan: layout.planLabel)
         let age = NSTextField(labelWithString: ageString)
         age.font = .systemFont(ofSize: Metrics.textSize)
