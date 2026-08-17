@@ -162,13 +162,42 @@ git config core.hooksPath .githooks
 Appearance** — не за алфавітом і не в порядку полів структури. Дамп читають, тримаючи панель перед
 очима: збіг порядку дає відповідність рядок-у-рядок.
 
-**Додаєш Appearance-опцію — встав її ключ на позицію, що відповідає місцю контролу в панелі.**
-Не дописуй у кінець і не сортуй. Синхронізувати треба три списки:
+**Структура — вкладена по поверхнях** (із [#381](https://github.com/artem-from-ua/cc-timer/issues/381),
+[ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md); до того всі сім ключів
+лежали плоским списком). Дві групи в порядку дочірніх сторінок, кожна зі
+своїми ключами в порядку контролів, і ключі всередині груп **без префікса поверхні** — його вже несе
+сама група, тож `menuBar.style` у `UserDefaults` — це `"style"` усередині `"menuBar"` у дампі:
 
-1. `UIPanes.swift` — сам контрол;
-2. `AppearanceConfigExport.json(values:preset:appVersion:)` — масив, що емітить рядки, і
-   `CodingKeys` у тому ж файлі;
-3. `AppearanceConfigExportTests.paneOrderedKeys` — еталон, що стереже порядок.
+```json
+{
+  "appVersion" : "…",
+  "preset" : "workHarder",
+  "appearance" : {
+    "menuBar" : {
+      "style" : "…",
+      "colorsTell" : "…",
+      "hideTop5hBar" : "…",
+      "showServiceStatusDot" : true
+    },
+    "dropdown" : {
+      "style" : "…",
+      "showPerModelLimits" : "…",
+      "showExtraUsage" : "…"
+    }
+  }
+}
+```
+
+**Додаєш Appearance-опцію — встав її ключ на позицію, що відповідає місцю контролу в панелі, і
+всередині своєї групи.** Не дописуй у кінець і не сортуй. Синхронізувати треба три списки:
+
+1. [`AppearancePanes.swift`](../../Sources/TokenPace/Settings/AppearancePanes.swift) — сам контрол
+   (файл звався `UIPanes.swift` до [#381](https://github.com/artem-from-ua/cc-timer/issues/381));
+2. [`AppearanceConfigExport`](../../Sources/TokenPaceKit/AppearanceConfigExport.swift) —
+   `json(values:preset:appVersion:)` (масиви `menuBar` / `dropdown`, що емітять рядки) і `MenuBarKeys`
+   / `DropdownKeys` у тому ж файлі;
+3. `AppearanceConfigExportTests.paneOrderedGroups` — еталон, що стереже порядок (плоский
+   `paneOrderedKeys` виводиться з нього як `"<group>.<key>"`).
 
 Порядок **не можна** доручити `Codable`/`JSONEncoder`/`JSONSerialization`: keyed-контейнер лежить на
 невпорядкованому словнику, тож порядок ключів різниться **між запусками того самого бінарника**.

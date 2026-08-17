@@ -54,8 +54,11 @@
 
 Дві застороги:
 
-- **«Одна смужка = 5h спокійне» справджується при дефолтному `CalmBarHiding = .fiveHour`.** Хто
-  обрав `Never`, завжди бачить обидві.
+- **«Одна смужка = 5h спокійне» справджується при дефолтному
+  [`TopBarHiding`](../../Sources/TokenPaceKit/TopBarHiding.swift)` = .untilItNeedsAttention`** —
+  сегмент `Until it needs attention` у рядку «Hide the top 5h bar» (перейменовано з
+  `CalmBarHiding.fiveHour` у [#381](https://github.com/artem-from-ua/cc-timer/issues/381)). Хто обрав
+  `Never`, завжди бачить обидві.
 - **Idle — інша причина одної смужки.** Коли активної сесії немає, 5-годинного вікна не існує
   взагалі ([ADR-0027](../adr/0027-session-idle-no-phantom-reset.md)), і його смужка малюється як нуль
   ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)). Той самий піксель, інша історія.

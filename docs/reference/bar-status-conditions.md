@@ -41,9 +41,10 @@ Per-model і credits проходять гілкою `Palette.gapGreen`
 ([PopupViewController.swift:607, 619](../../Sources/TokenPace/PopupViewController.swift#L607)).
 Menu bar per-model барів не має взагалі.
 
-**Чому в idle «ні», хоч пігулка буває синя.** Idle-бар не має пейсингу як такого — він не проходить
-через `severity` і не може набути `farBehind`. Його синій — це заливка стану «ready to start», яка
-**теж** гейтиться станом тижня, але окремим шляхом. Детально — §6.
+**Чому в idle «ні».** Idle-бар не має пейсингу як такого — він не проходить через `severity` і не
+може набути `farBehind`. Його заливка — це стан «ready to start», а не вердикт: із
+[#381](https://github.com/artem-from-ua/cc-timer/issues/381) вона **завжди зелена** (сіра при
+blocked), і тижневий gate до неї більше не входить. Детально — §6.
 
 > **Журнал і UI збігаються.** `PacingBucket.of` читає те саме `blueAllowed`, що й рендер, а
 > per-model рядки несуть той самий weekly-gate, тож у `usage-journal-*.jsonl` scoped-вікно більше
@@ -223,32 +224,42 @@ Ahead-поріг **звужується** з часом (лід наприкін
 ([PopupLayout.swift:542](../../Sources/TokenPaceKit/PopupLayout.swift#L542),
 [MenuBarLayout.swift:348](../../Sources/TokenPaceKit/MenuBarLayout.swift#L348)).
 
-Пігулка **тризначна**:
+Пігулка **двозначна** (з [#381](https://github.com/artem-from-ua/cc-timer/issues/381) — до того була
+тризначною):
 
 | Умова | Заливка | Слово |
 |---|---|---|
 | `sessionIdle` **і** `CreditsPacing.isBlocked` | **сіра** | «waiting for limit reset» |
-| `sessionIdle`, не blocked, **і** `weeklyHeadroom` | **синя** | «ready to start» |
-| `sessionIdle`, не blocked, **без** headroom | **зелена** | «ready to start» |
+| `sessionIdle`, не blocked | **зелена** | «ready to start» |
 
 - `isBlocked` = `mainWindowExhausted && !creditsCanCover`
   ([CreditsPacing.swift:150](../../Sources/TokenPaceKit/CreditsPacing.swift#L150)) — сірий лише коли
   головне вікно вичерпане **на 100 %** *і* кредити не покривають: працювати неможливо.
-- `weeklyHeadroom` — той самий `PacingModel.weeklyHasHeadroom`, що гейтить пейсинговий синій.
-  Синя пігулка обіцяє вільну квоту, і ця обіцянка хибна, щойно тиждень пішов попереду темпу.
-- **Слово не змінюється** між синьою й зеленою: працювати справді можна, різниця лише в тому, чи є
-  що «розганяти». Раніше текст обіцяв «ready to start, full quota available» — цю частину прибрано.
+- **Синьої idle-пігулки більше немає на жодній поверхні**
+  ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)). До
+  [#381](https://github.com/artem-from-ua/cc-timer/issues/381) вона була синьою при тижневому запасі
+  й зеленою без нього — і саме її синій колір розходився з тим, що синій означає на **активному**
+  барі. Тепер обидва рендери цілять у зелений безумовно:
+  [PopupViewController.swift:432](../../Sources/TokenPace/PopupViewController.swift#L432)
+  (`blocked ? monochromeGrey : color(.green)`) і
+  [StatusItemView.swift:995](../../Sources/TokenPace/StatusItemView.swift#L995).
+- Разом із кольором пішов і прапорець: полів `LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom`
+  **немає** — idle-бару більше нема чого питати про тиждень.
+- `PacingModel.weeklyHasHeadroom` лишається й далі гейтить `blueAllowed` для **активних** барів
+  ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md) у цій частині чинний) — просто idle до
+  нього більше не входить.
+- **Слово не змінюється** між зеленою й (колишньою) синьою: працювати справді можна. Раніше текст
+  обіцяв «ready to start, full quota available» — цю частину прибрано.
 
-Прапорець їде окремим полем (`LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom`), бо idle-бар не
-читає `blueAllowed` зі свого інертного `BarLayout`.
-
-**Поверх цього — `CalmColorMode`** (лише menu bar, §7): синя пігулка лишається синьою під
-`.yellowGreen`, зелена глушиться в обох режимах, сіра не глушиться ніколи
-([#343](https://github.com/artem-from-ua/cc-timer/issues/343)).
+**Поверх цього — [`ColorAdvice`](../../Sources/TokenPaceKit/ColorAdvice.swift)** (лише menu bar, §7):
+зелена пігулка глушиться в білий під обома глушильними режимами (і **безумовно** під Pressure), сіра
+не глушиться ніколи.
 
 > **Один синій, одна роль.** Раніше idle-заливка (`ColorRole.blue`) і пейсинговий зазор
 > (`ColorRole.paceBlue`) були двома записами палітри з **однаковим** дефолтом `.systemBlue` — на
-> екрані нерозрізненні, а розділені лише тим, що тюнер міг їх розвести. Ролі злито в одну `.blue`.
+> екрані нерозрізненні, а розділені лише тим, що тюнер міг їх розвести. Ролі злито в одну `.blue`,
+> а з [#381](https://github.com/artem-from-ua/cc-timer/issues/381) idle не читає її взагалі —
+> `.blue` лишився суто пейсинговим.
 
 **Узгодженість із «Back to work!».** Зелена пігулка може співіснувати з нотіфікацією, і це не
 суперечність: `WorkAvailability.canWork` питає «чи можливо працювати» (вичерпання), а gate — «чи є
@@ -265,29 +276,44 @@ Ahead-поріг **звужується** з часом (лід наприкін
 
 Колір із §3-6 — це **вхід**, а не фінальний піксель.
 
-### `CalmColorMode` — приглушення в біле (лише menu bar)
+### `ColorAdvice` — приглушення в біле (лише menu bar)
 
-| Режим | Зелений/жовтий | Синій | Помаранчевий/червоний |
+Тип названо за **порадою, яку несе колір**, а не за механізмом гасіння
+([ColorAdvice.swift](../../Sources/TokenPaceKit/ColorAdvice.swift), перейменований із `CalmColorMode`
+у [#381](https://github.com/artem-from-ua/cc-timer/issues/381) —
+[ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)). Рядок у Settings → Appearance ›
+Menu bar зветься **«Colors tell me»**, сегменти — нижче в першій колонці; старі raw
+(`yellowGreenBlue`/`yellowGreen`/`off`) читаються через `legacyRawValues`.
+
+| Режим (сегмент) | Зелений/жовтий | Синій | Помаранчевий/червоний |
 |---|---|---|---|
-| `.off` | кольорові | кольоровий | кольорові |
-| `.yellowGreen` | **білі** | кольоровий | кольорові |
-| `.yellowGreenBlue` | **білі** | **білий** | кольорові |
+| `.slowDown` (`Slow down`) | **білі** | **білий** | кольорові |
+| `.slowDownOrSpeedUp` (`Slow down or speed up`, дефолт) | **білі** | кольоровий | кольорові |
+| `.howItsGoing` (`How it's going`) | кольорові | кольоровий | кольорові |
 
-Попередження ніколи не глушаться. Попап не глушить нічого.
+Попередження ніколи не глушаться. Попап не глушить нічого. Рендер читає не сам кейс, а два derived-
+прапорці — `mutesCalm` і `mutesBlue`.
 
-**Idle-пігулка (§6) підпадає під ту саму таблицю** ([#343](https://github.com/artem-from-ua/cc-timer/issues/343)):
-синя «ready to start» лишається синьою під `.yellowGreen` — це той самий `ColorRole.blue`, що й
-пейсинговий зазор, тож глушити один і лишати інший суперечило б назві сегмента. **Зелена** пігулка
-(тиждень без запасу) глушиться в обох режимах: зелений — саме те, що ці режими глушать за
-означенням. Сіра (blocked) не глушиться ніколи — вона й так трек.
+**Під Pressure гасіння безумовне.** У menu bar при `menuBarStyle == .pressure` увесь спокійний бік
+(синій/зелений/жовтий) і idle-пігулка глушаться в білий **незалежно від `ColorAdvice`**
+([StatusItemView.swift:995](../../Sources/TokenPace/StatusItemView.swift#L995) — `barStyle ==
+.pressure || colorsTell.mutesCalm`). Саме тому рядок «Colors tell me» під Pressure **ховається** з
+панелі: під цим стилем спокійний бік має нульову довжину, і кольору вже нічого сказати — показувати
+перемикач, який нічого не змінює, було б нечесно.
 
-Рішення живе в `CalmColorMode.mutesIdlePill(isBlue:)`
-([CalmColorMode.swift](../../Sources/TokenPaceKit/CalmColorMode.swift)), а не в `severity`: idle-бар
-має жорстко `.calm` і `blueAllowed: false`, тож `.farBehind` там недосяжний.
+**Ці три поверхні більше не читають `ColorAdvice` взагалі**
+([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md),
+[#381](https://github.com/artem-from-ua/cc-timer/issues/381)), бо відповідають на інші питання:
+
+- **Service-крапка** в menu bar: жовтий `degraded` там **завжди** білий (`calmWhite`), безумовно —
+  поруч немає тексту, який пояснив би відтінок. У попапі крапка лишається жовтою (там текст є).
+- **Символ валюти (¤)**: його власна шкала біла→помаранчева→червона самодостатня
+  ([ADR-0068](../adr/0068-credits-in-use-marker-anatomy.md)).
+- **Idle-пігулка** (§6): гаситься за спільним `idleMuted`, тим самим, що й решта спокійного боку.
 
 ### Journal vs UI
 
-`PacingBucket` ігнорує **лише** `CalmColorMode` — це косметика, і серія має лишатися порівнюваною
+`PacingBucket` ігнорує **лише** `ColorAdvice` — це косметика, і серія має лишатися порівнюваною
 між користувачами. `blueAllowed` він, навпаки, **поважає**: це не налаштування, а факт про дані
 ([PacingBucket.swift](../../Sources/TokenPaceKit/PacingBucket.swift)).
 
@@ -311,11 +337,13 @@ Ahead-поріг **звужується** з часом (лід наприкін
 | Credits-бар із тіками | Його лінійка — два підписи країв місяця, зубців немає (0092); та й самі підписи видно **лише під ⌥** ([ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md)) — без нього бар стоїть без лінійки взагалі |
 | Idle-бар із маркером часу | idle малює нуль без маркера й зон |
 | Idle-бар із заливкою на всю ширину | idle — це пігулка на нулі |
-| **Біла idle-пігулка під `Yellow + Green` при спокійному тижні** | синя пігулка має той самий виняток, що й пейсинговий синій ([#343](https://github.com/artem-from-ua/cc-timer/issues/343)) — білою вона стає лише під `+ Blue` або коли тиждень без запасу (тоді вона зелена) |
+| **Синя idle-пігулка** — за будь-яких налаштувань і будь-якого стану тижня | З [#381](https://github.com/artem-from-ua/cc-timer/issues/381) синього idle немає на жодній поверхні: заливка або зелена, або біла (під гасінням), або сіра (blocked). Виняток `Yellow + Green` для idle, що діяв за [#343](https://github.com/artem-from-ua/cc-timer/issues/343), зник разом із синім |
+| **Кольорова idle-пігулка під Pressure у menu bar** | Під Pressure гасіння безумовне (`barStyle == .pressure \|\| colorsTell.mutesCalm`), тож зелена пігулка там **завжди** біла — незалежно від `ColorAdvice`, який під цим стилем навіть не показується в Settings |
+| **Жовта `degraded` service-крапка в menu bar** | З [#381](https://github.com/artem-from-ua/cc-timer/issues/381) вона там завжди `calmWhite`, безумовно ([StatusItemView.swift:385](../../Sources/TokenPace/StatusItemView.swift#L385)). Жовтою вона лишається **лише в попапі**, де поруч є назва сервісу й текст статусу |
 | Жовтий на спокійному боці | жовтий існує лише при `u > t` |
 | Синій на 5h при `t < 0.40` | `t − u ≤ t`, тож запас не досягне порога |
 | **Синій h5 при d7 ∈ {yellow, orange, red}** | weekly-gate закритий → `blueAllowed == false` |
-| **Синя idle-пігулка при гарячому тижні** | той самий gate → зелена заливка |
+| **Idle-пігулка, що змінює колір за станом тижня** | Тижневий gate більше не входить у idle: полів `LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom` немає, тож `idle` і `idle-week-hot` малюють однакову **зелену** пігулку |
 | `sev: "blue"` у журналі, якого не було на екрані | журнал читає те саме `blueAllowed` |
 
 ---
@@ -341,8 +369,9 @@ else:
     else:                                   -> ПОМАРАНЧЕВИЙ
 ```
 
-Далі: якщо бар не базовий (`isBaseLimit == false`) — синій замінюється зеленим. Якщо menu bar і
-`CalmColorMode` глушить цей тон — колір стає білим.
+Далі: якщо бар не базовий (`isBaseLimit == false`) — синій замінюється зеленим. Якщо menu bar і цей
+тон глушиться — колір стає білим; глушить його `ColorAdvice` (§7) **або**, безумовно, стиль
+Pressure.
 
 ---
 
@@ -355,8 +384,8 @@ else:
 | `calm-both` | обидва зелені |
 | `near-reset` | 20-хв кінець-override (2 пп ліду → помаранчевий) |
 | `bar-extremes` | 5h синій (75 пп запасу) + 7d позаду темпу (щоб gate лишався відкритим) |
-| `idle` | синя idle-пігулка (тиждень спокійний), «ready to start» |
-| `idle-week-hot` | **зелена** idle-пігулка (тиждень попереду темпу), те саме слово |
+| `idle` | **зелена** idle-пігулка, «ready to start» (до [#381](https://github.com/artem-from-ua/cc-timer/issues/381) була синя) |
+| `idle-week-hot` | тиждень попереду темпу — і пігулка **та сама зелена**. Стан лишився стубом навмисно: він доводить, що idle **не** реагує на тиждень; розбіжність із `idle` була б регресією |
 | `idle-blocked` | сіра idle-пігулка, «waiting for limit reset» |
 | `weekly-gate` | 5h глибоко позаду, але тиждень вичерпаний → 5h **зелений**, не синій |
 | `credits-*` | money-бар у різних станах, зокрема без cap |

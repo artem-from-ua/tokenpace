@@ -1,11 +1,22 @@
 ---
-status: accepted
+status: superseded
 date: 2026-08-13
 supersedes: []
-superseded_by: [0100]
+superseded_by: [0100, 0104]
 ---
 
 # ADR-0087: Режим `aboveZero` для секцій дропдауна, і чому кредити втрачають `nonCalm`
+
+> **Витіснений [ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md)**
+> ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)). Не лишилося жодного raw-значення,
+> яким цей ADR оперує: `aboveZero` → `onceUsed`, `nonCalm` → `whenItNeedsAttention`, а `.optionOnly`
+> **видалено з enum** — старі raw розвʼязуються через `PopupSectionVisibility.legacyRawValues`.
+> Маркерний ключ `extraUsageVisibilityMigratedFromNonCalm`, який тут запроваджено, ретировано:
+> перенесення значення відбувається дорогою при переїзді ключа на `dropdown.showExtraUsage`, тож
+> ідемпотентність тримає сама конструкція, а не прапорець. Порядок сегментів розвернуто (тихіше
+> ліворуч). **Чинним лишається зміст рішення** — предикат «значення, а не вердикт», два різні
+> предикати на дві групи, і те, що кредитний рядок не пропонує режим за вердиктом (сліпа зона
+> безлімітного капу); у коді це `PopupSectionVisibility.creditsOffered` / `foldedForCredits`.
 
 > **Частково витіснений [ADR-0100](0100-dropdown-style-tiles-and-retired-option-segment.md)** (#374): сегмент **`With ⌥ Option`** знято з **обох** рядків — ⌥ і так додається через `||` до кожного іншого режиму, тож `.optionOnly` відрізнявся лише тим, що **ховав** групу, коли її дані ставали цікавими. Кейс лишився в enum для декодування збережених значень (та сама процедура, що тут застосована до `.nonCalm` на кредитному рядку), з міграцією на `.aboveZero`. Сам режим `aboveZero`, його предикат і дефолти — чинні; **назву сегмента змінено** на `Once used`, тож аргумент нижче про «два коротких слова» і про чотири сегменти в рядку більше не описує UI.
 

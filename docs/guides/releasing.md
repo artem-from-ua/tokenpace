@@ -65,15 +65,15 @@ Persistent-стан (переживає рестарт, окрім прости�
 git diff "${LAST}..HEAD" -- \
   Sources/TokenPaceKit/MonitoredServices.swift \
   Sources/TokenPaceKit/SuppressDays.swift \
-  Sources/TokenPaceKit/CalmBarHiding.swift \
-  Sources/TokenPaceKit/CalmColorMode.swift \
+  Sources/TokenPaceKit/TopBarHiding.swift \
+  Sources/TokenPaceKit/ColorAdvice.swift \
   Sources/TokenPaceKit/BarStyle.swift \
   Sources/TokenPaceKit/PopupSectionVisibility.swift
 ```
 
 - `MonitoredServices` (`Codable`) серіалізується як JSON-блоб у `monitoredServices`.
   `MonitoredServicesTests.swift` пінить raw-рядки саме тому, що вони персистяться.
-- `SuppressDays`, `CalmBarHiding`, `CalmColorMode`, `BarStyle`, `PopupSectionVisibility` —
+- `SuppressDays`, `TopBarHiding`, `ColorAdvice`, `BarStyle`, `PopupSectionVisibility` —
   raw-string enums, зберігаються за raw-значенням. (`ResetCountdownMode` був тут до
   [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md) — тип видалено, ключ
   `resetCountdownModeMenuBar` ретировано й підмітається.)
@@ -81,7 +81,27 @@ git diff "${LAST}..HEAD" -- \
   raw тихо падає в дефолт (не креш). Якщо міняєш форму (нове/перейменоване поле, інший
   raw) — **збережи цю властивість**: старий блоб має або коректно декодуватись, або
   безпечно відкотитись у дефолт. Легенду legacy-значень тримай у коментарях типу (як уже
-  зроблено для `CalmBarHiding.migrated(fromLegacyHide:)` і `BarStyle.legacySurfaceStyles`).
+  зроблено для `TopBarHiding.migrated(fromLegacyHide:)` і `BarStyle.legacySurfaceStyles`).
+- **Перейменування raw-значення — це дві правки, а не одна**
+  ([ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)). Крім нового
+  кейса потрібен запис у `legacyRawValues` типу (`ColorAdvice`, `TopBarHiding`,
+  `PopupSectionVisibility`, `BarStyle` — у кожного вона своя) і кастомний `init(from:)`,
+  що консультується з нею **перед** дефолтним fallback. Без цього збережений вибір
+  користувача тихо падає в дефолт — те, чого перейменування не має права робити.
+
+**Ключі Appearance мають префікс поверхні** (`menuBar.*` / `dropdown.*`), а експорт конфіга
+видає **вкладені** групи `menuBar` / `dropdown`. Якщо перейменовуєш ключ, потрібні **обидві**
+половини:
+
+1. крок `migrateRawKey(from:to:label:resolve:)` у
+   [`PersistedConfig.migrateAppearanceKeysIfNeeded()`](../../Sources/TokenPace/PersistedConfig.swift)
+   — він переносить сировину зі старого ключа в новий і **зʼїдає** старий, тож ідемпотентність
+   не потребує окремого маркер-ключа;
+2. `legacyRawValues` у самому типі — щоб те саме перенесення працювало й для **імпортованого**
+   конфіга, який міграції `UserDefaults` не бачить.
+
+Забути другу половину найлегше: `defaults` мігрує, а вставлений із чужого дампа JSON тихо
+з'їжджає в дефолти.
 
 Також перевір edge-detect / update / archive стан (`backToWorkWasBlocked`,
 `pendingWhatsNewVersion`, `lastFailedInstallVersion`, `lastUpdateCheck`,
