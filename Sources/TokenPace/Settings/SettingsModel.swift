@@ -272,6 +272,11 @@ final class SettingsModel {
     /// surface currently draws, which is the one setting both pages open with and the only one whose
     /// answer differs between them by default.
     ///
+    /// Labelled `Style: Gauge`, not the bare style name: on the parent page the row title says only
+    /// which *surface* the page configures, so a lone "Gauge" leaves the reader to guess which of the
+    /// page's several settings it reports. The label is the child page's own control label verbatim,
+    /// so the summary and the control it summarises name the setting the same way.
+    ///
     /// The name comes from `AppearanceBarStyle.segments`, the same table the picker on the child page
     /// labels its own segments from: a row reporting "Gauge" while the control inside says something
     /// else would be worse than a row reporting nothing.
@@ -282,7 +287,10 @@ final class SettingsModel {
         case .appearanceDropdown: style = dropdownStyle
         case .providersClaude: return nil
         }
-        return AppearanceBarStyle.segments.first { $0.value == style }?.title
+        guard let name = AppearanceBarStyle.segments.first(where: { $0.value == style })?.title else {
+            return nil
+        }
+        return "Style: \(name)"
     }
 
     // MARK: Notifications (#160)
