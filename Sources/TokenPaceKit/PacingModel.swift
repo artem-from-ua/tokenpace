@@ -484,11 +484,21 @@ public enum PacingModel {
     /// On the seven-day window a wait under 20 min carries no decision — it elapses while the user is
     /// still reading the popup, and the bar greens on its own without anyone pausing for it.
     ///
-    /// **Currently unreachable, deliberately kept.** The API quantises the seven-day `utilization` to
-    /// whole percent, and one point is 1 h 40 m of stand-by — so the raw values are either zero or
-    /// ≥ 101 min and never land under this floor (docs/reference/usage-api-quirks.md). The floor is a
-    /// guard, not a live filter. It comes back into play once the weekly rate is interpolated from the
-    /// five-hour counter (issue #386), which brings the step down to ~10 min.
+    /// **Live, but only in a sliver — and not for the reason ADR-0102 predicted.** While the weekly
+    /// `utilization` was used raw, this floor was unreachable: the API quantises it to whole percent,
+    /// one point is 1 h 40 m of stand-by, so the values were either zero or ≥ 101 min and never landed
+    /// under 20 min. ADR-0102 expected the weekly reconstruction (ADR-0103) to revive the floor by
+    /// bringing the step down to ~10 min. That is **not** what happened.
+    ///
+    /// The actual mechanism: `standBy` and the time remaining grow **together**, so the 20-minute
+    /// end-of-window override (``pacingOrangeOverrideSeconds``) eats every frame where the lead is
+    /// small but the reset is still far. Scanning the whole `(u, reset)` space finds a suppressed
+    /// stand-by in **18 of 10 064** combinations, all with `u` between **99.15 % and 99.40 %** — the
+    /// band a whole percent cannot land in, but a value reconstructed inside the bucket can. The
+    /// smallest wait shown anywhere else is 20.9 min.
+    ///
+    /// See ADR-0103 (§Наслідки) and docs/reference/usage-api-quirks.md; the `standby-floor` stub
+    /// reproduces the surviving sliver on a whole `utilization` of 99.
     public static let standByFloorSeconds: TimeInterval = 1200
 
     /// ``standBySecondsForGreen(_:)`` filtered by whether the wait earns a line in the popup — the

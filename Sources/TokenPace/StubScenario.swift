@@ -250,7 +250,7 @@ enum StubScenario: String, CaseIterable {
             return "20-min override (ADR-0044): 5h only ~2 pts ahead but resets in 12 min → forced "
                  + "orange."
         case .standByFloor:
-            return "Stand-by floor: 7d orange with only a 15-min wait to green, so the ⌥ "
+            return "Stand-by floor: 7d orange with only a 16-min wait to green, so the ⌥ "
                  + "stand-by line stays hidden."
         case .midBandReset:
             return "One format for every distance (#284): the 5h reset is 4 h 41 m out — the band "
