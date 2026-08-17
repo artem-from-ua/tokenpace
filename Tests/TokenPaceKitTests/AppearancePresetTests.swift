@@ -12,13 +12,13 @@ struct AppearancePresetTests {
     /// drifting from the documented matrix.
     @Test func chillIsCalmLook() {
         let v = AppearancePreset.chill.values
-        #expect(v.calmColorMode == .yellowGreenBlue)   // greens/yellows AND far-behind blue all mute
-        #expect(v.calmBarHiding == .fiveHour)   // quiet 5h steps aside; the weekly bar stays (ADR-0086)
+        #expect(v.colorsTell == .slowDown)   // greens/yellows AND far-behind blue all mute
+        #expect(v.hideTop5hBar == .untilItNeedsAttention)   // quiet 5h steps aside; the weekly bar stays (ADR-0086)
         #expect(v.showServiceStatusDot)
-        #expect(v.modelLimitsVisibility == .nonCalm)   // quiet dropdown: fold until orange/red (#211)
+        #expect(v.modelLimitsVisibility == .whenItNeedsAttention)   // quiet dropdown: fold until orange/red (#211)
         // Credits fold until money is actually spent, not until they turn orange: an unlimited cap has
-        // no bar and hence no severity, so `.nonCalm` would hide the spend forever.
-        #expect(v.extraUsageVisibility == .aboveZero)
+        // no bar and hence no severity, so `.whenItNeedsAttention` would hide the spend forever.
+        #expect(v.extraUsageVisibility == .onceUsed)
         #expect(v.menuBarStyle == .pressure)   // the quietest style, and on both surfaces (#329)
         #expect(v.dropdownStyle == .pressure)
     }
@@ -28,26 +28,26 @@ struct AppearancePresetTests {
     @Test func workHarderIsChillPlusWorkHarderAndGauge() {
         let wh = AppearancePreset.workHarder.values
         let chill = AppearancePreset.chill.values
-        #expect(wh.calmColorMode == .yellowGreen)       // difference 1 — far-behind blue stays coloured
-        #expect(chill.calmColorMode == .yellowGreenBlue)
+        #expect(wh.colorsTell == .slowDownOrSpeedUp)       // difference 1 — far-behind blue stays coloured
+        #expect(chill.colorsTell == .slowDown)
         // Difference 2 — Gauge on both surfaces (#329; was the per-surface `.mixed` pair before).
         #expect(wh.menuBarStyle == .gauge)
         #expect(wh.dropdownStyle == .gauge)
         #expect(chill.menuBarStyle == .pressure)
         // The rest matches Chill.
-        #expect(wh.calmBarHiding == chill.calmBarHiding)   // both `.fiveHour` (ADR-0086)
+        #expect(wh.hideTop5hBar == chill.hideTop5hBar)   // both `.untilItNeedsAttention` (ADR-0086)
         #expect(wh.showServiceStatusDot == chill.showServiceStatusDot)
-        #expect(wh.modelLimitsVisibility == chill.modelLimitsVisibility)   // both .nonCalm (#211)
+        #expect(wh.modelLimitsVisibility == chill.modelLimitsVisibility)   // both .whenItNeedsAttention (#211)
         #expect(wh.extraUsageVisibility == chill.extraUsageVisibility)
-        #expect(wh.extraUsageVisibility == .aboveZero)   // pinned, not just "same as Chill"
+        #expect(wh.extraUsageVisibility == .onceUsed)   // pinned, not just "same as Chill"
     }
 
     /// Control freak = everything loud: calm off, nothing hidden, every glyph/dot/credits/per-model
     /// row on, dense pacing bars.
     @Test func controlFreakShowsEverything() {
         let v = AppearancePreset.controlFreak.values
-        #expect(v.calmColorMode == .off)   // nothing muted — every state loud
-        #expect(v.calmBarHiding == .never)   // both bars always on screen, however calm
+        #expect(v.colorsTell == .howItsGoing)   // nothing muted — every state loud
+        #expect(v.hideTop5hBar == .never)   // both bars always on screen, however calm
         #expect(v.showServiceStatusDot)
         // Nothing in the dropdown folds away — both sections pinned open (#211).
         #expect(v.modelLimitsVisibility == .always)
@@ -101,8 +101,8 @@ struct AppearancePresetTests {
     @Test func matchingReturnsNilForCustom() {
         let chill = AppearancePreset.chill.values
         let custom = AppearancePresetValues(
-            calmColorMode: chill.calmColorMode,
-            calmBarHiding: chill.calmBarHiding,
+            colorsTell: chill.colorsTell,
+            hideTop5hBar: chill.hideTop5hBar,
             showServiceStatusDot: chill.showServiceStatusDot,
             modelLimitsVisibility: chill.modelLimitsVisibility,
             extraUsageVisibility: chill.extraUsageVisibility,

@@ -19,10 +19,28 @@ struct GeneralPane: View {
         Form {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Launch TokenPace at login", isOn: Binding(
+                    // The control dims; the hint below does **not** (#381).
+                    //
+                    // The hint here is the *reason* the control is unavailable — "Unavailable in
+                    // development builds." — and dimming an explanation is backwards: it is the one line
+                    // the user still needs to read. Same split `AboutPane` uses for auto-install, where
+                    // the deferral reasons stay at full strength beside a greyed switch.
+                    //
+                    // This is the distinction `SettingsHint`'s environment-driven dimming cannot make on
+                    // its own: a hint that *describes* a control follows it down, a hint that *explains
+                    // its absence* must not. So the scope is the control, not the row.
+                    // The title is a `SettingsDisabledLabel`, not the `Toggle`'s own string, because
+                    // SwiftUI's `Form` on macOS dims **only the switch** when a `Toggle` is disabled —
+                    // the label stays at full strength, so a disabled row reads as half-live (verified on
+                    // screen, not assumed). Handing the title to a sibling view that reads `\.isEnabled`
+                    // is what actually dims it.
+                    Toggle(isOn: Binding(
                         get: { model.launchAtLogin },
-                        set: { model.toggleLaunchAtLogin($0) }))
+                        set: { model.toggleLaunchAtLogin($0) })) {
+                        SettingsDisabledLabel("Launch TokenPace at login")
+                    }
                     .disabled(!model.launchToggleEnabled)
+
                     SettingsHint(text: model.launchHint.text, warning: model.launchHint.devBuild)
                 }
             }
@@ -51,12 +69,14 @@ struct GeneralPane: View {
                             }
                         }
                     }
+                    .transition(SettingsRowReveal.transition)
                 }
             }
         }
         .formStyle(.grouped)
-        // Show/hide the Location row without an insertion animation (avoids neighbour-height flicker).
-        .animation(nil, value: model.journalEnabled)
+        // The Location row folds out of the toggle above it rather than blinking (#381) — see
+        // `SettingsRowReveal` for why the previous `.animation(nil, …)` was the worse of the two.
+        .animation(SettingsRowReveal.animation, value: model.journalEnabled)
     }
 
     /// The fixed journal directory in Application Support — read-only, revealed via Finder.

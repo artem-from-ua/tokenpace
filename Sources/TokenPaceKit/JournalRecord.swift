@@ -109,7 +109,7 @@ public struct WindowSample: Sendable, Equatable, Codable {
     public let reset: String
     /// Elapsed fraction of the window in [0, 1] (``PacingModel/elapsedFraction(resetsAt:now:window:)``).
     public let timePct: Double
-    /// The objective 5-way pacing colour bucket (``PacingBucket/of(_:)``), CalmColorMode-independent.
+    /// The objective 5-way pacing colour bucket (``PacingBucket/of(_:)``), ``ColorAdvice``-independent.
     public let sev: PacingBucket
 
     /// - Parameter windowSeconds: the window this sample describes, which sets how many decimals

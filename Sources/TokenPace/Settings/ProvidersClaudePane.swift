@@ -33,6 +33,7 @@ struct ProvidersClaudePane: View {
                             text: "With this off there is no usage data, so the menu bar shows no bars "
                                 + "— only the status of the services below.",
                             warning: true)
+                        .transition(SettingsRowReveal.transition)
                     }
                 }
             }
@@ -76,6 +77,7 @@ struct ProvidersClaudePane: View {
                         .labelsHidden()
                         .fixedSize()
                     }
+                    .transition(SettingsRowReveal.transition)
                 }
             } header: {
                 // Under a data stub the status page is never fetched — the stub transport answers the
@@ -87,8 +89,8 @@ struct ProvidersClaudePane: View {
             }
         }
         .formStyle(.grouped)
-        // Show/hide the dependent rows without an insertion animation (avoids neighbour-height flicker).
-        .animation(nil, value: model.webDesktopEnabled)
-        .animation(nil, value: model.usageApiEnabled)
+        // The dependent rows fold out of the toggle above them rather than blinking (#381).
+        .animation(SettingsRowReveal.animation, value: model.webDesktopEnabled)
+        .animation(SettingsRowReveal.animation, value: model.usageApiEnabled)
     }
 }

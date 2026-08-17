@@ -36,47 +36,46 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
     /// The fixed value set this preset writes to the seven Appearance keys. Stored in the **as-persisted**
     /// sense, matching `PersistedConfig`. Since ADR-0086 every value here is stored exactly as the pane
     /// shows it — the old `hideCalmSevenDayBar` was the last inverted one ("Show …" in the UI, *hide* in
-    /// storage), and its tri-state replacement `calmBarHiding` names the hidden bar directly.
+    /// storage), and its replacement `hideTop5hBar` names the hidden bar directly.
     public var values: AppearancePresetValues {
         switch self {
         case .chill:
-            // The calm look: per-model rows on, simplified bars, and — when fully
-            // blocked — only the red pause icon (bars hidden). Work harder off — the far-behind blue
-            // mutes with the rest of the calm colours.
+            // The quietest look: simplified bars, per-model rows folded until they matter, and — when
+            // fully blocked — only the red pause icon (bars hidden). The bars say one thing only: slow
+            // down. The far-behind blue mutes with everything else.
             return AppearancePresetValues(
-                calmColorMode: .yellowGreenBlue,   // greens/yellows AND far-behind blue all mute
-                calmBarHiding: .fiveHour,   // quiet 5h steps aside; the weekly bar is the one that stays
+                colorsTell: .slowDown,   // only the "too fast" orange stays coloured
+                hideTop5hBar: .untilItNeedsAttention,   // top bar steps aside; the weekly bar stays
                 showServiceStatusDot: true,
                 // The dropdown stays quiet too, but the two groups are quiet about different things:
                 // per-model rows wait for orange/red, credits only for the first cent actually spent
-                // (money has no calm/loud reading, and an unlimited cap has no severity at all).
+                // (money has no quiet/loud reading, and an unlimited cap has no severity at all).
                 // ⌥ Option still reveals either on demand.
-                modelLimitsVisibility: .nonCalm,
-                extraUsageVisibility: .aboveZero,
+                modelLimitsVisibility: .whenItNeedsAttention,
+                extraUsageVisibility: .onceUsed,
                 menuBarStyle: .pressure,
                 dropdownStyle: .pressure)
         case .workHarder:
-            // `.chill` with Work harder on and **Gauge** bars on both surfaces (#329) — the style that
-            // renders the underpace half, so an unspendable surplus is visible rather than flattened;
-            // far-behind blue stays coloured under calm colours. When blocked, keep the bars
-            // beside the pause icon.
+            // `.chill` plus the "you have spare capacity" advice, and **Gauge** bars on both surfaces
+            // (#329) — the style that renders the underpace half, so an unspendable surplus is visible
+            // rather than flattened. The two changes are the same idea from two directions: the colour
+            // says there is room, the scale says how much. When blocked, keep the bars beside the pause.
             return AppearancePresetValues(
-                calmColorMode: .yellowGreen,   // greens/yellows mute; far-behind blue stays coloured
-                calmBarHiding: .fiveHour,   // same quiet default as `.chill` — and the factory default
+                colorsTell: .slowDownOrSpeedUp,   // orange AND the far-behind blue stay coloured
+                hideTop5hBar: .untilItNeedsAttention,   // same quiet default as `.chill` — and the factory default
                 showServiceStatusDot: true,
                 // Same quiet dropdown as `.chill` — the extra loudness of this preset is in the menu
                 // bar (blue far-behind), not in permanently expanded popup sections.
-                modelLimitsVisibility: .nonCalm,
-                extraUsageVisibility: .aboveZero,
+                modelLimitsVisibility: .whenItNeedsAttention,
+                extraUsageVisibility: .onceUsed,
                 menuBarStyle: .gauge,
                 dropdownStyle: .gauge)
         case .controlFreak:
-            // Show everything: calm off; nothing hidden; every glyph/dot/credits/per-model row on;
-            // dense pacing bars. Work harder on so the far-behind blue stays loud too.
-            // When blocked, keep the bars beside the pause icon.
+            // Show everything: nothing muted, nothing hidden, every glyph/dot/credits/per-model row on,
+            // dense pacing bars. When blocked, keep the bars beside the pause icon.
             return AppearancePresetValues(
-                calmColorMode: .off,   // nothing muted — every state keeps its colour (loud)
-                calmBarHiding: .never,   // both bars always on screen, however calm
+                colorsTell: .howItsGoing,   // nothing muted — every state keeps its colour (loud)
+                hideTop5hBar: .never,   // both bars always on screen, however quiet
                 showServiceStatusDot: true,
                 // Nothing in the dropdown is ever folded away — every row on screen, always.
                 modelLimitsVisibility: .always,
@@ -102,14 +101,16 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
     /// Each sentence describes what the user will *see*, derived from ``values`` rather than from the
     /// preset's mood — a description that outran the value set would be worse than none:
     ///
-    /// - `.chill` mutes every calm colour (`.yellowGreenBlue`), hides the quiet 5-hour bar and keeps the
-    ///   per-model rows folded until one turns orange (`.nonCalm`), so nothing speaks until a limit
-    ///   actually presses.
+    /// - `.chill` keeps colour only on the "slow down" advice (`.slowDown`), hides the quiet top bar and
+    ///   keeps the per-model rows folded until one turns orange (`.whenItNeedsAttention`), so nothing
+    ///   speaks until a limit actually presses.
     /// - `.workHarder` differs from `.chill` in exactly two things, and both are about seeing the
-    ///   *underspend*: the far-behind blue stays coloured (`.yellowGreen`), and `Gauge` draws the
-    ///   below-pace half instead of flattening it to a minimum pill.
-    /// - `.controlFreak` turns muting off entirely, pins both bars on screen (`.never`) and both popup
-    ///   sections open (`.always`).
+    ///   *underspend*: the far-behind blue stays coloured (`.slowDownOrSpeedUp`), and `Gauge` draws the
+    ///   below-pace half instead of flattening it to a minimum pill. The two are complementary rather
+    ///   than redundant — past the middle of a window the Gauge half saturates, so colour is what still
+    ///   separates a large surplus from a small one.
+    /// - `.controlFreak` turns muting off entirely (`.howItsGoing`), pins both bars on screen (`.never`)
+    ///   and both popup sections open (`.always`).
     /// Each line describes **behaviour the user can picture**, and each stands on its own: an earlier
     /// draft of `.workHarder` opened "Like Chill, but…", which made the middle option unreadable
     /// without first reading the one above it — in a list, every entry is someone's first.
@@ -159,15 +160,18 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
 /// `PersistedConfig` — which is also exactly what each pane row shows (the inverted
 /// `hideCalmSevenDayBar` was the last exception, retired with ADR-0086).
 public struct AppearancePresetValues: Sendable, Equatable {
-    public let calmColorMode: CalmColorMode
-    /// Which menu-bar bar steps aside while it is calm (ADR-0086). Replaced the boolean that could only
-    /// hide the 7-day one; the calmer presets now hide the **5-hour** bar, so the weekly context is what
-    /// stays on screen when nothing needs attention.
-    public let calmBarHiding: CalmBarHiding
+    /// What the menu bar's bar colours tell the user — which pacing advice stays coloured and which
+    /// mutes to white (#381; was `calmColorMode`). Governs the **pacing bars only**: the service dot,
+    /// the credits glyph and the idle pill answer other questions and no longer read it.
+    public let colorsTell: ColorAdvice
+    /// Whether the **top (5-hour)** bar steps aside until it needs attention (ADR-0086). Replaced the
+    /// boolean that could only hide the 7-day one; the quieter presets hide the **5-hour** bar, so the
+    /// weekly context is what stays on screen when nothing needs attention.
+    public let hideTop5hBar: TopBarHiding
     public let showServiceStatusDot: Bool
     /// When the **dropdown** lists the per-model / per-service 7-day rows (#211). Was a boolean opt-out
-    /// before the tri-state; the calmer presets now use `.nonCalm` so the rows surface only when one of
-    /// them turns orange/red (or ⌥ is held).
+    /// before the tri-state; the quieter presets use `.whenItNeedsAttention` so the rows surface only
+    /// when one of them turns orange/red (or ⌥ is held).
     public let modelLimitsVisibility: PopupSectionVisibility
     /// When the **dropdown** shows the "Extra usage" credits section. Independent of
     /// the menu-bar credits icon, which is data-driven and has no user gate (ADR-0090).
@@ -183,16 +187,16 @@ public struct AppearancePresetValues: Sendable, Equatable {
     public let dropdownStyle: BarStyle
 
     public init(
-        calmColorMode: CalmColorMode,
-        calmBarHiding: CalmBarHiding,
+        colorsTell: ColorAdvice,
+        hideTop5hBar: TopBarHiding,
         showServiceStatusDot: Bool,
         modelLimitsVisibility: PopupSectionVisibility,
         extraUsageVisibility: PopupSectionVisibility,
         menuBarStyle: BarStyle,
         dropdownStyle: BarStyle
     ) {
-        self.calmColorMode = calmColorMode
-        self.calmBarHiding = calmBarHiding
+        self.colorsTell = colorsTell
+        self.hideTop5hBar = hideTop5hBar
         self.showServiceStatusDot = showServiceStatusDot
         self.modelLimitsVisibility = modelLimitsVisibility
         self.extraUsageVisibility = extraUsageVisibility

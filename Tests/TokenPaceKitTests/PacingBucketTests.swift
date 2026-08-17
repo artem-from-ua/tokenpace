@@ -7,7 +7,7 @@ import Foundation
 /// The journal's objective 5-way colour bucket. Boundaries are exercised directly on `BarLayout`
 /// values so the thresholds (ahead 0.16·(1−t), behind 2 h/5h · medium, the two 20-min overrides,
 /// exhaustion) are pinned. All at the shipped **medium** behind-multiplier, independent of any user
-/// `CalmColorMode` / `FarBehindInterval` — the "control-freak" contract of ``PacingBucket``.
+/// `ColorAdvice` / `FarBehindInterval` — the "control-freak" contract of ``PacingBucket``.
 @Suite("PacingBucket boundaries")
 struct PacingBucketTests {
 

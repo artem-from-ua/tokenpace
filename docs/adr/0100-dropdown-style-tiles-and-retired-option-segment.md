@@ -2,10 +2,21 @@
 status: accepted
 date: 2026-08-15
 supersedes: []
-superseded_by: []
+superseded_by: [0104]
 ---
 
 # ADR-0100: Дропдаун обирає стиль картинкою, а сегмент «With ⌥ Option» іде геть
+
+> **§5–§6 витіснено [ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md)**
+> ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)): `.optionOnly` більше **не лишається
+> в enum** — кейс видалено, а старий raw розвʼязується через `PopupSectionVisibility.legacyRawValues`
+> у `.onceUsed`; окрему міграцію `migrateOptionOnlyVisibilityIfNeeded()` і її маркер
+> `sectionVisibilityMigratedFromOptionOnly` ретировано на користь одного переїзду ключів. Legacy-
+> міграція булевого `showModelSpecificLimits == false` веде тепер на `whenItNeedsAttention` (те саме
+> значення під новою назвою). Перейменування §6 продовжено на всі рядки, ключі й значення панелі, а
+> сегменти обох рядків розвернуто (тихіше ліворуч). **Чинними лишаються §1–§4** — плитки на обидві
+> поверхні, запікання специмена під vibrant-появу теми, вимір треком без масштабування, і те, що ⌥ на
+> специмен не впливає.
 
 > Доводить до кінця [ADR-0093](0093-bar-style-picked-by-picture.md) (§5 якого лишав дропдаун
 > текстовим сегментедом «тимчасово») і **виконує прогноз** [ADR-0097 §2](0097-bar-style-preview-rendered-at-runtime.md),

@@ -18,36 +18,32 @@ public struct BarView: Sendable, Equatable {
     /// Which rolling window this bar represents (5h on top, 7d below — see ``MenuBarMode``).
     public let window: LimitWindow
     /// Whether this bar is the **idle** 5-hour bar — the 5h window does not exist server-side (no
-    /// active session, ``UsageSnapshot/sessionIdle``, #100). When `true` the view draws a **solid,
-    /// knobless** track (`StatusItemView` fills it with `Palette.idleBlue`, no zones, no time dot); the
+    /// active session, ``UsageSnapshot/sessionIdle``, #100). When `true` the view draws the **knobless
+    /// zero pill** — grey track plus a green pill at zero, no zones (ADR-0078); Progress additionally
+    /// parks its time marker there. Grey instead of green when `blocked`; the
     /// `layout`/`indicator` are inert placeholders (`usage 0 / time 0`, `.neutral`) that the idle draw
     /// path ignores. `false` on every normal bar, including a genuine 0 %-with-valid-reset 5h window.
     public let idle: Bool
     /// Whether this **idle** 5-hour bar is also **blocked** — the 7-day limit is exhausted and paid
     /// credits cannot cover, so there is no path to start a session (#158, `CreditsPacing.isBlocked`).
-    /// When `true` the view draws the solid idle track in **grey** (not the "ready" blue), meaning
+    /// When `true` the view draws the idle pill in **grey** (not the "ready" green), meaning
     /// "waiting for a limit to reset" rather than "ready to start". Only ever `true` alongside
     /// ``idle``; `false` on every normal bar and on a non-blocked idle bar.
     public let blocked: Bool
-    /// Whether the **week** still has room to spend (``PacingModel/weeklyHasHeadroom(in:now:)``), for
-    /// the idle bar's fill colour. An idle bar draws no pacing, so it cannot read the gate off its
-    /// inert ``layout`` — the verdict rides alongside.
-    ///
-    /// The "ready to start" blue claims there is quota to burn, which is wrong while the week runs
-    /// ahead of pace, so the idle fill degrades to **green** there — grey still means blocked (no work
-    /// possible) and blue still means a genuinely calm week. Meaningful only while ``idle``.
-    public let weeklyHeadroom: Bool
+    // No `weeklyHeadroom` here since #381: the idle "ready to start" fill is **green** whatever the week
+    // is doing, so the fill no longer needs the weekly verdict carried alongside an inert layout. The
+    // gate itself is untouched — `PacingModel.weeklyHasHeadroom` still decides `blueAllowed` for the
+    // *active* 5-hour bar, which is what ADR-0081 was actually about.
 
     public init(
         layout: BarLayout, indicator: LimitIndicator, window: LimitWindow,
-        idle: Bool = false, blocked: Bool = false, weeklyHeadroom: Bool = true
+        idle: Bool = false, blocked: Bool = false
     ) {
         self.layout = layout
         self.indicator = indicator
         self.window = window
         self.idle = idle
         self.blocked = blocked
-        self.weeklyHeadroom = weeklyHeadroom
     }
 
     /// The bar's pacing **severity** for reset-countdown selection (#103, ADR-0028/0029). Delegates to
@@ -59,7 +55,7 @@ public struct BarView: Sendable, Equatable {
 
     /// Whether this bar is "calm" (blue/green/yellow — not worth flagging). Derived from ``severity``
     /// (idle → always calm); both `.calm` and the calmer-than-green `.farBehind` (blue) count, matching
-    /// ``BarLayout/isCalm``. Its only consumer is `CalmBarHiding` — whether the bar is *drawn*; no
+    /// ``BarLayout/isCalm``. Its only consumer is `TopBarHiding` — whether the bar is *drawn*; no
     /// countdown hangs off it, since bars never carry one (ADR-0091).
     public var isCalm: Bool { severity == .calm || severity == .farBehind }
 }
@@ -83,17 +79,17 @@ public enum MenuBarMode: Sendable, Equatable {
     /// Full widget: 5h bar, 7d bar, and an optional reset countdown.
     ///
     /// Either bar may be `nil` — whichever one the user chose to hide while it is calm
-    /// (``CalmBarHiding``, ADR-0086; the boolean predecessor could only ever hide the 7-day one).
+    /// (``TopBarHiding``, ADR-0086; the boolean predecessor could only ever hide the 7-day one).
     /// A `nil` here **never** means "no data": both windows always resolve on this path, so it means
     /// "deliberately not drawn". That is the opposite of ``error``, where `nil` *is* absent data.
     ///
-    /// **Invariant: at most one of the two is `nil`.** `CalmBarHiding` names a single window, so it can
+    /// **Invariant: at most one of the two is `nil`.** `TopBarHiding` names a single window, so it can
     /// elide at most one bar whatever the severities are — the widget never renders empty, and the view's
-    /// "no bars at all" branch is unreachable. See `CalmBarHiding`'s own note for the argument.
+    /// "no bars at all" branch is unreachable. See `TopBarHiding`'s own note for the argument.
     ///
     /// - Parameters:
     ///   - fiveHour: The 5-hour bar (drawn on top), or `nil` when it is **hidden** because it is calm
-    ///     and the user picked `CalmBarHiding.fiveHour`. An **idle** 5-hour bar counts as calm, so it is
+    ///     and the user picked `TopBarHiding.untilItNeedsAttention`. An **idle** 5-hour bar counts as calm, so it is
     ///     hidden too — between sessions the widget then shows the 7-day bar alone.
     ///   - sevenDay: The 7-day bar (drawn below). Never elided since ADR-0090 — the calm-hiding choice
     ///     names only the 5-hour bar — but kept optional so the shape still mirrors ``error``, whose
@@ -316,12 +312,12 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// - Parameters:
     ///   - snapshot: A decoded usage poll (`UsageClient`/#9).
     ///   - now: Current instant — inject for deterministic tests; never call `Date()` here.
-    ///   - hideCalmBar: Which bar to drop while it is **calm** (`BarView.isCalm` — green on-pace/behind,
+    ///   - hideTopBar: Which bar to drop while it is **calm** (`BarView.isCalm` — green on-pace/behind,
     ///     mild-ahead yellow, or far-behind blue), leaving the other one as the single, vertically-centred
-    ///     bar (ADR-0086, `PersistedConfig.calmBarHiding`). An orange/red bar is always kept, and at most
+    ///     bar (ADR-0086, `PersistedConfig.hideTop5hBar`). An orange/red bar is always kept, and at most
     ///     one bar is ever elided, so the widget never ends up empty. Default `.never` (both bars) so
     ///     existing callers and tests are unaffected. In the session-idle state the inert 5h bar counts
-    ///     as calm and is dropped under `.fiveHour`, leaving the 7-day bar alone.
+    ///     as calm and is dropped under `.untilItNeedsAttention`, leaving the 7-day bar alone.
     ///
     /// Both bars-less answers to "can we work?" are produced here: being blocked
     /// (`CreditsPacing.isBlocked`) or paying (`CreditsPacing.subscriptionExhaustedWhileCovered`) returns
@@ -332,7 +328,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// It does **not** fall back to bars: an exhausted window is never drawn as a bar (ADR-0091).
     public static func make(
         from snapshot: UsageSnapshot, now: Date,
-        hideCalmBar: CalmBarHiding = .never
+        hideTopBar: TopBarHiding = .never
     ) -> MenuBarLayout {
         // "Can we work?" — the two answers that are not "yes, on the subscription" produce the same
         // bars-less shape (ADR-0090). Both are checked before the idle/active bar-building branches so
@@ -361,7 +357,7 @@ public struct MenuBarLayout: Sendable, Equatable {
                 ?? .exhaustedUnknownReset(which: exhaustedWindowWithoutReset(in: snapshot)))
         }
 
-        return MenuBarLayout(mode: expandedBars(for: snapshot, now: now, hideCalmBar: hideCalmBar))
+        return MenuBarLayout(mode: expandedBars(for: snapshot, now: now, hideTopBar: hideTopBar))
     }
 
     /// Which **main** window is exhausted but has no usable `resets_at` — the `which` for
@@ -382,7 +378,7 @@ public struct MenuBarLayout: Sendable, Equatable {
         }
     }
 
-    /// The **bars** half of ``make(from:now:hideCalmBar:)`` — everything after the two bars-less answers
+    /// The **bars** half of ``make(from:now:hideTopBar:)`` — everything after the two bars-less answers
     /// to "can we work?". Always returns ``MenuBarMode/expanded(fiveHour:sevenDay:)``, **never** a
     /// bars-less shape.
     ///
@@ -390,7 +386,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     /// bar: `make` has already answered that case above (ADR-0091).
     static func expandedBars(
         for snapshot: UsageSnapshot, now: Date,
-        hideCalmBar: CalmBarHiding = .never
+        hideTopBar: TopBarHiding = .never
     ) -> MenuBarMode {
         // The weekly gate, resolved once for every exit path below: the 5-hour bar may only go blue
         // while the 7-day window itself has headroom (`PacingModel.weeklyHasHeadroom`). The 7-day bar
@@ -399,7 +395,7 @@ public struct MenuBarLayout: Sendable, Equatable {
         let seven = bar(for: snapshot.sevenDay, window: .sevenDay, now: now, blueAllowed: true)
         // Elide the 7-day bar when it is calm and the user picked it (ADR-0086). The 5h side gets the
         // mirror-image treatment on each path that builds it (active and idle alike).
-        let sevenToShow: BarView? = hideCalmBar.hides(.sevenDay, isCalm: seven.isCalm) ? nil : seven
+        let sevenToShow: BarView? = hideTopBar.hides(.sevenDay, isCalm: seven.isCalm) ? nil : seven
 
         if snapshot.sessionIdle {
             // No active 5h window: an inert, knobless placeholder bar (the idle draw path ignores its
@@ -412,12 +408,11 @@ public struct MenuBarLayout: Sendable, Equatable {
                 // Inert placeholder: `.onPaceOrBehind` → `severity` is `.calm` before `remainingSeconds`
                 // is ever read, so the value here is immaterial (0).
                 layout: BarLayout(usageFraction: 0, timeFraction: 0, pacing: .onPaceOrBehind, remainingSeconds: 0, windowDurationSeconds: 0, blueAllowed: false),
-                indicator: .neutral, window: .fiveHour, idle: true, blocked: blocked,
-                weeklyHeadroom: weeklyHeadroom)
+                indicator: .neutral, window: .fiveHour, idle: true, blocked: blocked)
             // An idle 5h bar reports `.calm` unconditionally (`BarView.severity`), so `.fiveHour` hides
             // it here too — deliberately, with no idle exemption (ADR-0086): between sessions the widget
             // then shows the 7-day bar alone.
-            let fiveToShow: BarView? = hideCalmBar.hides(.fiveHour, isCalm: five.isCalm) ? nil : five
+            let fiveToShow: BarView? = hideTopBar.hides(.fiveHour, isCalm: five.isCalm) ? nil : five
             // In the idle state the 5h window is legitimately date-less (ADR-0027, not an error), but the
             // 7-day window is real: if it reports usage yet its `resets_at` is unparseable, that is the
             // same broken-payload data error as on the active path (#167, ADR-0043) → ⚠️.
@@ -433,7 +428,7 @@ public struct MenuBarLayout: Sendable, Equatable {
 
         let five = bar(for: snapshot.fiveHour, window: .fiveHour, now: now, blueAllowed: weeklyHeadroom)
         // Mirror of `sevenToShow` above: drop the 5h bar while it is calm under `.fiveHour`.
-        let fiveToShow: BarView? = hideCalmBar.hides(.fiveHour, isCalm: five.isCalm) ? nil : five
+        let fiveToShow: BarView? = hideTopBar.hides(.fiveHour, isCalm: five.isCalm) ? nil : five
 
         // API data error (#167, ADR-0043): a window the server reports as **active** (real usage) but
         // with a present-yet-unparseable `resets_at` is a malformed payload — surface the ⚠️ error state
@@ -477,8 +472,8 @@ public struct MenuBarLayout: Sendable, Equatable {
     ///   - serviceProblem: The worst non-operational Claude service state (issue #31), or `nil` when
     ///     all services are operational / unknown-cold. Threaded onto the result so the view can draw
     ///     the trailing dot; it does not affect the usage `mode`.
-    ///   - hideCalmBar: Elide the chosen calm bar on the **healthy/stale** path (ADR-0086) — see the
-    ///     plain ``make(from:now:hideCalmBar:)``. The error state draws no bars at all, so it is moot there.
+    ///   - hideTopBar: Elide the chosen calm bar on the **healthy/stale** path (ADR-0086) — see the
+    ///     plain ``make(from:now:hideTopBar:)``. The error state draws no bars at all, so it is moot there.
     ///   - showCredits: Whether to compute the money-credits icon (#144). When `false`, the credits
     ///     marker is always `nil` (no icon, no width) regardless of the snapshot — the gate is honoured
     ///     here, at the top, so the whole credits path is skipped rather than computed-then-discarded.
@@ -492,7 +487,7 @@ public struct MenuBarLayout: Sendable, Equatable {
     public static func make(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
         serviceProblem: ServiceStatus? = nil,
-        hideCalmBar: CalmBarHiding = .never, showCredits: Bool = false,
+        hideTopBar: TopBarHiding = .never, showCredits: Bool = false,
         monitoringAnything: Bool = true
     ) -> MenuBarLayout {
         // The credits marker rides on the snapshot, which is stale in both new modes (#341) — money
@@ -501,7 +496,7 @@ public struct MenuBarLayout: Sendable, Equatable {
         let liveCredits = (showCredits && dataIsLive)
             ? snapshot.flatMap { creditsMarker(for: $0, now: now) } : nil
         let layout = usageMode(from: snapshot, health: health, now: now,
-                               hideCalmBar: hideCalmBar,
+                               hideTopBar: hideTopBar,
                                monitoringAnything: monitoringAnything)
         // Pause icon: drawn whenever the user is fully blocked (`CreditsPacing.isBlocked` — no path to
         // work). On the healthy path that means ``MenuBarMode/iconOnlyReset``.
@@ -562,11 +557,11 @@ public struct MenuBarLayout: Sendable, Equatable {
     }
 
     /// The usage-driven `mode` only (no service dot) — the existing #12 decision tree, factored out
-    /// so ``make(from:health:now:serviceProblem:hideCalmBar:showCredits:monitoringAnything:)`` can
+    /// so ``make(from:health:now:serviceProblem:hideTopBar:showCredits:monitoringAnything:)`` can
     /// graft the service dot onto its result.
     private static func usageMode(
         from snapshot: UsageSnapshot?, health: UsageHealth, now: Date,
-        hideCalmBar: CalmBarHiding,
+        hideTopBar: TopBarHiding,
         monitoringAnything: Bool = true
     ) -> MenuBarLayout {
         // #341, checked before anything else: these two states are user choices, not poll outcomes,
@@ -580,11 +575,11 @@ public struct MenuBarLayout: Sendable, Equatable {
         // A healthy state with no snapshot only happens at the very first tick before the first
         // poll resolves; with no data to draw, fall back to the bare ⚠️ error glyph.
         guard let age = health.failureAge(now: now) else {
-            return snapshot.map { make(from: $0, now: now, hideCalmBar: hideCalmBar) }
+            return snapshot.map { make(from: $0, now: now, hideTopBar: hideTopBar) }
                 ?? MenuBarLayout(mode: .error(fiveHour: nil, sevenDay: nil, reset: nil, which: nil))
         }
         if let snapshot, age <= UsageHealth.glyphAfter(for: health) {
-            return make(from: snapshot, now: now, hideCalmBar: hideCalmBar)
+            return make(from: snapshot, now: now, hideTopBar: hideTopBar)
         }
 
         // Past the grace window: the bare ⚠️, with no bars and no countdown (ADR-0091).
@@ -598,7 +593,7 @@ public struct MenuBarLayout: Sendable, Equatable {
 
     /// A copy of this layout carrying `serviceProblem`, `credits`, and `blockedPause` (the `mode` is
     /// unchanged) — the decorations grafted onto the usage `mode` computed by
-    /// ``usageMode(from:health:now:hideCalmBar:monitoringAnything:)``.
+    /// ``usageMode(from:health:now:hideTopBar:monitoringAnything:)``.
     func with(serviceProblem: ServiceStatus?, credits: CreditsMarker?, blockedPause: Bool,
               awaitingInput: AwaitingSessions? = nil) -> MenuBarLayout {
         MenuBarLayout(mode: mode, serviceProblem: serviceProblem, credits: credits,

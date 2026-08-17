@@ -5,6 +5,16 @@ supersedes: [0034]
 superseded_by: [0090]
 ---
 
+> **Постскриптум ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)).** Тип, який тут
+> запроваджено, зветься [`TopBarHiding`](../../Sources/TokenPaceKit/TopBarHiding.swift) (був
+> `CalmBarHiding`), рядок Settings — **`Hide the top 5h bar`**, сегменти —
+> `Until it needs attention | Never` (був `When it's calm`), ключ — `menuBar.hideTop5hBar`, параметр
+> `MenuBarLayout.make(hideCalmBar:)` — `hideTopBar:`
+> ([ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md)). Старі raw `fiveHour` /
+> `sevenDay` розвʼязуються через `TopBarHiding.legacyRawValues`. **Поведінка не змінилася** —
+> предикат `BarView.isCalm`, інваріант «ховається щонайбільше одна смужка» й трактування idle як
+> спокійного стану чинні; з рядка зникла лише перша фраза підказки, яку дублював сам сегмент.
+
 > **Заміщено [ADR-0090](0090-menu-bar-answers-can-we-work.md).** Симетрію відкочено: сегмент
 > `7-day` прибрано, лишились `When it's calm` / `Never`, а рядок називає смужку («Hide 5h (top)
 > bar»). Чинними лишаються предикат `BarView.isCalm`, інваріант «ховається щонайбільше одна

@@ -59,7 +59,7 @@ enum ColorRole: String, CaseIterable {
         case semantic = "Semantic colours"
         case chrome = "Bar / chrome"
         case text = "Text / foreground"
-        case calm = "Calm mode"
+        case calm = "Quiet-side neutral"
         case brand = "Brand"
     }
 
@@ -87,7 +87,7 @@ enum ColorRole: String, CaseIterable {
         case .yellow:        return "Yellow (mild ahead / degraded)"
         case .orange:        return "Orange (strong ahead / partial outage)"
         case .red:           return "Red (exhausted / major outage)"
-        case .blue:          return "Blue (far behind / idle / maintenance)"
+        case .blue:          return "Blue (far behind / maintenance)"
         case .gray:          return "Grey (unknown status)"
         case .barTrack:      return "Bar track"
         case .indicatorRing: return "Indicator ring"
@@ -109,7 +109,9 @@ enum ColorRole: String, CaseIterable {
         switch self {
         case .green:
             return "On-pace / behind pacing gap AND the time-indicator marker in that state, on both the "
-                 + "menu bar and popup; also the credits ¤ icon and the operational service-status dot."
+                 + "menu bar and popup; the **idle 5-hour pill** (\"ready to start\") on both surfaces "
+                 + "since #381 — it used to be Blue; also the credits ¤ icon and the operational "
+                 + "service-status dot."
         case .yellow:
             return "Mild ahead-of-pace pacing gap / marker (lead below the dynamic threshold) on both "
                  + "surfaces, and the degraded service-status dot."
@@ -123,7 +125,7 @@ enum ColorRole: String, CaseIterable {
         case .blue:
             return "Every blue in the widget, on both surfaces: the far-behind pacing gap / marker "
                  + "(surplus above the behind-threshold, past the 20-min start override, base 5h/7d rows "
-                 + "only); the idle 5-hour bar fill (ready to start); the maintenance service dot (and "
+                 + "only); the maintenance service dot (and "
                  + "the update-menu \"new version available\" dot). The pacing blue used to be a separate "
                  + "`paceBlue` role, but both defaulted to the same system blue and the split only let "
                  + "one drift from the other."
@@ -164,8 +166,10 @@ enum ColorRole: String, CaseIterable {
             return "White text on the popup pills — the \"active\" in-use badge (#146) and the blocking "
                  + "reset-time badge (#158). Drawn on both the blue and red pill fills. Default white."
         case .calmWhite:
-            return "Calm-mode neutral for on-pace marker / gap / credits / degraded status dot in the "
-                 + "menu bar. Follows labelColor (re-alpha'd by bright())."
+            return "The quiet-side neutral in the menu bar: on-pace marker / gap when \"Colors tell "
+                 + "me\" mutes them, the whole quiet side under Pressure (unconditional, ADR-0105), and "
+                 + "the degraded service dot (also unconditional — the popup keeps that one yellow). "
+                 + "The credits ¤ glyph no longer uses it. Follows labelColor (re-alpha'd by bright())."
         case .claudeBrand:
             return "Popup \"Claude Code\" header accent (#d97757)."
         }

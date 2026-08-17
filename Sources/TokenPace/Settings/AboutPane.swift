@@ -125,7 +125,11 @@ struct AboutPane: View {
                                 .disabled(!model.installAutoEnabled)
                             }
                         } label: {
-                            Text("Install updates automatically")
+                            // Dims with the switch (#381): `LabeledContent` disables only what is
+                            // disabled *inside* it, so without this the title would stay at full
+                            // strength above a greyed control.
+                            SettingsDisabledLabel("Install updates automatically")
+                                .disabled(!model.installAutoEnabled)
                         }
                         // Why an available update is sitting unapplied (#221) — every blocking
                         // condition, not just the first, so fixing one doesn't reveal another. The ⚠️
@@ -139,6 +143,7 @@ struct AboutPane: View {
                             SettingsHint(text: model.installAutoHint.text, warning: true)
                         }
                     }
+                    .transition(SettingsRowReveal.transition)
                 }
 
                 // The previous auto-update failed (#210): a red status dot (matching the dropdown's
@@ -159,13 +164,15 @@ struct AboutPane: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .transition(SettingsRowReveal.transition)
                 }
             }
         }
         .formStyle(.grouped)
-        // Show/hide the dependent row without an insertion animation — otherwise the neighbouring row
-        // visibly changes height during the transition (SwiftUI Form quirk).
-        .animation(nil, value: model.automaticUpdateChecks)
+        // The dependent rows fold out of the toggle above them rather than blinking (#381).
+        .animation(SettingsRowReveal.animation, value: model.automaticUpdateChecks)
+        .animation(SettingsRowReveal.animation, value: model.canInstallNow)
+        .animation(SettingsRowReveal.animation, value: model.lastUpdateFailure != nil)
     }
 }
 

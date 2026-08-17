@@ -407,7 +407,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let coldHealth = UsageHealth(lastSuccess: nil, failingSince: nil, reason: nil)
         let view = StatusItemView(frame: NSRect(origin: .zero, size: NSSize(width: 0, height: 22)))
         view.layout = MenuBarLayout.make(from: nil, health: coldHealth, now: now)
-        view.calmColorMode = PersistedConfig.calmColorMode     // apply the saved calm-colours mode from launch (#105, #224)
+        view.colorsTell = PersistedConfig.colorsTell     // apply the saved calm-colours mode from launch (#105, #224)
         view.barStyle = PersistedConfig.menuBarStyle           // apply this surface's saved style (#224, #329)
         // Smooth colour transitions (ADR-0070): both surfaces share one animator, and a frame simply
         // re-renders from the retained poll — the same path a settings change or an age tick takes.
@@ -434,8 +434,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popupVC.loadView()   // realise the view so it can be sized before the menu measures it
         popupVC.barStyle = PersistedConfig.dropdownStyle   // this surface's own style (#224, #329)
         // The dropdown's two section-visibility modes (#211), likewise applied from launch.
-        popupVC.modelLimitsVisibility = PersistedConfig.modelLimitsVisibility
-        popupVC.extraUsageVisibility = PersistedConfig.extraUsageVisibility
+        popupVC.modelLimitsVisibility = PersistedConfig.showPerModelLimits
+        popupVC.extraUsageVisibility = PersistedConfig.showExtraUsage
         setPopupLayout(PopupLayout.make(
             from: nil, health: coldHealth, now: now, interval: PollingBackoff.defaultInterval))
 
@@ -601,8 +601,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             wc.onProviderMonitoringChange = { [weak self] config in self?.providerMonitoringChanged(config) }
             wc.onCheckForUpdatesNow = { [weak self] in self?.performUpdateCheck(userInitiated: true) }
             wc.onInstallUpdateNow = { [weak self] in self?.installUpdateNow() }
-            wc.onCalmColorModeChange = { [weak self] mode in
-                self?.statusView?.calmColorMode = mode
+            wc.onColorAdviceChange = { [weak self] mode in
+                self?.statusView?.colorsTell = mode
                 // Go through the normal render path, not a bare `refreshStatusImage()`. Muting an
                 // accent to `calmWhite` (and back) is exactly the kind of jump ADR-0070 fades, but a
                 // tween can only start against a *fresh* frame clock: `beginFrame()` — the one place
@@ -645,10 +645,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.popupVC.extraUsageVisibility = mode
                 self?.reRenderForCurrentTime()
             }
-            wc.onCalmBarHidingChange = { [weak self] _ in
+            wc.onTopBarHidingChange = { [weak self] _ in
                 // Changing this changes the layout (which bar is drawn, and whether the survivor is
                 // vertically centred), not just a colour — rebuild from the last poll (render reads
-                // PersistedConfig.calmBarHiding).
+                // PersistedConfig.hideTop5hBar).
                 self?.reRenderForCurrentTime()
             }
             wc.onPausePollingChange = { [weak self] on in
@@ -918,19 +918,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PersistedConfig.retirePauseKeysIfNeeded()
         // …and carry the boolean "Show model & service limits" opt-out onto its tri-state successor.
         PersistedConfig.migrateModelLimitsVisibilityIfNeeded()
-        // …and move an "Extra usage" section still set to `.nonCalm` onto `.aboveZero`: that segment is
-        // gone from the credits row, and on an unlimited money cap it had no severity to fire on at all.
-        PersistedConfig.migrateExtraUsageVisibilityIfNeeded()
-        PersistedConfig.migrateOptionOnlyVisibilityIfNeeded()
-        // …and the same for the boolean "hide the calm 7-day bar" opt-out, whose tri-state successor can
-        // hide either bar (ADR-0086). Only an explicit old choice carries over; anyone who never touched
-        // it picks up the new `.fiveHour` default.
-        PersistedConfig.migrateCalmBarHidingIfNeeded()
+        // …and the same for the boolean "hide the calm 7-day bar" opt-out, whose successor names the
+        // hidden bar directly (ADR-0086). Only an explicit old choice carries over; anyone who never
+        // touched it picks up the `.untilItNeedsAttention` default.
+        PersistedConfig.migrateTopBarHidingIfNeeded()
         // …and split the pre-#329 single bar-style key across the two surfaces (`"mixed"` becomes
         // Pressure + Progress, i.e. what it drew), carrying the pre-#307 renames along. Must run
         // before anything reads either style key, or the getters resolve the stale raw to the preset
         // default and the user's choice is silently lost.
         PersistedConfig.migrateBarStyleIfNeeded()
+        // …then move all seven Appearance keys onto their #381 surface-prefixed names, resolving each
+        // stored value through its type's `legacyRawValues` on the way (#381).
+        //
+        // **Runs last of the Appearance migrations, deliberately.** The three above write the *pre-#381*
+        // key names — they are upgrades from even older shapes — so this pass has to see their output.
+        // Reversing the order would leave a just-migrated flat key stranded until the next launch.
+        //
+        // Replaces the two marker-keyed value rewrites of #374 (`.optionOnly` → `.aboveZero`) and of the
+        // credits row (`.nonCalm` → `.aboveZero`): both raws now resolve through
+        // `PopupSectionVisibility.legacyRawValues` while the key itself moves, so one pass does both jobs
+        // and neither needs a marker.
+        PersistedConfig.migrateAppearanceKeysIfNeeded()
         // …and drop the retired "Far behind pace interval" key: the green→blue width is fixed now, and
         // whether blue applies is decided by the weekly data rather than by a preference.
         PersistedConfig.retireFarBehindIntervalIfNeeded()
@@ -2200,7 +2208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ? (colorCycleStatus ?? lastStatusHealth?.worstProblem) : nil,
             // ADR-0086: honour the "Hide the calm bar" choice — drops whichever bar the user picked while
             // it is calm, centring the one that remains. `.never` keeps both.
-            hideCalmBar: PersistedConfig.calmBarHiding,
+            hideTopBar: PersistedConfig.hideTop5hBar,
             // #144: the ¤ icon shows whenever credits are active and a base limit is exhausted. No user
             // gate since ADR-0090 — the data decides, and it is already silent until money is in play.
             showCredits: true,

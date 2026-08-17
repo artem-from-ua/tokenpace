@@ -45,7 +45,7 @@ final class PopupBarView: NSView {
         }
     }
 
-    /// Whether this is the **idle** 5-hour bar (#100, ADR-0027): a solid-blue knobless track (no pacing
+    /// Whether this is the **idle** 5-hour bar (#100, ADR-0027): a green knobless pill (no pacing
     /// zones, no time-indicator dot) for a 5h window with no active session. The under-bar tick ruler
     /// still draws (`subdivisions`), keeping the row's anatomy in family with the active bars.
     var idle: Bool = false {
@@ -56,7 +56,7 @@ final class PopupBarView: NSView {
     }
 
     /// Whether this idle bar is **blocked** (#158): the 7-day limit is exhausted and paid credits cannot
-    /// cover, so the solid track is drawn **grey** (`monochromeGrey`) instead of the "ready" blue —
+    /// cover, so the pill is drawn **grey** (`monochromeGrey`) instead of the "ready" green —
     /// "waiting for a limit to reset", not "ready to start". Only meaningful alongside ``idle``.
     var blocked: Bool = false {
         didSet {
@@ -65,15 +65,8 @@ final class PopupBarView: NSView {
         }
     }
 
-    /// Whether the **week** still has headroom (`PacingModel.weeklyHasHeadroom`). Only meaningful
-    /// alongside ``idle``: it picks the "ready" fill between the blue that advertises spare quota and
-    /// the plain green that does not. Defaults to `true` so a bar built without it looks unchanged.
-    var weeklyHeadroom: Bool = true {
-        didSet {
-            guard weeklyHeadroom != oldValue else { return }
-            needsDisplay = true
-        }
-    }
+    // No `weeklyHeadroom` here since #381: the idle "ready" fill is green whatever the week is doing, so
+    // the bar no longer needs the weekly verdict alongside its inert layout.
 
     /// Whether this is a **base** 5h/7d limit row (as opposed to a per-model/per-service row or the
     /// credits bar). Only base bars render the far-behind **blue** zone (``behindColor``); everything
@@ -302,11 +295,6 @@ final class PopupBarView: NSView {
         /// `.systemGreen`; the ahead-of-pace grade is `.systemYellow` (mild lead) → `.systemOrange`
         /// (strong lead) → `.systemRed` (exhausted), via `aheadColor`.
         static var gapGreen: NSColor { ColorStore.shared.color(.green) }
-        /// The **idle** 5-hour bar's solid fill (#100, ADR-0027): the 5h window has no active session, so
-        /// the bar is a knobless solid track meaning "ready to start" — plain
-        /// `.systemBlue`, the appearance-aware pair to the on-pace green; the unified `blue` role, so it
-        /// flips light/dark like the native icons and matches the menu-bar idle bar exactly.
-        static var idleBlue: NSColor { ColorStore.shared.color(.blue) }
         static var gapRed: NSColor { ColorStore.shared.color(.red) }
         static var gapYellow: NSColor { ColorStore.shared.color(.yellow) }
         static var gapOrange: NSColor { ColorStore.shared.color(.orange) }
@@ -425,16 +413,18 @@ final class PopupBarView: NSView {
         // the per-style shapes were meant to prevent. Zero usage is zero on both scales, so zero is what
         // both draw.
         if idle {
-            // Blocked idle (#158) → grey (no path to start); otherwise the "ready to start" blue.
+            // Blocked idle (#158) → grey (no path to start); otherwise green (ADR-0105).
             // Grey (blocked) is an already-translucent neutral — leave it; only the blue hue is tinted (#188).
             // Animated so idle→active reads as a fade (ADR-0070); the glow follows automatically
             // because it is derived from this same colour.
-            // Three-way, not two (#331 follow-up): grey when blocked (no path to start), blue when the
-            // week has headroom ("ready to start" with quota to burn), and green in between — ready,
-            // but with nothing to advertise, so the pill must not promise a full quota the week cannot
-            // fund. Same verdict the pacing blue is gated on (`PacingModel.weeklyHasHeadroom`).
-            let idleTarget = blocked ? Self.monochromeGrey
-                : (weeklyHeadroom ? Palette.idleBlue : ColorStore.shared.color(.green))
+            // Two-way since #381: grey when blocked (no path to start), **green** whenever ready. It was
+            // three-way (#331 follow-up), with blue standing for "ready, and the week has quota to burn"
+            // — a second claim layered onto "ready" and carried by the same pill, which needed
+            // `PacingModel.weeklyHasHeadroom` threaded through an inert row to stay honest. The claim is
+            // dropped rather than moved: idle answers one question. The weekly gate still does its real
+            // work on every *active* row's `blueAllowed` (ADR-0081), and the menu bar drops the same
+            // distinction in the same release, so the two surfaces cannot disagree about idle.
+            let idleTarget = blocked ? Self.monochromeGrey : ColorStore.shared.color(.green)
             let idleColor = blocked ? idleTarget : animated(idleTarget, part: .fill)
             // The zero tick goes down BEFORE the track: the track then covers its middle and only the
             // ends stand proud, which is what keeps it from reading as a time marker.
@@ -521,9 +511,14 @@ final class PopupBarView: NSView {
         // Gauge floors its zero at the centre (`stripFrom == 0.5` there, since a degenerate span has
         // both ends on the zero). `pinsStart` stays exclusive to Progress — on the centred scale both
         // edges are data and the floor must grow symmetrically about the zero.
-        let span = Self.stripRect(from: stripFrom, to: stripTo, in: rect,
-                                  pinsStart: frozenStripFraction == nil && effectiveScale == .window,
-                                  anchoredAt: effectiveScale == .centred ? 0.5 : nil)
+        let ribbon = Self.stripRect(from: stripFrom, to: stripTo, in: rect,
+                                    pinsStart: frozenStripFraction == nil && effectiveScale == .window,
+                                    anchoredAt: effectiveScale == .centred ? 0.5 : nil)
+        // Whether the ribbon degenerated and the pill floor took over — read off the fallback itself
+        // rather than re-measured from the resulting width, which would depend on `minStripWidth`
+        // rounding and quietly stop matching if that floor ever changes.
+        let collapsedToPill = ribbon == nil && effectiveScale != .window
+        let span = ribbon
             ?? (effectiveScale == .window ? nil : Self.pillRect(at: stripFrom, in: rect))
         if let stripRect = span {
             // The track's corner, not a capsule's (#326) — two shapes in one bar share one corner.
@@ -549,9 +544,26 @@ final class PopupBarView: NSView {
                 NSBezierPath(roundedRect: gutter, xRadius: r, yRadius: r).fill()
                 NSGraphicsContext.restoreGraphicsState()
             }
-            withGlow(gapColor, radius: Self.gapGlowRadius, strength: Self.gapGlowStrength) {
-                gapColor.setFill()
-                stripPath.fill()
+            // A Pressure ribbon that collapsed to its zero pill gets the tighter, brighter halo (#381):
+            // the quiet side has no width to carry colour there, so the ambient glow — sized for a full
+            // ribbon — leaves the mark looking unlit. Quiet states only; a warning's ribbon has length of
+            // its own and does not need lifting.
+            let isCollapsedQuietPill = effectiveScale == .remaining && l.isCalm && collapsedToPill
+            if isCollapsedQuietPill {
+                // Widest first, then narrower: each pass composites over the last, so the light stacks up
+                // where they overlap and falls off outward. See the radius constants for why three passes
+                // rather than one larger `strength`.
+                for radius in [Self.pillHaloRadius, Self.pillMidGlowRadius, Self.pillGlowRadius] {
+                    withGlow(gapColor, radius: radius, strength: Self.pillGlowStrength) {
+                        gapColor.setFill()
+                        stripPath.fill()
+                    }
+                }
+            } else {
+                withGlow(gapColor, radius: Self.gapGlowRadius, strength: Self.gapGlowStrength) {
+                    gapColor.setFill()
+                    stripPath.fill()
+                }
             }
         }
 
@@ -1110,6 +1122,36 @@ final class PopupBarView: NSView {
 
     private static let gapGlowRadius: CGFloat = 21
     private static let gapGlowStrength: CGFloat = 0.35
+
+    /// Glow for a **Pressure ribbon that has collapsed to its zero pill** (#381) — stronger and tighter
+    /// than the ambient one above.
+    ///
+    /// Pressure measures against the time left, so every quiet state — the far-behind blue and the
+    /// on-pace green alike — draws the same minimum pill: the scale deliberately spends no width on the
+    /// side where there is nothing to act on. That leaves the pill with almost no area to carry its
+    /// colour, and the ambient 21 pt halo is calibrated for a ribbon many times that size, so on a pill
+    /// it reads as a faint smudge rather than as the mark's own light.
+    ///
+    /// A **tighter** radius with **more** strength is what recovers it: the halo stays inside the bar's
+    /// own height instead of bleeding across the card, and the pill reads as a lit dot. Only the quiet
+    /// colours get this — orange and red already have ribbon length of their own, and lighting them
+    /// further would raise a warning's volume rather than restore a quiet mark's legibility.
+    /// The three glow passes for a collapsed Pressure pill, laid down widest-first.
+    ///
+    /// Three rather than one because `withGlow` sets a **shadow alpha**, and `strength` clamps at 1: once
+    /// there, a bigger number buys nothing and the only way left to add light is another pass. Each one
+    /// composites over the last, so the halo builds where they overlap — brightest against the pill,
+    /// falling off outward, which is how a light source actually behaves.
+    ///
+    /// The radii are a spread, not three tries at one value: the wide pass fills the bar's height with
+    /// colour, the mid pass gives the falloff a body, and the tight pass puts a hot core right at the
+    /// pill's edge so the mark reads as lit rather than as a blur with a dot inside it.
+    private static let pillGlowRadius: CGFloat = 10
+    private static let pillMidGlowRadius: CGFloat = 22
+    private static let pillHaloRadius: CGFloat = 40
+    /// Full alpha on every pass — see above for why the count, not this number, is the brightness knob.
+    private static let pillGlowStrength: CGFloat = 1.0
+
     /// Marker glow: a soft halo, kept subtle so the marker doesn't bloom over the card.
     private static let markerGlowRadius: CGFloat = 6
     private static let markerGlowStrength: CGFloat = 0.5
@@ -1680,7 +1722,7 @@ final class PopupViewController: NSViewController {
     /// When the per-model / per-service rows are shown (#211). The gate lives here rather than in
     /// `PopupLayout` because it depends on ``optionHeld``, which changes while the menu is open and
     /// without a re-poll. Like `barStyle`, a change rebuilds.
-    var modelLimitsVisibility: PopupSectionVisibility = .nonCalm {
+    var modelLimitsVisibility: PopupSectionVisibility = .whenItNeedsAttention {
         didSet {
             guard isViewLoaded, modelLimitsVisibility != oldValue else { return }
             rebuild()
@@ -1689,7 +1731,7 @@ final class PopupViewController: NSViewController {
 
     /// When the "Extra usage" credits section is shown. Independent of the menu-bar credits icon,
     /// which keeps its own boolean gate in `PersistedConfig.showExtraUsage`.
-    var extraUsageVisibility: PopupSectionVisibility = .nonCalm {
+    var extraUsageVisibility: PopupSectionVisibility = .whenItNeedsAttention {
         didSet {
             guard isViewLoaded, extraUsageVisibility != oldValue else { return }
             rebuild()
@@ -1769,7 +1811,7 @@ final class PopupViewController: NSViewController {
     private static let claudeCodeSectionTitle = "Claude"
 
     /// The status word shown flush-right on the **idle** 5-hour row (#100, ADR-0027): the 5h window has
-    /// no active session, so the row reads "5-hour  ready to start" with a solid-blue bar and no second
+    /// no active session, so the row reads "5-hour  ready to start" with a green pill and no second
     /// line. The localisation seam (ADR-0009) — like the other status phrases, the English word lives
     /// here, not in the kit.
     static let idleStatusText = "ready to start"
@@ -2592,13 +2634,13 @@ final class PopupViewController: NSViewController {
     /// ``addBar(bar:subdivisions:idle:isLast:)`` that unpacks the row's geometry.
     private func addBar(_ row: LimitRow, isLast: Bool, isBaseLimit: Bool) {
         addBar(bar: row.bar, subdivisions: row.subdivisions, idle: row.sessionIdle,
-               blocked: row.sessionBlocked, weeklyHeadroom: row.weeklyHeadroom,
+               blocked: row.sessionBlocked,
                isLast: isLast, isBaseLimit: isBaseLimit, tweenRow: row.title)
     }
 
     /// Add a pacing bar from raw geometry — shared by the token limit rows and the "Extra usage"
     /// credits section (#145), which has no ``LimitRow``. `subdivisions == 0` draws no tick ruler
-    /// (a calendar month has no equal window boundaries to mark); `idle` draws the solid-blue knobless
+    /// (a calendar month has no equal window boundaries to mark); `idle` draws the green knobless
     /// 5h track (#100). When `bar` is `nil` the view draws nothing — but callers only reach here with a
     /// real bar (idle uses the flag, not the layout).
     ///
@@ -2606,7 +2648,6 @@ final class PopupViewController: NSViewController {
     /// window's first and last day **and** puts the bar into its always-Progress presentation, since
     /// both follow from the same fact — this window is a calendar month.
     private func addBar(bar: BarLayout?, subdivisions: Int, idle: Bool, blocked: Bool = false,
-                        weeklyHeadroom: Bool = true,
                         isLast: Bool, isBaseLimit: Bool = false, tweenRow: String? = nil,
                         monthBounds: (start: String, end: String)? = nil) {
         let view = PopupBarView()
@@ -2620,9 +2661,8 @@ final class PopupViewController: NSViewController {
         // stays a still reference beside the animated one (ADR-0070).
         view.frozenStripFraction = tweenRow == frozenStripRow ? frozenStripFraction : nil
         view.subdivisions = subdivisions
-        view.idle = idle   // solid-blue knobless track when the 5h window is idle (#100)
-        view.blocked = blocked   // grey instead of blue when that idle state is blocked (#158)
-        view.weeklyHeadroom = weeklyHeadroom   // green instead of blue when the week has no headroom
+        view.idle = idle   // green knobless pill when the 5h window is idle (#100)
+        view.blocked = blocked   // grey instead of green when that idle state is blocked (#158)
         view.isBaseLimit = isBaseLimit   // only base 5h/7d rows render the far-behind blue zone
         view.barStyle = barStyle   // Progress (gap+marker) vs Pressure/Gauge (marker-less ribbons) — #224
         view.optionHeld = optionHeld   // the under-bar ruler (teeth + month captions) is ⌥-on-demand

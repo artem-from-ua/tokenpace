@@ -4,47 +4,84 @@ import Foundation
 
 // MARK: - Fixtures
 
-/// The canonical key order: the top-to-bottom order of the controls in Settings → Appearance
-/// (`UIPanes.swift`). Duplicated here on purpose — a test that derived the expected order from
-/// `CodingKeys` would pass no matter how the keys were re-ordered, which is exactly the drift this
-/// suite exists to catch. When an Appearance option is added, update the pane, the encoder, and this
-/// list together.
-private let paneOrderedKeys = [
-    "menuBarStyle",               // Menu Bar Widget → "Style"
-    "calmColorMode",              // "Calm non-critical colors"
-    "calmBarHiding",              // "Hide 5h (top) bar"
-    "showServiceStatusDot",       // "Show service status dot on issues"
-    "dropdownStyle",              // Dropdown Widget → "Style"
-    "modelLimitsVisibility",      // "Show model & service limits"
-    "extraUsageVisibility",       // "Show extra usage"
+/// The canonical key order, **grouped by surface** since #381: the two groups in the order of the two
+/// child pages, and inside each the top-to-bottom order of that page's controls
+/// (`AppearancePanes.swift`).
+///
+/// Duplicated here on purpose — a test that derived the expected order from the `CodingKeys` enums would
+/// pass no matter how the keys were re-ordered, which is exactly the drift this suite exists to catch.
+/// When an Appearance option is added, update the pane, the encoder, and this list together.
+private let paneOrderedGroups: [(group: String, keys: [String])] = [
+    ("menuBar", [
+        "style",                  // "Style"
+        "colorsTell",             // "Colors tell me"
+        "hideTop5hBar",           // "Hide the top 5h bar"
+        "showServiceStatusDot",   // "Show service status dot"
+    ]),
+    ("dropdown", [
+        "style",                  // "Style"
+        "showPerModelLimits",     // "Show per-model & per-service limits"
+        "showExtraUsage",         // "Show *Extra usage*"
+    ]),
 ]
 
-/// The keys of the `appearance` object **in the order they appear in the JSON text**. Works on the raw
-/// string rather than `JSONSerialization`, because parsing into a dictionary would discard the very
-/// ordering under test.
+/// The flattened expectation — `group.key` for every key, in emission order.
+private let paneOrderedKeys = paneOrderedGroups.flatMap { g in g.keys.map { "\(g.group).\($0)" } }
+
+/// The keys of the `appearance` object **in the order they appear in the JSON text**, qualified by their
+/// group (`"menuBar.style"`). Works on the raw string rather than `JSONSerialization`, because parsing
+/// into a dictionary would discard the very ordering under test.
+///
+/// Tracks brace depth rather than scanning for the first `}` (#381): with the keys nested one level
+/// deeper, "first closing brace" is the end of the **first group**, so the old scan would have silently
+/// returned half the dump and let the order assertions pass on incomplete data.
 private func appearanceKeysInOrder(_ json: String) -> [String] {
     guard let start = json.range(of: "\"appearance\"") else { return [] }
-    let tail = json[start.upperBound...]
-    guard let open = tail.firstIndex(of: "{"),
-          let close = tail[open...].firstIndex(of: "}") else { return [] }
-    let body = tail[tail.index(after: open)..<close]
+    var depth = 0
+    var group: String?
+    var result: [String] = []
 
-    return body.split(separator: "\n").compactMap { line in
-        // Each pretty-printed line looks like:  "barStyle" : "mixed",
-        guard let first = line.firstIndex(of: "\""),
-              let second = line[line.index(after: first)...].firstIndex(of: "\"") else { return nil }
-        return String(line[line.index(after: first)..<second])
+    for line in json[start.upperBound...].split(separator: "\n") {
+        let opens = line.filter { $0 == "{" }.count
+        let closes = line.filter { $0 == "}" }.count
+
+        if let key = quotedKey(in: line) {
+            // A line that opens a brace names a group; anything else at depth 1 names a value.
+            if opens > 0 {
+                group = key
+            } else if let group {
+                result.append("\(group).\(key)")
+            } else {
+                result.append(key)   // ungrouped key — the shape this test would flag
+            }
+        }
+
+        depth += opens - closes
+        if closes > 0, opens == 0, depth <= 1 { group = nil }
+        if depth <= 0 && !result.isEmpty { break }   // left the `appearance` object
     }
+    return result
+}
+
+/// The first `"…"`-quoted token on a line, or `nil` — the key half of a pretty-printed
+/// `"key" : value` line.
+private func quotedKey(in line: Substring) -> String? {
+    guard let first = line.firstIndex(of: "\""),
+          let second = line[line.index(after: first)...].firstIndex(of: "\"") else { return nil }
+    return String(line[line.index(after: first)..<second])
 }
 
 /// A value set that deliberately matches **no** preset, so `preset` exports as "custom".
 private let customValues = AppearancePresetValues(
-    calmColorMode: .off,
-    // `.never` with calm colours off would be Control freak, so the rest of the set pulls it away from
+    colorsTell: .howItsGoing,
+    // `.never` with nothing muted would be Control freak, so the rest of the set pulls it away from
     // every preset — a deliberately preset-less combination.
-    calmBarHiding: .never,
+    hideTop5hBar: .never,
     showServiceStatusDot: false,
-    modelLimitsVisibility: .optionOnly,
+    // `.onceUsed` here rather than Control freak's `.always`, which keeps this set distinct from every
+    // preset even though `.howItsGoing` + `.never` match one. (The retired `.optionOnly` used to do that
+    // job; #381 removed the case.)
+    modelLimitsVisibility: .onceUsed,
     extraUsageVisibility: .always,
     // Deliberately mismatched surfaces — the pair no preset can express (#329), and the shape the
     // retired `"mixed"` value used to name.
@@ -118,22 +155,37 @@ struct AppearanceConfigExportPayloadTests {
 
     /// Enum values export as their stable raw strings (not ordinals), so a dump stays readable and
     /// survives a case being re-ordered in a later build.
+    ///
+    /// The two `style` keys are checked with their values rather than by name alone: since #381 both
+    /// groups carry a key called `style`, so the pair is what pins each to its own surface.
     @Test func enumsExportAsRawStrings() {
         let json = export(customValues, preset: nil)
-        #expect(json.contains("\"menuBarStyle\" : \"pressure\""))
-        #expect(json.contains("\"dropdownStyle\" : \"progress\""))
-        #expect(json.contains("\"calmColorMode\" : \"off\""))
-        #expect(json.contains("\"calmBarHiding\" : \"never\""))
+        #expect(json.contains("\"style\" : \"pressure\""))     // menuBar
+        #expect(json.contains("\"style\" : \"progress\""))      // dropdown
+        #expect(json.contains("\"colorsTell\" : \"howItsGoing\""))
+        #expect(json.contains("\"hideTop5hBar\" : \"never\""))
     }
 
-    /// `calmBarHiding` exports as the raw string naming the **hidden** bar — the same sense
+    /// `hideTop5hBar` exports as the raw string naming what it does to the bar — the same sense
     /// `PersistedConfig` stores, with no inversion left anywhere (ADR-0086 retired the boolean whose
     /// stored form was the opposite of its checkbox).
-    @Test func calmBarHidingExportsTheHiddenBar() {
+    @Test func hideTopBarExportsItsMode() {
         #expect(export(AppearancePreset.chill.values, preset: .chill)
-            .contains("\"calmBarHiding\" : \"fiveHour\""))
+            .contains("\"hideTop5hBar\" : \"untilItNeedsAttention\""))
         #expect(export(AppearancePreset.controlFreak.values, preset: .controlFreak)
-            .contains("\"calmBarHiding\" : \"never\""))
+            .contains("\"hideTop5hBar\" : \"never\""))
+    }
+
+    /// The dump is **nested by surface** (#381): two groups, in child-page order, each holding its own
+    /// page's keys. Pinned separately from the key-order test because the grouping is the part a reader
+    /// relies on — it is what lets a dump be read against the two panes without a lookup table.
+    @Test func appearanceIsGroupedBySurface() {
+        let json = export(customValues, preset: nil)
+        #expect(json.contains("\"menuBar\" : {"))
+        #expect(json.contains("\"dropdown\" : {"))
+        guard let menuBar = json.range(of: "\"menuBar\" : {"),
+              let dropdown = json.range(of: "\"dropdown\" : {") else { return }
+        #expect(menuBar.lowerBound < dropdown.lowerBound)   // menu bar first, as on the sidebar
     }
 
     /// Pretty-printed, so the dump is readable where it's pasted.
@@ -175,8 +227,8 @@ struct AppearancePresetValuesCodableTests {
           "resetCountdownModeMenuBar" : "always" }
         """
         let decoded = try JSONDecoder().decode(AppearancePresetValues.self, from: Data(json.utf8))
-        #expect(decoded.modelLimitsVisibility == .aboveZero)
-        #expect(decoded.extraUsageVisibility == .aboveZero)
+        #expect(decoded.modelLimitsVisibility == .onceUsed)
+        #expect(decoded.extraUsageVisibility == .onceUsed)
     }
 
     /// Decoding ignores key order (JSON objects are unordered), so a dump someone re-formatted or
@@ -195,13 +247,13 @@ struct AppearancePresetValuesCodableTests {
         #expect(decoded.menuBarStyle == .pressure)   // the pre-#307 raw still maps, per surface
         #expect(decoded.dropdownStyle == .gauge)
         #expect(decoded.modelLimitsVisibility == .always)
-        #expect(decoded.extraUsageVisibility == .optionOnly)
+        #expect(decoded.extraUsageVisibility == .onceUsed)
         // This fixture also predates ADR-0086, so it exercises the legacy boolean: `false` → `.never`.
-        #expect(decoded.calmBarHiding == .never)
+        #expect(decoded.hideTop5hBar == .never)
     }
 
     /// A dump exported **before ADR-0086** carries the boolean `hideCalmSevenDayBar` instead of
-    /// `calmBarHiding`. It maps through `CalmBarHiding.migrated(fromLegacyHide:)` — the same call the
+    /// `calmBarHiding`. It maps through `TopBarHiding.migrated(fromLegacyHide:)` — the same call the
     /// `UserDefaults` migration makes — so importing an old dump and upgrading in place agree.
     @Test func decodesTheLegacyHideCalmSevenDayBoolean() throws {
         func decode(_ legacy: String) throws -> AppearancePresetValues {
@@ -221,14 +273,14 @@ struct AppearancePresetValuesCodableTests {
         // `resetCountdownModeMenuBar`, whose setting is gone now that a countdown only ever accompanies
         // the bars-less modes — and `showTicks`, retired when the tick ruler stopped being optional.
         // They must be ignored, not throw.
-        #expect(try decode("\"hideCalmSevenDayBar\" : true").calmBarHiding == .fiveHour)
-        #expect(try decode("\"hideCalmSevenDayBar\" : false").calmBarHiding == .never)
+        #expect(try decode("\"hideCalmSevenDayBar\" : true").hideTop5hBar == .untilItNeedsAttention)
+        #expect(try decode("\"hideCalmSevenDayBar\" : false").hideTop5hBar == .never)
         // The new key wins when both are present — an old key left in a hand-edited dump can't override
         // the current one.
         #expect(try decode("\"calmBarHiding\" : \"fiveHour\", \"hideCalmSevenDayBar\" : true")
-            .calmBarHiding == .fiveHour)
+            .hideTop5hBar == .untilItNeedsAttention)
         // Neither key (a dump older still) falls back to the same one-bar-while-calm reading.
-        #expect(try decode("\"unrelated\" : 1").calmBarHiding == .fiveHour)
+        #expect(try decode("\"unrelated\" : 1").hideTop5hBar == .untilItNeedsAttention)
     }
 
     // MARK: Pre-#329 configs — one `barStyle` key for both surfaces

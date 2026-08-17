@@ -34,11 +34,83 @@ extension SettingsModel {
     }
 }
 
+// MARK: - Conditional rows (#381)
+
+/// How a Settings row that appears and disappears with another control's value should move.
+///
+/// Every pane used to suppress this outright (`.animation(nil, value:)`), on the grounds that an
+/// insertion animation made the neighbouring rows flicker as the card changed height. That traded one
+/// problem for another: a row **blinking** in or out gives no clue where it came from, so the change
+/// reads as the window glitching rather than as a consequence of the click just made.
+///
+/// A short slide from the top edge plus a fade answers both. The row visibly folds out of the block it
+/// belongs to, so the eye follows it instead of hunting for what changed; and the 0.2 s is short enough
+/// that the height change reads as one motion rather than as a bounce.
+///
+/// `easeInOut` rather than a spring: the card is resizing, and an overshoot would push the sections
+/// below it past their resting place and back.
+enum SettingsRowReveal {
+    /// The animation to attach to the **container** (the `Form` or `Section`), keyed on the value that
+    /// gates the row. Scoping it to that value matters — a bare `.animation(_:)` would also animate every
+    /// segmented-control change on the page, so picking a different segment would slide its own control.
+    static let animation: Animation = .easeInOut(duration: 0.2)
+
+    /// The transition to attach to the **row**. `.top` rather than the default fade-in-place: the gated
+    /// row always sits under the control that gates it, so folding out of the top edge points back at the
+    /// thing that was just clicked.
+    ///
+    /// Computed rather than stored: `AnyTransition` is not `Sendable`, so a `static let` of it is a
+    /// concurrency error. Rebuilding the value per use costs nothing here.
+    static var transition: AnyTransition { .move(edge: .top).combined(with: .opacity) }
+}
+
+/// A row title that dims when its row is disabled (#381).
+///
+/// SwiftUI dims a control's **own** label automatically, but most rows here put the title in a sibling
+/// `Text` — either because the control carries `.labelsHidden()` (the notification switches) or because
+/// the row is a hand-built `HStack` (the Appearance segmented rows). SwiftUI has no way to know such a
+/// `Text` belongs to the control beside it, so it stays at full strength over a greyed control and the
+/// row reads as half-live.
+///
+/// Uses AppKit's `disabledControlTextColor` — the colour the platform ships for exactly this ("Text on
+/// disabled controls", `NSColor.h`) — so a disabled row here matches every system-drawn one and follows
+/// the theme without a second rule.
+struct SettingsDisabledLabel: View {
+    let title: String
+    @Environment(\.isEnabled) private var isEnabled
+
+    init(_ title: String) { self.title = title }
+
+    var body: some View {
+        Text(title)
+            .foregroundStyle(isEnabled
+                             ? AnyShapeStyle(.primary)
+                             : AnyShapeStyle(Color(nsColor: .disabledControlTextColor)))
+    }
+}
+
 /// A secondary-styled hint line under a control. When `warning` is set, it is prefixed with a
 /// warning-triangle SF Symbol (the dev-build "Unavailable in development builds." treatment, #156).
 struct SettingsHint: View {
     let text: String
     var warning: Bool = false
+
+    /// Whether the enclosing row is interactive (#381).
+    ///
+    /// Handled here rather than at each call site so a hint follows its row without every pane having to
+    /// remember — but **which hints belong inside the disabled scope is a call-site decision**, and the
+    /// distinction is not cosmetic:
+    ///
+    /// - a hint that **describes** what the control does ("Notifies you when the limit resets") is part
+    ///   of the control, and dims with it — at full strength it makes a disabled row read as half-live;
+    /// - a hint that **explains why the control is unavailable** ("Unavailable in development builds.",
+    ///   "Notifications are turned off for TokenPace — enable them in System Settings") must stay at full
+    ///   strength. It is the one line the user still needs, and dimming the recovery instructions along
+    ///   with the thing they recover is backwards.
+    ///
+    /// So put a describing hint inside the `.disabled(…)` scope and leave an explaining one outside it.
+    /// `GeneralPane`'s launch-at-login row and `AboutPane`'s auto-install row are the worked examples.
+    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         if !text.isEmpty {
@@ -53,7 +125,12 @@ struct SettingsHint: View {
             }
             .labelStyle(HintLabelStyle(showIcon: warning))
             .font(.callout)
-            .foregroundStyle(.secondary)
+            // Already secondary when live; disabled drops it a further step to AppKit's own
+            // `disabledControlTextColor` ("Text on disabled controls", `NSColor.h`), so the whole row —
+            // title, control and explanation — reads as one inactive block.
+            .foregroundStyle(isEnabled
+                             ? AnyShapeStyle(.secondary)
+                             : AnyShapeStyle(Color(nsColor: .disabledControlTextColor)))
             .fixedSize(horizontal: false, vertical: true)
         }
     }

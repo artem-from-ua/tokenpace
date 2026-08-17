@@ -120,6 +120,7 @@ struct ProvidersPane: View {
                             Button("Choose…") { model.chooseArchiveFolder() }
                         }
                     }
+                    .transition(SettingsRowReveal.transition)
 
                     VStack(alignment: .leading, spacing: 4) {
                         LabeledContent {
@@ -137,12 +138,13 @@ struct ProvidersPane: View {
                         SettingsHint(text: model.archiveSpaceHint, warning: true)
                         SettingsHint(text: model.archiveBatteryHint, warning: true)
                     }
+                    .transition(SettingsRowReveal.transition)
                 }
             }
         }
         .formStyle(.grouped)
-        // Show/hide the dependent rows without an insertion animation (avoids neighbour-height flicker).
-        .animation(nil, value: model.archiveEnabled)
+        // The dependent rows fold out of the toggle above them rather than blinking (#381).
+        .animation(SettingsRowReveal.animation, value: model.archiveEnabled)
     }
 
     private var archiveDestinationURL: URL? {

@@ -7,6 +7,18 @@ superseded_by: [0076, 0080, 0081, 0098]
 
 # ADR-0062: Конфігурована подача пейсинг-барів — Bar style, Calm-режим, поріг far-behind
 
+> **Постскриптум ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)).** §2 чинний по суті,
+> але не за назвами. `CalmColorMode` зветься
+> [`ColorAdvice`](../../Sources/TokenPaceKit/ColorAdvice.swift), його рядок — `Colors tell me`, ключ —
+> `menuBar.colorsTell`, а кейси `off` / `yellowGreen` / `yellowGreenBlue` стали
+> `howItsGoing` / `slowDownOrSpeedUp` / `slowDown`
+> ([ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md)). Похідні `mutesCalm` /
+> `mutesBlue` лишились як були, тож рендер незмінний. **Обсяг опції звужено**
+> ([ADR-0105](0105-color-advice-governs-pacing-bars-only.md)): вона керує лише пейсинг-барами — не
+> крапкою сервісу, не гліфом валюти, не idle-пігулкою — і під Pressure не діє взагалі, бо там
+> спокійний бік гаситься безумовно. `showTicks`, `FarBehindInterval` і `barStyle` з цього ADR у
+> сховищі більше немає; решта ключів перейменована з префіксом поверхні (`menuBar.` / `dropdown.`).
+
 > **Частково витіснений [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md)**: §4
 > більше не чинний — `showTicks` видалено з Settings, пресетів і експорту. Лінійка поділена за
 > роботою кожної позначки: риска нуля видима завжди, решта — під ⌥ Option. Чинними лишаються §2

@@ -128,9 +128,9 @@ final class SettingsWindowController: NSWindowController {
         get { model.onInstallUpdateNow } set { model.onInstallUpdateNow = newValue }
     }
 
-    /// Called when the user changes the calm-colours mode (#105, #224), with the new `CalmColorMode`.
-    var onCalmColorModeChange: ((CalmColorMode) -> Void)? {
-        get { model.onCalmColorModeChange } set { model.onCalmColorModeChange = newValue }
+    /// Called when the user changes the calm-colours mode (#105, #224), with the new `ColorAdvice`.
+    var onColorAdviceChange: ((ColorAdvice) -> Void)? {
+        get { model.onColorAdviceChange } set { model.onColorAdviceChange = newValue }
     }
 
     /// Called when the user changes the **Menu Bar Widget** section's "Bar style" control (#224,
@@ -161,8 +161,8 @@ final class SettingsWindowController: NSWindowController {
     }
 
     /// Called when the user picks a "Hide the calm bar" segment (ADR-0086), with the new mode.
-    var onCalmBarHidingChange: ((CalmBarHiding) -> Void)? {
-        get { model.onCalmBarHidingChange } set { model.onCalmBarHidingChange = newValue }
+    var onTopBarHidingChange: ((TopBarHiding) -> Void)? {
+        get { model.onTopBarHidingChange } set { model.onTopBarHidingChange = newValue }
     }
 
     /// Called when the user toggles "Pause polling while the screen is locked" (#114).

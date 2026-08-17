@@ -57,10 +57,14 @@ enum PersistedConfig {
         /// The latest release tag last surfaced to the user (#37), so the same version is not
         /// notified twice.
         static let lastSeenLatestVersion = "lastSeenLatestVersion"
-        /// How much of the non-critical pacing palette the menu-bar widget mutes to white (#105, #224),
-        /// stored as the raw `CalmColorMode` string. Replaces the old `calmMenuBarColors` +
-        /// `workHarderColors` pair — see the property.
-        static let calmColorMode = "calmColorMode"
+        /// What the menu bar's bar colours tell the user (#105, #224; renamed in #381), stored as the raw
+        /// `ColorAdvice` string. Replaces the old `calmMenuBarColors` + `workHarderColors` pair —
+        /// see the property.
+        static let colorsTell = "menuBar.colorsTell"
+        /// Legacy pre-#381 key for the same choice, when it was named after the colours it muted. Read
+        /// once by ``PersistedConfig/migrateAppearanceKeysIfNeeded()`` to seed ``colorsTell``, then
+        /// cleared. Do not read elsewhere.
+        static let legacyCalmColorMode = "calmColorMode"
         /// Retired by ADR-0091. Was "Show reset countdown: Always / Smart / Never" (#103), the raw
         /// `ResetCountdownMode` string deciding when a countdown appeared beside the bars. The countdown
         /// now appears only where there are no bars, so there is nothing left to choose. Kept as a
@@ -70,22 +74,32 @@ enum PersistedConfig {
         /// How the **menu-bar widget** presents its pacing bars (#224, split per surface in #329),
         /// stored as the raw `BarStyle` string. Default `.gauge` (from the `.workHarder` preset) —
         /// see the property.
-        static let menuBarStyle = "menuBarStyle"
+        static let menuBarStyle = "menuBar.style"
         /// How the **dropdown popup** presents its pacing bars (#329), stored as the raw `BarStyle`
         /// string. Default `.gauge` — see the property.
-        static let dropdownStyle = "dropdownStyle"
+        static let dropdownStyle = "dropdown.style"
+        /// Legacy pre-#381 keys for the two styles, before the surface became a key prefix. Read once by
+        /// ``PersistedConfig/migrateAppearanceKeysIfNeeded()``, then cleared.
+        static let legacyMenuBarStyle = "menuBarStyle"
+        static let legacyDropdownStyle = "dropdownStyle"
         /// Legacy pre-#329 key — one style for both surfaces, including the `"mixed"` value that gave
         /// them different ones. Read once by ``PersistedConfig/migrateBarStyleIfNeeded()`` to seed the
         /// two per-surface keys, then cleared. Do not read elsewhere.
         static let legacyBarStyle = "barStyle"
         /// Whether the menu-bar widget draws the service-status dot on a service issue (#31).
         /// Default-on (opt-out) — see the property.
-        static let showServiceStatusDot = "showServiceStatusDot"
-        /// Which menu-bar bar is hidden while it is calm — stored as the raw `CalmBarHiding` string
-        /// (ADR-0086). Default `.fiveHour` (from the `.workHarder` preset) — see the property.
-        static let calmBarHiding = "calmBarHiding"
+        static let showServiceStatusDot = "menuBar.showServiceStatusDot"
+        /// Legacy pre-#381 key for the same toggle, before the surface became a key prefix.
+        static let legacyShowServiceStatusDot = "showServiceStatusDot"
+        /// Whether the **top (5-hour)** bar is hidden until it needs attention — stored as the raw
+        /// `TopBarHiding` string (ADR-0086). Default `.untilItNeedsAttention` (from the `.workHarder`
+        /// preset) — see the property.
+        static let hideTop5hBar = "menuBar.hideTop5hBar"
+        /// Legacy pre-#381 key for the same choice, when it was named after the "calm" data state. Read
+        /// once by ``PersistedConfig/migrateAppearanceKeysIfNeeded()``, then cleared.
+        static let legacyCalmBarHiding = "calmBarHiding"
         /// Legacy pre-ADR-0086 key — the boolean "hide the calm **7-day** bar" opt-out (#94). Read once
-        /// by ``PersistedConfig/migrateCalmBarHidingIfNeeded()`` to seed ``calmBarHiding``, then cleared.
+        /// by ``PersistedConfig/migrateTopBarHidingIfNeeded()`` to seed ``hideTop5hBar``, then cleared.
         /// Do not read elsewhere.
         static let legacyHideCalmSevenDayBar = "hideCalmSevenDayBar"
         /// **Retired** (ADR-0090). Whether the red "pause" icon hid the pacing bars while fully blocked
@@ -103,23 +117,24 @@ enum PersistedConfig {
         static let retiredShowExtraUsage = "showExtraUsage"
         /// When the popup shows the per-model 7-day limit rows (`Opus`/`Sonnet`/`weekly_scoped`,
         /// e.g. `Fable`) below the `5h`/`7d` rows (#211), stored as the raw `PopupSectionVisibility`
-        /// string. Default `.nonCalm` — see the property.
-        static let modelLimitsVisibility = "modelLimitsVisibility"
+        /// string. Default `.whenItNeedsAttention` — see the property.
+        static let showPerModelLimits = "dropdown.showPerModelLimits"
         /// When the popup shows the "Extra usage" credits section, stored as the raw
-        /// `PopupSectionVisibility` string. Default `.aboveZero` — see the property. Distinct from the
+        /// `PopupSectionVisibility` string. Default `.onceUsed` — see the property. Distinct from the
         /// **menu-bar** credits icon, which is data-driven and has no key of its own (ADR-0090).
-        static let extraUsageVisibility = "extraUsageVisibility"
-        /// Marker set once ``PersistedConfig/migrateExtraUsageVisibilityIfNeeded()`` has run, so the
-        /// one-way `.nonCalm` → `.aboveZero` rewrite cannot re-fire and undo a later deliberate choice.
-        ///
-        /// A marker is needed because, unlike the legacy migrations around it, this one has no old key
-        /// to delete as its own evidence of completion: it rewrites a *value* of a key that stays in
-        /// use, and `.nonCalm` remains a legal value for the other row.
-        static let extraUsageVisibilityMigrated = "extraUsageVisibilityMigratedFromNonCalm"
-        /// Marker set once ``PersistedConfig/migrateOptionOnlyVisibilityIfNeeded()`` has run, so the
-        /// one-way `.optionOnly` → `.aboveZero` rewrite cannot re-fire on a later deliberate import.
-        /// Covers **both** dropdown groups, which retired the segment together (#374).
-        static let optionOnlyVisibilityMigrated = "sectionVisibilityMigratedFromOptionOnly"
+        static let showExtraUsage = "dropdown.showExtraUsage"
+        /// Legacy pre-#381 keys for the two visibility rows, before the surface became a key prefix.
+        /// Read once by ``PersistedConfig/migrateAppearanceKeysIfNeeded()``, then cleared.
+        static let legacyModelLimitsVisibility = "modelLimitsVisibility"
+        static let legacyExtraUsageVisibility = "extraUsageVisibility"
+        /// Retired markers of the two value-rewrite migrations #381 folded into
+        /// ``PersistedConfig/migrateAppearanceKeysIfNeeded()``: `.nonCalm` → `.aboveZero` for Extra usage,
+        /// and `.optionOnly` → `.aboveZero` for both rows (#374). Both rewrites now happen through
+        /// `PopupSectionVisibility.legacyRawValues` while the key itself moves, so completion is
+        /// self-evident from the old key being gone and no marker is needed. Kept as constants only so an
+        /// Appearance reset still sweeps a stored value, as ``retiredFarBehindInterval`` does.
+        static let retiredExtraUsageVisibilityMigrated = "extraUsageVisibilityMigratedFromNonCalm"
+        static let retiredOptionOnlyVisibilityMigrated = "sectionVisibilityMigratedFromOptionOnly"
         /// Legacy pre-tri-state key (the boolean "Show model & service limits" opt-out), read once by
         /// ``PersistedConfig/migrateModelLimitsVisibilityIfNeeded()`` to seed
         /// ``modelLimitsVisibility``, then cleared. Do not read elsewhere.
@@ -352,16 +367,21 @@ enum PersistedConfig {
     }
 
     /// How much of the menu-bar widget's **soft** pacing palette mutes to white (#105, #224, ADR-0061)
-    /// — the single three-way ``CalmColorMode`` that replaces the old `calmMenuBarColors` +
+    /// — the single three-way ``ColorAdvice`` that replaces the old `calmMenuBarColors` +
     /// `workHarderColors` pair. `.off` keeps every colour; `.yellowGreen` mutes the greens/yellows but
     /// keeps the far-behind blue coloured (the old "Work harder"); `.yellowGreenBlue` mutes the blue
     /// too (the quietest). Stored as the raw string; an absent key or an unrecognised value (a newer
     /// build's) falls back to the factory default (`AppearancePreset.default`). The strong warnings
     /// (orange/red), the time-indicator dot, and the error triangle are unaffected; the popup keeps its
     /// full colour too.
-    static var calmColorMode: CalmColorMode {
-        get { CalmColorMode(rawValue: defaults.string(forKey: Key.calmColorMode) ?? "") ?? AppearancePreset.defaultValues.calmColorMode }
-        set { defaults.set(newValue.rawValue, forKey: Key.calmColorMode) }
+    static var colorsTell: ColorAdvice {
+        get {
+            let raw = defaults.string(forKey: Key.colorsTell) ?? ""
+            return ColorAdvice(rawValue: raw)
+                ?? ColorAdvice.legacyRawValues[raw]
+                ?? AppearancePreset.defaultValues.colorsTell
+        }
+        set { defaults.set(newValue.rawValue, forKey: Key.colorsTell) }
     }
 
     /// How the **menu-bar widget** presents its pacing bars (#224, per-surface since #329). Stored as
@@ -404,11 +424,15 @@ enum PersistedConfig {
     /// An **orange/red** bar always stays visible, and at most one bar is ever hidden, so the widget
     /// never empties. The error state (⚠️ + stale bars, #12) is unaffected — both bars are kept there
     /// for diagnostics regardless of this choice. An absent or unrecognised value falls back to the
-    /// preset default; ``migrateCalmBarHidingIfNeeded()`` carries an explicit pre-ADR-0086 boolean over.
-    static var calmBarHiding: CalmBarHiding {
-        get { CalmBarHiding(rawValue: defaults.string(forKey: Key.calmBarHiding) ?? "")
-              ?? AppearancePreset.defaultValues.calmBarHiding }
-        set { defaults.set(newValue.rawValue, forKey: Key.calmBarHiding) }
+    /// preset default; ``migrateTopBarHidingIfNeeded()`` carries an explicit pre-ADR-0086 boolean over.
+    static var hideTop5hBar: TopBarHiding {
+        get {
+            let raw = defaults.string(forKey: Key.hideTop5hBar) ?? ""
+            return TopBarHiding(rawValue: raw)
+                ?? TopBarHiding.legacyRawValues[raw]
+                ?? AppearancePreset.defaultValues.hideTop5hBar
+        }
+        set { defaults.set(newValue.rawValue, forKey: Key.hideTop5hBar) }
     }
 
     /// When the **popup** lists the per-model 7-day limit rows — the legacy `Opus`/`Sonnet`
@@ -416,28 +440,42 @@ enum PersistedConfig {
     /// `5h`/`7d` rows (#211). Governs the popup only; the menu-bar widget is unaffected.
     ///
     /// Was a boolean opt-out before the tri-state (`PopupSectionVisibility`): `.always` is the old
-    /// "on", `.optionOnly` the old "off", and the new `.nonCalm` default shows the rows only while one
-    /// of them is orange/red (or ⌥ is held). Existing explicit choices are carried over by
-    /// ``migrateModelLimitsVisibilityIfNeeded()``. An absent or unrecognised value falls back to the
-    /// factory preset's value.
-    static var modelLimitsVisibility: PopupSectionVisibility {
-        get { PopupSectionVisibility(rawValue: defaults.string(forKey: Key.modelLimitsVisibility) ?? "") ?? AppearancePreset.defaultValues.modelLimitsVisibility }
-        set { defaults.set(newValue.rawValue, forKey: Key.modelLimitsVisibility) }
+    /// "on", the retired `.optionOnly` the old "off", and the `.whenItNeedsAttention` default shows the
+    /// rows only while one of them is orange/red (or ⌥ is held). Existing explicit choices are carried
+    /// over by ``migrateModelLimitsVisibilityIfNeeded()``. An absent value falls back to the factory
+    /// preset's value; a pre-#381 raw resolves through `PopupSectionVisibility.legacyRawValues`.
+    static var showPerModelLimits: PopupSectionVisibility {
+        get {
+            let raw = defaults.string(forKey: Key.showPerModelLimits) ?? ""
+            return PopupSectionVisibility(rawValue: raw)
+                ?? PopupSectionVisibility.legacyRawValues[raw]
+                ?? AppearancePreset.defaultValues.modelLimitsVisibility
+        }
+        set { defaults.set(newValue.rawValue, forKey: Key.showPerModelLimits) }
     }
 
     /// When the **popup** shows the "Extra usage" money-credits section (`PopupLayout.credits`).
-    /// Governs the popup only — the menu-bar credits icon (¤) keeps its own boolean gate,
-    /// ``showExtraUsage``, because the two surfaces answer different questions: the icon is a
-    /// glanceable badge, this is the detail section the user opened the dropdown to read.
-    /// An absent or unrecognised value falls back to the factory preset's value.
+    /// Governs the popup only — the menu-bar credits icon (¤) has no user gate at all since ADR-0090,
+    /// because the two surfaces answer different questions: the icon is a glanceable badge, this is the
+    /// detail section the user opened the dropdown to read.
     ///
-    /// This row offers `.always` / `.aboveZero` / `.optionOnly` — **no** `.nonCalm`. Money has no calm
+    /// This row offers `.always` / `.onceUsed` — **no** `.whenItNeedsAttention`. Money has no quiet
     /// reading to gate on: an unlimited cap yields no bar and hence no severity at all, and with a cap
-    /// "spent > 0" always precedes orange. Values stored before that was true are rewritten once by
-    /// ``migrateExtraUsageVisibilityIfNeeded()``.
-    static var extraUsageVisibility: PopupSectionVisibility {
-        get { PopupSectionVisibility(rawValue: defaults.string(forKey: Key.extraUsageVisibility) ?? "") ?? AppearancePreset.defaultValues.extraUsageVisibility }
-        set { defaults.set(newValue.rawValue, forKey: Key.extraUsageVisibility) }
+    /// "spent > 0" always precedes orange. An absent value falls back to the factory preset's value; a
+    /// pre-#381 raw (including the retired `nonCalm` and `optionOnly`) resolves through
+    /// `PopupSectionVisibility.legacyRawValues`, which lands both on `.onceUsed`.
+    static var showExtraUsage: PopupSectionVisibility {
+        get {
+            let raw = defaults.string(forKey: Key.showExtraUsage) ?? ""
+            let stored = PopupSectionVisibility(rawValue: raw)
+                ?? PopupSectionVisibility.legacyRawValues[raw]
+                ?? AppearancePreset.defaultValues.extraUsageVisibility
+            // Fold the one mode this row does not offer, wherever it came from — the key migration handles
+            // an upgrade, but a **hand-edited or imported** config can carry it too, and the control would
+            // then open with no segment highlighted.
+            return stored.foldedForCredits
+        }
+        set { defaults.set(newValue.rawValue, forKey: Key.showExtraUsage) }
     }
 
     /// Revert every setting the **Appearance** pane owns to its factory default — the menu-bar widget
@@ -448,17 +486,30 @@ enum PersistedConfig {
     /// and re-applies the values to the widget.
     static func resetAppearanceToDefaults() {
         for key in [
-            Key.calmColorMode,
+            Key.colorsTell,
             Key.showServiceStatusDot,
-            Key.calmBarHiding,
+            Key.hideTop5hBar,
             // Cleared too, for the same reason as `legacyBarStyle` below: a Reset must also sweep a
             // pre-ADR-0086 boolean the migration may not have reached yet, or it would sit there ready
-            // to re-seed `calmBarHiding` on a later launch.
+            // to re-seed `hideTop5hBar` on a later launch.
             Key.legacyHideCalmSevenDayBar,
-            Key.modelLimitsVisibility,
-            Key.extraUsageVisibility,
+            Key.showPerModelLimits,
+            Key.showExtraUsage,
             Key.menuBarStyle,
             Key.dropdownStyle,
+            // The pre-#381 flat keys, swept for the same reason: a Reset must not leave one waiting to
+            // re-seed its renamed successor on a later launch.
+            Key.legacyCalmColorMode,
+            Key.legacyCalmBarHiding,
+            Key.legacyShowServiceStatusDot,
+            Key.legacyModelLimitsVisibility,
+            Key.legacyExtraUsageVisibility,
+            Key.legacyMenuBarStyle,
+            Key.legacyDropdownStyle,
+            // The two retired migration markers (#381 folded both rewrites into the key move), swept so
+            // a Reset leaves no stale bookkeeping behind.
+            Key.retiredExtraUsageVisibilityMigrated,
+            Key.retiredOptionOnlyVisibilityMigrated,
             // Cleared too, so a reset also sweeps away a pre-#329 value the migration may not have
             // reached yet — otherwise it would be waiting to re-seed the two keys on a later launch.
             Key.legacyBarStyle,
@@ -527,109 +578,153 @@ enum PersistedConfig {
     /// one answers "when", so an explicit choice maps onto the two endpoints:
     ///
     /// - `true` (rows were always shown) → ``PopupSectionVisibility/always``
-    /// - `false` (rows were hidden) → ``PopupSectionVisibility/optionOnly`` — still hidden, but ⌥ Option
-    ///   now retrieves them on demand. `.nonCalm` would be a louder popup than the user asked for.
+    /// - `false` (rows were hidden) → ``PopupSectionVisibility/onceUsed``. This used to land on
+    ///   `.optionOnly` (hidden, but ⌥ Option retrieved them); #381 deleted that case, and the legacy
+    ///   raw now resolves through ``PopupSectionVisibility/legacyRawValues`` like every other one.
     ///
     /// Runs on every launch and is idempotent: it does nothing once the new key exists (the legacy key is
     /// cleared either way). Only an **explicit** legacy value migrates — someone who never touched the
-    /// old toggle gets the new `.nonCalm` default from the getter's preset fallback.
+    /// old toggle gets the new ``PopupSectionVisibility/whenItNeedsAttention`` default from the
+    /// getter's preset fallback.
     ///
     /// There is no counterpart for the Extra-usage section: it had no popup-side setting before, so
     /// everyone starts on the preset default.
     /// One-time upgrade of the boolean "hide the calm **7-day** bar" opt-out (#94) to the tri-state
-    /// ``calmBarHiding`` (ADR-0086). The old key could only ever hide the 7-day bar, so an explicit
+    /// ``hideTop5hBar`` (ADR-0086). The old key could only ever hide the 7-day bar, so an explicit
     /// choice maps onto two of the three cases — `true` → `.sevenDay`, `false` → `.never` — each
     /// preserving exactly what the user was looking at. The mapping itself lives in
-    /// `CalmBarHiding.migrated(fromLegacyHide:)` so it is unit-testable from the Kit and shared with the
+    /// `TopBarHiding.migrated(fromLegacyHide:)` so it is unit-testable from the Kit and shared with the
     /// exported-config decode.
     ///
     /// Runs on every launch and is idempotent: it does nothing once the new key exists (the legacy key is
     /// cleared either way). Only an **explicit** legacy value migrates. Someone who never touched the old
-    /// toggle has nothing stored, so they pick up the new `.fiveHour` default from the getter's preset
+    /// toggle has nothing stored, so they pick up the new ``TopBarHiding/untilItNeedsAttention``
+    /// default from the getter's preset
     /// fallback — a deliberate shift of the out-of-the-box look (the 7-day bar now stays and the 5-hour
     /// one steps aside while calm), the same way ADR-0080 moved the factory bar style.
-    static func migrateCalmBarHidingIfNeeded() {
-        // Already migrated (or new key explicitly set) → nothing to do.
-        guard defaults.object(forKey: Key.calmBarHiding) == nil else {
+    static func migrateTopBarHidingIfNeeded() {
+        // Already migrated (or new key explicitly set) → nothing to do. Both the #381 key and its
+        // pre-#381 predecessor count as "set": `migrateAppearanceKeysIfNeeded()` moves the latter onto
+        // the former, and it must not be pre-empted by a boolean two generations older.
+        guard defaults.object(forKey: Key.hideTop5hBar) == nil,
+              defaults.object(forKey: Key.legacyCalmBarHiding) == nil else {
             defaults.removeObject(forKey: Key.legacyHideCalmSevenDayBar)
             return
         }
         if let legacyHide = defaults.object(forKey: Key.legacyHideCalmSevenDayBar) as? Bool {
-            let migrated = CalmBarHiding.migrated(fromLegacyHide: legacyHide)
-            calmBarHiding = migrated
+            let migrated = TopBarHiding.migrated(fromLegacyHide: legacyHide)
+            hideTop5hBar = migrated
             AppLogger.lifecycle.notice(
-                "calm-bar-hiding: migrated \(legacyHide, privacy: .public) → \(migrated.rawValue, privacy: .public)")
+                "hide-top-5h-bar: migrated \(legacyHide, privacy: .public) → \(migrated.rawValue, privacy: .public)")
         }
         defaults.removeObject(forKey: Key.legacyHideCalmSevenDayBar)
     }
 
     static func migrateModelLimitsVisibilityIfNeeded() {
-        // Already migrated (or new key explicitly set) → nothing to do.
-        guard defaults.object(forKey: Key.modelLimitsVisibility) == nil else {
+        // Already migrated (or either generation of the key explicitly set) → nothing to do.
+        guard defaults.object(forKey: Key.showPerModelLimits) == nil,
+              defaults.object(forKey: Key.legacyModelLimitsVisibility) == nil else {
             defaults.removeObject(forKey: Key.legacyShowModelSpecificLimits)
             return
         }
         if let legacyShow = defaults.object(forKey: Key.legacyShowModelSpecificLimits) as? Bool {
-            // `false` used to land on `.optionOnly`, which is no longer offered by the control (#374).
-            // `.nonCalm` is this row's default and the nearest reading of the old intent: the user had
-            // the group switched off, so it should stay folded — but it now comes back on its own when
-            // a row turns orange, instead of only under ⌥.
-            modelLimitsVisibility = legacyShow ? .always : .nonCalm
+            // `false` used to land on the retired `.optionOnly` (#374, removed outright in #381).
+            // `.whenItNeedsAttention` is this row's default and the nearest reading of the old intent:
+            // the user had the group switched off, so it should stay folded — but it now comes back on
+            // its own when a row turns orange, instead of only under ⌥.
+            showPerModelLimits = legacyShow ? .always : .whenItNeedsAttention
         }
         defaults.removeObject(forKey: Key.legacyShowModelSpecificLimits)
     }
 
-    /// Rewrite a stored `.optionOnly` choice — on **either** dropdown group — to a mode still offered.
+    /// Move all seven Appearance keys onto their #381 names — the surface-prefixed
+    /// `menuBar.*` / `dropdown.*` form — carrying each stored **value** through its type's
+    /// `legacyRawValues` on the way.
     ///
-    /// The segment left both controls in #374: ⌥ is OR'd into every other mode, so it already reveals
-    /// either group whichever one is picked, and `.optionOnly`'s only distinct behaviour was to keep the
-    /// group hidden *when its data had turned interesting*. Without this migration an install holding it
-    /// would open Settings to a segmented control with nothing highlighted.
+    /// One migration for seven keys rather than seven migrations: they move together, in one release, so
+    /// a single event describes it and a single pass is atomic. Per key: if the new key is absent and the
+    /// old one is present, read the old raw, resolve it through the type (so `aboveZero` → `onceUsed`,
+    /// `yellowGreen` → `slowDownOrSpeedUp`, `fiveHour` → `untilItNeedsAttention`), write the new key,
+    /// delete the old one, log it.
     ///
-    /// Both land on `.aboveZero`, which is the closest surviving intent — "stay folded until there is
-    /// something in here" — and, unlike `.nonCalm`, is offered by both rows.
+    /// **An absent old key is left absent** — the value then keeps tracking the preset default, exactly
+    /// as the sibling legacy migrations do.
     ///
-    /// Idempotent via its own marker key, for the same reason `migrateExtraUsageVisibilityIfNeeded` uses
-    /// one: `.optionOnly` remains a legal decoded value (an imported config can still carry it), so
-    /// consuming the key would rewrite a later import a second time.
-    static func migrateOptionOnlyVisibilityIfNeeded() {
-        guard !defaults.bool(forKey: Key.optionOnlyVisibilityMigrated) else { return }
-        defaults.set(true, forKey: Key.optionOnlyVisibilityMigrated)
-        let retired = PopupSectionVisibility.optionOnly.rawValue
-        if defaults.string(forKey: Key.modelLimitsVisibility) == retired {
-            modelLimitsVisibility = .aboveZero
-            AppLogger.lifecycle.notice(
-                "model-limits-section: migrated optionOnly → \(PopupSectionVisibility.aboveZero.rawValue, privacy: .public)")
+    /// **Idempotent by construction, no marker key.** Each key's rewrite is guarded on "new key absent"
+    /// and consumes the old key, so completion is self-evident from the old key being gone. That is why
+    /// #381 could fold in the two marker-keyed *value* rewrites this replaces —
+    /// `.nonCalm` → `.aboveZero` for Extra usage, and `.optionOnly` → `.aboveZero` for both rows (#374).
+    /// Both now happen through `PopupSectionVisibility.legacyRawValues` while the key itself moves:
+    /// `optionOnly` and `nonCalm` both resolve to `.onceUsed` there, and neither raw survives as a case,
+    /// so there is nothing left for a later import to reintroduce. Their markers are retired
+    /// (`Key.retired…Migrated`) and only swept by an Appearance reset.
+    ///
+    /// Reads raw strings rather than the typed getters: a getter resolves an unrecognised raw to the
+    /// preset default, which would hide the very value being migrated.
+    static func migrateAppearanceKeysIfNeeded() {
+        migrateRawKey(from: Key.legacyMenuBarStyle, to: Key.menuBarStyle, label: "menu-bar-style") {
+            BarStyle(rawValue: $0)?.rawValue ?? BarStyle.legacyRawValues[$0]?.rawValue
         }
-        if defaults.string(forKey: Key.extraUsageVisibility) == retired {
-            extraUsageVisibility = .aboveZero
-            AppLogger.lifecycle.notice(
-                "extra-usage-section: migrated optionOnly → \(PopupSectionVisibility.aboveZero.rawValue, privacy: .public)")
+        migrateRawKey(from: Key.legacyDropdownStyle, to: Key.dropdownStyle, label: "dropdown-style") {
+            BarStyle(rawValue: $0)?.rawValue ?? BarStyle.legacyRawValues[$0]?.rawValue
         }
+        migrateRawKey(from: Key.legacyCalmColorMode, to: Key.colorsTell, label: "colors-tell") {
+            ColorAdvice(rawValue: $0)?.rawValue ?? ColorAdvice.legacyRawValues[$0]?.rawValue
+        }
+        migrateRawKey(from: Key.legacyCalmBarHiding, to: Key.hideTop5hBar, label: "hide-top-5h-bar") {
+            TopBarHiding(rawValue: $0)?.rawValue ?? TopBarHiding.legacyRawValues[$0]?.rawValue
+        }
+        migrateRawKey(
+            from: Key.legacyModelLimitsVisibility, to: Key.showPerModelLimits,
+            label: "show-per-model-limits"
+        ) {
+            PopupSectionVisibility(rawValue: $0)?.rawValue
+                ?? PopupSectionVisibility.legacyRawValues[$0]?.rawValue
+        }
+        migrateRawKey(
+            from: Key.legacyExtraUsageVisibility, to: Key.showExtraUsage, label: "show-extra-usage"
+        ) {
+            // Folded for this row: it offers only `.onceUsed` / `.always`, so a stored (or
+            // legacy-resolved) `.whenItNeedsAttention` has to land on `.onceUsed`. The shared legacy table
+            // cannot do it — it does not know which row is reading — and without the fold the control opens
+            // with **no segment highlighted**, the exact defect the retired
+            // `migrateExtraUsageVisibilityIfNeeded()` existed to prevent.
+            (PopupSectionVisibility(rawValue: $0) ?? PopupSectionVisibility.legacyRawValues[$0])?
+                .foldedForCredits.rawValue
+        }
+
+        // The one `Bool`, so it needs its own two lines rather than the string helper.
+        if defaults.object(forKey: Key.showServiceStatusDot) == nil,
+           let old = defaults.object(forKey: Key.legacyShowServiceStatusDot) as? Bool {
+            defaults.set(old, forKey: Key.showServiceStatusDot)
+            AppLogger.lifecycle.notice(
+                "service-status-dot: migrated key → \(Key.showServiceStatusDot, privacy: .public)")
+        }
+        defaults.removeObject(forKey: Key.legacyShowServiceStatusDot)
     }
 
-    /// Rewrite a stored `.nonCalm` **Extra usage** choice to `.aboveZero`, once.
+    /// One key's half of ``migrateAppearanceKeysIfNeeded()``: move a raw string from `from` to `to`,
+    /// mapping the value through `resolve` (the type's own current-or-legacy lookup).
     ///
-    /// `.nonCalm` used to be this row's default, so it sits in most existing installs — but the segment
-    /// is gone from the control, and the mode was never a good fit for money: on an unlimited cap
-    /// (`spend.limit == null`) there is no bar, hence no severity, hence the section would stay hidden
-    /// no matter how much was spent. `.aboveZero` keeps the intent that made `.nonCalm` the default
-    /// ("stay folded until there's something to see") and delivers it in every billing configuration.
-    ///
-    /// Only `.nonCalm` is touched: `.always` and `.optionOnly` are still offered and are deliberate
-    /// choices, and an absent key is left absent so it keeps tracking the preset default.
-    ///
-    /// Idempotent via its own marker key rather than by consuming a legacy key — there isn't one here,
-    /// and `.nonCalm` stays a legal value for the sibling row. Without the marker, a user who later
-    /// re-picked `.nonCalm` through an export/import round-trip would have it silently rewritten again.
-    static func migrateExtraUsageVisibilityIfNeeded() {
-        guard !defaults.bool(forKey: Key.extraUsageVisibilityMigrated) else { return }
-        defaults.set(true, forKey: Key.extraUsageVisibilityMigrated)
-        guard defaults.string(forKey: Key.extraUsageVisibility) == PopupSectionVisibility.nonCalm.rawValue
-        else { return }
-        extraUsageVisibility = .aboveZero
+    /// A raw that `resolve` cannot place is **dropped rather than copied**: it belongs to no case this
+    /// build knows, so writing it through would only make the new key fail its own decode. Dropping lets
+    /// the getter fall back to the preset default, which is the same thing an unreadable value has always
+    /// meant here.
+    private static func migrateRawKey(
+        from old: String, to new: String, label: String,
+        resolve: (String) -> String?
+    ) {
+        defer { defaults.removeObject(forKey: old) }
+        guard defaults.object(forKey: new) == nil,
+              let oldRaw = defaults.string(forKey: old) else { return }
+        guard let newRaw = resolve(oldRaw) else {
+            AppLogger.lifecycle.notice(
+                "\(label, privacy: .public): dropped unrecognised legacy value \(oldRaw, privacy: .public)")
+            return
+        }
+        defaults.set(newRaw, forKey: new)
         AppLogger.lifecycle.notice(
-            "extra-usage-section: migrated nonCalm → \(PopupSectionVisibility.aboveZero.rawValue, privacy: .public)")
+            "\(label, privacy: .public): migrated \(oldRaw, privacy: .public) → \(newRaw, privacy: .public)")
     }
 
     /// Split the pre-#329 single `barStyle` key into the per-surface ``menuBarStyle`` /
@@ -658,8 +753,13 @@ enum PersistedConfig {
     /// and the pass does nothing, and an absent legacy key stays absent.
     static func migrateBarStyleIfNeeded() {
         // Already migrated (or a new key explicitly set) → drop the stale legacy value and stop.
+        // Either generation of either key counts as "already split": `migrateAppearanceKeysIfNeeded()`
+        // moves the pre-#381 flat names onto the prefixed ones, and a pre-#329 single value must not
+        // pre-empt that.
         guard defaults.object(forKey: Key.menuBarStyle) == nil,
-              defaults.object(forKey: Key.dropdownStyle) == nil else {
+              defaults.object(forKey: Key.dropdownStyle) == nil,
+              defaults.object(forKey: Key.legacyMenuBarStyle) == nil,
+              defaults.object(forKey: Key.legacyDropdownStyle) == nil else {
             defaults.removeObject(forKey: Key.legacyBarStyle)
             return
         }
@@ -715,11 +815,11 @@ enum PersistedConfig {
     /// Write every Appearance key from an arbitrary value set — the general form of ``apply(_:)``,
     /// used to restore the saved Custom setup (#333).
     static func applyValues(_ v: AppearancePresetValues) {
-        calmColorMode = v.calmColorMode
-        calmBarHiding = v.calmBarHiding
+        colorsTell = v.colorsTell
+        hideTop5hBar = v.hideTop5hBar
         showServiceStatusDot = v.showServiceStatusDot
-        modelLimitsVisibility = v.modelLimitsVisibility
-        extraUsageVisibility = v.extraUsageVisibility
+        showPerModelLimits = v.modelLimitsVisibility
+        showExtraUsage = v.extraUsageVisibility
         menuBarStyle = v.menuBarStyle
         dropdownStyle = v.dropdownStyle
     }
@@ -730,11 +830,11 @@ enum PersistedConfig {
     /// active; equal to none → the "Custom" slot.
     static var currentAppearanceValues: AppearancePresetValues {
         AppearancePresetValues(
-            calmColorMode: calmColorMode,
-            calmBarHiding: calmBarHiding,
+            colorsTell: colorsTell,
+            hideTop5hBar: hideTop5hBar,
             showServiceStatusDot: showServiceStatusDot,
-            modelLimitsVisibility: modelLimitsVisibility,
-            extraUsageVisibility: extraUsageVisibility,
+            modelLimitsVisibility: showPerModelLimits,
+            extraUsageVisibility: showExtraUsage,
             menuBarStyle: menuBarStyle,
             dropdownStyle: dropdownStyle)
     }

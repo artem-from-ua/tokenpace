@@ -149,7 +149,7 @@ public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
     ///
     /// An unrecognised raw still falls back to ``progress`` (the default, i.e. the shipped behaviour)
     /// instead of throwing, so a *newer* build's value never makes an older one fail. Mirrors
-    /// `CalmBarHiding`'s unknown philosophy.
+    /// `TopBarHiding`'s unknown philosophy.
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
         self = BarStyle(rawValue: raw) ?? BarStyle.legacyRawValues[raw] ?? .progress

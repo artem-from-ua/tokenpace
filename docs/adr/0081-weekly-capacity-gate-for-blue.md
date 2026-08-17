@@ -2,9 +2,19 @@
 status: accepted
 date: 2026-08-12
 supersedes: []
+superseded_by: [0105]
 ---
 
 # ADR-0081: Синій гейтиться запасом тижня; ширина far-behind зони фіксована
+
+> **§4 «Idle-пігулка тризначна» витіснено
+> [ADR-0105](0105-color-advice-governs-pacing-bars-only.md)**
+> ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)): станів у пігулки **два** — сіра
+> `isBlocked` і **зелена** решта; синьої немає на жодній із поверхонь. Разом із нею видалено поля
+> `BarView.weeklyHeadroom` / `LimitRow.weeklyHeadroom`, які існували лише щоб протягти тижневий
+> вердикт крізь інертний idle-рядок. **Чинним лишається §3** — сам weekly-gate, що й далі гейтить
+> `blueAllowed` **активних** барів, а також §1, §2, §5 і §6. Опція, названа тут `CalmColorMode`,
+> зветься `ColorAdvice` ([ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md)).
 
 > Частково витісняє [ADR-0061](0061-far-behind-blue-pacing-zone.md) (§1 «Behind-поріг фіксованої
 > часової ширини» — поріг лишається фіксованим, але множник більше не конфігурований) і
