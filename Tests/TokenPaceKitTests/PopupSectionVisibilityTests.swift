@@ -121,6 +121,26 @@ struct PopupSectionVisibilityStorageTests {
         }
     }
 
+    /// The Extra-usage row offers two of the three modes, and anything that reaches it has to be folded
+    /// onto one of them — otherwise the control opens with **no segment highlighted**.
+    ///
+    /// Caught in live verification: the shared legacy table resolved a stored `nonCalm` to
+    /// `.whenItNeedsAttention` faithfully, which is right for the per-model row and wrong for this one.
+    /// Three paths feed that key (the key migration, the getter, an imported config), so the rule lives
+    /// beside the enum and all of them — plus the pane's segment list — read it from here.
+    @Test func creditsRowFoldsTheModeItCannotOffer() {
+        #expect(PopupSectionVisibility.creditsOffered == [.onceUsed, .always])
+        #expect(PopupSectionVisibility.whenItNeedsAttention.foldedForCredits == .onceUsed)
+        // The offered modes pass through untouched.
+        for mode in PopupSectionVisibility.creditsOffered {
+            #expect(mode.foldedForCredits == mode)
+        }
+        // Whatever the enum grows next, folding always lands on something the row can show.
+        for mode in PopupSectionVisibility.allCases {
+            #expect(PopupSectionVisibility.creditsOffered.contains(mode.foldedForCredits))
+        }
+    }
+
     /// Forward-compatible decode: a value written by a newer build must not make this one throw — it
     /// falls back to the default instead. Mirrors `ColorAdvice` / `BarStyle`.
     @Test func unknownRawDecodesToDefault() throws {

@@ -467,9 +467,13 @@ enum PersistedConfig {
     static var showExtraUsage: PopupSectionVisibility {
         get {
             let raw = defaults.string(forKey: Key.showExtraUsage) ?? ""
-            return PopupSectionVisibility(rawValue: raw)
+            let stored = PopupSectionVisibility(rawValue: raw)
                 ?? PopupSectionVisibility.legacyRawValues[raw]
                 ?? AppearancePreset.defaultValues.extraUsageVisibility
+            // Fold the one mode this row does not offer, wherever it came from — the key migration handles
+            // an upgrade, but a **hand-edited or imported** config can carry it too, and the control would
+            // then open with no segment highlighted.
+            return stored.foldedForCredits
         }
         set { defaults.set(newValue.rawValue, forKey: Key.showExtraUsage) }
     }
@@ -677,8 +681,13 @@ enum PersistedConfig {
         migrateRawKey(
             from: Key.legacyExtraUsageVisibility, to: Key.showExtraUsage, label: "show-extra-usage"
         ) {
-            PopupSectionVisibility(rawValue: $0)?.rawValue
-                ?? PopupSectionVisibility.legacyRawValues[$0]?.rawValue
+            // Folded for this row: it offers only `.onceUsed` / `.always`, so a stored (or
+            // legacy-resolved) `.whenItNeedsAttention` has to land on `.onceUsed`. The shared legacy table
+            // cannot do it — it does not know which row is reading — and without the fold the control opens
+            // with **no segment highlighted**, the exact defect the retired
+            // `migrateExtraUsageVisibilityIfNeeded()` existed to prevent.
+            (PopupSectionVisibility(rawValue: $0) ?? PopupSectionVisibility.legacyRawValues[$0])?
+                .foldedForCredits.rawValue
         }
 
         // The one `Bool`, so it needs its own two lines rather than the string helper.

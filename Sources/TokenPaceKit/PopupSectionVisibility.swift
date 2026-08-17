@@ -105,6 +105,22 @@ public enum PopupSectionVisibility: String, Sendable, Equatable, Codable, CaseIt
         }
     }
 
+    /// The modes the **Extra usage** row can actually show — `.whenItNeedsAttention` is not among them
+    /// (see the type's note on unlimited caps), so anything that reaches that row has to be folded onto
+    /// ``onceUsed`` first.
+    ///
+    /// Lives here rather than in the pane because three separate paths feed that row — the key migration,
+    /// the `UserDefaults` getter, and an imported config — and a value the control does not offer opens it
+    /// with **no segment highlighted**. Keeping the rule beside the enum is what lets all three agree; the
+    /// pane's own segment list is built from `creditsOffered` for the same reason.
+    public static let creditsOffered: [PopupSectionVisibility] = [.onceUsed, .always]
+
+    /// `self` if the Extra-usage row can show it, else ``onceUsed`` — the surviving intent of the one mode
+    /// it cannot ("stay folded until there is something in here").
+    public var foldedForCredits: PopupSectionVisibility {
+        PopupSectionVisibility.creditsOffered.contains(self) ? self : .onceUsed
+    }
+
     /// The pre-#381 raw values, mapped onto the current cases. Consulted by ``init(from:)`` **before**
     /// the default fallback, so a rename never silently downgrades a stored choice.
     ///
