@@ -302,3 +302,91 @@ struct WeeklyResetRepairTests {
         #expect(sample.d7.utilSrc == "interpolated")
     }
 }
+
+// MARK: - Which generation the backup is named after (#401)
+
+/// The backup keeps the format version it **contains**, so every migration leaves its own — a file
+/// taken v1 → v2 → v3 ends up with both `.v1.bak` and `.v2.bak`.
+///
+/// The bug this pins down: with a fixed `.v1.bak`, the second migration found that name already
+/// taken, correctly refused to overwrite the older evidence, and deleted the v2 file instead. The
+/// archive then jumped v1 → v3 with the middle generation gone — which is what happened on the
+/// maintainer's live journal.
+@Suite("JournalMigration — backup generation")
+struct BackupGenerationTests {
+
+    private static func at(_ minutes: Int) -> String {
+        ResetClock.isoString(from: Date(timeIntervalSince1970: 1_800_000_000)
+            .addingTimeInterval(Double(minutes) * 60))
+    }
+
+    /// A v1 file (no `v` key at all) reports generation 1.
+    @Test func aV1FileReportsVersionOne() {
+        let input = [v1Line(t: Self.at(0), h5: 10, d7: 50),
+                     v1Line(t: Self.at(3), h5: 20, d7: 50)].joined(separator: "\n")
+        let outcome = JournalMigration.migrate(contents: input).outcome
+        #expect(outcome.migrated == 2)
+        #expect(outcome.migratedFromVersion == 1)
+    }
+
+    /// A v2 file reports generation 2 — the case the live journal hit, and the one a fixed suffix
+    /// mislabelled.
+    @Test func aV2FileReportsVersionTwo() {
+        let line = """
+        {"kind":"usage","v":2,"t":"\(Self.at(0))",\
+        "h5":{"util":10,"raw":10,"reset":"","timePct":0.5,"sev":"green"},\
+        "d7":{"util":50,"raw":50,"src":"interpolated","n":10,"reset":"","timePct":0.5,"sev":"green"},\
+        "scoped":[],"sessionIdle":false,"blocked":false,\
+        "credits":{"active":false,"showIcon":false,"onCredits":false},"brokenReset":false}
+        """
+        let outcome = JournalMigration.migrate(contents: line).outcome
+        #expect(outcome.migrated == 1)
+        #expect(outcome.migratedFromVersion == 2)
+    }
+
+    /// A file spanning an upgrade holds several generations at once — the journal is append-only and
+    /// outlives app versions. The backup must be named after the **oldest** thing in it, or the label
+    /// claims the archive is more recent than it is.
+    @Test func aMixedFileReportsTheOldestGeneration() {
+        let v2 = """
+        {"kind":"usage","v":2,"t":"\(Self.at(3))",\
+        "h5":{"util":10,"raw":10,"reset":"","timePct":0.5,"sev":"green"},\
+        "d7":{"util":50,"raw":50,"src":"interpolated","n":10,"reset":"","timePct":0.5,"sev":"green"},\
+        "scoped":[],"sessionIdle":false,"blocked":false,\
+        "credits":{"active":false,"showIcon":false,"onCredits":false},"brokenReset":false}
+        """
+        let input = [v1Line(t: Self.at(0), h5: 10, d7: 50), v2].joined(separator: "\n")
+        let outcome = JournalMigration.migrate(contents: input).outcome
+        #expect(outcome.migratedFromVersion == 1)      // not 2
+    }
+
+    /// Nothing rewritten → nothing to name a backup after, and `changedAnything` keeps the shell from
+    /// writing one at all.
+    @Test func anAlreadyCurrentFileReportsNoVersion() {
+        let current = UsageSample(
+            t: Self.at(0),
+            h5: WindowSample(util: 10, reset: "", timePct: 0.5, sev: .green),
+            d7: WindowSample(util: 50, raw: 50, utilSrc: "interpolated", n: 9.8,
+                             reset: "", timePct: 0.5, sev: .green),
+            credits: CreditsFlags(active: false, showIcon: false, onCredits: false))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        let line = String(data: try! encoder.encode(JournalRecord.usage(current)), encoding: .utf8)!
+
+        let outcome = JournalMigration.migrate(contents: line).outcome
+        #expect(!outcome.changedAnything)
+        #expect(outcome.migratedFromVersion == nil)
+    }
+
+    /// A backup must never be picked up as a journal to migrate — it is the evidence, not an input.
+    /// Guarded by the `.jsonl` suffix check, which a `.bak` name fails.
+    @Test func backupsAreNotMigrated() {
+        for name in ["usage-journal-2026-08.jsonl.v1.bak", "usage-journal-2026-08.jsonl.v2.bak"] {
+            #expect(!JournalMigration.belongsToBuild(fileName: name, isRelease: true))
+            #expect(!JournalMigration.belongsToBuild(fileName: name, isRelease: false))
+        }
+        // The live file itself still is, in both build flavours.
+        #expect(JournalMigration.belongsToBuild(fileName: "usage-journal-2026-08.jsonl", isRelease: true))
+        #expect(JournalMigration.belongsToBuild(fileName: "usage-journal-dev-2026-08.jsonl", isRelease: false))
+    }
+}

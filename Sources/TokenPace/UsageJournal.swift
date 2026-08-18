@@ -194,8 +194,24 @@ actor UsageJournal {
 
     // MARK: - Migration (#386)
 
-    /// The suffix a pre-migration copy keeps. **Never deleted by the app** — see ``migrateIfNeeded()``.
-    static let backupSuffix = ".v1.bak"
+    /// The suffix a pre-migration copy keeps, named after the format version the copy **contains**
+    /// (`.v2.bak` for a file that was v2). **Never deleted by the app** — see ``migrateIfNeeded()``.
+    ///
+    /// Versioned since #401. It used to be a hardcoded `.v1.bak`, which described the contents
+    /// exactly while there was only one migration and started lying as soon as there were two: the
+    /// v2 → v3 pass found a `.v1.bak` already in place, kept it (correctly — it must never overwrite
+    /// older evidence) and discarded the v2 state instead of preserving it under its own name. The
+    /// archive then jumped v1 → v3 with the middle generation gone.
+    ///
+    /// Existing `.v1.bak` files need no migration of their own: they hold v1 and are already named
+    /// correctly under this rule.
+    static func backupSuffix(forVersion version: Int) -> String { ".v\(version).bak" }
+
+    /// Matches any versioned backup, for callers that need to recognise one without knowing which
+    /// generation it holds (file listing, tests).
+    static func isBackup(fileName: String) -> Bool {
+        fileName.range(of: #"\.v\d+\.bak$"#, options: .regularExpression) != nil
+    }
 
     /// Bring every journal file up to the current sample format, in chronological order.
     ///
@@ -206,10 +222,14 @@ actor UsageJournal {
     /// Each file is rewritten out-of-place and swapped in with two `rename` calls, which are atomic on
     /// APFS: a crash at any point leaves either the old file or the new one, never a half-written one.
     ///
-    /// **The `.v1.bak` copies are kept forever.** After migration `util` is the reconstructed value,
-    /// so the backup is the only remaining record of what the server actually returned — if the
-    /// algorithm turns out to have a flaw, that is the only way to redo the history. The app never
-    /// deletes them; removing them is the maintainer's call.
+    /// **The `.v<n>.bak` copies are kept forever.** After migration `util` is the reconstructed
+    /// value, so the backup is the only remaining record of what the server actually returned — if
+    /// the algorithm turns out to have a flaw, that is the only way to redo the history. The app
+    /// never deletes them; removing them is the maintainer's call.
+    ///
+    /// Each generation keeps its **own** backup (#401): a file migrated v1 → v2 → v3 leaves both
+    /// `.v1.bak` and `.v2.bak`, so any single step can be re-examined without replaying the ones
+    /// before it. A fixed name would have meant only the first migration's state survived.
     ///
     /// The reconstruction state is threaded from one file to the next, because the journal is split by
     /// month and starting each file cold would leave every line of a new month on an inherited anchor
@@ -220,6 +240,9 @@ actor UsageJournal {
 
         var state = WeeklyInterpolator()
         var migratedFiles = 0
+        // Which backup names this run actually wrote. A run spanning several months can touch files
+        // of different generations, so the log names what it produced rather than one fixed suffix.
+        var backupSuffixesWritten: Set<String> = []
 
         for url in files {
             guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
@@ -231,15 +254,20 @@ actor UsageJournal {
             state = carried
             guard outcome.changedAnything else { continue }
 
-            if swapIn(rewritten, at: url) {
+            // `changedAnything` guarantees at least one line was rewritten, so the pass knows which
+            // generation it came from; the fallback keeps the call total rather than force-unwrapping.
+            let wasVersion = outcome.migratedFromVersion ?? 1
+            if swapIn(rewritten, at: url, wasVersion: wasVersion) {
                 migratedFiles += 1
+                backupSuffixesWritten.insert(Self.backupSuffix(forVersion: wasVersion))
                 AppLogger.journal.notice(
                     "\(url.lastPathComponent, privacy: .public): \(outcome.logMessage, privacy: .public)")
             }
         }
         if migratedFiles > 0 {
+            let suffixes = backupSuffixesWritten.sorted().joined(separator: ", ")
             AppLogger.journal.notice(
-                "journal migration complete: \(migratedFiles, privacy: .public) file(s); originals kept as \(Self.backupSuffix, privacy: .public)")
+                "journal migration complete: \(migratedFiles, privacy: .public) file(s); originals kept as \(suffixes, privacy: .public)")
         }
     }
 
@@ -259,14 +287,17 @@ actor UsageJournal {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    /// Write `contents` beside `url` and swap it in atomically, keeping the original as `.v1.bak`.
+    /// Write `contents` beside `url` and swap it in atomically, keeping the original as
+    /// `.v<wasVersion>.bak`.
     ///
     /// Order matters: the new file is fully written and `fsync`ed *before* anything moves, and the
     /// original is renamed aside rather than overwritten, so at no point does the live path hold a
     /// partial file. Returns whether the swap happened.
-    private func swapIn(_ contents: String, at url: URL) -> Bool {
+    ///
+    /// - Parameter wasVersion: the format generation `url` currently holds, which names its backup.
+    private func swapIn(_ contents: String, at url: URL, wasVersion: Int) -> Bool {
         let staging = url.appendingPathExtension("migrating")
-        let backup = URL(fileURLWithPath: url.path + Self.backupSuffix)
+        let backup = URL(fileURLWithPath: url.path + Self.backupSuffix(forVersion: wasVersion))
 
         guard let data = contents.data(using: .utf8) else { return false }
         do {
@@ -277,8 +308,15 @@ actor UsageJournal {
             return false
         }
 
-        // A backup already present means a previous run migrated this file; never overwrite the
-        // original evidence with an already-migrated copy.
+        // Move the original aside under the name of the generation it holds. Because the suffix is
+        // versioned (#401), a second migration no longer collides with the first one's backup: the
+        // v1 → v2 pass leaves `.v1.bak`, the v2 → v3 pass leaves `.v2.bak`, and the chain of states
+        // stays complete. Before that fix this branch found the existing `.v1.bak`, kept it (right)
+        // and deleted the v2 file (wrong) — losing the middle generation.
+        //
+        // A backup under *this* version already existing still means a previous run migrated this
+        // same generation, so the original evidence is already safe and the current file is a
+        // duplicate of work already recorded. Never overwrite it.
         if !fileManager.fileExists(atPath: backup.path) {
             do {
                 try fileManager.moveItem(at: url, to: backup)
