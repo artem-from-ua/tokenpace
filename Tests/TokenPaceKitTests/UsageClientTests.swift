@@ -233,15 +233,71 @@ struct UsageDecodeTests {
         #expect(snapshot.fiveHour.resetsAt.isEmpty)
     }
 
-    @Test func sevenDayNullWithoutLimitStillUsesLocalEstimate() throws {
-        // The weekly window always exists, so its degenerate case keeps the local estimate — and is
-        // never `sessionIdle` (that flag is five_hour-only).
+    /// With no anchor to roll, the decoder invents **nothing** (ADR-0106). This replaces the old
+    /// `now + 7d` local estimate, which was recomputed every poll and therefore crept forward with
+    /// the clock, holding `elapsedFraction` at exactly 0 for the hours a weekly blackout lasts.
+    /// Still never `sessionIdle` — that flag is five_hour-only.
+    @Test func sevenDayNullWithoutLimitOrAnchorHasNoReset() throws {
         let snapshot = try UsageClient.decode(
             from: usageJSON(sevenDay: "null", limits: "[]"), now: now)
         #expect(!snapshot.sessionIdle)
         #expect(snapshot.sevenDay.utilization == 0)
-        let expected = ResetClock.nextReset(now: now, window: .sevenDay)
-        #expect(ResetClock.parse(snapshot.sevenDay.resetsAt) == expected)
+        #expect(snapshot.sevenDay.resetsAt.isEmpty)
+        #expect(snapshot.sevenDayResetSource == .unknown)
+    }
+
+    /// The blackout case with history: the anchor is rolled forward by whole weeks, landing on the
+    /// real grid rather than an estimate.
+    @Test func sevenDayNullWithAnchorIsReconstructed() throws {
+        let anchor = now.addingTimeInterval(-3600)   // last week's reset, an hour ago
+        let snapshot = try UsageClient.decode(
+            from: usageJSON(sevenDay: "null", limits: "[]"), now: now,
+            lastKnownSevenDayReset: anchor)
+        #expect(snapshot.sevenDayResetSource == .reconstructed)
+        #expect(ResetClock.parse(snapshot.sevenDay.resetsAt)
+                == anchor.addingTimeInterval(TimeInterval(LimitWindow.sevenDay.durationSeconds)))
+        #expect(snapshot.sevenDay.utilization == 0)
+    }
+
+    /// Rung order: a `limits[]` entry is a server fact and outranks our reconstruction.
+    @Test func limitsEntryOutranksTheAnchor() throws {
+        let limits = """
+        [{"kind":"weekly_all","group":"weekly","percent":36,"severity":"normal",\
+        "resets_at":"2026-06-23T06:59:59+00:00","is_active":true}]
+        """
+        let snapshot = try UsageClient.decode(
+            from: usageJSON(sevenDay: "null", limits: limits), now: now,
+            lastKnownSevenDayReset: now.addingTimeInterval(-3600))
+        #expect(snapshot.sevenDay.resetsAt == "2026-06-23T06:59:59+00:00")
+        #expect(snapshot.sevenDayResetSource == .limits)
+    }
+
+    /// And the window's own field outranks everything — an anchor never overrides live data.
+    @Test func theWindowsOwnResetOutranksTheAnchor() throws {
+        let snapshot = try UsageClient.decode(
+            from: usageJSON(sevenDay: #"{"utilization":31.0,"resets_at":"2026-07-28T07:00:00.405400+00:00"}"#),
+            now: now, lastKnownSevenDayReset: now.addingTimeInterval(-3600))
+        #expect(snapshot.sevenDay.resetsAt == "2026-07-28T07:00:00.405400+00:00")
+        #expect(snapshot.sevenDayResetSource == .server)
+    }
+
+    /// **The body that caused all of this**, verbatim from the 2026-08-18 blackout: `seven_day` null
+    /// and a `weekly_all` entry that carries no `resets_at` of its own. Without an anchor the app
+    /// used to answer with a drifting estimate; now it reconstructs the real grid instant.
+    @Test func theLiveBlackoutBodyReconstructsFromTheAnchor() throws {
+        let body = #"""
+        {"five_hour":{"utilization":0.0,"resets_at":null},"seven_day":null,"seven_day_opus":null,"seven_day_sonnet":null,"limits":[{"kind":"weekly_all","group":"weekly","percent":0,"severity":"normal","scope":null,"is_active":true}]}
+        """#
+        // The last reset the server sent before the blackout began, to the microsecond.
+        let anchor = try #require(ResetClock.parse("2026-08-18T07:00:00.306761+00:00"))
+        let snapshot = try UsageClient.decode(
+            from: Data(body.utf8), now: anchor.addingTimeInterval(3 * 3600),
+            lastKnownSevenDayReset: anchor)
+        #expect(snapshot.sevenDayResetSource == .reconstructed)
+        // The instant the server itself reported once the blackout ended, within a second.
+        let truth = try #require(ResetClock.parse("2026-08-25T07:00:00.058036+00:00"))
+        let reconstructed = try #require(ResetClock.parse(snapshot.sevenDay.resetsAt))
+        #expect(abs(reconstructed.timeIntervalSince(truth)) < 1)
     }
 
     @Test func idleLiveBodyDetectsSessionIdle() throws {

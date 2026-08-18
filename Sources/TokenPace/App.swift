@@ -2087,7 +2087,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 sevenDaySonnet: snapshot.sevenDaySonnet,
                 limits: snapshot.limits,
                 sessionIdle: snapshot.sessionIdle,
-                spend: snapshot.spend),
+                spend: snapshot.spend,
+                // Only the five-hour utilization is overlaid; the weekly date and its provenance
+                // belong to the underlying snapshot and must survive the dev-tools cycle.
+                sevenDayResetSource: snapshot.sevenDayResetSource),
             health: output.health, interval: output.interval, diagnostics: output.diagnostics)
         lastOutput = overlay
         colorCycleStatus = status

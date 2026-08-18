@@ -485,12 +485,21 @@ public enum ResetClock {
         }
 
         // 7d: roll forward when its reset has passed; sub-windows ride the same boundary.
-        let sevenReset = parse(snapshot.sevenDay.resetsAt).map { $0 <= now } ?? false
+        //
+        // The expired instant **is** the anchor — it is the last date we had for this window, and the
+        // weekly period is exact — so this rolls it by whole weeks (ADR-0106) rather than estimating
+        // `now + 7d`, which drifts with the clock and lands minutes off the real grid. Note the 5h
+        // branch above deliberately keeps `nextReset`: a five-hour window starts at the first spend,
+        // not on a fixed grid, so there is no period to roll (ADR-0030).
+        let sevenExpiry = parse(snapshot.sevenDay.resetsAt)
+        let sevenReset = sevenExpiry.map { $0 <= now } ?? false
         let sevenDay: UsageWindow
         let sevenDayOpus: UsageWindow?
         let sevenDaySonnet: UsageWindow?
-        if sevenReset {
-            let newSeven = isoString(from: nextReset(now: now, window: .sevenDay))
+        if sevenReset, let anchor = sevenExpiry {
+            let projected = rollForward(anchor: anchor, by: .sevenDay, until: now)
+                ?? nextReset(now: now, window: .sevenDay)   // unreachable in practice; never nil-out a date
+            let newSeven = isoString(from: projected)
             sevenDay = UsageWindow(utilization: 0, resetsAt: newSeven)
             sevenDayOpus = snapshot.sevenDayOpus.map { _ in UsageWindow(utilization: 0, resetsAt: newSeven) }
             sevenDaySonnet = snapshot.sevenDaySonnet.map { _ in UsageWindow(utilization: 0, resetsAt: newSeven) }
@@ -510,7 +519,13 @@ public enum ResetClock {
             // The money-credits state is orthogonal to the token windows this rolls forward — carry it
             // through untouched so the "Extra usage" section / icon survive the overlay. (Dropping it
             // here was a latent bug, made visible once the overlay runs on every render — #167.)
-            spend: snapshot.spend)
+            spend: snapshot.spend,
+            // A rolled 7-day date is one step further from the last server fact, so the provenance
+            // gains the `-rolled` suffix rather than being replaced: `reconstructed-rolled` says both
+            // that we derived the date *and* that it has since elapsed. Untouched windows keep theirs.
+            sevenDayResetSource: sevenReset
+                ? snapshot.sevenDayResetSource.rolled()
+                : snapshot.sevenDayResetSource)
     }
 
     /// Render a `Date` as an ISO-8601 string (`.withInternetDateTime`, UTC, no fractional seconds) so a

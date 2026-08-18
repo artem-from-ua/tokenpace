@@ -83,12 +83,25 @@ public enum UsageClient {
     /// failing. A genuinely malformed body (non-JSON, truncated) still maps to ``UsageError/decode``,
     /// and the (capped) body is logged so the failure is diagnosable.
     ///
-    /// - Parameter now: The poll instant, forwarded to the synthesis fallback
-    ///   (``ResetClock/nextReset(now:window:)``). Defaults to `Date()` for call sites (e.g. tests)
-    ///   that do not thread a clock; the live path (`fetch`) passes the real `now`.
-    public static func decode(from data: Data, now: Date = Date()) throws -> UsageSnapshot {
+    /// - Parameters:
+    ///   - data: The raw 200 body.
+    ///   - now: The poll instant, forwarded to the reconstruction rung
+    ///     (``ResetClock/rollForward(anchor:by:until:)``). Defaults to `Date()` for call sites (e.g.
+    ///     tests) that do not thread a clock; the live path (`fetch`) passes the real `now`.
+    ///   - lastKnownSevenDayReset: The last **server-supplied** weekly reset. When the body omits
+    ///     `seven_day.resets_at` entirely — which it does for hours at every weekly reset — this is
+    ///     what the decoder rolls forward instead of inventing a date (ADR-0106). Only set it from a
+    ///     value the API actually sent: ``ResetSource/isUnrolledServerFact`` is the caller's guard.
+    public static func decode(
+        from data: Data,
+        now: Date = Date(),
+        lastKnownSevenDayReset: Date? = nil
+    ) throws -> UsageSnapshot {
         let decoder = JSONDecoder()
         decoder.userInfo[.usageNow] = now
+        if let lastKnownSevenDayReset {
+            decoder.userInfo[.lastKnownSevenDayReset] = lastKnownSevenDayReset
+        }
         do {
             return try decoder.decode(UsageSnapshot.self, from: data)
         } catch is DecodingError {
@@ -110,12 +123,16 @@ public enum UsageClient {
     ///   - accessToken: Fresh bearer token from `TokenProvider` (never stale — see ADR-0007).
     ///   - now: Threaded into ``buildRequest(accessToken:now:)`` for signature symmetry.
     ///   - transport: Injected for testing; defaults to `URLSession.shared`.
+    ///   - lastKnownSevenDayReset: The last **server-supplied** weekly reset, for the decoder's
+    ///     reconstruction rung (ADR-0106). Defaults to `nil` — no anchor, and nothing is invented.
     public static func fetch(
         accessToken: String,
         now: Date,
-        transport: UsageTransport = URLSession.shared
+        transport: UsageTransport = URLSession.shared,
+        lastKnownSevenDayReset: Date? = nil
     ) async throws -> UsageSnapshot {
-        try (await diagnosedFetch(accessToken: accessToken, now: now, transport: transport)).result.get()
+        try (await diagnosedFetch(accessToken: accessToken, now: now, transport: transport,
+                                  lastKnownSevenDayReset: lastKnownSevenDayReset)).result.get()
     }
 
     /// The core of ``fetch(accessToken:now:transport:)`` that also captures the raw
@@ -133,7 +150,8 @@ public enum UsageClient {
     public static func diagnosedFetch(
         accessToken: String,
         now: Date,
-        transport: UsageTransport = URLSession.shared
+        transport: UsageTransport = URLSession.shared,
+        lastKnownSevenDayReset: Date? = nil
     ) async -> DiagnosedFetch {
         let request: URLRequest
         do {
@@ -185,7 +203,8 @@ public enum UsageClient {
         switch http.statusCode {
         case 200:
             do {
-                let snapshot = try decode(from: data, now: now)
+                let snapshot = try decode(from: data, now: now,
+                                         lastKnownSevenDayReset: lastKnownSevenDayReset)
                 // One line per success: status **and** the full JSON body, so there is no duplicate
                 // "200 ok" / "200 body" pair. `.notice` so it shows at the default log level (no
                 // `--level info` needed). The usage payload carries no secrets — the token rides only in

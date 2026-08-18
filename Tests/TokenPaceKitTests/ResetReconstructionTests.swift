@@ -180,3 +180,65 @@ struct ResetSourceTests {
         }
     }
 }
+
+// MARK: - Provenance survives the render pipeline
+
+/// `UsageSnapshot`'s memberwise init defaults `sevenDayResetSource` so ~90 synthetic fixtures stay
+/// unchanged — which means a production site that rebuilds a snapshot and *forgets* the field
+/// compiles silently and relabels a reconstruction as a server fact. Nothing but a test catches it,
+/// so here it is: every transform between decode and render must carry provenance through.
+@Suite("Snapshot rebuilders preserve the reset source")
+struct ResetSourcePreservationTests {
+
+    private static let now = Date(timeIntervalSince1970: 1_000_000)
+
+    private static func iso(_ offset: TimeInterval) -> String {
+        let f = ISO8601DateFormatter()
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.formatOptions = [.withInternetDateTime]
+        return f.string(from: now.addingTimeInterval(offset))
+    }
+
+    /// `WeeklyUtilization.applied(to:)` is the **first** transform in `App.render`, and it rewrites
+    /// the weekly window — so it is the likeliest place to drop the field, and the most damaging:
+    /// it runs on the majority of polls.
+    @Test func weeklyUtilizationOverlayKeepsIt() {
+        let snapshot = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 10, resetsAt: Self.iso(3600)),
+            sevenDay: UsageWindow(utilization: 50, resetsAt: Self.iso(7200)),
+            sevenDayResetSource: .reconstructed)
+        let weekly = WeeklyUtilization(
+            raw: 50, effective: 50.4, source: .interpolated, ratio: 9.8, sampleCount: 15)
+        #expect(weekly.applied(to: snapshot).sevenDayResetSource == .reconstructed)
+    }
+
+    /// `optimisticReset` leaves a future window alone — including its provenance.
+    @Test func optimisticResetKeepsItWhenNothingRolls() {
+        let snapshot = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 10, resetsAt: Self.iso(3600)),
+            sevenDay: UsageWindow(utilization: 50, resetsAt: Self.iso(7200)),
+            sevenDayResetSource: .reconstructed)
+        #expect(ResetClock.optimisticReset(snapshot, now: Self.now).sevenDayResetSource
+                == .reconstructed)
+    }
+
+    /// And when it *does* roll, the provenance gains the suffix rather than being replaced — a
+    /// reconstruction that has since elapsed is two steps from the last server fact, and says so.
+    @Test func optimisticResetAppendsTheRolledSuffix() {
+        let snapshot = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 10, resetsAt: Self.iso(3600)),
+            sevenDay: UsageWindow(utilization: 50, resetsAt: Self.iso(-1)),
+            sevenDayResetSource: .reconstructed)
+        #expect(ResetClock.optimisticReset(snapshot, now: Self.now).sevenDayResetSource
+                == .reconstructedRolled)
+    }
+
+    /// Only an untouched server fact may become the next anchor. This is the invariant that stops a
+    /// blackout's reconstruction being fed back in as if the server had confirmed it.
+    @Test func onlyServerFactsWouldBeAnchored() {
+        // The exact predicate `PollingEngine.advance` gates the anchor write on.
+        #expect(ResetSource.server.isUnrolledServerFact)
+        #expect(!ResetSource.reconstructed.isUnrolledServerFact)
+        #expect(!ResetSource.serverRolled.isUnrolledServerFact)
+    }
+}

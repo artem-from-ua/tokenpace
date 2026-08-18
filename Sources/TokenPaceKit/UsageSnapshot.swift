@@ -4,15 +4,29 @@ import Foundation
 
 extension CodingUserInfoKey {
     /// Threads the polling loop's `now` into ``UsageSnapshot/init(from:)`` so the reset-boundary
-    /// synthesis (a `null` window → a fresh `utilization: 0` window) can compute a fallback
-    /// `resets_at` via ``ResetClock/nextReset(now:window:)`` **without** calling `Date()` inside the
-    /// decode layer. ``UsageClient/decode(from:now:)`` sets it; if absent, the synthesis falls back
-    /// to `Date()` (the value only feeds a last-resort estimate, never a parsed instant).
+    /// reconstruction (a `null` window → a fresh `utilization: 0` window) can roll a known reset
+    /// forward **without** calling `Date()` inside the decode layer.
+    /// ``UsageClient/decode(from:now:lastKnownSevenDayReset:)`` sets it; if absent, the decode falls
+    /// back to `Date()`.
     ///
-    /// Only `seven_day` reaches the local estimate now (#100): the `five_hour` window opts out of it
-    /// (`localEstimateAllowed: false`), reporting the honest ``UsageSnapshot/sessionIdle`` state
-    /// instead of synthesizing a drifting `now + 5h` reset.
+    /// Only `seven_day` reconstructs (#100): the `five_hour` window opts out
+    /// (`reconstructionAllowed: false`), reporting the honest ``UsageSnapshot/sessionIdle`` state
+    /// instead — a five-hour window does not exist between sessions, so there is nothing to roll.
     static let usageNow = CodingUserInfoKey(rawValue: "cc.usageNow")!
+
+    /// Threads the last **server-supplied** `seven_day.resets_at` into ``UsageSnapshot/init(from:)``
+    /// so the decoder can reconstruct the weekly reset during an API blackout instead of estimating
+    /// it (ADR-0106).
+    ///
+    /// The decoder is deliberately stateless — it sees one body plus whatever is injected here — so
+    /// this is the same seam `usageNow` uses rather than a new mechanism. The caller
+    /// (``PollingEngine``) is responsible for only ever passing a value the API actually sent:
+    /// feeding back a reconstructed one would compound its own error across a multi-hour blackout.
+    /// ``ResetSource/isUnrolledServerFact`` is what enforces that at the call site.
+    ///
+    /// Absent (a cold start with nothing persisted) the decoder invents nothing and leaves
+    /// `resets_at` empty — see ``ResetSource/unknown``.
+    static let lastKnownSevenDayReset = CodingUserInfoKey(rawValue: "cc.lastKnownSevenDayReset")!
 }
 
 // MARK: - UsageWindow
@@ -373,6 +387,27 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
     /// blocks. `nil` on a pre-credits payload where neither block is present — the (many) legacy
     /// fixtures rely on that default. Consumed by ``CreditsPacing`` (#144/#145 render it).
     public let spend: SpendInfo?
+    /// Where ``sevenDay``'s `resets_at` came from (ADR-0106) — a server field, a `limits[]` entry, a
+    /// reconstruction from the last known reset, or nothing at all.
+    ///
+    /// Carried on the snapshot rather than recomputed downstream because **only the decoder knows**:
+    /// by the time a renderer sees the date, a reconstructed one is indistinguishable from a real
+    /// one — which is the point, but it means the provenance has to travel with it.
+    ///
+    /// Two consumers depend on it. ``PollingEngine`` reads ``ResetSource/isUnrolledServerFact`` to
+    /// decide whether this reset may become the anchor for future reconstructions (feeding a derived
+    /// value back would compound its own error). The journal records it as `resetSrc`, next to but
+    /// deliberately separate from `utilSrc` — the two describe different axes and are populated in
+    /// six of their eight combinations on live data.
+    ///
+    /// The memberwise init defaults this to ``ResetSource/server`` so the ~90 synthetic fixtures
+    /// stay unchanged — a hand-built window's date came from whoever wrote the literal, and
+    /// provenance is meaningless there. **The four production sites that rebuild a real snapshot**
+    /// (``WeeklyUtilization/applied(to:)``, ``ResetClock/optimisticReset(_:now:)``, the polling
+    /// engine's idle-grace suppression, and the colour-cycle stub) must forward it explicitly: the
+    /// default is exactly what would let one of them silently relabel a reconstruction as a server
+    /// fact. `snapshotRebuildersPreserveResetSource` in `ResetReconstructionTests` guards that.
+    public let sevenDayResetSource: ResetSource
 
     private enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
@@ -391,7 +426,8 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         sevenDaySonnet: UsageWindow? = nil,
         limits: [UsageLimit] = [],
         sessionIdle: Bool = false,
-        spend: SpendInfo? = nil
+        spend: SpendInfo? = nil,
+        sevenDayResetSource: ResetSource = .server
     ) {
         self.fiveHour = fiveHour
         self.sevenDay = sevenDay
@@ -400,6 +436,7 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         self.limits = limits
         self.sessionIdle = sessionIdle
         self.spend = spend
+        self.sevenDayResetSource = sevenDayResetSource
     }
 
     /// Whether the snapshot carries a **broken-`resets_at` data error** on an **active** window — the
@@ -430,9 +467,13 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         let limits = try container.decodeIfPresent([UsageLimit].self, forKey: .limits) ?? []
         self.limits = limits
 
-        // `now` for the last-resort reset estimate — injected by `UsageClient.decode(from:now:)`
-        // via `userInfo` so the decode layer never calls `Date()` (testability, ADR-0009 spirit).
+        // `now` for the reconstruction rung — injected by `UsageClient.decode(from:now:…)` via
+        // `userInfo` so the decode layer never calls `Date()` (testability, ADR-0009 spirit).
         let now = (decoder.userInfo[.usageNow] as? Date) ?? Date()
+
+        // The last reset the **server** actually sent, injected the same way. Absent on a cold start,
+        // which is precisely when nothing may be invented (ADR-0106).
+        let lastKnownSevenDay = decoder.userInfo[.lastKnownSevenDayReset] as? Date
 
         // The two core windows are required by the model, but on a reset boundary the API may send
         // them as `null` (or with `utilization: null`). Synthesize a fresh zero-usage window in that
@@ -442,19 +483,22 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         // `five_hour` is special (#100): when its reset is unavailable **and** `limits[]` backfills
         // nothing, the window does not exist server-side (no active session), so `window(...)` reports
         // `sessionIdle: true` and returns a `resetsAt: ""` window rather than a synthesized `now + 5h`
-        // phantom. `localEstimateAllowed: false` disables the local-estimate rung for it — that rung
-        // is exactly what produced the drifting phantom reset. `seven_day` keeps the local estimate
-        // (`localEstimateAllowed: true`) and is never idle: the weekly window always exists.
-        let (five, fiveIdle) = try Self.window(
+        // phantom. `reconstructionAllowed: false` disables the roll-forward rung for it: a window that
+        // does not exist between sessions has no previous instance to roll. `seven_day` does
+        // reconstruct (ADR-0106) — it is a real rolling period, so the last known reset plus whole
+        // weeks is sound — and is never idle.
+        let (five, fiveIdle, _) = try Self.window(
             in: container, key: .fiveHour, window: .fiveHour,
             limitKinds: ["session", "five_hour"], limits: limits, now: now,
-            localEstimateAllowed: false)
+            reconstructionAllowed: false)
         self.fiveHour = five
         self.sessionIdle = fiveIdle
-        self.sevenDay = try Self.window(
+        let seven = try Self.window(
             in: container, key: .sevenDay, window: .sevenDay,
             limitKinds: ["weekly_all", "seven_day"], limits: limits, now: now,
-            localEstimateAllowed: true).window
+            reconstructionAllowed: true, lastKnownReset: lastKnownSevenDay)
+        self.sevenDay = seven.window
+        self.sevenDayResetSource = seven.resetSource
 
         // Per-model sub-windows stay optional: an absent key or an all-`null` object → `nil` (the
         // model was not used this window). But a **present** sub-window with `resets_at: null` is the
@@ -502,20 +546,29 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
     /// 1. the window object's own `resets_at`, if present (the `utilization: null` case);
     /// 2. the first `limits[]` entry whose `kind` matches `limitKinds` and carries a `resets_at`
     ///    (live API uses `"session"`/`"weekly_all"`; the test fixtures use `"five_hour"`/`"seven_day"`);
-    /// 3. a local estimate, ``ResetClock/nextReset(now:window:)`` (`now + duration`, rounded to 10 min)
-    ///    — **only when `localEstimateAllowed`**.
+    /// 3. the **last known server-supplied reset, rolled forward** by whole windows
+    ///    (``ResetClock/rollForward(anchor:by:until:)``) — only when `reconstructionAllowed` and an
+    ///    anchor was injected (ADR-0106);
+    /// 4. nothing at all: `resets_at` stays empty and the source is ``ResetSource/unknown``.
     ///
-    /// `localEstimateAllowed` splits the two core windows (#100):
-    /// - `seven_day` (`true`): the weekly window always exists, so an exhausted chain still synthesizes
-    ///   a `now + 7d` estimate (logged once) — a missing weekly reset is a genuine boundary blip.
+    /// Rung 3 replaced a local `now + duration` estimate that was recomputed every poll and therefore
+    /// drifted forward with the clock, holding `elapsedFraction` at exactly 0 for the 4-6 hours the
+    /// weekly blackout lasts. Rolling the previous reset instead lands within 0.25 s of the value the
+    /// server eventually sends. Rung 4 is the honest end of the chain: with no anchor there is
+    /// nothing to roll, and inventing a date is what this change exists to stop.
+    ///
+    /// `reconstructionAllowed` splits the two core windows (#100):
+    /// - `seven_day` (`true`): the weekly window is a real rolling period, so a known reset plus a
+    ///   whole number of periods is a sound reconstruction.
     /// - `five_hour` (`false`): the 5h window is *created by the first token spend* and does not exist
     ///   before then. An exhausted chain therefore means "no active session", not a reset boundary:
     ///   the method returns `(UsageWindow(utilization: <decoded ?? 0>, resetsAt: ""), sessionIdle: true)`
-    ///   with **no** local estimate and **no** synthesis log — the honest idle state the UI renders as
-    ///   a green "ready to start" bar. This is what removes the drifting phantom `now + 5h` reset.
+    ///   with **no** reconstruction and **no** log — the honest idle state the UI renders as a green
+    ///   "ready to start" bar. This is what removes the drifting phantom `now + 5h` reset.
     ///
-    /// - Returns: the resolved window plus `sessionIdle` — `true` only in the `five_hour` exhausted-chain
-    ///   case above, `false` on every other path (present reset, or a `limits[]`/local-estimate fill).
+    /// - Returns: the resolved window, `sessionIdle` (`true` only in the `five_hour` exhausted-chain
+    ///   case above), and which rung supplied the date — the honesty carrier the journal and the UI
+    ///   both read.
     private static func window(
         in container: KeyedDecodingContainer<CodingKeys>,
         key: CodingKeys,
@@ -523,41 +576,53 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         limitKinds: [String],
         limits: [UsageLimit],
         now: Date,
-        localEstimateAllowed: Bool
-    ) throws -> (window: UsageWindow, sessionIdle: Bool) {
+        reconstructionAllowed: Bool,
+        lastKnownReset: Date? = nil
+    ) throws -> (window: UsageWindow, sessionIdle: Bool, resetSource: ResetSource) {
         // The window object as sent (may be absent → `nil`). Kept so an idle window can preserve a
         // present `utilization` (e.g. a `{"utilization":0.0,"resets_at":null}` idle body).
         let decoded = try container.decodeIfPresent(UsageWindow.self, forKey: key)
 
         // A present, well-formed window with its own `resets_at` is the common path — return as-is.
         if let decoded, decoded.hasResetsAt {
-            return (decoded, false)
+            return (decoded, false, .server)
         }
 
         // No usable own `resets_at`. Try the `limits[]` fallback next.
         if let fromLimit = limits.first(where: { limitKinds.contains($0.kind) && !$0.resetsAt.isEmpty })?.resetsAt {
             AppLogger.network.notice(
                 "synthesized \(key.stringValue, privacy: .public) window on reset boundary (utilization=0, resets_at source=limits[])")
-            return (UsageWindow(utilization: 0, resetsAt: fromLimit), false)
+            return (UsageWindow(utilization: 0, resetsAt: fromLimit), false, .limits)
         }
 
         // The `limits[]` chain is exhausted. For `five_hour` this is the honest "no active session"
-        // state: no synthesis, no phantom reset — `sessionIdle: true`. Preserve any present utilization
-        // (usually 0). No log: idle is a normal steady state, not a boundary event to diagnose.
-        guard localEstimateAllowed else {
-            return (UsageWindow(utilization: decoded?.utilization ?? 0, resetsAt: ""), true)
+        // state: no reconstruction, no phantom reset — `sessionIdle: true`. Preserve any present
+        // utilization (usually 0). No log: idle is a normal steady state, not a boundary event.
+        guard reconstructionAllowed else {
+            return (UsageWindow(utilization: decoded?.utilization ?? 0, resetsAt: ""), true, .unknown)
         }
 
-        // `seven_day`: the weekly window always exists, so fall back to a local estimate (logged once).
+        // `seven_day`: roll the last **server-supplied** reset forward by whole weeks (ADR-0106).
+        // The anchor is injected by the polling loop and is never a value this app derived, so the
+        // reconstruction cannot compound its own error across the hours a blackout lasts.
+        if let anchor = lastKnownReset,
+           let projected = ResetClock.rollForward(anchor: anchor, by: window, until: now) {
+            AppLogger.network.notice(
+                "reconstructed \(key.stringValue, privacy: .public) reset from the last known one (utilization=0, resets_at source=reconstructed)")
+            return (UsageWindow(utilization: 0, resetsAt: Self.isoString(from: projected)), false, .reconstructed)
+        }
+
+        // No anchor to roll — a cold start that has never seen a real weekly reset. Invent nothing:
+        // an empty `resets_at` is what the UI turns into "weekly reset time unknown", which is true,
+        // where a `now + 7d` estimate would have been a confident lie that drifts every poll.
         AppLogger.network.notice(
-            "synthesized \(key.stringValue, privacy: .public) window on reset boundary (utilization=0, resets_at source=local-estimate)")
-        let resetsAt = Self.isoString(from: ResetClock.nextReset(now: now, window: window))
-        return (UsageWindow(utilization: 0, resetsAt: resetsAt), false)
+            "\(key.stringValue, privacy: .public) reset unknown — no server value and no anchor to reconstruct from")
+        return (UsageWindow(utilization: 0, resetsAt: ""), false, .unknown)
     }
 
     /// Render a `Date` back into the API's `resets_at` string shape (`…+00:00`, no fractional
-    /// seconds) so the synthesized value round-trips through ``ResetClock/parse(_:)`` identically to
-    /// a real one. Only used for the local-estimate fallback.
+    /// seconds) so the reconstructed value round-trips through ``ResetClock/parse(_:)`` identically
+    /// to a real one. Only used for the reconstruction rung.
     private static func isoString(from date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
