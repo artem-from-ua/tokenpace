@@ -51,6 +51,8 @@ enum StubScenario: String, CaseIterable {
     case farBehind = "far-behind"
     case weeklyGate = "weekly-gate"
     case weeklyInterp = "weekly-interp"
+    case weeklyResetBlackout = "weekly-reset-blackout"
+    case weeklyResetUnknown = "weekly-reset-unknown"
     case idleWeekHot = "idle-week-hot"
     case pressureSweep = "pressure-sweep"
     case gaugeSweep = "gauge-sweep"
@@ -173,6 +175,8 @@ enum StubScenario: String, CaseIterable {
         case .farBehind:           return "Pacing · both far behind (blue)"
         case .weeklyGate:          return "Pacing · 5h far behind, week spent (gate)"
         case .weeklyInterp:        return "Pacing · 7d interpolated from the 5h counter"
+        case .weeklyResetBlackout: return "Reset · 7d blackout, reconstructed from the last one"
+        case .weeklyResetUnknown:  return "Reset · 7d unknown (cold start, nothing to roll)"
         case .idleWeekHot:         return "Idle · week ahead of pace (popup wording)"
         case .pressureSweep:       return "Pacing · Pressure scale (sharp 5h + clipped 7d)"
         case .gaugeSweep:          return "Pacing · Gauge scale (full-left 5h + short-right 7d)"
@@ -285,6 +289,25 @@ enum StubScenario: String, CaseIterable {
                  + "61.5 → 62.5 in 0.1 pp steps, then hold (`clipped`) rather than overtake the next "
                  + "quantum. Troubleshoot discloses both numbers throughout. What to check: nothing "
                  + "ever steps backwards, least of all at the two handovers."
+        case .weeklyResetBlackout:
+            return "The weekly API blackout (ADR-0106), as a **sequence** — step it with \"Refresh "
+                 + "now\". The first two polls carry a real `seven_day.resets_at`, which seeds the "
+                 + "anchor; every poll after that returns the body the server actually sends for 4-6 "
+                 + "hours after each weekly reset — `seven_day: null` with a `weekly_all` entry that "
+                 + "has no date either, so both sources of the reset vanish at once. What to check: "
+                 + "**the 7-day countdown stops moving** from poll 2 on. Before this change it "
+                 + "stepped ~10 minutes forward on every refresh, because the fallback re-estimated "
+                 + "`now + 7d` each time, and the time marker stayed pinned at the left edge for the "
+                 + "whole blackout. Now the date holds and the marker advances."
+        case .weeklyResetUnknown:
+            return "The cold start (ADR-0106): the same blackout body on every poll, with **no** "
+                 + "anchor to roll forward — a fresh install that has never spent a token. Clear the "
+                 + "stored anchor first (`defaults delete TokenPace lastSevenDayReset`), or the app "
+                 + "will reconstruct from it and you will see ordinary bars. What to check: the menu "
+                 + "bar shows the no-data symbol — **not** the ⚠️, which is reserved for data that "
+                 + "contradicts itself — and the popup withholds every limit row, showing only "
+                 + "\"Weekly reset time unknown\" and the line that says what will fix it. No "
+                 + "countdown anywhere: the whole point is that nothing is invented."
         case .idleWeekHot:
             return "Idle 5h while the week runs ahead of pace (u = 70 %, t = 29 %). No active session, "
                  + "so the 5h bar is the knobless idle pill — GREEN, like every ready idle state since "
@@ -452,6 +475,8 @@ enum StubScenario: String, CaseIterable {
         case .farBehind:           return StubUsageTransport(mode: .pacing(.farBehind), now: now)
         case .weeklyGate:          return StubUsageTransport(mode: .pacing(.weeklyGate), now: now)
         case .weeklyInterp:        return StubUsageTransport(mode: .weeklyInterp, now: now)
+        case .weeklyResetBlackout: return StubUsageTransport(mode: .weeklyResetBlackout, now: now)
+        case .weeklyResetUnknown:  return StubUsageTransport(mode: .weeklyResetUnknown, now: now)
         case .idleWeekHot:         return StubUsageTransport(mode: .idleWeekHot, now: now)
         case .pressureSweep:       return StubUsageTransport(mode: .pacing(.pressureSweep), now: now)
         case .gaugeSweep:          return StubUsageTransport(mode: .pacing(.gaugeSweep), now: now)
@@ -541,7 +566,10 @@ enum StubScenario: String, CaseIterable {
     var advancesPerPoll: Bool {
         switch self {
         case .weeklyInterp, .standByFloor, .optimisticReset, .resetGrace,
-             .justUnblocked, .creditsOnset, .staleError:
+             .justUnblocked, .creditsOnset, .staleError,
+             // Seeds the anchor on its first two polls, then blacks out — the whole point is that
+             // the countdown *stops* moving across the handover, which one frame cannot show.
+             .weeklyResetBlackout:
             return true
         default:
             return false

@@ -303,7 +303,7 @@ struct ReconstructionAnchorTests {
 
     /// A blackout keeps rolling from the same real anchor however long it lasts — the property that
     /// makes the reconstruction stable instead of creeping the way the old estimate did.
-    @Test func anAnchorSurvivesAWholeBlackout() throws {
+    @Test func anAnchorSurvivesAWholeBlackoutUnchanged() throws {
         let anchor = try #require(ResetClock.parse(Self.serverReset))
         var state = PollState()
         state.lastKnownSevenDayReset = anchor
@@ -316,5 +316,113 @@ struct ReconstructionAnchorTests {
                 claudeActive: true, now: Self.t0.addingTimeInterval(Double(i) * 180))
         }
         #expect(state.lastKnownSevenDayReset == anchor)
+    }
+}
+
+// MARK: - What the two surfaces show when there is no weekly clock
+
+/// The cold start: the API has never reported a weekly reset, and there is no anchor to reconstruct
+/// one from. Both surfaces withhold everything and say so, rather than drawing bars whose position
+/// would be invented.
+@Suite("Unknown weekly reset — menu bar and popup")
+struct UnknownWeeklyResetTests {
+
+    private static let now = Date(timeIntervalSince1970: 1_000_000)
+
+    /// The cold-start snapshot: no 5h session, no weekly date, nothing spent.
+    private static let coldStart = UsageSnapshot(
+        fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
+        sevenDay: UsageWindow(utilization: 0, resetsAt: ""),
+        sessionIdle: true,
+        sevenDayResetSource: .unknown)
+
+    @Test func theMenuBarShowsTheUnknownResetState() {
+        #expect(MenuBarLayout.make(from: Self.coldStart, now: Self.now).mode == .weeklyResetUnknown)
+    }
+
+    /// Specifically **not** the ⚠️ path: nothing contradicts itself here, so the state must not be
+    /// mistaken for the malformed-payload one that glyph is reserved for (ADR-0091).
+    @Test func itIsNotADataError() {
+        #expect(!Self.coldStart.hasBrokenActiveReset)
+        let mode = MenuBarLayout.make(from: Self.coldStart, now: Self.now).mode
+        if case .error = mode { Issue.record("cold start must not read as a data error") }
+        if case .exhaustedUnknownReset = mode { Issue.record("cold start is not an exhausted window") }
+    }
+
+    @Test func thePopupWithholdsEveryRowAndExplains() {
+        let layout = PopupLayout.make(
+            from: Self.coldStart, health: .healthy(lastSuccess: Self.now), now: Self.now,
+            interval: 180, serviceStatus: nil, monitoringAnything: true)
+        #expect(layout.weeklyResetUnknown)
+        // Every row is withheld — including the per-model ones, which inherit the empty weekly date
+        // and would otherwise each draw a marker pinned to the far edge.
+        #expect(layout.rows.isEmpty)
+        #expect(layout.credits == nil)
+        #expect(layout.blockingReset == nil)
+        // And it is not dressed as a polling failure: the request succeeded.
+        #expect(layout.warning == nil)
+    }
+
+    /// Real usage with a blank date is a **different** state, and both surfaces keep drawing it: the
+    /// numbers are known even when the clock is not, and hiding them would discard the one thing the
+    /// widget does know.
+    @Test func usageWithoutAClockStillDraws() {
+        let withUsage = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
+            sevenDay: UsageWindow(utilization: 31, resetsAt: ""),
+            sessionIdle: true)
+        #expect(MenuBarLayout.make(from: withUsage, now: Self.now).mode != .weeklyResetUnknown)
+
+        let layout = PopupLayout.make(
+            from: withUsage, health: .healthy(lastSuccess: Self.now), now: Self.now,
+            interval: 180, serviceStatus: nil, monitoringAnything: true)
+        #expect(!layout.weeklyResetUnknown)
+        #expect(!layout.rows.isEmpty)
+    }
+
+    /// The body the `weekly-reset-blackout` / `weekly-reset-unknown` stubs serve, decoded through the
+    /// real client — so the fixtures those stubs are built from are checked here rather than only by
+    /// looking at the running app.
+    ///
+    /// With an anchor it reconstructs; without one it reports the unknown state on both surfaces.
+    @Test func theStubBlackoutBodyDrivesBothOutcomes() throws {
+        let body = #"""
+        {"five_hour":{"utilization":0.0,"resets_at":null},"seven_day":null,\#
+        "seven_day_opus":null,"seven_day_sonnet":null,\#
+        "limits":[{"kind":"weekly_all","group":"weekly","percent":0,\#
+        "severity":"normal","scope":null,"is_active":true}]}
+        """#
+        let anchor = try #require(ResetClock.parse("2026-08-18T07:00:00.306761+00:00"))
+        let during = anchor.addingTimeInterval(2 * 3600)
+
+        // With the anchor the stub seeds on its first two polls: a real date, and ordinary bars.
+        let reconstructed = try UsageClient.decode(
+            from: Data(body.utf8), now: during, lastKnownSevenDayReset: anchor)
+        #expect(reconstructed.sevenDayResetSource == .reconstructed)
+        #expect(MenuBarLayout.make(from: reconstructed, now: during).mode != .weeklyResetUnknown)
+
+        // Without it — the cold-start stub — nothing is invented, and both surfaces say so.
+        let cold = try UsageClient.decode(from: Data(body.utf8), now: during)
+        #expect(cold.sevenDayResetSource == .unknown)
+        #expect(cold.sevenDay.resetsAt.isEmpty)
+        #expect(MenuBarLayout.make(from: cold, now: during).mode == .weeklyResetUnknown)
+        let layout = PopupLayout.make(
+            from: cold, health: .healthy(lastSuccess: during), now: during,
+            interval: 180, serviceStatus: nil, monitoringAnything: true)
+        #expect(layout.weeklyResetUnknown)
+        #expect(layout.rows.isEmpty)
+    }
+
+    /// An ordinary snapshot is untouched by any of this.
+    @Test func ahealthySnapshotIsUnaffected() {
+        let healthy = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 20, resetsAt: "2026-06-21T05:30:00+00:00"),
+            sevenDay: UsageWindow(utilization: 40, resetsAt: "2026-06-28T00:00:00+00:00"))
+        #expect(MenuBarLayout.make(from: healthy, now: Self.now).mode != .weeklyResetUnknown)
+        let layout = PopupLayout.make(
+            from: healthy, health: .healthy(lastSuccess: Self.now), now: Self.now,
+            interval: 180, serviceStatus: nil, monitoringAnything: true)
+        #expect(!layout.weeklyResetUnknown)
+        #expect(!layout.rows.isEmpty)
     }
 }

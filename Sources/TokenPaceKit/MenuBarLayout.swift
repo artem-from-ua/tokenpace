@@ -174,6 +174,18 @@ public enum MenuBarMode: Sendable, Equatable {
     /// widget that reports nothing is otherwise indistinguishable from a stuck one. The popup
     /// explains it in words and offers the way back into Settings.
     case nothingMonitored
+    /// The weekly window has no reset instant and none can be reconstructed (ADR-0106): the no-data
+    /// glyph alone, no bars, no countdown.
+    ///
+    /// Distinct from ``error`` because the data does not contradict itself — the server coherently
+    /// reports that no weekly window exists yet, which is true until the first token spend. ⚠️ is
+    /// reserved for the opposite case (a window provably exhausted while its reset is missing), and
+    /// spending it here would blur the one distinction that glyph carries.
+    ///
+    /// Bars are withheld rather than drawn from what survives: the five-hour window is idle in this
+    /// state too, and the per-model windows inherit the empty weekly reset, so there is nothing left
+    /// whose position on a track would mean anything.
+    case weeklyResetUnknown
 }
 
 // MARK: - CreditsMarker
@@ -330,6 +342,21 @@ public struct MenuBarLayout: Sendable, Equatable {
         from snapshot: UsageSnapshot, now: Date,
         hideTopBar: TopBarHiding = .never
     ) -> MenuBarLayout {
+        // No weekly reset **and nothing spent** (ADR-0106) — the cold start, before the first token
+        // spend has opened a weekly window. Checked before everything else because every path below
+        // assumes a weekly clock exists: without one, `elapsedFraction` answers `1.0` for the 7-day
+        // window and for the per-model windows that inherit its date, so each would draw a marker
+        // jammed against the right edge — a confident claim that the week is spent, from a snapshot
+        // saying nothing has been spent at all.
+        //
+        // The `utilization == 0` half matters. A blank date beside **real usage** is a different
+        // state: the numbers are still worth drawing, and hiding them would throw away the one thing
+        // the widget does know. That case keeps its bars and simply has no countdown, exactly as it
+        // did before this change.
+        if snapshot.sevenDay.resetsAt.isEmpty, snapshot.sevenDay.utilization == 0 {
+            return MenuBarLayout(mode: .weeklyResetUnknown)
+        }
+
         // "Can we work?" — the two answers that are not "yes, on the subscription" produce the same
         // bars-less shape (ADR-0090). Both are checked before the idle/active bar-building branches so
         // they short-circuit both.
@@ -514,7 +541,9 @@ public struct MenuBarLayout: Sendable, Equatable {
             guard let snapshot, CreditsPacing.isBlocked(in: snapshot) else { return false }
             switch layout.mode {
             case .expanded, .iconOnlyReset: return true
-            case .exhaustedUnknownReset, .error, .usagePollingOff, .nothingMonitored: return false
+            case .exhaustedUnknownReset, .error, .usagePollingOff, .nothingMonitored,
+                 .weeklyResetUnknown:
+                return false
             }
         }()
         // The pause icon and the currency icon are **mutually exclusive** (ADR-0090, restoring the

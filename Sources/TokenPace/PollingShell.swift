@@ -370,6 +370,33 @@ actor StubUsageTransport: UsageTransport {
         /// What to check: the bar never steps backwards, least of all at the two handovers (inherited
         /// → firm, and interpolated → clipped), and Troubleshoot shows both numbers throughout.
         case weeklyInterp
+        /// The weekly API blackout, reconstructed (ADR-0106). A **sequence**, watched with "Refresh
+        /// now": the first two polls return a healthy body carrying a real `seven_day.resets_at`,
+        /// which seeds the anchor; every poll after that returns the blackout body — `seven_day:
+        /// null` and a `weekly_all` entry with no date of its own — exactly as the server does for
+        /// 4-6 hours after every weekly reset.
+        ///
+        /// What to check: **the 7-day countdown does not move** from poll 2 onwards. Before this
+        /// change it stepped forward ~10 minutes on every refresh, because the estimate was
+        /// recomputed from the clock each time, and the time marker stayed jammed at the left edge
+        /// throughout. Now the date holds and the marker advances as it should.
+        ///
+        /// Requires no anchor in `UserDefaults` beforehand only if you want to see the seeding; with
+        /// one already stored the run starts reconstructing immediately, which is also correct.
+        case weeklyResetBlackout
+        /// The cold start (ADR-0106): every poll returns the blackout body, and there is no anchor to
+        /// reconstruct from — the state of a fresh install that has never spent a token.
+        ///
+        /// **Clear the stored anchor first**, or the app will reconstruct from it and this stub will
+        /// show the ordinary bars instead:
+        /// ```sh
+        /// defaults delete TokenPace lastSevenDayReset      # `swift run` domain
+        /// ```
+        /// What to check: the menu bar shows the no-data symbol (**not** the ⚠️ — nothing contradicts
+        /// itself here), and the popup withholds every limit row, showing only "Weekly reset time
+        /// unknown" and the line telling the user what will fix it. No countdown anywhere: the point
+        /// is that nothing is invented.
+        case weeklyResetUnknown
         /// The reset-boundary idle-grace frame (ADR-0041, ADR-0045). Watch it as a **sequence**, not as a
         /// single frame: **one** poll returns a 5h window about to expire (92 % used, ~4 min left — its
         /// strip and time marker correctly pinned near the bar's right edge), which also arms the grace
@@ -1140,6 +1167,41 @@ actor StubUsageTransport: UsageTransport {
             """.data(using: .utf8)!
             let response = HTTPURLResponse(
                 url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
+        // The weekly blackout (ADR-0106). Two healthy polls seed the anchor, then the body the API
+        // really sends for hours after each weekly reset: `seven_day` null, and a `weekly_all` entry
+        // that carries no `resets_at` of its own — both sources of the date gone at once, which is
+        // what sends the decoder to its reconstruction rung.
+        //
+        // The seeded reset is a whole hour on purpose: it makes the countdown easy to read across
+        // refreshes, which is the one thing this stub exists to watch.
+        if mode == .weeklyResetBlackout || mode == .weeklyResetUnknown {
+            let n = calls
+            calls += 1
+            let seeding = mode == .weeklyResetBlackout && n < 2
+            let response = HTTPURLResponse(
+                url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            if seeding {
+                let fiveReset = self.resetsAt(inSeconds: 2 * 3600)
+                let sevenReset = self.resetsAt(inSeconds: 6 * 24 * 3600 + 18 * 3600)
+                let body = """
+                {"five_hour":{"utilization":12.0,"resets_at":"\(fiveReset)"},\
+                "seven_day":{"utilization":3.0,"resets_at":"\(sevenReset)"},\
+                "limits":[{"kind":"weekly_all","group":"weekly","percent":3,\
+                "severity":"normal","resets_at":"\(sevenReset)","scope":null,"is_active":true}]}
+                """.data(using: .utf8)!
+                return (body, response)
+            }
+            // The blackout body, verbatim in shape: no session (so the 5h window is idle too), no
+            // weekly window, and a `weekly_all` entry stripped of its date.
+            let body = """
+            {"five_hour":{"utilization":0.0,"resets_at":null},"seven_day":null,\
+            "seven_day_opus":null,"seven_day_sonnet":null,\
+            "limits":[{"kind":"weekly_all","group":"weekly","percent":0,\
+            "severity":"normal","scope":null,"is_active":true}]}
+            """.data(using: .utf8)!
             return (body, response)
         }
 
