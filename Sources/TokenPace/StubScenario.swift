@@ -6,7 +6,7 @@ import TokenPaceKit
 /// a one-line note of what it verifies, and the transport it drives — so the launch-time env path and
 /// the Development-tools dropdown share **one** source of truth (no duplicated case list).
 ///
-/// Modeled on ``ColorRole``: a `CaseIterable` registry with computed display metadata. The `rawValue`
+/// A `CaseIterable` registry with computed display metadata. The `rawValue`
 /// of every case is the literal string a user would pass in `TOKENPACE_STUB=…`, so
 /// `StubScenario(rawValue:)` round-trips env compatibility for free. ``realNetwork`` (`"real"`) is the
 /// no-stub production path: the real usage API over `URLSession.shared`.

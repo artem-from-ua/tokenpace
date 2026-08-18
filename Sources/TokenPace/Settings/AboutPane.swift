@@ -179,14 +179,14 @@ struct AboutPane: View {
 // MARK: - UpdateStatusDot
 
 /// A small filled status dot for an About-pane update row (#210), tinted from the **same**
-/// `ColorStore` roles the dropdown's update item uses (`blue` for "available",
+/// `ColorRole` roles the dropdown's update item uses (`blue` for "available",
 /// `red` for "failed") — so the two surfaces read as one signal.
 private struct UpdateStatusDot: View {
     let role: ColorRole
 
     var body: some View {
         Circle()
-            .fill(Color(nsColor: ColorStore.shared.color(role)))
+            .fill(Color(nsColor: role.defaultColor))
             .frame(width: 8, height: 8)
     }
 }

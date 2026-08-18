@@ -313,7 +313,7 @@ struct SettingsRowBadge: Equatable {
     /// derived, so check it with the meter rather than trusting it.
     @MainActor
     static var claude: SettingsRowBadge {
-        brand(ColorStore.shared.color(.claudeBrand), symbol: "cloud.fill")
+        brand(ColorRole.claudeBrand.defaultColor, symbol: "cloud.fill")
     }
 }
 

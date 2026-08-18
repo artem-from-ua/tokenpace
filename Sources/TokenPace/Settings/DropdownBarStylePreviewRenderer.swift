@@ -129,9 +129,8 @@ enum DropdownBarStylePreviewRenderer {
     /// and 30 in dark, against the menu plate's 236/33.
     ///
     /// Not cached, for the same reason ``BarStylePreviewRenderer`` is not: three small canvases cost
-    /// microseconds, and a cache would have to be invalidated on every colour-role change from the dev
-    /// tuner (`ColorStore.onChange`) *and* on every theme flip — buying two staleness bugs in exchange
-    /// for nothing measurable. Rendering on demand means a theme change simply redraws.
+    /// microseconds, and a cache would have to be invalidated on every theme flip — buying a staleness
+    /// bug in exchange for nothing measurable. Rendering on demand means a theme change simply redraws.
     static func image(for style: BarStyle, size: NSSize,
                       appearance: NSAppearance? = nil) -> NSImage {
         let image = NSImage(size: size)

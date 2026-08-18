@@ -44,9 +44,8 @@ enum BarStylePreviewRenderer {
     /// The specimen widget drawn in `style`, ready for `Image(nsImage:)`.
     ///
     /// Not cached. Three 38×22 pt canvases cost microseconds, and a cache here would have to be
-    /// invalidated on every colour-role change from the dev tuner (`ColorStore.onChange`) — buying a
-    /// staleness bug in exchange for nothing measurable. The retired PNG path cached because it hit
-    /// the disk; this one does not.
+    /// invalidated on every theme flip — buying a staleness bug in exchange for nothing measurable.
+    /// The retired PNG path cached because it hit the disk; this one does not.
     @MainActor
     static func image(for style: BarStyle) -> NSImage {
         let view = StatusItemView(frame: .zero)

@@ -41,11 +41,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// swap does not work in a status-item menu. "Settings…" is a plain, always-shown item beside it.
     private var troubleshootItem: NSMenuItem?
 
-    /// The dev-only colour tuner window (#185). Lazily created and kept alive.
+    /// The dev-only Development tools window (#187, #279). Lazily created and kept alive.
     private var devToolsWC: DevToolsWindowController?
 
-    /// The optional "Development tools…" item (#185), shown just below "Troubleshoot…" but **only**
-    /// when the `devToolsEnabled` defaults key is set (`ColorStore.devToolsEnabled`) **and** ⌥ Option is held — so it
+    /// The optional "Development tools…" item (#187, #279), shown just below "Troubleshoot…" but **only**
+    /// when the `devToolsEnabled` defaults key is set (`PersistedConfig.devToolsEnabled`) **and** ⌥ Option is held — so it
     /// stays invisible on a normal run regardless of build type. Visibility is flipped alongside
     /// `troubleshootItem` in `updateTroubleshootVisibility(_:)`.
     private var devToolsItem: NSMenuItem?
@@ -480,7 +480,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(troubleshootItem)
         self.troubleshootItem = troubleshootItem
 
-        // "Development tools…" (#185): the dev colour tuner, sitting just below "Troubleshoot…". Only
+        // "Development tools…" (#187, #279): the stub selector and payload log, sitting just below
+        // "Troubleshoot…". Only
         // ever visible when the `devToolsEnabled` defaults key is set AND ⌥ Option is held (both gates
         // applied in `updateTroubleshootVisibility`), so a normal run never shows it — regardless of
         // build type. The item is created unconditionally but starts hidden: the gate is re-checked on
@@ -568,10 +569,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["TOKENPACE_OPEN_TROUBLESHOOT"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.openTroubleshoot() }
         }
-        // Same for the dev colour tuner (#185), normally reached only via ⌥ on the (flag-gated)
+        // Same for the Development tools window, normally reached only via ⌥ on the (flag-gated)
         // "Development tools…" item — doubly awkward to script. Requires the `devToolsEnabled`
-        // defaults key set too (`ColorStore.devToolsEnabled`).
-        if ColorStore.devToolsEnabled,
+        // defaults key set too (`PersistedConfig.devToolsEnabled`).
+        if PersistedConfig.devToolsEnabled,
            ProcessInfo.processInfo.environment["TOKENPACE_OPEN_DEVTOOLS"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.openDevTools() }
         }
@@ -627,7 +628,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Render-only, popup only (#329). The VC's `barStyle` didSet rebuilds its child bars,
                 // which is how the new style reaches each `PopupBarView`.
                 self?.popupVC.barStyle = style
-                self?.reRenderForCurrentTime()   // also push the new style into the dev-tuner preview
+                self?.reRenderForCurrentTime()
             }
             wc.onServiceDotChange = { [weak self] _ in
                 // The dot changes the layout (drawn + item width), not just a colour — rebuild the
@@ -738,25 +739,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         troubleshootWC?.show(lastOutput)
     }
 
-    /// Open (or focus) the dev colour tuner (#185). Lazily creates the single instance and wires its
-    /// change callback to re-render both surfaces, so a colour edit repaints the menu-bar icon and the
-    /// popup live. Reachable only when the `devToolsEnabled` defaults key is set (the item is gated in the menu).
+    /// Open (or focus) the Development tools window: the live stub selector (#187) and the
+    /// status-payload log switch (#279). Lazily creates the single instance. Reachable only when the
+    /// `devToolsEnabled` defaults key is set (the item is gated in the menu).
     @objc private func openDevTools() {
         if devToolsWC == nil {
             devToolsWC = DevToolsWindowController()
-            ColorStore.shared.onChange = { [weak self] in
-                // The tuner exists to show the exact colour being dialled in — fading toward it would
-                // lag every slider drag by 450 ms and misrepresent the value (ADR-0070).
-                self?.colorAnimator.finishAll()
-                self?.reRenderForCurrentTime()
-            }
             // Live stub selector (#187): the dropdown reports its pick back here to swap the data source
-            // without a restart. Mirrors the ColorStore.onChange bridge — the window holds no model ref.
+            // without a restart — the window holds no model reference of its own.
             devToolsWC?.onStubChange = { [weak self] in self?.switchScenario($0) }
         }
         devToolsWC?.setCurrentScenario(currentScenario)   // preselect the active stub (incl. env-set)
         devToolsWC?.show()
-        reRenderForCurrentTime()   // seed the tuner's popup preview with the current layout right away
     }
 
     /// Force an immediate refresh of both data streams (the Troubleshoot window's button, ADR-0020):
@@ -870,7 +864,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // "Development tools…" needs both gates: ⌥ Option AND the `devToolsEnabled` defaults key. The
         // item always exists now, so the flag gate is applied here (re-checked each open, so toggling
         // the defaults key takes effect on the next menu open).
-        devToolsItem?.isHidden = !(optionHeld && ColorStore.devToolsEnabled)
+        devToolsItem?.isHidden = !(optionHeld && PersistedConfig.devToolsEnabled)
         // Reveal the Quit tag ("(dev build …)" / "(stub …)") only while ⌥ is held (`quitDevTitle` is nil
         // for a plain `.app` on the real network, so the title stays a plain "Quit TokenPace" there).
         if let quitItem, let quitDevTitle {
@@ -2249,8 +2243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Latched for a Settings window opened *between* renders: without it the preview would sit
         // empty until the next poll or age tick (up to 30 s).
         lastPopupLayout = layout
-        devToolsWC?.updatePreview(layout)   // mirror into the dev colour tuner's live popup preview (#185)
-        settingsWC?.updatePreview(layout)   // …and into the Settings window's live preview (ADR-0083)
+        settingsWC?.updatePreview(layout)   // mirror into the Settings window's live preview (ADR-0083)
     }
 
     // MARK: - Menu-bar image
