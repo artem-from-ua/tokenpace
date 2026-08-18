@@ -2548,8 +2548,26 @@ final class PopupViewController: NSViewController {
     /// `alignmentRectInsets` is the API meant for exactly this, but `NSStackView` lays its arranged
     /// views out by frame and ignores it — measured, the text did not move at all — so the shift is
     /// applied to the row instead.
+    ///
+    /// The trailing **label** is right-aligned (a `PillView` is left alone — it draws its own padded
+    /// capsule). That is what keeps its glyphs still when ⌥ swaps a short reset string for a long one.
+    ///
+    /// Measured: a text field's resolved width carries a fractional remainder, because it comes from font
+    /// metrics rather than whole points (`on pace` reports `intrinsicContentSize.width` 48.5 at 13 pt,
+    /// `limit reached` 78.5). With the default leading alignment the string's origin is
+    /// `rightEdge − resolvedWidth`, so any rounding of that width displaces every glyph — and since the
+    /// remainder differs per string, the two ⌥ states landed the shared `at HH:MM` tail on different
+    /// sub-pixel positions: 232.11 against 232.28 on one row, 230.33 against 229.50 on another, close to
+    /// two device pixels on the 2× displays this popup draws on. Right-aligning moves the remainder into
+    /// the empty space *before* the text, where nothing can see it. Measured after the change: 0.000.
+    ///
+    /// Rounding the label's width instead is the wrong lever — it does not remove the remainder, it only
+    /// makes it constant per string, and per-string is exactly the axis along which ⌥ varies.
     @discardableResult
     private func addSplitRow(leadingView: NSView, rightView: NSView) -> NSView {
+        if let label = rightView as? NSTextField, !(rightView is PillView) {
+            label.alignment = .right
+        }
         let row = NSStackView(views: [leadingView, rightView])
         row.orientation = .horizontal
         row.distribution = .equalSpacing
