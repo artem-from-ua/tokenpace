@@ -428,9 +428,11 @@ struct DropdownPane: View {
 @MainActor
 enum AppearanceBarStyle {
     static let segments: [SegmentedControl<BarStyle>.Segment] = [
-        .init(value: .pressure, title: "Pressure"),
-        .init(value: .gauge, title: "Gauge"),
-        .init(value: .progress, title: "Progress"),
+        // Titles from `BarStyle.displayName`, not literals here (#396): the dropdown now captions each
+        // bar with the same word, and #387/#388 propose renaming Gauge — one source, one rename.
+        .init(value: .pressure, title: BarStyle.pressure.displayName),
+        .init(value: .gauge, title: BarStyle.gauge.displayName),
+        .init(value: .progress, title: BarStyle.progress.displayName),
     ]
 }
 

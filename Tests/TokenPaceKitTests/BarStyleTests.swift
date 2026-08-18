@@ -125,4 +125,32 @@ struct BarStyleTests {
         #expect(BarStyle.legacySurfaceStyles(for: "ribbon-3d") == nil)
         #expect(BarStyle.legacySurfaceStyles(for: "") == nil)
     }
+
+    /// The Title-Case name both surfaces read (#396) — Settings segments verbatim, the dropdown
+    /// caption lowercased from it. Pinned here so a rename (#387/#388) is a deliberate edit with a
+    /// failing test, not a silent divergence between the two surfaces.
+    @Test func displayNameIsTitleCasePerStyle() {
+        #expect(BarStyle.pressure.displayName == "Pressure")
+        #expect(BarStyle.gauge.displayName == "Gauge")
+        #expect(BarStyle.progress.displayName == "Progress")
+    }
+
+    /// The dropdown's per-bar caption is the display name lowercased — a quiet annotation beside a row
+    /// title, not a second heading.
+    @Test func captionIsLowercasedDisplayName() {
+        for style in BarStyle.allCases {
+            #expect(style.caption == style.displayName.lowercased(), "\(style)")
+        }
+        #expect(BarStyle.gauge.caption == "gauge")
+        #expect(BarStyle.progress.caption == "progress")
+    }
+
+    /// Display names are **not** derived from `rawValue`: the raws are persisted keys, and letting the
+    /// UI read them would make a stored string load-bearing for what the user sees. Today they happen
+    /// to match case-insensitively; this pins that it is a coincidence the code does not rely on.
+    @Test func displayNameIsIndependentOfPersistedRaw() {
+        // The property is a switch over cases, so every case answers even if a raw were renamed.
+        #expect(BarStyle.allCases.allSatisfy { !$0.displayName.isEmpty })
+        #expect(Set(BarStyle.allCases.map(\.displayName)).count == BarStyle.allCases.count)
+    }
 }

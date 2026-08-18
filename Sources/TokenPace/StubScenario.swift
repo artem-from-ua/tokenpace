@@ -66,6 +66,8 @@ enum StubScenario: String, CaseIterable {
     case creditsNoLimit = "credits-no-limit"
     case creditsZeroSpent = "credits-zero-spent"
     case creditsWideAmounts = "credits-wide-amounts"
+    case creditsMaxHeader = "credits-max-header"
+    case creditsMaxDetail = "credits-max-detail"
     case creditsMonthEnd = "credits-month-end"
     case justUnblocked = "just-unblocked"
     case creditsOnset = "credits-onset"
@@ -190,6 +192,8 @@ enum StubScenario: String, CaseIterable {
         case .creditsNoLimit:      return "Credits · no limit (neutral)"
         case .creditsZeroSpent:    return "Credits · nothing spent yet"
         case .creditsWideAmounts:  return "Credits · wide amounts (⌥ drops reset)"
+        case .creditsMaxHeader:    return "Credits · widest header line"
+        case .creditsMaxDetail:    return "Credits · widest detail line"
         case .creditsMonthEnd:     return "Credits · late in the month (time marker near the end)"
         case .justUnblocked:       return "Back to work! edge"
         case .creditsOnset:        return "Extra Usage Credit onset"
@@ -387,6 +391,22 @@ enum StubScenario: String, CaseIterable {
                  + "next Wednesday\", 376 pt) still drops the reset rather than truncating to an "
                  + "ellipsis. 7d is left un-exhausted on purpose: a blocking reset is a red badge and is "
                  + "never dropped."
+        case .creditsMaxHeader:
+            return "The widest FIRST line the section can produce (#396), and the case that set the "
+                 + "popup's width. Credits are enabled but not yet covering an exhausted plan limit, so "
+                 + "the header carries the wide `available` badge rather than the narrow currency glyph; "
+                 + "the spend is far enough ahead of the month's pace for \"well ahead of pace\", the "
+                 + "longest status phrase. \"Extra usage progress … [available] well ahead of pace\" "
+                 + "measures 318 pt against the 330 pt column — 12 pt of headroom, and nothing in this "
+                 + "row may be allowed to grow past it. Check the two halves do not touch."
+        case .creditsMaxDetail:
+            return "The widest SECOND line: a four-figure cap spent to the last cent, so both money "
+                 + "halves carry grouping separators and the same glyph count — \"spent $5,000.00 of "
+                 + "$5,000.00\". Paired with the longest reset phrase this overflows even the 330 pt "
+                 + "column, so the fit gate DROPS the whole reset half rather than truncating either "
+                 + "one to an ellipsis. This is the gate's remaining job after the widening; the header "
+                 + "above it reads \"limit reached\" and carries NO badge (once the cap is reached the "
+                 + "server disables credits, so nothing is actively spending)."
         case .creditsMonthEnd:
             return "The Extra-usage bar's captioned month ruler with the time marker near its right "
                  + "end: same €15 cap and €10.77 spent as `credits-active`, but the clock is pinned to "
@@ -491,6 +511,8 @@ enum StubScenario: String, CaseIterable {
         case .creditsNoLimit:      return StubUsageTransport(mode: .credits(.noLimit), now: now)
         case .creditsZeroSpent:    return StubUsageTransport(mode: .credits(.zeroSpent), now: now)
         case .creditsWideAmounts:  return StubUsageTransport(mode: .credits(.wideAmounts), now: now)
+        case .creditsMaxHeader:    return StubUsageTransport(mode: .credits(.maxHeader), now: now)
+        case .creditsMaxDetail:    return StubUsageTransport(mode: .credits(.maxDetail), now: now)
         case .creditsMonthEnd:     return StubUsageTransport(mode: .credits(.active), now: now)
         case .justUnblocked:       return StubUsageTransport(mode: .justUnblocked, now: now)
         case .creditsOnset:        return StubUsageTransport(mode: .creditsOnset, now: now)

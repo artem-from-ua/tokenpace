@@ -1971,7 +1971,11 @@ final class PopupViewController: NSViewController {
         // The right slot is reserved for the awaiting-input indicator (hand + count) and stays empty
         // otherwise.
         // The brand title — "Claude" plus the plan label ("Max (5x)") when present, both in brand colour.
-        let brand = Self.brandTitleLabel(plan: layout.planLabel)
+        // The plan label rides the ⌥ layer too (#396): it names the subscription once, never changes
+        // between polls, and answers a question nobody asks twice — so at rest the header is the bare
+        // "Claude" mark and ⌥ restores "Claude ･ Max (5x)". `brandTitleLabel` already renders the mark
+        // alone for a nil plan, so this is a gate on the argument, not a second code path.
+        let brand = Self.brandTitleLabel(plan: optionHeld ? layout.planLabel : nil)
         let age = NSTextField(labelWithString: ageString)
         age.font = .systemFont(ofSize: Metrics.textSize)
         age.textColor = Self.dimmedLabelColor
@@ -2141,7 +2145,8 @@ final class PopupViewController: NSViewController {
 
         for (index, row) in layout.rows.enumerated() {
             if index >= layout.perModelRowsStart, !showPerModel { continue }
-            addTitleStatusLine(title: row.title, status: Self.statusText(row, isBaseLimit: index <= 1))
+            addTitleStatusLine(title: row.title, status: Self.statusText(row, isBaseLimit: index <= 1),
+                               style: barStyleCaption())
             // The idle 5-hour row (#100) has **no** second line at all — no "0%", no reset — so it reads
             // as a compact "5-hour  ready to start" (or "waiting for limit reset" when blocked, #158) +
             // solid bar. Every other row shows the detail; its reset goes red when it is *the* blocking
@@ -2226,7 +2231,11 @@ final class PopupViewController: NSViewController {
         addTitleStatusLine(
             title: Self.extraUsageTitle,
             status: Self.creditsStatusText(bar),
-            badge: credits.inUse ? makeInUseMarker(currency: credits.spent.currency) : nil)
+            badge: credits.inUse ? makeInUseMarker(currency: credits.spent.currency) : nil,
+            // `monthBounds: true` — this bar is on the window scale regardless of the setting
+            // (ADR-0092), so it captions itself `progress` even in a column of Pressure bars. That
+            // mismatch is the caption's whole reason for existing.
+            style: barStyleCaption(monthBounds: true))
         // Both halves grow under ⌥ at once — exact cents on the left, the "resets in" lead-in on the
         // right — and the credits amounts are the popup's widest left half to begin with, so this is
         // where `addDetailLine`'s fit gate actually fires: the reset drops and the amounts stay.
@@ -2248,8 +2257,12 @@ final class PopupViewController: NSViewController {
     /// Neither half is bold — the section reads from the bar and numbers, not a heavier heading. Both
     /// the window titles (`"5-hour"`/`"7-day"`) and the bare per-model names (`"Opus"`/`"Fable"`) render
     /// whole in `labelColor`.
+    /// `style` names the scale **this** bar is drawn on and is shown only while ⌥ is held (#396) — see
+    /// ``barStyleCaption(monthBounds:)`` for why it is per-bar rather than one line in the header.
     @discardableResult
-    private func addTitleStatusLine(title: String, status: String, badge: NSView? = nil) -> NSView {
+    private func addTitleStatusLine(
+        title: String, status: String, badge: NSView? = nil, style: String? = nil
+    ) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = font
@@ -2257,15 +2270,43 @@ final class PopupViewController: NSViewController {
         let statusLabel = NSTextField(labelWithString: status)
         statusLabel.font = font
         statusLabel.textColor = ColorRole.label.defaultColor
-        guard let badge else {
+        // The style caption rides in the same dimmed ink as the detail line's numbers: it is a
+        // supporting fact about the row, not a second title.
+        var leadingViews: [NSView] = [titleLabel]
+        if let style {
+            let styleLabel = NSTextField(labelWithString: style)
+            styleLabel.font = font
+            styleLabel.textColor = Self.dimmedLabelColor
+            leadingViews.append(styleLabel)
+        }
+        if let badge { leadingViews.append(badge) }
+        guard leadingViews.count > 1 else {
             return addSplitRow(leftLabel: titleLabel, rightLabel: statusLabel)
         }
-        // With a badge, the left half is [title • badge]; the status stays flush right.
-        let leading = NSStackView(views: [titleLabel, badge])
+        // The leading half is [title • style • badge]; the status stays flush right.
+        let leading = NSStackView(views: leadingViews)
         leading.orientation = .horizontal
         leading.alignment = .centerY
         leading.spacing = 6
         return addSplitRow(leadingView: leading, rightLabel: statusLabel)
+    }
+
+    /// The style word for a bar, or `nil` when it must not be shown.
+    ///
+    /// Two rules, both of which a single header-level caption would get wrong:
+    ///
+    /// - **Only under ⌥.** The word explains rather than identifies, and ADR-0098 puts explanation on
+    ///   the modifier: the zero tick already identifies the scale at a glance, and repeating one
+    ///   global setting on every row would be noise in the resting popup.
+    /// - **From the scale actually drawn, not from `barStyle`.** The credits bar is pinned to the
+    ///   window scale by its `monthBounds` whatever the user picked (ADR-0092), so reading the setting
+    ///   would caption it `gauge` while it draws Progress — a caption that lies exactly where it is
+    ///   the only thing explaining the odd-looking row.
+    ///
+    /// `nil` for a row with no bar (unlimited "Extra usage"): there is no scale to name.
+    private func barStyleCaption(monthBounds: Bool = false) -> String? {
+        guard optionHeld else { return nil }
+        return monthBounds ? BarStyle.progress.caption : barStyle.caption
     }
 
     /// The awaiting-input indicator (#233) shown flush-right in the "Claude" header: a `hand.raised`

@@ -490,8 +490,16 @@ actor StubUsageTransport: UsageTransport {
     ///  • `.zeroSpent`    — enabled, €15.00 cap, **nothing spent yet** (`amount_minor: 0`): the resting
     ///    money line renders `€0 of €15`, both halves shedding zeros for their own reason (the spend
     ///    because it is untouched, the cap because it is whole).
+    ///  • `.maxHeader`    — the **widest first line** the section can produce (#396): credits enabled
+    ///    but not yet covering anything (so the header carries the wide `available` badge rather than
+    ///    the narrow currency glyph) and spending far ahead of the month's pace, which is the longest
+    ///    status phrase. `Extra usage progress … [available] well ahead of pace` measures 318 pt
+    ///    against the 330 pt column — the case that set the popup's width.
+    ///  • `.maxDetail`    — the **widest second line**: a four-figure cap fully spent, so both money
+    ///    halves carry grouping separators and the same number of glyphs, paired with the longest
+    ///    reset phrase the clock produces. This is the case the fit gate still has to drop.
     enum CreditsFrame: Equatable {
-        case active, limitReached, noLimit, zeroSpent, wideAmounts
+        case active, limitReached, noLimit, zeroSpent, wideAmounts, maxHeader, maxDetail
 
         /// The `spend` + `extra_usage` block pair for this frame, as raw JSON fragments (no braces) to
         /// splice into the usage body. Verbatim from `CreditsModelTests` fixtures so the stub exercises
@@ -556,6 +564,37 @@ actor StubUsageTransport: UsageTransport {
                 "limit":{"amount_minor":200000,"currency":"EUR","exponent":2},"percent":62,\
                 "severity":"normal","enabled":true,"disabled_reason":null,"balance":null,\
                 "auto_reload":null}
+                """
+            case .maxHeader:
+                // Widest first line (#396). Credits enabled and nothing spent against them yet, so the
+                // header shows the wide `available` badge instead of the narrow currency glyph; the
+                // spend is far enough ahead of the month's pace for "well ahead of pace", the longest
+                // status phrase. USD rather than EUR: the `$` glyph is what ships in the screenshots.
+                return """
+                "extra_usage":{"is_enabled":true,"monthly_limit":200000,"used_credits":180000.0,\
+                "utilization":90.0,"currency":"USD","decimal_places":2,"disabled_reason":null,\
+                "user_disabled":false,"spend_limit_reached":false,"credits_ever_enabled":true,\
+                "daily":null,"weekly":null},\
+                "spend":{"used":{"amount_minor":180000,"currency":"USD","exponent":2},\
+                "limit":{"amount_minor":200000,"currency":"USD","exponent":2},"percent":90,\
+                "severity":"normal","enabled":true,"disabled_reason":null,"balance":null,\
+                "auto_reload":null}
+                """
+            case .maxDetail:
+                // Widest second line (#396): a four-figure cap spent to the last cent, so both money
+                // halves carry grouping separators and the same glyph count —
+                // "spent $5,000.00 of $5,000.00". With the longest reset phrase this measures 376 pt
+                // bare (390 with the badges), past the 330 pt column: the reset is dropped, the amounts
+                // stay. `spend_limit_reached` so the header reads "limit reached".
+                return """
+                "extra_usage":{"is_enabled":false,"monthly_limit":500000,"used_credits":500000.0,\
+                "utilization":100.0,"currency":"USD","decimal_places":2,\
+                "disabled_reason":"spend_limit_reached","user_disabled":false,\
+                "spend_limit_reached":true,"credits_ever_enabled":true,"daily":null,"weekly":null},\
+                "spend":{"used":{"amount_minor":500000,"currency":"USD","exponent":2},\
+                "limit":{"amount_minor":500000,"currency":"USD","exponent":2},"percent":100,\
+                "severity":"critical","enabled":false,\
+                "disabled_reason":"spend_limit_reached","balance":null,"auto_reload":null}
                 """
             }
         }
