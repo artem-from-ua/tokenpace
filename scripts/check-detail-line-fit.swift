@@ -19,10 +19,10 @@ import AppKit
 
 // MARK: - Mirror of PopupViewController.Metrics
 
-let popupWidth: CGFloat = 390
+let popupWidth: CGFloat = 380
 let cardInset: CGFloat = 14
 let hPadding: CGFloat = 16
-let contentWidth = popupWidth - 2 * cardInset - 2 * hPadding   // 330 pt
+let contentWidth = popupWidth - 2 * cardInset - 2 * hPadding   // 320 pt
 let minSplitGap: CGFloat = 12
 let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
 
@@ -60,12 +60,14 @@ let cases: [Case] = [
     Case(name: "credits, rest", left: "€10.8 of €15", right: "5d on Friday", keepsReset: true),
     Case(name: "credits wide, rest", left: "€1.23K of €2K", right: "5d on Friday", keepsReset: true),
 
-    // Credits under ⌥: both halves grow at once. Against the old 252 pt column all three of these
-    // lost their reset; at 330 (#396) they keep it, which is what the wider popup was for. The gate
-    // itself stays — see the two cases below it.
+    // Credits under ⌥: both halves grow at once. Against the old 252 pt column all three of these lost
+    // their reset; at 320 (#396) the ordinary amounts keep it, which is what the wider popup was for.
+    // The four-figure one still overflows — see its own note.
     Case(name: "credits, ⌥", left: "spent €10.77 of €15.00", right: "resets in 5d on Friday", keepsReset: true),
     Case(name: "credits zero, ⌥", left: "spent €0.00 of €15.00", right: "resets in 5d on Friday", keepsReset: true),
-    Case(name: "credits wide, ⌥", left: "spent €1,234.56 of €2,000.00", right: "resets in 5d on Friday", keepsReset: true),
+    // 322.3 pt against the 320 pt column — the four-figure case sits just past the edge, so it is the
+    // narrowest line the gate still fires on. `credits, ⌥` (280 pt) is comfortably inside.
+    Case(name: "credits wide, ⌥", left: "spent €1,234.56 of €2,000.00", right: "resets in 5d on Friday", keepsReset: false),
 
     // The gate's remaining job: a four-figure cap paired with the longest reset phrase. The reset is
     // DROPPED rather than truncated — the amounts are what the user opened the popup for, and the

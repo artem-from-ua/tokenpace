@@ -494,12 +494,25 @@ actor StubUsageTransport: UsageTransport {
     ///    but not yet covering anything (so the header carries the wide `available` badge rather than
     ///    the narrow currency glyph) and spending far ahead of the month's pace, which is the longest
     ///    status phrase. `Extra usage progress … [available] well ahead of pace` measures 318 pt
-    ///    against the 330 pt column — the case that set the popup's width.
+    ///    against the 320 pt column — the case that set the popup's width.
     ///  • `.maxDetail`    — the **widest second line**: a four-figure cap fully spent, so both money
     ///    halves carry grouping separators and the same number of glyphs, paired with the longest
     ///    reset phrase the clock produces. This is the case the fit gate still has to drop.
+    ///  • `.noLimitSpent`  — **no cap, credits spent out** (#396): `limit: null` *and*
+    ///    `spend_limit_reached: true`. The one state where the red badge belongs in the header, because
+    ///    the row has no second line — no ceiling means no reset to wait for, so there is no reset badge
+    ///    to carry the red instead.
     enum CreditsFrame: Equatable {
-        case active, limitReached, noLimit, zeroSpent, wideAmounts, maxHeader, maxDetail
+        case active, limitReached, noLimit, noLimitSpent, zeroSpent, wideAmounts, maxHeader, maxDetail
+
+        /// Whether this frame wants the **token** limits left healthy rather than the usual pinned-100 %
+        /// 7-day window.
+        ///
+        /// Only `.maxHeader` does: the `available` badge means "credits are on and nothing is
+        /// overflowing onto them", which is unreachable while a base limit sits at 100 % — that state
+        /// is `active` instead. Everything else wants the exhausted window, since credits covering an
+        /// exhausted plan limit is the situation the section exists for.
+        var leavesBaseLimitsHealthy: Bool { self == .maxHeader }
 
         /// The `spend` + `extra_usage` block pair for this frame, as raw JSON fragments (no braces) to
         /// splice into the usage body. Verbatim from `CreditsModelTests` fixtures so the stub exercises
@@ -538,6 +551,21 @@ actor StubUsageTransport: UsageTransport {
                 "spend":{"used":{"amount_minor":1077,"currency":"EUR","exponent":2},"limit":null,\
                 "percent":0,"severity":"normal","enabled":true,"disabled_reason":null,\
                 "balance":null,"auto_reload":null}
+                """
+            case .noLimitSpent:
+                // No cap, but the credits themselves are spent out: `limit: null` with
+                // `spend_limit_reached: true`, which is why the server has also flipped `enabled` to
+                // false. Distinct from `.limitReached`, where a cap exists and the *reset* is what the
+                // user waits for — here there is no ceiling and no reset, so the header itself carries
+                // the red `out of credits` badge.
+                return """
+                "extra_usage":{"is_enabled":false,"monthly_limit":null,"used_credits":1077.0,\
+                "utilization":null,"currency":"EUR","decimal_places":2,\
+                "disabled_reason":"spend_limit_reached","user_disabled":false,\
+                "spend_limit_reached":true,"credits_ever_enabled":true,"daily":null,"weekly":null},\
+                "spend":{"used":{"amount_minor":1077,"currency":"EUR","exponent":2},"limit":null,\
+                "percent":0,"severity":"critical","enabled":false,\
+                "disabled_reason":"spend_limit_reached","balance":null,"auto_reload":null}
                 """
             case .zeroSpent:
                 return """
@@ -584,7 +612,7 @@ actor StubUsageTransport: UsageTransport {
                 // Widest second line (#396): a four-figure cap spent to the last cent, so both money
                 // halves carry grouping separators and the same glyph count —
                 // "spent $5,000.00 of $5,000.00". With the longest reset phrase this measures 376 pt
-                // bare (390 with the badges), past the 330 pt column: the reset is dropped, the amounts
+                // bare (390 with the badges), past the 320 pt column: the reset is dropped, the amounts
                 // stay. `spend_limit_reached` so the header reads "limit reached".
                 return """
                 "extra_usage":{"is_enabled":false,"monthly_limit":500000,"used_credits":500000.0,\
@@ -1387,10 +1415,17 @@ actor StubUsageTransport: UsageTransport {
         if case let .credits(frame) = mode {
             let fiveReset = self.resetsAt(inSeconds: 3 * 3600)          // active 5h, mid-window
             let sevenReset = self.resetsAt(inSeconds: 5 * 24 * 3600)    // weekly limit hit, resets in 5 d
+            // Most frames pin 7d at 100 % so a base limit is exhausted and the credits actually cover
+            // something. `.maxHeader` needs the opposite (#396): its whole point is the `available`
+            // badge, which requires credits enabled and **no** base limit exhausted — money spent
+            // earlier in the month, the plan limit since reset. So the frame chooses.
+            let sevenUtilization = frame.leavesBaseLimitsHealthy ? 42.0 : 100.0
+            let sevenSeverity = frame.leavesBaseLimitsHealthy ? "normal" : "critical"
             let body = """
             {"five_hour":{"utilization":18.0,"resets_at":"\(fiveReset)"},\
-            "seven_day":{"utilization":100.0,"resets_at":"\(sevenReset)"},\
-            "limits":[{"kind":"weekly_all","group":"weekly","percent":100,"severity":"critical",\
+            "seven_day":{"utilization":\(sevenUtilization),"resets_at":"\(sevenReset)"},\
+            "limits":[{"kind":"weekly_all","group":"weekly","percent":\(Int(sevenUtilization)),\
+            "severity":"\(sevenSeverity)",\
             "resets_at":"\(sevenReset)","scope":null,"is_active":true}],\
             \(frame.blocks)}
             """.data(using: .utf8)!

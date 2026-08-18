@@ -64,6 +64,7 @@ enum StubScenario: String, CaseIterable {
     case creditsActive = "credits-active"
     case creditsLimitReached = "credits-limit-reached"
     case creditsNoLimit = "credits-no-limit"
+    case creditsNoLimitSpent = "credits-no-limit-spent"
     case creditsZeroSpent = "credits-zero-spent"
     case creditsWideAmounts = "credits-wide-amounts"
     case creditsMaxHeader = "credits-max-header"
@@ -190,6 +191,7 @@ enum StubScenario: String, CaseIterable {
         case .creditsActive:       return "Credits · active (paced)"
         case .creditsLimitReached: return "Credits · limit reached (red)"
         case .creditsNoLimit:      return "Credits · no limit (neutral)"
+        case .creditsNoLimitSpent: return "Credits · no limit, spent out"
         case .creditsZeroSpent:    return "Credits · nothing spent yet"
         case .creditsWideAmounts:  return "Credits · wide amounts (⌥ drops reset)"
         case .creditsMaxHeader:    return "Credits · widest header line"
@@ -377,6 +379,14 @@ enum StubScenario: String, CaseIterable {
                  + "icon."
         case .creditsNoLimit:
             return "Credits ¤ icon (#144): unlimited limit (limit: null) → NEUTRAL (foreground) icon."
+        case .creditsNoLimitSpent:
+            return "No cap AND the credits spent out (`limit: null` + `spend_limit_reached: true`, so "
+                 + "the server has disabled them). The one place the header itself goes red: the row "
+                 + "has no second line — no ceiling means no reset to wait for — so there is no reset "
+                 + "badge to carry the red instead. Compare `credits-limit-reached`, where a cap exists: "
+                 + "there the header says \"limit reached\" in plain text and the RED sits on the reset "
+                 + "badge below it, because the reset is what actually unblocks. One filled red per row, "
+                 + "always on the thing you are waiting for."
         case .creditsZeroSpent:
             return "Credits enabled, €15 cap, nothing spent yet (amount_minor: 0) → the resting money "
                  + "line reads \"€0 of €15\" (⌥ → \"spent €0.00 of €15.00\"); bar sits at zero. The cap "
@@ -384,7 +394,7 @@ enum StubScenario: String, CaseIterable {
                  + "one, which is a different billing configuration."
         case .creditsWideAmounts:
             return "The widest money line a real payload can produce: €1,234.56 of a €2,000 cap, 322 pt "
-                 + "under ⌥. Since the column went to 330 pt (#396) this one FITS — both halves stay, "
+                 + "under ⌥. Since the column went to 320 pt (#396) this one FITS — both halves stay, "
                  + "and so does plain `credits-active` (281 pt), which used to lose its reset. The fit "
                  + "gate is not gone, it just moved out to the genuine extreme: a four-figure cap paired "
                  + "with the longest reset phrase (\"spent $5,000.00 of $5,000.00\" + \"resets in 20d "
@@ -397,12 +407,12 @@ enum StubScenario: String, CaseIterable {
                  + "the header carries the wide `available` badge rather than the narrow currency glyph; "
                  + "the spend is far enough ahead of the month's pace for \"well ahead of pace\", the "
                  + "longest status phrase. \"Extra usage progress … [available] well ahead of pace\" "
-                 + "measures 318 pt against the 330 pt column — 12 pt of headroom, and nothing in this "
+                 + "measures 318 pt against the 320 pt column — 12 pt of headroom, and nothing in this "
                  + "row may be allowed to grow past it. Check the two halves do not touch."
         case .creditsMaxDetail:
             return "The widest SECOND line: a four-figure cap spent to the last cent, so both money "
                  + "halves carry grouping separators and the same glyph count — \"spent $5,000.00 of "
-                 + "$5,000.00\". Paired with the longest reset phrase this overflows even the 330 pt "
+                 + "$5,000.00\". Paired with the longest reset phrase this overflows even the 320 pt "
                  + "column, so the fit gate DROPS the whole reset half rather than truncating either "
                  + "one to an ellipsis. This is the gate's remaining job after the widening; the header "
                  + "above it reads \"limit reached\" and carries NO badge (once the cap is reached the "
@@ -509,6 +519,7 @@ enum StubScenario: String, CaseIterable {
         case .creditsActive:       return StubUsageTransport(mode: .credits(.active), now: now)
         case .creditsLimitReached: return StubUsageTransport(mode: .credits(.limitReached), now: now)
         case .creditsNoLimit:      return StubUsageTransport(mode: .credits(.noLimit), now: now)
+        case .creditsNoLimitSpent: return StubUsageTransport(mode: .credits(.noLimitSpent), now: now)
         case .creditsZeroSpent:    return StubUsageTransport(mode: .credits(.zeroSpent), now: now)
         case .creditsWideAmounts:  return StubUsageTransport(mode: .credits(.wideAmounts), now: now)
         case .creditsMaxHeader:    return StubUsageTransport(mode: .credits(.maxHeader), now: now)

@@ -123,6 +123,15 @@ public struct CreditsRow: Sendable, Equatable {
     /// merely *active* (enabled/reached), but the badge appears only while the plan limit is actually
     /// overflowing into credits.
     public let inUse: Bool
+    /// Whether the money cap is **spent** — the server's own `spend_limit_reached`, not an arithmetic
+    /// comparison of the two amounts (#396).
+    ///
+    /// Distinct from `bar.usageFraction >= 1`, which the bar forces to `1` for this flag *and* reaches
+    /// on its own when `used >= limit`: the fraction answers "how full is the bar", this answers "has
+    /// the paid tier been switched off". The view needs the second one for the **unlimited** row, which
+    /// has no bar to read a fraction from — without a cap there is nothing to be `1` of, yet the credits
+    /// can still be spent out.
+    public let spendLimitReached: Bool
     /// The captions for the credits bar's two boundary ticks — the money window's first and last day,
     /// `("Aug 1", "Aug 31")`, from `CreditsPacing.monthBoundaryLabels`. `nil` when there is no
     /// bar to caption (unlimited) or the calendar could not resolve the bounds; the view then draws the
@@ -135,6 +144,7 @@ public struct CreditsRow: Sendable, Equatable {
 
     public init(spent: Money, limit: Money?, bar: BarLayout?, resetLine: String?,
                 resetLineVerbose: String? = nil, inUse: Bool = false,
+                spendLimitReached: Bool = false,
                 monthBounds: (start: String, end: String)? = nil) {
         self.spent = spent
         self.limit = limit
@@ -142,6 +152,7 @@ public struct CreditsRow: Sendable, Equatable {
         self.resetLine = resetLine
         self.resetLineVerbose = resetLineVerbose
         self.inUse = inUse
+        self.spendLimitReached = spendLimitReached
         self.monthBounds = monthBounds
     }
 
@@ -150,6 +161,7 @@ public struct CreditsRow: Sendable, Equatable {
         lhs.spent == rhs.spent && lhs.limit == rhs.limit && lhs.bar == rhs.bar
             && lhs.resetLine == rhs.resetLine && lhs.resetLineVerbose == rhs.resetLineVerbose
             && lhs.inUse == rhs.inUse
+            && lhs.spendLimitReached == rhs.spendLimitReached
             && lhs.monthBounds?.start == rhs.monthBounds?.start
             && lhs.monthBounds?.end == rhs.monthBounds?.end
     }
@@ -682,7 +694,8 @@ public struct PopupLayout: Sendable, Equatable {
         let monthBounds = bar == nil ? nil : CreditsPacing.monthBoundaryLabels(now: now)
         return CreditsRow(
             spent: spent, limit: spend.limit, bar: bar, resetLine: resetLine,
-            resetLineVerbose: resetLineVerbose, inUse: inUse, monthBounds: monthBounds)
+            resetLineVerbose: resetLineVerbose, inUse: inUse,
+            spendLimitReached: spend.spendLimitReached, monthBounds: monthBounds)
     }
 
     /// The amount spent as a ``Money``, preferring the exact `spend.used` object and falling back to a

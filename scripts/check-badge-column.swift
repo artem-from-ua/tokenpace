@@ -22,7 +22,7 @@
 
 import AppKit
 
-let contentWidth: CGFloat = 330                       // PopupViewController.Metrics.contentWidth
+let contentWidth: CGFloat = 320                       // PopupViewController.Metrics.contentWidth
 let textFont = NSFont.systemFont(ofSize: 13)          // Metrics.textSize
 let pillFont = NSFont.systemFont(ofSize: 11, weight: .medium)   // textSize − 2, medium
 let hInset: CGFloat = 0                               // PillView.hInset (on top of the cell's own)

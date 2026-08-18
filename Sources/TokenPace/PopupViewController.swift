@@ -192,17 +192,6 @@ final class PopupBarView: NSView {
         /// `StatusItemView.Metrics.zeroTickAlpha`, for the same reason: scale furniture must settle
         /// behind the one mark on the bar that actually moves.
         static let zeroTickAlpha: CGFloat = 0.55
-        /// Point size of the credits bar's boundary captions (`"Aug 1"` / `"Aug 31"`) — deliberately
-        /// smaller than the popup's own `textSize` (11): these caption the *ruler*, and must not
-        /// compete with the row's actual text.
-        static let boundaryCaptionSize: CGFloat = 9
-        /// Minimum horizontal breathing space between the two captions — only ever applied by the
-        /// anti-overlap clamp on a hypothetically narrow bar; at the shipped width the captions sit
-        /// flush to the track's ends and never come near each other.
-        static let boundaryCaptionGap: CGFloat = 3
-        /// How far below the ruler's centre line the captions are dropped, so the words clear both the
-        /// teeth and the time marker's glow rather than crowding them.
-        static let boundaryCaptionDrop: CGFloat = 5
         /// Total view height: tall enough for the bar + under-bar tick ruler **and** for the marker,
         /// which is centred on the bar and so overhangs it by `indicatorHeight/2 − barHeight/2`
         /// on top; without that headroom a taller marker would be clipped by the view's frame.
@@ -233,30 +222,6 @@ final class PopupBarView: NSView {
     /// track it instead of being copied at the call site.
     static var markerOverhang: CGFloat {
         max(0, (Metrics.indicatorHeight - Metrics.barHeight) / 2)
-    }
-
-    /// The view height for a **credits** bar: measured from where its captions actually end, not from
-    /// the tick-ruler band.
-    ///
-    /// ``Metrics/height`` reserves `tickGap + tickLength` for teeth this bar does not draw, so adding
-    /// the caption's own box on top of it paid for the teeth *and* the words — leaving a visible gap
-    /// under the row that no other section has. Measuring the caption's real bottom instead
-    /// (`captionTop + line height`, matched to the y `drawBoundaryCaptions` uses) closes it, and stays
-    /// correct if the point size or the drop changes.
-    static var creditsViewHeight: CGFloat {
-        let font = NSFont.systemFont(ofSize: Metrics.boundaryCaptionSize)
-        let overhang = max(0, (Metrics.indicatorHeight - Metrics.barHeight) / 2)
-        // Mirrors `drawBoundaryCaptions`: bar bottom → tick gap → centred on the (absent) tooth band →
-        // dropped. The glyph box then runs one line height further down.
-        let captionTop = overhang + Metrics.barHeight + Metrics.tickGap
-            + (Metrics.tickLength - font.ascender + font.descender) / 2 + Metrics.boundaryCaptionDrop
-        // Rounded up to a whole point. Both terms are built from font metrics, which are deeply
-        // fractional (`boundingRectForFont.height` is 11.09 at 9 pt, and the ascender/descender pair
-        // adds its own fraction), so the raw sum lands on 25.5. This view is inside the popup's vertical
-        // stack, and a fractional row height propagates to every row below it — visible in the Settings
-        // preview as the whole card shifting by half a point whenever ⌥ reveals the credits section.
-        // The live dropdown hides it because its hosting view is given a whole-number frame outright.
-        return ceil(captionTop + font.boundingRectForFont.height)
     }
 
     // MARK: - Effective presentation
@@ -583,7 +548,7 @@ final class PopupBarView: NSView {
     /// Render this bar to a non-template `NSImage` `width` points wide, for the Settings preview tiles.
     ///
     /// Width is a parameter rather than read from the view because ``intrinsicContentSize`` deliberately
-    /// leaves it `noIntrinsicMetric` — the live bar stretches to the popup card (330 pt), while a tile
+    /// leaves it `noIntrinsicMetric` — the live bar stretches to the popup card (320 pt), while a tile
     /// specimen is a fraction of that. Height comes from ``Metrics/height``, unscaled: the tile shows the
     /// bar and marker at their real thickness, so what the picture promises is what the dropdown draws.
     ///
@@ -896,55 +861,14 @@ final class PopupBarView: NSView {
     /// *without* teeth, so gating them on a non-empty tooth list would erase the whole ruler.
     private func drawTicks(in barRect: NSRect) {
         guard optionHeld else { return }                   // the explanatory half is ⌥-on-demand
-        drawBoundaryCaptions(in: barRect)
-        drawZeroCaption(in: barRect)
-        for f in tickFractions { drawTick(at: f, in: barRect) }
-    }
-
-    /// Caption the zero tick with a literal `"0"` — the ⌥ half of the mark whose stroke through the bar
-    /// is always on (``drawZeroTick(in:)``).
-    ///
-    /// The stroke says *there is a zero here*; the digit says *this is what it is*, which is the whole
-    /// difference between the two marker-less styles: Pressure counts up from an origin at the left end,
-    /// Gauge counts out from a zero in the middle. Seeing `0` sitting under the centre of one bar and
-    /// under the left end of another states that difference outright, where two unlabelled strokes could
-    /// only imply it. That is also why it is ⌥-on-demand rather than permanent: it *explains* the scale,
-    /// and everything explanatory in this popup waits for the modifier.
-    ///
-    /// Same font, ink and baseline as the credits bar's month captions
-    /// (``drawBoundaryCaptions(in:)``), so the two labelled rulers read as one convention rather than as
-    /// two typographic ideas — the popup has exactly one voice for "this is what the ruler means".
-    ///
-    /// No-op on Progress (no zero tick to caption) and on the credits bar (its own captions own that
-    /// row of text).
-    private func drawZeroCaption(in barRect: NSRect) {
-        guard let fraction = zeroTickFraction else { return }
-        let font = NSFont.systemFont(ofSize: Metrics.boundaryCaptionSize)
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: PopupViewController.dimmedLabelColor,
-        ]
-        let text = "0" as NSString
-        let size = text.size(withAttributes: attributes)
-        // Exactly the baseline the month captions use, `boundaryCaptionDrop` and all — the two labelled
-        // rulers must sit the same distance below their bar or they read as two different conventions.
+        // Captions retired (#396): the `0` under the zero tick and the credits bar's `Jan 1` / `Feb 1`
+        // month ends. Both spelled out what their own mark already showed — the tick *is* the zero, and
+        // a bar whose window is the calendar month has its dates on the reset line right above it. They
+        // also sat below the bar, which is where the next section's title begins, so under ⌥ the rows
+        // gained a half-line of text each and the popup's rhythm changed with the modifier.
         //
-        // That baseline puts the glyph ~4.3 pt past this view's own frame, and it is allowed to: the
-        // credits bar buys the room by being a taller row (`creditsViewHeight`), while here the digit
-        // simply **overhangs into the `limitSpacing` gap** between rows — 10 pt of empty space that no
-        // row draws into. The view is layer-backed without `masksToBounds`, so the overhang renders
-        // rather than clipping, and because it is only ever one short glyph under a mark at the bar's
-        // centre or left end, it cannot collide with the row beneath. Bar positions stay exactly where
-        // they were: nothing is re-laid-out to make space, the caption borrows space already there.
-        let tickTop = barRect.maxY + Metrics.tickGap
-        let y = tickTop + (Metrics.tickLength - font.ascender + font.descender) / 2
-            + Metrics.boundaryCaptionDrop
-        // Centred under the mark it labels, then held inside the track: Pressure's zero sits half a pill
-        // in from the left edge, so a centred glyph would hang past it — and a caption poking out beyond
-        // the bar reads as a layout slip rather than as a label.
-        let cx = Self.pillRect(at: fraction, in: barRect)?.midX ?? Self.scaleX(fraction, in: barRect)
-        let x = min(max(cx - size.width / 2, barRect.minX), barRect.maxX - size.width)
-        text.draw(at: NSPoint(x: x, y: y), withAttributes: attributes)
+        // The teeth stay: they subdivide the window, which nothing else in the row states.
+        for f in tickFractions { drawTick(at: f, in: barRect) }
     }
 
     /// One tooth of the ruler, below the bar and aligned to the same inset scale as the coloured strip.
@@ -961,59 +885,6 @@ final class PopupBarView: NSView {
         NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner).fill()
     }
 
-    /// Caption the credits bar's two boundary teeth with the money window's first and last day —
-    /// `"Aug 1"` to the **right** of the left tooth, `"Aug 31"` to the **left** of the right one, both
-    /// facing inwards so neither can overhang the bar's own width.
-    ///
-    /// This is what makes the Extra-usage bar legible as a *calendar month* rather than as a token
-    /// window: two ticks alone would just be an unusually sparse ruler, and a Progress bar sitting in a
-    /// column of Pressure/Gauge bars would read as a glitch. Named ends say "this ruler is a different
-    /// ruler" outright, which is the whole reason the captions exist rather than bare teeth.
-    ///
-    /// These **are** the credits bar's ruler — it draws no teeth (see ``tickFractions``). Two words at
-    /// the two ends mark the window and name it in one stroke, where teeth could only have marked it;
-    /// once the ends are named, a tooth under each word is a mark with nothing left to say, and the
-    /// one at `1` crowds a late-month time marker besides.
-    ///
-    /// Drawn in ``PopupViewController/dimmedLabelColor`` — the **same ink as the money line above**
-    /// ("€10.8 of €15") and as
-    /// every other secondary row in the popup, so the ruler joins that tier instead of introducing a
-    /// third weight of grey between it and the track. Flush to the track's ends, and dropped clear of
-    /// the bar. No-op on every non-credits bar.
-    private func drawBoundaryCaptions(in barRect: NSRect) {
-        guard let bounds = monthBounds else { return }
-        let font = NSFont.systemFont(ofSize: Metrics.boundaryCaptionSize)
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: PopupViewController.dimmedLabelColor,
-        ]
-        // Vertically centred on the teeth, then dropped by `boundaryCaptionDrop` so the words clear the
-        // teeth and the marker's glow instead of sitting shoulder-to-shoulder with them.
-        let tickTop = barRect.maxY + Metrics.tickGap
-        let y = tickTop + (Metrics.tickLength - font.ascender + font.descender) / 2
-            + Metrics.boundaryCaptionDrop
-
-        let start = bounds.start as NSString
-        let end = bounds.end as NSString
-        let startSize = start.size(withAttributes: attributes)
-        let endSize = end.size(withAttributes: attributes)
-        // Flush to the **track's** own edges, not inset from the boundary teeth: the captions label the
-        // ends of the bar, so they line up with the ends of the bar. Aligning them to the teeth instead
-        // pushed each word inwards by the tooth's half-width plus a gap, which read as a stray indent
-        // against the row's text above — that text is itself flush to the same edges.
-        var startX = barRect.minX
-        var endX = barRect.maxX - endSize.width
-        // On a narrow bar the two captions could meet in the middle; clamp them apart so they never
-        // overlap into an unreadable smear. (At the shipped 200-pt content width they never come close
-        // — this is a guard for future width changes, not a state seen today.)
-        if startX + startSize.width + Metrics.boundaryCaptionGap > endX {
-            let mid = (startX + startSize.width + endX) / 2
-            startX = min(startX, mid - startSize.width - Metrics.boundaryCaptionGap / 2)
-            endX = max(endX, mid + Metrics.boundaryCaptionGap / 2)
-        }
-        start.draw(at: NSPoint(x: startX, y: y), withAttributes: attributes)
-        end.draw(at: NSPoint(x: endX, y: y), withAttributes: attributes)
-    }
 
     private func indicatorColor(_ l: BarLayout) -> NSColor {
         // The dot uses the exact pacing-bar colours so it reads as the same colour as the gap zone it
@@ -1714,14 +1585,19 @@ final class PopupViewController: NSViewController {
     /// constant makes that impossible.
     ///
     /// The inner content column every fixed-width row measures against is ``Metrics/contentWidth`` =
-    /// `width − 2·cardInset − 2·hPadding` = 390 − 28 − 32 = **330 pt**. Widened from 312/252 (#396) to
-    /// fit the credits section's widest header — `Extra usage progress … [available] well ahead of
-    /// pace` measures 318 pt at 13 pt — without shortening the pacing phrases, which are shared
-    /// verbatim with the token rows.
+    /// `width − 2·cardInset − 2·hPadding` = 380 − 28 − 32 = **320 pt**. Widened from 312/252 (#396) so
+    /// the credits header fits without shortening the pacing phrases, which are shared verbatim with
+    /// the token rows.
+    ///
+    /// Sized against `Extra usage progress … [active] well ahead of pace` — **307 pt** at 13 pt, the
+    /// widest line that *must* fit. The **detail** line can exceed it (`spent $5,000.00 of $5,000.00`
+    /// plus the longest reset is 321 pt) without setting the width: overflowing is what the fit gate is
+    /// for, and it drops the reset by design.
+    ///
     /// `nonisolated` because ``Metrics`` is a plain (non-actor-isolated) enum and reads this as a
     /// default value — a bare `static let` on a `@MainActor` view controller cannot cross that line.
     /// Safe: it is an immutable number with no main-thread state behind it.
-    nonisolated static let popupWidth: CGFloat = 390
+    nonisolated static let popupWidth: CGFloat = 380
 
     // `fileprivate`, not `private`: `SubscribeRowView` (#279) is a sibling type in this file and
     // sizes itself from the same metrics, so the two rows cannot drift apart.
@@ -1750,9 +1626,11 @@ final class PopupViewController: NSViewController {
         /// `hPadding` so the gap above the header equals the gap from the card's left edge to it.
         static let topPadding: CGFloat = 16
         /// Bottom **inner** padding — space between the last bar's tick ruler and the card's bottom edge.
-        /// Roomier now that the content sits on its own card (a tight 3 pt left the ticks crowding the
-        /// rounded edge).
-        static let bottomPadding: CGFloat = 12
+        ///
+        /// Trimmed from 12 to 8 (#396) once the ⌥ captions came out: the 12 was sized to keep `0` and
+        /// the month ends clear of the rounded edge, and with only the teeth left below the bar the
+        /// same gap read as a slack margin under the last row.
+        static let bottomPadding: CGFloat = 8
         static let rowSpacing: CGFloat = 3
         static let sectionSpacing: CGFloat = 14
         /// Gap **between limit blocks** (after each section's bar) — a touch tighter than
@@ -1771,7 +1649,7 @@ final class PopupViewController: NSViewController {
         static let subscribeGlyphNudge: CGFloat = 1
         /// The inner content column width for fixed-width rows/labels — the popup width minus the card's
         /// outer inset on both sides minus the inner horizontal padding on both sides:
-        /// 390 − 2·14 − 2·16 = **330 pt** (#396; was 252 when the popup was 312 wide). Every fixed-width
+        /// 380 − 2·14 − 2·16 = **320 pt** (#396; was 252 when the popup was 312 wide). Every fixed-width
         /// row, the bars, and the fit gate measure against this, so widening the popup widens all three
         /// together.
         static let contentWidth: CGFloat = width - 2 * cardInset - 2 * hPadding
@@ -1976,7 +1854,10 @@ final class PopupViewController: NSViewController {
         // "Claude" mark and ⌥ restores "Claude ･ Max (5x)". `brandTitleLabel` already renders the mark
         // alone for a nil plan, so this is a gate on the argument, not a second code path.
         let brand = Self.brandTitleLabel(plan: optionHeld ? layout.planLabel : nil)
-        let age = NSTextField(labelWithString: ageString)
+        // The age carries the same `･` separator the brand mark uses before the plan (#396), in the
+        // dimmed ink rather than the brand colour: without it "Claude just now" read as one phrase,
+        // the timestamp looking like part of the heading instead of a fact about the data under it.
+        let age = NSTextField(labelWithString: Self.separatorPrefix + ageString)
         age.font = .systemFont(ofSize: Metrics.textSize)
         age.textColor = Self.dimmedLabelColor
         let leading = NSStackView(views: [brand, age])
@@ -2223,12 +2104,14 @@ final class PopupViewController: NSViewController {
             // different anatomy.
             //
             // No style word: there is no bar here, so there is no scale to name.
+            // Without a cap this is the row's **only** line, so it is the only place a red can live:
+            // there is no reset badge below it to carry one (no ceiling ⇒ no reset to wait for). That
+            // is why `out of credits` shows here and not on the capped row, where the reset badge marks
+            // the blocker instead.
             addTitleStatusLine(
                 title: Self.extraUsageTitle,
                 status: Self.creditsUnlimitedWord,
-                stateBadge: credits.inUse
-                    ? makeInUseMarker(currency: credits.spent.currency)
-                    : makeAvailableBadge())
+                stateBadge: creditsUnlimitedStateBadge(credits))
             addDetailLine(used: Self.creditsSpentOnlyText(credits.spent, verbose: optionHeld),
                           reset: nil)
             return
@@ -2289,13 +2172,20 @@ final class PopupViewController: NSViewController {
         // supporting fact about the row, not a second title.
         var leadingViews: [NSView] = [titleLabel]
         if let style {
-            let styleLabel = NSTextField(labelWithString: style)
-            styleLabel.font = font
+            let styleLabel = NSTextField(labelWithString: Self.separatorPrefix + style)
+            // Italic, on top of the dimmed ink: the word is *about* the row rather than part of it —
+            // a note on how the bar below is drawn, not another fact the row is reporting. Colour alone
+            // put it in the same class as "18% used" and "resets in 3h", which are data.
+            styleLabel.font = Self.italic(font)
             styleLabel.textColor = Self.dimmedLabelColor
             leadingViews.append(styleLabel)
         }
         if let badge { leadingViews.append(badge) }
-        guard leadingViews.count > 1 else {
+        // Plain row — nothing on either side but the two labels. Both halves must be bare for this:
+        // an early return that only checked the leading side silently dropped `stateBadge`, which is
+        // exactly when the resting credits row loses its currency glyph while the ⌥ row keeps `active`
+        // (the style word is what pushed the leading count past one).
+        if leadingViews.count == 1, stateBadge == nil {
             return addSplitRow(leftLabel: titleLabel, rightLabel: statusLabel)
         }
         // The leading half is [title • style • badge]; the status stays flush right.
@@ -2311,6 +2201,11 @@ final class PopupViewController: NSViewController {
         if badge != nil, leadingViews.count >= 2 {
             leading.setCustomSpacing(12, after: leadingViews[leadingViews.count - 2])
         }
+        // Same reason as the trailing stack below: the split row hands each half more width than its
+        // contents need, and an unconstrained pill absorbs the surplus by widening its capsule around
+        // a glyph that stays centred. `.fill` sends the surplus to the labels instead.
+        leading.distribution = .fill
+        titleLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         guard let stateBadge else {
             return addSplitRow(leadingView: leading, rightLabel: statusLabel)
         }
@@ -2320,9 +2215,44 @@ final class PopupViewController: NSViewController {
         let trailing = NSStackView(views: [stateBadge, statusLabel])
         trailing.orientation = .horizontal
         trailing.alignment = .centerY
-        trailing.spacing = 6
+        // Wider than the 6 pt that separates the title from its style word. That pair is two words of
+        // one phrase; this is a filled capsule against plain text, and at 6 pt (1.7 spaces at 13 pt)
+        // the status read as if it were printed on the badge. 10 pt is ~2.8 spaces — the capsule's own
+        // ~4.5 pt of internal padding makes the optical gap larger than the number suggests, so more
+        // than this starts to detach the status from the badge it qualifies.
+        trailing.spacing = 10
+        // `.fill`, not the default: the split row hands this stack more width than its contents need
+        // (it distributes with `.equalSpacing`), and under the default distribution the surplus was
+        // absorbed by the badge — measured at 44.5 pt against a 19 pt intrinsic size, origin pushed to
+        // x = −2. A stretched `PillView` widens its capsule without moving the glyph inside it, so the
+        // currency sign rendered as an empty plaque bleeding off its own container while the wider
+        // `active` word survived the same stretch. `.fill` plus the badge's own hugging priority sends
+        // the surplus to the label instead.
+        trailing.distribution = .fill
+        trailing.setHuggingPriority(.defaultLow, for: .horizontal)
+        statusLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         return addSplitRow(leadingView: leading, rightView: trailing)
     }
+
+    /// `font` slanted, via the font **descriptor's** italic trait rather than by naming a face.
+    ///
+    /// The system font has no independently addressable italic family — asking for one by name gets a
+    /// fallback, which on this surface would silently change the metrics of the word beside a row title.
+    /// Adding the trait keeps the same family and size and lets the system supply its own slant. Falls
+    /// back to the upright font if the descriptor cannot satisfy the trait.
+    private static func italic(_ font: NSFont) -> NSFont {
+        let descriptor = font.fontDescriptor.withSymbolicTraits(.italic)
+        return NSFont(descriptor: descriptor, size: font.pointSize) ?? font
+    }
+
+    /// The `･`-and-space prefix that introduces a secondary word inside one visual half — the style
+    /// caption after a row title, the age after the "Claude" mark (#396).
+    ///
+    /// The same halfwidth katakana middle dot (U+FF65) `brandTitleLabel` puts before the plan, so the
+    /// popup has **one** separator rather than a different mark per site. Attached to the following
+    /// word rather than drawn as its own label: one text object means one baseline, and the gap on
+    /// either side is the dot's own side bearing instead of a stack spacing to keep in sync.
+    static let separatorPrefix = "･ "
 
     /// The style word for a bar, or `nil` when it must not be shown.
     ///
@@ -2467,21 +2397,20 @@ final class PopupViewController: NSViewController {
         // one component with different contents rather than two similar-looking things. The glyph keeps
         // that size too; `PillView(symbol:)` scales the symbol from the font it is given.
         let font = Self.pillFont
+        // Neutral grey, not the label-coloured plaque it used to be (#396). The plaque read as loud as
+        // the blocking-reset badge next to it, which put "money is moving" — a fact, not a problem — in
+        // the same visual class as "you are blocked". Grey states it without claiming urgency; the
+        // filled red stays the popup's only alarming colour. The knocked-out glyph keeps its contrast
+        // because the ink is the card's own colour, which reads against the track grey as well.
         let badge: PillView = optionHeld
             ? PillView(text: Self.inUseWord, font: font, textColor: .cardPlateFillOpaque,
-                       fill: { ColorRole.inUsePill.defaultColor })
+                       fill: { ColorRole.barTrack.defaultColor })
             : PillView(symbol: StatusItemView.creditsSymbolName(for: currency), font: font,
                        textColor: .cardPlateFillOpaque,
-                       fill: { ColorRole.inUsePill.defaultColor })
+                       fill: { ColorRole.barTrack.defaultColor })
         badge.toolTip = Self.inUseHint
         badge.setAccessibilityLabel(Self.inUseAccessibilityLabel)
-        // Pin the plaque to its intrinsic size: inside the title stack an unpinned view is stretched to
-        // fill, which widens the plaque without moving the glyph — it reads as a lopsided badge with too
-        // much padding on one side.
-        badge.setContentHuggingPriority(.required, for: .horizontal)
-        badge.setContentHuggingPriority(.required, for: .vertical)
-        badge.setContentCompressionResistancePriority(.required, for: .horizontal)
-        badge.setContentCompressionResistancePriority(.required, for: .vertical)
+        Self.pinToIntrinsicSize(badge)
         return badge
     }
 
@@ -2495,23 +2424,17 @@ final class PopupViewController: NSViewController {
     /// VoiceOver label for the "in use" marker.
     static let inUseAccessibilityLabel = "currently spending Extra Usage Credit"
 
-    /// The **`available`** badge (#396): credits are switched on and have headroom, but nothing is
-    /// overflowing onto them yet — the plan limits are still covering the work.
+    /// Pin a badge to the size of its own contents, in both axes.
     ///
-    /// Filled with the bar track's neutral grey rather than a status colour, deliberately. "Available"
-    /// is the resting state of a feature that is not doing anything, and a tinted capsule there would
-    /// claim a verdict the row has not earned; the only filled colours in this popup mean "you are
-    /// blocked" (red) or "money is moving right now" (the `in use` plaque).
-    ///
-    /// It is the widest badge the header can carry, which is what makes
-    /// `Extra usage progress … [available] well ahead of pace` (318 pt) the row that set the popup's
-    /// width — see the `credits-max-header` stub.
-    private func makeAvailableBadge() -> NSView {
-        let pill = Self.makePill(text: Self.creditsAvailableWord,
-                                 fill: { ColorRole.barTrack.defaultColor })
-        pill.toolTip = Self.creditsAvailableHint
-        pill.setAccessibilityLabel(Self.creditsAvailableHint)
-        return pill
+    /// Every stack this popup puts a badge in distributes with `.equalSpacing`, which stretches its
+    /// arranged views. A stretched ``PillView`` grows its **capsule** without moving the text or glyph
+    /// inside it, so the badge reads as lopsided — and a one-character badge (a currency sign) reads as
+    /// an empty plaque, while a wider one survives by accident.
+    private static func pinToIntrinsicSize(_ view: NSView) {
+        view.setContentHuggingPriority(.required, for: .horizontal)
+        view.setContentHuggingPriority(.required, for: .vertical)
+        view.setContentCompressionResistancePriority(.required, for: .horizontal)
+        view.setContentCompressionResistancePriority(.required, for: .vertical)
     }
 
     /// The **`out of credits`** badge (#396): the money cap is spent, so the paid tier can no longer
@@ -2525,42 +2448,58 @@ final class PopupViewController: NSViewController {
         let pill = Self.makePill(text: Self.outOfCreditsWord, fill: { PopupBarView.gapRed })
         pill.toolTip = Self.outOfCreditsHint
         pill.setAccessibilityLabel(Self.outOfCreditsHint)
+        Self.pinToIntrinsicSize(pill)
         return pill
     }
 
-    /// Which state badge the "Extra usage" header carries, if any (#396).
+    /// The badge the **capped** "Extra usage" header carries, if any (#396).
     ///
-    /// The three states are mutually exclusive and cover the section completely, so the header always
-    /// says which one it is in rather than leaving the reader to infer it from the numbers:
+    /// Only one state earns a badge here: `credits.inUse` — money is moving *right now* — drawn as the
+    /// `$` plaque (`active` under ⌥). Everything else draws nothing:
     ///
-    /// | badge | when | reads as |
-    /// |---|---|---|
-    /// | `out of credits` (red) | the cap is spent (`usageFraction >= 1`) | the paid tier is gone |
-    /// | `in use` plaque (`$` → `active` under ⌥) | `credits.inUse` | money is moving right now |
-    /// | `available` (grey) | otherwise | switched on, nothing overflowing yet |
+    /// - **Cap spent** (`usageFraction >= 1`): the status word already reads "limit reached", and the
+    ///   red belongs on the **reset** badge in the line below (`resetIsBlocking`, #158) — that is what
+    ///   the user is waiting for. One filled red per row, on the thing that actually unblocks.
+    /// - **Enabled but idle**: no badge, because "available" is not a fact the badge would be adding.
+    ///   The section is only built at all when `CreditsPacing.isActive` holds (`PopupLayout.creditsRow`),
+    ///   so the row's mere presence already says credits are switched on; the absence of a red badge
+    ///   says they are not spent; the absence of the plaque says nothing is overflowing onto them right
+    ///   now. A grey `available` capsule restated all three and was the widest badge in the popup,
+    ///   setting the window's width for the state where nothing is happening.
     ///
-    /// The first two can never both apply: `spend_limit_reached` makes the server set `enabled: false`,
-    /// which makes `CreditsPacing.isSpending` — and so `inUse` — false. The order here states that
-    /// anyway, so a payload that ever broke the invariant degrades to the red badge (the more urgent
-    /// fact) instead of drawing two.
-    private func creditsStateBadge(_ credits: CreditsRow, bar: BarLayout) -> NSView {
-        if bar.usageFraction >= 1 { return makeOutOfCreditsBadge() }
+    /// The plaque and a red badge can never both apply: `spend_limit_reached` makes the server set
+    /// `enabled: false`, which makes `CreditsPacing.isSpending` — and so `inUse` — false.
+    private func creditsStateBadge(_ credits: CreditsRow, bar: BarLayout) -> NSView? {
+        // Exhausted with a cap set: the status word already says "limit reached", and the **reset** is
+        // what the user is waiting on — so the red lives on the reset badge in the line below
+        // (`resetIsBlocking`, #158), not here. A red badge in both lines would spend the popup's one
+        // alarming colour twice on one fact; the rule is that a row carries at most one filled red, and
+        // it marks the thing that actually unblocks.
+        //
+        // `nil` rather than a neutral badge: with the cap spent, "available" would be false and the
+        // currency plaque claims spending that is not happening.
+        if bar.usageFraction >= 1 { return nil }
         if credits.inUse { return makeInUseMarker(currency: credits.spent.currency) }
-        return makeAvailableBadge()
+        return nil
+    }
+
+    /// The state badge for the **unlimited** credits row, which has no bar and no reset line (#396).
+    ///
+    /// Same three states, resolved from the flags rather than from a bar fraction — without a cap there
+    /// is nothing for a fraction to be `1` of, yet the credits can still be spent out (the server sets
+    /// `spend_limit_reached` and disables them). This row is the only line the section draws, so unlike
+    /// the capped row it *does* carry the red itself: there is no reset badge beneath it to mark the
+    /// blocker.
+    private func creditsUnlimitedStateBadge(_ credits: CreditsRow) -> NSView? {
+        if credits.spendLimitReached { return makeOutOfCreditsBadge() }
+        if credits.inUse { return makeInUseMarker(currency: credits.spent.currency) }
+        return nil
     }
 
     /// The status word for a credits row with **no cap** (#396). There is no pace to be on when there
     /// is no ceiling, so the row states the billing configuration instead of a verdict — and states it
     /// in the same slot every other section puts its verdict, rather than moving the amount up there.
     static let creditsUnlimitedWord = "no limit set"
-
-    /// The word on the resting-credits badge. Lowercase like the row's other supporting words.
-    static let creditsAvailableWord = "available"
-
-    /// Hover text for `available` — says what it is *for*, since a badge that means "nothing is
-    /// happening" is the one most likely to be read as a warning.
-    static let creditsAvailableHint =
-        "Extra Usage Credit is enabled and unused — your plan limits are still covering the work"
 
     /// The word on the exhausted-credits badge.
     static let outOfCreditsWord = "out of credits"
@@ -2862,11 +2801,10 @@ final class PopupViewController: NSViewController {
         view.monthBounds = monthBounds
         view.translatesAutoresizingMaskIntoConstraints = false
         view.widthAnchor.constraint(equalToConstant: Metrics.contentWidth).isActive = true
-        // A captioned ruler needs room for its text line; every other bar keeps the shipped height.
-        view.heightAnchor.constraint(
-            equalToConstant: monthBounds == nil
-                ? PopupBarView.viewHeight
-                : PopupBarView.creditsViewHeight).isActive = true
+        // Every bar is the same height, credits included (#396). The credits row used to be taller by a
+        // text line to make room for its `Jan 1` / `Feb 1` captions; those are gone, and reserving their
+        // box would leave the section standing on a gap no other row has.
+        view.heightAnchor.constraint(equalToConstant: PopupBarView.viewHeight).isActive = true
         stack.addArrangedSubview(view)
         // Between-section gap after every bar except the last (the last sits above the menu separator).
         if !isLast { stack.setCustomSpacing(Metrics.limitSpacing, after: view) }
@@ -3569,7 +3507,7 @@ final class PopupViewController: NSViewController {
     /// locale- and currency-dependent (`10,77 kr`, `12.00 UAH`) and the font follows the system text
     /// size — no constant could stand in for either.
     ///
-    /// Measured widths at 13 pt against the **330 pt** column (#396; the figures below were calibrated
+    /// Measured widths at 13 pt against the **320 pt** column (#396; the figures below were calibrated
     /// against 268 when the mirrors still disagreed with the real 252 — both are gone):
     /// - `20% used` + `resets in 2h at 02:50` → 198 pt — every token row fits with room to spare.
     /// - `€10.8 of €15` + `5d on Friday` → 162 pt — the resting credits line always fits.
