@@ -91,6 +91,24 @@ public enum ResetSource: String, Sendable, Equatable, Codable, CaseIterable {
         }
     }
 
+    /// How this source reads on the Troubleshoot pane — the *mode* the weekly reset is currently
+    /// being computed in, in words rather than a raw case name.
+    ///
+    /// Deliberately says what the app **did**, not what the API sent, because during a blackout those
+    /// differ and the difference is the whole point: a reconstructed date looks exactly like a real
+    /// one on the bar, and this line is the only place that distinction survives.
+    public var troubleshootDescription: String {
+        switch self {
+        case .server:              return "from the API"
+        case .limits:              return "from limits[] (window was null)"
+        case .reconstructed:       return "reconstructed — API sent none"
+        case .unknown:             return "unknown — none sent, nothing to roll from"
+        case .serverRolled:        return "from the API, rolled forward locally"
+        case .limitsRolled:        return "from limits[], rolled forward locally"
+        case .reconstructedRolled: return "reconstructed, then rolled forward locally"
+        }
+    }
+
     /// Whether the date was rolled forward locally after its instant passed.
     public var isRolled: Bool {
         switch self {

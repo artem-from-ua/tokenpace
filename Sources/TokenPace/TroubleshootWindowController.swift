@@ -52,6 +52,10 @@ final class TroubleshootWindowController: NSWindowController {
     /// The weekly reconstruction disclosure (#386) — raw vs reconstructed, side by side. Hidden when
     /// the two agree, so it appears only when there is something to explain.
     private var weeklyLabel: NSTextField!
+    /// The weekly reset instant and the mode it was computed in (ADR-0106) — sits directly under
+    /// ``weeklyLabel`` because the two answer the same kind of question about the same window: one
+    /// about its number, one about its clock.
+    private var weeklyResetLabel: NSTextField!
     // Rows of the "Auth token" section.
     private var tokenStatusLabel: NSTextField!
     private var tokenExpiryLabel: NSTextField!
@@ -163,7 +167,8 @@ final class TroubleshootWindowController: NSWindowController {
         // Vertical stack for the API section's info rows (intrinsic height). The header row sits
         // above it as a separate, full-width subview so the copy button can reach the right edge.
         weeklyLabel = Self.infoLabel()
-        let apiStack = NSStackView(views: [timestampLabel, statusLabel, weeklyLabel])
+        weeklyResetLabel = Self.infoLabel()
+        let apiStack = NSStackView(views: [timestampLabel, statusLabel, weeklyLabel, weeklyResetLabel])
         apiStack.orientation = .vertical
         apiStack.alignment = .leading
         apiStack.spacing = Metrics.rowSpacing
@@ -306,6 +311,8 @@ final class TroubleshootWindowController: NSWindowController {
         nextUpdateLabel.isHidden = layout.nextUpdateLine == nil
         weeklyLabel.stringValue = layout.weeklyLine ?? ""
         weeklyLabel.isHidden = layout.weeklyLine == nil
+        weeklyResetLabel.stringValue = layout.weeklyResetLine ?? ""
+        weeklyResetLabel.isHidden = layout.weeklyResetLine == nil
         tokenStatusLabel.stringValue = layout.tokenStatusLine ?? ""
         tokenStatusLabel.isHidden = layout.tokenStatusLine == nil
         tokenExpiryLabel.stringValue = layout.tokenExpiryLine ?? ""

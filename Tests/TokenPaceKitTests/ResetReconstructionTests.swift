@@ -413,6 +413,40 @@ struct UnknownWeeklyResetTests {
         #expect(layout.rows.isEmpty)
     }
 
+    /// Troubleshoot names the instant **to the second** and the mode behind it — the only place the
+    /// two are visible, and the only resolution at which a held date differs from a creeping one.
+    @Test func troubleshootNamesTheInstantAndTheMode() {
+        let server = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 10, resetsAt: "2026-06-21T05:30:00+00:00"),
+            sevenDay: UsageWindow(utilization: 40, resetsAt: "2026-08-25T07:00:00.058036+00:00"))
+        let line = TroubleshootLayout.weeklyResetLine(server)
+        #expect(line.contains("2026-08-25 07:00:00 UTC"))   // seconds, not a rounded countdown
+        #expect(line.contains("from the API"))
+
+        // A reconstruction is labelled as one, so a blackout is recognisable while it happens.
+        let reconstructed = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
+            sevenDay: UsageWindow(utilization: 0, resetsAt: "2026-08-25T07:00:00+00:00"),
+            sevenDayResetSource: .reconstructed)
+        #expect(TroubleshootLayout.weeklyResetLine(reconstructed).contains("reconstructed"))
+
+        // And the cold start says the app declined to invent one, rather than reading as a parse
+        // failure.
+        #expect(TroubleshootLayout.weeklyResetLine(Self.coldStart).contains("none"))
+        #expect(TroubleshootLayout.weeklyResetLine(Self.coldStart).contains("nothing to roll from"))
+    }
+
+    /// Every source has a distinct phrase — a mode that rendered as another would defeat the point.
+    @Test func everyModeReadsDistinctly() {
+        let phrases = ResetSource.allCases.map(\.troubleshootDescription)
+        #expect(Set(phrases).count == ResetSource.allCases.count)
+        // The three rolled forms all say so, since that is the fact that separates them from their
+        // un-rolled base.
+        for source in ResetSource.allCases where source.isRolled {
+            #expect(source.troubleshootDescription.contains("rolled forward locally"))
+        }
+    }
+
     /// An ordinary snapshot is untouched by any of this.
     @Test func ahealthySnapshotIsUnaffected() {
         let healthy = UsageSnapshot(

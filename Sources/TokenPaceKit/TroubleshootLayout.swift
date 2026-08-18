@@ -36,6 +36,18 @@ public struct TroubleshootLayout: Sendable, Equatable {
     /// be judged on live data rather than on a stub — which is why it ships a full release before
     /// anything renders from the reconstructed value.
     public let weeklyLine: String?
+    /// The weekly **reset** instant and where it came from (ADR-0106) — the date to the second, plus
+    /// its ``ResetSource``. `nil` only when there is no snapshot to describe.
+    ///
+    /// Exists for the same reason ``weeklyLine`` does, and answers the question that one cannot: the
+    /// popup rounds the countdown to `6d`, which is far too coarse to tell a reconstruction from a
+    /// drifting estimate — the old fallback moved in 10-minute steps and rounded to the same `6d` for
+    /// hours. Only the seconds distinguish "this date is holding" from "this date is creeping", and
+    /// this is the one place they are visible.
+    ///
+    /// Also the only surface that names the source, so a blackout can be recognised while it is
+    /// happening rather than reconstructed afterwards from the journal.
+    public let weeklyResetLine: String?
     public let bodyText: String
     /// Whether `bodyText` is pretty-printed JSON (so the shell should syntax-highlight it) rather
     /// than an error/plain payload or a placeholder. Decided here in the tested core — on success,
@@ -52,6 +64,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
         intervalLine: String?,
         nextUpdateLine: String?,
         weeklyLine: String? = nil,
+        weeklyResetLine: String? = nil,
         bodyText: String,
         bodyIsJSON: Bool,
         tokenStatusLine: String?,
@@ -62,6 +75,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
         self.intervalLine = intervalLine
         self.nextUpdateLine = nextUpdateLine
         self.weeklyLine = weeklyLine
+        self.weeklyResetLine = weeklyResetLine
         self.bodyText = bodyText
         self.bodyIsJSON = bodyIsJSON
         self.tokenStatusLine = tokenStatusLine
@@ -164,10 +178,34 @@ public struct TroubleshootLayout: Sendable, Equatable {
             intervalLine: intervalLine,
             nextUpdateLine: nextUpdateLine,
             weeklyLine: output.weekly?.troubleshootLine,
+            weeklyResetLine: output.snapshot.map(Self.weeklyResetLine),
             bodyText: bodyText,
             bodyIsJSON: bodyIsJSON,
             tokenStatusLine: tokenStatusLine,
             tokenExpiryLine: tokenExpiryLine)
+    }
+
+    /// The weekly reset instant **to the second**, followed by how it was arrived at (ADR-0106).
+    ///
+    /// Seconds rather than the popup's rounded countdown, because that is what tells the two failure
+    /// modes apart: the fallback this replaced re-estimated `now + 7d` on every poll, so the date
+    /// crept forward in 10-minute steps while still rounding to the same `6d` for hours. A held date
+    /// and a creeping one are indistinguishable at that resolution and obvious at this one.
+    ///
+    /// Rendered in UTC, matching the raw `resets_at` in the body below it — the two are meant to be
+    /// compared, and a local-time rendering would make them look like different instants.
+    static func weeklyResetLine(_ snapshot: UsageSnapshot) -> String {
+        let mode = snapshot.sevenDayResetSource.troubleshootDescription
+        guard let instant = ResetClock.parse(snapshot.sevenDay.resetsAt) else {
+            // No date at all — the cold start. Naming the mode still matters: it says the app chose
+            // not to invent one, rather than having failed to parse something.
+            return "7d reset: none — \(mode)"
+        }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return "7d reset: \(f.string(from: instant)) UTC — \(mode)"
     }
 
     /// Whether `text` parses as JSON — the gate for syntax-highlighting `bodyText` in the shell.
