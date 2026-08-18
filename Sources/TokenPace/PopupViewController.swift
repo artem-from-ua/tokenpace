@@ -2216,10 +2216,21 @@ final class PopupViewController: NSViewController {
     /// brand-coloured "Claude" header): the section reads from its numbers and bar, not a heavy heading.
     private func addCreditsSection(_ credits: CreditsRow, resetIsBlocking creditsResetIsBlocking: Bool = false) {
         guard let bar = credits.bar, let limit = credits.limit else {
-            // Unlimited: "Extra usage … €X.XX spent". No bar, no reset line — no cap to pace.
+            // Unlimited: no cap, so no bar, no pacing verdict and no reset — but the row keeps the
+            // section's shape (#396): a header naming the state, then the amount on its own second
+            // line, where every other section puts its numbers. It used to be a single line with the
+            // amount standing in for a status, which made the one row without a cap the one row with a
+            // different anatomy.
+            //
+            // No style word: there is no bar here, so there is no scale to name.
             addTitleStatusLine(
                 title: Self.extraUsageTitle,
-                status: Self.creditsSpentOnlyText(credits.spent, verbose: optionHeld))
+                status: Self.creditsUnlimitedWord,
+                stateBadge: credits.inUse
+                    ? makeInUseMarker(currency: credits.spent.currency)
+                    : makeAvailableBadge())
+            addDetailLine(used: Self.creditsSpentOnlyText(credits.spent, verbose: optionHeld),
+                          reset: nil)
             return
         }
 
@@ -2231,11 +2242,14 @@ final class PopupViewController: NSViewController {
         addTitleStatusLine(
             title: Self.extraUsageTitle,
             status: Self.creditsStatusText(bar),
-            badge: credits.inUse ? makeInUseMarker(currency: credits.spent.currency) : nil,
             // `monthBounds: true` — this bar is on the window scale regardless of the setting
             // (ADR-0092), so it captions itself `progress` even in a column of Pressure bars. That
             // mismatch is the caption's whole reason for existing.
-            style: barStyleCaption(monthBounds: true))
+            style: barStyleCaption(monthBounds: true),
+            // The state badge sits in the **trailing** half, qualifying the status word (#396). It used
+            // to ride beside the title, where it named the money but sat next to the row's name rather
+            // than next to anything about money — and only ever appeared for one of the three states.
+            stateBadge: creditsStateBadge(credits, bar: bar))
         // Both halves grow under ⌥ at once — exact cents on the left, the "resets in" lead-in on the
         // right — and the credits amounts are the popup's widest left half to begin with, so this is
         // where `addDetailLine`'s fit gate actually fires: the reset drops and the amounts stay.
@@ -2261,7 +2275,8 @@ final class PopupViewController: NSViewController {
     /// ``barStyleCaption(monthBounds:)`` for why it is per-bar rather than one line in the header.
     @discardableResult
     private func addTitleStatusLine(
-        title: String, status: String, badge: NSView? = nil, style: String? = nil
+        title: String, status: String, badge: NSView? = nil, style: String? = nil,
+        stateBadge: NSView? = nil
     ) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
         let titleLabel = NSTextField(labelWithString: title)
@@ -2288,7 +2303,25 @@ final class PopupViewController: NSViewController {
         leading.orientation = .horizontal
         leading.alignment = .centerY
         leading.spacing = 6
-        return addSplitRow(leadingView: leading, rightLabel: statusLabel)
+        // The badge gets more air than the style word does. `title` and `style` are two words of the
+        // same sentence — "which row, on which scale" — and read as a pair at 6 pt; the badge is a
+        // separate object about a different thing (the money), and at the same 6 pt the three ran
+        // together into one stream. Applied to the view *before* the badge, which is the style label
+        // when there is one and the title otherwise.
+        if badge != nil, leadingViews.count >= 2 {
+            leading.setCustomSpacing(12, after: leadingViews[leadingViews.count - 2])
+        }
+        guard let stateBadge else {
+            return addSplitRow(leadingView: leading, rightLabel: statusLabel)
+        }
+        // With a state badge the trailing half is [badge • status], the badge first: it qualifies the
+        // word after it ("available … well ahead of pace" reads as one clause), and putting it after
+        // would separate the status from the column edge every other row's status aligns to.
+        let trailing = NSStackView(views: [stateBadge, statusLabel])
+        trailing.orientation = .horizontal
+        trailing.alignment = .centerY
+        trailing.spacing = 6
+        return addSplitRow(leadingView: leading, rightView: trailing)
     }
 
     /// The style word for a bar, or `nil` when it must not be shown.
@@ -2462,6 +2495,81 @@ final class PopupViewController: NSViewController {
     /// VoiceOver label for the "in use" marker.
     static let inUseAccessibilityLabel = "currently spending Extra Usage Credit"
 
+    /// The **`available`** badge (#396): credits are switched on and have headroom, but nothing is
+    /// overflowing onto them yet — the plan limits are still covering the work.
+    ///
+    /// Filled with the bar track's neutral grey rather than a status colour, deliberately. "Available"
+    /// is the resting state of a feature that is not doing anything, and a tinted capsule there would
+    /// claim a verdict the row has not earned; the only filled colours in this popup mean "you are
+    /// blocked" (red) or "money is moving right now" (the `in use` plaque).
+    ///
+    /// It is the widest badge the header can carry, which is what makes
+    /// `Extra usage progress … [available] well ahead of pace` (318 pt) the row that set the popup's
+    /// width — see the `credits-max-header` stub.
+    private func makeAvailableBadge() -> NSView {
+        let pill = Self.makePill(text: Self.creditsAvailableWord,
+                                 fill: { ColorRole.barTrack.defaultColor })
+        pill.toolTip = Self.creditsAvailableHint
+        pill.setAccessibilityLabel(Self.creditsAvailableHint)
+        return pill
+    }
+
+    /// The **`out of credits`** badge (#396): the money cap is spent, so the paid tier can no longer
+    /// cover an exhausted plan limit.
+    ///
+    /// Red, and mutually exclusive with the `in use` plaque by construction rather than by a check
+    /// here: once `spend_limit_reached`, the server sets `enabled: false`, so `CreditsPacing.isSpending`
+    /// is false and `credits.inUse` cannot be true at the same time. The two badges can never appear
+    /// on one row.
+    private func makeOutOfCreditsBadge() -> NSView {
+        let pill = Self.makePill(text: Self.outOfCreditsWord, fill: { PopupBarView.gapRed })
+        pill.toolTip = Self.outOfCreditsHint
+        pill.setAccessibilityLabel(Self.outOfCreditsHint)
+        return pill
+    }
+
+    /// Which state badge the "Extra usage" header carries, if any (#396).
+    ///
+    /// The three states are mutually exclusive and cover the section completely, so the header always
+    /// says which one it is in rather than leaving the reader to infer it from the numbers:
+    ///
+    /// | badge | when | reads as |
+    /// |---|---|---|
+    /// | `out of credits` (red) | the cap is spent (`usageFraction >= 1`) | the paid tier is gone |
+    /// | `in use` plaque (`$` → `active` under ⌥) | `credits.inUse` | money is moving right now |
+    /// | `available` (grey) | otherwise | switched on, nothing overflowing yet |
+    ///
+    /// The first two can never both apply: `spend_limit_reached` makes the server set `enabled: false`,
+    /// which makes `CreditsPacing.isSpending` — and so `inUse` — false. The order here states that
+    /// anyway, so a payload that ever broke the invariant degrades to the red badge (the more urgent
+    /// fact) instead of drawing two.
+    private func creditsStateBadge(_ credits: CreditsRow, bar: BarLayout) -> NSView {
+        if bar.usageFraction >= 1 { return makeOutOfCreditsBadge() }
+        if credits.inUse { return makeInUseMarker(currency: credits.spent.currency) }
+        return makeAvailableBadge()
+    }
+
+    /// The status word for a credits row with **no cap** (#396). There is no pace to be on when there
+    /// is no ceiling, so the row states the billing configuration instead of a verdict — and states it
+    /// in the same slot every other section puts its verdict, rather than moving the amount up there.
+    static let creditsUnlimitedWord = "no limit set"
+
+    /// The word on the resting-credits badge. Lowercase like the row's other supporting words.
+    static let creditsAvailableWord = "available"
+
+    /// Hover text for `available` — says what it is *for*, since a badge that means "nothing is
+    /// happening" is the one most likely to be read as a warning.
+    static let creditsAvailableHint =
+        "Extra Usage Credit is enabled and unused — your plan limits are still covering the work"
+
+    /// The word on the exhausted-credits badge.
+    static let outOfCreditsWord = "out of credits"
+
+    /// Hover text for `out of credits` — the paid tier is spent, so an exhausted plan limit now
+    /// actually blocks work until it resets.
+    static let outOfCreditsHint =
+        "Extra Usage Credit is spent — an exhausted plan limit now blocks work until it resets"
+
     /// The blocking-reset badge (#158): a red capsule carrying the reset countdown (e.g. "4d"), shown
     /// flush-right on the one row whose reset actually unblocks work. Same pill shape as the "in use"
     /// badge, filled with the exhausted red (`PopupBarView.gapRed`) so it reads as the blocker. A
@@ -2514,11 +2622,19 @@ final class PopupViewController: NSViewController {
     /// becomes possible again, so it keeps its badge whatever the width.
     ///
     @discardableResult
-    private func addDetailLine(used: String, reset: String, resetIsBlocking: Bool = false) -> NSView {
+    /// `reset` is `nil` for a row that has none to show — the unlimited credits line (#396), whose left
+    /// half is the whole line. That takes the same path as a right half dropped by the fit gate below,
+    /// so both shapes render identically rather than through two layouts.
+    private func addDetailLine(used: String, reset: String?, resetIsBlocking: Bool = false) -> NSView {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
         let usedLabel = NSTextField(labelWithString: used)
         usedLabel.font = font
         usedLabel.textColor = Self.dimmedLabelColor
+        guard let reset else {
+            usedLabel.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(usedLabel)
+            return usedLabel
+        }
         // When this reset is the one blocking work (#158), show it as a red **badge** so the eye lands on
         // the single reset that will actually unblock — every other reset stays the plain dimmed label,
         // even if its own limit is also exhausted.
@@ -3420,8 +3536,10 @@ final class PopupViewController: NSViewController {
     /// `€10.77 of €15.00 spent`. A trailing `spent` binds to the nearest noun phrase — the *cap* — so
     /// the postfixed reading is "€10.77 of the €15.00 that were spent", exactly inverting which number
     /// is the money gone. Leading, the verb can only govern the first amount. The unlimited line
-    /// (``creditsSpentOnlyText(_:verbose:)``) keeps its trailing `spent` because it has one number, so
-    /// there is nothing for the word to mis-bind to.
+    /// (``creditsSpentOnlyText(_:verbose:)``) leads with `spent` too (#396): it has one number, so
+    /// nothing there could mis-bind, but a word that moved from the end of the line to the front the
+    /// moment ⌥ went down made the two forms read as different facts rather than one fact at two
+    /// precisions.
     ///
     /// The cap is shown even at **zero spend** (`€0 of €15`). Dropping it there would render as a bare
     /// `€0`/`€0 spent`, which is precisely the unlimited line's shape — two different billing
@@ -3468,11 +3586,16 @@ final class PopupViewController: NSViewController {
         return leftWidth + Metrics.minSplitGap + rightWidth <= Metrics.contentWidth
     }
 
-    /// The **unlimited** line's right half: `"€10.8 spent"` — the spent amount with a trailing word,
-    /// no cap and no reset (there is nothing to pace against). Same ⌥ precision gate as
-    /// ``creditsAmountText(spent:limit:verbose:)``: three significant digits at rest, exact under Option.
+    /// The **unlimited** row's amount line: `"spent €10.8"` — the spent amount with the verb leading,
+    /// no cap and no reset (there is nothing to pace against). Since #396 this is the row's own second
+    /// line rather than a status standing in the header's right half, so it lines up with
+    /// ``creditsAmountText(spent:limit:verbose:)`` on every capped row.
+    ///
+    /// Same ⌥ precision gate as that one: three significant digits at rest, exact under Option — and
+    /// the same leading `spent`, so the word does not jump from the end of the line to the front when
+    /// the modifier goes down.
     static func creditsSpentOnlyText(_ spent: Money, verbose: Bool = false) -> String {
-        "\(verbose ? moneyText(spent) : compactMoneyText(spent)) spent"
+        "spent \(verbose ? moneyText(spent) : compactMoneyText(spent))"
     }
 
     /// Format a ``Money`` for display. For a **known** currency the symbol sits in that currency's
