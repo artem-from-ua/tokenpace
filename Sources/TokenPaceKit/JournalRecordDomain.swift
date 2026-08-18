@@ -44,8 +44,11 @@ extension JournalRecord {
             plan: plan,
             tier: tier,
             h5: window(snapshot.fiveHour, window: .fiveHour, now: now, blueAllowed: weeklyHeadroom),
+            // `resetSrc` reads the **rendered** snapshot for the same reason `weeklyHeadroom` does:
+            // it must describe the date the user was actually shown. The overlays carry provenance
+            // through, and `optimisticReset` can add a `-rolled` suffix the raw snapshot never had.
             d7: window(snapshot.sevenDay, window: .sevenDay, now: now, blueAllowed: true,
-                       weekly: weekly),
+                       weekly: weekly, resetSource: rendered.sevenDayResetSource),
             opus: snapshot.sevenDayOpus.map { window($0, window: .sevenDay, now: now, blueAllowed: weeklyHeadroom) },
             sonnet: snapshot.sevenDaySonnet.map { window($0, window: .sevenDay, now: now, blueAllowed: weeklyHeadroom) },
             scoped: snapshot.scopedModelWindows.map { scoped($0, now: now, blueAllowed: weeklyHeadroom) },
@@ -112,7 +115,8 @@ extension JournalRecord {
     ///   value as both `util` and `raw`.
     private static func window(_ w: UsageWindow, window kind: LimitWindow, now: Date,
                                blueAllowed: Bool,
-                               weekly: WeeklyUtilization? = nil) -> WindowSample {
+                               weekly: WeeklyUtilization? = nil,
+                               resetSource: ResetSource? = nil) -> WindowSample {
         // What the app acted on. The bars were drawn from the reconstructed value, so the journal
         // records that as `util` and keeps the API's number beside it — a line must describe the
         // pixels that existed, not a parallel reality.
@@ -122,7 +126,8 @@ extension JournalRecord {
         guard let resetsAt = ResetClock.parse(w.resetsAt) else {
             // No parseable reset → no pacing gap to colour; `timePct` 0, and `gap` derives to −util.
             return WindowSample(
-                util: effective, raw: raw, src: weekly?.source.rawValue, n: weekly?.ratio,
+                util: effective, raw: raw, utilSrc: weekly?.source.rawValue,
+                resetSrc: resetSource?.rawValue, n: weekly?.ratio,
                 reset: w.resetsAt, timePct: 0, sev: effective >= 100 ? .red : .green,
                 windowSeconds: kind.durationSeconds)
         }
@@ -130,7 +135,8 @@ extension JournalRecord {
             utilization: effective, resetsAt: resetsAt, now: now,
             window: kind, blueAllowed: blueAllowed)
         return WindowSample(
-            util: effective, raw: raw, src: weekly?.source.rawValue, n: weekly?.ratio,
+            util: effective, raw: raw, utilSrc: weekly?.source.rawValue,
+            resetSrc: resetSource?.rawValue, n: weekly?.ratio,
             reset: w.resetsAt, timePct: layout.timeFraction, sev: PacingBucket.of(layout),
             windowSeconds: kind.durationSeconds)
     }

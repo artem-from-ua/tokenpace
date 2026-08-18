@@ -17,6 +17,12 @@ public struct UsageSample: Sendable, Equatable, Codable {
     ///   `gap` was a stored field.
     /// - **2** — #386: `util` carries the value the app **acted on** (reconstructed for `seven_day`),
     ///   `raw` carries the API's; `src`/`n` describe the reconstruction; `gap` is derived, not stored.
+    /// - **3** — ADR-0106: `src` is renamed `utilSrc` and joined by `resetSrc`, because the *date*
+    ///   can now be reconstructed too and one field could not answer for both axes. Migration also
+    ///   **rewrites** `reset` and `timePct` on lines written during a weekly API blackout: those
+    ///   carried a `now + 7d` estimate that crept forward every poll, pinning `timePct` to 0 for
+    ///   hours. Recovering them is what makes the archived series usable — the marker in those lines
+    ///   never moved, so any analysis over them was reading a flat line that never happened.
     public let v: Int
     /// Poll timestamp (ISO-8601, UTC, no fractional seconds — ``ResetClock/isoString(from:)``).
     public let t: String
@@ -43,7 +49,7 @@ public struct UsageSample: Sendable, Equatable, Codable {
     public let blockingReset: BlockingResetSample?
 
     /// The version this build writes. Bump together with the case list on ``v``.
-    public static let currentVersion = 2
+    public static let currentVersion = 3
 
     public init(
         v: Int = UsageSample.currentVersion,

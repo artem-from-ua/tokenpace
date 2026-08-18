@@ -48,12 +48,18 @@ public enum JournalMigration {
         public let skipped: Int
         /// Lines whose timestamp went backwards relative to the line before it.
         public let outOfOrder: Int
+        /// Lines whose weekly `resets_at` was a `now + 7d` estimate and has been rolled back onto the
+        /// real grid, with `timePct` recomputed (ADR-0106). Counted separately from `migrated`
+        /// because it is the one part of the pass that recovers *data* rather than reshaping it.
+        public let resetsRepaired: Int
 
-        public init(migrated: Int, passedThrough: Int, skipped: Int, outOfOrder: Int) {
+        public init(migrated: Int, passedThrough: Int, skipped: Int, outOfOrder: Int,
+                    resetsRepaired: Int = 0) {
             self.migrated = migrated
             self.passedThrough = passedThrough
             self.skipped = skipped
             self.outOfOrder = outOfOrder
+            self.resetsRepaired = resetsRepaired
         }
 
         /// Whether the pass changed anything — `false` means the file is already current and the
@@ -63,6 +69,7 @@ public enum JournalMigration {
         /// A `.public`-safe one-liner for the migration log.
         public var logMessage: String {
             var out = "journal migrated: \(migrated) rewritten, \(passedThrough) unchanged"
+            if resetsRepaired > 0 { out += ", \(resetsRepaired) weekly resets repaired" }
             if skipped > 0 { out += ", \(skipped) unparseable" }
             if outOfOrder > 0 { out += ", \(outOfOrder) out of order" }
             return out
@@ -100,8 +107,12 @@ public enum JournalMigration {
     ) -> (contents: String, state: WeeklyInterpolator, outcome: Outcome) {
         var interpolator = state
         var lastAccepted: Date?
-        var migrated = 0, passedThrough = 0, skipped = 0, outOfOrder = 0
+        var migrated = 0, passedThrough = 0, skipped = 0, outOfOrder = 0, resetsRepaired = 0
         var out: [String] = []
+        // The last **server-supplied** weekly reset seen so far, used to repair the lines that
+        // followed it during a blackout. Same anchor discipline as the live path: only a real date
+        // may become one, or a repair would build on a repair.
+        var weeklyAnchor: Date?
 
         let decoder = JSONDecoder()
         let encoder = JSONEncoder()
@@ -149,14 +160,25 @@ public enum JournalMigration {
                 weekly = .passthrough(sample.d7.raw)
             }
 
+            // Repair a weekly reset that was written as a `now + 7d` estimate (ADR-0106). Those lines
+            // are identifiable by their signature and recoverable from the anchor that preceded them;
+            // `timePct` is recomputed with them, because it is derived from the date and was pinned
+            // to 0 for the whole blackout.
+            let repaired = repairWeeklyReset(sample.d7, at: at, anchor: weeklyAnchor)
+            if repaired.source == .reconstructed { resetsRepaired += 1 }
+            if !repaired.wasEstimated, let real = ResetClock.parse(sample.d7.reset), !goesBackwards {
+                weeklyAnchor = real          // a genuine server date: the anchor for what follows
+            }
+
             let rewritten = UsageSample(
                 v: UsageSample.currentVersion,
                 t: sample.t, ms: sample.ms, plan: sample.plan, tier: sample.tier,
                 h5: sample.h5,
                 d7: WindowSample(
                     util: weekly.effective, raw: weekly.raw,
-                    src: weekly.source.rawValue, n: weekly.ratio,
-                    reset: sample.d7.reset, timePct: sample.d7.timePct, sev: sample.d7.sev,
+                    utilSrc: weekly.source.rawValue, resetSrc: repaired.source.rawValue,
+                    n: weekly.ratio,
+                    reset: repaired.reset, timePct: repaired.timePct, sev: sample.d7.sev,
                     windowSeconds: LimitWindow.sevenDay.durationSeconds),
                 opus: sample.opus, sonnet: sample.sonnet, scoped: sample.scoped,
                 sessionIdle: sample.sessionIdle, spend: sample.spend,
@@ -175,7 +197,70 @@ public enum JournalMigration {
 
         return (out.joined(separator: "\n"), interpolator,
                 Outcome(migrated: migrated, passedThrough: passedThrough,
-                        skipped: skipped, outOfOrder: outOfOrder))
+                        skipped: skipped, outOfOrder: outOfOrder, resetsRepaired: resetsRepaired))
+    }
+
+    /// What a repaired weekly window carries: the date, its recomputed elapsed fraction, where it
+    /// came from, and whether the original had to be repaired at all.
+    private struct RepairedReset {
+        let reset: String
+        let timePct: Double
+        let source: ResetSource
+        let wasEstimated: Bool
+    }
+
+    /// Whether a journalled `resets_at` is one of the old `now + 7d` estimates rather than a date the
+    /// server sent.
+    ///
+    /// The signature is exact and needs no heuristics: the estimate was ceilinged to a 10-minute
+    /// boundary (`ResetClock.ceilTo10Minutes`), while every real weekly reset the API sends carries
+    /// **fractional seconds** — measured across 5 029 samples on one journal and 862 on another, with
+    /// zero overlap.
+    ///
+    /// Tested on the **raw string**, not the parsed instant: `ResetClock.parse` deliberately strips
+    /// the fractional part, so by the time a date exists the two are indistinguishable. Both halves
+    /// must hold — a fractional-second value is always the server's, and a whole-second one still has
+    /// to land on the 10-minute grid to be ours.
+    private static func isEstimatedReset(_ raw: String, instant: Date) -> Bool {
+        let hasFractionalSeconds = raw.range(
+            of: #"\.\d+(?=([+-]\d{2}:?\d{2})$|Z$)"#, options: .regularExpression) != nil
+        guard !hasFractionalSeconds else { return false }
+        let epoch = instant.timeIntervalSince1970
+        return epoch == epoch.rounded(.down) && Int(epoch) % 600 == 0
+    }
+
+    /// Repair one weekly window, rolling the anchor forward when the stored date was an estimate.
+    ///
+    /// Lines with no anchor before them are left exactly as they were: a repair needs something real
+    /// to roll from, and inventing a different wrong answer would be worse than keeping the honest
+    /// record of what the app showed. In practice this is rare — on both journals measured, every one
+    /// of the 199 and 56 affected lines had an anchor earlier in the same file.
+    private static func repairWeeklyReset(
+        _ sample: WindowSample, at: Date?, anchor: Date?
+    ) -> RepairedReset {
+        guard let instant = ResetClock.parse(sample.reset) else {
+            // No parseable date at all — nothing to repair, and nothing to claim about its source.
+            return RepairedReset(reset: sample.reset, timePct: sample.timePct,
+                                 source: .unknown, wasEstimated: false)
+        }
+        guard isEstimatedReset(sample.reset, instant: instant) else {
+            return RepairedReset(reset: sample.reset, timePct: sample.timePct,
+                                 source: .server, wasEstimated: false)
+        }
+        // An estimate. Roll the last real reset forward to the line's own timestamp — the same
+        // arithmetic, including the same tolerance, the live decoder uses.
+        guard let at, let anchor,
+              let projected = ResetClock.rollForward(anchor: anchor, by: .sevenDay, until: at) else {
+            return RepairedReset(reset: sample.reset, timePct: sample.timePct,
+                                 source: .unknown, wasEstimated: true)
+        }
+        return RepairedReset(
+            reset: ResetClock.isoString(from: projected),
+            // Recomputed, not carried: the stored value was 0 for the whole blackout precisely
+            // because the estimate kept the window looking un-started.
+            timePct: PacingModel.elapsedFraction(resetsAt: projected, now: at, window: .sevenDay),
+            source: .reconstructed,
+            wasEstimated: true)
     }
 
     /// The two counters the reconstruction reads, rebuilt from a journalled sample.
