@@ -342,6 +342,15 @@ public struct PollingEngine: Sendable {
     /// Called whenever that state advances, so the shell can persist it. Same seam discipline as
     /// `usageApiEnabled`: the Kit owns the value, the shell owns the storage. Defaults to a no-op.
     let persistWeekly: @Sendable (WeeklyInterpolator) -> Void
+    /// The reconstruction anchor to start from (ADR-0106) — the last `seven_day.resets_at` the
+    /// server sent, as the shell persisted it. Restored rather than re-derived because a blackout
+    /// outlives a relaunch: without this, an app restarted mid-blackout has no anchor and can only
+    /// report the reset time as unknown. Defaults to `nil` (a cold start), so every existing
+    /// construction site and test reads unchanged.
+    let restoreSevenDayReset: @Sendable () -> Date?
+    /// Called when a **server-supplied** weekly reset differs from the stored one — about once a
+    /// week, against ~480 polls a day. Same seam discipline as `persistWeekly`. Defaults to a no-op.
+    let persistSevenDayReset: @Sendable (Date) -> Void
 
     public init(
         transport: UsageTransport,
@@ -352,7 +361,9 @@ public struct PollingEngine: Sendable {
         now: @escaping @Sendable () -> Date,
         usageApiEnabled: @escaping @Sendable () -> Bool = { true },
         restoreWeekly: @escaping @Sendable () -> WeeklyInterpolator = { WeeklyInterpolator() },
-        persistWeekly: @escaping @Sendable (WeeklyInterpolator) -> Void = { _ in }
+        persistWeekly: @escaping @Sendable (WeeklyInterpolator) -> Void = { _ in },
+        restoreSevenDayReset: @escaping @Sendable () -> Date? = { nil },
+        persistSevenDayReset: @escaping @Sendable (Date) -> Void = { _ in }
     ) {
         self.transport = transport
         self.tokenProvider = tokenProvider
@@ -363,6 +374,8 @@ public struct PollingEngine: Sendable {
         self.usageApiEnabled = usageApiEnabled
         self.restoreWeekly = restoreWeekly
         self.persistWeekly = persistWeekly
+        self.restoreSevenDayReset = restoreSevenDayReset
+        self.persistSevenDayReset = persistSevenDayReset
     }
 
     // MARK: Pure transitions
@@ -709,7 +722,8 @@ public struct PollingEngine: Sendable {
             let task = Task {
                 // Restore the weekly reconstruction (#386) and age it for the break since the last
                 // run: the ratio always survives, the accumulation only if the gap was short.
-                var state = PollState(weeklyInterpolator: restoreWeekly().resumed(at: now()))
+                var state = PollState(weeklyInterpolator: restoreWeekly().resumed(at: now()),
+                                      lastKnownSevenDayReset: restoreSevenDayReset())
                 while !Task.isCancelled {
                     let active = probe.isClaudeRunning()
                     let previous = state
@@ -766,6 +780,14 @@ public struct PollingEngine: Sendable {
                     }
                     if state.weeklyInterpolator != previous.weeklyInterpolator {
                         persistWeekly(state.weeklyInterpolator)
+                    }
+                    // The reconstruction anchor, on change only (ADR-0106): the value moves about
+                    // once a week, so writing it every poll would be ~480 identical writes a day and
+                    // would bury a genuine re-anchor in noise. `advance` only ever sets it from a
+                    // server-supplied date, so anything arriving here is safe to store.
+                    if let anchor = state.lastKnownSevenDayReset,
+                       anchor != previous.lastKnownSevenDayReset {
+                        persistSevenDayReset(anchor)
                     }
 
                     let interval = Self.effectiveInterval(state)

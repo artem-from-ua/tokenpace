@@ -242,3 +242,79 @@ struct ResetSourcePreservationTests {
         #expect(!ResetSource.serverRolled.isUnrolledServerFact)
     }
 }
+
+// MARK: - The anchor the polling loop keeps
+
+/// `PollState.lastKnownSevenDayReset` is what makes a reconstruction possible across polls and
+/// across relaunches. What it must *never* do is absorb a value this app derived: a blackout lasts
+/// hours, so an anchor that drifted by one poll would keep drifting by every poll after it.
+@Suite("PollingEngine — reconstruction anchor")
+struct ReconstructionAnchorTests {
+
+    private static let t0 = Date(timeIntervalSince1970: 1_000_000)
+    private static let serverReset = "2026-06-28T00:00:00+00:00"
+
+    private static func snapshot(source: ResetSource, resetsAt: String = serverReset) -> UsageSnapshot {
+        UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 10, resetsAt: "2026-06-21T05:30:00+00:00"),
+            sevenDay: UsageWindow(utilization: 20, resetsAt: resetsAt),
+            sevenDayResetSource: source)
+    }
+
+    @Test func aServerSuppliedResetBecomesTheAnchor() {
+        let next = PollingEngine.advance(
+            previous: PollState(), outcome: .success(Self.snapshot(source: .server)),
+            claudeActive: true, now: Self.t0)
+        #expect(next.lastKnownSevenDayReset == ResetClock.parse(Self.serverReset))
+    }
+
+    /// A `limits[]` fill is still the server talking, just through a different field.
+    @Test func aLimitsFillAlsoAnchors() {
+        let next = PollingEngine.advance(
+            previous: PollState(), outcome: .success(Self.snapshot(source: .limits)),
+            claudeActive: true, now: Self.t0)
+        #expect(next.lastKnownSevenDayReset == ResetClock.parse(Self.serverReset))
+    }
+
+    /// **The self-feeding guard.** A reconstructed date must not overwrite the anchor it was itself
+    /// derived from — otherwise each blackout poll would build on the previous poll's estimate.
+    @Test func aReconstructedResetDoesNotAnchor() {
+        var previous = PollState()
+        previous.lastKnownSevenDayReset = Self.t0
+        let next = PollingEngine.advance(
+            previous: previous,
+            outcome: .success(Self.snapshot(source: .reconstructed, resetsAt: "2026-07-05T00:00:00+00:00")),
+            claudeActive: true, now: Self.t0)
+        #expect(next.lastKnownSevenDayReset == Self.t0)   // untouched
+    }
+
+    /// Nor does a locally-rolled one, for the same reason: the roll was ours, not the server's.
+    @Test func aRolledResetDoesNotAnchor() {
+        var previous = PollState()
+        previous.lastKnownSevenDayReset = Self.t0
+        for source in [ResetSource.serverRolled, .limitsRolled, .reconstructedRolled, .unknown] {
+            let next = PollingEngine.advance(
+                previous: previous,
+                outcome: .success(Self.snapshot(source: source, resetsAt: "2026-07-05T00:00:00+00:00")),
+                claudeActive: true, now: Self.t0)
+            #expect(next.lastKnownSevenDayReset == Self.t0)
+        }
+    }
+
+    /// A blackout keeps rolling from the same real anchor however long it lasts — the property that
+    /// makes the reconstruction stable instead of creeping the way the old estimate did.
+    @Test func anAnchorSurvivesAWholeBlackout() throws {
+        let anchor = try #require(ResetClock.parse(Self.serverReset))
+        var state = PollState()
+        state.lastKnownSevenDayReset = anchor
+        // Twelve polls of blackout, each decoding to a reconstruction.
+        for i in 1...12 {
+            state = PollingEngine.advance(
+                previous: state,
+                outcome: .success(Self.snapshot(source: .reconstructed,
+                                                resetsAt: "2026-07-05T00:00:00+00:00")),
+                claudeActive: true, now: Self.t0.addingTimeInterval(Double(i) * 180))
+        }
+        #expect(state.lastKnownSevenDayReset == anchor)
+    }
+}

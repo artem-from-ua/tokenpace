@@ -1109,7 +1109,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // restored across relaunches rather than re-warmed each time. Same `nonisolated` reader
             // discipline as the switch above — the engine calls these from its own task.
             restoreWeekly: { PersistedConfig.weeklyInterpolatorUnsafe() },
-            persistWeekly: { PersistedConfig.setWeeklyInterpolatorUnsafe($0) })
+            persistWeekly: { PersistedConfig.setWeeklyInterpolatorUnsafe($0) },
+            restoreSevenDayReset: { PersistedConfig.lastSevenDayResetUnsafe() },
+            persistSevenDayReset: { PersistedConfig.setLastSevenDayResetUnsafe($0) })
 
         // Consume on the main actor — every PollOutput drives the menu bar + popup.
         pollTask = Task { [weak self] in
