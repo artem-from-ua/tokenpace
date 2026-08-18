@@ -159,7 +159,7 @@ public struct PollState: Sendable, Equatable {
     /// ``WeeklyInterpolator/resumed(at:)`` for what survives a break and what does not).
     public var weeklyInterpolator: WeeklyInterpolator = WeeklyInterpolator()
     /// The last `seven_day.resets_at` the **server** actually sent — the anchor the decoder rolls
-    /// forward when the API stops reporting one (ADR-0106).
+    /// forward when the API stops reporting one (ADR-0107).
     ///
     /// Deliberately **not** read back out of ``lastSnapshot``: that snapshot may already hold a
     /// *reconstructed* date, and feeding one reconstruction into the next would compound its error
@@ -342,7 +342,7 @@ public struct PollingEngine: Sendable {
     /// Called whenever that state advances, so the shell can persist it. Same seam discipline as
     /// `usageApiEnabled`: the Kit owns the value, the shell owns the storage. Defaults to a no-op.
     let persistWeekly: @Sendable (WeeklyInterpolator) -> Void
-    /// The reconstruction anchor to start from (ADR-0106) — the last `seven_day.resets_at` the
+    /// The reconstruction anchor to start from (ADR-0107) — the last `seven_day.resets_at` the
     /// server sent, as the shell persisted it. Restored rather than re-derived because a blackout
     /// outlives a relaunch: without this, an app restarted mid-blackout has no anchor and can only
     /// report the reset time as unknown. Defaults to `nil` (a cold start), so every existing
@@ -433,7 +433,7 @@ public struct PollingEngine: Sendable {
             // rolling a window forward for the UI must not be mistaken for spend.
             next.weeklyInterpolator = previous.weeklyInterpolator.advanced(with: snapshot, now: now)
             // Re-anchor the weekly reconstruction, but **only** from a date the server actually sent
-            // (ADR-0106). Anchoring on a reconstructed or locally-rolled value would make each
+            // (ADR-0107). Anchoring on a reconstructed or locally-rolled value would make each
             // blackout poll build on the previous one's estimate; the guard is the whole reason
             // `sevenDayResetSource` travels on the snapshot. A blackout therefore keeps rolling from
             // the last real reset, however many hours it lasts.
@@ -781,7 +781,7 @@ public struct PollingEngine: Sendable {
                     if state.weeklyInterpolator != previous.weeklyInterpolator {
                         persistWeekly(state.weeklyInterpolator)
                     }
-                    // The reconstruction anchor, on change only (ADR-0106): the value moves about
+                    // The reconstruction anchor, on change only (ADR-0107): the value moves about
                     // once a week, so writing it every poll would be ~480 identical writes a day and
                     // would bury a genuine re-anchor in noise. `advance` only ever sets it from a
                     // server-supplied date, so anything arriving here is safe to store.
@@ -903,7 +903,7 @@ public struct PollingEngine: Sendable {
             accessToken: creds.accessToken, now: now(), transport: transport,
             // The anchor the decoder rolls forward when this body omits `seven_day.resets_at`. It
             // comes from `PollState` — written only from server-supplied dates — never from
-            // `lastSnapshot`, which may itself hold a reconstruction (ADR-0106).
+            // `lastSnapshot`, which may itself hold a reconstruction (ADR-0107).
             lastKnownSevenDayReset: state.lastKnownSevenDayReset)
         let diagnostics = PollDiagnostics(fetch: fetched.diagnostics, token: token)
         switch fetched.result {

@@ -370,7 +370,7 @@ actor StubUsageTransport: UsageTransport {
         /// What to check: the bar never steps backwards, least of all at the two handovers (inherited
         /// → firm, and interpolated → clipped), and Troubleshoot shows both numbers throughout.
         case weeklyInterp
-        /// The weekly API blackout, reconstructed (ADR-0106). A **sequence**, watched with "Refresh
+        /// The weekly API blackout, reconstructed (ADR-0107). A **sequence**, watched with "Refresh
         /// now": the first two polls return a healthy body carrying a real `seven_day.resets_at`,
         /// which seeds the anchor; every poll after that returns the blackout body — `seven_day:
         /// null` and a `weekly_all` entry with no date of its own — exactly as the server does for
@@ -384,7 +384,7 @@ actor StubUsageTransport: UsageTransport {
         /// Requires no anchor in `UserDefaults` beforehand only if you want to see the seeding; with
         /// one already stored the run starts reconstructing immediately, which is also correct.
         case weeklyResetBlackout
-        /// The cold start (ADR-0106): every poll returns the blackout body, and there is no anchor to
+        /// The cold start (ADR-0107): every poll returns the blackout body, and there is no anchor to
         /// reconstruct from — the state of a fresh install that has never spent a token.
         ///
         /// **Clear the stored anchor first**, or the app will reconstruct from it and this stub will
@@ -1170,7 +1170,7 @@ actor StubUsageTransport: UsageTransport {
             return (body, response)
         }
 
-        // The weekly blackout (ADR-0106). Two healthy polls seed the anchor, then the body the API
+        // The weekly blackout (ADR-0107). Two healthy polls seed the anchor, then the body the API
         // really sends for hours after each weekly reset: `seven_day` null, and a `weekly_all` entry
         // that carries no `resets_at` of its own — both sources of the date gone at once, which is
         // what sends the decoder to its reconstruction rung.

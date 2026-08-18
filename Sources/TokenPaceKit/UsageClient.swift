@@ -90,7 +90,7 @@ public enum UsageClient {
     ///     tests) that do not thread a clock; the live path (`fetch`) passes the real `now`.
     ///   - lastKnownSevenDayReset: The last **server-supplied** weekly reset. When the body omits
     ///     `seven_day.resets_at` entirely — which it does for hours at every weekly reset — this is
-    ///     what the decoder rolls forward instead of inventing a date (ADR-0106). Only set it from a
+    ///     what the decoder rolls forward instead of inventing a date (ADR-0107). Only set it from a
     ///     value the API actually sent: ``ResetSource/isUnrolledServerFact`` is the caller's guard.
     public static func decode(
         from data: Data,
@@ -124,7 +124,7 @@ public enum UsageClient {
     ///   - now: Threaded into ``buildRequest(accessToken:now:)`` for signature symmetry.
     ///   - transport: Injected for testing; defaults to `URLSession.shared`.
     ///   - lastKnownSevenDayReset: The last **server-supplied** weekly reset, for the decoder's
-    ///     reconstruction rung (ADR-0106). Defaults to `nil` — no anchor, and nothing is invented.
+    ///     reconstruction rung (ADR-0107). Defaults to `nil` — no anchor, and nothing is invented.
     public static func fetch(
         accessToken: String,
         now: Date,

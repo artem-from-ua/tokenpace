@@ -290,7 +290,7 @@ enum StubScenario: String, CaseIterable {
                  + "quantum. Troubleshoot discloses both numbers throughout. What to check: nothing "
                  + "ever steps backwards, least of all at the two handovers."
         case .weeklyResetBlackout:
-            return "The weekly API blackout (ADR-0106), as a **sequence** — step it with \"Refresh "
+            return "The weekly API blackout (ADR-0107), as a **sequence** — step it with \"Refresh "
                  + "now\". The first two polls carry a real `seven_day.resets_at`, which seeds the "
                  + "anchor; every poll after that returns the body the server actually sends for 4-6 "
                  + "hours after each weekly reset — `seven_day: null` with a `weekly_all` entry that "
@@ -300,7 +300,7 @@ enum StubScenario: String, CaseIterable {
                  + "`now + 7d` each time, and the time marker stayed pinned at the left edge for the "
                  + "whole blackout. Now the date holds and the marker advances."
         case .weeklyResetUnknown:
-            return "The cold start (ADR-0106): the same blackout body on every poll, with **no** "
+            return "The cold start (ADR-0107): the same blackout body on every poll, with **no** "
                  + "anchor to roll forward — a fresh install that has never spent a token. Clear the "
                  + "stored anchor first (`defaults delete TokenPace lastSevenDayReset`), or the app "
                  + "will reconstruct from it and you will see ordinary bars. What to check: the menu "

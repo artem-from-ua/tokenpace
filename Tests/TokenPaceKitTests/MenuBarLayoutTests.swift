@@ -286,7 +286,7 @@ struct MenuBarLayoutIdleTests {
         // (the countdown is simply absent). Only a non-empty unparseable date qualifies as an error.
         //
         // The `utilization: 31` here is what separates this from the cold start below: real usage is
-        // worth drawing even without a clock to pace it against, so ADR-0106's unknown-reset state
+        // worth drawing even without a clock to pace it against, so ADR-0107's unknown-reset state
         // deliberately does not claim this case.
         let snap = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
@@ -296,7 +296,7 @@ struct MenuBarLayoutIdleTests {
     }
 
     /// Idle 5h + a 7-day window with **no** usage and a blank date — the cold start, before any token
-    /// has been spent. Since ADR-0106 this is its own state rather than a bar: with no weekly clock
+    /// has been spent. Since ADR-0107 this is its own state rather than a bar: with no weekly clock
     /// there is nothing to position a marker against, and the two zero bars it used to draw said
     /// "everything is fine" when the truthful answer is "there is nothing to report yet".
     ///

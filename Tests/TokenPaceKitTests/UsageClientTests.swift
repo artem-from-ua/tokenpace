@@ -233,7 +233,7 @@ struct UsageDecodeTests {
         #expect(snapshot.fiveHour.resetsAt.isEmpty)
     }
 
-    /// With no anchor to roll, the decoder invents **nothing** (ADR-0106). This replaces the old
+    /// With no anchor to roll, the decoder invents **nothing** (ADR-0107). This replaces the old
     /// `now + 7d` local estimate, which was recomputed every poll and therefore crept forward with
     /// the clock, holding `elapsedFraction` at exactly 0 for the hours a weekly blackout lasts.
     /// Still never `sessionIdle` — that flag is five_hour-only.

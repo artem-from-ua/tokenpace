@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import TokenPaceKit
 
-// MARK: - rollForward (ADR-0106)
+// MARK: - rollForward (ADR-0107)
 
 /// The reconstruction that replaces the drifting `now + 7d` estimate during a weekly API blackout.
 ///

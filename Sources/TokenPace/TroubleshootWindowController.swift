@@ -52,7 +52,7 @@ final class TroubleshootWindowController: NSWindowController {
     /// The weekly reconstruction disclosure (#386) — raw vs reconstructed, side by side. Hidden when
     /// the two agree, so it appears only when there is something to explain.
     private var weeklyLabel: NSTextField!
-    /// The weekly reset instant and the mode it was computed in (ADR-0106) — sits directly under
+    /// The weekly reset instant and the mode it was computed in (ADR-0107) — sits directly under
     /// ``weeklyLabel`` because the two answer the same kind of question about the same window: one
     /// about its number, one about its clock.
     private var weeklyResetLabel: NSTextField!

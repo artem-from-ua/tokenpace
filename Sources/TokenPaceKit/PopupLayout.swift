@@ -298,7 +298,7 @@ public struct PopupLayout: Sendable, Equatable {
     }
 
     /// The weekly window has no reset instant and none can be reconstructed — a cold start that has
-    /// never seen one (ADR-0106). Every row is withheld while this is `true`.
+    /// never seen one (ADR-0107). Every row is withheld while this is `true`.
     ///
     /// **Not a ``FailureReason``.** That enum is the taxonomy of polling failures, and nothing has
     /// failed here: the request returned 200 and the body was well-formed. The API simply has not
@@ -535,7 +535,7 @@ public struct PopupLayout: Sendable, Equatable {
                 warning: .serverProblem, serviceStatus: serviceStatus)
         }
 
-        // No weekly reset at all, and no anchor to reconstruct one from (ADR-0106) — a cold start
+        // No weekly reset at all, and no anchor to reconstruct one from (ADR-0107) — a cold start
         // that has never seen a token spent. Deliberately **not** a `warning`: the poll succeeded and
         // the body was valid, so the failure vocabulary would misdescribe it and send the user to
         // check their network. Rows are withheld for the same reason as `brokenData` above: the

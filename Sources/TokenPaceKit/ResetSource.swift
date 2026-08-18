@@ -20,7 +20,7 @@ import Foundation
 /// with `now + 7d` recomputed each poll, which drifted forward with the clock and pinned the time
 /// marker to zero for hours. Rolling the *last known real* reset forward instead lands within
 /// ±0.25 s of the value the server eventually sends (verified on two independent journals, one Max
-/// 5x and one Pro, whose reset grids differ). See ADR-0106.
+/// 5x and one Pro, whose reset grids differ). See ADR-0107.
 ///
 /// ## The `-rolled` suffix
 ///

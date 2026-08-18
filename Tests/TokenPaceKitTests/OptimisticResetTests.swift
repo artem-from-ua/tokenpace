@@ -27,7 +27,7 @@ private func synthesized(_ window: LimitWindow) -> String {
     return f.string(from: ResetClock.nextReset(now: now, window: window))
 }
 
-/// The **seven-day** roll: the expired instant plus one whole week, to the second (ADR-0106).
+/// The **seven-day** roll: the expired instant plus one whole week, to the second (ADR-0107).
 /// Weekly resets sit on an exact grid, so rolling the known date beats estimating `now + 7d` — which
 /// is where the 10-minute ceiling used to put it, minutes off the real boundary.
 private func rolledWeek(fromExpiryAt offset: TimeInterval) -> String {

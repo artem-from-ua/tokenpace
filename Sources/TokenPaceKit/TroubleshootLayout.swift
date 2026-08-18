@@ -36,7 +36,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
     /// be judged on live data rather than on a stub — which is why it ships a full release before
     /// anything renders from the reconstructed value.
     public let weeklyLine: String?
-    /// The weekly **reset** instant and where it came from (ADR-0106) — the date to the second, plus
+    /// The weekly **reset** instant and where it came from (ADR-0107) — the date to the second, plus
     /// its ``ResetSource``. `nil` only when there is no snapshot to describe.
     ///
     /// Exists for the same reason ``weeklyLine`` does, and answers the question that one cannot: the
@@ -185,7 +185,7 @@ public struct TroubleshootLayout: Sendable, Equatable {
             tokenExpiryLine: tokenExpiryLine)
     }
 
-    /// The weekly reset instant **to the second**, followed by how it was arrived at (ADR-0106).
+    /// The weekly reset instant **to the second**, followed by how it was arrived at (ADR-0107).
     ///
     /// Seconds rather than the popup's rounded countdown, because that is what tells the two failure
     /// modes apart: the fallback this replaced re-estimated `now + 7d` on every poll, so the date

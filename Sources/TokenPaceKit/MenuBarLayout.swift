@@ -174,7 +174,7 @@ public enum MenuBarMode: Sendable, Equatable {
     /// widget that reports nothing is otherwise indistinguishable from a stuck one. The popup
     /// explains it in words and offers the way back into Settings.
     case nothingMonitored
-    /// The weekly window has no reset instant and none can be reconstructed (ADR-0106): the no-data
+    /// The weekly window has no reset instant and none can be reconstructed (ADR-0107): the no-data
     /// glyph alone, no bars, no countdown.
     ///
     /// Distinct from ``error`` because the data does not contradict itself — the server coherently
@@ -342,7 +342,7 @@ public struct MenuBarLayout: Sendable, Equatable {
         from snapshot: UsageSnapshot, now: Date,
         hideTopBar: TopBarHiding = .never
     ) -> MenuBarLayout {
-        // No weekly reset **and nothing spent** (ADR-0106) — the cold start, before the first token
+        // No weekly reset **and nothing spent** (ADR-0107) — the cold start, before the first token
         // spend has opened a weekly window. Checked before everything else because every path below
         // assumes a weekly clock exists: without one, `elapsedFraction` answers `1.0` for the 7-day
         // window and for the per-model windows that inherit its date, so each would draw a marker

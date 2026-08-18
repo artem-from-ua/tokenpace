@@ -1794,7 +1794,7 @@ final class PopupViewController: NSViewController {
     /// like the limit-window titles (plain label colour), the section reads from its numbers/bar.
     static let extraUsageTitle = "Extra usage"
 
-    /// The weekly window has no reset instant and no history to reconstruct one from (ADR-0106).
+    /// The weekly window has no reset instant and no history to reconstruct one from (ADR-0107).
     ///
     /// States the fact and nothing more — the app does not know *why* the API has not opened a
     /// weekly window, only that it has not. Matches the menu bar's accessibility description for the
@@ -2075,7 +2075,7 @@ final class PopupViewController: NSViewController {
             stack.setCustomSpacing(Metrics.sectionSpacing, after: row)
         }
 
-        // ADR-0106: no weekly reset and nothing to reconstruct one from. Same two-line shape as the
+        // ADR-0107: no weekly reset and nothing to reconstruct one from. Same two-line shape as the
         // block above and, for the same reason, **not** red and not a ⚠️: nothing has failed — the
         // API answered, it simply has not opened a weekly window yet because no tokens have been
         // spent. The detail line says what will fix it, which is the only action available.

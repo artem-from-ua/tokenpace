@@ -182,7 +182,7 @@ private extension Double {
     }
 }
 
-// MARK: - Weekly reset repair (v2 → v3, ADR-0106)
+// MARK: - Weekly reset repair (v2 → v3, ADR-0107)
 
 /// The archived counterpart of the live fix: lines written during a weekly API blackout carry a
 /// `now + 7d` estimate that crept forward every poll, with `timePct` pinned at 0 throughout. The

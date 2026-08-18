@@ -200,7 +200,7 @@ enum PersistedConfig {
         static let episodeSubscription = "episodeSubscription"
         /// The weekly-utilization reconstruction state (#386), as a JSON blob. See the property.
         static let weeklyInterpolator = "weeklyInterpolator"
-        /// The last server-supplied `seven_day.resets_at`, as an ISO-8601 string (ADR-0106). See
+        /// The last server-supplied `seven_day.resets_at`, as an ISO-8601 string (ADR-0107). See
         /// the property.
         static let lastSevenDayReset = "lastSevenDayReset"
         /// Hide incidents older than this many hours; `0` means no limit (#279, ADR-0071 §9).
@@ -941,7 +941,7 @@ enum PersistedConfig {
     }
 
     /// The last `seven_day.resets_at` the **server** sent — the anchor the decoder rolls forward
-    /// while the API withholds one (ADR-0106).
+    /// while the API withholds one (ADR-0107).
     ///
     /// Persisted because the blackout it covers lasts 4-6 hours and the app restarts inside it: the
     /// journal shows five polling gaps within one 2026-08-04 blackout, the longest 104 minutes. An

@@ -16,7 +16,7 @@ extension CodingUserInfoKey {
 
     /// Threads the last **server-supplied** `seven_day.resets_at` into ``UsageSnapshot/init(from:)``
     /// so the decoder can reconstruct the weekly reset during an API blackout instead of estimating
-    /// it (ADR-0106).
+    /// it (ADR-0107).
     ///
     /// The decoder is deliberately stateless — it sees one body plus whatever is injected here — so
     /// this is the same seam `usageNow` uses rather than a new mechanism. The caller
@@ -387,7 +387,7 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
     /// blocks. `nil` on a pre-credits payload where neither block is present — the (many) legacy
     /// fixtures rely on that default. Consumed by ``CreditsPacing`` (#144/#145 render it).
     public let spend: SpendInfo?
-    /// Where ``sevenDay``'s `resets_at` came from (ADR-0106) — a server field, a `limits[]` entry, a
+    /// Where ``sevenDay``'s `resets_at` came from (ADR-0107) — a server field, a `limits[]` entry, a
     /// reconstruction from the last known reset, or nothing at all.
     ///
     /// Carried on the snapshot rather than recomputed downstream because **only the decoder knows**:
@@ -472,7 +472,7 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         let now = (decoder.userInfo[.usageNow] as? Date) ?? Date()
 
         // The last reset the **server** actually sent, injected the same way. Absent on a cold start,
-        // which is precisely when nothing may be invented (ADR-0106).
+        // which is precisely when nothing may be invented (ADR-0107).
         let lastKnownSevenDay = decoder.userInfo[.lastKnownSevenDayReset] as? Date
 
         // The two core windows are required by the model, but on a reset boundary the API may send
@@ -485,7 +485,7 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
         // `sessionIdle: true` and returns a `resetsAt: ""` window rather than a synthesized `now + 5h`
         // phantom. `reconstructionAllowed: false` disables the roll-forward rung for it: a window that
         // does not exist between sessions has no previous instance to roll. `seven_day` does
-        // reconstruct (ADR-0106) — it is a real rolling period, so the last known reset plus whole
+        // reconstruct (ADR-0107) — it is a real rolling period, so the last known reset plus whole
         // weeks is sound — and is never idle.
         let (five, fiveIdle, _) = try Self.window(
             in: container, key: .fiveHour, window: .fiveHour,
@@ -548,7 +548,7 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
     ///    (live API uses `"session"`/`"weekly_all"`; the test fixtures use `"five_hour"`/`"seven_day"`);
     /// 3. the **last known server-supplied reset, rolled forward** by whole windows
     ///    (``ResetClock/rollForward(anchor:by:until:)``) — only when `reconstructionAllowed` and an
-    ///    anchor was injected (ADR-0106);
+    ///    anchor was injected (ADR-0107);
     /// 4. nothing at all: `resets_at` stays empty and the source is ``ResetSource/unknown``.
     ///
     /// Rung 3 replaced a local `now + duration` estimate that was recomputed every poll and therefore
@@ -602,7 +602,7 @@ public struct UsageSnapshot: Sendable, Equatable, Decodable {
             return (UsageWindow(utilization: decoded?.utilization ?? 0, resetsAt: ""), true, .unknown)
         }
 
-        // `seven_day`: roll the last **server-supplied** reset forward by whole weeks (ADR-0106).
+        // `seven_day`: roll the last **server-supplied** reset forward by whole weeks (ADR-0107).
         // The anchor is injected by the polling loop and is never a value this app derived, so the
         // reconstruction cannot compound its own error across the hours a blackout lasts.
         if let anchor = lastKnownReset,

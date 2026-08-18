@@ -381,7 +381,7 @@ public enum ResetClock {
 
     /// Roll a **known-real** reset instant forward by whole windows until it lands after `now`.
     ///
-    /// The reconstruction behind ADR-0106: when the API goes quiet about `seven_day.resets_at`, the
+    /// The reconstruction behind ADR-0107: when the API goes quiet about `seven_day.resets_at`, the
     /// previous reset plus a whole number of window lengths is a far better answer than `now +
     /// duration`. Weekly resets keep the same weekday and the same wall-clock instant **in UTC**,
     /// so this lands within a fraction of a second — measured ±0.25 s across three blackouts on a
@@ -487,7 +487,7 @@ public enum ResetClock {
         // 7d: roll forward when its reset has passed; sub-windows ride the same boundary.
         //
         // The expired instant **is** the anchor — it is the last date we had for this window, and the
-        // weekly period is exact — so this rolls it by whole weeks (ADR-0106) rather than estimating
+        // weekly period is exact — so this rolls it by whole weeks (ADR-0107) rather than estimating
         // `now + 7d`, which drifts with the clock and lands minutes off the real grid. Note the 5h
         // branch above deliberately keeps `nextReset`: a five-hour window starts at the first spend,
         // not on a fixed grid, so there is no period to roll (ADR-0030).
@@ -534,7 +534,7 @@ public enum ResetClock {
     /// reset-boundary grace suppress (ADR-0045) both synthesize a rolled-forward `resets_at` and must
     /// serialize it the same way.
     ///
-    /// `public` since ADR-0106: the shell persists the reconstruction anchor as a `resets_at` string
+    /// `public` since ADR-0107: the shell persists the reconstruction anchor as a `resets_at` string
     /// (`PersistedConfig.lastSevenDayReset`), and it has to be the *same* string shape the parser
     /// accepts — a second date format for one stored value is how round-trips start disagreeing.
     public static func isoString(from date: Date) -> String {

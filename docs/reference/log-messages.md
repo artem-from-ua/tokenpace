@@ -398,9 +398,10 @@ itself is never logged — only exit status and byte count.
 
 | Line | Category | Level | Message | When |
 |------|----------|-------|---------|------|
-| 268 | `network` | `.notice` | `filled <key> sub-window resets_at from seven_day (was null)` | a per-model sub-window's `resets_at` was null; borrowed from the parent 7-day window |
-| 314 | `network` | `.notice` | `synthesized <key> window on reset boundary (utilization=0, resets_at source=limits[])` | a core window's `resets_at` was null but a matching `limits[]` entry supplied one — a reset-boundary blip |
-| 327 | `network` | `.notice` | `synthesized <key> window on reset boundary (utilization=0, resets_at source=local-estimate)` | **`seven_day` only** — the weekly window's `resets_at` was null and no `limits[]` entry supplied one; a local `now+7d` estimate is used (`five_hour` in this case is idle, see the `PollingEngine` table — no synthesis, no log) |
+| 538 | `network` | `.notice` | `filled <key> sub-window resets_at from seven_day (was null)` | a per-model sub-window's `resets_at` was null; borrowed from the parent 7-day window |
+| 594 | `network` | `.notice` | `synthesized <key> window on reset boundary (utilization=0, resets_at source=limits[])` | a core window's `resets_at` was null but a matching `limits[]` entry supplied one — a reset-boundary blip |
+| 611 | `network` | `.notice` | `reconstructed <key> reset from the last known one (utilization=0, resets_at source=reconstructed)` | **`seven_day` only** — neither the window nor `limits[]` carried a `resets_at`, so the last server-supplied reset was rolled forward by whole weeks (ADR-0107). Fires on every poll of the 4–6 h weekly blackout, ~80–100 times per episode. Replaced the `source=local-estimate` line, whose `now+7d` estimate drifted forward each poll |
+| 619 | `network` | `.notice` | `<key> reset unknown — no server value and no anchor to reconstruct from` | **`seven_day` only** — same exhausted chain, but no persisted anchor either (a cold start that has never spent a token). Nothing is invented: `resets_at` stays empty and both surfaces say the reset time is unknown |
 
 ## `Sources/TokenPaceKit/PollingEngine.swift`
 

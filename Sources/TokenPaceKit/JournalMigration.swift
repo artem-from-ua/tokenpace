@@ -49,7 +49,7 @@ public enum JournalMigration {
         /// Lines whose timestamp went backwards relative to the line before it.
         public let outOfOrder: Int
         /// Lines whose weekly `resets_at` was a `now + 7d` estimate and has been rolled back onto the
-        /// real grid, with `timePct` recomputed (ADR-0106). Counted separately from `migrated`
+        /// real grid, with `timePct` recomputed (ADR-0107). Counted separately from `migrated`
         /// because it is the one part of the pass that recovers *data* rather than reshaping it.
         public let resetsRepaired: Int
 
@@ -160,7 +160,7 @@ public enum JournalMigration {
                 weekly = .passthrough(sample.d7.raw)
             }
 
-            // Repair a weekly reset that was written as a `now + 7d` estimate (ADR-0106). Those lines
+            // Repair a weekly reset that was written as a `now + 7d` estimate (ADR-0107). Those lines
             // are identifiable by their signature and recoverable from the anchor that preceded them;
             // `timePct` is recomputed with them, because it is derived from the date and was pinned
             // to 0 for the whole blackout.
