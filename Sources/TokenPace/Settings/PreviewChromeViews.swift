@@ -1,14 +1,14 @@
 import AppKit
 
-/// Chrome shared by every window that renders the popup **outside** a real `NSMenu`: the dev colour
-/// tuner's "Popup Preview" (#185) and the Settings window's "Dropdown live preview" (ADR-0083).
+/// Chrome for rendering the popup **outside** a real `NSMenu`: the Settings window's "Dropdown live
+/// preview" (ADR-0083).
 ///
-/// The types here are deliberately *not* dev-tools-only despite the folder they sit in — neither
-/// knows about `ColorRole`/`ColorStore`, and the Settings preview ships in release builds with no
-/// `devToolsEnabled` gate. What binds them is the surface being imitated, not the tool using it.
+/// These types once served two previews — the dev colour tuner had its own "Popup Preview" window —
+/// and lived under the tuner's folder for that reason. ADR-0106 removed the tuner, leaving the
+/// Settings preview as the only consumer; the file moved here with it, unchanged.
 ///
-/// Both metrics below were fought for once already; duplicating either would let the two previews
-/// drift apart on the next OS bump.
+/// Both metrics below were fought for once already: they describe the surface being imitated, not the
+/// window doing the imitating, so they belong in one place even with a single caller.
 @MainActor
 enum PreviewChrome {
 
@@ -48,9 +48,9 @@ enum PreviewChrome {
     /// `.menu` is the material the popup is actually drawn over, and `.behindWindow` is what lets the
     /// desktop through — the same combination the system menu window uses.
     ///
-    /// The flat `NSColor.popupMenuMatchedBackground` remains the right answer where the job is to
-    /// *measure* a colour rather than resemble the surface (#202): a vibrancy view renders lighter here
-    /// than the live menu, so the dev tuner keeps it as its reference backdrop.
+    /// A flat fill matched to the live menu (sRGB `#212121` in dark) is the right answer only where the
+    /// job is to *measure* a colour rather than resemble the surface (#202) — a vibrancy view renders
+    /// lighter than the live menu. Here the job is resemblance, so the material wins.
     static func makeMenuMaterialBackdrop() -> MenuMaterialBackdrop {
         let view = MenuMaterialBackdrop()
         view.material = .menu
@@ -150,7 +150,7 @@ extension NSColor {
     /// meant for the area behind paged content, far too dark for a card. Both values measured by
     /// resolving the colours under each appearance, not assumed.
     ///
-    /// Deliberately a step darker than `popupMenuMatchedBackground` (`#212121` dark), which the *active*
+    /// Deliberately a step darker than the live menu's own dark tone (sRGB `#212121`), which the *active*
     /// surface matches: an inactive window reading slightly lighter than the live menu is what separates
     /// "settled" from "switched off".
     static let previewInactiveBackground = NSColor(name: nil) { appearance in
@@ -168,9 +168,6 @@ extension NSColor {
 final class ThemedFillView: NSView {
     var fillColor: NSColor = .windowBackgroundColor { didSet { needsDisplay = true } }
     var cornerRadius: CGFloat = 0 { didSet { needsDisplay = true } }
-    /// A hairline border around the rounded card, mimicking the thin light edge a real `NSMenu` popup
-    /// draws (see ``NSColor/popupMenuBorder``). `nil` = no border. Preview only (#185).
-    var borderColor: NSColor? { didSet { needsDisplay = true } }
 
     override var wantsUpdateLayer: Bool { true }
     override init(frame frameRect: NSRect) { super.init(frame: frameRect); wantsLayer = true }
@@ -180,9 +177,6 @@ final class ThemedFillView: NSView {
         layer?.backgroundColor = fillColor.cgColor   // re-resolves in the current appearance
         layer?.cornerRadius = cornerRadius
         layer?.masksToBounds = cornerRadius > 0
-        // The 1 pt hairline is drawn inside masksToBounds, so it stays clipped to the rounded corners.
-        layer?.borderWidth = borderColor == nil ? 0 : 1
-        layer?.borderColor = borderColor?.cgColor
     }
 }
 

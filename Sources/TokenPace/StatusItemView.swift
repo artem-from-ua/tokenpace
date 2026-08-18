@@ -244,7 +244,7 @@ final class StatusItemView: NSView {
 
     // MARK: Colour mapping (system semantic colours → NSColor)
     //
-    // Every menu-bar colour is a **system semantic colour** resolved through `ColorStore` — the
+    // Every menu-bar colour is a **system semantic colour** resolved through `ColorRole` — the
     // coloured accents (pacing gap/marker, service dot, idle bar) map 1:1 onto the discrete
     // pacing/service buckets via `.systemGreen/.systemYellow/.systemOrange/.systemRed/.systemBlue`,
     // and the neutrals use the `*labelColor` family. The image draws through a per-appearance
@@ -257,55 +257,55 @@ final class StatusItemView: NSView {
         /// Pacing gap / dot when on pace or behind — `.systemGreen`. The ahead-of-pace colours are NOT
         /// here: they come from `PopupBarView.aheadColor` (discrete yellow/orange/red buckets), shared
         /// with the popup so both bars agree.
-        static var gapGreen: NSColor { ColorStore.shared.color(.green) }
+        static var gapGreen: NSColor { ColorRole.green.defaultColor }
 
         /// Pacing gap / dot when **far behind** pace (deep behind / big surplus) on the base 5h/7d
         /// bars — `.systemBlue` via the shared `blue` role, the same one the idle fill and the
         /// maintenance dot use. Chosen by `PopupBarView.behindColor`; on the menu bar the surface only
         /// ever carries base 5h/7d bars, so no per-row gate is needed here.
-        static var gapBlue: NSColor { ColorStore.shared.color(.blue) }
+        static var gapBlue: NSColor { ColorRole.blue.defaultColor }
 
         /// Time-indicator dot when on pace. Shares the unified green with the gap (`.systemGreen`), so the
         /// marker reads as the gap's colour with no manual lightening.
-        static var dotGreen: NSColor { ColorStore.shared.color(.green) }
+        static var dotGreen: NSColor { ColorRole.green.defaultColor }
         /// Ring around the time-indicator marker so it stays distinct over any coloured zone —
         /// `.separatorColor`, so the ring flips with the bar (dark ring on a light bar and vice versa).
-        static var indicatorStroke: NSColor { ColorStore.shared.color(.indicatorRing) }
+        static var indicatorStroke: NSColor { ColorRole.indicatorRing.defaultColor }
         /// The **Gauge** centre tick (#326) — the *calm fill's* own tone by default (``calmWhite`` =
         /// `labelColor`, re-alpha'd through ``bright(_:)`` at the draw site, exactly as the calm bar
         /// fill is). That is the menu bar's mono foreground: white on a dark bar, black on a light one,
         /// flipping with the appearance. The zero is furniture of the scale, not a status, so it takes
-        /// the neutral foreground rather than a grey a step down from it. It keeps its own role, so the
-        /// tuner can pull the tick away from the calm fill.
-        static var centreTick: NSColor { ColorStore.shared.color(.centreTick) }
+        /// the neutral foreground rather than a grey a step down from it. It keeps its own role because
+        /// it names a different element of the scale — the zero, not the calm fill (ADR-0089).
+        static var centreTick: NSColor { ColorRole.centreTick.defaultColor }
         /// The neutral grey track of a menu-bar bar — the whole-bar background, i.e. BOTH the `used`
         /// head and the future/unused tail on either side of the coloured pacing gap. `labelColor` at
         /// 22 % alpha, so both flanks read identical and the track "breathes" with the wallpaper like a
         /// native icon. The unified `barTrack` role — the popup bar uses the same one.
-        static var unusedGrey: NSColor { ColorStore.shared.color(.barTrack) }
+        static var unusedGrey: NSColor { ColorRole.barTrack.defaultColor }
         /// Idle glyph + reset label — follow the menu-bar foreground.
-        static var foreground: NSColor { ColorStore.shared.color(.foreground) }
+        static var foreground: NSColor { ColorRole.foreground.defaultColor }
 
         /// The quiet-side neutral (#105): the soft pacing colours (idle green, on-pace green,
         /// mild-ahead yellow) — and, since the time-indicator marker now shares its gap's colour, the
         /// marker too — collapse to this when the user opts into a quieter menu bar. `labelColor`, the
         /// same semantic foreground the reset label uses, so the calm signals read as the neutral
         /// foreground and flip with the bar (a fixed light tone would vanish on a light bar).
-        static var calmWhite: NSColor { ColorStore.shared.color(.calmWhite) }
+        static var calmWhite: NSColor { ColorRole.calmWhite.defaultColor }
 
         // Service-status dot (issue #31). The unified semantic hues (`.yellow/.orange/…`), shared with
         // the popup service dots, so the dot flips light/dark and honours Increase Contrast.
         // `operational` is never drawn (the dot appears only for a problem), so it is omitted.
-        static var statusYellow: NSColor { ColorStore.shared.color(.yellow) }
-        static var statusOrange: NSColor { ColorStore.shared.color(.orange) }
-        static var statusRed:    NSColor { ColorStore.shared.color(.red) }
-        static var statusBlue:   NSColor { ColorStore.shared.color(.blue) }
-        static var statusGray:   NSColor { ColorStore.shared.color(.gray) }
+        static var statusYellow: NSColor { ColorRole.yellow.defaultColor }
+        static var statusOrange: NSColor { ColorRole.orange.defaultColor }
+        static var statusRed:    NSColor { ColorRole.red.defaultColor }
+        static var statusBlue:   NSColor { ColorRole.blue.defaultColor }
+        static var statusGray:   NSColor { ColorRole.gray.defaultColor }
 
         /// The red "pause" glyph drawn to the left of the bars/countdown when the user is fully blocked
         /// (`CreditsPacing.isBlocked`) — the "no path to work" signal (#199, #227). The unified `red`
         /// role, shared with the exhausted-limit bars and the blocking reset pill.
-        static var pauseRed: NSColor { ColorStore.shared.color(.red) }
+        static var pauseRed: NSColor { ColorRole.red.defaultColor }
     }
 
     // MARK: Colour resolution (ADR-0059)
@@ -710,11 +710,11 @@ final class StatusItemView: NSView {
         // At the cap → red. Otherwise only a *strong* ahead reads as orange; on-pace/behind and the
         // mild-ahead rung (which the bars paint yellow) both render white. The thresholds mirror
         // `PopupBarView.aheadColor` so the glyph and the bars never disagree about which rung we're on.
-        if l.usageFraction >= 1 { return accent(ColorStore.shared.color(.red)) }
+        if l.usageFraction >= 1 { return accent(ColorRole.red.defaultColor) }
         guard l.timeFraction < l.usageFraction else { return bright(Palette.calmWhite) }
         let stronglyAhead = l.remainingSeconds <= PacingModel.pacingOrangeOverrideSeconds
             || (l.usageFraction - l.timeFraction) >= PacingModel.aheadThreshold(timeFraction: l.timeFraction)
-        return stronglyAhead ? accent(ColorStore.shared.color(.orange)) : bright(Palette.calmWhite)
+        return stronglyAhead ? accent(ColorRole.orange.defaultColor) : bright(Palette.calmWhite)
     }
 
     /// Rendered width of the money-credits glyph at ``Metrics/creditsIconSize`` — measured the same way
@@ -1272,7 +1272,7 @@ final class StatusItemView: NSView {
         guard barStyle != .pressure else { return false }
         guard !colorsTell.mutesCalm else { return false }
         guard let a = colour.usingColorSpace(.sRGB),
-              let b = ColorStore.shared.color(.yellow).usingColorSpace(.sRGB) else { return false }
+              let b = ColorRole.yellow.defaultColor.usingColorSpace(.sRGB) else { return false }
         let tolerance = 0.02
         return abs(a.redComponent - b.redComponent) < tolerance
             && abs(a.greenComponent - b.greenComponent) < tolerance

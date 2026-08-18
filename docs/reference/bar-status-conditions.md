@@ -257,7 +257,8 @@ Ahead-поріг **звужується** з часом (лід наприкін
 
 > **Один синій, одна роль.** Раніше idle-заливка (`ColorRole.blue`) і пейсинговий зазор
 > (`ColorRole.paceBlue`) були двома записами палітри з **однаковим** дефолтом `.systemBlue` — на
-> екрані нерозрізненні, а розділені лише тим, що тюнер міг їх розвести. Ролі злито в одну `.blue`,
+> екрані нерозрізненні, а розділені лише тим, що тюнер міг їх розвести (сам тюнер прибрано —
+> [ADR-0106](../adr/0106-remove-dev-color-tuner-and-dissolve-colorstore.md)). Ролі злито в одну `.blue`,
 > а з [#381](https://github.com/artem-from-ua/cc-timer/issues/381) idle не читає її взагалі —
 > `.blue` лишився суто пейсинговим.
 
@@ -393,5 +394,5 @@ Pressure.
 | `credits-month-end` | той самий money-бар на **90 % місяця** — найтісніше місце його лінійки: маркер часу підходить до правого підпису (`Jan 31`) найближче |
 | `color-cycle` | прогін усіх бакетів по черзі |
 
-Запуск: `TOKENPACE_DEVTOOLS=1 TOKENPACE_STUB=<id> swift run`.
+Запуск: `TOKENPACE_STUB=<id> swift run`.
 Повний перелік — [ui-verification.md](../guides/ui-verification.md).

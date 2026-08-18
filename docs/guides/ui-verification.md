@@ -203,11 +203,11 @@ Show *Extra usage*                      [ Once used | Always ]
 а отже й severity. Саме тому кредитний рядок `When it needs attention` не пропонує взагалі.
 
 ```sh
-TOKENPACE_STUB=screenshot TOKENPACE_DEVTOOLS=1 swift run          # Fable 70 % (помаранч) + Mythos 100 % (черв.)
-TOKENPACE_STUB=credits-active TOKENPACE_DEVTOOLS=1 swift run      # €10.77 of €15 — секція з баром
-TOKENPACE_STUB=credits-zero-spent TOKENPACE_DEVTOOLS=1 swift run  # €0 of €15 — Once used ховає
-TOKENPACE_STUB=credits-no-limit TOKENPACE_DEVTOOLS=1 swift run    # €10.8 unlimited — Once used показує
-TOKENPACE_STUB=credits-month-end TOKENPACE_DEVTOOLS=1 swift run   # 90 % місяця — маркер біля «Jan 31»
+TOKENPACE_STUB=screenshot swift run          # Fable 70 % (помаранч) + Mythos 100 % (черв.)
+TOKENPACE_STUB=credits-active swift run      # €10.77 of €15 — секція з баром
+TOKENPACE_STUB=credits-zero-spent swift run  # €0 of €15 — Once used ховає
+TOKENPACE_STUB=credits-no-limit swift run    # €10.8 unlimited — Once used показує
+TOKENPACE_STUB=credits-month-end swift run   # 90 % місяця — маркер біля «Jan 31»
 ```
 
 > На `credits-month-end` дивись саме **правий край** бару: підписи мають читатися `Jan 1` / `Jan 31`,
@@ -262,7 +262,7 @@ defaults read TokenPace | grep -i -e showPerModelLimits -e ModelSpecific
 ```sh
 defaults write TokenPace modelLimitsVisibility -string optionOnly
 defaults write TokenPace extraUsageVisibility  -string nonCalm
-TOKENPACE_STUB=screenshot TOKENPACE_DEVTOOLS=1 swift run
+TOKENPACE_STUB=screenshot swift run
 # після запуску: dropdown.showPerModelLimits = onceUsed, dropdown.showExtraUsage = onceUsed,
 # у Settings підсвічений сегмент «Once used» в обох рядках, старих ключів немає
 defaults read TokenPace | grep -i -e Visibility -e showPerModelLimits -e showExtraUsage
@@ -760,7 +760,7 @@ defaults write TokenPace calmBarHiding           -string never
 defaults write TokenPace showServiceStatusDot    -bool   false
 defaults write TokenPace modelLimitsVisibility   -string aboveZero     # → onceUsed
 defaults write TokenPace extraUsageVisibility    -string always
-TOKENPACE_STUB=screenshot TOKENPACE_DEVTOOLS=1 TOKENPACE_OPEN_SETTINGS=1 swift run
+TOKENPACE_STUB=screenshot TOKENPACE_OPEN_SETTINGS=1 swift run
 ```
 
 Очікувані рядки в `/tmp/tp.log` (категорія `lifecycle`) — по одному на кожен переїзд:
@@ -796,10 +796,10 @@ defaults read TokenPace | grep -E 'calmColorMode|calmBarHiding|modelLimitsVisibi
 
 ```sh
 # другий запуск: у лозі жодного рядка "migrated"
-TOKENPACE_STUB=screenshot TOKENPACE_DEVTOOLS=1 swift run
+TOKENPACE_STUB=screenshot swift run
 # і ручна зміна не відкочується наступним стартом
 defaults write TokenPace menuBar.hideTop5hBar -string untilItNeedsAttention
-TOKENPACE_STUB=screenshot TOKENPACE_DEVTOOLS=1 swift run   # має лишитися untilItNeedsAttention
+TOKENPACE_STUB=screenshot swift run   # має лишитися untilItNeedsAttention
 ```
 
 Окремо перевір **нерозпізнане** значення: `defaults write TokenPace calmColorMode -string bogus` →
@@ -813,7 +813,7 @@ TOKENPACE_STUB=screenshot TOKENPACE_DEVTOOLS=1 swift run   # має лишити
 ### Рядок «Colors tell me» неактивний під Pressure (#381)
 
 Найшвидше — на будь-якому спокійному стубі з видимою смужкою:
-`TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2 TOKENPACE_STUB=far-behind TOKENPACE_DEVTOOLS=1 swift run`.
+`TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2 TOKENPACE_STUB=far-behind swift run`.
 
 Settings → Appearance › **Menu bar**. Клацай плитки Style і дивись на рядок під ними
 ([ADR-0105 §6](../adr/0105-color-advice-governs-pacing-bars-only.md)):
@@ -840,7 +840,7 @@ Settings → Appearance › **Menu bar**. Клацай плитки Style і д�
 ```sh
 defaults write TokenPace menuBar.colorsTell -string slowDownOrSpeedUp
 defaults write TokenPace menuBar.style      -string pressure
-TOKENPACE_STUB=far-behind TOKENPACE_DEVTOOLS=1 swift run
+TOKENPACE_STUB=far-behind swift run
 # на реальному menu bar: пігулка БІЛА, не синя
 ```
 
@@ -849,7 +849,7 @@ TOKENPACE_STUB=far-behind TOKENPACE_DEVTOOLS=1 swift run
 
 ### Біла крапка `degraded` на СВІТЛІЙ темі (#381)
 
-`TOKENPACE_STUB=calm-degraded TOKENPACE_DEVTOOLS=1 swift run`, System Settings → Appearance → **Light**.
+`TOKENPACE_STUB=calm-degraded swift run`, System Settings → Appearance → **Light**.
 
 У menu bar крапка `degraded` тепер **біла безумовно**
 ([ADR-0105 §3](../adr/0105-color-advice-governs-pacing-bars-only.md)) — і саме на світлій темі вона
@@ -870,7 +870,7 @@ TOKENPACE_STUB=far-behind TOKENPACE_DEVTOOLS=1 swift run
 
 ### Посилений glow нульової пігулки в попапі під Pressure (#381)
 
-`TOKENPACE_STUB=far-behind TOKENPACE_DEVTOOLS=1 swift run`, Settings → Appearance › **Dropdown** →
+`TOKENPACE_STUB=far-behind swift run`, Settings → Appearance › **Dropdown** →
 Style = **Pressure**, тоді клікнути значок і дивитись у попап.
 
 Під Pressure спокійний бік малюється нулем, тож стрічка вироджується в **мінімальну пігулку** — і
@@ -908,7 +908,7 @@ ambient-glow, розрахований на повну стрічку (раді�
   start») теж має glow — той самий, що й у pacing-стріпа (ті самі параметри).
 - **Status-крапки** сервісів (напр. жовта «API degraded») мають glow і коректно перемальовуються при
   зміні світлої/темної теми (це `GlowDotView`, layer-backed — не запечений image).
-- **Dev color-tuner preview** має рендерити попап **ідентично** реальному меню (той самий Vibrant-
+- **Прев'ю дропдауна в Settings** має рендерити попап **ідентично** реальному меню (той самий Vibrant-
   appearance): сірі бари/тіки/dimmed-текст однакової яскравості; preview рендерить **попап**, тож реагує на зміну **Dropdown → Style** (не менюбарного, #329).
   Один бар свідомо **не** реагує на Style — кредитний
   ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)); це не баг прев'ю.
@@ -992,8 +992,8 @@ locked».
   automatically` · *(опційно)* рядок 🔴 **Update to version X.Y.Z failed during `<стадія>`.** +
   `Reason: <причина>` (selectable, переноситься).
 
-Крапки беруть ті самі `ColorStore`-кольори, що й дропдаун (синя `popupServiceBlue`, червона
-`popupServiceRed`). Усі версії показуються **без `v`**; release-notes URL усе одно бʼє в `vX.Y.Z`.
+Крапки беруть ті самі ролі палітри, що й дропдаун (`ColorRole.blue` для «доступне оновлення»,
+`ColorRole.red` для «встановлення не вдалося»). Усі версії показуються **без `v`**; release-notes URL усе одно бʼє в `vX.Y.Z`.
 
 Стуб **`TOKENPACE_FAKE_FAILURE=<stage>:<reason>`** форсує failure-рядок у About (пише лише в пам'ять,
 **не** в `UserDefaults`); `<stage>` ∈ `download|unzip|verify|replace`; тег береться з
@@ -1001,7 +1001,7 @@ locked».
 одразу About. Приклад:
 
 ```sh
-TOKENPACE_STUB=1 TOKENPACE_DEVTOOLS=1 TOKENPACE_SETTINGS_SECTION=0 \
+TOKENPACE_STUB=1 TOKENPACE_SETTINGS_SECTION=0 \
 TOKENPACE_UPDATE_STATE=failed TOKENPACE_FAKE_LATEST=v0.56.0 \
 TOKENPACE_FAKE_FAILURE='verify:team id mismatch (expected S5A4U9798Y, got ABCDE12345)' \
 swift run
@@ -1023,7 +1023,7 @@ swift run
 клік там законно відмовляє (`forced-skip reason=not-app-bundle`) — це видно в логах.
 
 ```sh
-TOKENPACE_STUB=1 TOKENPACE_DEVTOOLS=1 TOKENPACE_SETTINGS_SECTION=0 \
+TOKENPACE_STUB=1 TOKENPACE_SETTINGS_SECTION=0 \
 TOKENPACE_FAKE_LATEST=v99.0.0 TOKENPACE_FAKE_DEFERRAL=battery,metered \
 swift run
 ```
@@ -1052,7 +1052,7 @@ swift run
 Секція показується, лише коли бекап **увімкнено й обрано теку** — інакше рядків не буде взагалі.
 
 ```sh
-TOKENPACE_STUB=1 TOKENPACE_DEVTOOLS=1 TOKENPACE_SETTINGS_SECTION=7 \
+TOKENPACE_STUB=1 TOKENPACE_SETTINGS_SECTION=7 \
 TOKENPACE_FAKE_ARCHIVE_GATE=space \
 swift run
 ```
@@ -1325,8 +1325,8 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2.1 TOKENPACE_STUB=screensh
 8. **Тема.** Флипни light↔dark при відкритому прев'ю: нейтралі перерезолвлюються, кольори **клацають**,
    а не блендяться. Кольори міряти Digital Color Meter у sRGB, не зі скриншота.
 
-Заразом варто глянути dev-прев'ю (`TOKENPACE_OPEN_DEVTOOLS=1`) — воно ділить із цим chrome-типи, тож
-зміни там зачіпають обидва.
+Chrome-типи (`PreviewChrome`/`ThemedFillView`/`TitlePlaqueView`) від ADR-0106 має єдиного споживача —
+це прев'ю; другого вікна, з яким вони колись ділилися, більше немає.
 
 ### `TOKENPACE_SIDEBAR_FILLER` — зробити sidebar достатньо довгим, щоб він скролив
 
@@ -1396,37 +1396,49 @@ TOKENPACE_OPEN_TROUBLESHOOT=1 TOKENPACE_STUB=screenshot swift run
 кнопки натиснутою картинка не «блимає» — тип кнопки змінено на `.momentaryPushIn` саме тому, що
 `.momentaryChange` повертав гліф на mouse-up і затирав checkmark.
 
-### Development tools — колор-тюнер (#185)
+### Development tools — селектор стубів і payload-лог (#187, #279)
 
-Dev-інструмент підбору кольорів: вікно з дропдауном усіх ~35 іменованих кольорових ролей (menu-bar і
-popup pacing **розділені**; є popup service-доти, warning red, «in use» pill, link, label) + **вбудований
-inline-пікер** у правій панелі — усі 6 каналів (RGB **і** HSB) разом, над кожним повзунком динамічна
-градієнт-стрічка, редаговані 16-бітні поля 0–65535 + alpha, живі копійовані RGB(0–255)+HEX readout-и.
-Перемальовує menu-bar іконку й popup-preview **наживо**. У preview-вікні під popup — два mock-рядки
-(синя «New update available» / червона «Automatic update failed») для підбору відповідних кольорів.
-Гейт — **`defaults`-ключ `devToolsEnabled`** (`defaults write com.artem-n.tokenpace devToolsEnabled -bool true`,
-ADR-0053) **плюс** затиснутий ⌥ Option на пункті меню «Development tools…». Незалежить від
-типу білда (dev / notarized / release): гейт — `UserDefaults`-ключ, не `#if DEBUG`. Override-и
-**ephemeral** (не персистяться); без ключа шар кольорів інертний (завжди дефолти).
+Dev-only вікно з двома інструментами, що не мають стосунку один до одного, крім спільного гейта.
+До [ADR-0106](../adr/0106-remove-dev-color-tuner-and-dissolve-colorstore.md) тут жив ще й колор-тюнер
+із власним вікном прев'ю — обидва прибрано; підбір кольорів тепер робиться так, як описано в
+наступному розділі (swatch + піпетка).
 
-> **Лише на встановленому `.app`.** Ключ читається з домену bundle id, тож діє тільки коли ключ
-> виставлено на нотаризованому `.app` і його ж запущено. У `swift run` бінарник **без bundle id** →
-> інший домен `UserDefaults`, тож `defaults write com.artem-n.tokenpace …` на нього не впливає —
-> тюнер тепер можна ганяти **лише на зібраному `.app`**, не в `swift run` (ADR-0053).
+**1. `Preview data source (stub)`** — випадайка, що перемикає `TOKENPACE_STUB`-сценарій **без
+рестарту** (#187, [ADR-0047](../adr/0047-live-stub-selector.md)). Під нею — опис поточного сценарію.
+`Real network (no stub)` повертає застосунок на живий API. Це найшвидший спосіб пройтися по станах:
+перемкнув — і menu bar із попапом одразу перемалювалися.
+
+**2. `Log status payloads (JSONL)`** — чекбокс сирого логу відповідей `status.claude.com` (#279,
+[ADR-0071](../adr/0071-incident-subscriptions.md) §10), поруч — **`Reveal in Finder`**. Пише лише
+**матеріально змінені** payload-и і лише на **живій мережі** (на стубі писати нічого). Прапорець
+читається на кожному полі, тож діє одразу, без рестарту. Кнопка відкриває файл поточного місяця
+(`status-payloads[-dev]-YYYY-MM.jsonl` у теці журналу), а якщо його ще немає — саму теку; «файлу
+немає» одразу після ввімкнення — нормальний стан. Повний опис формату — у
+[incident-subscriptions.md](../design/incident-subscriptions.md) §11.
+
+Гейт — **`defaults`-ключ `devToolsEnabled`** (`defaults write com.artem-n.tokenpace devToolsEnabled
+-bool true`, [ADR-0053](../adr/0053-devtools-flag-via-defaults.md)) **плюс** затиснутий ⌥ Option на
+пункті меню «Development tools…». Не залежить від типу білда: гейт — `UserDefaults`-ключ, не
+`#if DEBUG`.
+
+> **Лише на зібраному `.app`.** Ключ читається з домену bundle id, тож у `swift run` (бінарник без
+> bundle id → інший домен) `defaults write com.artem-n.tokenpace …` на нього не впливає (ADR-0053).
+> Збирати треба **свій** бандл — `scripts/build-app.sh` кладе його в `./build/TokenPace.app` з тим
+> самим bundle id. Запускати встановлену копію з `/Applications` для перевірки **своїх** змін не
+> можна: там стоїть інший білд, і побачиш не те, що зробив.
 
 Запуск для перевірки (auto-open обходить незручний ⌥-клік по menu-bar, як для Troubleshoot):
 
 ```sh
-defaults write com.artem-n.tokenpace devToolsEnabled -bool true
-TOKENPACE_OPEN_DEVTOOLS=1 TOKENPACE_STUB=both-orange open -n /Applications/TokenPace.app
+scripts/build-app.sh
+TOKENPACE_OPEN_DEVTOOLS=1 TOKENPACE_STUB=both-orange ./build/TokenPace.app/Contents/MacOS/TokenPace
 ```
 
-→ вікно тюнера (always-on-top) відкриється саме, поруч — окреме always-on-top вікно **«Popup preview»**
-з живим рендером дропдауна. Обери роль (напр. «Popup · gap orange»), посунь повзунок каналу (або
-впиши 16-бітне значення) — і preview-вікно, і menu-bar іконка міняються негайно. Закриття вікна тюнера
-закриває й preview. **Reset** / **Reset all** повертають дефолти,
-**Copy sRGB** кладе значення в буфер, ● позначає недефолтні ролі. Без `devToolsEnabled` пункт меню
-не з'являється навіть під ⌥, а `TOKENPACE_OPEN_DEVTOOLS` ігнорується.
+→ вікно (always-on-top) відкриється саме. Перевіряти: випадайка перемикає сценарій і віджет у барі
+змінюється **без рестарту**; чекбокс логу перемикається; `Reveal in Finder` відкриває файл або теку.
+Без `devToolsEnabled` пункт меню не з'являється навіть під ⌥, а `TOKENPACE_OPEN_DEVTOOLS`
+ігнорується.
+
 
 ### Тестування кольорів menu-bar віджета (swatch-режим + піпетка)
 
@@ -1437,7 +1449,7 @@ Wi-Fi, battery) має **суворий метод**, вироблений бо�
    RGB (color management), і кілька разів заводив у хибні висновки. Джерело істини — **Digital Color
    Meter** (нативна піпетка) у режимі **sRGB** (View → Display in sRGB). Див. розділ «Кольори» в CLAUDE.md.
 2. **Завжди на РЕАЛЬНОМУ барі, скріншот ВЕРХНЬОЇ СМУГИ повного екрана — не вікна.** Скріншот вікна
-   (напр. color-tuner preview) рендерить віджет **без menu-bar vibrancy й шпалери** → бреше. Прозорі
+   (напр. прев'ю дропдауна в Settings) рендерить віджет **без menu-bar vibrancy й шпалери** → бреше. Прозорі
    ефекти («дихання» кольором фону) видно тільки на реальному барі поряд із системними іконками.
 3. **Swatch-режим `TOKENPACE_SWATCHES=1`.** Замість віджета малює **великі кольорові квадрати**
    (`StatusItemView.render`) — кандидати кольору/alpha пліч-о-пліч. Так їх легко піпкати й порівнювати
@@ -1505,7 +1517,7 @@ Claude-сесії), **і** вмикає показ (обходить master-ту
 ```sh
 TOKENPACE_STUB=1 TOKENPACE_AWAITING=8 TOKENPACE_AWAITING_DAYS=3,28,10,5,25,12,20,4 \
   TOKENPACE_AWAITING_PROJECTS=tokenpace-menubar,claude-code-daemon,awaiting-input-watcher \
-  TOKENPACE_DEVTOOLS=1 swift run
+  swift run
 ```
 
 Проєкти чергуються round-robin (`i % 3`), тож 8 сесій дають різні бакети (не самі одинички). Долоні
@@ -1571,7 +1583,7 @@ store, тож **лише живий стрім**, піднятий *до* зап
 ```sh
 ( log stream --predicate 'subsystem == "com.artem-n.tokenpace"' --level debug > /tmp/tp.log ) &
 sleep 2
-TOKENPACE_DEVTOOLS=1 TOKENPACE_STUB=real swift run
+TOKENPACE_STUB=real swift run
 ```
 
 1. Увімкни тумблер → індикатор показує живий лічильник.

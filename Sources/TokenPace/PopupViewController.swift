@@ -294,23 +294,23 @@ final class PopupBarView: NSView {
         /// Pacing gap colours — the unified semantic hues shared with the menu bar. Green (on pace) is
         /// `.systemGreen`; the ahead-of-pace grade is `.systemYellow` (mild lead) → `.systemOrange`
         /// (strong lead) → `.systemRed` (exhausted), via `aheadColor`.
-        static var gapGreen: NSColor { ColorStore.shared.color(.green) }
-        static var gapRed: NSColor { ColorStore.shared.color(.red) }
-        static var gapYellow: NSColor { ColorStore.shared.color(.yellow) }
-        static var gapOrange: NSColor { ColorStore.shared.color(.orange) }
+        static var gapGreen: NSColor { ColorRole.green.defaultColor }
+        static var gapRed: NSColor { ColorRole.red.defaultColor }
+        static var gapYellow: NSColor { ColorRole.yellow.defaultColor }
+        static var gapOrange: NSColor { ColorRole.orange.defaultColor }
         /// The **far-behind** pacing gap (deep behind pace / big surplus) on the base 5h/7d bars —
         /// `.systemBlue` via the shared `blue` role, the same one the idle fill and the maintenance dot
         /// use. Chosen by `behindColor` when the surplus clears the behind-threshold and the weekly
         /// gate is open; otherwise green.
-        static var gapBlue: NSColor { ColorStore.shared.color(.blue) }
+        static var gapBlue: NSColor { ColorRole.blue.defaultColor }
 
         /// Indicator-dot ring: a soft separation between the dot and the bar beneath it. `separatorColor`
         /// — the unified `indicatorRing` role, the same semantic hairline the menu-bar ring uses.
-        static var indicatorStroke: NSColor { ColorStore.shared.color(.indicatorRing) }
+        static var indicatorStroke: NSColor { ColorRole.indicatorRing.defaultColor }
 
         /// Tick-ruler marks below the bar: `tertiaryLabelColor` (the `.tick` role) — a muted neutral that
         /// flips light/dark and reads weaker than the indicator dot.
-        static var tick: NSColor { ColorStore.shared.color(.tick) }
+        static var tick: NSColor { ColorRole.tick.defaultColor }
 
         /// The **zero tick** struck through the bar — the same `centreTick` role the menu bar's mark
         /// uses, not the `.tick` ruler tone beside it. Deliberately shared: the two surfaces draw the
@@ -325,10 +325,10 @@ final class PopupBarView: NSView {
         /// bakes the dark tone into the light theme and vice-versa. Resolving per appearance is what
         /// makes the mark follow the system's light/dark setting, exactly as the menu bar's does.
         ///
-        /// A tuner-supplied override keeps its own alpha as the base, so pulling the role somewhere else
-        /// still fades by the same proportion.
+        /// The role is resolved **outside** the provider closure on purpose: `defaultColor` is
+        /// `@MainActor`, and the closure is not isolated — inlining the lookup into it does not compile.
         static var zeroTick: NSColor {
-            let role = ColorStore.shared.color(.centreTick)
+            let role = ColorRole.centreTick.defaultColor
             return NSColor(name: nil) { appearance in
                 var faded = role
                 appearance.performAsCurrentDrawingAppearance {
@@ -424,7 +424,7 @@ final class PopupBarView: NSView {
             // dropped rather than moved: idle answers one question. The weekly gate still does its real
             // work on every *active* row's `blueAllowed` (ADR-0081), and the menu bar drops the same
             // distinction in the same release, so the two surfaces cannot disagree about idle.
-            let idleTarget = blocked ? Self.monochromeGrey : ColorStore.shared.color(.green)
+            let idleTarget = blocked ? Self.monochromeGrey : ColorRole.green.defaultColor
             let idleColor = blocked ? idleTarget : animated(idleTarget, part: .fill)
             // The zero tick goes down BEFORE the track: the track then covers its middle and only the
             // ends stand proud, which is what keeps it from reading as a time marker.
@@ -1062,9 +1062,9 @@ final class PopupBarView: NSView {
     /// The ahead-of-pace grade, shared by both surfaces: they now resolve the same unified
     /// `red`/`yellow`/`orange` roles, so the menu-bar bar and popup bar always agree.
     static func aheadColor(usage: Double, time: Double, remainingSeconds: TimeInterval) -> NSColor {
-        let red = ColorStore.shared.color(.red)
-        let yellow = ColorStore.shared.color(.yellow)
-        let orange = ColorStore.shared.color(.orange)
+        let red = ColorRole.red.defaultColor
+        let yellow = ColorRole.yellow.defaultColor
+        let orange = ColorRole.orange.defaultColor
         if usage >= 1 { return red }
         if remainingSeconds <= PacingModel.pacingOrangeOverrideSeconds { return orange }
         return (usage - time) < PacingModel.aheadThreshold(timeFraction: time) ? yellow : orange
@@ -1082,7 +1082,7 @@ final class PopupBarView: NSView {
     /// so this and Kit's `BarLayout.severity` compute the identical split and never drift. Restricted
     /// to base 5h/7d bars by the caller (`isBaseLimit`); per-model / credits rows stay green.
     static func behindColor(_ l: BarLayout) -> NSColor {
-        let green = ColorStore.shared.color(.green)
+        let green = ColorRole.green.defaultColor
         // Blue is off the table for this bar (weekly gate closed, or an inert/non-token bar) → green.
         // Must stay in lock-step with `isFarBehind`, or the bar reads green under a "far behind pace"
         // status word.
@@ -1090,7 +1090,7 @@ final class PopupBarView: NSView {
         let elapsed = Double(l.windowDurationSeconds) - l.remainingSeconds
         if elapsed <= PacingModel.pacingBlueStartOverrideSeconds { return green }
         return (l.timeFraction - l.usageFraction) > PacingModel.behindThreshold(windowDurationSeconds: l.windowDurationSeconds)
-            ? ColorStore.shared.color(.blue) : green
+            ? ColorRole.blue.defaultColor : green
     }
 
     /// Glow radii (#188 follow-up): a soft coloured halo (ambient) behind the coloured pacing strip, the
@@ -1113,7 +1113,7 @@ final class PopupBarView: NSView {
     /// first — a dynamic catalogue colour and a resolved one never compare equal directly.
     private func isYellow(_ colour: NSColor) -> Bool {
         guard let a = colour.usingColorSpace(.sRGB),
-              let b = ColorStore.shared.color(.yellow).usingColorSpace(.sRGB) else { return false }
+              let b = ColorRole.yellow.defaultColor.usingColorSpace(.sRGB) else { return false }
         let tolerance = 0.02
         return abs(a.redComponent - b.redComponent) < tolerance
             && abs(a.greenComponent - b.greenComponent) < tolerance
@@ -1213,38 +1213,6 @@ final class CardBackdropView: NSView {
 }
 
 extension NSColor {
-    /// The popup card's background **as the real `NSMenu` renders it on screen**, for surfaces outside a
-    /// menu (the dev colour-tuner's "Popup Preview" window, #185). Inside the real menu the vibrancy
-    /// material yields **#2C2C2C** in dark; the preview is a plain borderless window, where a
-    /// `windowBackgroundColor` fill renders a visibly lighter **#414141**. In **light** the two already
-    /// match exactly (#EFEFEF), so only the **dark** branch is overridden; light falls through to
-    /// `windowBackgroundColor`.
-    ///
-    /// The dark value is sRGB **#212121** — the colour the real `NSMenu` popup shows, verified live with
-    /// Digital Color Meter in **sRGB** mode (popup `0x212121`, this fill `0x212121`). It is darker than
-    /// `windowBackgroundColor`, whose fill reads noticeably lighter here. Screenshots are not a reliable
-    /// reference for this — `screencapture` colour-management shifts both surfaces so they look equal in
-    /// the file while differing on the live display; the value was matched against the live sRGB meter, not
-    /// a captured image. Dynamic (`NSColor(name:)`) so it re-resolves on a theme flip.
-    static let popupMenuMatchedBackground = NSColor(name: nil) { appearance in
-        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        return isDark ? NSColor(srgbRed: 0x21/255, green: 0x21/255, blue: 0x21/255, alpha: 1)
-                      : .windowBackgroundColor
-    }
-
-    /// The thin light hairline a real `NSMenu` popup draws around its rounded edge, for the dev-tuner
-    /// preview window which — being a plain borderless window — has no such system chrome. A subtle grey,
-    /// darker than the card so it reads as an edge; dynamic so it tracks the theme.
-    ///
-    /// Deliberately **not** a `ColorRole` (audit #206): this hairline is **preview-only** chrome. The
-    /// shipped popup lives inside an `NSMenu`, which draws its own edge — this border is never rendered
-    /// in the real UI, so a tuner slider for it would only affect the preview window. Left as a fixed
-    /// pair verified against dark/light: #4D4D4D dark, #C4C4C4 light.
-    static let popupMenuBorder = NSColor(name: nil) { appearance in
-        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        return isDark ? NSColor(srgbRed: 0x4D/255, green: 0x4D/255, blue: 0x4D/255, alpha: 1)
-                      : NSColor(srgbRed: 0xC4/255, green: 0xC4/255, blue: 0xC4/255, alpha: 1)
-    }
 
     /// Fill of the Control-Center-style section card (`CardBackdropView`, #188). `controlBackgroundColor`
     /// (light #FFFFFF, dark #1E1E1E) at **partial alpha**, so the `NSMenu` vibrancy material below the card
@@ -1369,7 +1337,7 @@ final class SubscribeRowView: NSView {
         // The icon carries the state, so it takes the full label colour when active and the dimmed
         // one when not — the same weight the text has in each state.
         iconView.contentTintColor = filled
-            ? ColorStore.shared.color(.label)
+            ? ColorRole.label.defaultColor
             : PopupViewController.dimmedLabelColor
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
@@ -1830,7 +1798,7 @@ final class PopupViewController: NSViewController {
     /// against `anthropics/skills`' `brand-guidelines/SKILL.md` on GitHub, the same value the local
     /// Claude Code "claude" theme slot resolves to. Used only for the "Claude Code" section header,
     /// so the popup echoes the CLI's own brand mark rather than a generic label colour.
-    private static var claudeBrandColor: NSColor { ColorStore.shared.color(.claudeBrand) }
+    private static var claudeBrandColor: NSColor { ColorRole.claudeBrand.defaultColor }
 
     /// `Metrics.textSize`, bold — the "Claude Code" section header and the two native menu items
     /// below it (via `App.swift`'s `attributedTitle`) all resolve to this exact font, so there is no
@@ -1869,7 +1837,7 @@ final class PopupViewController: NSViewController {
     /// appearance, so it re-resolves per view and adapts to light/dark. A plain `static let ...
     /// .blended(...)` bakes in whatever appearance was current at first access — which made it render
     /// near-black under the dark system theme.
-    static var dimmedLabelColor: NSColor { ColorStore.shared.color(.dimmedLabel) }
+    static var dimmedLabelColor: NSColor { ColorRole.dimmedLabel.defaultColor }
 
     /// The shipped default for ``dimmedLabelColor`` — a **dynamic** `NSColor(name:)` whose blend is
     /// computed inside the provider (see the note above). Source of truth for `ColorRole.defaultColor`.
@@ -2236,10 +2204,10 @@ final class PopupViewController: NSViewController {
         let font = NSFont.systemFont(ofSize: Metrics.textSize)
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = font
-        titleLabel.textColor = ColorStore.shared.color(.label)
+        titleLabel.textColor = ColorRole.label.defaultColor
         let statusLabel = NSTextField(labelWithString: status)
         statusLabel.font = font
-        statusLabel.textColor = ColorStore.shared.color(.label)
+        statusLabel.textColor = ColorRole.label.defaultColor
         guard let badge else {
             return addSplitRow(leftLabel: titleLabel, rightLabel: statusLabel)
         }
@@ -2318,7 +2286,7 @@ final class PopupViewController: NSViewController {
     private func makeAwaitingProjectRow(_ stat: ProjectAwaitingStats) -> NSView {
         let name = NSTextField(labelWithString: stat.projectName)
         name.font = .systemFont(ofSize: Metrics.textSize)
-        name.textColor = ColorStore.shared.color(.label)
+        name.textColor = ColorRole.label.defaultColor
 
         let chips = NSStackView()
         chips.orientation = .horizontal
@@ -2327,7 +2295,7 @@ final class PopupViewController: NSViewController {
         // Order: neutral → orange → red; only non-empty buckets. Each chip's tooltip states its
         // time-to-deletion bucket.
         let buckets: [(Int, NSColor, String)] = [
-            (stat.recent, ColorStore.shared.color(.label), ">15d till deletion"),
+            (stat.recent, ColorRole.label.defaultColor, ">15d till deletion"),
             (stat.orange, .systemOrange, "<15d till deletion"),
             (stat.red, .systemRed, "<7d till deletion"),
         ]
@@ -2345,7 +2313,7 @@ final class PopupViewController: NSViewController {
         switch urgency {
         case .red:     return .systemRed
         case .orange:  return .systemOrange
-        case .neutral: return ColorStore.shared.color(.label)
+        case .neutral: return ColorRole.label.defaultColor
         }
     }
 
@@ -2378,10 +2346,10 @@ final class PopupViewController: NSViewController {
         let font = Self.pillFont
         let badge: PillView = optionHeld
             ? PillView(text: Self.inUseWord, font: font, textColor: .cardPlateFillOpaque,
-                       fill: { ColorStore.shared.color(.inUsePill) })
+                       fill: { ColorRole.inUsePill.defaultColor })
             : PillView(symbol: StatusItemView.creditsSymbolName(for: currency), font: font,
                        textColor: .cardPlateFillOpaque,
-                       fill: { ColorStore.shared.color(.inUsePill) })
+                       fill: { ColorRole.inUsePill.defaultColor })
         badge.toolTip = Self.inUseHint
         badge.setAccessibilityLabel(Self.inUseAccessibilityLabel)
         // Pin the plaque to its intrinsic size: inside the title stack an unpinned view is stretched to
@@ -2424,7 +2392,7 @@ final class PopupViewController: NSViewController {
     /// ``PillView`` is a label whose cell pads its own text — see that type for why the padding lives
     /// there rather than in constraints or in hand-drawing.
     private static func makePill(text: String, fill: @escaping () -> NSColor) -> NSView {
-        PillView(text: text, font: pillFont, textColor: ColorStore.shared.color(.pillText), fill: fill)
+        PillView(text: text, font: pillFont, textColor: ColorRole.pillText.defaultColor, fill: fill)
     }
 
     /// The type face every badge uses — the blocking reset, the credits currency glyph and the ⌥ word
@@ -2436,7 +2404,7 @@ final class PopupViewController: NSViewController {
     private func addLabel(_ text: String, font: NSFont, secondary: Bool = false, color: NSColor? = nil) -> NSView {
         let label = NSTextField(labelWithString: text)
         label.font = font
-        label.textColor = color ?? (secondary ? Self.dimmedLabelColor : ColorStore.shared.color(.label))
+        label.textColor = color ?? (secondary ? Self.dimmedLabelColor : ColorRole.label.defaultColor)
         stack.addArrangedSubview(label)
         return label
     }
@@ -2603,7 +2571,7 @@ final class PopupViewController: NSViewController {
     private func addWrappingLabel(_ text: String, font: NSFont, secondary: Bool = false) -> NSView {
         let label = NSTextField(wrappingLabelWithString: text)
         label.font = font
-        label.textColor = secondary ? Self.dimmedLabelColor : ColorStore.shared.color(.label)
+        label.textColor = secondary ? Self.dimmedLabelColor : ColorRole.label.defaultColor
         label.lineBreakMode = .byWordWrapping
         label.translatesAutoresizingMaskIntoConstraints = false
         let contentWidth = Metrics.contentWidth
@@ -2628,7 +2596,7 @@ final class PopupViewController: NSViewController {
         color: NSColor? = nil
     ) -> NSView {
         let font = NSFont.boldSystemFont(ofSize: Metrics.textSize)
-        let color = color ?? ColorStore.shared.color(.red)
+        let color = color ?? ColorRole.red.defaultColor
         let attributed = NSMutableAttributedString()
 
         let symbolConfig = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
@@ -2725,7 +2693,7 @@ final class PopupViewController: NSViewController {
         dot.toolTip = status == .operational ? "operational" : "issue"
         let nameLabel = NSTextField(labelWithString: label)
         nameLabel.font = font
-        nameLabel.textColor = ColorStore.shared.color(.label)
+        nameLabel.textColor = ColorRole.label.defaultColor
         let leadingLabel = NSStackView(views: [dot, nameLabel])
         leadingLabel.orientation = .horizontal
         leadingLabel.alignment = .centerY
@@ -2805,9 +2773,9 @@ final class PopupViewController: NSViewController {
         // colour rather than the dimmed one. It is the answer to "can I work", so it should read as
         // content, not as a footnote — only the age beside it is secondary.
         attributed.append(NSAttributedString(string: word, attributes: url != nil
-            ? [.font: font, .foregroundColor: ColorStore.shared.color(.link),
+            ? [.font: font, .foregroundColor: ColorRole.link.defaultColor,
                .underlineStyle: NSUnderlineStyle.single.rawValue]
-            : [.font: font, .foregroundColor: ColorStore.shared.color(.label)]))
+            : [.font: font, .foregroundColor: ColorRole.label.defaultColor]))
 
         let label = StatusLineLabel(labelWithAttributedString: attributed)
         if let url {
@@ -2972,14 +2940,14 @@ final class PopupViewController: NSViewController {
 
         let text = NSMutableAttributedString(
             string: name + separator,
-            attributes: [.font: font, .foregroundColor: ColorStore.shared.color(.label)])
+            attributes: [.font: font, .foregroundColor: ColorRole.label.defaultColor])
         if !ageAndSeparator.isEmpty {
             text.append(NSAttributedString(
                 string: ageAndSeparator, attributes: [.font: font, .foregroundColor: dimmedLabelColor]))
         }
         let stageStart = text.length
         text.append(NSAttributedString(string: meta.stage, attributes: isLinked
-            ? [.font: font, .foregroundColor: ColorStore.shared.color(.link),
+            ? [.font: font, .foregroundColor: ColorRole.link.defaultColor,
                .underlineStyle: NSUnderlineStyle.single.rawValue]
             : [.font: font, .foregroundColor: dimmedLabelColor]))
 
@@ -3076,12 +3044,12 @@ final class PopupViewController: NSViewController {
     /// dark panels, exactly like the warning triangle's `.systemRed`. Exhaustive, no `default`.
     static func dotColor(_ status: ServiceStatus) -> NSColor {
         switch status {
-        case .operational:      return ColorStore.shared.color(.green)
-        case .degraded:         return ColorStore.shared.color(.yellow)
-        case .partialOutage:    return ColorStore.shared.color(.orange)
-        case .majorOutage:      return ColorStore.shared.color(.red)
-        case .underMaintenance: return ColorStore.shared.color(.blue)
-        case .unknown:          return ColorStore.shared.color(.gray)
+        case .operational:      return ColorRole.green.defaultColor
+        case .degraded:         return ColorRole.yellow.defaultColor
+        case .partialOutage:    return ColorRole.orange.defaultColor
+        case .majorOutage:      return ColorRole.red.defaultColor
+        case .underMaintenance: return ColorRole.blue.defaultColor
+        case .unknown:          return ColorRole.gray.defaultColor
         }
     }
 

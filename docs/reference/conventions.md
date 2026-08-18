@@ -244,8 +244,8 @@ Appearance** — не за алфавітом і не в порядку полі
   `ProcessInfo`. Тож достатньо `export TOKENPACE_GH_AUTH=1` у `~/.zshrc` — працює і в нотаризованому
   `.app`, запущеному з Finder/при логіні. Жодних `launchctl setenv`/LaunchAgent не потрібно.
 
-> **Dev-tools вмикаються не через env-змінну.** ⌥-пункт «Development tools…» і live-колор-тюнер (#185)
-> тепер гейтяться `UserDefaults`-ключем: `defaults write com.artem-n.tokenpace devToolsEnabled -bool true`.
+> **Dev-tools вмикаються не через env-змінну.** ⌥-пункт «Development tools…» — а з ним селектор стубів
+> (#187) і чекбокс payload-логу (#279) — гейтяться `UserDefaults`-ключем: `defaults write com.artem-n.tokenpace devToolsEnabled -bool true`.
 > Ключ читається лише у **встановленому `.app`** (bundle id → правильний домен `UserDefaults`); у
 > `swift run` бінарник без bundle id → інший домен, тож там ключ не діє (ADR-0053).
 - **`TOKENPACE_FAKE_LATEST`** = `vX.Y.Z` — форсує канований «останній реліз» (`StubUpdateFetcher`)

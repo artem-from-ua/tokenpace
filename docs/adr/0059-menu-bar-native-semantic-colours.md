@@ -1,9 +1,18 @@
 ---
 status: accepted
 date: 2026-08-02
+superseded_by: [0106]
 ---
 
 # ADR-0059: Menu-bar widget — native semantic colours, not statusline-fixed sRGB
+
+> **Частково витіснено [ADR-0106](0106-remove-dev-color-tuner-and-dissolve-colorstore.md).**
+> Витіснено лише те, що стосується **шару доступу**: `ColorStore` і тюнер видалені, тож фрази
+> «розширює ColorStore/ColorRole», «Tuner і override-шар працюють як раніше» та правило «оновлюй
+> `ColorRole.defaultColor` у тому ж коміті» більше не описують код — значення тепер зберігається в
+> одному місці, розсинхрону немає. **Саме рішення чинне повністю**: menu bar малює системними
+> семантичними кольорами, `labelColor@0.22` для track, bright-alpha 0.865, резолвінг у
+> `button.effectiveAppearance`.
 
 > This ADR supersedes the colour clauses of [ADR-0005](0005-pacing-fractions-not-blocks.md),
 > [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) §5–§9,
