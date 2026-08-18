@@ -19,11 +19,11 @@ import AppKit
 // MARK: - Mirror of PopupViewController.Metrics
 
 let popupWidth: CGFloat = 312
-let cardInset: CGFloat = 8
-let hPadding: CGFloat = 14
-let contentWidth = popupWidth - 2 * cardInset - 2 * hPadding   // 268 pt
-let statusDotDiameter: CGFloat = 8
-let statusDotGap: CGFloat = 8
+let cardInset: CGFloat = 14
+let hPadding: CGFloat = 16
+let contentWidth = popupWidth - 2 * cardInset - 2 * hPadding   // 252 pt
+let statusDotDiameter: CGFloat = 9
+let statusDotGap: CGFloat = 10
 let incidentTextWidth = contentWidth - statusDotDiameter - statusDotGap
 let maxIncidentDescriptionLines = 3
 let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
