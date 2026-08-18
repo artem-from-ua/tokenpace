@@ -52,14 +52,25 @@ public enum JournalMigration {
         /// real grid, with `timePct` recomputed (ADR-0107). Counted separately from `migrated`
         /// because it is the one part of the pass that recovers *data* rather than reshaping it.
         public let resetsRepaired: Int
+        /// The **lowest** format version found among the lines this pass rewrote, or `nil` when it
+        /// rewrote nothing.
+        ///
+        /// Exists so the shell can name the backup after what it actually contains
+        /// (`.v2.bak` for a file that was v2) rather than after whichever migration existed when the
+        /// suffix was first written (#401). The *lowest* rather than the highest, because a file
+        /// that spans an upgrade legitimately holds several generations — the journal is append-only
+        /// and outlives app versions — and the backup has to be labelled by the oldest thing in it,
+        /// or the label overstates how recent the archive is.
+        public let migratedFromVersion: Int?
 
         public init(migrated: Int, passedThrough: Int, skipped: Int, outOfOrder: Int,
-                    resetsRepaired: Int = 0) {
+                    resetsRepaired: Int = 0, migratedFromVersion: Int? = nil) {
             self.migrated = migrated
             self.passedThrough = passedThrough
             self.skipped = skipped
             self.outOfOrder = outOfOrder
             self.resetsRepaired = resetsRepaired
+            self.migratedFromVersion = migratedFromVersion
         }
 
         /// Whether the pass changed anything — `false` means the file is already current and the
@@ -109,6 +120,9 @@ public enum JournalMigration {
         var lastAccepted: Date?
         var migrated = 0, passedThrough = 0, skipped = 0, outOfOrder = 0, resetsRepaired = 0
         var out: [String] = []
+        // The oldest generation this pass had to rewrite — what the file *was*, which is what its
+        // backup should be named after (#401).
+        var lowestVersion: Int?
         // The last **server-supplied** weekly reset seen so far, used to repair the lines that
         // followed it during a blackout. Same anchor discipline as the live path: only a real date
         // may become one, or a repair would build on a repair.
@@ -142,6 +156,7 @@ public enum JournalMigration {
                 passedThrough += 1
                 continue
             }
+            lowestVersion = min(lowestVersion ?? sample.v, sample.v)
 
             // Drive the estimator only with lines that move time forward. An out-of-order line is
             // rewritten from its own values but must not teach the estimator anything, or it would
@@ -197,7 +212,8 @@ public enum JournalMigration {
 
         return (out.joined(separator: "\n"), interpolator,
                 Outcome(migrated: migrated, passedThrough: passedThrough,
-                        skipped: skipped, outOfOrder: outOfOrder, resetsRepaired: resetsRepaired))
+                        skipped: skipped, outOfOrder: outOfOrder, resetsRepaired: resetsRepaired,
+                        migratedFromVersion: lowestVersion))
     }
 
     /// What a repaired weekly window carries: the date, its recomputed elapsed fraction, where it
