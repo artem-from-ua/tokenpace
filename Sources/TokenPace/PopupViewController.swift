@@ -1794,6 +1794,22 @@ final class PopupViewController: NSViewController {
     /// like the limit-window titles (plain label colour), the section reads from its numbers/bar.
     static let extraUsageTitle = "Extra usage"
 
+    /// The weekly window has no reset instant and no history to reconstruct one from (ADR-0107).
+    ///
+    /// States the fact and nothing more — the app does not know *why* the API has not opened a
+    /// weekly window, only that it has not. Matches the menu bar's accessibility description for the
+    /// same state, so the two surfaces speak with one phrase.
+    static let weeklyResetUnknownTitle = "Weekly reset time unknown"
+
+    /// The second line: what will actually change the state.
+    ///
+    /// "start a session in Claude Code" rather than "start using Claude", because the weekly window
+    /// is opened by token spend through the CLI — a conversation on claude.ai will not create one.
+    /// Phrased as the next step rather than an instruction, matching the "Turn it back on in
+    /// Settings…" line above it.
+    static let weeklyResetUnknownDetail =
+        "Claude has not reported a weekly reset yet — start a session in Claude Code and it will appear."
+
     /// Anthropic's official primary accent colour (`#d97757`, a terracotta orange) — confirmed
     /// against `anthropics/skills`' `brand-guidelines/SKILL.md` on GitHub, the same value the local
     /// Claude Code "claude" theme slot resolves to. Used only for the "Claude Code" section header,
@@ -2057,6 +2073,20 @@ final class PopupViewController: NSViewController {
             stack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             stack.setCustomSpacing(Metrics.sectionSpacing, after: row)
+        }
+
+        // ADR-0107: no weekly reset and nothing to reconstruct one from. Same two-line shape as the
+        // block above and, for the same reason, **not** red and not a ⚠️: nothing has failed — the
+        // API answered, it simply has not opened a weekly window yet because no tokens have been
+        // spent. The detail line says what will fix it, which is the only action available.
+        if layout.weeklyResetUnknown {
+            addWarningTitle(Self.weeklyResetUnknownTitle,
+                            symbolName: StatusItemView.noDataSymbolName,
+                            color: Self.dimmedLabelColor)
+            let detail = addWrappingLabel(
+                Self.weeklyResetUnknownDetail,
+                font: .systemFont(ofSize: Metrics.textSize), secondary: true)
+            stack.setCustomSpacing(Metrics.sectionSpacing, after: detail)
         }
 
         // Error block (when failing): two lines — a bold title led by the ⚠️ symbol, then the

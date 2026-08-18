@@ -472,6 +472,12 @@ final class StatusItemView: NSView {
         case .nothingMonitored:
             drawGlyphAlone("exclamationmark.triangle", accessibilityDescription: "monitoring off",
                            atX: contentRect.minX + Metrics.hPadding, in: contentRect)
+        case .weeklyResetUnknown:
+            // ADR-0107: the no-data symbol, deliberately not the ⚠️ — nothing contradicts itself
+            // here, the weekly window simply does not exist yet. The popup explains it in words and
+            // names the one action that changes it.
+            drawGlyphAlone(Self.noDataSymbolName, accessibilityDescription: "weekly reset time unknown",
+                           atX: contentRect.minX + Metrics.hPadding, in: contentRect)
         }
     }
 
@@ -1400,10 +1406,10 @@ final class StatusItemView: NSView {
             // The lone no-data glyph — never bars since ADR-0091. Credits stays **trailing** here
             // (no leading pause sequence in this state).
             return Metrics.height + dotInset + creditsInset
-        case .usagePollingOff, .nothingMonitored:
-            // A lone glyph in both (#341) — same compact width as the error state. The credits inset is
-            // structurally zero here (`make` suppresses the marker in these modes), but it is kept in
-            // the sum so this branch cannot drift from the others.
+        case .usagePollingOff, .nothingMonitored, .weeklyResetUnknown:
+            // A lone glyph in all three (#341, ADR-0107) — same compact width as the error state. The
+            // credits inset is structurally zero here (`make` suppresses the marker in these modes),
+            // but it is kept in the sum so this branch cannot drift from the others.
             return Metrics.height + dotInset + creditsInset
         }
     }

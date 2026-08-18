@@ -297,6 +297,21 @@ public struct PopupLayout: Sendable, Equatable {
         case nothing
     }
 
+    /// The weekly window has no reset instant and none can be reconstructed — a cold start that has
+    /// never seen one (ADR-0107). Every row is withheld while this is `true`.
+    ///
+    /// **Not a ``FailureReason``.** That enum is the taxonomy of polling failures, and nothing has
+    /// failed here: the request returned 200 and the body was well-formed. The API simply has not
+    /// created a weekly window yet, because no tokens have been spent. Dressing it as
+    /// `.serverProblem` would show "Usage API unavailable", sending the user to check their network
+    /// when the actual fix is to start working — the opposite of useful.
+    ///
+    /// Rows are withheld rather than partially drawn because the emptiness cascades: the per-model
+    /// windows (`Fable`, `Opus`, `Sonnet`) inherit the weekly reset, so they would all render with a
+    /// time marker pinned to the far edge — `elapsedFraction` returns `1.0` for an unparseable reset.
+    /// Showing nothing and saying why beats showing four wrong bars.
+    public let weeklyResetUnknown: Bool
+
     public init(
         lastUpdateAge: TimeInterval,
         intervalSeconds: TimeInterval,
@@ -314,7 +329,8 @@ public struct PopupLayout: Sendable, Equatable {
         incidents: [VisibleIncident] = [],
         subscription: EpisodeSubscriptionState? = nil,
         planLabel: String? = nil,
-        monitoringMode: MonitoringMode = .usageAndServices
+        monitoringMode: MonitoringMode = .usageAndServices,
+        weeklyResetUnknown: Bool = false
     ) {
         self.lastUpdateAge = lastUpdateAge
         self.intervalSeconds = intervalSeconds
@@ -335,6 +351,7 @@ public struct PopupLayout: Sendable, Equatable {
         self.incidents = incidents
         self.subscription = subscription
         self.monitoringMode = monitoringMode
+        self.weeklyResetUnknown = weeklyResetUnknown
     }
 
     /// A copy of this layout with **one** field replaced, everything else carried over.
@@ -362,7 +379,8 @@ public struct PopupLayout: Sendable, Equatable {
             incidents: incidents ?? self.incidents,
             subscription: subscription ?? self.subscription,
             planLabel: planLabel ?? self.planLabel,
-            monitoringMode: monitoringMode)
+            monitoringMode: monitoringMode,
+            weeklyResetUnknown: weeklyResetUnknown)
     }
 
     /// A copy of this layout with the awaiting-input count grafted on, everything else unchanged
@@ -515,6 +533,25 @@ public struct PopupLayout: Sendable, Equatable {
             return PopupLayout(
                 lastUpdateAge: lastUpdateAge, intervalSeconds: interval, rows: [],
                 warning: .serverProblem, serviceStatus: serviceStatus)
+        }
+
+        // No weekly reset at all, and no anchor to reconstruct one from (ADR-0107) — a cold start
+        // that has never seen a token spent. Deliberately **not** a `warning`: the poll succeeded and
+        // the body was valid, so the failure vocabulary would misdescribe it and send the user to
+        // check their network. Rows are withheld for the same reason as `brokenData` above: the
+        // per-model windows inherit the empty weekly reset, so every one of them would draw a marker
+        // pinned to the far edge. `hasBrokenActiveReset` does not catch this — it requires
+        // `utilization > 0` and a *non-empty* unparseable string, and here both are the opposite.
+        // The `utilization == 0` half mirrors `MenuBarLayout`: a blank date beside real usage is a
+        // different state, where the numbers are still worth drawing and only the countdown is
+        // missing. Both surfaces must agree, or the widget and the popup would describe one snapshot
+        // two different ways.
+        if !health.isFailing,
+           snapshot?.sevenDay.resetsAt.isEmpty == true,
+           snapshot?.sevenDay.utilization == 0 {
+            return PopupLayout(
+                lastUpdateAge: lastUpdateAge, intervalSeconds: interval, rows: [],
+                serviceStatus: serviceStatus, weeklyResetUnknown: true)
         }
 
         let rows = snapshot.map {

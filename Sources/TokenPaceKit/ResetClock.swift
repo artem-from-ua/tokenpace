@@ -355,6 +355,68 @@ public enum ResetClock {
         return ceilTo10Minutes(estimate)
     }
 
+    // MARK: rollForward (reconstruction from a known anchor)
+
+    /// How far into the future an anchor may still sit and be treated as **already elapsed**.
+    ///
+    /// The server reports resets with microsecond precision, and the first poll after a reset
+    /// regularly lands in the same second: measured on live journals the anchor was 0.31 s and
+    /// 0.33 s in the future at that moment (2026-08-18 and 08-11). Without a tolerance those polls
+    /// take the "still future, nothing to roll" path and the bar announces a reset 0.3 s away
+    /// instead of 7 days — pinning the marker to **100 %**, a worse lie than the zero this whole
+    /// mechanism replaces. Verified across both journals: without the tolerance the reconstruction
+    /// misses by exactly one week; with anything from 1 s upward it lands within 0.25 s.
+    ///
+    /// The tolerance is **one-sided** — it shifts the "now" line forward, it does not open a
+    /// symmetric window around it. `abs(anchor - now) < resetGrace` would be a different function
+    /// and a bug: an anchor an hour in the past must still roll.
+    public static let resetGrace: TimeInterval = 60
+
+    /// Ceiling on how many whole windows ``rollForward(anchor:by:until:)`` will step — ten years of
+    /// weeks. Guards a corrupted anchor (one decoded as 1970, say) from yielding a plausible-looking
+    /// but meaningless date; exceeding it returns `nil`, which surfaces as the honest "no reset
+    /// known" state rather than an invented one. `Double` because the step count is computed in
+    /// floating point and compared before it is ever used.
+    public static let maxRollForwardSteps: Double = 520
+
+    /// Roll a **known-real** reset instant forward by whole windows until it lands after `now`.
+    ///
+    /// The reconstruction behind ADR-0107: when the API goes quiet about `seven_day.resets_at`, the
+    /// previous reset plus a whole number of window lengths is a far better answer than `now +
+    /// duration`. Weekly resets keep the same weekday and the same wall-clock instant **in UTC**,
+    /// so this lands within a fraction of a second — measured ±0.25 s across three blackouts on a
+    /// Max 5x journal and two on a Pro journal, whose grid is a different weekday and hour entirely.
+    ///
+    /// **Deliberately `TimeInterval` arithmetic, never `Calendar`.** A `Date` is an absolute instant
+    /// with no time zone, and UTC has no DST, so adding 604 800 s to a Tuesday 07:00:00 UTC yields
+    /// Tuesday 07:00:00 UTC forever. `Calendar.date(byAdding:)` would honour `Calendar.timeZone`
+    /// (`.current` by default), where the night of a DST transition is 23 or 25 hours long — the
+    /// exact one-hour drift this function must not have. The local *rendering* of the result still
+    /// shifts across a transition, which is correct: the real server reset shifts the same way.
+    ///
+    /// The step count is closed-form rather than a loop, so a month-long absence and a two-year one
+    /// cost the same single multiplication — and a corrupt anchor cannot spin.
+    ///
+    /// - Parameters:
+    ///   - anchor: A reset instant the **server** actually supplied. Passing a value this app
+    ///     derived would let the reconstruction feed on its own output; callers guard that with
+    ///     ``ResetSource/isUnrolledServerFact``.
+    ///   - window: The rolling window whose period to step by.
+    ///   - now: The current instant (inject for deterministic tests; do **not** call `Date()`).
+    /// - Returns: The first instant `anchor + k · period` (integer `k ≥ 0`) later than `now` by more
+    ///   than ``resetGrace``, or `nil` when the window has no positive period or the anchor is so
+    ///   stale that stepping it would exceed ``maxRollForwardSteps``.
+    public static func rollForward(anchor: Date, by window: LimitWindow, until now: Date) -> Date? {
+        let period = TimeInterval(window.durationSeconds)
+        guard period > 0 else { return nil }
+        let cutoff = now.addingTimeInterval(resetGrace)
+        if anchor > cutoff { return anchor }          // genuinely still ahead — nothing to roll
+        let elapsed = cutoff.timeIntervalSince(anchor)
+        let steps = (elapsed / period).rounded(.down) + 1   // smallest k landing past the cutoff
+        guard steps.isFinite, steps <= maxRollForwardSteps else { return nil }
+        return anchor.addingTimeInterval(steps * period)
+    }
+
     // MARK: nextResetInstant (scheduler helper)
 
     /// The nearest **future** reset instant across the 5h and 7d windows, or `nil` if neither is in
@@ -423,12 +485,21 @@ public enum ResetClock {
         }
 
         // 7d: roll forward when its reset has passed; sub-windows ride the same boundary.
-        let sevenReset = parse(snapshot.sevenDay.resetsAt).map { $0 <= now } ?? false
+        //
+        // The expired instant **is** the anchor — it is the last date we had for this window, and the
+        // weekly period is exact — so this rolls it by whole weeks (ADR-0107) rather than estimating
+        // `now + 7d`, which drifts with the clock and lands minutes off the real grid. Note the 5h
+        // branch above deliberately keeps `nextReset`: a five-hour window starts at the first spend,
+        // not on a fixed grid, so there is no period to roll (ADR-0030).
+        let sevenExpiry = parse(snapshot.sevenDay.resetsAt)
+        let sevenReset = sevenExpiry.map { $0 <= now } ?? false
         let sevenDay: UsageWindow
         let sevenDayOpus: UsageWindow?
         let sevenDaySonnet: UsageWindow?
-        if sevenReset {
-            let newSeven = isoString(from: nextReset(now: now, window: .sevenDay))
+        if sevenReset, let anchor = sevenExpiry {
+            let projected = rollForward(anchor: anchor, by: .sevenDay, until: now)
+                ?? nextReset(now: now, window: .sevenDay)   // unreachable in practice; never nil-out a date
+            let newSeven = isoString(from: projected)
             sevenDay = UsageWindow(utilization: 0, resetsAt: newSeven)
             sevenDayOpus = snapshot.sevenDayOpus.map { _ in UsageWindow(utilization: 0, resetsAt: newSeven) }
             sevenDaySonnet = snapshot.sevenDaySonnet.map { _ in UsageWindow(utilization: 0, resetsAt: newSeven) }
@@ -448,15 +519,25 @@ public enum ResetClock {
             // The money-credits state is orthogonal to the token windows this rolls forward — carry it
             // through untouched so the "Extra usage" section / icon survive the overlay. (Dropping it
             // here was a latent bug, made visible once the overlay runs on every render — #167.)
-            spend: snapshot.spend)
+            spend: snapshot.spend,
+            // A rolled 7-day date is one step further from the last server fact, so the provenance
+            // gains the `-rolled` suffix rather than being replaced: `reconstructed-rolled` says both
+            // that we derived the date *and* that it has since elapsed. Untouched windows keep theirs.
+            sevenDayResetSource: sevenReset
+                ? snapshot.sevenDayResetSource.rolled()
+                : snapshot.sevenDayResetSource)
     }
 
     /// Render a `Date` as an ISO-8601 string (`.withInternetDateTime`, UTC, no fractional seconds) so a
     /// synthesized `resets_at` round-trips through ``parse(_:)`` identically to a real API one. Mirrors
-    /// the decode layer's private helper of the same name. `internal` (module-only): the optimistic path
-    /// (ADR-0030) and the reset-boundary grace suppress (ADR-0045) both synthesize a rolled-forward
-    /// `resets_at` from ``nextReset(now:window:)`` and must serialize it the same way.
-    static func isoString(from date: Date) -> String {
+    /// the decode layer's private helper of the same name. The optimistic path (ADR-0030) and the
+    /// reset-boundary grace suppress (ADR-0045) both synthesize a rolled-forward `resets_at` and must
+    /// serialize it the same way.
+    ///
+    /// `public` since ADR-0107: the shell persists the reconstruction anchor as a `resets_at` string
+    /// (`PersistedConfig.lastSevenDayReset`), and it has to be the *same* string shape the parser
+    /// accepts — a second date format for one stored value is how round-trips start disagreeing.
+    public static func isoString(from date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.formatOptions = [.withInternetDateTime]

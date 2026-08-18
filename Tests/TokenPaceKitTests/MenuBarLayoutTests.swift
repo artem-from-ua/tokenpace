@@ -284,6 +284,10 @@ struct MenuBarLayoutIdleTests {
         // Idle 5h + a 7-day window with usage but a **blank** (empty/null) date: that is a
         // boundary/synthesis state, NOT a malformed value — so it is not a data error. Stays `.expanded`
         // (the countdown is simply absent). Only a non-empty unparseable date qualifies as an error.
+        //
+        // The `utilization: 31` here is what separates this from the cold start below: real usage is
+        // worth drawing even without a clock to pace it against, so ADR-0107's unknown-reset state
+        // deliberately does not claim this case.
         let snap = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
             sevenDay: UsageWindow(utilization: 31, resetsAt: ""),
@@ -291,14 +295,18 @@ struct MenuBarLayoutIdleTests {
         #expect(expanded(MenuBarLayout.make(from: snap, now: now)) != nil)
     }
 
-    @Test func idleWithCalmSevenDayNoUsageStaysExpanded() {
-        // Idle 5h + a 7-day window with **no** usage and a blank date: nothing to reset yet, so it is
-        // NOT a data error — the widget stays `.expanded`.
+    /// Idle 5h + a 7-day window with **no** usage and a blank date — the cold start, before any token
+    /// has been spent. Since ADR-0107 this is its own state rather than a bar: with no weekly clock
+    /// there is nothing to position a marker against, and the two zero bars it used to draw said
+    /// "everything is fine" when the truthful answer is "there is nothing to report yet".
+    ///
+    /// Still not a data error: `.weeklyResetUnknown` draws the no-data symbol, not the ⚠️.
+    @Test func idleWithNoUsageAndBlankSevenDayDateReportsUnknownReset() {
         let snap = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 0, resetsAt: ""),
             sevenDay: UsageWindow(utilization: 0, resetsAt: ""),
             sessionIdle: true)
-        #expect(expanded(MenuBarLayout.make(from: snap, now: now)) != nil)
+        #expect(MenuBarLayout.make(from: snap, now: now).mode == .weeklyResetUnknown)
     }
 
     // MARK: idle-blocked (#158)
@@ -536,6 +544,10 @@ struct MenuBarLayoutCountdownExclusivityTests {
                 #expect(reset == nil && which == nil, "\(name): error must not fabricate a countdown")
             case .usagePollingOff, .nothingMonitored:
                 Issue.record("\(name): unexpected user-choice mode on the healthy path")
+            case .weeklyResetUnknown:
+                // Every fixture in the grid carries a real weekly reset, so this state cannot arise
+                // here — reaching it would mean `make` lost a date it was given.
+                Issue.record("\(name): weekly reset went missing from a snapshot that had one")
             }
         }
     }

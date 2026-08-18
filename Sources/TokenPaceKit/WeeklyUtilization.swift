@@ -105,7 +105,11 @@ public struct WeeklyUtilization: Sendable, Equatable, Codable {
             sevenDaySonnet: snapshot.sevenDaySonnet,
             limits: snapshot.limits,
             sessionIdle: snapshot.sessionIdle,
-            spend: snapshot.spend)
+            spend: snapshot.spend,
+            // Carried through, never defaulted: this overlay rewrites the *utilization*, not the
+            // date, so relabelling a reconstructed reset as a server fact here would make the
+            // journal's `resetSrc` lie on exactly the polls where the reconstruction is live.
+            sevenDayResetSource: snapshot.sevenDayResetSource)
     }
 
     // MARK: - Disclosure

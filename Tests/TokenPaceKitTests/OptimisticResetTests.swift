@@ -18,12 +18,24 @@ private func iso(_ offset: TimeInterval) -> String {
 }
 
 /// The next-window instant `ResetClock` synthesizes for `window` at `now` (`now + duration`, ceil to
-/// 10 min), as the raw ISO string. Used to assert the rolled-forward `resets_at`.
+/// 10 min), as the raw ISO string. Still how the **five-hour** window rolls: that window starts at
+/// the first token spend rather than on a fixed grid, so there is no period to roll (ADR-0030).
 private func synthesized(_ window: LimitWindow) -> String {
     let f = ISO8601DateFormatter()
     f.timeZone = TimeZone(secondsFromGMT: 0)
     f.formatOptions = [.withInternetDateTime]
     return f.string(from: ResetClock.nextReset(now: now, window: window))
+}
+
+/// The **seven-day** roll: the expired instant plus one whole week, to the second (ADR-0107).
+/// Weekly resets sit on an exact grid, so rolling the known date beats estimating `now + 7d` — which
+/// is where the 10-minute ceiling used to put it, minutes off the real boundary.
+private func rolledWeek(fromExpiryAt offset: TimeInterval) -> String {
+    let f = ISO8601DateFormatter()
+    f.timeZone = TimeZone(secondsFromGMT: 0)
+    f.formatOptions = [.withInternetDateTime]
+    let expiry = now.addingTimeInterval(offset)
+    return f.string(from: expiry.addingTimeInterval(TimeInterval(LimitWindow.sevenDay.durationSeconds)))
 }
 
 // MARK: - optimisticReset
@@ -61,14 +73,16 @@ struct OptimisticResetTests {
         #expect(out == snapshot)
     }
 
-    /// A 7d window past its reset → 0% and a fresh `now + 7d` reset.
+    /// A 7d window past its reset → 0% and the expired instant rolled on by exactly one week.
     @Test func sevenDayPastResetRollsForward() {
         let snapshot = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 60, resetsAt: iso(3600)),
             sevenDay: UsageWindow(utilization: 80, resetsAt: iso(-1)))
         let out = ResetClock.optimisticReset(snapshot, now: now)
         #expect(out.fiveHour == snapshot.fiveHour)   // 5h still future → untouched
-        #expect(out.sevenDay == UsageWindow(utilization: 0, resetsAt: synthesized(.sevenDay)))
+        #expect(out.sevenDay == UsageWindow(utilization: 0, resetsAt: rolledWeek(fromExpiryAt: -1)))
+        // The date is now one step further from the last server fact, and says so.
+        #expect(out.sevenDayResetSource == .serverRolled)
     }
 
     /// Sub-windows reset with the 7d window, borrowing its new `resets_at`.
@@ -79,7 +93,7 @@ struct OptimisticResetTests {
             sevenDayOpus: UsageWindow(utilization: 50, resetsAt: iso(-1)),
             sevenDaySonnet: UsageWindow(utilization: 30, resetsAt: iso(-1)))
         let out = ResetClock.optimisticReset(snapshot, now: now)
-        let newSeven = synthesized(.sevenDay)
+        let newSeven = rolledWeek(fromExpiryAt: -1)
         #expect(out.sevenDayOpus == UsageWindow(utilization: 0, resetsAt: newSeven))
         #expect(out.sevenDaySonnet == UsageWindow(utilization: 0, resetsAt: newSeven))
     }
@@ -94,14 +108,15 @@ struct OptimisticResetTests {
         #expect(out == snapshot)
     }
 
-    /// Both windows past their reset → both roll forward in a single call.
+    /// Both windows past their reset → both roll forward in a single call, each by its own rule:
+    /// the 5h window gets a fresh `now + 5h` (no grid to land on), the 7d one an exact week.
     @Test func bothWindowsResetTogether() {
         let snapshot = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 60, resetsAt: iso(-1)),
             sevenDay: UsageWindow(utilization: 80, resetsAt: iso(-1)))
         let out = ResetClock.optimisticReset(snapshot, now: now)
         #expect(out.fiveHour == UsageWindow(utilization: 0, resetsAt: synthesized(.fiveHour)))
-        #expect(out.sevenDay == UsageWindow(utilization: 0, resetsAt: synthesized(.sevenDay)))
+        #expect(out.sevenDay == UsageWindow(utilization: 0, resetsAt: rolledWeek(fromExpiryAt: -1)))
     }
 
     /// `limits` are carried through unchanged — the overlay is transient; the next poll replaces them.

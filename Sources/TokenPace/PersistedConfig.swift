@@ -200,6 +200,9 @@ enum PersistedConfig {
         static let episodeSubscription = "episodeSubscription"
         /// The weekly-utilization reconstruction state (#386), as a JSON blob. See the property.
         static let weeklyInterpolator = "weeklyInterpolator"
+        /// The last server-supplied `seven_day.resets_at`, as an ISO-8601 string (ADR-0107). See
+        /// the property.
+        static let lastSevenDayReset = "lastSevenDayReset"
         /// Hide incidents older than this many hours; `0` means no limit (#279, ADR-0071 §9).
         static let incidentMaxAgeHours = "incidentMaxAgeHours"
         /// The Settings window's last frame, `[x, y, width, height]` in screen coordinates (ADR-0069).
@@ -935,6 +938,46 @@ enum PersistedConfig {
     nonisolated static func setWeeklyInterpolatorUnsafe(_ value: WeeklyInterpolator) {
         guard let data = try? JSONEncoder().encode(value) else { return }
         UserDefaults.standard.set(data, forKey: Key.weeklyInterpolator)
+    }
+
+    /// The last `seven_day.resets_at` the **server** sent — the anchor the decoder rolls forward
+    /// while the API withholds one (ADR-0107).
+    ///
+    /// Persisted because the blackout it covers lasts 4-6 hours and the app restarts inside it: the
+    /// journal shows five polling gaps within one 2026-08-04 blackout, the longest 104 minutes. An
+    /// in-memory-only anchor would be gone exactly when it is needed, and the app would fall back to
+    /// the honest but useless "reset time unknown".
+    ///
+    /// Stored as the **ISO-8601 string**, not an epoch number or a JSON blob: it round-trips through
+    /// the same ``ResetClock/parse(_:)`` / `isoString` pair as every other date in the app, and it
+    /// stays readable in `defaults read` — which matters for a value worth inspecting mid-blackout.
+    /// There is no structure here to justify a blob.
+    static var lastSevenDayReset: Date? {
+        get {
+            defaults.string(forKey: Key.lastSevenDayReset).flatMap(ResetClock.parse)
+        }
+        set {
+            guard let newValue else {
+                defaults.removeObject(forKey: Key.lastSevenDayReset)
+                return
+            }
+            defaults.set(ResetClock.isoString(from: newValue), forKey: Key.lastSevenDayReset)
+        }
+    }
+
+    /// ``lastSevenDayReset`` read from the polling engine's own task, which is not main-actor
+    /// isolated — the same `nonisolated` escape hatch (and the same key) as
+    /// ``weeklyInterpolatorUnsafe()``. An absent or unparseable value degrades to `nil`, which is
+    /// the cold-start path: nothing is reconstructed and the UI says the reset time is unknown.
+    nonisolated static func lastSevenDayResetUnsafe() -> Date? {
+        UserDefaults.standard.string(forKey: Key.lastSevenDayReset).flatMap(ResetClock.parse)
+    }
+
+    /// The write half of ``lastSevenDayResetUnsafe()``, called only when the value actually changes
+    /// — roughly once a week, against ~480 polls a day. Failure is silent for the same reason as the
+    /// interpolator's: losing the anchor costs a reconstruction, never correctness.
+    nonisolated static func setLastSevenDayResetUnsafe(_ value: Date) {
+        UserDefaults.standard.set(ResetClock.isoString(from: value), forKey: Key.lastSevenDayReset)
     }
 
     /// Hide incidents older than this (#279, ADR-0071 §9), or `nil` for no limit.

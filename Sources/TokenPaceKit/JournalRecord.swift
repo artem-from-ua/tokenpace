@@ -99,7 +99,21 @@ public struct WindowSample: Sendable, Equatable, Codable {
     public let raw: Double
     /// How ``util`` was produced (`WeeklyUtilization.Source`), or `nil` where nothing is
     /// reconstructed — the five-hour window, the per-model rows.
-    public let src: String?
+    ///
+    /// Named `utilSrc` since v3 (was `src`). The bare name became ambiguous the moment ``resetSrc``
+    /// joined it: two independent things can be reconstructed on one line, and a field called just
+    /// "source" reads as though it answered for both.
+    public let utilSrc: String?
+    /// Where ``reset`` came from (``ResetSource``): a server field, a `limits[]` entry, a
+    /// reconstruction from the last known reset, or nothing at all — plus a `-rolled` suffix when the
+    /// date has since elapsed and was rolled forward locally. `nil` on windows that cannot be
+    /// reconstructed.
+    ///
+    /// **Orthogonal to ``utilSrc``**, which is why they are two fields rather than one. Measured over
+    /// 5 029 live samples, six of their eight combinations occur, including `degraded × reconstructed`
+    /// — a percentage degraded by a polling hole beside a date invented during an API blackout, two
+    /// unrelated failures on one line. A single field would have had to pick one story to tell.
+    public let resetSrc: String?
     /// The 5h↔7d exchange rate in force when this line was written (#386), or `nil` where it does not
     /// apply. Recorded on **every** sample, not just when it moves: the log gets only the changes
     /// (that would be ~341 lines a day), the journal gets the series, because a series is what can be
@@ -118,7 +132,8 @@ public struct WindowSample: Sendable, Equatable, Codable {
     public init(
         util: Double,
         raw: Double? = nil,
-        src: String? = nil,
+        utilSrc: String? = nil,
+        resetSrc: String? = nil,
         n: Double? = nil,
         reset: String,
         timePct: Double,
@@ -129,7 +144,8 @@ public struct WindowSample: Sendable, Equatable, Codable {
         // and any future writer that bypasses the domain factory.
         self.util = JournalPrecision.round(util, decimals: JournalPrecision.percentPoints)
         self.raw = JournalPrecision.round(raw ?? util, decimals: JournalPrecision.percentPoints)
-        self.src = src
+        self.utilSrc = utilSrc
+        self.resetSrc = resetSrc
         self.n = JournalPrecision.round(n, decimals: JournalPrecision.percentPoints)
         self.reset = reset
         self.timePct = JournalPrecision.round(
@@ -137,7 +153,13 @@ public struct WindowSample: Sendable, Equatable, Codable {
         self.sev = sev
     }
 
-    private enum CodingKeys: String, CodingKey { case util, raw, src, n, reset, timePct, sev }
+    private enum CodingKeys: String, CodingKey {
+        case util, raw, utilSrc, resetSrc, n, reset, timePct, sev
+        /// The pre-v3 spelling of ``utilSrc``, read-only. Migration rewrites every line to the new
+        /// key, but a decoder that met an un-migrated file (a `.v2.bak`, a hand-copied line) should
+        /// still read it rather than silently reporting no source at all.
+        case legacySrc = "src"
+    }
 
     /// Tolerant decode — every field defaults so a partial line never fails the whole record.
     ///
@@ -148,11 +170,30 @@ public struct WindowSample: Sendable, Equatable, Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.util = try c.decodeIfPresent(Double.self, forKey: .util) ?? 0
         self.raw = try c.decodeIfPresent(Double.self, forKey: .raw) ?? util
-        self.src = try c.decodeIfPresent(String.self, forKey: .src)
+        // v3 key first, falling back to the v2 spelling so an un-migrated line still reports its
+        // source instead of reading as "nothing was reconstructed".
+        self.utilSrc = try c.decodeIfPresent(String.self, forKey: .utilSrc)
+            ?? c.decodeIfPresent(String.self, forKey: .legacySrc)
+        self.resetSrc = try c.decodeIfPresent(String.self, forKey: .resetSrc)
         self.n = try c.decodeIfPresent(Double.self, forKey: .n)
         self.reset = try c.decodeIfPresent(String.self, forKey: .reset) ?? ""
         self.timePct = try c.decodeIfPresent(Double.self, forKey: .timePct) ?? 0
         self.sev = try c.decodeIfPresent(PacingBucket.self, forKey: .sev) ?? .green
+    }
+
+    /// Explicit rather than synthesized because ``CodingKeys/legacySrc`` is **read-only**: the v2
+    /// spelling is accepted on the way in so an un-migrated line still parses, but never written —
+    /// otherwise every new line would carry both keys and the rename would never actually land.
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(util, forKey: .util)
+        try c.encode(raw, forKey: .raw)
+        try c.encodeIfPresent(utilSrc, forKey: .utilSrc)
+        try c.encodeIfPresent(resetSrc, forKey: .resetSrc)
+        try c.encodeIfPresent(n, forKey: .n)
+        try c.encode(reset, forKey: .reset)
+        try c.encode(timePct, forKey: .timePct)
+        try c.encode(sev, forKey: .sev)
     }
 
     /// The pacing **gap** in percentage points: `timePct·100 − util`. Positive = headroom (behind

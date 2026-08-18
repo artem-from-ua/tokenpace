@@ -67,7 +67,7 @@ struct JournalMigrationTests {
         #expect(last.d7.raw == 51)                       // the API's value, untouched
         #expect(last.d7.util > 50.5)                     // reconstructed above the bucket floor
         #expect(last.d7.util <= 51.5)
-        #expect(last.d7.src != nil)                      // and it says how it got there
+        #expect(last.d7.utilSrc != nil)                  // and it says how it got there
     }
 
     @Test func passesThroughOtherRecordKinds() {
@@ -97,7 +97,7 @@ struct JournalMigrationTests {
         let current = UsageSample(
             t: iso(0),
             h5: WindowSample(util: 10, reset: "", timePct: 0.5, sev: .green),
-            d7: WindowSample(util: 50.25, raw: 50, src: "interpolated", n: 9.8,
+            d7: WindowSample(util: 50.25, raw: 50, utilSrc: "interpolated", n: 9.8,
                              reset: "", timePct: 0.5, sev: .green),
             credits: CreditsFlags(active: false, showIcon: false, onCredits: false))
         let encoder = JSONEncoder()
@@ -179,5 +179,126 @@ private extension Double {
     func rounded(toPlaces places: Int) -> Double {
         let scale = pow(10.0, Double(places))
         return (self * scale).rounded() / scale
+    }
+}
+
+// MARK: - Weekly reset repair (v2 → v3, ADR-0107)
+
+/// The archived counterpart of the live fix: lines written during a weekly API blackout carry a
+/// `now + 7d` estimate that crept forward every poll, with `timePct` pinned at 0 throughout. The
+/// migration rolls them back onto the real grid and recomputes the fraction.
+@Suite("JournalMigration — weekly reset repair")
+struct WeeklyResetRepairTests {
+
+    /// A blackout replayed from the maintainer's journal: the last real reset before it, and the
+    /// first one the server sent after it ended.
+    private static let realReset = "2026-08-18T07:00:00.306761+00:00"
+    private static let truthAfter = "2026-08-25T07:00:00.058036+00:00"
+
+    /// A v2 line. `reset` is written verbatim so a fixture can carry either a real microsecond
+    /// instant or one of the old 10-minute estimates.
+    private static func v2Line(t: String, reset: String, timePct: Double, d7: Double = 0) -> String {
+        """
+        {"kind":"usage","v":2,"t":"\(t)","h5":{"util":0,"raw":0,"reset":"","timePct":0,"sev":"green"},\
+        "d7":{"util":\(d7),"raw":\(d7),"src":"interpolated","n":10,"reset":"\(reset)",\
+        "timePct":\(timePct),"sev":"green"},\
+        "scoped":[],"sessionIdle":false,"blocked":false,\
+        "credits":{"active":false,"showIcon":false,"onCredits":false},"brokenReset":false}
+        """
+    }
+
+    private static func at(_ offsetHours: Double) -> String {
+        let anchor = ResetClock.parse(realReset)!
+        return ResetClock.isoString(from: anchor.addingTimeInterval(offsetHours * 3600))
+    }
+
+    /// The whole point: an estimated reset preceded by a real one is rolled onto the true grid, and
+    /// `timePct` stops being a flat zero.
+    @Test func anEstimateAfterARealResetIsRepaired() throws {
+        let input = [
+            // The last healthy poll, six seconds before the reset.
+            Self.v2Line(t: Self.at(-0.0017), reset: Self.realReset, timePct: 0.99999, d7: 94),
+            // Then the blackout: 10-minute estimates, timePct pinned at zero.
+            Self.v2Line(t: Self.at(0.5), reset: "2026-08-25T07:30:00Z", timePct: 0),
+            Self.v2Line(t: Self.at(3.0), reset: "2026-08-25T10:00:00Z", timePct: 0),
+        ].joined(separator: "\n")
+
+        let (out, _, outcome) = JournalMigration.migrate(contents: input)
+        #expect(outcome.resetsRepaired == 2)
+
+        let samples = out.split(separator: "\n").compactMap { decodeUsage(String($0)) }
+        let truth = try #require(ResetClock.parse(Self.truthAfter))
+
+        // Both repaired lines now name the instant the server itself reported, within a second.
+        for sample in samples.dropFirst() {
+            let repaired = try #require(ResetClock.parse(sample.d7.reset))
+            #expect(abs(repaired.timeIntervalSince(truth)) < 1)
+            #expect(sample.d7.resetSrc == "reconstructed")
+            #expect(sample.d7.timePct > 0)          // no longer a flat zero
+        }
+        // And the elapsed fraction now advances between the two, as time actually did.
+        #expect(samples[2].d7.timePct > samples[1].d7.timePct)
+    }
+
+    /// **The `resetGrace` regression, in the archive.** The first poll of a blackout lands in the
+    /// same second as the reset, leaving the anchor a fraction of a second ahead. Without the
+    /// tolerance the roll is skipped and the line reads as ~100 % elapsed — worse than the zero it
+    /// replaced.
+    @Test func theFirstLineOfABlackoutDoesNotLandAtFullElapsed() throws {
+        let anchor = try #require(ResetClock.parse(Self.realReset))
+        let input = [
+            Self.v2Line(t: Self.at(-0.0017), reset: Self.realReset, timePct: 0.99999, d7: 94),
+            // Polled at 07:00:00.000 — 0.31 s *before* the anchor instant.
+            Self.v2Line(t: ResetClock.isoString(from: anchor.addingTimeInterval(-0.306761)),
+                        reset: "2026-08-25T07:10:00Z", timePct: 0),
+        ].joined(separator: "\n")
+
+        let samples = JournalMigration.migrate(contents: input).contents
+            .split(separator: "\n").compactMap { decodeUsage(String($0)) }
+        #expect(samples[1].d7.timePct < 0.01)       // start of the window, not the end of it
+    }
+
+    /// A real (microsecond) reset is never mistaken for an estimate.
+    @Test func realResetsAreLeftAlone() throws {
+        let input = Self.v2Line(t: Self.at(-1), reset: Self.realReset, timePct: 0.9, d7: 94)
+        let (out, _, outcome) = JournalMigration.migrate(contents: input)
+        #expect(outcome.resetsRepaired == 0)
+        let sample = try #require(decodeUsage(out))
+        #expect(sample.d7.reset == Self.realReset)
+        #expect(sample.d7.resetSrc == "server")
+    }
+
+    /// With no anchor before it, the line is left exactly as it was: a repair needs something real to
+    /// roll from, and a different wrong answer is not an improvement.
+    @Test func anEstimateWithNoPrecedingAnchorIsKept() throws {
+        let input = Self.v2Line(t: Self.at(0.5), reset: "2026-08-25T07:30:00Z", timePct: 0)
+        let (out, _, outcome) = JournalMigration.migrate(contents: input)
+        #expect(outcome.resetsRepaired == 0)
+        let sample = try #require(decodeUsage(out))
+        #expect(sample.d7.reset == "2026-08-25T07:30:00Z")
+        #expect(sample.d7.resetSrc == "unknown")
+    }
+
+    /// Running the migration twice must not change anything the second time — the pass is a one-off,
+    /// and a v3 file has to be recognised as current.
+    @Test func theMigrationIsIdempotent() {
+        let input = [
+            Self.v2Line(t: Self.at(-0.0017), reset: Self.realReset, timePct: 0.99999, d7: 94),
+            Self.v2Line(t: Self.at(0.5), reset: "2026-08-25T07:30:00Z", timePct: 0),
+        ].joined(separator: "\n")
+
+        let first = JournalMigration.migrate(contents: input)
+        let second = JournalMigration.migrate(contents: first.contents, state: first.state)
+        #expect(second.outcome.migrated == 0)
+        #expect(second.outcome.resetsRepaired == 0)
+        #expect(second.contents == first.contents)
+    }
+
+    /// The v2 spelling still decodes after the rename, so a `.v2.bak` or a hand-copied line reports
+    /// its source instead of reading as "nothing was reconstructed".
+    @Test func theLegacySrcKeyStillDecodes() throws {
+        let sample = try #require(decodeUsage(
+            Self.v2Line(t: Self.at(-1), reset: Self.realReset, timePct: 0.9, d7: 94)))
+        #expect(sample.d7.utilSrc == "interpolated")
     }
 }
