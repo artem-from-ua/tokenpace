@@ -130,7 +130,7 @@ func png(_ name: String, _ colour: NSColor,
 |---|---|
 | `pointSize` | `Metrics.awaitingIconSize` (12), `pauseGlyphSize` (11), `creditsIconSize` (12), `Metrics.textSize` у попапі |
 | `weight` | `.semibold` — так конфігуруються всі наявні гліфи обох поверхонь |
-| колір | роль із `ColorStore`, не довільний відтінок |
+| колір | роль із `ColorRole`, не довільний відтінок |
 | `scale` | 4× для retina; розмір в HTML лишається в пунктах |
 
 ## Анатомія бару

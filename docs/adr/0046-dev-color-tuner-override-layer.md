@@ -1,9 +1,15 @@
 ---
-status: accepted
+status: superseded
 date: 2026-07-30
+superseded_by: [0106]
 ---
 
 # ADR-0046: Централізований `ColorStore` override-шар для dev color-tuner
+
+> Витіснено [ADR-0106](0106-remove-dev-color-tuner-and-dissolve-colorstore.md): тюнер і `ColorStore`
+> видалені, обидві `Palette` читають `ColorRole.defaultColor` напряму. Чинним лишається сам
+> **каталог ролей** — але як палітра застосунку, а не як реєстр для UI інструмента; розділення
+> menu-bar / popup із «Уточнення D2» теж живе далі, на власних підставах.
 
 ## Контекст
 

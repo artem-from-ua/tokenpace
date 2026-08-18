@@ -216,7 +216,7 @@ We are continuing to work on a fix for this issue.
 
 - **Запис лише коли змінились суттєві поля** — відбиток = статуси компонентів + набір
   `incident_updates[].id` + статус інциденту. Дублікати не пишуться.
-- **Вмикається чекбоксом** у меню Development tools (#185), поруч із Color tuner; там же —
+- **Вмикається чекбоксом** у вікні Development tools (#279), поруч із селектором стубів; там же —
   «Reveal log file in Finder».
 
 ## Відкриті питання
