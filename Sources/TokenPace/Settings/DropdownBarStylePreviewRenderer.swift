@@ -16,7 +16,7 @@ import TokenPaceKit
 ///   property: the dropdown is a Control-Center-style card that flips with the system, so the specimen
 ///   bakes under whatever appearance is current and the tile's plate is the card's own colour.
 /// - **Geometry.** `StatusItemView` has a fixed 34 pt width; `PopupBarView` stretches to the popup card
-///   (252 pt) and has no intrinsic width at all, so the tile has to *choose* one — see ``barWidth``.
+///   (330 pt) and has no intrinsic width at all, so the tile has to *choose* one — see ``barWidth``.
 /// - **The ruler.** The popup bar has an under-bar ruler the menu bar has no equivalent of, gated on a
 ///   held ⌥. It is left off here; see ``barViews(for:)``.
 @MainActor
@@ -31,7 +31,7 @@ enum DropdownBarStylePreviewRenderer {
     /// Shortening the bar does *not* misplace the marks, which is the thing to check before accepting
     /// a length. `scaleX` insets the 0..1 scale by `minStripWidth/2` — a constant 1.75 pt, derived from
     /// the bar's height rather than its length — at each end. Computed across the two widths, that inset
-    /// costs 5.6 % of a 56 pt bar against 1.4 % of the live 252 pt one, and the largest resulting shift
+    /// costs 5.6 % of a 56 pt bar against 1.1 % of the live 330 pt one, and the largest resulting shift
     /// in any mark's position is about **2 % of the bar's width**. Visible only if measured; the shapes
     /// and their order are identical.
     ///

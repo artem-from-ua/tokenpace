@@ -583,7 +583,7 @@ final class PopupBarView: NSView {
     /// Render this bar to a non-template `NSImage` `width` points wide, for the Settings preview tiles.
     ///
     /// Width is a parameter rather than read from the view because ``intrinsicContentSize`` deliberately
-    /// leaves it `noIntrinsicMetric` — the live bar stretches to the popup card (252 pt), while a tile
+    /// leaves it `noIntrinsicMetric` — the live bar stretches to the popup card (330 pt), while a tile
     /// specimen is a fraction of that. Height comes from ``Metrics/height``, unscaled: the tile shows the
     /// bar and marker at their real thickness, so what the picture promises is what the dropdown draws.
     ///
@@ -1706,12 +1706,29 @@ final class PopupViewController: NSViewController {
         }
     }
 
+    /// The popup's fixed width — **the** number, read by ``Metrics/width`` here and by
+    /// `SettingsPreviewWindowController.Metrics.nominalWidth` for the live preview window (#396).
+    ///
+    /// Both used to carry their own `312` literal, which could drift apart silently: the preview would
+    /// simply open at a different width than the popup it previews. Deriving both from this one
+    /// constant makes that impossible.
+    ///
+    /// The inner content column every fixed-width row measures against is ``Metrics/contentWidth`` =
+    /// `width − 2·cardInset − 2·hPadding` = 390 − 28 − 32 = **330 pt**. Widened from 312/252 (#396) to
+    /// fit the credits section's widest header — `Extra usage progress … [available] well ahead of
+    /// pace` measures 318 pt at 13 pt — without shortening the pacing phrases, which are shared
+    /// verbatim with the token rows.
+    /// `nonisolated` because ``Metrics`` is a plain (non-actor-isolated) enum and reads this as a
+    /// default value — a bare `static let` on a `@MainActor` view controller cannot cross that line.
+    /// Safe: it is an immutable number with no main-thread state behind it.
+    nonisolated static let popupWidth: CGFloat = 390
+
     // `fileprivate`, not `private`: `SubscribeRowView` (#279) is a sibling type in this file and
     // sizes itself from the same metrics, so the two rows cannot drift apart.
     fileprivate enum Metrics {
-        /// Popup width. Sized so the inner content column stays 252 pt once the Control-Center-style card
-        /// adds its outer margin (308 − 2·14 card inset − 2·14 inner = 252).
-        static let width: CGFloat = 312
+        /// Popup width — reads ``PopupViewController/popupWidth``, the one place the number lives, so the
+        /// Settings live preview (`SettingsPreviewWindowController`) cannot silently drift from it.
+        static let width: CGFloat = PopupViewController.popupWidth
         static let hPadding: CGFloat = 16
         /// Outer margin between the popup edge and the rounded "card". Matched to the horizontal inset of
         /// the native menu separator so the card is exactly as wide as the divider between the menu items
@@ -1753,8 +1770,10 @@ final class PopupViewController: NSViewController {
         static let statusDotNudge: CGFloat = 0.5
         static let subscribeGlyphNudge: CGFloat = 1
         /// The inner content column width for fixed-width rows/labels — the popup width minus the card's
-        /// outer inset on both sides minus the inner horizontal padding on both sides. Held constant at
-        /// 252 pt (296 − 2·8 − 2·14) so bar/label wrapping is identical to before the card was added.
+        /// outer inset on both sides minus the inner horizontal padding on both sides:
+        /// 390 − 2·14 − 2·16 = **330 pt** (#396; was 252 when the popup was 312 wide). Every fixed-width
+        /// row, the bars, and the fit gate measure against this, so widening the popup widens all three
+        /// together.
         static let contentWidth: CGFloat = width - 2 * cardInset - 2 * hPadding
         /// The smallest readable gap between a split row's two halves. Below it the two columns stop
         /// reading as separate facts, so a pair that cannot keep this much air between them counts as
@@ -3391,12 +3410,16 @@ final class PopupViewController: NSViewController {
     /// locale- and currency-dependent (`10,77 kr`, `12.00 UAH`) and the font follows the system text
     /// size — no constant could stand in for either.
     ///
-    /// Measured widths at 13 pt against the 268 pt column, for calibration:
+    /// Measured widths at 13 pt against the **330 pt** column (#396; the figures below were calibrated
+    /// against 268 when the mirrors still disagreed with the real 252 — both are gone):
     /// - `20% used` + `resets in 2h at 02:50` → 198 pt — every token row fits with room to spare.
     /// - `€10.8 of €15` + `5d on Friday` → 162 pt — the resting credits line always fits.
-    /// - `spent €10.77 of €15.00` + `resets in 5d on Friday` → 281 pt — the **ordinary** ⌥ credits line
-    ///   already overflows, which is what this gate is for; it is not an exotic-payload guard.
-    /// - `spent €1,234.56 of €2,000.00` + `resets in 5d on Friday` → 322 pt — four-figure worst case.
+    /// - `spent €10.77 of €15.00` + `resets in 5d on Friday` → 281 pt — **now fits.** At 252 this
+    ///   ordinary ⌥ line was dropped; the wider column is what buys it back, which is half the point
+    ///   of widening (#396).
+    /// - `spent €1,234.56 of €2,000.00` + `resets in 5d on Friday` → 322 pt — still fits at 330.
+    /// - `spent $5,000.00 of $5,000.00` + `resets in 20d next Wednesday` → 376 pt — the gate's remaining
+    ///   job: a four-figure cap with the longest reset phrase still overflows and drops the reset.
     static func detailHalvesFit(left: String, right: String, font: NSFont) -> Bool {
         let attrs: [NSAttributedString.Key: Any] = [.font: font]
         let leftWidth = (left as NSString).size(withAttributes: attrs).width
