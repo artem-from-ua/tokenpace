@@ -394,17 +394,18 @@ final class PopupBarView: NSView {
     /// Scales the **coloured strip's** ambient halo for this bar. `1` is the shipped glow.
     ///
     /// The companion to ``markerGlowScale``, and set for the same reason on the same surface: the
-    /// popup's halo is sized for a vibrant card, where the ribbon has to lift off a busy material.
-    /// A Settings form is flat and opaque, so the same radius spreads instead of lifting — the
-    /// colour bleeds past the strip's own edge and the specimen reads softer than the bar it is
-    /// meant to be a picture of.
+    /// popup's halo is tuned against a vibrant card, where the ribbon has to lift off a busy
+    /// material. A Settings form is flat and opaque, so the same halo reads as bloom rather than
+    /// lift — the specimen looks softer than the bar it is a picture of.
     ///
-    /// Scales the radius, not the strength: dimming the halo would change what colour the specimen
-    /// shows, while a tighter one shows the same colour over less of the form.
+    /// Scales the **strength**, not the radius. Both were tried and they are not interchangeable:
+    /// tightening the radius keeps the halo as bright as ever and merely shrinks it, which reads as
+    /// a smaller glow rather than a quieter one. Fading it leaves the falloff at the shipped size
+    /// and only lowers how much of it lands — the specimen keeps the same shape of light, less of it.
     var stripGlowScale: CGFloat = 1
 
-    /// The strip halo's radius after ``stripGlowScale``.
-    private var stripGlow: CGFloat { Self.gapGlowRadius * stripGlowScale }
+    /// The strip halo's strength after ``stripGlowScale``.
+    private var stripGlowStrength: CGFloat { Self.gapGlowStrength * stripGlowScale }
 
 
     /// The exhausted-pacing red (`aheadColor`'s cap rung). Exposed so the popup can paint the **one**
@@ -477,7 +478,7 @@ final class PopupBarView: NSView {
                 } else {
                     // The idle strip carries the same ambient glow as a pacing strip (#188),
                     // with the same parameters — one halo treatment across every strip.
-                    withGlow(idleColor, radius: stripGlow, strength: Self.gapGlowStrength) {
+                    withGlow(idleColor, radius: Self.gapGlowRadius, strength: stripGlowStrength) {
                         idleColor.setFill()
                         idlePath.fill()
                     }
@@ -585,13 +586,13 @@ final class PopupBarView: NSView {
                 // where they overlap and falls off outward. See the radius constants for why three passes
                 // rather than one larger `strength`.
                 for radius in [Self.pillHaloRadius, Self.pillMidGlowRadius, Self.pillGlowRadius] {
-                    withGlow(gapColor, radius: radius * stripGlowScale, strength: Self.pillGlowStrength) {
+                    withGlow(gapColor, radius: radius, strength: Self.pillGlowStrength * stripGlowScale) {
                         gapColor.setFill()
                         stripPath.fill()
                     }
                 }
             } else {
-                withGlow(gapColor, radius: stripGlow, strength: Self.gapGlowStrength) {
+                withGlow(gapColor, radius: Self.gapGlowRadius, strength: stripGlowStrength) {
                     gapColor.setFill()
                     stripPath.fill()
                 }

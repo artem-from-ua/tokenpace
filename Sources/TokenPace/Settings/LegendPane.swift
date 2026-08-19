@@ -200,7 +200,7 @@ struct LegendPane: View {
     ///     width      = anatomyWidth = 320
     ///
     ///     used   f = usageFraction 0.35  →  112.5
-    ///     marker f = timeFraction  0.71  →  226.5
+    ///     marker f = timeFraction  0.71  →  226.5  (drawn at 226 — see `markerCallout`)
     ///     tick 4 f = 4/5           0.80  →  255.0
     ///
     /// **Recompute these if `anatomyWidth`, `PopupBarView.trackHeight`, `minStripWidth` or the
@@ -243,10 +243,12 @@ struct LegendPane: View {
     /// overlapping. Splitting them across the bar gives each room, and puts the marker's name on the
     /// side the marker is read from.
     ///
-    /// 226.5 for the reason the ruler callout is 254.5: a 1 pt leader centred on an integer x
-    /// splits across two device pixels at 2×, and the line then reads as standing just right of
-    /// the mark it points at.
-    private static let markerCallout = Callout(x: 226.5, text: "now-marker")
+    /// 226, half a point left of the 226.5 the arithmetic gives. The ruler's callout takes the
+    /// opposite correction for the opposite reason: it points at a 1 pt tooth, where landing on the
+    /// half-pixel is what keeps leader and tooth on the same device pixel at 2×. The marker is a 7 pt
+    /// wide mark, so the leader is read against its **centre** rather than against a hairline, and the
+    /// half-point that squares a hairline reads here as the line standing right of what it names.
+    private static let markerCallout = Callout(x: 226, text: "now-marker")
 
     /// One label beside an anatomy bar, pointing at `x`.
     private struct Callout {
@@ -521,9 +523,15 @@ struct LegendPane: View {
                 // Above the bar: the caption sits at the top and its leader runs from the caption's
                 // foot down to the marker's tip — which is the image's own top edge, the marker being
                 // the tallest thing the bar draws.
+                // Centred on its own leader, the same way the below-bar captions are — not centred in
+                // the figure. The two coincided only while the specimen's marker stood at the halfway
+                // point; once it moved along the bar the caption stayed in the middle and read as
+                // naming whatever happened to be under it.
                 Text(marker.text)
                     .font(.callout).foregroundStyle(.secondary).fixedSize()
-                    .frame(width: Self.anatomyWidth, alignment: .center)
+                    .position(x: marker.x, y: Geometry.captionHeight / 2)
+                    .frame(width: Self.anatomyWidth,
+                           height: Geometry.height(imageTop: imageTop, hasCallouts: true))
                 leaderLine(Geometry.imageTop - Geometry.captionHeight)
                     .offset(x: marker.x, y: Geometry.captionHeight)
             }
