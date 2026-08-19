@@ -675,6 +675,13 @@ final class SettingsWindowController: NSWindowController {
             toolbarController.update(title: model.currentPaneTitle,
                                      canGoBack: model.canGoBack,
                                      canGoForward: model.canGoForward)
+            // Make room *before* the preview appears, not after: the constraint in `windowDidMove`
+            // only fires while the window is being dragged, so a window parked far right — dragged
+            // there on a pane that has no preview, or restored from a session that did not — would
+            // otherwise have the preview open straight across it. Ordered first so the parent has
+            // already slid left by the time the child is shown, rather than the pair jumping apart
+            // once it is on screen.
+            if model.selection.showsDropdownPreview { makeRoomForPreview() }
             preview.isEnabledForCurrentPane = model.selection.showsDropdownPreview
         } onChange: { [weak self] in
             Task { @MainActor in
@@ -889,11 +896,25 @@ extension SettingsWindowController: NSWindowDelegate {
     /// is corrected after the fact. In practice the window slides along the invisible wall, which is
     /// what a maximum position should feel like.
     private func keepPreviewRoomOnTheRight() {
-        guard preview.isEnabledForCurrentPane, let window,
-              let visible = (window.screen ?? NSScreen.main)?.visibleFrame else { return }
+        guard preview.isEnabledForCurrentPane else { return }
+        makeRoomForPreview()
+    }
+
+    /// Slide the window left, if it has to, so the preview fits beside it.
+    ///
+    /// Called from two places, and both are needed. `windowDidMove` catches a drag in progress, which
+    /// is the wall the user feels. This is also called when a pane that *has* a preview is selected —
+    /// the window may already be parked far right, dragged there while a preview-less pane was showing
+    /// or restored from a session that ended on one, and the drag hook cannot see a move that never
+    /// happened.
+    private func makeRoomForPreview() {
+        guard let window, let visible = (window.screen ?? NSScreen.main)?.visibleFrame else { return }
         let maxX = visible.maxX - SettingsPreviewWindowController.roomNeededOnTheRight
         guard window.frame.maxX > maxX else { return }
-        window.setFrameOrigin(NSPoint(x: maxX - window.frame.width, y: window.frame.origin.y))
+        // Never past the left edge: on a display too narrow for the pair, hugging the left is the best
+        // available answer, and it is the one the preview's own clamp then completes.
+        let x = max(visible.minX, maxX - window.frame.width)
+        window.setFrameOrigin(NSPoint(x: x, y: window.frame.origin.y))
     }
 
     /// The state the window was in when it went away is the one to reopen at — a resize immediately

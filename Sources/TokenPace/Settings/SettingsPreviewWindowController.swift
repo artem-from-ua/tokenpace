@@ -351,8 +351,15 @@ final class SettingsPreviewWindowController {
         var x = parentFrame.maxX + Metrics.gap
         if let visible { x = min(x, visible.maxX - size.width) }
 
-        var y = parentFrame.maxY - size.height
-        if let visible { y = max(y, visible.minY) }
+        // Top edges aligned, and **left** aligned — no clamp to the screen's bottom.
+        //
+        // The clamp used to lift the preview whenever it would have hung below the visible frame,
+        // which is what happens as soon as Settings is dragged low. The result was a preview that
+        // stopped following its parent and drifted upward out of line with it, breaking the one
+        // relationship this placement is for. Letting the bottom run off screen keeps the two locked
+        // together: what is lost is the tail of a card whose interesting end is its top, and the fix is
+        // to move the window the reader is already holding.
+        let y = parentFrame.maxY - size.height
 
         win.setFrameOrigin(NSPoint(x: x, y: y))
     }
