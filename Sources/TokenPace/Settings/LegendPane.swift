@@ -218,13 +218,15 @@ struct LegendPane: View {
     /// Both start `calloutGap` below the image and run to their own mark. The image now includes the
     /// ruler, so its bottom edge *is* the teeth's foot:
     ///
-    ///     ticks   calloutGap 4                              = 4    — the tooth's foot
-    ///     capsule calloutGap 4 + tickGap 2 + tickLength 5    = 11   — back up to the track
+    ///     ticks   calloutGap 7                              = 7    — the tooth's foot
+    ///     capsule calloutGap 7 + tickGap 2 + tickLength 5    = 14   — back up to the track
     ///
     /// Recompute alongside the `x` values above if the tick metrics or ``calloutGap`` change.
     private static let progressCallouts: [Callout] = [
-        Callout(x: 112.5, text: "used tokens/credits so far", anchor: .leading, leader: 11),
-        Callout(x: 255.0, text: "ticks — hours / days", anchor: .trailing, leader: Self.calloutGap),
+        Callout(x: 112.5, text: "used tokens/credits so far", anchor: .leading, leader: 14),
+        // `hours/days` unspaced, matching `tokens/credits` on the other caption — one page should not
+        // punctuate the same "either of these" two ways.
+        Callout(x: 255.0, text: "ticks — hours/days", anchor: .trailing, leader: Self.calloutGap),
     ]
 
     /// The clear space between a caption and the bar, identical above and below.
@@ -232,7 +234,7 @@ struct LegendPane: View {
     /// Everything else on the diagram is measured *from* this: the leaders are this gap plus however
     /// deep their own mark sits, so the captions sit the same distance out on both sides even though
     /// the lines they hang from are different lengths.
-    private static let calloutGap: CGFloat = 4
+    private static let calloutGap: CGFloat = 7
 
     /// The marker's own callout, which sits **above** the bar.
     ///
@@ -506,6 +508,11 @@ struct LegendPane: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
+        // A little more clearance above a diagram that captions the *top* of its bar. Balance and
+        // Pressure caption nothing up there, so their heading can sit close; Progress puts a line of
+        // text and a leader between the two, and without this the heading reads as belonging to that
+        // caption rather than to the section.
+        .padding(.top, marker == nil ? 0 : 6)
     }
 
     /// The callouts under an anatomy bar: a tick at the x each one points to, its label beneath.
