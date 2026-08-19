@@ -195,7 +195,58 @@ struct LegendPane: View {
                 legendRow(swatch: { glyph(icon.symbol, tint: icon.tint) },
                           name: icon.name, detail: icon.detail)
             }
+            statusDotRow
         }
+    }
+
+    /// The service dot, and the six states it can be in.
+    ///
+    /// A row of its own rather than one more entry in ``icons``, because the dot is not a symbol: it is
+    /// a filled circle the widget draws, and its whole vocabulary is colour. Listing the six states
+    /// under it is the only way this row says anything — a single orange dot beside "service status"
+    /// would name the element without explaining it.
+    ///
+    /// **Grey covers two states**, and that is worth the reader's attention rather than a footnote:
+    /// `unknown` means "we could not find out", which is not the same as `operational` even though the
+    /// dot is only ever drawn for a problem — so the pairing shows a colour that says less than the
+    /// others, not a duplicate.
+    private var statusDotRow: some View {
+        legendRow(swatch: { dot(ColorRole.orange.defaultColor) },
+                  name: "service status",
+                  detail: "a Claude service has a problem · shown only when something’s wrong") {
+            HStack(spacing: 10) {
+                ForEach(Array(Self.serviceStates.enumerated()), id: \.offset) { _, state in
+                    HStack(spacing: 4) {
+                        dot(state.colour)
+                        Text(state.name).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    /// The six service states in the order they escalate, with the colours the **menu bar** gives them.
+    ///
+    /// Taken from `StatusItemView.statusDotTarget`, not from the popup's table: this page explains the
+    /// widget, and the two deliberately disagree on one state. `degraded` is neutral here and yellow
+    /// there, because in the menu bar the dot is alone and a yellow with no action attached is noise,
+    /// while in the popup it sits beside the service's name and status word.
+    @MainActor
+    private static var serviceStates: [(name: String, colour: NSColor)] {
+        [("operational", ColorRole.gray.defaultColor),
+         ("degraded", ColorRole.calmWhite.defaultColor),
+         ("partial outage", ColorRole.orange.defaultColor),
+         ("major outage", ColorRole.red.defaultColor),
+         ("maintenance", ColorRole.blue.defaultColor),
+         ("unknown", ColorRole.gray.defaultColor)]
+    }
+
+    /// The dot at the size the widget draws it (`StatusItemView.Metrics.statusDotDiameter`).
+    private func dot(_ colour: NSColor) -> some View {
+        Circle()
+            .fill(Color(nsColor: colour))
+            .frame(width: 6, height: 6)
     }
 
     private struct Icon {
@@ -253,13 +304,19 @@ struct LegendPane: View {
     ///
     /// The pair of tones is the popup's own (`label` over `dimmedLabel`), so the page reproduces the
     /// hierarchy the reader will meet in the app rather than inventing one.
-    private func legendRow<Swatch: View>(@ViewBuilder swatch: () -> Swatch,
-                                         name: String, detail: String) -> some View {
+    /// `extra` hangs under the detail line for a row that needs more than two lines — currently only
+    /// the service dot, whose six states are the row's actual content.
+    private func legendRow<Swatch: View, Extra: View>(
+        @ViewBuilder swatch: () -> Swatch,
+        name: String, detail: String,
+        @ViewBuilder extra: () -> Extra = { EmptyView() }
+    ) -> some View {
         HStack(alignment: .center, spacing: 12) {
             swatch().frame(width: 34, alignment: .center)
             VStack(alignment: .leading, spacing: 1) {
                 Text(name).font(.callout)
                 Text(.init(detail)).font(.caption).foregroundStyle(.secondary)
+                extra()
             }
             Spacer(minLength: 0)
         }
