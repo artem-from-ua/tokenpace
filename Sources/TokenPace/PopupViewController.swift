@@ -230,6 +230,14 @@ final class PopupBarView: NSView {
         max(0, (Metrics.indicatorHeight - Metrics.barHeight) / 2)
     }
 
+    /// How far the tick ruler reaches **below** the track — its gap plus a tooth.
+    ///
+    /// ``viewHeight`` deliberately excludes this (#388): the live popup shows the teeth only under ⌥,
+    /// and reserving the strip permanently read as padding under every bar. A caller that draws a bar
+    /// *with* its ruler — the Legend page — has to add the depth back, or the canvas clips the teeth
+    /// part-way down and the specimen misreports their size.
+    static var rulerDepth: CGFloat { Metrics.tickGap + Metrics.tickLength }
+
     // MARK: - Effective presentation
 
     /// The scale this bar is actually **drawn** on — the user's `BarStyle` choice, except on the

@@ -126,7 +126,14 @@ enum LegendRenderer {
         // than the scale, stay uncluttered.
         view.optionHeld = showsRuler
 
-        let size = NSSize(width: width, height: PopupBarView.viewHeight)
+        // **Tall enough for the ruler.** `viewHeight` is the marker's height and stops at the track's
+        // foot — #388 deliberately stripped the strip that used to be reserved for teeth, because the
+        // live popup only draws them under ⌥ and the reserved space read as padding the rest of the
+        // time. Here the ruler is always on, so a canvas that height clipped the teeth at 2 of their
+        // 5 pt: they looked like a smaller tick than the dropdown's rather than the same one, which is
+        // exactly the misreport a specimen must not make.
+        let rulerDepth: CGFloat = showsRuler ? PopupBarView.rulerDepth : 0
+        let size = NSSize(width: width, height: PopupBarView.viewHeight + rulerDepth)
         let image = NSImage(size: size)
         image.lockFocusFlipped(true)
         // Baked under the **current** theme's vibrant appearance, not a pinned one: the dropdown is a
