@@ -69,6 +69,8 @@ enum StubScenario: String, CaseIterable {
     case creditsWideAmounts = "credits-wide-amounts"
     case creditsMaxHeader = "credits-max-header"
     case creditsMaxDetail = "credits-max-detail"
+    case allExhaustedCreditsBlock = "all-exhausted-credits-block"
+    case allExhaustedTokenBlocks = "all-exhausted-token-blocks"
     case creditsMonthEnd = "credits-month-end"
     case justUnblocked = "just-unblocked"
     case creditsOnset = "credits-onset"
@@ -196,6 +198,8 @@ enum StubScenario: String, CaseIterable {
         case .creditsWideAmounts:  return "Credits · wide amounts (⌥ drops reset)"
         case .creditsMaxHeader:    return "Credits · widest header line"
         case .creditsMaxDetail:    return "Credits · widest detail line"
+        case .allExhaustedCreditsBlock: return "All spent · credits free you first"
+        case .allExhaustedTokenBlocks:  return "All spent · 7-day frees you last"
         case .creditsMonthEnd:     return "Credits · late in the month (time marker near the end)"
         case .justUnblocked:       return "Back to work! edge"
         case .creditsOnset:        return "Extra Usage Credit onset"
@@ -417,6 +421,22 @@ enum StubScenario: String, CaseIterable {
                  + "one to an ellipsis. This is the gate's remaining job after the widening; the header "
                  + "above it reads \"limit reached\" and carries NO badge (once the cap is reached the "
                  + "server disables credits, so nothing is actively spending)."
+        case .allExhaustedCreditsBlock:
+            return "EVERYTHING is spent — 5h, 7d and the €15 money cap all at 100 % — and the token "
+                 + "windows reset AFTER the month does (7d in 40 d). By the last-stand rule "
+                 + "(`BlockingReset.select`) the credits reset is then the first way back, so it is the "
+                 + "blocker: the RED reset badge sits on the **Extra usage** line and nowhere else. "
+                 + "Both token rows read \"limit reached\" with their resets as plain dimmed text, "
+                 + "despite being just as exhausted. Extra usage carries no state badge either — with "
+                 + "the cap spent the red belongs to the reset below, not the header. Compare against "
+                 + "`all-exhausted-token-blocks`, which differs ONLY in when the tokens reset."
+        case .allExhaustedTokenBlocks:
+            return "The same three limits exhausted, but the 7-day window resets LAST (in 24 d, past "
+                 + "the month boundary) instead of first. The red badge moves to the **7-day** row and "
+                 + "the Extra usage reset goes plain — the money frees you before the plan does, so "
+                 + "the plan is what you are actually waiting on. Run it back to back with "
+                 + "`all-exhausted-credits-block`: identical utilizations, identical amounts, one "
+                 + "red badge each, on different rows."
         case .creditsMonthEnd:
             return "The Extra-usage bar's captioned month ruler with the time marker near its right "
                  + "end: same €15 cap and €10.77 spent as `credits-active`, but the clock is pinned to "
@@ -524,6 +544,10 @@ enum StubScenario: String, CaseIterable {
         case .creditsWideAmounts:  return StubUsageTransport(mode: .credits(.wideAmounts), now: now)
         case .creditsMaxHeader:    return StubUsageTransport(mode: .credits(.maxHeader), now: now)
         case .creditsMaxDetail:    return StubUsageTransport(mode: .credits(.maxDetail), now: now)
+        case .allExhaustedCreditsBlock:
+            return StubUsageTransport(mode: .credits(.allExhaustedCreditsBlock), now: now)
+        case .allExhaustedTokenBlocks:
+            return StubUsageTransport(mode: .credits(.allExhaustedTokenBlocks), now: now)
         case .creditsMonthEnd:     return StubUsageTransport(mode: .credits(.active), now: now)
         case .justUnblocked:       return StubUsageTransport(mode: .justUnblocked, now: now)
         case .creditsOnset:        return StubUsageTransport(mode: .creditsOnset, now: now)
