@@ -417,25 +417,26 @@ final class SettingsWindowController: NSWindowController {
         guard sidebarClickMonitor == nil else { return }
         sidebarClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self, weak sidebar] event in
             guard let self, let sidebar, event.window === sidebar.window else { return event }
-            let point = sidebar.convert(event.locationInWindow, from: nil)
-            guard sidebar.bounds.contains(point) else { return event }
-            // **Not the titlebar band.** The sidebar column runs to the very top of the window — its
-            // strip is merged into the titlebar (`mergeSidebarTitlebarStrip`), which is what makes the
-            // sidebar material continue behind the traffic lights. So the close button sits
-            // geometrically *inside* this view, and without this guard closing the window counted as a
-            // sidebar click: the deferred pop then ran, and the child page the user was reading was
-            // gone when they opened Settings again. Found by logging every `childPage` write — the
-            // reset arrived with `selection` unchanged, which ruled the binding out and left this.
+            // **A click on a row**, not merely a click inside the column.
             //
-            // Measured against the window's own content-layout guide rather than a constant, so it
-            // holds at whatever height AppKit gives the bar.
-            if let window = sidebar.window {
-                let titlebarHeight = window.frame.height - window.contentLayoutRect.height
-                let inTitlebar = sidebar.isFlipped
-                    ? point.y < titlebarHeight
-                    : point.y > sidebar.bounds.height - titlebarHeight
-                guard !inTitlebar else { return event }
-            }
+            // The pop is meant for one gesture: clicking the row you are already on, to come back out
+            // of its child page. Everything else in this view means nothing — and the column contains
+            // a good deal of "everything else". Its strip is merged into the titlebar
+            // (`mergeSidebarTitlebarStrip`), so the close button sits geometrically inside it, and
+            // below the last row there is empty list. Treating either as a row click threw the reader
+            // out of the page they were reading: first on closing the window, then on clicking the
+            // blank space under the list.
+            //
+            // Both fall out of asking the table where its rows are instead of measuring bands. The
+            // sidebar is an `NSTableView` under the SwiftUI `List`, and `row(at:)` answers the exact
+            // question this needs — returning -1 for the blank space below the last row and for the
+            // titlebar strip, which is not inside the table at all. Geometry would need a fresh
+            // special case for each such region; this needs none.
+            let point = sidebar.convert(event.locationInWindow, from: nil)
+            guard sidebar.bounds.contains(point),
+                  let table = Self.enclosedTableView(in: sidebar) else { return event }
+            let inTable = table.convert(event.locationInWindow, from: nil)
+            guard table.row(at: inTable) >= 0 else { return event }
             // Captured now, checked later: the page that was open when the click landed.
             let openPage = MainActor.assumeIsolated { self.model.childPage }
             DispatchQueue.main.async {
@@ -443,6 +444,20 @@ final class SettingsWindowController: NSWindowController {
             }
             return event
         }
+    }
+
+    /// The `NSTableView` a SwiftUI `List` is built on, somewhere below `root`.
+    ///
+    /// SwiftUI gives no way to ask "is this point on a row", but the table underneath it does, and
+    /// finding the table is a short walk. Returns `nil` if the structure ever changes, and the caller
+    /// then simply does nothing — the pop is an extra, so failing to find the table costs the
+    /// click-the-current-row shortcut and breaks nothing else.
+    private static func enclosedTableView(in root: NSView) -> NSTableView? {
+        if let table = root as? NSTableView { return table }
+        for child in root.subviews {
+            if let found = enclosedTableView(in: child) { return found }
+        }
+        return nil
     }
 
     /// Stop the divider advertising a drag the pinned sidebar will refuse.
