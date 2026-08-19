@@ -65,6 +65,7 @@ features) **і** «Show awaiting-input icon in the menu bar» (Appearance), — 
 | `indicatorCorner` | 2 |
 | обводка маркера | 1 pt, `monochromeGrey` змішаний 40% із кольором маркера |
 | `tickLength` / `tickGap` / `tickWidth` | 5 / 2 / 2 |
+| висота в'ю бару (`PopupBarView.viewHeight`) | **14** = `indicatorHeight`. Резерву під лінійку тіків **немає** (#388): тіки малюються в нижньому виступі маркера. Доти в'ю була 21 pt, і ті зайві 7 pt порожнечі під кожним баром читалися як збільшений відступ *між блоками лімітів* |
 | `boundaryCaptionSize` (підписи місяця, кредитний бар) | 9 |
 | `boundaryCaptionDrop` / `boundaryCaptionGap` | 5 / 3 |
 | `minStripWidth` | `0.75 × barHeight − 1` = 3.5 (меню-бар: 2.75) |

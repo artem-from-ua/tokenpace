@@ -192,12 +192,18 @@ final class PopupBarView: NSView {
         /// `StatusItemView.Metrics.zeroTickAlpha`, for the same reason: scale furniture must settle
         /// behind the one mark on the bar that actually moves.
         static let zeroTickAlpha: CGFloat = 0.55
-        /// Total view height: tall enough for the bar + under-bar tick ruler **and** for the marker,
-        /// which is centred on the bar and so overhangs it by `indicatorHeight/2 − barHeight/2`
-        /// on top; without that headroom a taller marker would be clipped by the view's frame.
-        static let height: CGFloat = max(
-            barHeight + tickGap + tickLength,
-            indicatorHeight + tickGap + tickLength)
+        /// Total view height: the **marker** and nothing more. The marker is centred on the bar and so
+        /// overhangs it by `(indicatorHeight − barHeight)/2` on each side; that is the whole reserve.
+        ///
+        /// The tick ruler is deliberately **not** reserved for (#388). It used to add `tickGap +
+        /// tickLength` on top of the marker, which bought 7 pt of empty strip under every bar — and
+        /// two of the three styles draw no ruler at all (ADR-0098), so on those the strip was pure
+        /// air. Because a bar sits at the end of each limit block, that air read as extra space
+        /// *between blocks*: the gap under "Claude" measured its honest `sectionSpacing`, while the
+        /// gap between blocks measured `limitSpacing` **plus** the reserve — 10 pt of setting looking
+        /// like 25. The ticks now draw into the marker's own bottom overhang, where they are thin
+        /// enough (2 pt wide, `tertiaryLabelColor`) to need no clearance of their own.
+        static let height: CGFloat = indicatorHeight
     }
 
     /// The fixed view height (bar + under-bar tick ruler), exposed so `PopupViewController` can pin
@@ -1625,17 +1631,25 @@ final class PopupViewController: NSViewController {
         /// Top **inner** padding — space between the card's top edge and the "Claude" header. Matched to
         /// `hPadding` so the gap above the header equals the gap from the card's left edge to it.
         static let topPadding: CGFloat = 16
-        /// Bottom **inner** padding — space between the last bar's tick ruler and the card's bottom edge.
+        /// Bottom **inner** padding — space between the last bar and the card's bottom edge.
         ///
-        /// Trimmed from 12 to 8 (#396) once the ⌥ captions came out: the 12 was sized to keep `0` and
-        /// the month ends clear of the rounded edge, and with only the teeth left below the bar the
-        /// same gap read as a slack margin under the last row.
-        static let bottomPadding: CGFloat = 8
+        /// Was 12, trimmed to 8 in #396 when the ⌥ captions came out, then back to 14 in #388: both
+        /// earlier numbers were chosen while each bar still carried 7 pt of tick-ruler reserve below it,
+        /// so the *rendered* bottom margin was 15–19 pt however the constant read. Removing the reserve
+        /// dropped it to a real 8 and the last row sat on the card's edge. 14 restores the old optical
+        /// margin and makes it the same value as `limitSpacing`, so the space below the last bar matches
+        /// the space between bars.
+        static let bottomPadding: CGFloat = 14
         static let rowSpacing: CGFloat = 3
         static let sectionSpacing: CGFloat = 14
-        /// Gap **between limit blocks** (after each section's bar) — a touch tighter than
-        /// `sectionSpacing` so the limit list reads as a group without the header's larger breathing room.
-        static let limitSpacing: CGFloat = 10
+        /// Gap **between limit blocks** (after each section's bar) — the same 14 pt the header takes.
+        ///
+        /// It used to be 10, "a touch tighter than `sectionSpacing` so the limit list reads as a group".
+        /// That reasoning measured the wrong thing: every bar view reserved 7 pt under itself for a tick
+        /// ruler two of the three styles never draw, so the gap between blocks *rendered* as ~25 pt while
+        /// the gap under "Claude" rendered as its honest 14. The list read looser than the header, not
+        /// tighter. With the reserve gone (#388) the two are set equal and finally look it.
+        static let limitSpacing: CGFloat = 14
         static let textSize: CGFloat = dropdownTextSize
         /// Diameter of the service-status glow dot (#188) and the gap between it and the component name.
         static let statusDotDiameter: CGFloat = 9
