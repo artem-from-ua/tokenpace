@@ -55,7 +55,7 @@ enum StubScenario: String, CaseIterable {
     case weeklyResetUnknown = "weekly-reset-unknown"
     case idleWeekHot = "idle-week-hot"
     case pressureSweep = "pressure-sweep"
-    case gaugeSweep = "gauge-sweep"
+    case balanceSweep = "balance-sweep"
     case barExtremes = "bar-extremes"
     case nearZero = "near-zero"
     case edgeExtremes = "edge-extremes"
@@ -184,7 +184,7 @@ enum StubScenario: String, CaseIterable {
         case .weeklyResetUnknown:  return "Reset · 7d unknown (cold start, nothing to roll)"
         case .idleWeekHot:         return "Idle · week ahead of pace (popup wording)"
         case .pressureSweep:       return "Pacing · Pressure scale (sharp 5h + clipped 7d)"
-        case .gaugeSweep:          return "Pacing · Gauge scale (full-left 5h + short-right 7d)"
+        case .balanceSweep:          return "Pacing · Balance scale (full-left 5h + short-right 7d)"
         case .barExtremes:         return "Pacing · fill extremes (full blue 5h + 1 % green 7d)"
         case .nearZero:            return "Pacing · near-zero (pill caps)"
         case .edgeExtremes:        return "Pacing · edge extremes (5h 0 %, 7d 100 %)"
@@ -331,27 +331,27 @@ enum StubScenario: String, CaseIterable {
                  + "7 % of the window left — 4 % of the bar on the old window scale (below the min "
                  + "pill), 57 % now. 7d sits in the yellow band at 11 %, just clear of the min pill, so "
                  + "the two rows show yellow and orange holding clearly different widths — and the 7d "
-                 + "row is the tightest case for that. Switch Bar style across Pressure / Gauge / "
+                 + "row is the tightest case for that. Switch Bar style across Pressure / Balance / "
                  + "Progress: Progress must look exactly as before, and the 7d ribbon must not move "
-                 + "between Pressure and Gauge (Pressure IS Gauge's ahead half)."
+                 + "between Pressure and Balance (Pressure IS Balance's ahead half)."
         case .barExtremes:
             return "Both ends of the fill range at once, for judging the strip's CORNER RADIUS "
                  + "(#326). 5h: a 75 pp surplus (t = 80 %, u = 5 %) — far past the far-behind "
-                 + "threshold, so blue, and under Gauge it fills the entire left half. 7d: a hair of "
+                 + "threshold, so blue, and under Balance it fills the entire left half. 7d: a hair of "
                  + "a lead (t = 30 %, u = 31.25 %) → 1.4 % of the ahead half, floored to the minimum "
                  + "pill. Check: the strip's corners match the grey track's (1.5 pt) on BOTH rows — "
                  + "a full strip must not bulge past the track's own corners, and the tiny one must "
                  + "not read as a capsule lozenge sitting on a rectangle. Worth a pass in every Bar "
                  + "style: the radius is shared by all four."
-        case .gaugeSweep:
-            return "Gauge scale (#326): one row each side of the centre. 5h sits deep behind pace "
+        case .balanceSweep:
+            return "Balance scale (#326): one row each side of the centre. 5h sits deep behind pace "
                  + "(t = 90 %, u = 70 %) — a surplus twice the time left, so the left half is FULL; "
                  + "every other style draws this as the minimum pill. 7d holds the mild lead "
                  + "(t = 30 %, u = 38 %) → a short ribbon right of centre. Check: (1) the centre tick "
                  + "is present in every state, including idle, and only its ends show above and below "
-                 + "the track; (2) switching Pressure ↔ Gauge leaves the 7d (ahead) ribbon at the very "
+                 + "the track; (2) switching Pressure ↔ Balance leaves the 7d (ahead) ribbon at the very "
                  + "same length — since ADR-0101 Pressure IS this scale's ahead half, so the two "
-                 + "cannot disagree; (3) on Gauge the 5h row is the widest thing on screen, on "
+                 + "cannot disagree; (3) on Balance the 5h row is the widest thing on screen, on "
                  + "Pressure it is the narrowest; (4) with \"Colors tell me\" on `Slow down`, direction is the only cue "
                  + "left — that is the case that decides whether the trade-off is acceptable."
         case .nearZero:
@@ -530,7 +530,7 @@ enum StubScenario: String, CaseIterable {
         case .weeklyResetUnknown:  return StubUsageTransport(mode: .weeklyResetUnknown, now: now)
         case .idleWeekHot:         return StubUsageTransport(mode: .idleWeekHot, now: now)
         case .pressureSweep:       return StubUsageTransport(mode: .pacing(.pressureSweep), now: now)
-        case .gaugeSweep:          return StubUsageTransport(mode: .pacing(.gaugeSweep), now: now)
+        case .balanceSweep:          return StubUsageTransport(mode: .pacing(.balanceSweep), now: now)
         case .barExtremes:         return StubUsageTransport(mode: .pacing(.barExtremes), now: now)
         case .nearZero:            return StubUsageTransport(mode: .pacing(.nearZero), now: now)
         case .edgeExtremes:        return StubUsageTransport(mode: .pacing(.edgeExtremes), now: now)
