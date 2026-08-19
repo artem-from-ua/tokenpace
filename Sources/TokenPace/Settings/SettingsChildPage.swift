@@ -126,6 +126,39 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
     static func pages(of section: SettingsSection) -> [SettingsChildPage] {
         allCases.filter { $0.section == section && $0.configuresSurface }
     }
+
+    /// Every child page of `section`, in the order the page draws their rows — including the ones
+    /// that configure nothing.
+    ///
+    /// Separate from ``pages(of:)`` because the two callers ask different questions. That one asks
+    /// "what goes in the surfaces section", and must exclude `Legend` or it would be drawn twice.
+    /// The `TOKENPACE_SETTINGS_SECTION` dev hook asks "what can I open", and the answer is every page
+    /// a user can reach — a recipe that cannot name a page is a page that cannot be verified.
+    ///
+    /// Legend was unreachable through the hook until this existed: `2.0`–`2.1` addressed the two
+    /// surfaces and there was no index left for it, so the hook logged nothing and the window opened
+    /// wherever it had last been left — which reads exactly like a recipe that worked.
+    ///
+    /// Ordered by ``rowOrder``, not by raw value. The hook's contract is "count the rows down the
+    /// page", and Legend's row is drawn above the two surfaces while its raw value is the highest of
+    /// the three. Sorting by raw would make `2.0` name the second row.
+    static func reachablePages(of section: SettingsSection) -> [SettingsChildPage] {
+        allCases.filter { $0.section == section }.sorted { $0.rowOrder < $1.rowOrder }
+    }
+
+    /// Where this page's navigator row sits on its parent, top to bottom.
+    ///
+    /// Only the hook reads it. The page itself draws Legend from a separate section above the presets
+    /// and the surfaces from `pages(of:)` below them, so nothing else needs the two orders unified —
+    /// but a recipe that says "the first page under Appearance" has to mean the first one you see.
+    private var rowOrder: Int {
+        switch self {
+        case .appearanceLegend:   return 0
+        case .appearanceMenuBar:  return 1
+        case .appearanceDropdown: return 2
+        case .providersClaude:    return 0
+        }
+    }
 }
 
 // MARK: - SettingsRoute

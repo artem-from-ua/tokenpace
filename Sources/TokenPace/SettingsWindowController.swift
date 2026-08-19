@@ -665,7 +665,10 @@ final class SettingsWindowController: NSWindowController {
             model.openAtLaunch(section)
             return
         }
-        let pages = SettingsChildPage.pages(of: section)
+        // `reachablePages`, not `pages`: the latter is the surfaces-only list the parent page draws
+        // its unlabelled section from, and a hook that could not name Legend left it verifiable only
+        // by hand.
+        let pages = SettingsChildPage.reachablePages(of: section)
         guard let childIndex = Int(parts[1]), pages.indices.contains(childIndex) else {
             AppLogger.lifecycle.notice(
                 "settings hook: unknown child \(raw, privacy: .public) — opening the section")
