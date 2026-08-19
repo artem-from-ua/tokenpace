@@ -2515,10 +2515,10 @@ final class PopupViewController: NSViewController {
 
     /// Hover text for the "in use" marker — the words the old `active` badge used to spell out, stating
     /// explicitly that the spending is happening *right now*.
-    static let inUseHint = "Currently spending Extra Usage Credit — your plan limit is exhausted"
+    static let inUseHint = "Currently spending Extra usage credits — your plan limit is exhausted"
 
     /// VoiceOver label for the "in use" marker.
-    static let inUseAccessibilityLabel = "currently spending Extra Usage Credit"
+    static let inUseAccessibilityLabel = "currently spending Extra usage credits"
 
     /// Pin a badge to the size of its own contents, in both axes.
     ///
@@ -2603,7 +2603,7 @@ final class PopupViewController: NSViewController {
     /// Hover text for `out of credits` — the paid tier is spent, so an exhausted plan limit now
     /// actually blocks work until it resets.
     static let outOfCreditsHint =
-        "Extra Usage Credit is spent — an exhausted plan limit now blocks work until it resets"
+        "Extra usage credits are spent — an exhausted plan limit now blocks work until it resets"
 
     /// The blocking-reset badge (#158): a red capsule carrying the reset countdown (e.g. "4d"), shown
     /// flush-right on the one row whose reset actually unblocks work. Same pill shape as the "in use"

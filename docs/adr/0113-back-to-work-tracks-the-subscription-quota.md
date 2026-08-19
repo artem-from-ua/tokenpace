@@ -7,6 +7,11 @@ superseded_by: []
 
 # ADR-0113: «Back to work!» стежить за підписочною квотою, а не за можливістю працювати
 
+> **Постскриптум (#416).** Рядки, які цей ADR цитує, змінили написання: усі поверхні тепер пишуть
+> **`Extra usage`**, а `credits` — з малої й у множині ([ADR-0114](0114-extra-usage-is-one-name.md)).
+> Тобто хінт нижче читається «…get back to work. Extra usage credits don't count.», а банер —
+> «Now using Extra usage credits». Рішення цього ADR — який предикат живить фронт — не зачеплене.
+>
 > Витісняє **вибір сигналу** з [ADR-0039](0039-back-to-work-notification.md): фронт тепер
 > `subscriptionAvailable`, а не `canWork`. Решта того ADR чинна й не змінюється — персистований
 > edge-state із розколом «трекінг щополу / постинг за тумблером», quiet-hours (`NotificationSchedule`,

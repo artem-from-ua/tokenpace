@@ -82,7 +82,11 @@ struct SettingsDisabledLabel: View {
     init(_ title: String) { self.title = title }
 
     var body: some View {
-        Text(title)
+        // `Text(.init(_:))` forces the `LocalizedStringKey` initializer, which renders inline
+        // markdown — the same idiom `SettingsHint` uses. A row label may name another surface's
+        // element in italics (`Switching to *Extra usage*`, ADR-0113), and the plain `Text(String)`
+        // initializer would print the asterisks verbatim. Labels without markup render identically.
+        Text(.init(title))
             .foregroundStyle(isEnabled
                              ? AnyShapeStyle(.primary)
                              : AnyShapeStyle(Color(nsColor: .disabledControlTextColor)))

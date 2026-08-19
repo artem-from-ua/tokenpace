@@ -91,13 +91,17 @@ enum BackToWorkNotifier {
              body: "Your Claude usage limit has reset — you're good to go.")
     }
 
-    /// Post the "Now using Extra Usage Credit" banner immediately. The caller has already confirmed the
+    /// Post the "Now using Extra usage credits" banner immediately. The caller has already confirmed the
     /// not-spending→spending edge and passed the quiet-hours gate; this only checks authorization and
     /// delivers. The `body` (which carries the spent amount and, if set, the limit) is built by the pure
     /// `ExtraUsageOnset.bannerBody(for:)`. No-op (logged) on a dev build or when not authorized.
+    ///
+    /// The title comes from `ExtraUsageOnset.bannerTitle` rather than a literal repeated here: the two
+    /// used to hold the same string by coincidence, and a wording change on either side would have
+    /// drifted silently (the seam `conventions.md` describes for `CopyFeedback`).
     static func postExtraUsage(body: String) {
         post(kind: "extra-usage", idPrefix: "extraUsage",
-             title: "Now using Extra Usage Credit", body: body)
+             title: ExtraUsageOnset.bannerTitle, body: body)
     }
 
     /// Post an incident banner for the episode the user is following (#279).

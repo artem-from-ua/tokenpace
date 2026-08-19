@@ -144,7 +144,7 @@ final class SettingsWindowController: NSWindowController {
         get { model.onCheckForUpdatesNow } set { model.onCheckForUpdatesNow = newValue }
     }
 
-    /// Called when the user clicks "Update Now" (#221) — installs the known release immediately,
+    /// Called when the user clicks "Update now" (#221) — installs the known release immediately,
     /// bypassing the power/metered courtesy gates.
     var onInstallUpdateNow: (() -> Void)? {
         get { model.onInstallUpdateNow } set { model.onInstallUpdateNow = newValue }
@@ -218,7 +218,7 @@ final class SettingsWindowController: NSWindowController {
         get { model.onTryBackToWork } set { model.onTryBackToWork = newValue }
     }
 
-    /// Fires the "Switching to Extra Usage" notification on demand from its Settings "Try" button.
+    /// Fires the "Switching to Extra usage" notification on demand from its Settings "Try" button.
     var onTryExtraUsage: (() -> Void)? {
         get { model.onTryExtraUsage } set { model.onTryExtraUsage = newValue }
     }

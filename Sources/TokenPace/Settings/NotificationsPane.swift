@@ -56,7 +56,7 @@ struct NotificationsPane: View {
                     // The descriptive hint dims with the control it describes (#381) …
                     SettingsHint(
                         text: "If you hit your 5-hour or weekly subscription limit, notifies you when "
-                            + "it resets so you can get back to work. Extra Usage Credit doesn't count.")
+                            + "it resets so you can get back to work. Extra usage credits don't count.")
                         .disabled(!model.backToWorkMasterEnabled)
 
                     // … but this one is the **reason** the switch is unavailable ("Notifications are
@@ -72,22 +72,26 @@ struct NotificationsPane: View {
                         // feature's availability, while "Preview" stays outside the group because it
                         // works regardless (the post gates on support + authorization itself).
                         Group {
-                            SettingsDisabledLabel("Switching to Extra Usage")
+                            // *Extra usage* is the dropdown section's own name, so it is written and
+                            // italicised exactly as the Appearance pane writes it (ADR-0114). The
+                            // toggle's own label below stays plain: it is hidden from sight and read
+                            // aloud by VoiceOver, where asterisks would be spoken as markup.
+                            SettingsDisabledLabel("Switching to *Extra usage*")
                             Spacer()
                         }
                         .disabled(!model.backToWorkMasterEnabled)
 
                         Button("Preview") { model.tryExtraUsage() }
 
-                        Toggle("Switching to Extra Usage", isOn: Binding(
+                        Toggle("Switching to Extra usage", isOn: Binding(
                             get: { model.extraUsageNotifyEnabled },
                             set: { model.setExtraUsageNotify($0) }))
                         .labelsHidden()
                         .disabled(!model.backToWorkMasterEnabled)
                     }
                     SettingsHint(
-                        text: "Notifies you the moment work starts running on paid Extra Usage Credit "
-                            + "— with the amount spent and your limit, if set.")
+                        text: "Notifies you the moment work starts running on paid Extra usage "
+                            + "credits — with the amount spent and your limit, if set.")
                         .disabled(!model.backToWorkMasterEnabled)
                 }
 

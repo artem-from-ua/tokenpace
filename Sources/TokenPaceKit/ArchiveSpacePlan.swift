@@ -28,7 +28,7 @@ public enum ArchiveSpaceVerdict: Sendable, Equatable {
 ///
 /// **Only the free-space gate lives here.** The sibling battery gate is deliberately *not* modelled:
 /// the two run at different times (battery before the scan, on the daily-heartbeat path only; space
-/// after the scan, on every path) and have different bypass rules (a manual "Archive Now" skips the
+/// after the scan, on every path) and have different bypass rules (a manual "Archive now" skips the
 /// battery gate but never this one). Folding both into one `decide` would force every call site to
 /// pass a fabricated value for the gate it isn't evaluating — the `onACPower: true` lie
 /// ``UpdateInstallPlan`` has to document at length for forced installs. The battery gate is one

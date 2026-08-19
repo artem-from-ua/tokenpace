@@ -51,7 +51,7 @@ public enum ExtraUsageOnset {
     }
 
     /// The banner **title** — fixed copy, no interpolation (the numbers live in the body).
-    public static let bannerTitle = "Now using Extra Usage Credit"
+    public static let bannerTitle = "Now using Extra usage credits"
 
     /// The banner **body**: the current spent amount, plus the limit when the user set one.
     ///

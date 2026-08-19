@@ -114,10 +114,11 @@ public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
     /// The style's name as it appears **in the dropdown**, beside each bar's title under ⌥ (#396):
     /// lowercase — `"pressure"` / `"balance"` / `"progress"`.
     ///
-    /// Lowercase only here, deliberately. In Settings the word is a control's label and takes Title
-    /// Case like every other segment; in the popup it is a quiet annotation sitting next to a row
-    /// title in the same ink as the supporting numbers, and Title Case there would read as a second
-    /// heading competing with the row's own name.
+    /// Lowercase only here, deliberately. In Settings the word is a control's label and keeps its
+    /// capital as the style's own name (the window is otherwise sentence case — `Slow down`,
+    /// `How it's going` — so this is the proper-noun exception, not the house style); in the popup it
+    /// is a quiet annotation sitting next to a row title in the same ink as the supporting numbers,
+    /// and a capital there would read as a second heading competing with the row's own name.
     public var caption: String { displayName.lowercased() }
 
     /// Which scale this presentation is measured on (#326). The renderers branch on this rather than
