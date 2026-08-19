@@ -263,9 +263,20 @@ struct LegendPane: View {
         var namesTheRuler = false
     }
 
+    /// How to read a Progress bar, one rule per specimen.
+    ///
+    /// Worded in **`pace`**, the same word ``LegendCatalog/tiers`` uses for the verdicts in the Colors
+    /// section above. These two read the same picture — where the marker sits relative to the capsule
+    /// *is* what makes a bar behind or ahead — so naming it twice, once as "pace" and once as "the
+    /// clock", left one page describing one thing in two vocabularies. The clock wording also leaned
+    /// on a phrase English does not actually have: it is `behind schedule`, never `behind the clock`.
+    ///
+    /// `you're`, not the bare adjective. Without a subject the phrase floats free of who is behind —
+    /// and the answer is neither the bar nor the marker but the reader's own spending, which is the
+    /// one thing on this page they can act on.
     private static var progressRules: [(layout: BarLayout, text: String)] {
-        [(LegendCatalog.progressSpecimen, "now-marker on the right — behind the clock"),
-         (LegendCatalog.markerlessSpecimen, "now-marker on the left — ahead of the clock"),
+        [(LegendCatalog.progressSpecimen, "now-marker on the right — you're behind pace"),
+         (LegendCatalog.markerlessSpecimen, "now-marker on the left — you're ahead of pace"),
          (LegendCatalog.exhaustedSpecimen, "limit reached")]
     }
 
