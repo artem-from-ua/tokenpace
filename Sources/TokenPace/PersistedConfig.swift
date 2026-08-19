@@ -31,9 +31,11 @@ enum PersistedConfig {
         /// older build that rewrites that blob knows nothing of this flag and would silently erase the
         /// user's choice. Two keys survive a downgrade; one blob does not.
         static let usageApiEnabled = "usageApiEnabled"
-        /// The user's own Appearance setup, kept so the "Custom" segment can be returned to after a
-        /// detour through the presets (#333). See ``customAppearanceValues``.
-        static let customAppearanceValues = "customAppearanceValues"
+        /// **Retired.** Held a JSON snapshot of the user's own Appearance setup, so the old "Custom"
+        /// radio could return to it after a detour through the presets (#333). The preset rows preview
+        /// instead of applying now, so nothing overwrites the stored configuration and there is no
+        /// setup to stash: "My setup" *is* the stored configuration. Swept on launch and by a Reset.
+        static let retiredCustomAppearanceValues = "customAppearanceValues"
         /// Whether the periodic update check runs (#37). Default-on (opt-out) — see the property.
         static let automaticUpdateChecks = "automaticUpdateChecks"
         /// Whether a found update is downloaded and installed automatically (#122). Default-**on**
@@ -369,6 +371,71 @@ enum PersistedConfig {
         set { defaults.set(newValue, forKey: Key.lastSeenLatestVersion) }
     }
 
+    // MARK: - Appearance preview overlay
+
+    /// A set of Appearance values that **temporarily shadows the store**, so the Settings preset rows
+    /// can show a preset on the live widget without writing anything.
+    ///
+    /// This is the one piece of ephemeral UI state in an otherwise pure storage facade, and it earns
+    /// its place: the render path reads Appearance almost entirely through the seven getters below, so
+    /// shadowing them here reaches every surface at once — the menu-bar widget, the dropdown, and the
+    /// preview window beside Settings — without a single call site knowing a preview exists.
+    ///
+    /// The alternative (write the preset, restore on close) was rejected: a crash or a Quit mid-preview
+    /// would leave someone else's configuration persisted with no way for the user to know it was not
+    /// their own. Nothing is written here, so losing the process simply loses the preview.
+    ///
+    /// No extra isolation annotation is needed: the whole type is already `@MainActor`, and every
+    /// reader that matters during a preview runs there anyway — `syncFromConfig()`,
+    /// `AppDelegate.render(_:at:)` and the preview window's `syncPresentation()`. The background poll
+    /// produces `UsageOutput` and never reads Appearance, so there is no race to guard against by
+    /// construction rather than by convention.
+    private static var appearancePreview: AppearancePresetValues?
+
+    /// Start shadowing the store with `values`. Idempotent — switching between presets is just another
+    /// call, which is what lets the user compare them in any order.
+    static func beginAppearancePreview(_ values: AppearancePresetValues) {
+        appearancePreview = values
+    }
+
+    /// Stop shadowing. The next read of any Appearance getter sees the store again.
+    static func endAppearancePreview() { appearancePreview = nil }
+
+    /// Whether a preview is currently shadowing the store.
+    static var isPreviewingAppearance: Bool { appearancePreview != nil }
+
+    /// The Appearance values **as stored**, ignoring any preview.
+    ///
+    /// This is what "my setup" means while a preview is up: the row that names the saved configuration
+    /// has to describe the store, not the preset being tried on, or it would claim to be whatever the
+    /// user is currently previewing.
+    /// Read one Appearance field through the overlay: the previewed value when a preview is up, the
+    /// stored one otherwise.
+    ///
+    /// Every getter below is one call to this, which is what keeps "does this honour the preview?" from
+    /// being a per-property judgement call — a getter that forgot would silently exclude its surface
+    /// from previews.
+    private static func previewOr<T>(
+        _ field: KeyPath<AppearancePresetValues, T>, _ stored: @autoclosure () -> T
+    ) -> T {
+        if let preview = appearancePreview { return preview[keyPath: field] }
+        return stored()
+    }
+
+    /// Built from the `stored…` half of each getter, so it reads the store directly rather than by
+    /// briefly clearing the overlay — a swap-and-restore would be visible to anything that read a
+    /// getter in between.
+    static var persistedAppearanceValues: AppearancePresetValues {
+        AppearancePresetValues(
+            colorsTell: storedColorsTell,
+            hideTop5hBar: storedHideTop5hBar,
+            showServiceStatusDot: storedShowServiceStatusDot,
+            modelLimitsVisibility: storedShowPerModelLimits,
+            extraUsageVisibility: storedShowExtraUsage,
+            menuBarStyle: storedMenuBarStyle,
+            dropdownStyle: storedDropdownStyle)
+    }
+
     /// How much of the menu-bar widget's **soft** pacing palette mutes to white (#105, #224, ADR-0061)
     /// — the single three-way ``ColorAdvice`` that replaces the old `calmMenuBarColors` +
     /// `workHarderColors` pair. `.off` keeps every colour; `.yellowGreen` mutes the greens/yellows but
@@ -378,13 +445,16 @@ enum PersistedConfig {
     /// (orange/red), the time-indicator dot, and the error triangle are unaffected; the popup keeps its
     /// full colour too.
     static var colorsTell: ColorAdvice {
-        get {
-            let raw = defaults.string(forKey: Key.colorsTell) ?? ""
-            return ColorAdvice(rawValue: raw)
-                ?? ColorAdvice.legacyRawValues[raw]
-                ?? AppearancePreset.defaultValues.colorsTell
-        }
+        get { previewOr(\.colorsTell, storedColorsTell) }
         set { defaults.set(newValue.rawValue, forKey: Key.colorsTell) }
+    }
+
+    /// The stored value, ignoring any preview overlay — see ``persistedAppearanceValues``.
+    private static var storedColorsTell: ColorAdvice {
+        let raw = defaults.string(forKey: Key.colorsTell) ?? ""
+        return ColorAdvice(rawValue: raw)
+            ?? ColorAdvice.legacyRawValues[raw]
+            ?? AppearancePreset.defaultValues.colorsTell
     }
 
     /// How the **menu-bar widget** presents its pacing bars (#224, per-surface since #329). Stored as
@@ -399,24 +469,30 @@ enum PersistedConfig {
     /// `AppearanceConfigValues`' decode — all four read the same table (#388). `"mixed"` stays
     /// unresolvable here: it names a *pair*, and only the migration can split it.
     static var menuBarStyle: BarStyle {
-        get {
-            let raw = defaults.string(forKey: Key.menuBarStyle) ?? ""
-            return BarStyle(rawValue: raw) ?? BarStyle.legacyRawValues[raw]
-                ?? AppearancePreset.defaultValues.menuBarStyle
-        }
+        get { previewOr(\.menuBarStyle, storedMenuBarStyle) }
         set { defaults.set(newValue.rawValue, forKey: Key.menuBarStyle) }
+    }
+
+    /// The stored value, ignoring any preview overlay — see ``persistedAppearanceValues``.
+    private static var storedMenuBarStyle: BarStyle {
+        let raw = defaults.string(forKey: Key.menuBarStyle) ?? ""
+        return BarStyle(rawValue: raw) ?? BarStyle.legacyRawValues[raw]
+            ?? AppearancePreset.defaultValues.menuBarStyle
     }
 
     /// How the **dropdown popup** presents its pacing bars (#329) — chosen independently of
     /// ``menuBarStyle``, so the compact bar and the roomy popup can differ. Same storage, same
     /// preset-default fallback, and the same dependence on ``migrateBarStyleIfNeeded()``.
     static var dropdownStyle: BarStyle {
-        get {
-            let raw = defaults.string(forKey: Key.dropdownStyle) ?? ""
-            return BarStyle(rawValue: raw) ?? BarStyle.legacyRawValues[raw]
-                ?? AppearancePreset.defaultValues.dropdownStyle
-        }
+        get { previewOr(\.dropdownStyle, storedDropdownStyle) }
         set { defaults.set(newValue.rawValue, forKey: Key.dropdownStyle) }
+    }
+
+    /// The stored value, ignoring any preview overlay — see ``persistedAppearanceValues``.
+    private static var storedDropdownStyle: BarStyle {
+        let raw = defaults.string(forKey: Key.dropdownStyle) ?? ""
+        return BarStyle(rawValue: raw) ?? BarStyle.legacyRawValues[raw]
+            ?? AppearancePreset.defaultValues.dropdownStyle
     }
 
     /// Whether the **menu-bar** widget draws the service-status dot when a monitored service has a
@@ -426,8 +502,14 @@ enum PersistedConfig {
     /// silently defeat the opt-out default. Menu-bar only: the popup's service-status rows are
     /// unaffected.
     static var showServiceStatusDot: Bool {
-        get { defaults.object(forKey: Key.showServiceStatusDot) as? Bool ?? AppearancePreset.defaultValues.showServiceStatusDot }
+        get { previewOr(\.showServiceStatusDot, storedShowServiceStatusDot) }
         set { defaults.set(newValue, forKey: Key.showServiceStatusDot) }
+    }
+
+    /// The stored value, ignoring any preview overlay — see ``persistedAppearanceValues``.
+    private static var storedShowServiceStatusDot: Bool {
+        defaults.object(forKey: Key.showServiceStatusDot) as? Bool
+            ?? AppearancePreset.defaultValues.showServiceStatusDot
     }
 
     /// Which **menu-bar** bar is hidden while it is calm — green (on pace or behind), mild-ahead yellow,
@@ -440,13 +522,16 @@ enum PersistedConfig {
     /// for diagnostics regardless of this choice. An absent or unrecognised value falls back to the
     /// preset default; ``migrateTopBarHidingIfNeeded()`` carries an explicit pre-ADR-0086 boolean over.
     static var hideTop5hBar: TopBarHiding {
-        get {
-            let raw = defaults.string(forKey: Key.hideTop5hBar) ?? ""
-            return TopBarHiding(rawValue: raw)
-                ?? TopBarHiding.legacyRawValues[raw]
-                ?? AppearancePreset.defaultValues.hideTop5hBar
-        }
+        get { previewOr(\.hideTop5hBar, storedHideTop5hBar) }
         set { defaults.set(newValue.rawValue, forKey: Key.hideTop5hBar) }
+    }
+
+    /// The stored value, ignoring any preview overlay — see ``persistedAppearanceValues``.
+    private static var storedHideTop5hBar: TopBarHiding {
+        let raw = defaults.string(forKey: Key.hideTop5hBar) ?? ""
+        return TopBarHiding(rawValue: raw)
+            ?? TopBarHiding.legacyRawValues[raw]
+            ?? AppearancePreset.defaultValues.hideTop5hBar
     }
 
     /// When the **popup** lists the per-model 7-day limit rows — the legacy `Opus`/`Sonnet`
@@ -459,13 +544,16 @@ enum PersistedConfig {
     /// over by ``migrateModelLimitsVisibilityIfNeeded()``. An absent value falls back to the factory
     /// preset's value; a pre-#381 raw resolves through `PopupSectionVisibility.legacyRawValues`.
     static var showPerModelLimits: PopupSectionVisibility {
-        get {
-            let raw = defaults.string(forKey: Key.showPerModelLimits) ?? ""
-            return PopupSectionVisibility(rawValue: raw)
-                ?? PopupSectionVisibility.legacyRawValues[raw]
-                ?? AppearancePreset.defaultValues.modelLimitsVisibility
-        }
+        get { previewOr(\.modelLimitsVisibility, storedShowPerModelLimits) }
         set { defaults.set(newValue.rawValue, forKey: Key.showPerModelLimits) }
+    }
+
+    /// The stored value, ignoring any preview overlay — see ``persistedAppearanceValues``.
+    private static var storedShowPerModelLimits: PopupSectionVisibility {
+        let raw = defaults.string(forKey: Key.showPerModelLimits) ?? ""
+        return PopupSectionVisibility(rawValue: raw)
+            ?? PopupSectionVisibility.legacyRawValues[raw]
+            ?? AppearancePreset.defaultValues.modelLimitsVisibility
     }
 
     /// When the **popup** shows the "Extra usage" money-credits section (`PopupLayout.credits`).
@@ -479,17 +567,20 @@ enum PersistedConfig {
     /// pre-#381 raw (including the retired `nonCalm` and `optionOnly`) resolves through
     /// `PopupSectionVisibility.legacyRawValues`, which lands both on `.onceUsed`.
     static var showExtraUsage: PopupSectionVisibility {
-        get {
-            let raw = defaults.string(forKey: Key.showExtraUsage) ?? ""
-            let stored = PopupSectionVisibility(rawValue: raw)
-                ?? PopupSectionVisibility.legacyRawValues[raw]
-                ?? AppearancePreset.defaultValues.extraUsageVisibility
-            // Fold the one mode this row does not offer, wherever it came from — the key migration handles
-            // an upgrade, but a **hand-edited or imported** config can carry it too, and the control would
-            // then open with no segment highlighted.
-            return stored.foldedForCredits
-        }
+        get { previewOr(\.extraUsageVisibility, storedShowExtraUsage) }
         set { defaults.set(newValue.rawValue, forKey: Key.showExtraUsage) }
+    }
+
+    /// The stored value, ignoring any preview overlay — see ``persistedAppearanceValues``.
+    private static var storedShowExtraUsage: PopupSectionVisibility {
+        let raw = defaults.string(forKey: Key.showExtraUsage) ?? ""
+        let stored = PopupSectionVisibility(rawValue: raw)
+            ?? PopupSectionVisibility.legacyRawValues[raw]
+            ?? AppearancePreset.defaultValues.extraUsageVisibility
+        // Fold the one mode this row does not offer, wherever it came from — the key migration handles
+        // an upgrade, but a **hand-edited or imported** config can carry it too, and the control would
+        // then open with no segment highlighted.
+        return stored.foldedForCredits
     }
 
     /// Revert every setting the **Appearance** pane owns to its factory default — the menu-bar widget
@@ -529,6 +620,7 @@ enum PersistedConfig {
             Key.legacyBarStyle,
             // Retired keys, still swept so a Reset also clears them for anyone who never launched the
             // retiring build (see each `Key.retired…` for what it used to mean).
+            Key.retiredCustomAppearanceValues,
             Key.retiredShowTicks,
             Key.retiredFarBehindInterval,
             Key.retiredPauseHidesBars,
@@ -585,6 +677,20 @@ enum PersistedConfig {
     /// beside the bars whenever a window ran well ahead of pace; it no longer does.
     static func retireResetCountdownModeIfNeeded() {
         defaults.removeObject(forKey: Key.retiredResetCountdownModeMenuBar)
+    }
+
+    /// Drop the retired stash of the user's own Appearance setup.
+    ///
+    /// It existed so the old "Custom" radio could restore what a preset had overwritten. Preset rows
+    /// preview rather than apply now, so the stored configuration is never overwritten behind the
+    /// user's back and there is nothing to stash — "My setup" reads the live keys. Removing the blob
+    /// keeps it from sitting in the plist forever on machines that once wrote it.
+    ///
+    /// Deliberately **not** a value migration: folding the stash into the live keys would silently
+    /// change how the widget looks on upgrade, which is the opposite of what the user asked for the
+    /// last time they touched these settings.
+    static func retireCustomAppearanceValuesIfNeeded() {
+        defaults.removeObject(forKey: Key.retiredCustomAppearanceValues)
     }
 
     /// One-time upgrade of the boolean "Show model & service limits" opt-out to the tri-state
@@ -837,31 +943,6 @@ enum PersistedConfig {
     /// the default `.workHarder` preset uses `.balance`). The caller re-syncs the model and re-applies the
     /// values to the widget.
     static func apply(_ preset: AppearancePreset) { applyValues(preset.values) }
-
-    /// The user's own Appearance setup — the values the **Custom** segment restores (#333).
-    ///
-    /// Custom used to be an indicator: it lit up when the live config matched no preset, and clicking
-    /// it did nothing, so trying a preset destroyed a hand-made setup with no way back. Keeping a
-    /// snapshot makes it a real slot — try Chill, then return to exactly what you had.
-    ///
-    /// Written whenever the live config drifts off every preset (that drift *is* the user's custom
-    /// setup), never by applying a preset. `nil` until such a drift exists, which is what keeps the
-    /// segment unselectable on a fresh install: there is nothing to go back to yet.
-    static var customAppearanceValues: AppearancePresetValues? {
-        get {
-            guard let data = defaults.data(forKey: Key.customAppearanceValues),
-                  let decoded = try? JSONDecoder().decode(AppearancePresetValues.self, from: data)
-            else { return nil }
-            return decoded
-        }
-        set {
-            guard let newValue, let data = try? JSONEncoder().encode(newValue) else {
-                defaults.removeObject(forKey: Key.customAppearanceValues)
-                return
-            }
-            defaults.set(data, forKey: Key.customAppearanceValues)
-        }
-    }
 
     /// Write every Appearance key from an arbitrary value set — the general form of ``apply(_:)``,
     /// used to restore the saved Custom setup (#333).

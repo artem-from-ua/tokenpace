@@ -476,11 +476,43 @@ final class SettingsModel {
             dropdownStyle: dropdownStyle)
     }
 
-    /// Which preset the live config matches, or `nil` for the "Custom" state (#215, #224). Drives the
-    /// Appearance preset segmented control's active segment: after any manual change the config drifts
-    /// off every preset and this becomes `nil`, so the control honestly shows "Custom". Reactive because
-    /// it reads the observable fields via `liveAppearanceValues`.
-    var activePreset: AppearancePreset? { AppearancePreset.matching(liveAppearanceValues) }
+    // MARK: Appearance presets — preview, then apply
+
+    /// The preset currently being **previewed**, or `nil` when the widget is showing the stored setup.
+    ///
+    /// Observable so the radio list re-lights on every click. The preview itself lives in
+    /// `PersistedConfig`'s overlay (which is what reaches the widget); this mirrors it so SwiftUI has
+    /// something to observe, since a `static var` on a plain enum is invisible to `@Observable`.
+    private(set) var previewedPreset: AppearancePreset?
+
+    /// Which radio row is selected — a previewed preset, or the stored setup.
+    var selectedAppearanceChoice: AppearanceChoice {
+        AppearanceChoice.selected(stored: storedAppearanceValues, previewing: previewedPreset)
+    }
+
+    /// The preset the **stored** setup happens to equal, for the `· same as Chill preset` suffix on the
+    /// "My setup" row. `nil` once the user has made a combination of their own.
+    var storedPresetName: AppearancePreset? {
+        AppearanceChoice.storedPresetName(storedAppearanceValues)
+    }
+
+    /// Whether `Apply` on the previewed row would change anything.
+    var canApplyPreviewedPreset: Bool {
+        AppearanceChoice.canApply(stored: storedAppearanceValues, previewing: previewedPreset)
+    }
+
+    /// The stored Appearance values, read past the preview overlay.
+    ///
+    /// Not `liveAppearanceValues`: during a preview the model's fields hold the previewed values (they
+    /// are synced from the same getters the overlay shadows), and every question on this screen — which
+    /// row is selected, what the suffix names, whether `Apply` does anything — is about the *stored*
+    /// setup rather than what is on screen.
+    private var storedAppearanceValues: AppearancePresetValues {
+        // Touch the observable fields so SwiftUI re-evaluates the rows after an edit on a child page;
+        // `PersistedConfig` is not observable, so a read of it alone would never invalidate the view.
+        _ = liveAppearanceValues
+        return PersistedConfig.persistedAppearanceValues
+    }
 
     /// The master "Back to work" switch is disabled on a dev build (authorization is impossible there,
     /// so the feature can never work — like launch-at-login / auto-install).
@@ -650,6 +682,9 @@ final class SettingsModel {
     }
 
     func setColorAdvice(_ mode: ColorAdvice) {
+        // Leaving a preset preview: persist the seven stored values before writing this one, or the
+        // other six would stay shadowed by the overlay (see `dropPreviewBeforeEdit`).
+        dropPreviewBeforeEdit()
         colorsTell = mode
         PersistedConfig.colorsTell = mode
         AppLogger.lifecycle.notice("colors-tell: set \(mode.rawValue, privacy: .public)")
@@ -657,6 +692,9 @@ final class SettingsModel {
     }
 
     func setTopBarHiding(_ mode: TopBarHiding) {
+        // Leaving a preset preview: persist the seven stored values before writing this one, or the
+        // other six would stay shadowed by the overlay (see `dropPreviewBeforeEdit`).
+        dropPreviewBeforeEdit()
         hideTop5hBar = mode
         PersistedConfig.hideTop5hBar = mode
         AppLogger.lifecycle.notice("hide-top-5h-bar: set \(mode.rawValue, privacy: .public)")
@@ -664,6 +702,9 @@ final class SettingsModel {
     }
 
     func setModelLimitsVisibility(_ mode: PopupSectionVisibility) {
+        // Leaving a preset preview: persist the seven stored values before writing this one, or the
+        // other six would stay shadowed by the overlay (see `dropPreviewBeforeEdit`).
+        dropPreviewBeforeEdit()
         showPerModelLimits = mode
         PersistedConfig.showPerModelLimits = mode
         AppLogger.lifecycle.notice("show-per-model-limits: set \(mode.rawValue, privacy: .public)")
@@ -671,6 +712,9 @@ final class SettingsModel {
     }
 
     func setExtraUsageVisibility(_ mode: PopupSectionVisibility) {
+        // Leaving a preset preview: persist the seven stored values before writing this one, or the
+        // other six would stay shadowed by the overlay (see `dropPreviewBeforeEdit`).
+        dropPreviewBeforeEdit()
         showExtraUsage = mode
         PersistedConfig.showExtraUsage = mode
         AppLogger.lifecycle.notice("show-extra-usage: set \(mode.rawValue, privacy: .public)")
@@ -678,6 +722,9 @@ final class SettingsModel {
     }
 
     func setShowServiceDot(_ on: Bool) {
+        // Leaving a preset preview: persist the seven stored values before writing this one, or the
+        // other six would stay shadowed by the overlay (see `dropPreviewBeforeEdit`).
+        dropPreviewBeforeEdit()
         showServiceDot = on
         PersistedConfig.showServiceStatusDot = on
         AppLogger.lifecycle.notice("service-status-dot: set \(on, privacy: .public)")
@@ -688,6 +735,9 @@ final class SettingsModel {
     /// the Menu Bar Widget section writes `menuBarStyle` directly (via the binding), then calls this.
     /// Touches that surface only — the dropdown keeps whatever it was set to.
     func setMenuBarStyle(_ style: BarStyle) {
+        // Leaving a preset preview: persist the seven stored values before writing this one, or the
+        // other six would stay shadowed by the overlay (see `dropPreviewBeforeEdit`).
+        dropPreviewBeforeEdit()
         menuBarStyle = style
         PersistedConfig.menuBarStyle = style
         AppLogger.lifecycle.notice("menu-bar-style: set \(style.rawValue, privacy: .public)")
@@ -697,70 +747,93 @@ final class SettingsModel {
     /// Persist the **dropdown** bar style (#329) and fire the callback. Mirror of
     /// ``setMenuBarStyle(_:)`` for the popup's own segmented control.
     func setDropdownStyle(_ style: BarStyle) {
+        // Leaving a preset preview: persist the seven stored values before writing this one, or the
+        // other six would stay shadowed by the overlay (see `dropPreviewBeforeEdit`).
+        dropPreviewBeforeEdit()
         dropdownStyle = style
         PersistedConfig.dropdownStyle = style
         AppLogger.lifecycle.notice("dropdown-style: set \(style.rawValue, privacy: .public)")
         onDropdownStyleChange?(style)
     }
 
-    /// Revert every Appearance-pane setting to its factory default (the "Reset" button). Clears the
-    /// stored keys, re-syncs the model so the controls repaint, then fires each pane callback with the
-    /// now-default value so the menu-bar widget rebuilds — the same notifications the individual setters
-    /// send, so a reset looks exactly like the user having toggled each control back by hand.
-    func resetAppearanceToDefaults() {
-        PersistedConfig.resetAppearanceToDefaults()
-        syncFromConfig()   // re-reads the (now absent) keys → default getters; refreshes the bound controls
-        AppLogger.lifecycle.notice("appearance settings reset to defaults")
+    /// **Preview** a preset: draw it on the live widget without writing anything.
+    ///
+    /// The values go into `PersistedConfig`'s overlay, which every Appearance getter consults, so the
+    /// menu-bar widget, the dropdown and the preview window beside Settings all pick it up from the one
+    /// call to ``fireAppearanceCallbacks()`` below. `syncFromConfig()` then pulls the previewed values
+    /// into this model's fields, so the child pages show what is on screen while the preview is up.
+    ///
+    /// Switching between presets is just another call — that is what lets the user compare them in any
+    /// order without a modal "you are previewing" state to get out of.
+    func previewPreset(_ preset: AppearancePreset) {
+        previewedPreset = preset
+        PersistedConfig.beginAppearancePreview(preset.values)
+        syncFromConfig()
+        AppLogger.lifecycle.notice("appearance preview: \(preset.rawValue, privacy: .public)")
         fireAppearanceCallbacks()
     }
 
-    /// Apply a named Appearance **preset** (#215, #224) — the general form of
-    /// `resetAppearanceToDefaults()`. Writes all seven keys from the preset's fixed value set, re-syncs
-    /// the model so the controls repaint (the preset segmented control re-lights via `activePreset`),
-    /// then fires each pane callback so both surfaces rebuild. The segmented control in `AppearancePane`
-    /// calls this.
-    func apply(_ preset: AppearancePreset) {
-        // Stash the setup being overwritten if it is the user's own (#333). This is the only moment it
-        // can be lost — every other write keeps the config where the user put it — so it is also the
-        // only place that needs to remember. A config already equal to some preset is not worth
-        // stashing: it is reachable by clicking that preset.
-        if activePreset == nil { PersistedConfig.customAppearanceValues = liveAppearanceValues }
+    /// End the preview and go back to the stored setup — what closing the Settings window does, and
+    /// what clicking the "My setup" row does. No-op when nothing is being previewed.
+    func endPreview() {
+        guard previewedPreset != nil else { return }
+        previewedPreset = nil
+        PersistedConfig.endAppearancePreview()
+        syncFromConfig()
+        AppLogger.lifecycle.notice("appearance preview: ended")
+        fireAppearanceCallbacks()
+    }
+
+    /// Make the previewed preset permanent — the `Apply` button. Writes all seven keys, then drops the
+    /// overlay so the stored values are what everything reads again.
+    ///
+    /// The overlay has to go *after* the write rather than before it: dropping it first would repaint
+    /// both surfaces with the old stored setup for one frame, which reads as a flicker back to where
+    /// the user came from at the exact moment they chose to leave it.
+    func applyPreviewedPreset() {
+        guard let preset = previewedPreset else { return }
         PersistedConfig.apply(preset)
+        previewedPreset = nil
+        PersistedConfig.endAppearancePreview()
         syncFromConfig()
         AppLogger.lifecycle.notice("appearance preset applied: \(preset.rawValue, privacy: .public)")
         fireAppearanceCallbacks()
     }
 
-    /// Restore the saved **Custom** setup — the segment's own action (#333). No-op when nothing is
-    /// saved, which is the state ``canRestoreCustom`` renders as an unselectable segment.
-    func applySavedCustom() {
-        guard let values = PersistedConfig.customAppearanceValues else { return }
-        PersistedConfig.applyValues(values)
+    /// Drop a live preview before an individual Appearance option is written.
+    ///
+    /// Without this, a setter called during a preview would persist its own field while the other six
+    /// stayed shadowed by the overlay — the screen would show a mixture, and closing the window would
+    /// reveal a third state. Re-syncing after clearing the overlay is what puts the other six fields
+    /// back to their stored values before the setter writes the seventh.
+    ///
+    /// A no-op — one nil check — in the overwhelmingly common case where no preview is up.
+    private func dropPreviewBeforeEdit() {
+        guard previewedPreset != nil else { return }
+        previewedPreset = nil
+        PersistedConfig.endAppearancePreview()
         syncFromConfig()
-        AppLogger.lifecycle.notice("appearance preset applied: custom")
-        fireAppearanceCallbacks()
+        AppLogger.lifecycle.notice("appearance preview: ended")
     }
 
-    /// Whether the **Custom** segment can be clicked: there is a saved setup, and we are not already
-    /// on it. Without a saved setup the segment is an indicator, exactly as it was before #333 — on a
-    /// fresh install there is nothing to return to.
-    var canRestoreCustom: Bool {
-        activePreset != nil && PersistedConfig.customAppearanceValues != nil
-    }
-
-    /// The live Appearance config as clipboard-ready pretty-printed JSON (#257) — the payload behind
-    /// the copy button in the pane's preset row. Read-only: unlike every setter above it writes nothing
-    /// to `PersistedConfig` and fires no callback, so it sits outside the "persist, then notify"
+    /// The **stored** Appearance config as clipboard-ready pretty-printed JSON (#257) — the payload
+    /// behind the copy button on the "My setup" row. Read-only: unlike every setter above it writes
+    /// nothing to `PersistedConfig` and fires no callback, so it sits outside the "persist, then notify"
     /// contract this class otherwise follows.
     ///
     /// Returns the string rather than writing the pasteboard itself, which keeps this class free of
     /// AppKit (it imports only Foundation / Observation / the kit); the pane owns the `NSPasteboard`
-    /// write. Reads `liveAppearanceValues`, so the dump always matches what the controls show —
-    /// including the "Custom" state, which exports as `"preset": "custom"`.
+    /// write.
+    ///
+    /// Reads past the preview overlay on purpose. The button sits on the row that names the saved
+    /// setup, so that is what it has to hand over — copying a preset the user is merely trying on would
+    /// contradict the row it is part of, and would quietly hand someone else a configuration the user
+    /// does not actually run.
     func appearanceConfigJSON() -> String {
-        AppearanceConfigExport.json(
-            values: liveAppearanceValues,
-            preset: activePreset,
+        let stored = PersistedConfig.persistedAppearanceValues
+        return AppearanceConfigExport.json(
+            values: stored,
+            preset: AppearancePreset.matching(stored),
             appVersion: TokenPaceKit.version)
     }
 

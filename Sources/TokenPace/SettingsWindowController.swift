@@ -938,6 +938,10 @@ extension SettingsWindowController: NSWindowDelegate {
     /// The state the window was in when it went away is the one to reopen at — a resize immediately
     /// followed by a close would otherwise be the one change that never got recorded.
     func windowWillClose(_ notification: Notification) {
+        // A preset the user was only trying on does not outlive the window it was tried on in — that is
+        // what makes clicking the rows safe to do freely. `Apply` is the only thing that keeps one, and
+        // it has already cleared the preview by the time it returns, so this finds nothing to undo then.
+        model.endPreview()
         persistFrame()
         preview.detach()
     }

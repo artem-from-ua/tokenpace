@@ -939,6 +939,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // …and the retired "Show reset countdown" key (ADR-0091): the countdown now appears only where
         // there are no bars, so none of its three values selects anything.
         PersistedConfig.retireResetCountdownModeIfNeeded()
+        // …and the retired "Custom" stash: preset rows preview instead of applying, so the stored
+        // configuration is never overwritten and there is no setup to keep a snapshot of.
+        PersistedConfig.retireCustomAppearanceValuesIfNeeded()
         // Record the running version so the next launch compares against it.
         PersistedConfig.lastRunVersion = current
     }

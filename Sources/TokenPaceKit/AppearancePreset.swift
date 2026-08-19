@@ -134,10 +134,11 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
         }
     }
 
-    /// The preset whose value set exactly equals `values`, or `nil` if the live config matches none of
-    /// them (the "Custom" state). Drives the preset segmented control's active segment: after any
-    /// manual toggle the config drifts off every preset and this returns `nil`, so the control honestly
-    /// shows "Custom" rather than a stale preset. Relies on `AppearancePresetValues: Equatable`.
+    /// The preset whose value set exactly equals `values`, or `nil` when it matches none of them.
+    ///
+    /// Applied to the **stored** configuration, this is what lets the "My setup" row say
+    /// `· same as Chill preset` — naming the preset a hand-made setup happens to equal, without
+    /// pretending the user is *on* that preset. Relies on `AppearancePresetValues: Equatable`.
     public static func matching(_ values: AppearancePresetValues) -> AppearancePreset? {
         allCases.first { $0.values == values }
     }
