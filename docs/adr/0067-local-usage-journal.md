@@ -92,6 +92,15 @@ Downstream не має перераховувати те, що app уже обч
 `TOKENPACE_GENERATE_JOURNAL=<днів>` (`JournalFixture`) пише багатоденний журнал у нього для
 верифікації downstream-читачів.
 
+**Межа `-dev`-суфікса.** Він розводить *dev-збірку* й реліз, але **не** розводить «робота» й «тест»:
+копія з `/Applications`, запущена заради перевірки фічі, що потребує підпису, пише в **той самий**
+`usage-journal-YYYY-MM.jsonl`, що й у бойовій роботі. Гейт `.realNetwork` тримає лише синтетику
+стубів; повз нього проходять `TOKENPACE_GENERATE_JOURNAL` (навмисно обходить live-only гейти),
+`resume`-рядки від рестартів (`lastWriteInstant` — in-memory) і безумовна `migrateIfNeeded()`, що
+переписує наявний файл (із незнищуваним `.v<n>.bak`). Тому тестові запуски нотаризованої копії
+ведуть журнал через `TOKENPACE_JOURNAL_FILE` — див.
+[ui-verification.md § «Журнал використання»](../guides/ui-verification.md#журнал-використання-242-adr-0067).
+
 ### 5. Concurrency — flock advisory lock
 
 Штатно кілька інстансів TokenPace пишуть в один файл (нотаризований реліз + dev-копії). На macOS
