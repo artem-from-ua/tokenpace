@@ -204,3 +204,28 @@ struct GitHubReleaseNotesURLTests {
             == "https://github.com/artem-from-ua/tokenpace/releases/tag/v1%200")
     }
 }
+
+@Suite("GitHubReleaseClient.releaseTag")
+struct GitHubReleaseTagTests {
+
+    @Test func aBareVersionGainsTheVPrefix() {
+        // `TokenPaceKit.version` is bare; the release it names is tagged `v0.111.0` (#414).
+        #expect(GitHubReleaseClient.releaseTag("0.111.0") == "v0.111.0")
+    }
+
+    @Test func anAlreadyTaggedVersionIsUnchanged() {
+        // `pendingWhatsNewVersion` / `GitHubRelease.tagName` come from the API with the prefix already.
+        #expect(GitHubReleaseClient.releaseTag("v0.111.0") == "v0.111.0")
+    }
+
+    @Test func anUppercaseVCountsAsPrefixed() {
+        #expect(GitHubReleaseClient.releaseTag("V0.111.0") == "V0.111.0")
+    }
+
+    @Test func normalizingFeedsTheNotesURL() {
+        // The pairing that matters: a bare installed version must still reach the real tag page.
+        #expect(GitHubReleaseClient.releaseNotesURL(
+            tag: GitHubReleaseClient.releaseTag("0.111.0")).absoluteString
+            == "https://github.com/artem-from-ua/tokenpace/releases/tag/v0.111.0")
+    }
+}

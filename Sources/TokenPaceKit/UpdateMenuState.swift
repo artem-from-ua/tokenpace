@@ -9,10 +9,13 @@ import Foundation
 /// is to interrupt and clutter as little as possible until the App Store build lands (where updates
 /// are the store's job).
 ///
-/// The item's click target is always the releases page — the state only changes the **dot colour**
-/// and **wording**. Keeping the semantics here (an ``Item`` case) and the human strings + colours in
-/// the view mirrors ``ServiceStatus`` (its `word`/`dotColor` live in `PopupViewController`): the kit
-/// says *what* the item means, the view decides how it reads (ADR-0009/0013).
+/// The state decides the **dot colour**, the **wording** and — for `whatsNew` — the click target: the
+/// three pending-action states open Settings → About (#210), while `whatsNew` opens the installed
+/// tag's release notes in the browser (#415), since by then the update has already landed and only the
+/// notes are left to read. Keeping the semantics here (an ``Item`` case) and the human strings +
+/// colours + destinations in the view mirrors ``ServiceStatus`` (its `word`/`dotColor` live in
+/// `PopupViewController`): the kit says *what* the item means, the view decides how it reads
+/// (ADR-0009/0013).
 public enum UpdateMenuState {
 
     /// What the single update menu item should show, in priority order. `hidden` means no item (and no

@@ -982,9 +982,15 @@ locked».
 
 Перевірка: `TOKENPACE_UPDATE_STATE=whatsnew TOKENPACE_STUB=1 swift run` → відкрий меню, глянь
 колір/текст пункта (над Quit) й **вирівнювання крапки** з текстом (має збігатися з крапками статусів
-сервісів у popup). Клік завжди → **Settings → About** (не браузер, з #210); `whatsnew` після кліку
-зникає (крім форсованого стуба — той тримає стан). У логах: `update: menu item = <state>` і
-`update: user opened About from update item`.
+сервісів у popup). Клік у станах `failed`/`available`/`pending` → **Settings → About** (не браузер,
+з #210); у стані `whatsnew` → одразу **сторінка релізу на GitHub** у браузері
+(`…/releases/tag/vX.Y.Z`, #415) — оновлення вже встановлене, діяти в About нема над чим, потрібні лише
+самі нотатки. Тег нормалізується через `GitHubReleaseClient.releaseTag(_:)`: `pendingWhatsNewVersion`
+приходить з API вже з `v`, а фолбек `TokenPaceKit.version` — голий `0.111.0`, і без префікса URL дав
+би 404. Під стубом `whatsnew` (реального `pendingWhatsNewVersion` немає) відкривається саме сторінка
+запущеної версії — з `v`. `whatsnew` після кліку зникає (крім форсованого стуба — той тримає стан). У логах:
+`update: menu item = <state>` і далі або `update: user opened About from update item`, або
+`update: user opened release notes from update item (tag=…)`.
 
 ### About: деталі зафейленого апдейту + клікабельні версії (#210)
 

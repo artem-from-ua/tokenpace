@@ -66,11 +66,24 @@ public enum GitHubReleaseClient {
     public static let releasesPageURL = URL(
         string: "https://github.com/\(owner)/\(repo)/releases")!
 
+    /// A version string normalized to the **release tag** form GitHub actually uses — `vX.Y.Z` (#415).
+    ///
+    /// The two sources feeding ``releaseNotesURL(tag:)`` disagree on the prefix: a tag read back from
+    /// the API (`GitHubRelease.tagName`, `pendingWhatsNewVersion`) already carries the `v`, while
+    /// `TokenPaceKit.version` is the bare `0.111.0` — and `…/releases/tag/0.111.0` is a 404, since the
+    /// tag it names does not exist. Prepending the `v` only when it is missing makes both safe to pass.
+    /// Mirrors `SettingsModel.displayTag(_:)`, which does the inverse for on-screen text.
+    public static func releaseTag(_ version: String) -> String {
+        guard let first = version.first, first == "v" || first == "V" else { return "v\(version)" }
+        return version
+    }
+
     /// The release-notes page for a **specific** tag — `…/releases/tag/<tag>` (#210). Used by the
-    /// About pane's clickable "Version" row to open the notes for the installed build. The tag is
-    /// percent-encoded for the path segment (a plain `vX.Y.Z` needs none, but a stray character must
-    /// not break the URL); an encoding failure falls back to the general ``releasesPageURL`` rather
-    /// than crashing.
+    /// About pane's clickable "Version" row to open the notes for the installed build, and by the
+    /// dropdown's `whatsNew` item (#415). Pass the tag through ``releaseTag(_:)`` first unless it is
+    /// already known to carry the `v` prefix. The tag is percent-encoded for the path segment (a plain
+    /// `vX.Y.Z` needs none, but a stray character must not break the URL); an encoding failure falls
+    /// back to the general ``releasesPageURL`` rather than crashing.
     public static func releaseNotesURL(tag: String) -> URL {
         let encoded = tag.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? tag
         return URL(string: "https://github.com/\(owner)/\(repo)/releases/tag/\(encoded)")

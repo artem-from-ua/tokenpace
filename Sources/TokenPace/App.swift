@@ -498,7 +498,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // sitting just above Quit behind its own separator, with a status-coloured dot (same tinted
         // `circle.fill` attachment the popup uses for service dots). Both the separator and the item
         // start hidden and are driven entirely by `refreshUpdateMenuItem` (colour, label, visibility);
-        // click always opens the releases page.
+        // click opens Settings → About, except in the `whatsNew` state, which opens the installed tag's
+        // release notes in the browser (#415) — see `openReleasesPage`.
         let updateSeparator = NSMenuItem.separator()
         updateSeparator.isHidden = true
         menu.addItem(updateSeparator)
@@ -1952,19 +1953,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppLogger.lifecycle.notice("update: menu item = \(String(describing: item), privacy: .public)")
     }
 
-    /// Handle a click on the update menu item (#130, #210) — the click target is now **Settings →
-    /// About**, not the GitHub releases page in a browser. About surfaces the update state (available /
-    /// failed with stage + reason) and keeps the "Download" / release-notes links in-pane, so a single
-    /// destination carries every signal. If the item was the `whatsNew` state, opening it acknowledges
-    /// the update: clear `pendingWhatsNewVersion` and recompute the item so it disappears.
+    /// Handle a click on the update menu item (#130, #210, #415) — the destination depends on the
+    /// state.
+    ///
+    /// The three *pending-action* states (`updateFailed` / `updateAvailable` / `updatePending`) open
+    /// **Settings → About**: it surfaces the update state (available / failed with stage + reason) and
+    /// keeps the "Download" / release-notes links in-pane, so a single destination carries every signal.
+    ///
+    /// `whatsNew` is different: the update has already landed, so there is nothing left to act on in
+    /// About — the only thing the user came for is *what changed*. That state therefore opens the
+    /// release-notes page of the installed tag straight in the browser (`…/releases/tag/<tag>`), the
+    /// same URL the About pane's "Version" row links to, skipping the About detour. Opening it also
+    /// acknowledges the update: clear `pendingWhatsNewVersion` and recompute the item so it disappears.
     @objc private func openReleasesPage() {
-        AppLogger.lifecycle.notice("update: user opened About from update item (item=\(String(describing: self.currentUpdateItem), privacy: .public))")
-        openSettings(section: .about)
         if currentUpdateItem == .whatsNew {
+            // The acknowledged tag is the one the successful auto-update recorded. It is cleared right
+            // below, so read it *before* clearing; a missing tag falls back to the running build's own
+            // version, which in the `whatsNew` state is by definition the newest release.
+            //
+            // Both paths go through `releaseTag`: GitHub's tags carry the `v` prefix (`v0.111.0`) while
+            // `TokenPaceKit.version` is the bare `0.111.0`, and a `…/releases/tag/0.111.0` URL is a 404.
+            let tag = GitHubReleaseClient.releaseTag(
+                PersistedConfig.pendingWhatsNewVersion ?? TokenPaceKit.version)
+            AppLogger.lifecycle.notice("update: user opened release notes from update item (tag=\(tag, privacy: .public))")
+            NSWorkspace.shared.open(GitHubReleaseClient.releaseNotesURL(tag: tag))
             PersistedConfig.pendingWhatsNewVersion = nil
             AppLogger.lifecycle.notice("update: cleared pending what's new (user opened it)")
             refreshUpdateMenuItem()
+            return
         }
+        AppLogger.lifecycle.notice("update: user opened About from update item (item=\(String(describing: self.currentUpdateItem), privacy: .public))")
+        openSettings(section: .about)
     }
 
     /// The update menu item's title for `item` (#130): a `circle.fill` dot tinted to the item's
