@@ -18,7 +18,9 @@ import Foundation
 ///
 /// ## Scope: pacing bars only
 ///
-/// Since #381 this governs **only** the two pacing bars. The service-status dot, the credits glyph and
+/// Since #381 this governs **only** the two pacing bars — still true after #410, which changed the
+/// service dot's `degraded` tone to yellow but not who decides it (the dot reads no setting at all).
+/// The service-status dot, the credits glyph and
 /// the idle "ready to start" pill answer different questions and no longer read it — see
 /// `StatusItemView.statusDotTarget` / `creditsIconColor` and the idle branch of `draw(_:)`. That is
 /// what makes the row safe to hide under Pressure, where the whole calm side draws as zero and there
