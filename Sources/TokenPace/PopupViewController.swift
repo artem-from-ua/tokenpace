@@ -385,8 +385,15 @@ final class PopupBarView: NSView {
     /// there.
     var tickScale: CGFloat = 1
 
+    /// Scales the teeth's **width** separately from their height.
+    ///
+    /// Two knobs rather than one because the two axes want different amounts. A tooth that grows in
+    /// both directions at the Legend page's factor stops reading as a ruler mark and starts reading as
+    /// a second marker — height is what makes it visible, width is what makes it heavy.
+    var tickWidthScale: CGFloat = 1
+
     private var tickLength: CGFloat { Self.Metrics.tickLength * tickScale }
-    private var tickWidth: CGFloat { Self.Metrics.tickWidth * tickScale }
+    private var tickWidth: CGFloat { Self.Metrics.tickWidth * tickWidthScale }
 
     /// The exhausted-pacing red (`aheadColor`'s cap rung). Exposed so the popup can paint the **one**
     /// blocking reset time red (#158) in the same tone the bars use for an exhausted limit. Computed (not

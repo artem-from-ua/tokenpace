@@ -213,9 +213,15 @@ struct LegendPane: View {
     ///
     /// The fourth tooth rather than the first: it is the one with room for a label under it without
     /// colliding with the capsule's own.
+    /// Leader lengths are measured to the mark each one names, from the bottom of the track:
+    ///
+    ///     ticks   tickGap 2 + tickLength 5 × 2.4  = 14   — stops at the tooth's foot
+    ///     capsule                          14 + 4 = 18   — runs past the teeth to the track itself
+    ///
+    /// Recompute alongside the `x` values above if the tick metrics or `tickScale` change.
     private static let progressCallouts: [Callout] = [
-        Callout(x: 112.5, text: "used tokens/credits so far", anchor: .leading),
-        Callout(x: 255.0, text: "ticks — hours / days", anchor: .trailing),
+        Callout(x: 112.5, text: "used tokens/credits so far", anchor: .leading, leader: 18),
+        Callout(x: 255.0, text: "ticks — hours / days", anchor: .trailing, leader: 14),
     ]
 
     /// The marker's own callout, which sits **above** the bar.
@@ -225,14 +231,24 @@ struct LegendPane: View {
     /// captions would then be competing for one strip of space — which is exactly how they ended up
     /// overlapping. Splitting them across the bar gives each room, and puts the marker's name on the
     /// side the marker is read from.
-    private static let markerCallout = Callout(x: 160.0, text: "now-marker", anchor: .center)
+    ///
+    /// Its leader is short — 6 pt — because the marker reaches up toward it: the caption sits directly
+    /// over a mark that already stands 4 pt proud of the track, unlike the two below, which have the
+    /// ruler's depth to cross first.
+    private static let markerCallout = Callout(x: 160.0, text: "now-marker", anchor: .center, leader: 6)
 
     /// One label beside an anatomy bar, pointing at `x`.
     private struct Callout {
         let x: CGFloat
         let text: String
-        /// Which edge of the label sits at `x` — see the spacing note on ``progressCallouts``.
+        /// Which edge of the label's **frame** sits at `x`.
+        ///
+        /// The text itself is always centred on the line (see ``calloutRow(_:pointingDown:)``); this
+        /// only decides which way the frame extends, so a caption near either end of the bar has room
+        /// to spread inward instead of off the edge.
         let anchor: HorizontalAlignment
+        /// How far the leader runs, in points, to reach the mark it names.
+        let leader: CGFloat
     }
 
     private static var progressRules: [(layout: BarLayout, text: String)] {
@@ -493,14 +509,17 @@ struct LegendPane: View {
     private func calloutRow(_ callouts: [Callout], pointingDown: Bool = false) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(Array(callouts.enumerated()), id: \.offset) { _, callout in
-                VStack(alignment: callout.anchor, spacing: 0) {
+                // **Centred on the line**, whichever way the frame extends. The line marks the spot;
+                // the caption sits under its middle, which is how a reader pairs the two without
+                // having to work out which end of the text the line belongs to. `anchor` still decides
+                // which direction the *frame* grows, so a caption near either end of the bar spreads
+                // inward instead of off the edge.
+                VStack(alignment: .center, spacing: 0) {
                     if pointingDown {
                         Text(callout.text).font(.callout).foregroundStyle(.secondary).fixedSize()
-                        leaderStem(tall: true)
-                        leader(pointingDown: true)
+                        leaderLine(callout.leader)
                     } else {
-                        leader(pointingDown: false)
-                        leaderStem(tall: false)
+                        leaderLine(callout.leader)
                         Text(callout.text).font(.callout).foregroundStyle(.secondary).fixedSize()
                     }
                 }
@@ -549,28 +568,16 @@ struct LegendPane: View {
         }
     }
 
-    /// A leader: a hairline with an arrowhead at the end that touches the bar.
+    /// The hairline joining a caption to the mark it names.
     ///
-    /// An arrow rather than a plain rule because these point at marks a few points wide — a bare line
-    /// ending near a 7 pt marker reads as another tick in the ruler, which is the one thing it must not
-    /// be mistaken for. The head names a direction, and a direction is what a callout is.
-    ///
-    /// `pointingDown` flips it for the caption above the bar: the head always sits on the bar's side.
-    private func leader(pointingDown: Bool) -> some View {
-        Image(systemName: pointingDown ? "arrowtriangle.down.fill" : "arrowtriangle.up.fill")
-            .font(.system(size: 5))
-            .foregroundStyle(.secondary.opacity(0.55))
-    }
-
-    /// The stem between a callout's text and its arrowhead.
-    ///
-    /// Taller for the marker's callout, which sits above the bar: the marker stands proud of the track,
-    /// so its leader has further to travel before it reaches what it is naming. The lower captions
-    /// start just under the ruler and need only clear it.
-    private func leaderStem(tall: Bool) -> some View {
+    /// Each length is measured to reach its own target rather than shared, because the three marks sit
+    /// at three different depths: the marker stands proud above the track, the ruler's teeth hang below
+    /// it, and the capsule's edge is on the track itself. A single length would leave two of the three
+    /// lines stopping in mid-air.
+    private func leaderLine(_ length: CGFloat) -> some View {
         Rectangle()
             .fill(Color.secondary.opacity(0.35))
-            .frame(width: 1, height: tall ? 12 : 6)
+            .frame(width: 1, height: length)
     }
 
     /// Height reserved for a callout strip: leader line, gap, and one line of text.
