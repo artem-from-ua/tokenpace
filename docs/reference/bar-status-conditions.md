@@ -307,8 +307,10 @@ Menu bar зветься **«Colors tell me»**, сегменти — нижче 
 ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md),
 [#381](https://github.com/artem-from-ua/cc-timer/issues/381)), бо відповідають на інші питання:
 
-- **Service-крапка** в menu bar: жовтий `degraded` там **завжди** білий (`calmWhite`), безумовно —
-  поруч немає тексту, який пояснив би відтінок. У попапі крапка лишається жовтою (там текст є).
+- **Service-крапка**: її шкала (сірий → жовтий → помаранчевий → червоний) самодостатня, і від
+  [#410](https://github.com/artem-from-ua/tokenpace/issues/410) однакова на всіх трьох поверхнях —
+  menu bar, попап, Legend ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md)).
+  Змінився **тон** `degraded`, а не те, хто його вирішує: налаштування крапка не читала й не читає.
 - **Символ валюти (¤)**: його власна шкала біла→помаранчева→червона самодостатня
   ([ADR-0068](../adr/0068-credits-in-use-marker-anatomy.md)).
 - **Idle-пігулка** (§6): гаситься за спільним `idleMuted`, тим самим, що й решта спокійного боку.
@@ -341,7 +343,7 @@ Menu bar зветься **«Colors tell me»**, сегменти — нижче 
 | Idle-бар із заливкою на всю ширину | idle — це пігулка на нулі |
 | **Синя idle-пігулка** — за будь-яких налаштувань і будь-якого стану тижня | З [#381](https://github.com/artem-from-ua/cc-timer/issues/381) синього idle немає на жодній поверхні: заливка або зелена, або біла (під гасінням), або сіра (blocked). Виняток `Yellow + Green` для idle, що діяв за [#343](https://github.com/artem-from-ua/cc-timer/issues/343), зник разом із синім |
 | **Кольорова idle-пігулка під Pressure у menu bar** | Під Pressure гасіння безумовне (`barStyle == .pressure \|\| colorsTell.mutesCalm`), тож зелена пігулка там **завжди** біла — незалежно від `ColorAdvice`, який під цим стилем навіть не показується в Settings |
-| **Жовта `degraded` service-крапка в menu bar** | З [#381](https://github.com/artem-from-ua/cc-timer/issues/381) вона там завжди `calmWhite`, безумовно ([StatusItemView.swift:385](../../Sources/TokenPace/StatusItemView.swift)). Жовтою вона лишається **лише в попапі**, де поруч є назва сервісу й текст статусу |
+| **Біла (нейтральна) service-крапка в menu bar — у будь-якому стані** | Від [#410](https://github.com/artem-from-ua/tokenpace/issues/410) ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md)) `statusDotTarget` не має жодного винятку: усі шість станів беруть свій тон зі шкали (`degraded` — жовтий, як у попапі й на Legend). Гілки `calmWhite` там більше немає, тож нейтральна крапка не малюється ніде |
 | Жовтий на спокійному боці | жовтий існує лише при `u > t` |
 | Синій на 5h при `t < 0.40` | `t − u ≤ t`, тож запас не досягне порога |
 | **Синій h5 при d7 ∈ {yellow, orange, red}** | weekly-gate закритий → `blueAllowed == false` |

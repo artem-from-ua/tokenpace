@@ -353,13 +353,10 @@ final class StatusItemView: NSView {
     /// The dot colour for a non-operational service state. `operational` should never reach here
     /// (the dot is drawn only for a problem) but maps to gray defensively.
     ///
-    /// `.degraded` is the **soft** service signal — the yellow counterpart of the mild ahead-of-pace
-    /// yellow — and since #381 it is drawn `calmWhite` (= `labelColor`) **unconditionally**, no longer
-    /// following `Colors tell me`: that setting governs the pacing bars only (ADR-0105), and a dot with
-    /// no text beside it cannot afford a second loud colour. The **popup keeps this one yellow** — there
-    /// the service name and status sit next to the dot, so colour is not the only carrier. The strong
-    /// states (partial/major outage → orange/red) and the neutral ones (maintenance blue, unknown grey)
-    /// keep their colour on both surfaces.
+    /// Every state takes its own semantic hue from one escalating scale — grey, yellow, orange, red —
+    /// and all three surfaces that draw this dot (here, `PopupViewController.dotColor`, and the Legend
+    /// page) agree on it. No setting reaches this function: `Colors tell me` governs the pacing bars
+    /// only (ADR-0105 §1, still current). `#410` changed which tone `.degraded` gets, not who decides it.
     private func statusDotColor(_ status: ServiceStatus) -> NSColor {
         let target = statusDotTarget(status)
         guard let colorAnimator else { return target }
@@ -372,16 +369,16 @@ final class StatusItemView: NSView {
     /// The dot's colour for a status, before the transition layer.
     private func statusDotTarget(_ status: ServiceStatus) -> NSColor {
         switch status {
-        // `degraded` is **always** the neutral since #381, where it used to follow the pacing-colour
-        // setting. Two reasons, and the second is why it is unconditional rather than merely detached:
-        // the dot is not a pacing signal, so a row about bar colours should not reach it; and a yellow
-        // dot in the menu bar is a state with no action attached, which is exactly what this widget's
-        // quiet default is for. The louder service states keep their colour — `partialOutage`,
-        // `majorOutage`, `underMaintenance` and `unknown` all carry something to do.
-        //
-        // The **popup** keeps drawing this state yellow (`PopupViewController.dotColor`): there the dot
-        // sits beside the service's name and status text, so colour is not the only carrier. Here it is.
-        case .degraded:         return bright(Palette.calmWhite)
+        // `degraded` was muted to the neutral from #381 until #410 (ADR-0111 supersedes ADR-0105 §3).
+        // The mute rested on "a yellow dot here is a state with no action attached", and three things
+        // sank it: `unknown` is grey and no more actionable, so the widget was not reserving colour for
+        // actionable states — it made one exception; the meaning is carried by the *scale*, and grey →
+        // yellow → orange → red only reads without a key because it is monotonic (drop the middle step
+        // and grey → orange says "fine, then suddenly bad", losing the slow-vs-broken distinction this
+        // dot exists to draw); and a degradation does have an action — check whether the slowness is
+        // theirs before spending an hour on your own code, the same class `partialOutage` prompts, one
+        // step milder. Unconditional, like every other case: this switch now has no exception at all.
+        case .degraded:         return accent(Palette.statusYellow)
         case .partialOutage:    return accent(Palette.statusOrange)
         case .majorOutage:      return accent(Palette.statusRed)
         case .underMaintenance: return accent(Palette.statusBlue)
