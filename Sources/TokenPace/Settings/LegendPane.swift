@@ -147,12 +147,16 @@ struct LegendPane: View {
     private var markerlessSection: some View {
         Section(header: heading("Balance & Pressure bar styles",
                                 detail: "how far you’ve drifted from steady spending")) {
-            anatomy(style: .balance,
+            anatomy(LegendCatalog.markerlessSpecimen, style: .balance,
                     caption: "zero in the middle · grows both ways", name: "Balance")
-            anatomy(style: .pressure,
-                    caption: "zero at the left · grows right only", name: "Pressure")
-            Text("*Pressure* is *Balance*’s right half")
-                .font(.callout)
+            // "Balance's right half" rides in the caption rather than standing as its own line below
+            // the pair. As a separate sentence it read as a further fact about two things already
+            // described; inside the caption it is the first thing said about Pressure, which is what
+            // it actually is — the identity `pressureLength ≡ max(0, balanceOffset)` (ADR-0101), not
+            // a resemblance noticed afterwards.
+            anatomy(LegendCatalog.markerlessSpecimen, style: .pressure,
+                    caption: "*Balance*’s right half · zero at the left · grows right only",
+                    name: "Pressure")
             ForEach(Array(Self.markerlessRules.enumerated()), id: \.offset) { _, rule in
                 ruleRow(style: .balance, layout: rule.layout, text: rule.text)
             }
@@ -172,13 +176,41 @@ struct LegendPane: View {
     private var progressSection: some View {
         Section(header: heading("Progress bar style",
                                 detail: "shows where you are between resets")) {
-            anatomy(style: .progress, subdivisions: 5,
+            anatomy(LegendCatalog.progressSpecimen, style: .progress, subdivisions: 5,
                     caption: "the limit window edge to edge · two readings: time and usage",
-                    name: "Progress")
+                    name: "Progress",
+                    callouts: Self.progressCallouts)
             ForEach(Array(Self.progressRules.enumerated()), id: \.offset) { _, rule in
                 ruleRow(style: .progress, layout: rule.layout, text: rule.text)
             }
         }
+    }
+
+    /// The three parts of a Progress bar, each pointing at the x it names.
+    ///
+    /// **Computed through the renderer's own scale**, not written as measured pixels: `scaleX` insets
+    /// the 0..1 range by `minStripWidth/2` at each end, so a hand-placed tick would drift the moment
+    /// `anatomyWidth` changed. `usageFraction` is the capsule's near end here because the specimen is
+    /// behind pace — which is also why the marker sits to its right.
+    ///
+    /// The fourth tooth rather than the first: it is the one with room for a label under it without
+    /// colliding with the capsule's own.
+    @MainActor
+    private static var progressCallouts: [(x: CGFloat, text: String)] {
+        let layout = LegendCatalog.progressSpecimen
+        return [(scaleX(layout.usageFraction), "used tokens/credits so far"),
+                (scaleX(layout.timeFraction), "now-marker"),
+                (scaleX(4.0 / 5.0), "ticks — hours / days")]
+    }
+
+    /// Where a 0..1 fraction lands on the anatomy bar, mirroring `PopupBarView`'s own `scaleX`.
+    ///
+    /// The inset is derived from the bar's **height**, not its width — which is why it is read from
+    /// the same `minStripWidth(_:)` the renderer uses rather than written as a number.
+    private static func scaleX(_ fraction: Double) -> CGFloat {
+        let track = NSRect(x: 0, y: 0, width: anatomyWidth, height: PopupBarView.trackHeight)
+        let inset = PopupBarView.minStripWidth(track) / 2
+        return inset + CGFloat(fraction) * (anatomyWidth - 2 * inset)
     }
 
     private static var progressRules: [(layout: BarLayout, text: String)] {
@@ -195,8 +227,28 @@ struct LegendPane: View {
                 legendRow(swatch: { glyph(icon.symbol, tint: icon.tint) },
                           name: icon.name, detail: icon.detail)
             }
+            countdownRow
             statusDotRow
         }
+    }
+
+    /// The reset countdown — the one mark in the widget that is a number rather than a symbol.
+    ///
+    /// `25m` is the shape `ResetClock.timeToReset` produces: **one unit at any distance** (`45m`,
+    /// `5h`, `4d`), never a wall clock and never a combined `1h30m` (ADR-0074). Set in the same
+    /// monospaced digits the widget uses, so the specimen matches the thing it names.
+    ///
+    /// The detail line leads with the condition rather than the value, because the countdown does not
+    /// appear until a limit is spent — a row saying only "time left" would describe a number the
+    /// reader may never have seen.
+    private var countdownRow: some View {
+        legendRow(swatch: {
+            Text("25m")
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(.primary)
+        },
+                  name: "reset countdown",
+                  detail: "limit reached · time left until its reset")
     }
 
     /// The service dot, and the six states it can be in.
@@ -226,27 +278,35 @@ struct LegendPane: View {
         }
     }
 
-    /// The six service states in the order they escalate, with the colours the **menu bar** gives them.
+    /// The six service states in the order they escalate.
     ///
-    /// Taken from `StatusItemView.statusDotTarget`, not from the popup's table: this page explains the
-    /// widget, and the two deliberately disagree on one state. `degraded` is neutral here and yellow
-    /// there, because in the menu bar the dot is alone and a yellow with no action attached is noise,
-    /// while in the popup it sits beside the service's name and status word.
+    /// **`degraded` is yellow**, which is what the popup draws and what the escalation reads as: grey,
+    /// yellow, orange, red is a scale a reader can follow without being told. The menu bar currently
+    /// mutes this one state to the neutral (`StatusItemView.statusDotTarget`, #381) — a decision that
+    /// pre-dates this page and is tracked separately (#410). The legend shows the scale rather than
+    /// that exception: a reference whose own example is the odd case out teaches the exception.
     @MainActor
     private static var serviceStates: [(name: String, colour: NSColor)] {
-        [("operational", ColorRole.gray.defaultColor),
-         ("degraded", ColorRole.calmWhite.defaultColor),
+        [("operational", ColorRole.green.defaultColor),
+         ("degraded", ColorRole.yellow.defaultColor),
          ("partial outage", ColorRole.orange.defaultColor),
          ("major outage", ColorRole.red.defaultColor),
          ("maintenance", ColorRole.blue.defaultColor),
          ("unknown", ColorRole.gray.defaultColor)]
     }
 
-    /// The dot at the size the widget draws it (`StatusItemView.Metrics.statusDotDiameter`).
+    /// The dot at the size the widget draws it (`StatusItemView.Metrics.statusDotDiameter`), with the
+    /// dropdown's own halo around it.
+    ///
+    /// The glow is `GlowDotView`'s: a shadow in the dot's own colour, radius 5 at 0.75 alpha
+    /// (`PopupViewController.dotGlowRadius`/`dotGlowStrength`, #188). Six pixels of colour is very
+    /// little to identify a hue by, and the halo is most of what makes these legible at this size — a
+    /// legend that dropped it would show a duller mark than the one it is explaining.
     private func dot(_ colour: NSColor) -> some View {
         Circle()
             .fill(Color(nsColor: colour))
             .frame(width: 6, height: 6)
+            .shadow(color: Color(nsColor: colour).opacity(0.75), radius: 5)
     }
 
     private struct Icon {
@@ -342,20 +402,58 @@ struct LegendPane: View {
         }
     }
 
-    /// A wide specimen with the style's name and its one-line description above it.
-    private func anatomy(style: BarStyle, subdivisions: Int = 0,
-                         caption: String, name: String) -> some View {
+    /// A wide specimen with the style's name and its one-line description above it, and optionally a
+    /// row of callouts naming the parts it is made of.
+    ///
+    /// `callouts` is empty for the two marker-less styles: their whole anatomy is one ribbon and its
+    /// zero, both already named in the caption. Progress is the style with parts — a capsule whose far
+    /// end is one reading, a marker that is another, and a ruler — so it is the one that needs them.
+    private func anatomy(_ layout: BarLayout, style: BarStyle, subdivisions: Int = 0,
+                         caption: String, name: String,
+                         callouts: [(x: CGFloat, text: String)] = []) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(.init("**\(name)** · \(caption)")).font(.callout)
             Image(nsImage: LegendRenderer.dropdownBarImage(
-                LegendCatalog.markerlessSpecimen, style: style, width: Self.anatomyWidth,
+                layout, style: style, width: Self.anatomyWidth,
                 subdivisions: subdivisions, appearance: barAppearance))
+            if !callouts.isEmpty {
+                calloutRow(callouts)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
     }
 
+    /// The callouts under an anatomy bar: a tick at the x each one points to, its label beneath.
+    ///
+    /// Positioned by `alignmentGuide` against the bar's own coordinate space rather than laid out in a
+    /// stack, because each label names a **point** on the track — the capsule's left end, the marker,
+    /// the fourth tooth — and a label that merely sits nearby names nothing in particular. The x values
+    /// come from the same `scaleX` inset the renderer uses, so they land on the mark rather than beside
+    /// it.
+    private func calloutRow(_ callouts: [(x: CGFloat, text: String)]) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(callouts.enumerated()), id: \.offset) { _, callout in
+                VStack(alignment: .center, spacing: 2) {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.35))
+                        .frame(width: 1, height: 6)
+                    Text(callout.text)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                }
+                .alignmentGuide(.leading) { dimension in dimension.width / 2 - callout.x }
+            }
+        }
+        .frame(width: Self.anatomyWidth, alignment: .leading)
+    }
+
     /// A short specimen beside the rule it demonstrates.
+    ///
+    /// **Indented**, so the rules read as belonging to the anatomy above them rather than as further
+    /// entries in the section's list. The anatomy is the subject; these are the ways of reading it,
+    /// and a flush-left row would give them the same standing as the diagram they explain.
     private func ruleRow(style: BarStyle, layout: BarLayout, text: String) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Image(nsImage: LegendRenderer.dropdownBarImage(
@@ -363,7 +461,11 @@ struct LegendPane: View {
             Text(.init(text)).font(.callout)
             Spacer(minLength: 0)
         }
+        .padding(.leading, Self.ruleIndent)
     }
+
+    /// How far the reading rules sit in from the section's edge.
+    private static let ruleIndent: CGFloat = 20
 
     /// Anatomy bars run wide — they are the section's subject and carry captions pointing into them.
     private static let anatomyWidth: CGFloat = 320
