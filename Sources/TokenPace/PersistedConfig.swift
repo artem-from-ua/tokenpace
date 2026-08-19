@@ -715,6 +715,43 @@ enum PersistedConfig {
                 "service-status-dot: migrated key → \(Key.showServiceStatusDot, privacy: .public)")
         }
         defaults.removeObject(forKey: Key.legacyShowServiceStatusDot)
+
+        // …and then rewrite any *value* that is still a legacy raw under a current key. The passes
+        // above only move a raw from an old key to a new one, so an install that already made that
+        // move keeps whatever string it moved — a renamed case then lives on disk indefinitely,
+        // readable only because the getters consult the same legacy tables. That is a working
+        // fallback, not a resting state: `defaults read` shows a value matching no case name, an
+        // exported config carries it, and the day a legacy entry is pruned the setting resets for
+        // real. Rewriting here means the tables carry upgrades, never the stored state.
+        refreshRawValue(Key.menuBarStyle, label: "menu-bar-style") { BarStyle.legacyRawValues[$0]?.rawValue }
+        refreshRawValue(Key.dropdownStyle, label: "dropdown-style") { BarStyle.legacyRawValues[$0]?.rawValue }
+        refreshRawValue(Key.colorsTell, label: "colors-tell") { ColorAdvice.legacyRawValues[$0]?.rawValue }
+        refreshRawValue(Key.hideTop5hBar, label: "hide-top-5h-bar") { TopBarHiding.legacyRawValues[$0]?.rawValue }
+        refreshRawValue(Key.showPerModelLimits, label: "show-per-model-limits") {
+            PopupSectionVisibility.legacyRawValues[$0]?.rawValue
+        }
+        refreshRawValue(Key.showExtraUsage, label: "show-extra-usage") {
+            PopupSectionVisibility.legacyRawValues[$0]?.foldedForCredits.rawValue
+        }
+    }
+
+    /// The value-level counterpart of ``migrateRawKey(from:to:label:)``: rewrite a **current** key whose
+    /// stored string is a legacy raw, in place.
+    ///
+    /// `migrateRawKey` only fires while the *key* is moving. Once an install has made that move, a raw
+    /// renamed later (`"gauge"` → `"balance"`, #388) sits under the current key untouched, and only the
+    /// getters' legacy lookup keeps it readable. This closes that gap so a rename is finished on disk
+    /// rather than translated on every read.
+    ///
+    /// **Idempotent by construction, no marker key** — the same property the sibling passes rely on:
+    /// `resolve` answers only for raws that are *not* current, so one rewrite removes the condition that
+    /// triggered it. A value already current is left alone, and one that belongs to no case is left for
+    /// the getter's preset-default fallback (the meaning an unreadable value has always had here).
+    private static func refreshRawValue(_ key: String, label: String, resolve: (String) -> String?) {
+        guard let stored = defaults.string(forKey: key), let fresh = resolve(stored) else { return }
+        defaults.set(fresh, forKey: key)
+        AppLogger.lifecycle.notice(
+            "\(label, privacy: .public): rewrote stored \(stored, privacy: .public) → \(fresh, privacy: .public)")
     }
 
     /// One key's half of ``migrateAppearanceKeysIfNeeded()``: move a raw string from `from` to `to`,
