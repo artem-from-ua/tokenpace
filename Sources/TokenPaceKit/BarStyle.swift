@@ -84,6 +84,32 @@ public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
     /// direction *from*. No time marker: like Pressure, this scale has no position for one.
     case gauge = "gauge"
 
+    /// The style's name as a **word**, Title Case: `"Pressure"` / `"Gauge"` / `"Progress"`.
+    ///
+    /// The single source for both places a user reads a style name: the Settings segments
+    /// (`AppearanceBarStyle.segments`, verbatim) and the dropdown's per-bar caption (lowercased —
+    /// see ``caption``). Kept here rather than beside either surface so a rename lands once: #387 /
+    /// #388 propose renaming Gauge, and two literals would mean two half-renames.
+    ///
+    /// Spelled out rather than derived from `rawValue`: the raw values are **persisted** keys, and
+    /// deriving display text from them would make a stored string load-bearing for the UI.
+    public var displayName: String {
+        switch self {
+        case .pressure: return "Pressure"
+        case .gauge:    return "Gauge"
+        case .progress: return "Progress"
+        }
+    }
+
+    /// The style's name as it appears **in the dropdown**, beside each bar's title under ⌥ (#396):
+    /// lowercase — `"pressure"` / `"gauge"` / `"progress"`.
+    ///
+    /// Lowercase only here, deliberately. In Settings the word is a control's label and takes Title
+    /// Case like every other segment; in the popup it is a quiet annotation sitting next to a row
+    /// title in the same ink as the supporting numbers, and Title Case there would read as a second
+    /// heading competing with the row's own name.
+    public var caption: String { displayName.lowercased() }
+
     /// Which scale this presentation is measured on (#326). The renderers branch on this rather than
     /// on a negated marker flag, because three scales no longer fit in one bit.
     public var scale: BarScale {

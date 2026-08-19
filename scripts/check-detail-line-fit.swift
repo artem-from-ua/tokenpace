@@ -19,10 +19,10 @@ import AppKit
 
 // MARK: - Mirror of PopupViewController.Metrics
 
-let popupWidth: CGFloat = 312
-let cardInset: CGFloat = 8
-let hPadding: CGFloat = 14
-let contentWidth = popupWidth - 2 * cardInset - 2 * hPadding   // 268 pt
+let popupWidth: CGFloat = 380
+let cardInset: CGFloat = 14
+let hPadding: CGFloat = 16
+let contentWidth = popupWidth - 2 * cardInset - 2 * hPadding   // 320 pt
 let minSplitGap: CGFloat = 12
 let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
 
@@ -60,11 +60,20 @@ let cases: [Case] = [
     Case(name: "credits, rest", left: "€10.8 of €15", right: "5d on Friday", keepsReset: true),
     Case(name: "credits wide, rest", left: "€1.23K of €2K", right: "5d on Friday", keepsReset: true),
 
-    // Credits under ⌥: both halves grow at once and the reset gives way. This fires at ORDINARY
-    // amounts — the gate is not an exotic-payload guard.
-    Case(name: "credits, ⌥", left: "spent €10.77 of €15.00", right: "resets in 5d on Friday", keepsReset: false),
-    Case(name: "credits zero, ⌥", left: "spent €0.00 of €15.00", right: "resets in 5d on Friday", keepsReset: false),
+    // Credits under ⌥: both halves grow at once. Against the old 252 pt column all three of these lost
+    // their reset; at 320 (#396) the ordinary amounts keep it, which is what the wider popup was for.
+    // The four-figure one still overflows — see its own note.
+    Case(name: "credits, ⌥", left: "spent €10.77 of €15.00", right: "resets in 5d on Friday", keepsReset: true),
+    Case(name: "credits zero, ⌥", left: "spent €0.00 of €15.00", right: "resets in 5d on Friday", keepsReset: true),
+    // 322.3 pt against the 320 pt column — the four-figure case sits just past the edge, so it is the
+    // narrowest line the gate still fires on. `credits, ⌥` (280 pt) is comfortably inside.
     Case(name: "credits wide, ⌥", left: "spent €1,234.56 of €2,000.00", right: "resets in 5d on Friday", keepsReset: false),
+
+    // The gate's remaining job: a four-figure cap paired with the longest reset phrase. The reset is
+    // DROPPED rather than truncated — the amounts are what the user opened the popup for, and the
+    // reset is repeated in the menu bar anyway.
+    Case(name: "credits max, ⌥", left: "spent $5,000.00 of $5,000.00", right: "resets in 20d next Wednesday", keepsReset: false),
+    Case(name: "credits max, rest", left: "$5,000.00 of $5,000.00", right: "20d next Wednesday", keepsReset: true),
 ]
 
 // MARK: - Run

@@ -18,12 +18,12 @@ import AppKit
 
 // MARK: - Mirror of PopupViewController.Metrics
 
-let popupWidth: CGFloat = 312
-let cardInset: CGFloat = 8
-let hPadding: CGFloat = 14
-let contentWidth = popupWidth - 2 * cardInset - 2 * hPadding   // 268 pt
-let statusDotDiameter: CGFloat = 8
-let statusDotGap: CGFloat = 8
+let popupWidth: CGFloat = 380
+let cardInset: CGFloat = 14
+let hPadding: CGFloat = 16
+let contentWidth = popupWidth - 2 * cardInset - 2 * hPadding   // 320 pt
+let statusDotDiameter: CGFloat = 9
+let statusDotGap: CGFloat = 10
 let incidentTextWidth = contentWidth - statusDotDiameter - statusDotGap
 let maxIncidentDescriptionLines = 3
 let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
@@ -123,17 +123,20 @@ func measure(name: String, chip: String) -> (lines: Int, chipLine: Int, chipLine
 /// Real names from the `incident-two` stub plus the one from #351, each with the chip the row shows
 /// and where that chip belongs. Sharing is the preferred outcome — the chip only takes a line of its
 /// own when the description's last line has no room for it.
+/// Re-measured against the 301 pt text column the 380 pt popup gives (#396; it was 233 at 252 pt).
+/// Widening moved where each name wraps, and with it the leftover on the **last** line — which is what
+/// decides whether the chip fits beside the text. Every expectation below is read off the actual
+/// render, never predicted: only one of the five kept its original answer.
 let cases: [(name: String, chip: String, expectOwnLine: Bool)] = [
     ("Increased latency", "5m · monitoring", false),
-    ("Degraded performance of multiple models", "2h7m · identified", false),
+    ("Degraded performance of multiple models", "2h7m · identified", true),
     ("Elevated errors for Claude Mythos 5, Claude Fable 5, and Claude Sonnet 5",
      "13m · investigating", true),
-    // Single-line name, chip still homeless: the name ends ~185 pt in, leaving 67 pt where the chip
-    // needs 113. The clearest case, and the one a line-count heuristic would get wrong — one line of
-    // description does not mean the chip fits on it.
+    // Single-line name, chip still homeless: the clearest case, and the one a line-count heuristic
+    // would get wrong — one line of description does not mean the chip fits on it.
     ("Elevated error rates on the API", "6m · investigating", true),
     ("Elevated errors for Claude Fable 5, Claude Sonnet 5, Claude Haiku 4.5, and other models",
-     "12m · investigating", false),
+     "12m · investigating", true),
 ]
 
 print("incident text width: \(incidentTextWidth) pt\n")

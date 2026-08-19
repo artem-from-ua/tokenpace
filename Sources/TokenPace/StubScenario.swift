@@ -64,8 +64,13 @@ enum StubScenario: String, CaseIterable {
     case creditsActive = "credits-active"
     case creditsLimitReached = "credits-limit-reached"
     case creditsNoLimit = "credits-no-limit"
+    case creditsNoLimitSpent = "credits-no-limit-spent"
     case creditsZeroSpent = "credits-zero-spent"
     case creditsWideAmounts = "credits-wide-amounts"
+    case creditsMaxHeader = "credits-max-header"
+    case creditsMaxDetail = "credits-max-detail"
+    case allExhaustedCreditsBlock = "all-exhausted-credits-block"
+    case allExhaustedTokenBlocks = "all-exhausted-token-blocks"
     case creditsMonthEnd = "credits-month-end"
     case justUnblocked = "just-unblocked"
     case creditsOnset = "credits-onset"
@@ -188,8 +193,13 @@ enum StubScenario: String, CaseIterable {
         case .creditsActive:       return "Credits · active (paced)"
         case .creditsLimitReached: return "Credits · limit reached (red)"
         case .creditsNoLimit:      return "Credits · no limit (neutral)"
+        case .creditsNoLimitSpent: return "Credits · no limit, spent out"
         case .creditsZeroSpent:    return "Credits · nothing spent yet"
         case .creditsWideAmounts:  return "Credits · wide amounts (⌥ drops reset)"
+        case .creditsMaxHeader:    return "Credits · widest header line"
+        case .creditsMaxDetail:    return "Credits · widest detail line"
+        case .allExhaustedCreditsBlock: return "All spent · credits free you first"
+        case .allExhaustedTokenBlocks:  return "All spent · 7-day frees you last"
         case .creditsMonthEnd:     return "Credits · late in the month (time marker near the end)"
         case .justUnblocked:       return "Back to work! edge"
         case .creditsOnset:        return "Extra Usage Credit onset"
@@ -373,19 +383,60 @@ enum StubScenario: String, CaseIterable {
                  + "icon."
         case .creditsNoLimit:
             return "Credits ¤ icon (#144): unlimited limit (limit: null) → NEUTRAL (foreground) icon."
+        case .creditsNoLimitSpent:
+            return "No cap AND the credits spent out (`limit: null` + `spend_limit_reached: true`, so "
+                 + "the server has disabled them). The one place the header itself goes red: the row "
+                 + "has no second line — no ceiling means no reset to wait for — so there is no reset "
+                 + "badge to carry the red instead. Compare `credits-limit-reached`, where a cap exists: "
+                 + "there the header says \"limit reached\" in plain text and the RED sits on the reset "
+                 + "badge below it, because the reset is what actually unblocks. One filled red per row, "
+                 + "always on the thing you are waiting for."
         case .creditsZeroSpent:
             return "Credits enabled, €15 cap, nothing spent yet (amount_minor: 0) → the resting money "
                  + "line reads \"€0 of €15\" (⌥ → \"spent €0.00 of €15.00\"); bar sits at zero. The cap "
                  + "stays on the line at zero spend: without it the row would read like the unlimited "
                  + "one, which is a different billing configuration."
         case .creditsWideAmounts:
-            return "The fit gate at its worst: €1,234.56 of a €2,000 cap — the widest money line a real "
-                 + "payload can produce (322 pt under ⌥ against a 268 pt column). At rest both halves fit "
-                 + "(\"€1.23K of €2K\" + \"5d on Friday\"); hold ⌥ and the reset is DROPPED rather than "
-                 + "truncated to an ellipsis, leaving the amounts. Release ⌥ and it returns. Note the "
-                 + "gate also fires on plain `credits-active` (281 pt) — this stub is the extreme, not "
-                 + "the only case. 7d is left un-exhausted on purpose: a blocking reset is a red badge "
-                 + "and is never dropped."
+            return "The widest money line a real payload can produce: €1,234.56 of a €2,000 cap, 322 pt "
+                 + "under ⌥. Since the column went to 320 pt (#396) this one FITS — both halves stay, "
+                 + "and so does plain `credits-active` (281 pt), which used to lose its reset. The fit "
+                 + "gate is not gone, it just moved out to the genuine extreme: a four-figure cap paired "
+                 + "with the longest reset phrase (\"spent $5,000.00 of $5,000.00\" + \"resets in 20d "
+                 + "next Wednesday\", 376 pt) still drops the reset rather than truncating to an "
+                 + "ellipsis. 7d is left un-exhausted on purpose: a blocking reset is a red badge and is "
+                 + "never dropped."
+        case .creditsMaxHeader:
+            return "The widest FIRST line the section can produce (#396), and the case that set the "
+                 + "popup's width. Credits are enabled but not yet covering an exhausted plan limit, so "
+                 + "the header carries the wide `available` badge rather than the narrow currency glyph; "
+                 + "the spend is far enough ahead of the month's pace for \"well ahead of pace\", the "
+                 + "longest status phrase. \"Extra usage progress … [available] well ahead of pace\" "
+                 + "measures 318 pt against the 320 pt column — 12 pt of headroom, and nothing in this "
+                 + "row may be allowed to grow past it. Check the two halves do not touch."
+        case .creditsMaxDetail:
+            return "The widest SECOND line: a four-figure cap spent to the last cent, so both money "
+                 + "halves carry grouping separators and the same glyph count — \"spent $5,000.00 of "
+                 + "$5,000.00\". Paired with the longest reset phrase this overflows even the 320 pt "
+                 + "column, so the fit gate DROPS the whole reset half rather than truncating either "
+                 + "one to an ellipsis. This is the gate's remaining job after the widening; the header "
+                 + "above it reads \"limit reached\" and carries NO badge (once the cap is reached the "
+                 + "server disables credits, so nothing is actively spending)."
+        case .allExhaustedCreditsBlock:
+            return "EVERYTHING is spent — 5h, 7d and the €15 money cap all at 100 % — and the token "
+                 + "windows reset AFTER the month does (7d in 40 d). By the last-stand rule "
+                 + "(`BlockingReset.select`) the credits reset is then the first way back, so it is the "
+                 + "blocker: the RED reset badge sits on the **Extra usage** line and nowhere else. "
+                 + "Both token rows read \"limit reached\" with their resets as plain dimmed text, "
+                 + "despite being just as exhausted. Extra usage carries no state badge either — with "
+                 + "the cap spent the red belongs to the reset below, not the header. Compare against "
+                 + "`all-exhausted-token-blocks`, which differs ONLY in when the tokens reset."
+        case .allExhaustedTokenBlocks:
+            return "The same three limits exhausted, but the 7-day window resets LAST (in 24 d, past "
+                 + "the month boundary) instead of first. The red badge moves to the **7-day** row and "
+                 + "the Extra usage reset goes plain — the money frees you before the plan does, so "
+                 + "the plan is what you are actually waiting on. Run it back to back with "
+                 + "`all-exhausted-credits-block`: identical utilizations, identical amounts, one "
+                 + "red badge each, on different rows."
         case .creditsMonthEnd:
             return "The Extra-usage bar's captioned month ruler with the time marker near its right "
                  + "end: same €15 cap and €10.77 spent as `credits-active`, but the clock is pinned to "
@@ -488,8 +539,15 @@ enum StubScenario: String, CaseIterable {
         case .creditsActive:       return StubUsageTransport(mode: .credits(.active), now: now)
         case .creditsLimitReached: return StubUsageTransport(mode: .credits(.limitReached), now: now)
         case .creditsNoLimit:      return StubUsageTransport(mode: .credits(.noLimit), now: now)
+        case .creditsNoLimitSpent: return StubUsageTransport(mode: .credits(.noLimitSpent), now: now)
         case .creditsZeroSpent:    return StubUsageTransport(mode: .credits(.zeroSpent), now: now)
         case .creditsWideAmounts:  return StubUsageTransport(mode: .credits(.wideAmounts), now: now)
+        case .creditsMaxHeader:    return StubUsageTransport(mode: .credits(.maxHeader), now: now)
+        case .creditsMaxDetail:    return StubUsageTransport(mode: .credits(.maxDetail), now: now)
+        case .allExhaustedCreditsBlock:
+            return StubUsageTransport(mode: .credits(.allExhaustedCreditsBlock), now: now)
+        case .allExhaustedTokenBlocks:
+            return StubUsageTransport(mode: .credits(.allExhaustedTokenBlocks), now: now)
         case .creditsMonthEnd:     return StubUsageTransport(mode: .credits(.active), now: now)
         case .justUnblocked:       return StubUsageTransport(mode: .justUnblocked, now: now)
         case .creditsOnset:        return StubUsageTransport(mode: .creditsOnset, now: now)

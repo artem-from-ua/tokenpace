@@ -490,8 +490,62 @@ actor StubUsageTransport: UsageTransport {
     ///  • `.zeroSpent`    — enabled, €15.00 cap, **nothing spent yet** (`amount_minor: 0`): the resting
     ///    money line renders `€0 of €15`, both halves shedding zeros for their own reason (the spend
     ///    because it is untouched, the cap because it is whole).
+    ///  • `.maxHeader`    — the **widest first line** the section can produce (#396): credits enabled
+    ///    but not yet covering anything (so the header carries the wide `available` badge rather than
+    ///    the narrow currency glyph) and spending far ahead of the month's pace, which is the longest
+    ///    status phrase. `Extra usage progress … [available] well ahead of pace` measures 318 pt
+    ///    against the 320 pt column — the case that set the popup's width.
+    ///  • `.maxDetail`    — the **widest second line**: a four-figure cap fully spent, so both money
+    ///    halves carry grouping separators and the same number of glyphs, paired with the longest
+    ///    reset phrase the clock produces. This is the case the fit gate still has to drop.
+    ///  • `.noLimitSpent`  — **no cap, credits spent out** (#396): `limit: null` *and*
+    ///    `spend_limit_reached: true`. The one state where the red badge belongs in the header, because
+    ///    the row has no second line — no ceiling means no reset to wait for, so there is no reset badge
+    ///    to carry the red instead.
+    ///  • `.allExhaustedCreditsBlock` — **everything spent, credits free you first** (#396): 5h, 7d and
+    ///    the money cap all at 100 %, with the token windows resetting *after* the month does. By the
+    ///    last-stand rule (`BlockingReset.select`) the credits reset is then the way back, so it is the
+    ///    one carrying the red badge — and the token rows show their resets as plain text despite being
+    ///    exhausted too.
+    ///  • `.allExhaustedTokenBlocks` — the **same** three limits exhausted, but the 7-day window resets
+    ///    after the month: the red moves to the 7-day row and the credits line goes plain. The pair
+    ///    exists to be compared — only the reset instants differ.
     enum CreditsFrame: Equatable {
-        case active, limitReached, noLimit, zeroSpent, wideAmounts
+        case active, limitReached, noLimit, noLimitSpent, zeroSpent, wideAmounts, maxHeader, maxDetail
+        case allExhaustedCreditsBlock, allExhaustedTokenBlocks
+
+        /// Whether this frame wants the **token** limits left healthy rather than the usual pinned-100 %
+        /// 7-day window.
+        ///
+        /// Only `.maxHeader` does: the `available` badge means "credits are on and nothing is
+        /// overflowing onto them", which is unreachable while a base limit sits at 100 % — that state
+        /// is `active` instead. Everything else wants the exhausted window, since credits covering an
+        /// exhausted plan limit is the situation the section exists for.
+        var leavesBaseLimitsHealthy: Bool { self == .maxHeader }
+
+        /// Whether this frame exhausts the **token** windows too (5h and 7d at 100 %), rather than the
+        /// usual "7d spent, 5h healthy" shape. Only the two all-exhausted frames do.
+        var exhaustsEverything: Bool {
+            self == .allExhaustedCreditsBlock || self == .allExhaustedTokenBlocks
+        }
+
+        /// How many days out the **7-day** window's reset sits, for the frames that care.
+        ///
+        /// This is the whole experiment. `BlockingReset.select` gives the credits reset priority unless
+        /// it is strictly later than every exhausted token reset, so moving this number across the
+        /// month boundary moves the red badge between the credits row and the 7-day row — with the same
+        /// three limits exhausted either way. `nil` leaves the shipped 5-day reset alone.
+        ///
+        /// The rule is `creditsReset <= latestToken → credits win`, so **credits block when the tokens
+        /// reset later**, not sooner. 40 days clears the month boundary from any day of any month; 1 day
+        /// is inside it from every day but the last.
+        var sevenDayResetDays: Int? {
+            switch self {
+            case .allExhaustedCreditsBlock: return 40   // tokens reset last → credits are the way back
+            case .allExhaustedTokenBlocks:  return 1    // a token resets first → credits reset last
+            default: return nil
+            }
+        }
 
         /// The `spend` + `extra_usage` block pair for this frame, as raw JSON fragments (no braces) to
         /// splice into the usage body. Verbatim from `CreditsModelTests` fixtures so the stub exercises
@@ -531,6 +585,35 @@ actor StubUsageTransport: UsageTransport {
                 "percent":0,"severity":"normal","enabled":true,"disabled_reason":null,\
                 "balance":null,"auto_reload":null}
                 """
+            case .allExhaustedCreditsBlock, .allExhaustedTokenBlocks:
+                // Money cap spent to the last cent. Both frames share this block; what separates them
+                // is when the *token* windows reset (see `tokenResetDays`), which is what decides
+                // whether the credits reset or a token reset is the last stand.
+                return """
+                "extra_usage":{"is_enabled":false,"monthly_limit":1500,"used_credits":1500.0,\
+                "utilization":100.0,"currency":"EUR","decimal_places":2,\
+                "disabled_reason":"spend_limit_reached","user_disabled":false,\
+                "spend_limit_reached":true,"credits_ever_enabled":true,"daily":null,"weekly":null},\
+                "spend":{"used":{"amount_minor":1500,"currency":"EUR","exponent":2},\
+                "limit":{"amount_minor":1500,"currency":"EUR","exponent":2},"percent":100,\
+                "severity":"critical","enabled":false,\
+                "disabled_reason":"spend_limit_reached","balance":null,"auto_reload":null}
+                """
+            case .noLimitSpent:
+                // No cap, but the credits themselves are spent out: `limit: null` with
+                // `spend_limit_reached: true`, which is why the server has also flipped `enabled` to
+                // false. Distinct from `.limitReached`, where a cap exists and the *reset* is what the
+                // user waits for — here there is no ceiling and no reset, so the header itself carries
+                // the red `out of credits` badge.
+                return """
+                "extra_usage":{"is_enabled":false,"monthly_limit":null,"used_credits":1077.0,\
+                "utilization":null,"currency":"EUR","decimal_places":2,\
+                "disabled_reason":"spend_limit_reached","user_disabled":false,\
+                "spend_limit_reached":true,"credits_ever_enabled":true,"daily":null,"weekly":null},\
+                "spend":{"used":{"amount_minor":1077,"currency":"EUR","exponent":2},"limit":null,\
+                "percent":0,"severity":"critical","enabled":false,\
+                "disabled_reason":"spend_limit_reached","balance":null,"auto_reload":null}
+                """
             case .zeroSpent:
                 return """
                 "extra_usage":{"is_enabled":true,"monthly_limit":1500,"used_credits":0.0,\
@@ -556,6 +639,37 @@ actor StubUsageTransport: UsageTransport {
                 "limit":{"amount_minor":200000,"currency":"EUR","exponent":2},"percent":62,\
                 "severity":"normal","enabled":true,"disabled_reason":null,"balance":null,\
                 "auto_reload":null}
+                """
+            case .maxHeader:
+                // Widest first line (#396). Credits enabled and nothing spent against them yet, so the
+                // header shows the wide `available` badge instead of the narrow currency glyph; the
+                // spend is far enough ahead of the month's pace for "well ahead of pace", the longest
+                // status phrase. USD rather than EUR: the `$` glyph is what ships in the screenshots.
+                return """
+                "extra_usage":{"is_enabled":true,"monthly_limit":200000,"used_credits":180000.0,\
+                "utilization":90.0,"currency":"USD","decimal_places":2,"disabled_reason":null,\
+                "user_disabled":false,"spend_limit_reached":false,"credits_ever_enabled":true,\
+                "daily":null,"weekly":null},\
+                "spend":{"used":{"amount_minor":180000,"currency":"USD","exponent":2},\
+                "limit":{"amount_minor":200000,"currency":"USD","exponent":2},"percent":90,\
+                "severity":"normal","enabled":true,"disabled_reason":null,"balance":null,\
+                "auto_reload":null}
+                """
+            case .maxDetail:
+                // Widest second line (#396): a four-figure cap spent to the last cent, so both money
+                // halves carry grouping separators and the same glyph count —
+                // "spent $5,000.00 of $5,000.00". With the longest reset phrase this measures 376 pt
+                // bare (390 with the badges), past the 320 pt column: the reset is dropped, the amounts
+                // stay. `spend_limit_reached` so the header reads "limit reached".
+                return """
+                "extra_usage":{"is_enabled":false,"monthly_limit":500000,"used_credits":500000.0,\
+                "utilization":100.0,"currency":"USD","decimal_places":2,\
+                "disabled_reason":"spend_limit_reached","user_disabled":false,\
+                "spend_limit_reached":true,"credits_ever_enabled":true,"daily":null,"weekly":null},\
+                "spend":{"used":{"amount_minor":500000,"currency":"USD","exponent":2},\
+                "limit":{"amount_minor":500000,"currency":"USD","exponent":2},"percent":100,\
+                "severity":"critical","enabled":false,\
+                "disabled_reason":"spend_limit_reached","balance":null,"auto_reload":null}
                 """
             }
         }
@@ -1348,11 +1462,25 @@ actor StubUsageTransport: UsageTransport {
         if case let .credits(frame) = mode {
             let fiveReset = self.resetsAt(inSeconds: 3 * 3600)          // active 5h, mid-window
             let sevenReset = self.resetsAt(inSeconds: 5 * 24 * 3600)    // weekly limit hit, resets in 5 d
+            // Most frames pin 7d at 100 % so a base limit is exhausted and the credits actually cover
+            // something. `.maxHeader` needs the opposite (#396): its whole point is the `available`
+            // badge, which requires credits enabled and **no** base limit exhausted — money spent
+            // earlier in the month, the plan limit since reset. So the frame chooses.
+            let sevenUtilization = frame.leavesBaseLimitsHealthy ? 42.0 : 100.0
+            let sevenSeverity = frame.leavesBaseLimitsHealthy ? "normal" : "critical"
+            // The all-exhausted pair moves the 7-day reset across the month boundary to swap which
+            // limit is the last stand; every other frame keeps the shipped 5-day one.
+            let sevenAt = frame.sevenDayResetDays
+                .map { self.resetsAt(inSeconds: TimeInterval($0) * 24 * 3600) } ?? sevenReset
+            // …and exhausts the 5h window too, so "everything is spent" is literally true. Its own
+            // reset stays near (2 h): a 5h window that resets last is not a shape the API produces.
+            let fiveUtilization = frame.exhaustsEverything ? 100.0 : 18.0
             let body = """
-            {"five_hour":{"utilization":18.0,"resets_at":"\(fiveReset)"},\
-            "seven_day":{"utilization":100.0,"resets_at":"\(sevenReset)"},\
-            "limits":[{"kind":"weekly_all","group":"weekly","percent":100,"severity":"critical",\
-            "resets_at":"\(sevenReset)","scope":null,"is_active":true}],\
+            {"five_hour":{"utilization":\(fiveUtilization),"resets_at":"\(fiveReset)"},\
+            "seven_day":{"utilization":\(sevenUtilization),"resets_at":"\(sevenAt)"},\
+            "limits":[{"kind":"weekly_all","group":"weekly","percent":\(Int(sevenUtilization)),\
+            "severity":"\(sevenSeverity)",\
+            "resets_at":"\(sevenAt)","scope":null,"is_active":true}],\
             \(frame.blocks)}
             """.data(using: .utf8)!
             let response = HTTPURLResponse(

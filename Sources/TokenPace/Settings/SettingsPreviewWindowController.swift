@@ -11,7 +11,7 @@ import TokenPaceKit
 ///
 /// ## Why a separate window and not a view inside the pane
 /// The Settings window's width is pinned at 857 pt (ADR-0069, enforced in `windowWillResize`), and the
-/// popup is a fixed 312 pt wide. Embedding it would either crowd the 599-pt detail column or force the
+/// popup is a fixed 390 pt wide. Embedding it would either crowd the 599-pt detail column or force the
 /// width pin open — a regression of ADR-0069 for a preview. A borderless child window costs the layout
 /// nothing and rides along for free.
 ///
@@ -60,7 +60,11 @@ final class SettingsPreviewWindowController {
         /// The window's width before Auto Layout measures it: the popup's own fixed width. Only the
         /// height is ever in question, so this is exact rather than a guess — it is used to size the
         /// initial frame and to reserve room when centring the pair.
-        static let nominalWidth: CGFloat = 312
+        ///
+        /// Read from ``PopupViewController/popupWidth`` rather than repeated as a literal (#396): a
+        /// second copy of the number would let the preview open at a different width than the popup it
+        /// previews, and nothing would flag it.
+        static let nominalWidth: CGFloat = PopupViewController.popupWidth
     }
 
     // MARK: - State
