@@ -84,25 +84,27 @@ public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
     /// direction *from*. No time marker: like Pressure, this scale has no position for one.
     case gauge = "gauge"
 
-    /// The style's name as a **word**, Title Case: `"Pressure"` / `"Gauge"` / `"Progress"`.
+    /// The style's name as a **word**, Title Case: `"Pressure"` / `"Balance"` / `"Progress"`.
     ///
     /// The single source for both places a user reads a style name: the Settings segments
     /// (`AppearanceBarStyle.segments`, verbatim) and the dropdown's per-bar caption (lowercased —
-    /// see ``caption``). Kept here rather than beside either surface so a rename lands once: #387 /
-    /// #388 propose renaming Gauge, and two literals would mean two half-renames.
+    /// see ``caption``). Kept here rather than beside either surface so a rename lands once — which
+    /// is what #388 then did: `"Gauge"` became `"Balance"` by editing this one line, and both
+    /// surfaces followed. Two literals would have meant two half-renames.
     ///
     /// Spelled out rather than derived from `rawValue`: the raw values are **persisted** keys, and
-    /// deriving display text from them would make a stored string load-bearing for the UI.
+    /// deriving display text from them would make a stored string load-bearing for the UI. That
+    /// separation is what let #388 change the word here while the stored raw migrated separately.
     public var displayName: String {
         switch self {
         case .pressure: return "Pressure"
-        case .gauge:    return "Gauge"
+        case .gauge:    return "Balance"
         case .progress: return "Progress"
         }
     }
 
     /// The style's name as it appears **in the dropdown**, beside each bar's title under ⌥ (#396):
-    /// lowercase — `"pressure"` / `"gauge"` / `"progress"`.
+    /// lowercase — `"pressure"` / `"balance"` / `"progress"`.
     ///
     /// Lowercase only here, deliberately. In Settings the word is a control's label and takes Title
     /// Case like every other segment; in the popup it is a quiet annotation sitting next to a row

@@ -229,7 +229,7 @@ final class SettingsModel {
     ///
     /// **Read-only, and deliberately not a stored "previous value".** Nothing writes
     /// `PersistedConfig.colorsTell` on a style change, so the user's own choice sits untouched in the
-    /// store and comes back the moment they pick Gauge or Progress. A remembered-previous field would be
+    /// store and comes back the moment they pick Balance or Progress. A remembered-previous field would be
     /// a second copy of something the store already holds, with the usual failure mode: the two disagree
     /// after a preset, a reset, or a restart.
     var displayedColorAdvice: ColorAdvice { menuBarStyle == .pressure ? .slowDown : colorsTell }
@@ -290,13 +290,13 @@ final class SettingsModel {
     /// surface currently draws, which is the one setting both pages open with and the only one whose
     /// answer differs between them by default.
     ///
-    /// Labelled `Style: Gauge`, not the bare style name: on the parent page the row title says only
-    /// which *surface* the page configures, so a lone "Gauge" leaves the reader to guess which of the
+    /// Labelled `Style: Balance`, not the bare style name: on the parent page the row title says only
+    /// which *surface* the page configures, so a lone "Balance" leaves the reader to guess which of the
     /// page's several settings it reports. The label is the child page's own control label verbatim,
     /// so the summary and the control it summarises name the setting the same way.
     ///
     /// The name comes from `AppearanceBarStyle.segments`, the same table the picker on the child page
-    /// labels its own segments from: a row reporting "Gauge" while the control inside says something
+    /// labels its own segments from: a row reporting "Balance" while the control inside says something
     /// else would be worse than a row reporting nothing.
     func surfaceSummary(for page: SettingsChildPage) -> String? {
         let style: BarStyle

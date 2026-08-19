@@ -127,11 +127,12 @@ struct BarStyleTests {
     }
 
     /// The Title-Case name both surfaces read (#396) — Settings segments verbatim, the dropdown
-    /// caption lowercased from it. Pinned here so a rename (#387/#388) is a deliberate edit with a
-    /// failing test, not a silent divergence between the two surfaces.
+    /// caption lowercased from it. Pinned here so a rename is a deliberate edit with a failing test,
+    /// not a silent divergence between the two surfaces — which is exactly how #388 landed: the
+    /// centred style became **Balance**, and this expectation is what made that a conscious change.
     @Test func displayNameIsTitleCasePerStyle() {
         #expect(BarStyle.pressure.displayName == "Pressure")
-        #expect(BarStyle.gauge.displayName == "Gauge")
+        #expect(BarStyle.gauge.displayName == "Balance")
         #expect(BarStyle.progress.displayName == "Progress")
     }
 
@@ -141,7 +142,7 @@ struct BarStyleTests {
         for style in BarStyle.allCases {
             #expect(style.caption == style.displayName.lowercased(), "\(style)")
         }
-        #expect(BarStyle.gauge.caption == "gauge")
+        #expect(BarStyle.gauge.caption == "balance")
         #expect(BarStyle.progress.caption == "progress")
     }
 
