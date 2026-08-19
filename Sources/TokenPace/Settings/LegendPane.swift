@@ -218,15 +218,22 @@ struct LegendPane: View {
     /// Both start `calloutGap` below the image and run to their own mark. The image now includes the
     /// ruler, so its bottom edge *is* the teeth's foot:
     ///
-    ///     ticks   calloutGap 7                              = 7    — the tooth's foot
-    ///     capsule calloutGap 7 + tickGap 2 + tickLength 5    = 14   — back up to the track
+    /// **Measured from the image's bottom edge, which is below the ruler rather than at it.** The
+    /// canvas is `viewHeight 14 + rulerDepth 7 = 21` tall, while the marker's overhang puts the track
+    /// at y 4–10 and the teeth at 12–17 — so there are 4 pt of empty canvas under the last tooth that
+    /// a leader has to cross before it reaches anything:
     ///
-    /// Recompute alongside the `x` values above if the tick metrics or ``calloutGap`` change.
+    ///     ticks   calloutGap 7 + (21 − 17)                  = 11   — the tooth's foot
+    ///     capsule calloutGap 7 + (21 − 10)                  = 18   — back up to the track
+    ///
+    /// Getting this wrong is invisible in code and obvious on screen: both lines stopped 4 pt short,
+    /// pointing at nothing. Recompute alongside the `x` values above if the tick metrics,
+    /// ``calloutGap`` or `PopupBarView.viewHeight` change.
     private static let progressCallouts: [Callout] = [
-        Callout(x: 112.5, text: "used tokens/credits so far", anchor: .leading, leader: 14),
+        Callout(x: 112.5, text: "used tokens/credits so far", anchor: .leading, leader: 18),
         // `hours/days` unspaced, matching `tokens/credits` on the other caption — one page should not
         // punctuate the same "either of these" two ways.
-        Callout(x: 255.0, text: "ticks — hours/days", anchor: .trailing, leader: Self.calloutGap),
+        Callout(x: 255.0, text: "ticks — hours/days", anchor: .trailing, leader: 11),
     ]
 
     /// The clear space between a caption and the bar, identical above and below.
@@ -572,7 +579,13 @@ struct LegendPane: View {
                     // gap — below it, the gap is enough, because the leaders there start at the image's
                     // edge and run downward away from the text.
                     .padding(.bottom, pointingDown ? callout.leader : 0)
-                    .padding(.top, pointingDown ? 0 : Self.calloutGap)
+                    // Below the bar the captions clear the **longest** leader in the row, not their
+                    // own. The lines start at the image's edge and run down toward the text, so a
+                    // caption placed at the plain gap sits underneath the longer of them — which is
+                    // what put the line through "used tokens/credits so far". One baseline, set by
+                    // the line that reaches furthest, keeps every caption clear and the two on the
+                    // same level.
+                    .padding(.top, pointingDown ? 0 : longestLeader(callouts))
             }
         }
         // Height comes from the content, not a constant. The row above the bar holds a caption over a
@@ -580,6 +593,11 @@ struct LegendPane: View {
         // line away from the marker it is supposed to touch.
         .frame(width: Self.anatomyWidth, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The furthest any leader in a row reaches — where its captions start.
+    private func longestLeader(_ callouts: [Callout]) -> CGFloat {
+        callouts.map(\.leader).max() ?? Self.calloutGap
     }
 
     /// Which end of the bar a caption is pushed to.
