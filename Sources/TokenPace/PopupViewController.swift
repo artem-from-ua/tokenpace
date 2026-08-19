@@ -82,7 +82,7 @@ final class PopupBarView: NSView {
     /// Bar presentation style for **this surface** (#224, per-surface since #329) — fed from
     /// `PersistedConfig.dropdownStyle` and pushed in from `PopupViewController.addBar`.
     /// ``BarStyle/progress`` draws the gap + time-indicator marker + gap dividers;
-    /// ``BarStyle/pressure`` a left-anchored ribbon; ``BarStyle/gauge`` a centre-anchored one. The
+    /// ``BarStyle/pressure`` a left-anchored ribbon; ``BarStyle/balance`` a centre-anchored one. The
     /// last two keep the under-bar tick ruler but have no marker or dividers.
     ///
     /// Independent of `StatusItemView.barStyle` since #329 — the user picks each surface separately,
@@ -165,7 +165,7 @@ final class PopupBarView: NSView {
         static let tickGap: CGFloat = 2
         static let tickWidth: CGFloat = 2
         /// Width of the **zero tick** — the permanent mark for the zero each marker-less ribbon grows
-        /// out of: Gauge's centre and Pressure's origin. Documented here, computed at the draw site.
+        /// out of: Balance's centre and Pressure's origin. Documented here, computed at the draw site.
         ///
         /// A **fraction of the zero pill's width** rather than a constant: the tick marks the position
         /// that pill sits at, so it is sized against the pill and follows it if the bar's height ever
@@ -174,7 +174,7 @@ final class PopupBarView: NSView {
         /// where it looks like the pill continued past the track's edges — clearly the same vertical,
         /// visibly narrower than the shape it belongs to.
         ///
-        /// Still well under the time marker's 7 pt, so the mark that identifies Pressure/Gauge cannot be
+        /// Still well under the time marker's 7 pt, so the mark that identifies Pressure/Balance cannot be
         /// confused with the one that identifies Progress — and the rest of the argument (neutral,
         /// static, hidden under the track) is untouched by the width.
         static let zeroTickPillFraction: CGFloat = 5.0 / 7.0
@@ -192,12 +192,18 @@ final class PopupBarView: NSView {
         /// `StatusItemView.Metrics.zeroTickAlpha`, for the same reason: scale furniture must settle
         /// behind the one mark on the bar that actually moves.
         static let zeroTickAlpha: CGFloat = 0.55
-        /// Total view height: tall enough for the bar + under-bar tick ruler **and** for the marker,
-        /// which is centred on the bar and so overhangs it by `indicatorHeight/2 − barHeight/2`
-        /// on top; without that headroom a taller marker would be clipped by the view's frame.
-        static let height: CGFloat = max(
-            barHeight + tickGap + tickLength,
-            indicatorHeight + tickGap + tickLength)
+        /// Total view height: the **marker** and nothing more. The marker is centred on the bar and so
+        /// overhangs it by `(indicatorHeight − barHeight)/2` on each side; that is the whole reserve.
+        ///
+        /// The tick ruler is deliberately **not** reserved for (#388). It used to add `tickGap +
+        /// tickLength` on top of the marker, which bought 7 pt of empty strip under every bar — and
+        /// two of the three styles draw no ruler at all (ADR-0098), so on those the strip was pure
+        /// air. Because a bar sits at the end of each limit block, that air read as extra space
+        /// *between blocks*: the gap under "Claude" measured its honest `sectionSpacing`, while the
+        /// gap between blocks measured `limitSpacing` **plus** the reserve — 10 pt of setting looking
+        /// like 25. The ticks now draw into the marker's own bottom overhang, where they are thin
+        /// enough (2 pt wide, `tertiaryLabelColor`) to need no clearance of their own.
+        static let height: CGFloat = indicatorHeight
     }
 
     /// The fixed view height (bar + under-bar tick ruler), exposed so `PopupViewController` can pin
@@ -233,7 +239,7 @@ final class PopupBarView: NSView {
     /// limit is exhausted, so a pace-relative ribbon says little about it, whereas "how much of the cap,
     /// how far into the month" is exactly the pair of positions the window scale marks. Its two
     /// captioned boundary ticks (``monthBounds``) name that window on the bar itself, which is what
-    /// keeps a Progress bar sitting in a Pressure/Gauge column from reading as a bug: it is visibly a
+    /// keeps a Progress bar sitting in a Pressure/Balance column from reading as a bug: it is visibly a
     /// *different ruler*, not the same one behaving oddly.
     ///
     /// Every render branch reads this rather than `barStyle.scale` — a mixed pair would draw a
@@ -398,7 +404,7 @@ final class PopupBarView: NSView {
             // hangs in empty space while every neighbouring row shows a track.
             Self.monochromeGrey.setFill()
             NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner).fill()
-            // Gauge's zero is the centre, so its idle pill sits there (ADR-0078's shape, drawn on this
+            // Balance's zero is the centre, so its idle pill sits there (ADR-0078's shape, drawn on this
             // style's own scale) — struck through by the zero tick laid down just above.
             if let idleShape = Self.pillRect(at: effectiveScale == .centred ? 0.5 : 0, in: rect) {
                 // Same corner as the track and every other strip (#326) — idle is a zero-length ribbon,
@@ -445,11 +451,11 @@ final class PopupBarView: NSView {
         //    3. The strip carries the ambient glow.
         // The `color-cycle` stub pins the strip so only the colour moves (`frozenStripFraction`); it
         // overrides the length, so the stub is unaffected by the rescale.
-        // Gauge (#326, ADR-0079) measures from the bar's CENTRE — the span is `0.5 .. 0.5 + offset/2`
+        // Balance (#326, ADR-0079) measures from the bar's CENTRE — the span is `0.5 .. 0.5 + offset/2`
         // taken in whichever order the sign puts them, so the ribbon's direction carries ahead vs
         // behind. The other two scales are unchanged: Progress the window-scale gap, Pressure the
         // left-anchored ribbon.
-        let gaugeFar = 0.5 + (frozenStripFraction.map { $0 * 2 - 1 } ?? l.gaugeOffset) / 2
+        let balanceFar = 0.5 + (frozenStripFraction.map { $0 * 2 - 1 } ?? l.balanceOffset) / 2
         let stripFrom: Double
         let stripTo: Double
         switch effectiveScale {
@@ -460,8 +466,8 @@ final class PopupBarView: NSView {
             stripFrom = 0
             stripTo = frozenStripFraction ?? l.pressureLength
         case .centred:
-            stripFrom = min(0.5, gaugeFar)
-            stripTo = max(0.5, gaugeFar)
+            stripFrom = min(0.5, balanceFar)
+            stripTo = max(0.5, balanceFar)
         }
         // A **zero-length** Pressure ribbon still has to read as "zero", not as an empty track: with no
         // marker the ribbon is this bar's only mark, and `stripRect` returns nil for a degenerate span.
@@ -473,7 +479,7 @@ final class PopupBarView: NSView {
         // Progress pins the strip's start: its left edge is `usage`, so the min-width floor and the
         // flush-to-track snap must not drag it leftwards into the "already spent" zone (#323).
         // The pill floor applies to both marker-less scales: Pressure floors its zero at the left edge,
-        // Gauge floors its zero at the centre (`stripFrom == 0.5` there, since a degenerate span has
+        // Balance floors its zero at the centre (`stripFrom == 0.5` there, since a degenerate span has
         // both ends on the zero). `pinsStart` stays exclusive to Progress — on the centred scale both
         // edges are data and the floor must grow symmetrically about the zero.
         let ribbon = Self.stripRect(from: stripFrom, to: stripTo, in: rect,
@@ -630,7 +636,7 @@ final class PopupBarView: NSView {
     ///
     /// This is the single knob for the whole inset geometry, not just the floor: ``scaleX`` insets the
     /// 0..1 scale by half of it at each end, so every fraction on both surfaces — strips, pills, the
-    /// time marker, the tick ruler and Gauge's centre tick — shifts with this number, and all of them
+    /// time marker, the tick ruler and Balance's centre tick — shifts with this number, and all of them
     /// stay aligned with each other because they read it from here.
     static func minStripWidth(_ rect: NSRect) -> CGFloat { 0.75 * rect.height - 1 }
 
@@ -685,7 +691,7 @@ final class PopupBarView: NSView {
                 sx1 = c + msw / 2
             }
         }
-        // Gauge (#326): the end that sits ON the zero overlaps it by half the pill's width, in whichever
+        // Balance (#326): the end that sits ON the zero overlaps it by half the pill's width, in whichever
         // direction the ribbon runs. Without this the strip merely *begins* at `scaleX(0.5)` and its
         // rounded cap curves away from there, while the centre tick is *centred* on the same x — so the
         // colour visibly retreats from the tick by a cap's radius, in mirror image on each side (a
@@ -748,13 +754,13 @@ final class PopupBarView: NSView {
     /// - **Progress** marks each interior window boundary (`k / subdivisions`): the hour lines of a
     ///   5-hour window, the day lines of a 7-day one. Those are real positions on the window scale,
     ///   and the time marker lands among them.
-    /// - **Pressure** and **Gauge** carry **no teeth at all** (ADR-0098). Window subdivisions have no
+    /// - **Pressure** and **Balance** carry **no teeth at all** (ADR-0098). Window subdivisions have no
     ///   position on either track — an hour boundary is not at a fixed fraction of the time remaining
     ///   — and the landmark each scale *does* define is its **zero**, which is already drawn
     ///   unconditionally by ``drawZeroTick(in:)`` and captioned `0` under ⌥. A second, unlabelled
     ///   tooth a few points from a labelled zero read as a stray mark rather than as a reading.
     ///
-    ///   Pressure's zero is `0` and Gauge's is `0.5` (``zeroTickFraction``) — that mark is also what
+    ///   Pressure's zero is `0` and Balance's is `0.5` (``zeroTickFraction``) — that mark is also what
     ///   tells the two styles apart at a glance, and it is the same one the menu bar draws
     ///   (`StatusItemView.drawZeroTick`); that surface carries only the identifying half, since ⌥
     ///   cannot reach it. Pressure once marked `0.20` here, back when its zero sat left of `t`; since
@@ -792,12 +798,12 @@ final class PopupBarView: NSView {
     }
 
     /// The scale's **zero** — the position the ribbon grows out of, or `nil` for a style that has none
-    /// to show. Gauge's is its centre, Pressure's the left end of the renormalised track; **Progress is
+    /// to show. Balance's is its centre, Pressure's the left end of the renormalised track; **Progress is
     /// deliberately untouched**, since its time marker already carries a position and a second vertical
     /// mark beside it would read as a competing one.
     ///
     /// Drawn **unconditionally**, unlike the rest of the ruler: this mark is what tells the two
-    /// marker-less styles apart at a glance — a line through the middle is Gauge, a line at the left end
+    /// marker-less styles apart at a glance — a line through the middle is Balance, a line at the left end
     /// is Pressure — so hiding it behind ⌥ would take away the thing that identifies the style. The
     /// landmarks that merely *explain* the scale stay on demand.
     ///
@@ -815,7 +821,7 @@ final class PopupBarView: NSView {
     /// Draw the **zero tick**: a line struck through the whole bar at ``zeroTickFraction``, in the
     /// neutral tick tone, drawn *under* the track so only its protruding ends show. The popup's copy of
     /// `StatusItemView.drawZeroTick` — same construction, same proportions, so the mark that identifies
-    /// Gauge and Pressure looks like itself on both surfaces.
+    /// Balance and Pressure looks like itself on both surfaces.
     ///
     /// Called **before** the track on every path (idle and pacing alike), which is what turns a full
     /// stroke into a pair of ends: the track paints over its middle. Drawing it after would put a solid
@@ -1625,17 +1631,25 @@ final class PopupViewController: NSViewController {
         /// Top **inner** padding — space between the card's top edge and the "Claude" header. Matched to
         /// `hPadding` so the gap above the header equals the gap from the card's left edge to it.
         static let topPadding: CGFloat = 16
-        /// Bottom **inner** padding — space between the last bar's tick ruler and the card's bottom edge.
+        /// Bottom **inner** padding — space between the last bar and the card's bottom edge.
         ///
-        /// Trimmed from 12 to 8 (#396) once the ⌥ captions came out: the 12 was sized to keep `0` and
-        /// the month ends clear of the rounded edge, and with only the teeth left below the bar the
-        /// same gap read as a slack margin under the last row.
-        static let bottomPadding: CGFloat = 8
+        /// Was 12, trimmed to 8 in #396 when the ⌥ captions came out, then back to 14 in #388: both
+        /// earlier numbers were chosen while each bar still carried 7 pt of tick-ruler reserve below it,
+        /// so the *rendered* bottom margin was 15–19 pt however the constant read. Removing the reserve
+        /// dropped it to a real 8 and the last row sat on the card's edge. 14 restores the old optical
+        /// margin and makes it the same value as `limitSpacing`, so the space below the last bar matches
+        /// the space between bars.
+        static let bottomPadding: CGFloat = 14
         static let rowSpacing: CGFloat = 3
         static let sectionSpacing: CGFloat = 14
-        /// Gap **between limit blocks** (after each section's bar) — a touch tighter than
-        /// `sectionSpacing` so the limit list reads as a group without the header's larger breathing room.
-        static let limitSpacing: CGFloat = 10
+        /// Gap **between limit blocks** (after each section's bar) — the same 14 pt the header takes.
+        ///
+        /// It used to be 10, "a touch tighter than `sectionSpacing` so the limit list reads as a group".
+        /// That reasoning measured the wrong thing: every bar view reserved 7 pt under itself for a tick
+        /// ruler two of the three styles never draw, so the gap between blocks *rendered* as ~25 pt while
+        /// the gap under "Claude" rendered as its honest 14. The list read looser than the header, not
+        /// tighter. With the reserve gone (#388) the two are set equal and finally look it.
+        static let limitSpacing: CGFloat = 14
         static let textSize: CGFloat = dropdownTextSize
         /// Diameter of the service-status glow dot (#188) and the gap between it and the component name.
         static let statusDotDiameter: CGFloat = 9
@@ -1841,7 +1855,9 @@ final class PopupViewController: NSViewController {
         // number that mode has to offer would stay hidden. There, show it whenever it exists.
         let showAge = optionHeld || layout.lastUpdateAge >= Self.staleAgeThreshold
             || (servicesAreTheContent && layout.lastUpdateAge > 0)
-        let ageString = showAge ? Self.ageText(layout.lastUpdateAge) : ""
+        // Prefixed with the verb (#388 follow-up): on its own, "just now" beside the plan label
+        // read as a fragment — the header tail says *what* happened then, not just when.
+        let ageString = showAge ? "updated \(Self.ageText(layout.lastUpdateAge))" : ""
         // Header layout (#233): the "Claude" brand title with the "Nm ago" age beside it on the left —
         // **always**, whether or not an awaiting-input count exists. The age belongs to the brand title,
         // not to the right edge: pushing it flush right (the old no-awaiting fallback) made it jump
@@ -1855,7 +1871,7 @@ final class PopupViewController: NSViewController {
         // alone for a nil plan, so this is a gate on the argument, not a second code path.
         let brand = Self.brandTitleLabel(plan: optionHeld ? layout.planLabel : nil)
         // The age rides the ⌥ layer with the plan label (#396): at rest the header is the bare "Claude"
-        // mark, and ⌥ restores the whole tail — `Claude ･ Max (20x) ･ just now`.
+        // mark, and ⌥ restores the whole tail — `Claude ･ Max (20x) ･ updated just now`.
         //
         // The two belong together. Both answer questions asked once rather than watched: which plan
         // this is, and how fresh the numbers are. Leaving the age visible while the plan hid split one
@@ -2276,7 +2292,7 @@ final class PopupViewController: NSViewController {
     ///   global setting on every row would be noise in the resting popup.
     /// - **From the scale actually drawn, not from `barStyle`.** The credits bar is pinned to the
     ///   window scale by its `monthBounds` whatever the user picked (ADR-0092), so reading the setting
-    ///   would caption it `gauge` while it draws Progress — a caption that lies exactly where it is
+    ///   would caption it `balance` while it draws Progress — a caption that lies exactly where it is
     ///   the only thing explaining the odd-looking row.
     ///
     /// `nil` for a row with no bar (unlimited "Extra usage"): there is no scale to name.
@@ -2811,7 +2827,7 @@ final class PopupViewController: NSViewController {
         view.idle = idle   // green knobless pill when the 5h window is idle (#100)
         view.blocked = blocked   // grey instead of green when that idle state is blocked (#158)
         view.isBaseLimit = isBaseLimit   // only base 5h/7d rows render the far-behind blue zone
-        view.barStyle = barStyle   // Progress (gap+marker) vs Pressure/Gauge (marker-less ribbons) — #224
+        view.barStyle = barStyle   // Progress (gap+marker) vs Pressure/Balance (marker-less ribbons) — #224
         view.optionHeld = optionHeld   // the under-bar ruler (teeth + month captions) is ⌥-on-demand
         // Credits only: captions the month's ends and pins the bar to Progress, overriding `barStyle`.
         view.monthBounds = monthBounds

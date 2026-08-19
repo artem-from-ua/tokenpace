@@ -8,15 +8,15 @@ import Foundation
 struct BarStyleTests {
 
     /// Three styles ship; the raw values are persisted in UserDefaults. Two were renamed in #307
-    /// alongside the UI names — see `decodesLegacyRawValues` for the pre-#307 raws. `gauge` is new in
-    /// #326 and has no legacy raw, so it is absent from that table by construction. The fourth case,
+    /// alongside the UI names — see `decodesLegacyRawValues` for those raws. `gauge` joined them in #388,
+    /// when the centred style became **Balance**, so the table now covers three renames. The fourth case,
     /// `mixed`, was never a style at all but a *pair* of them; #329 gave each surface its own key and
     /// retired it (see `legacySurfaceStylesSplitsTheOldKey`).
     @Test func casesAndRawValues() {
-        #expect(BarStyle.allCases == [.progress, .pressure, .gauge])
+        #expect(BarStyle.allCases == [.progress, .pressure, .balance])
         #expect(BarStyle.progress.rawValue == "progress")
         #expect(BarStyle.pressure.rawValue == "pressure")
-        #expect(BarStyle.gauge.rawValue == "gauge")
+        #expect(BarStyle.balance.rawValue == "balance")
     }
 
     /// The scale of every case, spelled out — the table the renderers branch on. Since #329 a style
@@ -25,11 +25,12 @@ struct BarStyleTests {
     @Test func scales() {
         #expect(BarStyle.progress.scale == .window)
         #expect(BarStyle.pressure.scale == .remaining)
-        #expect(BarStyle.gauge.scale == .centred)
+        #expect(BarStyle.balance.scale == .centred)
     }
 
     /// A time marker is meaningful on the **window** scale and nowhere else — on either renormalised
-    /// track it would sit at a fixed spot forever. Until Gauge that implication was an equivalence and
+    /// track it would sit at a fixed spot forever. Until the centred scale (#326) that implication was
+    /// an equivalence and
     /// one bit told the two scales apart; a third marker-less scale breaks the reverse direction, so
     /// what is pinned here is the surviving one-way rule, with the scale itself as the source.
     @Test func theTimeMarkerIsExactlyTheWindowScale() {
@@ -40,11 +41,11 @@ struct BarStyleTests {
 
     /// Gauge is the only case on the centred scale, and it carries no marker — the pair of facts that
     /// makes its centre tick load-bearing rather than decorative (#326).
-    @Test func onlyGaugeIsCentredAndItIsMarkerLess() {
-        for style in BarStyle.allCases where style != .gauge {
+    @Test func onlyBalanceIsCentredAndItIsMarkerLess() {
+        for style in BarStyle.allCases where style != .balance {
             #expect(style.scale != .centred, "\(style)")
         }
-        #expect(!BarStyle.gauge.showsTimeMarker)
+        #expect(!BarStyle.balance.showsTimeMarker)
     }
 
     /// A known raw value round-trips through `Codable`.
@@ -70,6 +71,7 @@ struct BarStyleTests {
         let cases: [(String, BarStyle)] = [
             ("pacing", .progress),   // was "Pace & Time"
             ("simple", .pressure),   // was "Pace"
+            ("gauge", .balance),     // was "Gauge" (#388)
         ]
         for (raw, expected) in cases {
             let style = try JSONDecoder().decode(BarStyle.self, from: Data("\"\(raw)\"".utf8))
@@ -88,10 +90,12 @@ struct BarStyleTests {
         #expect(style == .progress)   // the unknown-raw fallback, not a mapping
     }
 
-    /// The legacy table covers exactly the two renamed cases. Pins the table against a future edit
-    /// that adds a stale entry.
+    /// The legacy table covers exactly the three renamed cases — two from #307, one from #388. Pins
+    /// the table against a future edit that adds a stale entry.
     @Test func legacyTableCoversOnlyTheRenamedCases() {
-        #expect(BarStyle.legacyRawValues == ["pacing": .progress, "simple": .pressure])
+        #expect(
+            BarStyle.legacyRawValues
+                == ["pacing": .progress, "simple": .pressure, "gauge": .balance])
         // Every legacy raw maps to a case whose *current* raw differs — otherwise the entry is dead.
         for (raw, style) in BarStyle.legacyRawValues {
             #expect(style.rawValue != raw, "\(raw)")
@@ -109,7 +113,8 @@ struct BarStyleTests {
             ("simple", .pressure, .pressure),
             ("progress", .progress, .progress),   // current raws split too — the key itself is gone
             ("pressure", .pressure, .pressure),
-            ("gauge", .gauge, .gauge),
+            ("gauge", .balance, .balance),     // pre-#388 rename, then doubled
+            ("balance", .balance, .balance),
         ]
         for (raw, menuBar, dropdown) in cases {
             let split = BarStyle.legacySurfaceStyles(for: raw)
@@ -127,11 +132,12 @@ struct BarStyleTests {
     }
 
     /// The Title-Case name both surfaces read (#396) — Settings segments verbatim, the dropdown
-    /// caption lowercased from it. Pinned here so a rename (#387/#388) is a deliberate edit with a
-    /// failing test, not a silent divergence between the two surfaces.
+    /// caption lowercased from it. Pinned here so a rename is a deliberate edit with a failing test,
+    /// not a silent divergence between the two surfaces — which is exactly how #388 landed: the
+    /// centred style became **Balance**, and this expectation is what made that a conscious change.
     @Test func displayNameIsTitleCasePerStyle() {
         #expect(BarStyle.pressure.displayName == "Pressure")
-        #expect(BarStyle.gauge.displayName == "Gauge")
+        #expect(BarStyle.balance.displayName == "Balance")
         #expect(BarStyle.progress.displayName == "Progress")
     }
 
@@ -141,7 +147,7 @@ struct BarStyleTests {
         for style in BarStyle.allCases {
             #expect(style.caption == style.displayName.lowercased(), "\(style)")
         }
-        #expect(BarStyle.gauge.caption == "gauge")
+        #expect(BarStyle.balance.caption == "balance")
         #expect(BarStyle.progress.caption == "progress")
     }
 

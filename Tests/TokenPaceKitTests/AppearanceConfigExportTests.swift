@@ -245,7 +245,7 @@ struct AppearancePresetValuesCodableTests {
         let decoded = try JSONDecoder().decode(
             AppearancePresetValues.self, from: Data(json.utf8))
         #expect(decoded.menuBarStyle == .pressure)   // the pre-#307 raw still maps, per surface
-        #expect(decoded.dropdownStyle == .gauge)
+        #expect(decoded.dropdownStyle == .balance)
         #expect(decoded.modelLimitsVisibility == .always)
         #expect(decoded.extraUsageVisibility == .onceUsed)
         // This fixture also predates ADR-0086, so it exercises the legacy boolean: `false` → `.never`.
@@ -302,7 +302,7 @@ struct AppearancePresetValuesCodableTests {
         let cases: [(String, BarStyle)] = [
             ("simple", .pressure),   // pre-#307 "Pace"
             ("pacing", .progress),   // pre-#307 "Pace & Time"
-            ("gauge", .gauge),
+            ("gauge", .balance),     // pre-#388 raw
         ]
         for (raw, expected) in cases {
             let decoded = try JSONDecoder().decode(

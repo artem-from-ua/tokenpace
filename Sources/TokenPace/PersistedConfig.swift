@@ -72,11 +72,11 @@ enum PersistedConfig {
         /// does.
         static let retiredResetCountdownModeMenuBar = "resetCountdownModeMenuBar"
         /// How the **menu-bar widget** presents its pacing bars (#224, split per surface in #329),
-        /// stored as the raw `BarStyle` string. Default `.gauge` (from the `.workHarder` preset) —
+        /// stored as the raw `BarStyle` string. Default `.balance` (from the `.workHarder` preset) —
         /// see the property.
         static let menuBarStyle = "menuBar.style"
         /// How the **dropdown popup** presents its pacing bars (#329), stored as the raw `BarStyle`
-        /// string. Default `.gauge` — see the property.
+        /// string. Default `.balance` — see the property.
         static let dropdownStyle = "dropdown.style"
         /// Legacy pre-#381 keys for the two styles, before the surface became a key prefix. Read once by
         /// ``PersistedConfig/migrateAppearanceKeysIfNeeded()``, then cleared.
@@ -389,14 +389,21 @@ enum PersistedConfig {
 
     /// How the **menu-bar widget** presents its pacing bars (#224, per-surface since #329). Stored as
     /// the raw `BarStyle` string; an absent key or an unrecognised value (a newer build's) reads as
-    /// the preset default — ``BarStyle/gauge``, from `.workHarder`. Render-only: never changes the
+    /// the preset default — ``BarStyle/balance``, from `.workHarder`. Render-only: never changes the
     /// underlying layout, severity, or which bars are shown.
     ///
-    /// The getter looks up `rawValue` **only**, not `BarStyle`'s legacy-aware `Codable` decode, so a
-    /// value written by an older build (`"pacing"`, `"simple"`, `"mixed"`) would silently read as the
-    /// default. That is why ``migrateBarStyleIfNeeded()`` must run before the first read — see there.
+    /// The getter consults ``BarStyle/legacyRawValues`` before falling back, so a raw written by an
+    /// older build (`"pacing"`, `"simple"`, `"gauge"`) reads as the case that replaced it rather than
+    /// silently as the preset default. That makes this path agree with the three others that can see a
+    /// stored raw — ``migrateBarStyleIfNeeded()``, ``migrateAppearanceKeysIfNeeded()`` and
+    /// `AppearanceConfigValues`' decode — all four read the same table (#388). `"mixed"` stays
+    /// unresolvable here: it names a *pair*, and only the migration can split it.
     static var menuBarStyle: BarStyle {
-        get { BarStyle(rawValue: defaults.string(forKey: Key.menuBarStyle) ?? "") ?? AppearancePreset.defaultValues.menuBarStyle }
+        get {
+            let raw = defaults.string(forKey: Key.menuBarStyle) ?? ""
+            return BarStyle(rawValue: raw) ?? BarStyle.legacyRawValues[raw]
+                ?? AppearancePreset.defaultValues.menuBarStyle
+        }
         set { defaults.set(newValue.rawValue, forKey: Key.menuBarStyle) }
     }
 
@@ -404,7 +411,11 @@ enum PersistedConfig {
     /// ``menuBarStyle``, so the compact bar and the roomy popup can differ. Same storage, same
     /// preset-default fallback, and the same dependence on ``migrateBarStyleIfNeeded()``.
     static var dropdownStyle: BarStyle {
-        get { BarStyle(rawValue: defaults.string(forKey: Key.dropdownStyle) ?? "") ?? AppearancePreset.defaultValues.dropdownStyle }
+        get {
+            let raw = defaults.string(forKey: Key.dropdownStyle) ?? ""
+            return BarStyle(rawValue: raw) ?? BarStyle.legacyRawValues[raw]
+                ?? AppearancePreset.defaultValues.dropdownStyle
+        }
         set { defaults.set(newValue.rawValue, forKey: Key.dropdownStyle) }
     }
 
@@ -704,6 +715,43 @@ enum PersistedConfig {
                 "service-status-dot: migrated key → \(Key.showServiceStatusDot, privacy: .public)")
         }
         defaults.removeObject(forKey: Key.legacyShowServiceStatusDot)
+
+        // …and then rewrite any *value* that is still a legacy raw under a current key. The passes
+        // above only move a raw from an old key to a new one, so an install that already made that
+        // move keeps whatever string it moved — a renamed case then lives on disk indefinitely,
+        // readable only because the getters consult the same legacy tables. That is a working
+        // fallback, not a resting state: `defaults read` shows a value matching no case name, an
+        // exported config carries it, and the day a legacy entry is pruned the setting resets for
+        // real. Rewriting here means the tables carry upgrades, never the stored state.
+        refreshRawValue(Key.menuBarStyle, label: "menu-bar-style") { BarStyle.legacyRawValues[$0]?.rawValue }
+        refreshRawValue(Key.dropdownStyle, label: "dropdown-style") { BarStyle.legacyRawValues[$0]?.rawValue }
+        refreshRawValue(Key.colorsTell, label: "colors-tell") { ColorAdvice.legacyRawValues[$0]?.rawValue }
+        refreshRawValue(Key.hideTop5hBar, label: "hide-top-5h-bar") { TopBarHiding.legacyRawValues[$0]?.rawValue }
+        refreshRawValue(Key.showPerModelLimits, label: "show-per-model-limits") {
+            PopupSectionVisibility.legacyRawValues[$0]?.rawValue
+        }
+        refreshRawValue(Key.showExtraUsage, label: "show-extra-usage") {
+            PopupSectionVisibility.legacyRawValues[$0]?.foldedForCredits.rawValue
+        }
+    }
+
+    /// The value-level counterpart of ``migrateRawKey(from:to:label:)``: rewrite a **current** key whose
+    /// stored string is a legacy raw, in place.
+    ///
+    /// `migrateRawKey` only fires while the *key* is moving. Once an install has made that move, a raw
+    /// renamed later (`"gauge"` → `"balance"`, #388) sits under the current key untouched, and only the
+    /// getters' legacy lookup keeps it readable. This closes that gap so a rename is finished on disk
+    /// rather than translated on every read.
+    ///
+    /// **Idempotent by construction, no marker key** — the same property the sibling passes rely on:
+    /// `resolve` answers only for raws that are *not* current, so one rewrite removes the condition that
+    /// triggered it. A value already current is left alone, and one that belongs to no case is left for
+    /// the getter's preset-default fallback (the meaning an unreadable value has always had here).
+    private static func refreshRawValue(_ key: String, label: String, resolve: (String) -> String?) {
+        guard let stored = defaults.string(forKey: key), let fresh = resolve(stored) else { return }
+        defaults.set(fresh, forKey: key)
+        AppLogger.lifecycle.notice(
+            "\(label, privacy: .public): rewrote stored \(stored, privacy: .public) → \(fresh, privacy: .public)")
     }
 
     /// One key's half of ``migrateAppearanceKeysIfNeeded()``: move a raw string from `from` to `to`,
@@ -740,7 +788,7 @@ enum PersistedConfig {
     /// | `"mixed"` | `.pressure` | `.progress` |
     /// | `"pacing"` / `"progress"` | `.progress` | `.progress` |
     /// | `"simple"` / `"pressure"` | `.pressure` | `.pressure` |
-    /// | `"gauge"` | `.gauge` | `.gauge` |
+    /// | `"gauge"` / `"balance"` | `.balance` | `.balance` |
     ///
     /// **Why it is not optional.** Both getters resolve an unrecognised raw to the preset default,
     /// silently — and after #329 *every* stored `barStyle` is unrecognised, since the key itself is
@@ -749,7 +797,7 @@ enum PersistedConfig {
     /// rather than collapsing it to one style is what keeps that upgrade visually invisible.
     ///
     /// **A user who never set the key is not migrated at all** — nothing is written, both getters
-    /// fall back to `.workHarder`, and that user sees the new default (Gauge). That is intended: the
+    /// fall back to `.workHarder`, and that user sees the new default (Balance). That is intended: the
     /// default moved, and only people who never expressed a preference follow it.
     ///
     /// Runs on every launch and is idempotent: once either new key exists the legacy key is cleared
@@ -786,7 +834,7 @@ enum PersistedConfig {
     /// general form of `resetAppearanceToDefaults()`. Unlike reset (which *removes* keys so getters fall
     /// back to their defaults), this writes explicit values, because a preset can differ from the
     /// factory defaults (e.g. `.controlFreak` turns calm off; `.chill` opts into `.pressure` bars while
-    /// the default `.workHarder` preset uses `.gauge`). The caller re-syncs the model and re-applies the
+    /// the default `.workHarder` preset uses `.balance`). The caller re-syncs the model and re-applies the
     /// values to the widget.
     static func apply(_ preset: AppearancePreset) { applyValues(preset.values) }
 

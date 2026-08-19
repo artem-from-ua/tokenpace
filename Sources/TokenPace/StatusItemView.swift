@@ -69,7 +69,7 @@ final class StatusItemView: NSView {
 
     /// Bar presentation style for **this surface** (#224, per-surface since #329) — fed from
     /// `PersistedConfig.menuBarStyle`. ``BarStyle/progress`` draws the current gap + time-indicator
-    /// marker; ``BarStyle/pressure`` a left-anchored ribbon with no marker; ``BarStyle/gauge`` a
+    /// marker; ``BarStyle/pressure`` a left-anchored ribbon with no marker; ``BarStyle/balance`` a
     /// ribbon growing either way from a centre tick. Render-only (the bar occupies the same rect
     /// whichever it is), so a redraw is all that's needed.
     ///
@@ -163,7 +163,7 @@ final class StatusItemView: NSView {
         /// Width of the dark ring around the time-indicator marker.
         static let tickStroke: CGFloat = 1
         /// Width of the **zero tick** — the permanent mark for the zero each marker-less ribbon grows
-        /// out of: Gauge's centre (#326) and Pressure's origin. Drawn *under* the track in the neutral
+        /// out of: Balance's centre (#326) and Pressure's origin. Drawn *under* the track in the neutral
         /// tick tone rather than over it in the pacing colour, so a lone vertical mark on a 34 pt bar
         /// cannot be mistaken for the Progress time marker: only its ends show, it never moves, and it
         /// carries no colour.
@@ -271,7 +271,7 @@ final class StatusItemView: NSView {
         /// Ring around the time-indicator marker so it stays distinct over any coloured zone —
         /// `.separatorColor`, so the ring flips with the bar (dark ring on a light bar and vice versa).
         static var indicatorStroke: NSColor { ColorRole.indicatorRing.defaultColor }
-        /// The **Gauge** centre tick (#326) — the *calm fill's* own tone by default (``calmWhite`` =
+        /// The **Balance** centre tick (#326) — the *calm fill's* own tone by default (``calmWhite`` =
         /// `labelColor`, re-alpha'd through ``bright(_:)`` at the draw site, exactly as the calm bar
         /// fill is). That is the menu bar's mono foreground: white on a dark bar, black on a light one,
         /// flipping with the appearance. The zero is furniture of the scale, not a status, so it takes
@@ -1005,7 +1005,7 @@ final class StatusItemView: NSView {
             // swap fade rather than snap.
             let fill = animated(idleTarget, window: bar.window, part: .fill)
             let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.barCorner, yRadius: Metrics.barCorner)
-            // Gauge's zero is the centre, so its idle pill sits there rather than at the left edge —
+            // Balance's zero is the centre, so its idle pill sits there rather than at the left edge —
             // the same "grey track + zero pill" shape ADR-0078 fixes for every style, drawn on this
             // style's own scale. Its centre tick goes down first, under the track, exactly as the
             // pacing path does: the tick is drawn in *every* state, which is what makes the zero
@@ -1034,7 +1034,7 @@ final class StatusItemView: NSView {
 
         // The zero tick goes down BEFORE the track (#326): the track then covers its middle and only
         // the ends stand proud, which is what keeps it from reading as a Progress time marker. True of
-        // Pressure's origin tick for exactly the same reason it is of Gauge's centre one.
+        // Pressure's origin tick for exactly the same reason it is of Balance's centre one.
         if barStyle.scale != .window { drawZeroTick(in: rect) }
 
         // Whole-bar rounded grey track (drawn first; the gap paints over it). Both flanks of the gap —
@@ -1057,7 +1057,7 @@ final class StatusItemView: NSView {
         // `frozenStripFraction`; it overrides the length, so the stub is unaffected by the rescale.
         // The *style* still decides whether a marker follows, so Progress keeps its full anatomy under
         // the stub instead of collapsing into Pressure.
-        // Gauge (#326, ADR-0079): the ribbon runs from the bar's CENTRE to `0.5 + offset/2`, so its
+        // Balance (#326, ADR-0079): the ribbon runs from the bar's CENTRE to `0.5 + offset/2`, so its
         // direction carries ahead-vs-behind and its length carries by how much. Same colour source as
         // every other style — this changes the geometry, never the verdict. The floor applies for the
         // same reason it does on the Pressure branch, but about the centre: `u == t` is a real,
@@ -1066,7 +1066,7 @@ final class StatusItemView: NSView {
         // both edges here are data, and the floor must grow symmetrically about the zero — pinning
         // would shove the pill off-centre and make "dead on pace" read as a small lead.
         if barStyle.scale == .centred {
-            let offset = frozenStrip(for: bar).map { $0 * 2 - 1 } ?? l.gaugeOffset
+            let offset = frozenStrip(for: bar).map { $0 * 2 - 1 } ?? l.balanceOffset
             let far = 0.5 + offset / 2
             fillZone(from: min(0.5, far), to: max(0.5, far), in: rect, width: w,
                      color: calmedGapColor(l, window: bar.window), floorEmptyToPill: true,
@@ -1118,7 +1118,7 @@ final class StatusItemView: NSView {
     }
 
     /// The **zero tick**: a permanent 1 pt vertical mark at the zero the ribbon grows out of, in the
-    /// neutral tick tone, drawn **under** the track so only its protruding ends show. Gauge's zero is
+    /// neutral tick tone, drawn **under** the track so only its protruding ends show. Balance's zero is
     /// the bar's midpoint (#326, ADR-0079); Pressure's is the left-anchored ribbon's own origin.
     ///
     /// Deliberately *not* built on ``drawTimeMarker(at:colour:in:)`` despite the similar shape — the
@@ -1138,7 +1138,7 @@ final class StatusItemView: NSView {
     /// the pill it marks however that snap resolves, instead of restating the arithmetic here and
     /// drifting from it the next time the inset geometry moves (`minStripWidth` is the one knob).
     private func drawZeroTick(in rect: NSRect) {
-        // Gauge measures from the middle; Pressure from the zero pill's centre.
+        // Balance measures from the middle; Pressure from the zero pill's centre.
         let cx: CGFloat = barStyle.scale == .centred
             ? PopupBarView.scaleX(0.5, in: rect).rounded()
             : (PopupBarView.pillRect(at: 0, in: rect)?.midX ?? PopupBarView.scaleX(0, in: rect)).rounded()
@@ -1240,7 +1240,7 @@ final class StatusItemView: NSView {
             return bright(Palette.calmWhite)
         }
 
-        // Gauge and Progress honour the setting. When `mutesBlue` is off the far-behind blue is exempt
+        // Balance and Progress honour the setting. When `mutesBlue` is off the far-behind blue is exempt
         // from muting, so a big surplus stays coloured — there the scale *does* draw the quiet side, so
         // the colour has a ribbon to qualify.
         if colorsTell.mutesCalm && l.isCalm && !(l.severity == .farBehind && !colorsTell.mutesBlue) {

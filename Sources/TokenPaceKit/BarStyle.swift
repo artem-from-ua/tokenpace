@@ -5,9 +5,10 @@ import Foundation
 /// Which **scale** a bar is measured on — the geometry underneath a ``BarStyle``, named explicitly
 /// rather than derived from whether a marker is drawn (#326, ADR-0079).
 ///
-/// Until Gauge there were two scales and exactly one bit told them apart, so "no marker" and
+/// Until the centred scale arrived (#326) there were two scales and exactly one bit told them
+/// apart, so "no marker" and
 /// "remaining scale" were one decision (`menuBarUsesPressureScale == !menuBarShowsTimeMarker`).
-/// A third scale breaks that identity: Gauge has no marker either, yet it is not Pressure. The
+/// A third scale breaks that identity: Balance has no marker either, yet it is not Pressure. The
 /// implication that survives is one-directional and still worth naming — **a time marker is only
 /// meaningful on ``window``** — so the marker flags are now *derived from* the scale rather than
 /// the reverse, and the renderers branch on the scale itself.
@@ -19,7 +20,7 @@ public enum BarScale: String, Sendable, Equatable, CaseIterable {
     /// Fractions of the **time remaining**, left-anchored: ``BarLayout/pressureLength``.
     case remaining
     /// Fractions of the time remaining, **signed about the bar's centre**:
-    /// ``BarLayout/gaugeOffset``. Zero is the middle; the ribbon grows right when ahead of pace and
+    /// ``BarLayout/balanceOffset``. Zero is the middle; the ribbon grows right when ahead of pace and
     /// left when behind.
     case centred
 }
@@ -29,7 +30,7 @@ public enum BarScale: String, Sendable, Equatable, CaseIterable {
 /// How a pacing bar is **presented** on **one surface** — chosen by the user via a segmented control
 /// in Settings → Appearance, separately for the menu-bar widget and the dropdown popup (#329). A bar
 /// is drawn either as **Progress** (grey track + coloured gap + a "you are here" time-indicator
-/// marker), as **Pressure** (a left-anchored colour ribbon, no marker), or as **Gauge** (a ribbon
+/// marker), as **Pressure** (a left-anchored colour ribbon, no marker), or as **Balance** (a ribbon
 /// growing either way from the centre, no marker). All of them carry the *same* pacing state colour,
 /// so they never disagree on "what state am I in".
 ///
@@ -38,12 +39,12 @@ public enum BarScale: String, Sendable, Equatable, CaseIterable {
 /// - **Progress** draws on the **window** scale — two positional marks on one track: the marker at
 ///   `timeFraction`, and the capsule's far edge, which is always `usageFraction`.
 /// - **Pressure** draws on the **remaining** scale — ``BarLayout/pressureLength``, which is exactly
-///   the ahead half of the Gauge scale: `max(0, gaugeOffset)` = `clamp(r, 0, 1)`,
+///   the ahead half of the Balance scale: `max(0, balanceOffset)` = `clamp(r, 0, 1)`,
 ///   `r = (u − t)/(1 − t)`. Its zero is `t` itself. Width alone encodes severity there, at fixed
 ///   positions: zero is exactly on pace, `0.16` is where yellow turns orange (the `aheadThreshold`
 ///   itself), `1` is exhausted. A time marker is impossible: on this track it would sit at zero
 ///   forever.
-/// - **Gauge** draws on the **centred** scale — ``BarLayout/gaugeOffset`` (`clamp(r, −1, +1)`).
+/// - **Balance** draws on the **centred** scale — ``BarLayout/balanceOffset`` (`clamp(r, −1, +1)`).
 ///   Same quantity as Pressure, zero moved to the middle, so the ribbon's *direction* says
 ///   ahead-or-behind and its length says by how much. This is the only scale that renders the
 ///   underpace half at all: Pressure's `max(0, …)` flattens every calm state onto one minimum pill,
@@ -63,8 +64,9 @@ public enum BarScale: String, Sendable, Equatable, CaseIterable {
 ///
 /// Stored raw-string in `UserDefaults` with a forward-compatible decode so a newer build's value never
 /// makes an older build fail — an unknown raw falls back to ``progress`` (the shipped behaviour).
-/// Raws written by older builds (`"pacing"`/`"simple"` from before #307, and `"mixed"` from before
-/// #329) are migrated in `PersistedConfig.migrateBarStyleIfNeeded` via ``legacySurfaceStyles(for:)``;
+/// Raws written by older builds (`"pacing"`/`"simple"` from before #307, `"mixed"` from before #329,
+/// and `"gauge"` from before #388) are migrated in `PersistedConfig.migrateBarStyleIfNeeded` via
+/// ``legacySurfaceStyles(for:)``;
 /// they must **not** be silently swallowed by that fallback, which is why the migration runs before
 /// any read.
 public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
@@ -79,30 +81,38 @@ public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
     /// to correlate against. Raw value was `"simple"` before #307.
     case pressure = "pressure"
     /// A colour ribbon anchored to the bar's **centre** (#326), growing **right** when spending is
-    /// ahead of pace and **left** when it is behind, its signed length ``BarLayout/gaugeOffset``. A
+    /// ahead of pace and **left** when it is behind, its signed length ``BarLayout/balanceOffset``. A
     /// permanent centre tick marks the zero — without it the direction would have nothing to be a
     /// direction *from*. No time marker: like Pressure, this scale has no position for one.
-    case gauge = "gauge"
+    ///
+    /// Raw value was `"gauge"` before #388, when the style was called **Gauge**. That name said
+    /// *instrument*, and "pressure gauge" made it read as a variant of ``pressure`` — the opposite
+    /// of the real relation, since ``BarLayout/pressureLength`` is this scale's ahead half.
+    /// **Balance** names what actually distinguishes it: a zero in the middle, deviation either way.
+    /// Unrelated to the credits API's `spend.balance` (a money figure this app never decodes).
+    case balance = "balance"
 
-    /// The style's name as a **word**, Title Case: `"Pressure"` / `"Gauge"` / `"Progress"`.
+    /// The style's name as a **word**, Title Case: `"Pressure"` / `"Balance"` / `"Progress"`.
     ///
     /// The single source for both places a user reads a style name: the Settings segments
     /// (`AppearanceBarStyle.segments`, verbatim) and the dropdown's per-bar caption (lowercased —
-    /// see ``caption``). Kept here rather than beside either surface so a rename lands once: #387 /
-    /// #388 propose renaming Gauge, and two literals would mean two half-renames.
+    /// see ``caption``). Kept here rather than beside either surface so a rename lands once — which
+    /// is what #388 then did: `"Gauge"` became `"Balance"` by editing this one line, and both
+    /// surfaces followed. Two literals would have meant two half-renames.
     ///
     /// Spelled out rather than derived from `rawValue`: the raw values are **persisted** keys, and
-    /// deriving display text from them would make a stored string load-bearing for the UI.
+    /// deriving display text from them would make a stored string load-bearing for the UI. That
+    /// separation is what let #388 change the word here while the stored raw migrated separately.
     public var displayName: String {
         switch self {
         case .pressure: return "Pressure"
-        case .gauge:    return "Gauge"
+        case .balance:  return "Balance"
         case .progress: return "Progress"
         }
     }
 
     /// The style's name as it appears **in the dropdown**, beside each bar's title under ⌥ (#396):
-    /// lowercase — `"pressure"` / `"gauge"` / `"progress"`.
+    /// lowercase — `"pressure"` / `"balance"` / `"progress"`.
     ///
     /// Lowercase only here, deliberately. In Settings the word is a control's label and takes Title
     /// Case like every other segment; in the popup it is a quiet annotation sitting next to a row
@@ -116,7 +126,7 @@ public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
         switch self {
         case .progress: return .window
         case .pressure: return .remaining
-        case .gauge: return .centred
+        case .balance: return .centred
         }
     }
 
@@ -129,14 +139,19 @@ public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
     /// their **zero** alone, drawn by `PopupBarView.drawZeroTick` and captioned under ⌥.
     public var showsTimeMarker: Bool { scale == .window }
 
-    /// The pre-#307 raw values, mapped to the cases that replaced them.
+    /// Raw values written by older builds, mapped to the cases that replaced them.
     ///
-    /// Only covers the two *renames*. `"mixed"` is not here because it never named a presentation —
-    /// it named a **pair** of them, so it cannot map to a single case; see
-    /// ``legacySurfaceStyles(for:)``.
+    /// Covers the *renames* only, from two separate rounds: `"pacing"`/`"simple"` from #307, and
+    /// `"gauge"` from #388. `"mixed"` is not here because it never named a presentation — it named a
+    /// **pair** of them, so it cannot map to a single case; see ``legacySurfaceStyles(for:)``.
+    ///
+    /// Every entry is load-bearing for someone's stored setting, so entries are **removed only when
+    /// no supported upgrade path can still carry that raw**. `"gauge"` in particular was the shipped
+    /// default (`.workHarder`) before #388, so dropping it would reset the majority of installs.
     public static let legacyRawValues: [String: BarStyle] = [
         "pacing": .progress,
         "simple": .pressure,
+        "gauge": .balance,
     ]
 
     /// Splits a raw value written by an older build into the pair of per-surface styles that
@@ -148,7 +163,7 @@ public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
     /// | `"mixed"` | ``pressure`` | ``progress`` |
     /// | `"pacing"` / `"progress"` | ``progress`` | ``progress`` |
     /// | `"simple"` / `"pressure"` | ``pressure`` | ``pressure`` |
-    /// | `"gauge"` | ``gauge`` | ``gauge`` |
+    /// | `"gauge"` / `"balance"` | ``balance`` | ``balance`` |
     ///
     /// `"mixed"` is why this exists and why it returns a pair: it is the one legacy value whose two
     /// surfaces disagree, so mapping it through ``legacyRawValues`` would have to pick a winner and
@@ -164,10 +179,11 @@ public enum BarStyle: String, Sendable, Equatable, Codable, CaseIterable {
         return (style, style)
     }
 
-    /// Decode with legacy support *before* the forward-compatible fallback (#307): a `"pacing"` /
-    /// `"simple"` raw written by an older build maps to the case that replaced it, rather than being
-    /// swallowed by the unknown-value fallback. Without this, importing a pre-#307 config would
-    /// silently turn `Pace` into `Progress` — the exact trap the rename had to avoid.
+    /// Decode with legacy support *before* the forward-compatible fallback (#307): a `"pacing"`,
+    /// `"simple"` or `"gauge"` raw written by an older build maps to the case that replaced it, rather
+    /// than being swallowed by the unknown-value fallback. Without this, importing an older config
+    /// would silently turn `Pace` into `Progress` (#307) or `Gauge` into `Progress` (#388) — the exact
+    /// trap each rename had to avoid.
     ///
     /// This decodes **one surface**, so `"mixed"` is deliberately *not* handled here: a pair cannot
     /// come out of a single-value container. It is split one level up, in `AppearanceConfigValues`'

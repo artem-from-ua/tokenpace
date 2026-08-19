@@ -223,7 +223,7 @@ struct BarLayoutTests {
 ///
 /// - **window scale** (`gapEnd - gapStart` = `|u − t|`) — what the marker-less bar drew before #307.
 /// - **remaining scale** (``BarLayout/pressureLength`` = `clamp((u − t)/(1 − t), 0, 1)`, i.e. the
-///   ahead half of ``BarLayout/gaugeOffset``) — what it draws now (ADR-0101).
+///   ahead half of ``BarLayout/balanceOffset``) — what it draws now (ADR-0101).
 ///
 /// `minPillFraction` is the renderer's floor expressed as a fraction of the bar: `minStripWidth`
 /// is ¾ of the bar height less 1 pt (2.75 pt at the menu bar's 5 pt, #326) against a 34 pt track
@@ -470,7 +470,7 @@ struct RibbonLengthTests {
     /// The ribbon's zero sits at `t`, so **everything at or behind pace collapses onto it** and the
     /// ribbon starts growing the moment usage passes time. At `t = 50 %` that boundary is `u = 50 %`
     /// exactly. This is the deliberate cost of ADR-0101 — the whole calm side shares one mark,
-    /// because there the action is carried by the colour, and by ``BarStyle/gauge`` for anyone who
+    /// because there the action is carried by the colour, and by ``BarStyle/balance`` for anyone who
     /// wants the surplus drawn.
     @Test func calmStatesCollapseOntoTheZeroAtTime() {
         let t = 0.50
@@ -481,13 +481,13 @@ struct RibbonLengthTests {
     }
 }
 
-// MARK: - gaugeOffset (#326)
+// MARK: - balanceOffset (#326)
 
 /// The **centred** scale: the same signed lead `pressureLength` measures, with zero moved to the
 /// bar's middle so the underpace half renders at all (ADR-0079). The states are the same surveyed
 /// set `RibbonLengthTests` uses, so the two scales can be compared row by row.
-@Suite("BarLayout gauge offset")
-struct GaugeOffsetTests {
+@Suite("BarLayout balance offset")
+struct BalanceOffsetTests {
 
     private struct State {
         let name: String
@@ -525,7 +525,7 @@ struct GaugeOffsetTests {
     /// positives ahead (right). Note the two states the shipped scales cannot separate — "Deep
     /// behind" and "Behind, late" both saturate at `−1` here, but they at least reach the edge
     /// instead of collapsing onto the same minimum pill as "Dead on pace".
-    @Test func gaugeOffsetsPerState() {
+    @Test func balanceOffsetsPerState() {
         let expected: [String: Double] = [
             "Deep behind":       -1.0,      // r = −2.5, clamped
             "Behind, early":     -0.1875,
@@ -542,7 +542,7 @@ struct GaugeOffsetTests {
             "Exhausted":          1.0,
         ]
         for s in Self.states {
-            let got = Self.layout(s).gaugeOffset
+            let got = Self.layout(s).balanceOffset
             #expect(abs(got - expected[s.name]!) < 1e-3, "\(s.name): \(got)")
         }
     }
@@ -552,7 +552,7 @@ struct GaugeOffsetTests {
     @Test func exhaustedAlwaysFillsTheRightHalf() {
         for pct in [0.0, 10, 50, 70, 99] {
             let l = Self.layout(.init(name: "spent", timePct: pct, utilPct: 100))
-            #expect(l.gaugeOffset == 1.0, "t=\(pct)")
+            #expect(l.balanceOffset == 1.0, "t=\(pct)")
         }
     }
 
@@ -572,24 +572,24 @@ struct GaugeOffsetTests {
             (70.0, 40.0, true),
             (40.0, 0.0, false),     // before t = 50 % the left half cannot saturate at all
         ] {
-            let o = Self.layout(.init(name: "surplus", timePct: timePct, utilPct: utilPct)).gaugeOffset
+            let o = Self.layout(.init(name: "surplus", timePct: timePct, utilPct: utilPct)).balanceOffset
             #expect((o <= -1.0 + 1e-9) == expectFull, "t=\(timePct) u=\(utilPct): \(o)")
         }
     }
 
-    /// The acceptance criterion from #326, in its final form (ADR-0101): switching Pressure ↔ Gauge
+    /// The acceptance criterion from #326, in its final form (ADR-0101): switching Pressure ↔ Balance
     /// cannot change what the **ahead** side says, because there is only one expression —
-    /// `pressureLength` *is* `max(0, gaugeOffset)`.
+    /// `pressureLength` *is* `max(0, balanceOffset)`.
     ///
     /// Asserted as an exact identity over the whole reachable grid, with no epsilon: the two are the
     /// same `Double`, not two derivations that happen to agree. Before this the relationship was a
     /// constant difference of `0.20` that only held on the ahead group and had to be maintained by
     /// hand in two parallel formulas.
-    @Test func pressureIsTheGaugeAheadHalf() {
+    @Test func pressureIsTheBalanceAheadHalf() {
         for timePct in stride(from: 1.0, through: 98.0, by: 1) {
             for utilPct in stride(from: 0.0, through: 99.0, by: 1) {
                 let l = Self.layout(.init(name: "grid", timePct: timePct, utilPct: utilPct))
-                #expect(l.pressureLength == max(0, l.gaugeOffset), "t=\(timePct) u=\(utilPct)")
+                #expect(l.pressureLength == max(0, l.balanceOffset), "t=\(timePct) u=\(utilPct)")
             }
         }
     }
@@ -598,7 +598,7 @@ struct GaugeOffsetTests {
     /// be trusted at a glance in both styles.
     @Test func aheadHalfIsMonotonic() {
         let offsets = Self.aheadGroup.map { name -> Double in
-            Self.layout(Self.states.first { $0.name == name }!).gaugeOffset
+            Self.layout(Self.states.first { $0.name == name }!).balanceOffset
         }
         #expect(offsets.allSatisfy { $0 > 0 })
         #expect(zip(offsets, offsets.dropFirst()).allSatisfy { $0 < $1 }, "\(offsets)")
@@ -610,7 +610,7 @@ struct GaugeOffsetTests {
     @Test func deadOnPaceIsTheCentre() {
         for pct in [0.0, 25, 55, 90, 99] {
             let l = Self.layout(.init(name: "tie", timePct: pct, utilPct: pct))
-            #expect(abs(l.gaugeOffset) < 1e-9, "t=u=\(pct)")
+            #expect(abs(l.balanceOffset) < 1e-9, "t=u=\(pct)")
         }
     }
 
@@ -620,7 +620,7 @@ struct GaugeOffsetTests {
         for util in [0.0, 40, 100] {
             let l = PacingModel.barLayout(
                 utilization: util, resetsAt: now - 1, now: now, window: .fiveHour)
-            #expect(l.gaugeOffset == 1.0, "u=\(util)")
+            #expect(l.balanceOffset == 1.0, "u=\(util)")
         }
     }
 
@@ -630,7 +630,7 @@ struct GaugeOffsetTests {
     @Test func offsetStaysInRange() {
         for timePct in stride(from: 1.0, through: 98.0, by: 1.0) {
             for utilPct in stride(from: 0.0, through: 99.0, by: 1.0) {
-                let o = Self.layout(.init(name: "grid", timePct: timePct, utilPct: utilPct)).gaugeOffset
+                let o = Self.layout(.init(name: "grid", timePct: timePct, utilPct: utilPct)).balanceOffset
                 #expect(!o.isNaN, "t=\(timePct) u=\(utilPct)")
                 #expect(o >= -1.0 && o <= 1.0, "t=\(timePct) u=\(utilPct): \(o)")
             }
@@ -644,7 +644,7 @@ struct GaugeOffsetTests {
         for timePct in stride(from: 1.0, through: 98.0, by: 1.0) {
             for utilPct in stride(from: 0.0, through: 99.0, by: 1.0) {
                 let l = Self.layout(.init(name: "grid", timePct: timePct, utilPct: utilPct))
-                let o = l.gaugeOffset
+                let o = l.balanceOffset
                 if utilPct > timePct { #expect(o > 0, "t=\(timePct) u=\(utilPct)") }
                 else if utilPct < timePct { #expect(o < 0, "t=\(timePct) u=\(utilPct)") }
                 else { #expect(o == 0, "t=\(timePct) u=\(utilPct)") }

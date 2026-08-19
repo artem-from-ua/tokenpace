@@ -7,6 +7,12 @@ superseded_by: []
 
 # ADR-0101: Pressure — це права половина Gauge, а коефіцієнта шкали більше немає
 
+> **Стиль перейменовано: `Gauge` → `Balance`** ([ADR-0109](0109-centred-style-renamed-to-balance.md),
+> #388). Теза цього ADR чинна дослівно — змінилися лише імена: `BarLayout.gaugeOffset` став
+> `balanceOffset`, а заголовок треба читати як «Pressure — це права половина **Balance**».
+> Тест, названий тут у прозі `pressureIsTheGaugeAheadHalf`, тепер зветься
+> `pressureIsTheBalanceAheadHalf`.
+
 > Частково витісняє [ADR-0076](0076-pressure-scale-for-marker-less-bar.md): нуль стрічки більше не
 > зсунутий лівіше за `t` — доданок `(k − 1)` видалено, тож «рівно за планом» малює **нуль**, а не
 > 20 % бару. Разом із ним відпадають таблиця фіксованих ширин (§«Ширина сама кодує severity») і

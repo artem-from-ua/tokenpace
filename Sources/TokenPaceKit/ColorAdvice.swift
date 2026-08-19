@@ -36,7 +36,7 @@ public enum ColorAdvice: String, Sendable, Equatable, Codable, CaseIterable {
     /// all mute to white. The quietest look (`.chill`).
     case slowDown = "slowDown"
     /// Orange **and** the far-behind blue stay coloured — the blue is the "there is spare capacity"
-    /// advice, and it survives here because under Gauge/Progress its length saturates: past the middle
+    /// advice, and it survives here because under Balance/Progress its length saturates: past the middle
     /// of a window a big surplus and a small one draw the same full half, so colour is the only thing
     /// left that distinguishes them. **Default** (`.workHarder`).
     case slowDownOrSpeedUp = "slowDownOrSpeedUp"

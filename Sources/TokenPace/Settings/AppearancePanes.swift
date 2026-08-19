@@ -184,7 +184,7 @@ struct MenuBarPane: View {
             Section {
                 // Bar style, menu-bar copy (#224, rescaled in #307, per-surface since #329). All three
                 // show the pacing state by colour and differ in *scale*: Progress marks positions in
-                // the window, Pressure measures the gap against the time left, Gauge measures the same
+                // the window, Pressure measures the gap against the time left, Balance measures the same
                 // thing from a centred zero so the underpace side is drawn too.
                 //
                 // Picked by picture, System-Settings-Appearance style: the difference between the
@@ -215,7 +215,7 @@ struct MenuBarPane: View {
                 // with `Style` rather than sitting with the row below.
                 //
                 // Pressure draws the whole quiet side at zero length (`BarLayout.pressureLength` =
-                // `max(0, gaugeOffset)`) *and* `StatusItemView` mutes it to white there regardless of
+                // `max(0, balanceOffset)`) *and* `StatusItemView` mutes it to white there regardless of
                 // this value, so every segment would render the same bar. `Slow down` is the segment
                 // that describes what is actually on screen — only the "too fast" orange keeps colour —
                 // so the control reports the truth instead of offering a choice that does nothing.
@@ -228,7 +228,7 @@ struct MenuBarPane: View {
                 //
                 // **The stored value is never written here.** `displayedColorAdvice` swaps only what is
                 // *drawn*; `PersistedConfig.colorsTell` keeps whatever the user last chose, so switching
-                // back to Gauge or Progress restores it with no bookkeeping of a "previous" value — the
+                // back to Balance or Progress restores it with no bookkeeping of a "previous" value — the
                 // store already is that memory.
                 HStack {
                     // The title dims with the control below it — `.disabled` sits on the whole `HStack`,
@@ -308,7 +308,7 @@ struct DropdownPane: View {
                 // Bar style, dropdown copy (#329) — the same three styles as the menu bar, chosen
                 // separately. Its hint states the Extra-usage exception, and states only the fact: that
                 // bar is always Progress whatever is picked here, so a Progress bar sitting under a
-                // column of Pressure/Gauge bars reads as documented behaviour rather than a bug worth
+                // column of Pressure/Balance bars reads as documented behaviour rather than a bug worth
                 // reporting. The hint names the *bar*, not the section: this page sets how bars are
                 // drawn, and the section also carries text and a badge that this exception says nothing
                 // about. The reasons stay here rather than in the hint — its window is a calendar
@@ -422,16 +422,17 @@ struct DropdownPane: View {
 /// for the release-notes recipe in `docs/guides/releasing.md`, which greps the titles out of this
 /// file.
 ///
-/// Ordered **Pressure · Gauge · Progress**, not by `allCases`: it reads as a gradient of how much
+/// Ordered **Pressure · Balance · Progress**, not by `allCases`: it reads as a gradient of how much
 /// positional information the bar carries — length alone, then length plus direction, then two
 /// positions on the window. Declaration order is pinned by its own test and is free to differ.
 @MainActor
 enum AppearanceBarStyle {
     static let segments: [SegmentedControl<BarStyle>.Segment] = [
         // Titles from `BarStyle.displayName`, not literals here (#396): the dropdown now captions each
-        // bar with the same word, and #387/#388 propose renaming Gauge — one source, one rename.
+        // bar with the same word, and #388 renamed the centred style through it — one source, one
+        // rename. Two literals here would have meant two half-renames.
         .init(value: .pressure, title: BarStyle.pressure.displayName),
-        .init(value: .gauge, title: BarStyle.gauge.displayName),
+        .init(value: .balance, title: BarStyle.balance.displayName),
         .init(value: .progress, title: BarStyle.progress.displayName),
     ]
 }

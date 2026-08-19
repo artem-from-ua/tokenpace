@@ -97,7 +97,7 @@ enum DropdownBarStylePreviewRenderer {
         // ruler: ⌥ must not reach a specimen. In the live dropdown the modifier reveals the explanatory
         // teeth and the `0` caption *while held*, so a tile baked with them on advertises a state the
         // row is not in — and, measured, that caption dominates a tile this size. Nothing identifying is
-        // lost: the mark that tells Pressure from Gauge is the zero struck through the track, which
+        // lost: the mark that tells Pressure from Balance is the zero struck through the track, which
         // `drawZeroTick` draws unconditionally, in every style, held or not.
         //
         // No `colorAnimator` either — a specimen has no previous value to ease away from, so every

@@ -26,7 +26,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
     /// Exactly `.chill`, but with **Work harder** on: the far-behind blue stays coloured under calm
     /// colours (a nudge that you're well under pace) while everything else stays calm. Sits between
     /// `.chill` and `.controlFreak`. The **default** preset, and so the source of every Appearance
-    /// default — including **Gauge** bars on both surfaces (#329).
+    /// default — including **Balance** bars on both surfaces (#329).
     case workHarder = "workHarder"
     /// Everything on and loud: calm colours off, all bars/dots/glyphs shown, the dropdown's credits and
     /// per-model sections pinned open (`.always`), and the dense
@@ -56,7 +56,7 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 menuBarStyle: .pressure,
                 dropdownStyle: .pressure)
         case .workHarder:
-            // `.chill` plus the "you have spare capacity" advice, and **Gauge** bars on both surfaces
+            // `.chill` plus the "you have spare capacity" advice, and **Balance** bars on both surfaces
             // (#329) — the style that renders the underpace half, so an unspendable surplus is visible
             // rather than flattened. The two changes are the same idea from two directions: the colour
             // says there is room, the scale says how much. When blocked, keep the bars beside the pause.
@@ -68,8 +68,8 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
                 // bar (blue far-behind), not in permanently expanded popup sections.
                 modelLimitsVisibility: .whenItNeedsAttention,
                 extraUsageVisibility: .onceUsed,
-                menuBarStyle: .gauge,
-                dropdownStyle: .gauge)
+                menuBarStyle: .balance,
+                dropdownStyle: .balance)
         case .controlFreak:
             // Show everything: nothing muted, nothing hidden, every glyph/dot/credits/per-model row on,
             // dense pacing bars. When blocked, keep the bars beside the pause icon.
@@ -105,9 +105,9 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
     ///   keeps the per-model rows folded until one turns orange (`.whenItNeedsAttention`), so nothing
     ///   speaks until a limit actually presses.
     /// - `.workHarder` differs from `.chill` in exactly two things, and both are about seeing the
-    ///   *underspend*: the far-behind blue stays coloured (`.slowDownOrSpeedUp`), and `Gauge` draws the
+    ///   *underspend*: the far-behind blue stays coloured (`.slowDownOrSpeedUp`), and `Balance` draws the
     ///   below-pace half instead of flattening it to a minimum pill. The two are complementary rather
-    ///   than redundant — past the middle of a window the Gauge half saturates, so colour is what still
+    ///   than redundant — past the middle of a window the Balance half saturates, so colour is what still
     ///   separates a large surplus from a small one.
     /// - `.controlFreak` turns muting off entirely (`.howItsGoing`), pins both bars on screen (`.never`)
     ///   and both popup sections open (`.always`).

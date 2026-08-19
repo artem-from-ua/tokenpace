@@ -190,7 +190,7 @@ Ahead-поріг **звужується** з часом (лід наприкін
 | Вікно | 5h / 7d | місяць; у `BarLayout` підставляється 7d як плейсхолдер |
 | Синій | так (базові) | **ніколи** (`blueAllowed: false`) |
 | Бар існує? | завжди | **лише коли є cap** |
-| Стиль подачі | за `dropdownStyle` (Pressure / Gauge / Progress) | **завжди Progress**; `BarStyle` ігнорується ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)) |
+| Стиль подачі | за `dropdownStyle` (Pressure / Balance / Progress) | **завжди Progress**; `BarStyle` ігнорується ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)) |
 | Тіки | набір за стилем (частки вікна / 20 % / 0.5) | **жодного**; натомість два підписи країв місяця (`Jan 1` / `Jan 31`) |
 
 **Підписи країв — теж UTC, і це видимий користувачеві текст.** На межі місяця вони можуть на кілька
@@ -301,7 +301,7 @@ Menu bar зветься **«Colors tell me»**, сегменти — нижче 
 .pressure || colorsTell.mutesCalm`). Саме тому рядок «Colors tell me» під Pressure **стає неактивним і
 показує `Slow down`**: під цим стилем кольоровим лишається рівно помаранчевий «витрачаєш зашвидко», а
 це і є той сегмент. Контрол звітує про стан замість пропонувати вибір, який нічого не змінить;
-збережене значення не переписується й повертається на Gauge чи Progress.
+збережене значення не переписується й повертається на Balance чи Progress.
 
 **Ці три поверхні більше не читають `ColorAdvice` взагалі**
 ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md),
@@ -335,7 +335,7 @@ Menu bar зветься **«Colors tell me»**, сегменти — нижче 
 | Помаранчевий при `u <= t` | кінець-override недосяжний на спокійному боці |
 | Синій бар зі словом «far behind» на Opus | `isFarBehind` гейтиться `isBaseLimit` |
 | Credits-бар при `limit == nil` | `barLayout` повертає `nil` — бару немає |
-| Credits-бар у Pressure чи Gauge | Завжди шкала вікна, незалежно від `dropdownStyle` ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)) |
+| Credits-бар у Pressure чи Balance | Завжди шкала вікна, незалежно від `dropdownStyle` ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)) |
 | Credits-бар із тіками | Його лінійка — два підписи країв місяця, зубців немає (0092); та й самі підписи видно **лише під ⌥** ([ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md)) — без нього бар стоїть без лінійки взагалі |
 | Idle-бар із маркером часу | idle малює нуль без маркера й зон |
 | Idle-бар із заливкою на всю ширину | idle — це пігулка на нулі |

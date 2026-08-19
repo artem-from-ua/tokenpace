@@ -28,7 +28,7 @@ enum BarStylePreviewRenderer {
     /// signed lead is `r = −1`, so its ribbon clips to zero and draws as the bare minimum pill. That
     /// **is** the demonstration: the tile shows that Pressure spends its whole width on the ahead side
     /// and says nothing about a surplus, which is precisely the difference between it and the other
-    /// two scales. Progress draws the same window as a mid-bar gap with a marker; Gauge fills its
+    /// two scales. Progress draws the same window as a mid-bar gap with a marker; Balance fills its
     /// entire left half. Three shapes, one dataset.
     private enum Specimen {
         /// 5-hour window: a fifth spent with 2 of its 5 hours left — behind pace.

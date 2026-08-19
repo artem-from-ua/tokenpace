@@ -752,7 +752,7 @@ actor StubUsageTransport: UsageTransport {
         /// start. The 7d bar therefore fills end to end, both caps hard against the track's rounded
         /// ends. This is the frame that exercises `stripRect`'s end-snapping: without it the `scaleX`
         /// cap inset leaves a grey sliver past the fill (the "bar doesn't reach the end" bug). Note the
-        /// ribbon in Simple/Mixed spans `gapEnd - gapStart` ≈ 0.9987, not exactly 1 — which is why the
+        /// ribbon in Pressure spans `gapEnd - gapStart` ≈ 0.9987, not exactly 1 — which is why the
         /// snap tests a band rather than equality.
         case edgeExtremes
 
@@ -775,11 +775,11 @@ actor StubUsageTransport: UsageTransport {
         ///   yellow and orange holding visibly different widths — and it is the tightest such pair, so
         ///   it is the row to look at when judging whether yellow still reads as a lead at all.
         ///
-        /// Switch Bar style across Pressure / Mixed / Progress on this frame: Progress must be
+        /// Switch Bar style across Pressure / Balance / Progress on this frame: Progress must be
         /// pixel-identical to its pre-#307 rendering, Pressure visibly wider on the 5h row.
         case pressureSweep
 
-        /// **Gauge-scale** frame (#326, ADR-0079): one row on each side of the centre, so the style's
+        /// **Balance-scale** frame (#326, ADR-0079): one row on each side of the centre, so the style's
         /// whole point — that the ribbon has a *direction* — is visible on one screen.
         ///
         /// - **5h** — `t = 90 %, u = 70 %`: a 20 pp surplus with 10 % of the window left, i.e. twice
@@ -793,15 +793,15 @@ actor StubUsageTransport: UsageTransport {
         ///   draws — since ADR-0101 Pressure is exactly this half, so switching between the two styles
         ///   cannot move it). Paired with the 5h row it shows the two directions at once.
         ///
-        /// Switch Bar style across all four on this frame: the ahead side must not move between
-        /// Pressure and Gauge, and only Gauge draws anything at all on the 5h row.
-        case gaugeSweep
+        /// Switch Bar style across all three on this frame: the ahead side must not move between
+        /// Pressure and Balance, and only Balance draws anything at all on the 5h row.
+        case balanceSweep
 
         /// **Corner-radius / extreme-fill** frame (#326): the two ends of the fill range on one
         /// screen, which is where the strip's corner rounding is judged.
         ///
         /// - **5h** — `t = 80 %, u = 5 %`: a 75 pp surplus, far past the medium far-behind threshold
-        ///   (2 h of 5 h = 40 pp), so the bar is **blue** and, under Gauge, fills its whole left half
+        ///   (2 h of 5 h = 40 pp), so the bar is **blue** and, under Balance, fills its whole left half
         ///   (`r = −3.75`, clamped). A full-length strip is the only state where the strip's corners
         ///   meet the track's own, so it is the state that shows whether the two radii agree.
         /// - **7d** — `t = 30 %, u = 20 %`: a 10 pp surplus, well under the 28.6 pp far-behind
@@ -845,7 +845,7 @@ actor StubUsageTransport: UsageTransport {
             // and just above the 8.1 % minimum pill: the pair proves yellow and orange stay separable,
             // and the 7d row is the tightest case for that (ADR-0101).
             case .pressureSweep:      return (97, 38, 1_260, 423_360)
-            case .gaugeSweep:         return (70, 38, 1_800, 423_360)
+            case .balanceSweep:         return (70, 38, 1_800, 423_360)
             case .barExtremes:        return (5, 20, 3_600, 423_360)
             }
         }
