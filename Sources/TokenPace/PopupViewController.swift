@@ -375,25 +375,6 @@ final class PopupBarView: NSView {
     /// The marker halo's radius after ``markerGlowScale``.
     private var markerGlow: CGFloat { Self.markerGlowRadius * markerGlowScale }
 
-    /// Scales the ruler's teeth for **this** bar. `1` is the shipped size.
-    ///
-    /// The third of the Legend page's overrides, and the same argument as the other two. In the popup
-    /// the teeth are deliberately faint — 2 × 5 pt of `tertiaryLabelColor`, present enough to read as a
-    /// scale and quiet enough to ignore, which is right for a mark that appears only under ⌥ beside
-    /// live numbers. On the Legend page the ruler is one of the *named parts*: an arrow points at it and
-    /// a caption calls it "ticks — hours / days", and at shipped size the thing being named is barely
-    /// there.
-    var tickScale: CGFloat = 1
-
-    /// Scales the teeth's **width** separately from their height.
-    ///
-    /// Two knobs rather than one because the two axes want different amounts. A tooth that grows in
-    /// both directions at the Legend page's factor stops reading as a ruler mark and starts reading as
-    /// a second marker — height is what makes it visible, width is what makes it heavy.
-    var tickWidthScale: CGFloat = 1
-
-    private var tickLength: CGFloat { Self.Metrics.tickLength * tickScale }
-    private var tickWidth: CGFloat { Self.Metrics.tickWidth * tickWidthScale }
 
     /// The exhausted-pacing red (`aheadColor`'s cap rung). Exposed so the popup can paint the **one**
     /// blocking reset time red (#158) in the same tone the bars use for an exhausted limit. Computed (not
@@ -931,14 +912,14 @@ final class PopupBarView: NSView {
     /// One tooth of the ruler, below the bar and aligned to the same inset scale as the coloured strip.
     private func drawTick(at fraction: CGFloat, in barRect: NSRect) {
         let top = barRect.maxY + Metrics.tickGap           // flipped: just below the bar
-        let bottom = top + tickLength
+        let bottom = top + Metrics.tickLength
         Palette.tick.setFill()
         // Pixel-snap the tooth's centre so it stays crisp at @1x and @2x. Mapped through the same
         // inset scale as the coloured strip / marker so the ruler stays aligned with them.
         let cx = Self.scaleX(fraction, in: barRect).rounded()
-        let rect = NSRect(x: cx - tickWidth / 2, y: top, width: tickWidth, height: bottom - top)
+        let rect = NSRect(x: cx - Metrics.tickWidth / 2, y: top, width: Metrics.tickWidth, height: bottom - top)
         // Rounded (capsule) teeth — corner = half the width so the ends read soft, not blocky.
-        let corner = tickWidth / 2
+        let corner = Metrics.tickWidth / 2
         NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner).fill()
     }
 
