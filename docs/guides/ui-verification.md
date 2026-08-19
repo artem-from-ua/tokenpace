@@ -1084,6 +1084,10 @@ log stream --predicate 'subsystem == "com.artem-n.tokenpace"' --level debug
 `installUpdatesAutomatically` — **default-ON** (opt-out, з #130). Після успіху пункт меню показує 🔵
 «What's new…» (переживає рестарт); після фейлу — 🔴 «…(update failed)…», і цей tag не ретраїться.
 
+> ⚠️ Прогони нижче йдуть на копії з `/Applications` **без стуба даних**, тож журнал пише в реальний
+> файл мейнтейнера. Додавай `TOKENPACE_JOURNAL_FILE=/tmp/tp-test.jsonl` до кожної команди в цьому
+> розділі — деталі в [«Журнал використання»](#журнал-використання-242-adr-0067).
+
 - Стуб **`TOKENPACE_UPDATE_DRYRUN=1`** ганяє download→verify→unzip **без** заміни й перезапуску (і
   оминає гейти AC-power/metered — це forced-шлях). Приватний репо: asset качається через `gh` за
   `TOKENPACE_GH_AUTH=1`. Верифікація: збери нотаризований білд із **заниженою** версією (щоб реальний
@@ -1602,6 +1606,31 @@ TOKENPACE_STUB=real swift run
 (`currentScenario == .realNetwork` І тумблер «Record usage history» у Settings → **General →
 Usage history** увімкнено) — синтетичний стуб у журнал не потрапляє навмисно.
 
+> ⚠️ **Тестуєш на нотаризованій копії з `/Applications` — став `TOKENPACE_JOURNAL_FILE`.**
+> Суфікс `-dev` у назві файла означає «бандл поза `/Applications`», тож копія з `/Applications`
+> пише в **той самий** `usage-journal-YYYY-MM.jsonl`, що й у бойовій роботі — а це реальний ряд
+> мейнтейнера, і його не можна змішувати з тестовими прогонами. Гейт `.realNetwork` захищає лише
+> від стубових даних; три речі проходять повз нього:
+>
+> - **`TOKENPACE_GENERATE_JOURNAL=<days>` без override** — фікстура ляже прямо в реальний файл
+>   (хук навмисно обходить live-only гейти, це фікстура, а не полл);
+> - **прогони на `real`** (перевірка фіч, що потребують підпису) лишають `resume`-рядок і розрив
+>   у ряду на кожному рестарті — `lastWriteInstant` живе лише в памʼяті процесу;
+> - **`migrateIfNeeded()`** стартує на кожному лончі **без** stub-гейта і переписує наявний файл
+>   у поточний формат (дані не гинуть — кожне покоління лишає `.v<n>.bak`, який застосунок ніколи
+>   не видаляє, — але файл переписано під час «суто візуального» тесту).
+>
+> Тому на **кожному** запуску нотаризованої копії заради перевірки — не лише з генератором
+> фікстур — веди журнал у тимчасовий файл:
+>
+> ```sh
+> TOKENPACE_JOURNAL_FILE=/tmp/tp-test.jsonl /Applications/TokenPace.app/Contents/MacOS/TokenPace
+> ```
+>
+> Override виграє в `fileURL(for:)` беззастережно, тож туди підуть і `usage`, і `status`, і
+> `resume`-рядки. Міграцію він не зупиняє (вона йде по файлах у теці журналу), але вона й так
+> страхується бекапами.
+
 - **Тумблер:** Settings → **General** → секція «Usage history» → «Record usage history»
   (default-off); під ним read-only «Location» (шлях у Application Support) із кнопкою «Open in Finder».
   Перегляд даних — окреме вікно **«Insights»**; його пункт **«Insights…»** у dropdown-меню (разом із
@@ -1635,3 +1664,13 @@ Usage history** увімкнено) — синтетичний стуб у жу�
 
 Для фіч, що залежать від підпису (launch-at-login / SMAppService, банери оновлень), потрібен
 **локальний нотаризований `.app`** із `/Applications` — у dev `swift run` вони не працюють.
+
+**Запускай таку копію з `TOKENPACE_JOURNAL_FILE`**, інакше тестовий прогін пише в реальний журнал
+мейнтейнера (файл без суфікса `-dev` — той самий, що в бойовій роботі):
+
+```sh
+TOKENPACE_JOURNAL_FILE=/tmp/tp-test.jsonl /Applications/TokenPace.app/Contents/MacOS/TokenPace
+```
+
+Чому це стосується навіть прогонів без стуба — у [«Журнал використання»](#журнал-використання-242-adr-0067)
+вище.
