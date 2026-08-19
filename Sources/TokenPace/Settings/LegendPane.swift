@@ -188,29 +188,42 @@ struct LegendPane: View {
 
     /// The three parts of a Progress bar, each pointing at the x it names.
     ///
-    /// **Computed through the renderer's own scale**, not written as measured pixels: `scaleX` insets
-    /// the 0..1 range by `minStripWidth/2` at each end, so a hand-placed tick would drift the moment
-    /// `anatomyWidth` changed. `usageFraction` is the capsule's near end here because the specimen is
-    /// behind pace — which is also why the marker sits to its right.
+    /// **The x values are constants**, worked out once for the geometry below and written down rather
+    /// than derived at runtime. Deriving them looked tidier and was worse: it made the callouts depend
+    /// on `PopupBarView`'s internals, which meant a page that silently mispointed if the renderer's
+    /// inset ever changed shape rather than value. Fixed numbers with the arithmetic recorded beside
+    /// them fail visibly instead — the label lands off its mark and a screenshot shows it.
+    ///
+    ///     scaleX(f)  = inset + f · (width − 2·inset)
+    ///     inset      = minStripWidth / 2 = (0.75 · trackHeight − 1) / 2 = 1.75   (trackHeight 6)
+    ///     width      = anatomyWidth = 320
+    ///
+    ///     used   f = usageFraction 0.35  →  112.5
+    ///     marker f = timeFraction  0.50  →  160.0
+    ///     tick 4 f = 4/5           0.80  →  255.0
+    ///
+    /// **Recompute these if `anatomyWidth`, `PopupBarView.trackHeight`, `minStripWidth` or the
+    /// specimen's fractions change.** Any of the four moves every mark on this diagram.
+    ///
+    /// The alignment differs per label because the marks are not evenly spread: `used` and `marker`
+    /// are 47.5 pt apart while their labels are two and three times that wide, so centring all three
+    /// overlaps the first two. Anchoring the outer labels by their near edges and centring only the
+    /// middle one spreads them across the width the bar actually occupies.
     ///
     /// The fourth tooth rather than the first: it is the one with room for a label under it without
     /// colliding with the capsule's own.
-    @MainActor
-    private static var progressCallouts: [(x: CGFloat, text: String)] {
-        let layout = LegendCatalog.progressSpecimen
-        return [(scaleX(layout.usageFraction), "used tokens/credits so far"),
-                (scaleX(layout.timeFraction), "now-marker"),
-                (scaleX(4.0 / 5.0), "ticks — hours / days")]
-    }
+    private static let progressCallouts: [Callout] = [
+        Callout(x: 112.5, text: "used tokens/credits so far", anchor: .leading),
+        Callout(x: 160.0, text: "now-marker", anchor: .center),
+        Callout(x: 255.0, text: "ticks — hours / days", anchor: .trailing),
+    ]
 
-    /// Where a 0..1 fraction lands on the anatomy bar, mirroring `PopupBarView`'s own `scaleX`.
-    ///
-    /// The inset is derived from the bar's **height**, not its width — which is why it is read from
-    /// the same `minStripWidth(_:)` the renderer uses rather than written as a number.
-    private static func scaleX(_ fraction: Double) -> CGFloat {
-        let track = NSRect(x: 0, y: 0, width: anatomyWidth, height: PopupBarView.trackHeight)
-        let inset = PopupBarView.minStripWidth(track) / 2
-        return inset + CGFloat(fraction) * (anatomyWidth - 2 * inset)
+    /// One label under an anatomy bar, pointing at `x`.
+    private struct Callout {
+        let x: CGFloat
+        let text: String
+        /// Which edge of the label sits at `x` — see the spacing note on ``progressCallouts``.
+        let anchor: HorizontalAlignment
     }
 
     private static var progressRules: [(layout: BarLayout, text: String)] {
@@ -375,7 +388,10 @@ struct LegendPane: View {
             swatch().frame(width: 34, alignment: .center)
             VStack(alignment: .leading, spacing: 1) {
                 Text(name).font(.callout)
-                Text(.init(detail)).font(.caption).foregroundStyle(.secondary)
+                // Same size as the name above it, not the smaller caption a settings subtitle takes.
+                // On this page the explanation *is* the content — the name is a label for it — so
+                // shrinking it would rank the two the wrong way round. Tone still separates them.
+                Text(.init(detail)).font(.callout).foregroundStyle(.secondary)
                 extra()
             }
             Spacer(minLength: 0)
@@ -410,12 +426,16 @@ struct LegendPane: View {
     /// end is one reading, a marker that is another, and a ruler — so it is the one that needs them.
     private func anatomy(_ layout: BarLayout, style: BarStyle, subdivisions: Int = 0,
                          caption: String, name: String,
-                         callouts: [(x: CGFloat, text: String)] = []) -> some View {
+                         callouts: [Callout] = []) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(.init("**\(name)** · \(caption)")).font(.callout)
+            // Pinned to the width it was baked at. Without this the form stretches the image to the
+            // row, and every callout below then points at a mark that has moved — which is exactly
+            // what the first screenshot of this section showed.
             Image(nsImage: LegendRenderer.dropdownBarImage(
                 layout, style: style, width: Self.anatomyWidth,
                 subdivisions: subdivisions, appearance: barAppearance))
+                .frame(width: Self.anatomyWidth, alignment: .leading)
             if !callouts.isEmpty {
                 calloutRow(callouts)
             }
@@ -431,19 +451,27 @@ struct LegendPane: View {
     /// the fourth tooth — and a label that merely sits nearby names nothing in particular. The x values
     /// come from the same `scaleX` inset the renderer uses, so they land on the mark rather than beside
     /// it.
-    private func calloutRow(_ callouts: [(x: CGFloat, text: String)]) -> some View {
+    private func calloutRow(_ callouts: [Callout]) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(Array(callouts.enumerated()), id: \.offset) { _, callout in
-                VStack(alignment: .center, spacing: 2) {
+                VStack(alignment: callout.anchor, spacing: 2) {
                     Rectangle()
                         .fill(Color.secondary.opacity(0.35))
                         .frame(width: 1, height: 6)
                     Text(callout.text)
-                        .font(.caption2)
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize()
                 }
-                .alignmentGuide(.leading) { dimension in dimension.width / 2 - callout.x }
+                // The tick is what must land on `x`; the label hangs off it by its own anchor. Both
+                // are placed by the same guide, so the pair moves together.
+                .alignmentGuide(.leading) { dimension in
+                    switch callout.anchor {
+                    case .center:   return dimension.width / 2 - callout.x
+                    case .trailing: return dimension.width - callout.x
+                    default:        return -callout.x
+                    }
+                }
             }
         }
         .frame(width: Self.anatomyWidth, alignment: .leading)
