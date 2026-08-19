@@ -12,12 +12,13 @@ import Foundation
 ///
 /// Each preset picks **one** ``BarStyle`` and gives it to both surfaces (#329) — the presets are the
 /// three coherent looks, so a preset that disagreed with itself across the menu bar and the dropdown
-/// would be a fourth. Mixing the two surfaces is exactly what dropping out to "Custom" is for.
+/// would be a fourth. A config that mixes the two surfaces is simply the user's own, which is what the
+/// "My setup" row names.
 ///
 /// The preset **values** live here in the kit (not the AppKit/SwiftUI shell) so they are unit-testable
-/// without a UI. The shell owns only presentation: the segmented control that calls `apply` and the
-/// ``displayName`` shown on it. ``matching(_:)`` powers the control's "Custom" indicator segment: it
-/// lights up when the live config matches no preset.
+/// without a UI. The shell owns only presentation: the radio row that previews a preset and the
+/// ``displayName`` shown on it. ``matching(_:)`` reads the **stored** config, which is what lets the
+/// "My setup" row report the preset it happens to equal.
 public enum AppearancePreset: String, Sendable, CaseIterable {
     /// The calm, quiet look: every menu-bar toggle calm and the left-anchored
     /// **Pressure** ribbon on both surfaces (#224) — the quietest of the three styles, since every
@@ -134,10 +135,11 @@ public enum AppearancePreset: String, Sendable, CaseIterable {
         }
     }
 
-    /// The preset whose value set exactly equals `values`, or `nil` if the live config matches none of
-    /// them (the "Custom" state). Drives the preset segmented control's active segment: after any
-    /// manual toggle the config drifts off every preset and this returns `nil`, so the control honestly
-    /// shows "Custom" rather than a stale preset. Relies on `AppearancePresetValues: Equatable`.
+    /// The preset whose value set exactly equals `values`, or `nil` when it matches none of them.
+    ///
+    /// Applied to the **stored** configuration, this is what lets the "My setup" row say
+    /// `· same as Chill preset` — naming the preset a hand-made setup happens to equal, without
+    /// pretending the user is *on* that preset. Relies on `AppearancePresetValues: Equatable`.
     public static func matching(_ values: AppearancePresetValues) -> AppearancePreset? {
         allCases.first { $0.values == values }
     }

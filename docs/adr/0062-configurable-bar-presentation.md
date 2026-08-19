@@ -2,7 +2,7 @@
 status: superseded
 date: 2026-08-02
 supersedes: []
-superseded_by: [0076, 0080, 0081, 0098]
+superseded_by: [0076, 0080, 0081, 0098, 0112]
 ---
 
 # ADR-0062: Конфігурована подача пейсинг-барів — Bar style, Calm-режим, поріг far-behind
@@ -18,6 +18,13 @@ superseded_by: [0076, 0080, 0081, 0098]
 > крапкою сервісу, не гліфом валюти, не idle-пігулкою — і під Pressure не діє взагалі, бо там
 > спокійний бік гаситься безумовно. `showTicks`, `FarBehindInterval` і `barStyle` з цього ADR у
 > сховищі більше немає; решта ключів перейменована з префіксом поверхні (`menuBar.` / `dropdown.`).
+
+> **§«Пресети (розширені)» витіснено
+> [ADR-0112](0112-appearance-presets-preview-apply-commits.md)**: сегментованого контрола там уже
+> немає (радіо з [ADR-0099](0099-appearance-nests-its-two-surfaces.md)), а `Custom` як некликабельний
+> індикатор замінено рядком `My setup` — самим збереженим конфігом, клікабельним завжди. Клік по
+> пресету тепер **прев'ю**, а пише лише кнопка `Apply`. §«Єдине джерело дефолтів — пресет
+> `.workHarder`» лишається чинним.
 
 > **Частково витіснений [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md)**: §4
 > більше не чинний — `showTicks` видалено з Settings, пресетів і експорту. Лінійка поділена за
@@ -131,9 +138,14 @@ Bool-гейт на `PopupBarView.drawTicks`. Menu bar засічок не має
 
 ### Пресети (розширені)
 
-Три пресети керуються сегментованим контролом (`Chill | Work harder! | Control freak | Custom`), де
-**Custom** — некликабельний індикатор, що підсвічується, коли конфіг не збігається з жодним пресетом
-(`AppearancePreset.matching(_:)`):
+> ~~Три пресети керуються сегментованим контролом (`Chill | Work harder! | Control freak | Custom`),
+> де **Custom** — некликабельний індикатор.~~ Витіснено
+> [ADR-0112](0112-appearance-presets-preview-apply-commits.md) (контрол — радіо з
+> [ADR-0099](0099-appearance-nests-its-two-surfaces.md); четвертий рядок — `My setup`, клік по
+> пресету — прев'ю). Таблиця нижче — історична: `showTicks` і `FarBehindInterval` зі сховища прибрано,
+> а імена стилів змінилися ([ADR-0109](0109-centred-style-renamed-to-balance.md)).
+
+Значення пресетів на момент цього ADR:
 
 | Пресет | CalmColorMode | BarStyle | showTicks | FarBehindInterval |
 |---|---|---|---|---|

@@ -254,8 +254,10 @@ token itself never is.
 | — | `lifecycle` | `.notice` | `service-status-dot: migrated key → menuBar.showServiceStatusDot` | the one `Bool` in the same pass — the key moves, the value cannot need mapping, so the line names the destination instead of a value pair |
 | — | `lifecycle` | `.notice` | ~~`extra-usage-section: migrated nonCalm → aboveZero`~~ | **Gone** ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)). The marker-keyed value rewrite it came from (`migrateExtraUsageVisibilityIfNeeded`) folded into the key migration above: `nonCalm` now resolves through `PopupSectionVisibility.legacyRawValues` and is then folded by `foldedForCredits`, so the Extra-usage row can never open with no segment highlighted. Its marker survives only as `Key.retiredExtraUsageVisibilityMigrated`, swept by an Appearance reset |
 | — | `lifecycle` | `.notice` | ~~`model-limits-section: migrated optionOnly → aboveZero`~~, ~~`extra-usage-section: migrated optionOnly → aboveZero`~~ | **Gone** ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)) for the same reason: `migrateOptionOnlyVisibilityIfNeeded` is replaced by `optionOnly` → `.onceUsed` in `legacyRawValues`, and the case no longer exists for a later import to reintroduce. Marker retired as `Key.retiredOptionOnlyVisibilityMigrated` |
-| — | `lifecycle` | `.notice` | `appearance settings reset to defaults` | user cleared the Appearance keys (#214); all **seven** live Appearance keys (`AppearancePresetValues`, down from eight since the "Show ticks on bars" option was removed, and from nine since [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md) retired `resetCountdownModeMenuBar`) cleared to their defaults, plus the legacy/retired keys — the pre-[#381](https://github.com/artem-from-ua/cc-timer/issues/381) flat names (`calmColorMode`, `calmBarHiding`, `modelLimitsVisibility`, `extraUsageVisibility`, `menuBarStyle`, `dropdownStyle`, `showServiceStatusDot`), the pre-#329 `barStyle`, the pre-[ADR-0086](../adr/0086-tri-state-calm-bar-hiding.md) `hideCalmSevenDayBar`, the two retired migration markers (`Key.retiredExtraUsageVisibilityMigrated`, `Key.retiredOptionOnlyVisibilityMigrated`), and every other `Key.retired…` — swept too so a stale value can't re-seed a live key on a later launch |
-| — | `lifecycle` | `.notice` | `appearance preset applied: <preset>` | user picked a preset segment on the Appearance pane (#215, #224); `<preset>` is the raw `AppearancePreset` (`chill`/`workHarder`/`controlFreak`), or the literal **`custom`** when the user returned to their own saved setup (#333) — either way it sets all **seven** Appearance keys at once (eight before "Show ticks on bars" was removed, nine before [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md) dropped `resetCountdownModeMenuBar`) |
+| — | `lifecycle` | `.notice` | ~~`appearance settings reset to defaults`~~ | **Gone** ([ADR-0112](../adr/0112-appearance-presets-preview-apply-commits.md)). `SettingsModel.resetAppearanceToDefaults()` was dead code — no view had called it since the Reset row became the preset list (#215), and it was removed with the preview rework. `PersistedConfig.resetAppearanceToDefaults()` survives (it is what sweeps the retired keys, now including `customAppearanceValues`), but nothing logs when it runs |
+| — | `lifecycle` | `.notice` | `appearance preset applied: <preset>` | user pressed **`Apply`** on a previewed preset (#215, #224; [ADR-0112](../adr/0112-appearance-presets-preview-apply-commits.md)); `<preset>` is the raw `AppearancePreset` (`chill`/`workHarder`/`controlFreak`) and it writes all **seven** Appearance keys at once. The literal **`custom`** is gone with the stash it named — clicking a preset row no longer applies anything, so this fires only on the button. Preceded by an `appearance preview:` line for the same preset |
+| — | `lifecycle` | `.notice` | `appearance preview: <preset>` | user clicked a preset row, which **previews** it — the values go into `PersistedConfig`'s overlay and both surfaces redraw, but nothing is written ([ADR-0112](../adr/0112-appearance-presets-preview-apply-commits.md)). Fires on every click, including switching straight from one preview to another, so the log shows the order presets were compared in |
+| — | `lifecycle` | `.notice` | `appearance preview: ended` | the overlay was dropped and the stored config is live again — on closing the Settings window, on clicking the `My setup` row, or before an individual option is written from a child page (a setter must not leave the other six fields shadowed). **Not** emitted by `Apply`, which logs `appearance preset applied:` instead. Together with the line above this is what makes "the widget does not match my settings" diagnosable |
 | — | `lifecycle` | `.notice` | `screen-lock-pause: setting set <bool>` | user toggled the "Pause polling while the screen is locked" checkbox (#114, ADR-0032) |
 | 439 | `lifecycle` | `.notice` | `update: automatic checks set <bool>` | user toggled the "Check for updates automatically" checkbox (#37) |
 | — | `lifecycle` | `.notice` | `archive: enabled set <bool>` | user toggled the "Archive session logs to a folder" checkbox (#110) |
@@ -437,12 +439,12 @@ One log line per interval change. The format is built by
 |----------|-------|-------|
 | `network` | 31 | `UsageClient` (6), `GitHubReleaseClient` (6), `StatusClient` (5), `PollingEngine` (4), `UsageSnapshot` (3), `UpdateInstaller` (3), `GitHubRelease` (1), `GHReleaseFetcher` (1), `App` (1) |
 | `keychain` | 12 | `ClaudeCLIRefresher` (6), `TokenProvider` (3), `PollingEngine` (1) |
-| `lifecycle` | 116 | `App` (48), `SettingsModel` (30), `UpdateInstaller` (13), `PollingShell` (7), `BackToWorkNotifier` (6), `AwaitingInputWatcher` (5), `PollingEngine` (3), `SettingsWindowController` (2), `ShellEnvironment` (1), `PersistedConfig` (1), `IncidentNotificationDelegate` (1) |
+| `lifecycle` | 118 | `App` (48), `SettingsModel` (27), `UpdateInstaller` (13), `PollingShell` (7), `PersistedConfig` (6), `BackToWorkNotifier` (6), `AwaitingInputWatcher` (5), `SettingsWindowController` (2), `PollingEngine` (2), `ShellEnvironment` (1), `IncidentNotificationDelegate` (1) |
 | `ui` | 1 | `AppearancePane` (1) |
 | `archive` | 7 | `App` (5), `LogArchiver` (2) |
 | `journal` | 18 | `UsageJournal` (10), `StatusPayloadLog` (4), `App` (3), `DevToolsWindowController` (1) |
 
-**Total: 185 log statements** — `.error` ×50, `.notice` ×117, `.info` ×13, `.debug` ×5.
+**Total: 188 log statements** — `.error` ×50, `.notice` ×120, `.info` ×13, `.debug` ×5.
 
 > Counts recomputed from the source in #275 (the previous figures had drifted over several releases —
 > `SettingsModel` and `BackToWorkNotifier` were missing entirely) and again in #341, where the same
@@ -450,6 +452,14 @@ One log line per interval change. The format is built by
 > `SettingsModel` / `PollingEngine` had each gained statements the table did not know about.
 > Regenerate with: `grep -rho 'AppLogger\.[a-z]*\.' Sources/ | sort | uniq -c`. Recomputed again in
 > #386, which added the two weekly-reconstruction lines to `PollingEngine` network (2 → 4).
+>
+> Recomputed once more with
+> [ADR-0112](../adr/0112-appearance-presets-preview-apply-commits.md), which added the two
+> `appearance preview:` lines and removed the dead reset one. The drift had recurred a third time,
+> independently of that change: `PersistedConfig` was listed as 1 against 6 in the source, and
+> `PollingEngine` lifecycle as 3 against 2. The per-file column is now a straight readout of the
+> recipe above rather than arithmetic on the previous row — which is how the drift kept surviving
+> recounts.
 
 The `journal: enabled set <bool>` toggle line (`SettingsModel`) is a `lifecycle` statement (like the
 other Settings-toggle lines), counted under `lifecycle`. The twelve `journal`-category statements are

@@ -33,19 +33,23 @@ struct AppearancePane: View {
 
     var body: some View {
         Form {
-            // First section: one-click Appearance presets (#215, #224) — a **radio group**, one row per
-            // preset. Picking Chill / Work harder! / Control freak applies it (sets every option on both
-            // child pages at once).
+            // First section: Appearance presets (#215, #224) — a **radio group**, one row per preset,
+            // each setting every option on both child pages at once.
             //
             // Radios rather than the segmented control this was until now: the three names read as
             // moods, and the question they leave open — *which signals does this make loudest?* — needs
             // a line of prose per option, which a segment has no room for. `AppearancePreset.summary`
             // holds those lines, beside the values they describe.
             //
-            // "Custom" is a **real slot** since #333, not the pure indicator it was: applying a preset
-            // stashes the setup it overwrites, so Custom can restore it. It falls back to
-            // indicator-only (visible, highlightable, inert) while nothing is stashed — a fresh install
-            // has nothing to come back to — and says so on its own second line.
+            // **Clicking previews; only `Apply` commits.** A click puts the preset in
+            // `PersistedConfig`'s overlay, which every Appearance getter consults, so both surfaces draw
+            // it while the store is untouched — and closing the window drops it. That is what makes the
+            // rows safe to click through, which is what people come here to do: compare presets against
+            // their own config, or take one as a base to modify.
+            //
+            // The fourth row is that config itself — "My setup" — rather than the old "Custom", which
+            // stood for the live config and a hidden snapshot at the same time and was clickable only
+            // in some states.
             // MARK: The legend — its own section, above everything (#261)
             //
             // First on the page, and alone in its section, because it is the only row here that
@@ -65,44 +69,38 @@ struct AppearancePane: View {
 
             Section {
                 VStack(alignment: .leading, spacing: 10) {
-                    // Heading block: the section's own label with the copy-config button trailing, and
-                    // the hint directly under it — the hint explains what picking *any* option below
-                    // does, so it belongs to the heading, not to the last radio. Its own 4 pt spacing
-                    // (rather than the 10 pt between the block and the radios) is what keeps the two
-                    // lines reading as one heading instead of as a fifth entry in the list.
+                    // Heading block: the section's own label with the hint directly under it. The hint
+                    // carries the whole mental model of this list — clicking previews, only Apply
+                    // commits — so it belongs to the heading rather than to any one row. Its 4 pt
+                    // spacing (against the 10 pt below) is what keeps the two lines reading as one
+                    // heading instead of as a fifth entry.
                     //
-                    // The radios sit below the block rather than beside the label — four two-line
-                    // options are a block, not a control that fits at the end of a row.
+                    // The copy button used to live here, trailing the label. It sits on the "My setup"
+                    // row now: it copies the stored configuration, so it belongs to the row that names
+                    // it rather than to a heading that covers all four.
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Change appearance preset")
-                            Spacer()
-                            copyConfigButton
-                        }
-                        SettingsHint(text: "Set all the options for *Menu bar* and *Dropdown* at once.")
+                        Text("Try an appearance preset")
+                        SettingsHint(text: "Click one to see it live. "
+                                         + "Nothing is saved until you press Apply.")
                     }
                     RadioGroup(
-                        options: AppearancePreset.allCases.map {
-                            .init(value: AppearancePreset?.some($0), title: $0.displayName,
-                                  summary: $0.summary)
-                        } + [.init(value: AppearancePreset?.none, title: "Custom",
-                                   // Names what it actually holds: the setup as it stood the last time
-                                   // a preset overwrote it. Saying "your settings" would imply a slot
-                                   // the user maintains, when it is a snapshot the app takes for them
-                                   // — and one that a *new* hand-made setup replaces (`apply(_:)`
-                                   // re-stashes only when the live config matches no preset).
-                                   // Worded to hold in **both** states, because the line never swaps:
-                                   // on a fresh install there is no such setup yet, and the sentence
-                                   // then reads as what the option is *for* rather than as a promise
-                                   // about something that exists. A second wording that appeared only
-                                   // while the option was inert would move the rows under the pointer.
-                                   summary: "The setup you had before switching to a predefined preset.",
-                                   // Selectable once there is a setup to go back to (#333); until then
-                                   // it stays the indicator it always was.
-                                   selectable: model.canRestoreCustom)],
-                        active: model.activePreset,
+                        options: AppearancePreset.allCases.map { preset in
+                            .init(value: AppearanceChoice.preset(preset), title: preset.displayName,
+                                  summary: preset.summary,
+                                  trailing: { AnyView(applyButton(for: preset)) })
+                        } + [.init(value: AppearanceChoice.mySetup, title: "My setup",
+                                   titleNote: mySetupNote,
+                                   // States what the row is *for* rather than what it happens to hold,
+                                   // and names the one thing the preview model makes people ask: what
+                                   // happens when I close the window without applying anything.
+                                   summary: "Your saved config — restored when you close Settings.",
+                                   trailing: { AnyView(copyConfigButton) })],
+                        active: model.selectedAppearanceChoice,
                         onSelect: { picked in
-                            if let preset = picked { model.apply(preset) } else { model.applySavedCustom() }
+                            switch picked {
+                            case .preset(let preset): model.previewPreset(preset)
+                            case .mySetup: model.endPreview()
+                            }
                         })
                 }
             }
@@ -128,18 +126,66 @@ struct AppearancePane: View {
         .formStyle(.grouped)
     }
 
+    // MARK: The "My setup" row and the Apply button
+
+    /// The note after the fourth row's name: the preset its **stored** values happen to equal, or
+    /// nothing once the config is a combination of the user's own.
+    ///
+    /// It is a **statement about the saved config**, not a selection: a config that matches `Chill`
+    /// today stops matching the moment any option changes, and selecting the `Chill` row would promise
+    /// it keeps following that preset. Naming the match beside the row says the same thing without the
+    /// promise — and disappears by itself once the config drifts.
+    ///
+    /// Drawn in secondary ink by `RadioGroup` (see `Option.titleNote`), so it reads as an observation
+    /// rather than as part of the row's name. It rides with the title rather than in the summary
+    /// because the summary is a fixed description of the row; a second line that rewrote itself as
+    /// state changed would reflow the list under the pointer, which is the one thing this control must
+    /// not do while the user is clicking through it.
+    /// The preset's name is italicised (`*…*`, rendered by `RadioGroup` through `Text(.init(_:))`)
+    /// because it is a name being quoted, not a word in the sentence — the same reason the hints on
+    /// these panes italicise *Menu bar* and *Dropdown*. It also keeps `Work harder!` from reading as an
+    /// exclamation the note itself is making.
+    private var mySetupNote: String? {
+        model.storedPresetName.map { "· same as *\($0.displayName)* preset" }
+    }
+
+    /// The `Apply` button on a preset row: makes the preview permanent.
+    ///
+    /// Present on **every** preset row rather than only the previewed one, and disabled where it would
+    /// do nothing. A button that came and went with the selection would change the row's width as the
+    /// user clicked down the list; one that is simply dim says "nothing to apply here" without moving
+    /// anything. Its tooltip explains the dim state, which the button alone cannot.
+    private func applyButton(for preset: AppearancePreset) -> some View {
+        let isPreviewed = model.previewedPreset == preset
+        let canApply = isPreviewed && model.canApplyPreviewedPreset
+        return Button("Apply") { model.applyPreviewedPreset() }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(!canApply)
+            // Shown only on the row being previewed: on the others the button is dim simply because
+            // they are not selected, which needs no explanation.
+            .help(isPreviewed && !canApply ? "Already matches your setup" : "")
+            .accessibilityLabel("Apply the \(preset.displayName) preset")
+            // The row it sits on is the selected one; hiding it elsewhere would be a layout change, so
+            // it stays put and only its enabled state moves.
+            .opacity(isPreviewed ? 1 : 0)
+            .allowsHitTesting(isPreviewed)
+    }
+
     // MARK: Copy config (#257)
 
-    /// The copy-to-clipboard button sitting immediately **left of** the preset segmented control:
-    /// it puts the Appearance values (plus the active preset and app version) on the clipboard as
-    /// pretty-printed JSON, so "what does your setup look like?" is one click instead of a
-    /// screenshot tour of the pane — now of three pages, which is what makes it worth more than it
-    /// was before the split.
+    /// The copy-to-clipboard button on the **"My setup" row**: it puts the stored Appearance values
+    /// (plus the preset they match and the app version) on the clipboard as pretty-printed JSON, so
+    /// "what does your setup look like?" is one click instead of a screenshot tour of three pages.
+    ///
+    /// It sits on that row rather than in the section heading because that is what it copies — the
+    /// saved configuration, read past any preview. From the heading it would have looked like it
+    /// copied whatever was on screen, which during a preview is a preset the user has not chosen.
     ///
     /// `doc.on.doc` is the same glyph as the Troubleshoot window's copy button, keeping one visual
     /// vocabulary for "copy" across the app — a share icon would promise a share sheet that isn't
-    /// there. The hint rides as a native tooltip rather than a `SettingsHint` row: the preset row
-    /// already carries two hint lines explaining the presets, and a third would crowd them.
+    /// there. The hint rides as a native tooltip rather than a `SettingsHint` row: the section already
+    /// carries a hint line, and a second would crowd it.
     private var copyConfigButton: some View {
         Button {
             copyConfigToClipboard()
@@ -165,7 +211,7 @@ struct AppearancePane: View {
     }
 
     /// What this button copies — used in the tooltip and the accessibility label.
-    private static let copyTarget = "appearance settings"
+    private static let copyTarget = "my appearance settings"
 
     /// The fixed box the copy glyph draws in, so neither of the two symbols can move the layout when
     /// they swap. Square: the resting `doc.on.doc` is the larger glyph in both dimensions, and one

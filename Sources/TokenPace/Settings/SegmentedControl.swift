@@ -5,12 +5,12 @@ import SwiftUI
 /// A segmented control that allows a segment to be **shown-and-selectable OR shown-active-but-disabled**
 /// — something the native `Picker(.pickerStyle(.segmented))` cannot do (its `.disabled` dims the whole
 /// control, and it offers no per-segment disable). We need exactly that for the Appearance preset row:
-/// the "Custom" segment must light up when the live config matches no preset, yet never be pickable.
+/// the Appearance preset control needed a segment that lights up to report state without being pickable.
 ///
 /// A segment whose ``Segment/selectable`` is `false` renders like any other segment (and highlights when
 /// it is the active one) but ignores selection taps. Selectable segments call ``onSelect`` with their
 /// value. An unselectable segment carrying ``Segment/inactiveHelp`` shows that text in a **popover on
-/// click** while it isn't the active one — so "Custom" can explain how to reach it.
+/// click** while it isn't the active one — so such a segment can explain how to reach its state.
 ///
 /// Styled to sit next to the native `.segmented` pickers in the same pane: a rounded capsule track with the
 /// active segment filled in the **system accent colour**. Not pixel-identical to AppKit's control, but
@@ -19,10 +19,16 @@ struct SegmentedControl<Value: Hashable>: View {
     struct Segment: Identifiable {
         let value: Value
         let title: String
-        /// Whether tapping this segment selects it. `false` = an indicator-only segment (e.g. "Custom").
+        /// Whether tapping this segment selects it. `false` = an indicator-only segment: it reports a
+        /// state the user reaches some other way.
+        ///
+        /// No caller passes `false` today — the Appearance preset list that needed it is a `RadioGroup`
+        /// now, and its fourth row is a real, always-selectable option. Kept because the capability is
+        /// what distinguishes this control from a plain `Picker`, and because `inactiveHelp` below is
+        /// only reachable through it.
         var selectable: Bool = true
         /// Optional explanation, shown in a **popover on click** while this segment is not the active
-        /// one — e.g. the "Custom" indicator explains how to reach it while some preset is active.
+        /// one — an indicator segment can explain how to reach the state it reports.
         var inactiveHelp: String? = nil
         var id: Value { value }
     }
@@ -54,7 +60,7 @@ struct SegmentedControl<Value: Hashable>: View {
                     if segment.selectable {
                         onSelect(segment.value)
                     } else if !isActive, segment.inactiveHelp != nil {
-                        // Unselectable indicator (e.g. "Custom"): a click explains how to reach it.
+                        // Unselectable indicator: a click explains how to reach the state it reports.
                         helpShownFor = segment.value
                     }
                 } label: {
