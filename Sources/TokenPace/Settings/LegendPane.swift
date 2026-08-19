@@ -110,10 +110,10 @@ struct LegendPane: View {
             HStack(alignment: .top, spacing: 0) {
                 menuBarCase(fiveHour: LegendCatalog.menuBarFiveHour,
                             sevenDay: LegendCatalog.menuBarSevenDay,
-                            caption: "5-hour on top · 7-day below")
+                            caption: "5-hour limit on top · 7-day below")
                 menuBarCase(fiveHour: nil,
                             sevenDay: LegendCatalog.menuBarSevenDay,
-                            caption: "7-day only · 5-hour hidden while calm")
+                            caption: "7-day limit only · 5-hour hidden while calm")
             }
         }
     }
