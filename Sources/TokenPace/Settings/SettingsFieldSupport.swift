@@ -222,8 +222,17 @@ struct SettingsNavigationRow: View {
                     .foregroundStyle(.tertiary)
                     .font(.system(size: Metrics.chevron, weight: .semibold))
             }
-            // Without this the hit target is only the drawn content, leaving the gap between the
-            // subtitle and the chevron dead — but the whole row is what looks clickable.
+            // The hit target is the **whole row**, edge to edge.
+            //
+            // `contentShape` alone only covers what the stack occupies, which fixed the gap between
+            // the subtitle and the chevron but left the row's own margins dead — the padding a grouped
+            // `Form` puts around its content, plus whatever slack a short row leaves. Clicking there
+            // did nothing, on a row whose entire surface reads as one target.
+            //
+            // `maxWidth: .infinity` claims the width first, then the shape follows it. Both are needed:
+            // the frame without the shape still hit-tests only the drawn pixels, and the shape without
+            // the frame has nothing wider to describe.
+            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
