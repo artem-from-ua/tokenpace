@@ -64,7 +64,7 @@ end note
 Environment-гейти (місце / живлення / metered) — **лише для встановлення**, не для check-шляху;
 `.defer…` переоцінюється наступним heartbeat, `.skip…` — settled.
 
-**Явний запит користувача — «Update Now» у Settings → About** (#221, `AppDelegate.installUpdateNow`)
+**Явний запит користувача — «Update now» у Settings → About** (#221, `AppDelegate.installUpdateNow`)
 проходить ті самі гейти, але з `onACPower: true, networkIsMetered: false`: гейти живлення й мережі —
 це *ввічливість* фонового процесу (не палити metered-трафік, не ризикувати розрядом посеред заміни),
 і явний клік цю ввічливість знімає. Клік також рахується за opt-in для **цієї** інсталяції

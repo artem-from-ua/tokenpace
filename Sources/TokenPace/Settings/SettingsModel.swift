@@ -49,7 +49,7 @@ final class SettingsModel {
     /// Fire the "Back to work!" notification immediately, bypassing the edge-detection and quiet-hours
     /// gates (those live in `AppDelegate`, not the notifier) — the Settings "Try" button (#193).
     var onTryBackToWork: (() -> Void)?
-    /// Fire the "Switching to Extra Usage" notification immediately from its Settings "Try" button —
+    /// Fire the "Switching to Extra usage" notification immediately from its Settings "Try" button —
     /// the shell reads the latest snapshot's spend for the amount/limit body (ADR-0050).
     var onTryExtraUsage: (() -> Void)?
     /// Fire one of every incident banner on demand, for the "Preview" button beside the incident
@@ -421,7 +421,7 @@ final class SettingsModel {
     /// need an unplugged laptop and a genuinely full destination volume to reproduce. `nil` for a
     /// normal run; unknown tokens are ignored.
     ///
-    /// It forces only the **display**: the poll still runs and "Archive Now" still archives, matching
+    /// It forces only the **display**: the poll still runs and "Archive now" still archives, matching
     /// `TOKENPACE_FAKE_DEFERRAL` (which doesn't block a real install either). A stub that also broke
     /// the feature would make the button untestable in the same run.
     static let forcedArchiveGate: (battery: Bool, space: ArchiveSpaceVerdict)? = {
@@ -595,7 +595,7 @@ final class SettingsModel {
         return "Backup will resume when you plug in."
     }
 
-    /// Whether "Update Now" can do anything — a known release, and a real `.app` to replace. The
+    /// Whether "Update now" can do anything — a known release, and a real `.app` to replace. The
     /// power/metered gates are deliberately **not** consulted: bypassing them is the button's whole
     /// purpose. A disk too full still lets the user click; the install then declines and logs why,
     /// which beats an unexplained dead button.
@@ -901,7 +901,7 @@ final class SettingsModel {
         onTryBackToWork?()
     }
 
-    /// Fire the "Switching to Extra Usage" notification on demand from its Settings "Try" button.
+    /// Fire the "Switching to Extra usage" notification on demand from its Settings "Try" button.
     /// Forces a post through the normal delivery channel, bypassing edge-detection and quiet hours.
     func tryExtraUsage() {
         AppLogger.lifecycle.notice("extra-usage: try (forced) notification")

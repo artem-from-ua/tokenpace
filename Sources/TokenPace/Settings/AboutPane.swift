@@ -4,7 +4,7 @@ import AppKit
 // MARK: - AboutPane (#168, ADR-0042)
 
 /// Settings → About: a header (app icon + name + tagline, System Settings-style), version + source
-/// link, and the Updates card (#37) — the daily-check toggle, Check Now, the nested "Install updates
+/// link, and the Updates card (#37) — the daily-check toggle, Check now, the nested "Install updates
 /// automatically" toggle, and the update-available row.
 struct AboutPane: View {
     @Bindable var model: SettingsModel
@@ -67,7 +67,7 @@ struct AboutPane: View {
 
                 if let release = model.latestRelease {
                     // A blue status dot matches the dropdown's "new version available" item. The
-                    // "Download" button was dropped (#221): installing is now "Update Now" below, and
+                    // "Download" button was dropped (#221): installing is now "Update now" below, and
                     // "release notes" doubles as the manual route — it opens the release page, which is
                     // where a hand-download starts anyway.
                     LabeledContent {
@@ -87,7 +87,7 @@ struct AboutPane: View {
 
             // Update behaviour: the check/install toggles, and (when it happened) the last failure.
             Section {
-                // The periodic-check switch, with "Check Now" as a trailing button on the same row.
+                // The periodic-check switch, with "Check now" as a trailing button on the same row.
                 LabeledContent {
                     HStack(spacing: 10) {
                         Button("Check now") { model.checkForUpdatesNow() }
@@ -105,7 +105,7 @@ struct AboutPane: View {
                 // disabled), so the card shows only what applies.
                 if model.automaticUpdateChecks {
                     VStack(alignment: .leading, spacing: 4) {
-                        // "Update Now" sits before the switch, like "Check Now" on the row above. It
+                        // "Update now" sits before the switch, like "Check now" on the row above. It
                         // appears only when there is something to install (#221) — the button exists to
                         // resolve a pending update, so with nothing pending it would be dead weight.
                         LabeledContent {

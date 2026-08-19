@@ -1597,7 +1597,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ~10 MB update we already hold back, and the first sync copies the whole archive. The marker
         // is not advanced, so the run stays due and starts by itself once the adapter is back — no
         // state to persist. Placed after the cadence check so an unplugged Mac logs only while a sync
-        // is genuinely due, not on every 180 s heartbeat. A manual "Archive Now" reaches
+        // is genuinely due, not on every 180 s heartbeat. A manual "Archive now" reaches
         // `performArchiveSync` directly and bypasses this deliberately: the user asked.
         guard PowerSource.isOnACPower else {
             AppLogger.archive.notice("archive: deferred reason=on-battery")
@@ -1810,7 +1810,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Install the known release **now**, at the user's explicit request — the "Update Now" button in
+    /// Install the known release **now**, at the user's explicit request — the "Update now" button in
     /// Settings → About (#221).
     ///
     /// The environment gates exist as a *courtesy*: they keep a background install from spending a
@@ -1833,7 +1833,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             release: release,
             currentVersion: TokenPaceKit.version,
             isAppBundle: LaunchAtLoginController.isAppBundle,
-            // The user clicked "Update Now" — that *is* the opt-in for this one install, whatever the
+            // The user clicked "Update now" — that *is* the opt-in for this one install, whatever the
             // standing preference says. Without this, the button would be inert exactly where it is
             // most wanted: auto-install off, a new version sitting there.
             autoInstallEnabled: true,
@@ -1878,7 +1878,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// still is. A dry run touches neither marker (nothing was really installed).
     private func startInstall(asset: GitHubReleaseAsset, tag: String, forceRealInstall: Bool = false) {
         installTask?.cancel()
-        // `forceRealInstall` is the "Update Now" path (#221): the user asked for an install, so the
+        // `forceRealInstall` is the "Update now" path (#221): the user asked for an install, so the
         // dry-run env var must not turn it into a no-op — that flag means "rehearse the background
         // install", not "never install".
         let dryRun = !forceRealInstall

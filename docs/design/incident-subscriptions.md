@@ -201,7 +201,7 @@ We are continuing to work on a fix for this issue.
 
 ### 9. Quiet hours поширюються
 
-Ті самі тихі години, що й для «Back to work!» / «Extra Usage Credit»
+Ті самі тихі години, що й для «Back to work!» / «Extra usage credits»
 ([ADR-0039](../adr/0039-back-to-work-notification.md),
 [ADR-0050](../adr/0050-extra-usage-notification.md)). Одна поведінка, без сюрпризів.
 

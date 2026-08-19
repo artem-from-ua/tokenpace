@@ -268,7 +268,7 @@ token itself never is.
 | — | `lifecycle` | `.notice` | `back-to-work: time window set <start>–<end>` | user changed the allowed-hours pickers; `<start>`/`<end>` are minute-of-day (#160) |
 | — | `lifecycle` | `.notice` | `back-to-work: suppress set <raw>` | user picked a "Suppress notifications on" radio; `<raw>` is the raw `SuppressDays` (#160) |
 | — | `lifecycle` | `.notice` | `back-to-work: try (forced) notification` | user pressed the Settings "Try" button, forcing a `postBackToWork` that bypasses edge-detection and quiet hours (#193) |
-| — | `lifecycle` | `.notice` | `extra-usage: notify enabled set <bool>` | user toggled the "Switching to Extra Usage" notification switch |
+| — | `lifecycle` | `.notice` | `extra-usage: notify enabled set <bool>` | user toggled the "Switching to Extra usage" notification switch |
 | — | `lifecycle` | `.notice` | `incident: max age set <n>h` | user changed "Hide incidents older than" in Providers → Incidents; `0` means no limit (#279, ADR-0071 §9; the row moved with the pane in #341) |
 | — | `lifecycle` | `.notice` | `settings hook: unknown section <raw> — ignored` | `TOKENPACE_SETTINGS_SECTION` carried a value that resolves to no pane — e.g. the retired `4` (#341, ADR-0084). Logged rather than silently ignored: a no-op hook looks exactly like one that worked and landed on the default pane |
 | — | `lifecycle` | `.notice` | `settings hook: unknown child <raw> — opening the section` | the dotted form named a child index the section does not have; the window still opens on the section (#341, ADR-0084) |
