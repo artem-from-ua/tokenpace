@@ -137,8 +137,12 @@ struct AppearancePane: View {
     /// because the summary is a fixed description of the row; a second line that rewrote itself as
     /// state changed would reflow the list under the pointer, which is the one thing this control must
     /// not do while the user is clicking through it.
+    /// The preset's name is italicised (`*…*`, rendered by `RadioGroup` through `Text(.init(_:))`)
+    /// because it is a name being quoted, not a word in the sentence — the same reason the hints on
+    /// these panes italicise *Menu bar* and *Dropdown*. It also keeps `Work harder!` from reading as an
+    /// exclamation the note itself is making.
     private var mySetupNote: String? {
-        model.storedPresetName.map { "· same as \($0.displayName) preset" }
+        model.storedPresetName.map { "· same as *\($0.displayName)* preset" }
     }
 
     /// The `Apply` button on a preset row: makes the preview permanent.

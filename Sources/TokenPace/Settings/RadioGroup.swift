@@ -26,13 +26,17 @@ struct RadioGroup<Value: Hashable>: View {
     struct Option: Identifiable {
         let value: Value
         let title: String
-        /// A note appended to the title in **secondary ink** — "· same as Chill preset" on the row that
-        /// names the saved config.
+        /// A note appended to the title in **secondary ink** — "· same as *Chill* preset" on the row
+        /// that names the saved config.
         ///
         /// Separate from ``title`` rather than concatenated into it because the two carry different
         /// weight: the title names the option and never changes, while this reports state and comes and
         /// goes. Rendering it in the same ink would make a passing observation look like part of the
         /// option's name.
+        ///
+        /// Rendered through `Text(.init(_:))`, so inline markdown works — `*Chill*` italicises the
+        /// preset's name inside the note, marking it as a name being quoted rather than a word in the
+        /// sentence. Same mechanism `SettingsHint` uses for its own emphasis.
         var titleNote: String?
         /// The line under the title: what this option does, in the user's terms.
         let summary: String
@@ -95,7 +99,7 @@ struct RadioGroup<Value: Hashable>: View {
                             // both wrong and confusing, since selecting it is exactly what already
                             // happened.
                             .foregroundStyle(option.selectable || isActive ? .primary : .secondary)
-                         + Text(option.titleNote.map { " \($0)" } ?? "")
+                         + Text(.init(option.titleNote.map { " \($0)" } ?? ""))
                             .foregroundStyle(.secondary))
                         Text(.init(option.summary))
                             .font(.callout)
