@@ -371,10 +371,18 @@ struct LegendPane: View {
     /// than the name above it. `.headline` on the name keeps the pair reading as one heading; the form
     /// styles a bare `Text` header down to a caption, which would bury it.
     private func heading(_ title: String, detail: String?) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.headline).foregroundStyle(.primary)
+        // One line, name and explanation separated by the same `·` the style captions use — rather
+        // than the two-line block this started as. The second line read as a subtitle *belonging* to
+        // the heading, which put three ranks of text above every section (name, subtitle, then the
+        // rows' own pairs) and pushed the diagrams down. Inline, the two halves are one sentence and
+        // the page keeps two ranks: heading, then content.
+        Group {
             if let detail {
-                Text(detail).font(.callout).foregroundStyle(.secondary)
+                Text(title).font(.headline).foregroundStyle(.primary)
+                    + Text(" · ").font(.callout).foregroundStyle(.secondary)
+                    + Text(detail).font(.callout).foregroundStyle(.secondary)
+            } else {
+                Text(title).font(.headline).foregroundStyle(.primary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
