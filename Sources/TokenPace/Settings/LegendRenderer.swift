@@ -81,6 +81,29 @@ enum LegendRenderer {
         view.subdivisions = subdivisions
         view.isBaseLimit = isBaseLimit
         view.barStyle = style
+        // A step brighter than the popup's own track, and only here (#261). `monochromeGrey` is
+        // `tertiaryLabelColor` blended halfway toward `quaternary` — right on a vibrant card, where the
+        // track should be the absence of colour rather than a shape. On a Settings form that tone all
+        // but vanishes: the plate is flatter and there are no surrounding rows to say where the bar is.
+        //
+        // A **quarter** of the way back toward quaternary, not the whole way. Plain `tertiaryLabelColor`
+        // was tried first and overshot — the track stopped reading as backing and started competing with
+        // the coloured ribbon on top of it, which is the one thing on these bars that must be loudest.
+        // This lands between the two: visible as a shape, still quieter than anything it carries.
+        //
+        // A **dynamic** colour, not a blend computed here: `blended` resolves against whatever
+        // appearance is current at the call site, and this runs before the `performAsCurrentDrawing`
+        // block below. Computing it inside the provider is the same shape `Palette.monochromeGrey`
+        // uses, and for the same reason — it is what makes the tone flip with the theme instead of
+        // freezing at whatever the theme was when the view was configured.
+        view.trackTint = NSColor(name: nil) { appearance in
+            var mixed: NSColor = .tertiaryLabelColor
+            appearance.performAsCurrentDrawingAppearance {
+                mixed = NSColor.tertiaryLabelColor
+                    .blended(withFraction: 0.25, of: .quaternaryLabelColor) ?? .tertiaryLabelColor
+            }
+            return mixed
+        }
         // `optionHeld` stays false: ⌥ reveals the ruler's explanatory teeth *while held*, so a
         // specimen baked with them on advertises a state the page is not in. The mark that identifies
         // a marker-less style — the zero struck through the track — is drawn unconditionally.
@@ -126,18 +149,19 @@ enum LegendRenderer {
     /// `SymbolConfiguration`, because every glyph routine on `StatusItemView` is private and there is
     /// no seam that returns one icon; the alternative, rendering the whole widget per row, would put a
     /// bar and a countdown beside every caption.
-    static func glyphImage(_ name: String, tint: NSColor, pointSize: CGFloat = 12) -> NSImage? {
+    /// **Returned as a template**, with no colour baked in — the caller tints it with
+    /// `.foregroundStyle`, and SwiftUI re-resolves that on every theme flip.
+    ///
+    /// The first version filled the glyph with an `NSColor` here and shipped a non-template image.
+    /// That froze the colour at bake time: a label glyph drawn under the dark theme stayed near-white
+    /// after a switch to light, on a near-white form. The bars have the same property and solve it by
+    /// re-baking (the view depends on `colorScheme`, so the whole image is redrawn), but a glyph does
+    /// not need that machinery — a template is the platform's own answer to exactly this.
+    static func glyphImage(_ name: String, pointSize: CGFloat = 12) -> NSImage? {
         let configuration = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold)
         guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(configuration) else { return nil }
-
-        let image = NSImage(size: symbol.size)
-        image.lockFocus()
-        symbol.draw(in: NSRect(origin: .zero, size: symbol.size))
-        tint.set()
-        NSRect(origin: .zero, size: symbol.size).fill(using: .sourceAtop)
-        image.unlockFocus()
-        image.isTemplate = false
-        return image
+        symbol.isTemplate = true
+        return symbol
     }
 }

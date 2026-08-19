@@ -335,7 +335,7 @@ struct LegendPane: View {
     private static var icons: [Icon] {
         [Icon(symbol: WidgetGlyph.awaitingInput, tint: ColorRole.label.defaultColor,
               name: "awaiting input",
-              detail: "sessions waiting for your reply · turns orange, then red, as the session nears deletion"),
+              detail: "sessions waiting for your reply"),
          Icon(symbol: WidgetGlyph.paused, tint: ColorRole.red.defaultColor,
               name: "paused", detail: "every limit spent · no credits to cover"),
          Icon(symbol: WidgetGlyph.credits(for: "EUR"), tint: ColorRole.label.defaultColor,
@@ -410,10 +410,16 @@ struct LegendPane: View {
                 .strokeBorder(Color.primary.opacity(outlined ? 0.28 : 0), lineWidth: 0.5))
     }
 
+    /// A widget glyph, tinted **in SwiftUI** rather than baked.
+    ///
+    /// `.foregroundStyle` on a template image re-resolves whenever the theme changes, which is what
+    /// keeps a `label`-coloured glyph readable on both grounds. Baking the colour into the bitmap —
+    /// the first attempt — left it frozen at whatever the theme was when the page first drew.
     private func glyph(_ symbol: String, tint: NSColor) -> some View {
         Group {
-            if let image = LegendRenderer.glyphImage(symbol, tint: tint) {
+            if let image = LegendRenderer.glyphImage(symbol) {
                 Image(nsImage: image)
+                    .foregroundStyle(Color(nsColor: tint))
             }
         }
     }
@@ -428,7 +434,12 @@ struct LegendPane: View {
                          caption: String, name: String,
                          callouts: [Callout] = []) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(.init("**\(name)** · \(caption)")).font(.callout)
+            // The name in full ink, the rest dimmed — the same split the row pairs use, and for the
+            // same reason: what the thing is called ranks above what it does here, because the caption
+            // is read once and the name is what the reader carries to the Style control.
+            (Text(name).font(.callout).bold()
+             + Text(" · ").font(.callout).foregroundColor(.secondary)
+             + Text(.init(caption)).font(.callout).foregroundColor(.secondary))
             // Pinned to the width it was baked at. Without this the form stretches the image to the
             // row, and every callout below then points at a mark that has moved — which is exactly
             // what the first screenshot of this section showed.
