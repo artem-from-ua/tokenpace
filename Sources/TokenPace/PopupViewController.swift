@@ -1854,16 +1854,26 @@ final class PopupViewController: NSViewController {
         // "Claude" mark and ⌥ restores "Claude ･ Max (5x)". `brandTitleLabel` already renders the mark
         // alone for a nil plan, so this is a gate on the argument, not a second code path.
         let brand = Self.brandTitleLabel(plan: optionHeld ? layout.planLabel : nil)
-        // The age carries the same `･` separator the brand mark uses before the plan (#396), in the
-        // dimmed ink rather than the brand colour: without it "Claude just now" read as one phrase,
-        // the timestamp looking like part of the heading instead of a fact about the data under it.
-        let age = NSTextField(labelWithString: Self.separatorPrefix + ageString)
+        // The age takes the same `･` separator the brand mark uses before the plan (#396) — without it
+        // "Claude just now" read as one phrase, the timestamp looking like part of the heading rather
+        // than a fact about the data under it.
+        //
+        // **Only while ⌥ is up.** Under ⌥ the mark already ends in `･ Max (20x)`, and a second dot
+        // would make the header a list of three things joined by the same punctuation. There the plan
+        // label itself is the separation the age needs.
+        //
+        // The dot leads the age's own string rather than sitting in the stack's spacing: one text
+        // object means one baseline, and the gap either side is the glyph's own side bearing. The
+        // stack's spacing then drops to 4 — 8 was tuned for two labels meeting with no punctuation
+        // between them, and on top of the dot's bearing it read as a double space.
+        let age = NSTextField(
+            labelWithString: (optionHeld ? "" : Self.separatorPrefix) + ageString)
         age.font = .systemFont(ofSize: Metrics.textSize)
         age.textColor = Self.dimmedLabelColor
         let leading = NSStackView(views: [brand, age])
         leading.orientation = .horizontal
         leading.alignment = .firstBaseline
-        leading.spacing = 8
+        leading.spacing = optionHeld ? 8 : 4
         // Right slot: the summary badge when there is an awaiting count and ⌥ is up; nothing when ⌥ is
         // held (the per-project breakdown below supersedes it — but the age stays put next to the brand
         // title, it does not move to where the badge was) or when there is no awaiting count at all.
@@ -2192,7 +2202,9 @@ final class PopupViewController: NSViewController {
         let leading = NSStackView(views: leadingViews)
         leading.orientation = .horizontal
         leading.alignment = .centerY
-        leading.spacing = 6
+        // 4, not 6: the style caption leads with `･`, whose own side bearing already separates it from
+        // the title. At 6 the two gaps stacked and read as a double space.
+        leading.spacing = 4
         // The badge gets more air than the style word does. `title` and `style` are two words of the
         // same sentence — "which row, on which scale" — and read as a pair at 6 pt; the badge is a
         // separate object about a different thing (the money), and at the same 6 pt the three ran
@@ -2397,16 +2409,19 @@ final class PopupViewController: NSViewController {
         // one component with different contents rather than two similar-looking things. The glyph keeps
         // that size too; `PillView(symbol:)` scales the symbol from the font it is given.
         let font = Self.pillFont
-        // Neutral grey, not the label-coloured plaque it used to be (#396). The plaque read as loud as
-        // the blocking-reset badge next to it, which put "money is moving" — a fact, not a problem — in
-        // the same visual class as "you are blocked". Grey states it without claiming urgency; the
-        // filled red stays the popup's only alarming colour. The knocked-out glyph keeps its contrast
-        // because the ink is the card's own colour, which reads against the track grey as well.
+        // Neutral grey fill, label-coloured content (#396).
+        //
+        // The plaque used to be filled with `labelColor` and knocked its glyph out in the card's own
+        // colour. Filled that strongly it read as loud as the blocking-reset badge beside it, putting
+        // "money is moving" — a fact — in the same visual class as "you are blocked". The fill is now
+        // the bar track's grey, and with it the knockout stops making sense: cutting a hole through a
+        // light grey shows the card at nearly the same tone, so the glyph fades instead of reading.
+        // Ordinary `label` ink on grey is the same relationship every other row has with the card.
         let badge: PillView = optionHeld
-            ? PillView(text: Self.inUseWord, font: font, textColor: .cardPlateFillOpaque,
+            ? PillView(text: Self.inUseWord, font: font, textColor: ColorRole.label.defaultColor,
                        fill: { ColorRole.barTrack.defaultColor })
             : PillView(symbol: StatusItemView.creditsSymbolName(for: currency), font: font,
-                       textColor: .cardPlateFillOpaque,
+                       textColor: ColorRole.label.defaultColor,
                        fill: { ColorRole.barTrack.defaultColor })
         badge.toolTip = Self.inUseHint
         badge.setAccessibilityLabel(Self.inUseAccessibilityLabel)
