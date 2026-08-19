@@ -33,19 +33,23 @@ struct AppearancePane: View {
 
     var body: some View {
         Form {
-            // First section: one-click Appearance presets (#215, #224) — a **radio group**, one row per
-            // preset. Picking Chill / Work harder! / Control freak applies it (sets every option on both
-            // child pages at once).
+            // First section: Appearance presets (#215, #224) — a **radio group**, one row per preset,
+            // each setting every option on both child pages at once.
             //
             // Radios rather than the segmented control this was until now: the three names read as
             // moods, and the question they leave open — *which signals does this make loudest?* — needs
             // a line of prose per option, which a segment has no room for. `AppearancePreset.summary`
             // holds those lines, beside the values they describe.
             //
-            // "Custom" is a **real slot** since #333, not the pure indicator it was: applying a preset
-            // stashes the setup it overwrites, so Custom can restore it. It falls back to
-            // indicator-only (visible, highlightable, inert) while nothing is stashed — a fresh install
-            // has nothing to come back to — and says so on its own second line.
+            // **Clicking previews; only `Apply` commits.** A click puts the preset in
+            // `PersistedConfig`'s overlay, which every Appearance getter consults, so both surfaces draw
+            // it while the store is untouched — and closing the window drops it. That is what makes the
+            // rows safe to click through, which is what people come here to do: compare presets against
+            // their own config, or take one as a base to modify.
+            //
+            // The fourth row is that config itself — "My setup" — rather than the old "Custom", which
+            // stood for the live config and a hidden snapshot at the same time and was clickable only
+            // in some states.
             // MARK: The legend — its own section, above everything (#261)
             //
             // First on the page, and alone in its section, because it is the only row here that

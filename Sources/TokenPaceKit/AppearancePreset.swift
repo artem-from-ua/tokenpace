@@ -12,12 +12,13 @@ import Foundation
 ///
 /// Each preset picks **one** ``BarStyle`` and gives it to both surfaces (#329) — the presets are the
 /// three coherent looks, so a preset that disagreed with itself across the menu bar and the dropdown
-/// would be a fourth. Mixing the two surfaces is exactly what dropping out to "Custom" is for.
+/// would be a fourth. A config that mixes the two surfaces is simply the user's own, which is what the
+/// "My setup" row names.
 ///
 /// The preset **values** live here in the kit (not the AppKit/SwiftUI shell) so they are unit-testable
-/// without a UI. The shell owns only presentation: the segmented control that calls `apply` and the
-/// ``displayName`` shown on it. ``matching(_:)`` powers the control's "Custom" indicator segment: it
-/// lights up when the live config matches no preset.
+/// without a UI. The shell owns only presentation: the radio row that previews a preset and the
+/// ``displayName`` shown on it. ``matching(_:)`` reads the **stored** config, which is what lets the
+/// "My setup" row report the preset it happens to equal.
 public enum AppearancePreset: String, Sendable, CaseIterable {
     /// The calm, quiet look: every menu-bar toggle calm and the left-anchored
     /// **Pressure** ribbon on both surfaces (#224) — the quietest of the three styles, since every

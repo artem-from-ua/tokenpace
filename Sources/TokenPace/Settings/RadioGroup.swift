@@ -49,6 +49,10 @@ struct RadioGroup<Value: Hashable>: View {
         /// The dimming it drives is suppressed on the **active** row: a grey title means "clicking this
         /// does nothing", which on the option you are already on is both wrong and alarming. See
         /// ``RadioGroup/row(_:)``.
+        ///
+        /// Every option passes `true` today. The row this existed for — the old "Custom" — was
+        /// selectable only in some states, which is exactly the ambiguity the preview model removed:
+        /// all four rows are now real options that always do something.
         var selectable: Bool = true
         /// A control at the row's trailing edge — the `Apply` button on a previewed preset, the copy
         /// button on "My setup".

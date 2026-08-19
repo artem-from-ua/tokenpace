@@ -944,8 +944,7 @@ enum PersistedConfig {
     /// values to the widget.
     static func apply(_ preset: AppearancePreset) { applyValues(preset.values) }
 
-    /// Write every Appearance key from an arbitrary value set — the general form of ``apply(_:)``,
-    /// used to restore the saved Custom setup (#333).
+    /// Write every Appearance key from an arbitrary value set — the general form of ``apply(_:)``.
     static func applyValues(_ v: AppearancePresetValues) {
         colorsTell = v.colorsTell
         hideTop5hBar = v.hideTop5hBar
@@ -956,10 +955,12 @@ enum PersistedConfig {
         dropdownStyle = v.dropdownStyle
     }
 
-    /// The live Appearance config assembled into an `AppearancePresetValues` — the read-mirror of
-    /// ``apply(_:)`` (#224). Used by the Settings model to light the preset segmented control's active
-    /// segment via `AppearancePreset.matching(_:)`: equal to a preset's `.values` → that preset is
-    /// active; equal to none → the "Custom" slot.
+    /// The Appearance config assembled into an `AppearancePresetValues` — the read-mirror of
+    /// ``apply(_:)`` (#224).
+    ///
+    /// Honours a preview overlay, so this is what is **on screen**. For what is *stored* — which is what
+    /// the "My setup" row, its `· same as …` note and the copy button all report — read
+    /// ``persistedAppearanceValues`` instead.
     static var currentAppearanceValues: AppearancePresetValues {
         AppearancePresetValues(
             colorsTell: colorsTell,
