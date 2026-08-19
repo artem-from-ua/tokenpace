@@ -202,7 +202,7 @@ enum StubScenario: String, CaseIterable {
         case .allExhaustedTokenBlocks:  return "All spent · 7-day frees you last"
         case .creditsMonthEnd:     return "Credits · late in the month (time marker near the end)"
         case .justUnblocked:       return "Back to work! edge"
-        case .creditsOnset:        return "Extra Usage Credit onset"
+        case .creditsOnset:        return "Extra usage credits onset"
         case .resetGrace:          return "Reset-boundary idle grace"
         case .colorCycle:          return "Colour transitions (frozen bars)"
         case .incidentActive:      return "Incident · one active (⌥ shows it)"
@@ -449,8 +449,8 @@ enum StubScenario: String, CaseIterable {
                  + "\"Back to work!\" notification once (quiet hours + authorization permitting)."
         case .creditsOnset:
             return "Extra-usage onset: first poll not on credits (7d 40 %), then 7d 100 % with credits "
-                 + "enabled → work overflows onto paid credit, firing the \"Now using Extra Usage "
-                 + "Credit\" notification once (€10.77 of €15.00; quiet hours + authorization permitting)."
+                 + "enabled → work overflows onto paid credit, firing the \"Now using Extra usage "
+                 + "credits\" notification once (€10.77 of €15.00; quiet hours + authorization permitting)."
         case .resetGrace:
             return "Reset-boundary idle grace (ADR-0041): active → post-reset empty five_hour → active "
                  + "again. The 5h bar stays \"ready\" across the empty polls — no flicker."

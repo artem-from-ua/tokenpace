@@ -90,7 +90,7 @@ struct AboutPane: View {
                 // The periodic-check switch, with "Check Now" as a trailing button on the same row.
                 LabeledContent {
                     HStack(spacing: 10) {
-                        Button("Check Now") { model.checkForUpdatesNow() }
+                        Button("Check now") { model.checkForUpdatesNow() }
                         Toggle("", isOn: Binding(
                             get: { model.automaticUpdateChecks },
                             set: { model.setAutomaticUpdateChecks($0) }))
@@ -111,7 +111,7 @@ struct AboutPane: View {
                         LabeledContent {
                             HStack(spacing: 10) {
                                 if model.canInstallNow {
-                                    Button("Update Now") { model.installUpdateNow() }
+                                    Button("Update now") { model.installUpdateNow() }
                                 }
                                 // When the feature can't work (a dev build), show the switch as OFF
                                 // regardless of the stored value — an on-but-disabled switch reads as

@@ -124,7 +124,7 @@ struct ProvidersPane: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         LabeledContent {
-                            Button("Archive Now") { model.archiveNow() }
+                            Button("Archive now") { model.archiveNow() }
                                 .disabled(model.archiveDestination == nil)
                         } label: {
                             Text(model.archiveStatusText)
