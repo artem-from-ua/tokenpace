@@ -58,7 +58,7 @@ struct AppearancePane: View {
             Section {
                 SettingsNavigationRow(
                     title: SettingsChildPage.appearanceLegend.title,
-                    subtitle: "What the colours, bars and icons mean.",
+                    subtitle: "What the colors, bars and icons mean.",
                     badge: .page(.appearanceLegend),
                     action: { model.drill(into: .appearanceLegend) })
             }

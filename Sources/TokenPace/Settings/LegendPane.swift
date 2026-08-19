@@ -61,7 +61,7 @@ struct LegendPane: View {
     /// beside a percentage reads as a progress bar, and the colour then looks like "how full", which
     /// is the one thing it never means.
     private var colorSection: some View {
-        Section(header: heading("What a bar’s colour says",
+        Section(header: heading("What a bar’s color says",
                                 detail: "how fast you’re spending, not how much")) {
             ForEach(Array(LegendCatalog.tiers.enumerated()), id: \.offset) { _, tier in
                 legendRow(swatch: { stroke(colour: Color(LegendRenderer.tierColor(tier.layout))) },
@@ -70,8 +70,8 @@ struct LegendPane: View {
             }
             legendRow(swatch: { stroke(colour: Color(nsColor: ColorRole.calmWhite.defaultColor),
                                        outlined: true) },
-                      name: "no colour",
-                      detail: "optionally replaces non-critical colours in the menu bar")
+                      name: "no color",
+                      detail: "optionally replaces non-critical colors in the menu bar")
         }
     }
 
