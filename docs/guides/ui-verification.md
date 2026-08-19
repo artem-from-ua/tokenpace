@@ -282,7 +282,7 @@ defaults read TokenPace | grep -i -e Visibility -e showPerModelLimits -e showExt
 Дві поведінки в шапці попапа, обидві зав'язані на ⌥ Option (`PopupViewController.optionHeld`,
 `rebuild()`):
 
-- **Час оновлення («2m ago» / «just now»)** — **зліва, одразу після бренду** «Claude [план]» у тому
+- **Час оновлення («updated 2m ago» / «updated just now»)** — **зліва, одразу після бренду** «Claude [план]» у тому
   самому рядку (правий край рядка належить лише awaiting-input індикатору, і залишається порожнім,
   коли того немає). Тепер показується
   **завжди, коли дані застаріли** — вік перевищив `PopupViewController.staleAgeThreshold` (2× базова
@@ -1548,7 +1548,7 @@ TOKENPACE_STUB=1 TOKENPACE_AWAITING=8 TOKENPACE_AWAITING_DAYS=3,28,10,5,25,12,20
 - **Попап (без ⌥)**: `Claude [Nm ago]` зліва, `N✋` — **flush right**. При `TOKENPACE_AWAITING=1` —
   лише долоня, без числа. Наведення → tooltip «Sessions waiting for your answer.\nHold ⌥ (Option) for
   per-project stats».
-- **Попап (тримати ⌥)**: `N✋` праворуч **зникає** (age «just now» лишається біля «Claude»); нижче —
+- **Попап (тримати ⌥)**: `N✋` праворуч **зникає** (age «updated just now» лишається біля «Claude»); нижче —
   **inline-розбивка по проєктах**: `project ..... 2✋ 1✋ 6✋` (по одній долоні на непорожній бакет,
   порядок нейтр→оранж→червон, завжди з числом вкл. 1). Наведення на кожну руку → tooltip бакета
   («<7d/<15d/>15d till deletion»). (Попап показує індикатор завжди, поки фіча ON.)

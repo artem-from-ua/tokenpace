@@ -1841,7 +1841,9 @@ final class PopupViewController: NSViewController {
         // number that mode has to offer would stay hidden. There, show it whenever it exists.
         let showAge = optionHeld || layout.lastUpdateAge >= Self.staleAgeThreshold
             || (servicesAreTheContent && layout.lastUpdateAge > 0)
-        let ageString = showAge ? Self.ageText(layout.lastUpdateAge) : ""
+        // Prefixed with the verb (#388 follow-up): on its own, "just now" beside the plan label
+        // read as a fragment — the header tail says *what* happened then, not just when.
+        let ageString = showAge ? "updated \(Self.ageText(layout.lastUpdateAge))" : ""
         // Header layout (#233): the "Claude" brand title with the "Nm ago" age beside it on the left —
         // **always**, whether or not an awaiting-input count exists. The age belongs to the brand title,
         // not to the right edge: pushing it flush right (the old no-awaiting fallback) made it jump
@@ -1855,7 +1857,7 @@ final class PopupViewController: NSViewController {
         // alone for a nil plan, so this is a gate on the argument, not a second code path.
         let brand = Self.brandTitleLabel(plan: optionHeld ? layout.planLabel : nil)
         // The age rides the ⌥ layer with the plan label (#396): at rest the header is the bare "Claude"
-        // mark, and ⌥ restores the whole tail — `Claude ･ Max (20x) ･ just now`.
+        // mark, and ⌥ restores the whole tail — `Claude ･ Max (20x) ･ updated just now`.
         //
         // The two belong together. Both answer questions asked once rather than watched: which plan
         // this is, and how fresh the numbers are. Leaving the age visible while the plan hid split one
