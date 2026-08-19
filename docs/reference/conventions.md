@@ -168,7 +168,7 @@ git config core.hooksPath .githooks
 **Називаєш елемент іншої поверхні — бери його ім'я з єдиного джерела, не з пам'яті.** Рядок Settings,
 що згадує секцію дропдауна, має писати її точно так, як пише сам дропдаун. Канонічний приклад —
 `Extra usage`: джерело `PopupViewController.extraUsageTitle`, у Settings курсивом (`*Extra usage*`),
-бо це ім'я, а не опис ([ADR-0113](../adr/0113-extra-usage-is-one-name.md)). Курсив вимагає
+бо це ім'я, а не опис ([ADR-0114](../adr/0114-extra-usage-is-one-name.md)). Курсив вимагає
 `Text(.init(_:))` — плейн-`Text(String)` надрукує зірочки буквально; так уміють `SettingsHint` і
 `SettingsDisabledLabel`, а от **схована мітка `Toggle` лишається без розмітки**, бо її читає
 VoiceOver, і зірочки він промовить.

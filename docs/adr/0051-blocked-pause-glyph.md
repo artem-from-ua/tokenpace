@@ -35,8 +35,14 @@ superseded_by: [0063]
 (`mainWindowExhausted && !creditsCanCover`), а **не** ширший `mainWindowExhausted`, який використовує
 #194 (ADR-0049) для ховання барів. Різниця істотна: коли 7d на 100 %, але кредити ще покривають, робота
 триває на платному тарифі — це **не** повна зупинка, тож pause не показуємо. Це та сама межа, що й
-червоний «Effective blocker» бейдж у попапі та edge «Back to work!» (`WorkAvailability.canWork` —
-інверсія `isBlocked`), тож усі сигнали узгоджені.
+червоний «Effective blocker» бейдж у попапі (`WorkAvailability.canWork` — інверсія `isBlocked`).
+
+> **Постскриптум (#161, [ADR-0113](0113-back-to-work-tracks-the-subscription-quota.md)).** Речення
+> вище спершу зараховувало до цієї межі й edge «Back to work!». Більше ні: нотифікація стежить за
+> `subscriptionAvailable` (`!mainWindowExhausted`) — тобто за **ширшою** межею, тією самою, що її
+> згадує абзац вище як «#194 (ADR-0049)». Розходяться вони рівно в
+> credits-cover-випадку: pause-гліф там не показуємо (робота триває), а квоту вважаємо витраченою
+> (щоб її ресет оголосити). Рішення цього ADR — `isBlocked` як тригер гліфа — чинне без змін.
 
 ### Модель — прапорець `blockedPause: Bool` на `MenuBarLayout`, обчислений на health-обізнаному шві
 

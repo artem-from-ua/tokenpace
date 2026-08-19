@@ -1,11 +1,19 @@
 ---
 status: accepted
 date: 2026-07-26
+supersedes: []
+superseded_by: [0113]
 ---
 
 # ADR-0039: Нотифікація «Back to work!» — фронт blocked→unblocked, quiet-hours, opt-in
 
 > Реалізовано в [#160](https://github.com/artem-from-ua/tokenpace/issues/160).
+>
+> ⚠️ **Вибір сигналу витіснено [ADR-0113](0113-back-to-work-tracks-the-subscription-quota.md)**
+> ([#161](https://github.com/artem-from-ua/tokenpace/issues/161)): фронт тепер `subscriptionAvailable`
+> (лише 5h/7d, кредити поза сигналом в обидва боки), а не `canWork`. Усе решта нижче — персистований
+> edge-state і розкол «трекінг щополу / постинг за тумблером», quiet-hours із Правилом A, ленива
+> `.app`-only авторизація, розкол pure/shell — **чинне без змін**.
 
 ## Контекст
 

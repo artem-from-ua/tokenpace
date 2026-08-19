@@ -53,16 +53,11 @@ struct NotificationsPane: View {
                         .labelsHidden()
                         .disabled(!model.backToWorkMasterEnabled)
                     }
-                    // Descriptive hints dim with the control they describe (#381) …
-                    Group {
-                        SettingsHint(
-                            text: "If you hit a Claude usage limit, notifies you when it resets so you "
-                                + "can get back to work.")
-                        SettingsHint(
-                            text: "It best suits the *Work harder!* and *Control freak* presets on the "
-                                + "*Appearance* page.")
-                    }
-                    .disabled(!model.backToWorkMasterEnabled)
+                    // The descriptive hint dims with the control it describes (#381) …
+                    SettingsHint(
+                        text: "If you hit your 5-hour or weekly subscription limit, notifies you when "
+                            + "it resets so you can get back to work. Extra usage credits don't count.")
+                        .disabled(!model.backToWorkMasterEnabled)
 
                     // … but this one is the **reason** the switch is unavailable ("Notifications are
                     // turned off for TokenPace — enable them in System Settings"), so it stays at full
@@ -78,7 +73,7 @@ struct NotificationsPane: View {
                         // works regardless (the post gates on support + authorization itself).
                         Group {
                             // *Extra usage* is the dropdown section's own name, so it is written and
-                            // italicised exactly as the Appearance pane writes it (ADR-0113). The
+                            // italicised exactly as the Appearance pane writes it (ADR-0114). The
                             // toggle's own label below stays plain: it is hidden from sight and read
                             // aloud by VoiceOver, where asterisks would be spoken as markup.
                             SettingsDisabledLabel("Switching to *Extra usage*")
