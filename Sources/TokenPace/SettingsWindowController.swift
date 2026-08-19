@@ -25,6 +25,15 @@ import TokenPaceKit
 @MainActor
 final class SettingsWindowController: NSWindowController {
 
+    /// The window's pinned content width, readable from outside the controller.
+    ///
+    /// `Metrics` itself stays private — this is the one number anything else needs, and it needs it for
+    /// one reason: the preview parks beside this window, so it has to know how much of the screen the
+    /// pair will take (`SettingsPreviewWindowController.Metrics.pairWidth`). Exposed as a single
+    /// constant rather than by opening the whole enum, so the rest of the geometry stays this type's
+    /// own business.
+    nonisolated static let pinnedContentWidth: CGFloat = 792
+
     private enum Metrics {
         /// Fixed window content width. Pinned min == max: only the **height** resizes (ADR-0069).
         ///
@@ -35,7 +44,11 @@ final class SettingsWindowController: NSWindowController {
         /// reflow every pane; the split is tuned to this width, which is why it is not draggable.
         ///
         /// Change one of the two and the other must follow, or the detail column silently resizes.
-        static let contentWidth: CGFloat = 792
+        ///
+        /// The number itself lives on ``SettingsWindowController/pinnedContentWidth``, which the
+        /// preview reads to work out how wide the pair is; this alias keeps the rest of the file
+        /// reading as `Metrics.contentWidth` while there is still only one copy of the value.
+        static let contentWidth: CGFloat = SettingsWindowController.pinnedContentWidth
         /// Content height the window **opens at** — a default since ADR-0069, a hard size before it.
         /// It was hand-bumped every time the Appearance pane grew an option: 480 → 520 (#199) → 560
         /// (#211) → 600 (#215) → 636 (the "Work harder" toggle) → 684 → 776 (#224 — "Bar style", the
@@ -256,12 +269,18 @@ final class SettingsWindowController: NSWindowController {
         // toolbar material: content blurs *under* it rather than through it, which is what System
         // Settings does.
         window.titlebarAppearsTransparent = false
-        window.level = .floating               // float above other apps from a menu-bar app (ADR-0012 §6)
+        // **An ordinary window level, not `.floating`.** ADR-0012 §6 floated it so a menu-bar app's
+        // Settings could be found again after clicking away — but the cost is that it then sits over
+        // *everything*, including the editor or terminal the reader is comparing it against, and it
+        // cannot be pushed behind them. A Settings window is somewhere you go, not something you
+        // consult while working in another app; the widget's own menu reopens it in one click.
+        //
+        // The preview is unaffected: it is a **child** window, so it follows this one's ordering
+        // whatever level that is.
         window.isReleasedWhenClosed = false    // keep the controller alive so re-opening reuses it
         // Zoom means "as tall as the screen" here, not "as large as the screen" — see
-        // `windowWillUseStandardFrame`. Full screen is refused outright: a `.floating` window in its
-        // own Space fights whatever app is actually full-screen (the conflict that made ADR-0020 drop
-        // `.floating` from Troubleshoot; here we keep the level and drop full screen instead).
+        // `windowWillUseStandardFrame`. Full screen stays refused: the window is a fixed-width form
+        // with a companion parked beside it, and neither survives being blown up to a Space of its own.
         window.collectionBehavior.insert(.fullScreenNone)
         // No `setFrameAutosaveName`, even though the frame *is* persisted now (ADR-0069): autosave
         // restores a frame before anything can check it against the current screen layout, which is
@@ -850,8 +869,31 @@ extension SettingsWindowController: NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
+        keepPreviewRoomOnTheRight()
         persistFrame()
         preview.reposition()
+    }
+
+    /// Stop the window being dragged so far right that the preview has nowhere to sit.
+    ///
+    /// The preview lives to the **right**, always — a window that jumped sides mid-session made the
+    /// reader hunt for it, and one that overlapped Settings hid the very controls it was previewing.
+    /// Keeping the side fixed means the constraint has to go on the parent instead: it may not cross
+    /// the point where the pair stops fitting on screen.
+    ///
+    /// Only while the preview is actually showing (`Appearance` and its pages, ADR-0083). Everywhere
+    /// else the window is the user's to put where they like, and clamping it there would take space
+    /// away for a companion that is not on screen.
+    ///
+    /// Nudged rather than refused: AppKit has no "you may not move there" for a user drag, so the frame
+    /// is corrected after the fact. In practice the window slides along the invisible wall, which is
+    /// what a maximum position should feel like.
+    private func keepPreviewRoomOnTheRight() {
+        guard preview.isEnabledForCurrentPane, let window,
+              let visible = (window.screen ?? NSScreen.main)?.visibleFrame else { return }
+        let maxX = visible.maxX - SettingsPreviewWindowController.roomNeededOnTheRight
+        guard window.frame.maxX > maxX else { return }
+        window.setFrameOrigin(NSPoint(x: maxX - window.frame.width, y: window.frame.origin.y))
     }
 
     /// The state the window was in when it went away is the one to reopen at — a resize immediately

@@ -65,6 +65,24 @@ final class SettingsPreviewWindowController {
         /// second copy of the number would let the preview open at a different width than the popup it
         /// previews, and nothing would flag it.
         static let nominalWidth: CGFloat = PopupViewController.popupWidth
+
+    }
+
+    /// How much screen must stay clear to the right of Settings for the preview to sit there: the gap
+    /// plus the preview's own width.
+    ///
+    /// The constraint that keeps the preview on one side
+    /// (`SettingsWindowController.keepPreviewRoomOnTheRight()`) is expressed in terms of this, so the
+    /// two cannot disagree about what "fits" means.
+    ///
+    /// A sum rather than a measured number, because every term has already moved once — Settings'
+    /// width, this window's (312 → 380 with the dropdown, #396), and the gap. A literal would have gone
+    /// quietly stale each time while the layout it describes changed underneath it.
+    nonisolated static var roomNeededOnTheRight: CGFloat { Metrics.gap + Metrics.nominalWidth }
+
+    /// How much screen the pair needs side by side — Settings plus ``roomNeededOnTheRight``.
+    nonisolated static var pairWidth: CGFloat {
+        SettingsWindowController.pinnedContentWidth + roomNeededOnTheRight
     }
 
     // MARK: - State
@@ -312,13 +330,16 @@ final class SettingsPreviewWindowController {
         reposition()
     }
 
-    /// Park beside the parent, top edges aligned.
+    /// Park to the **right** of the parent, top edges aligned. Always that side.
     ///
-    /// Settings is 857 pt wide and the preview ~340: on a 1440-pt display the pair does not fit unless
-    /// Settings sits well left, so falling off the right edge is the *ordinary* case, not an edge case.
-    /// Order of preference: right → left → clamped to the screen's right edge (overlapping Settings).
-    /// The overlap is ugly but honest; the alternative — scaling the preview down — would misreport the
-    /// dropdown's real width, which is the one thing this window exists to get right.
+    /// It used to hop to the left when the right ran out, and to sit on top of Settings when neither
+    /// side fitted. Both were worse than they sounded: a preview that changes sides between sessions
+    /// has to be found again each time, and one that overlaps hides the controls it exists to preview.
+    ///
+    /// So the side is fixed and the *parent* is constrained instead —
+    /// `SettingsWindowController.keepPreviewRoomOnTheRight()` will not let the window be dragged past
+    /// the point where ``roomNeededOnTheRight`` stops fitting. The clamp below is a floor for the cases
+    /// that constraint cannot reach: a screen change, a restored frame from a larger display.
     func reposition() {
         guard let win = window, let parent = parentWindow else { return }
         let parentFrame = parent.frame
@@ -328,12 +349,7 @@ final class SettingsPreviewWindowController {
         let visible = (parent.screen ?? NSScreen.main)?.visibleFrame
 
         var x = parentFrame.maxX + Metrics.gap
-        if let visible {
-            if x + size.width > visible.maxX {
-                let mirrored = parentFrame.minX - Metrics.gap - size.width
-                x = mirrored >= visible.minX ? mirrored : visible.maxX - size.width
-            }
-        }
+        if let visible { x = min(x, visible.maxX - size.width) }
 
         var y = parentFrame.maxY - size.height
         if let visible { y = max(y, visible.minY) }
