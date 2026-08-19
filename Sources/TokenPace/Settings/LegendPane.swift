@@ -213,7 +213,7 @@ struct LegendPane: View {
     private var statusDotRow: some View {
         legendRow(swatch: { dot(ColorRole.orange.defaultColor) },
                   name: "service status",
-                  detail: "a Claude service has a problem · shown only when something’s wrong") {
+                  detail: "a provider service has a problem · shown only when something’s wrong") {
             HStack(spacing: 10) {
                 ForEach(Array(Self.serviceStates.enumerated()), id: \.offset) { _, state in
                     HStack(spacing: 4) {
