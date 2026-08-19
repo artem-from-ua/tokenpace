@@ -304,6 +304,9 @@ final class SettingsModel {
         case .appearanceMenuBar: style = menuBarStyle
         case .appearanceDropdown: style = dropdownStyle
         case .providersClaude: return nil
+        // Legend configures nothing, so there is no setting to report. Its row carries a fixed
+        // subtitle written where the row is built, rather than a summary of state it does not own.
+        case .appearanceLegend: return nil
         }
         guard let name = AppearanceBarStyle.segments.first(where: { $0.value == style })?.title else {
             return nil

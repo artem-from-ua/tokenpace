@@ -58,7 +58,16 @@ final class SettingsWindowController: NSWindowController {
         /// (Deriving it from a screenshot first gave 443, because that subtracted a title bar which does
         /// not exist here; the live window measured 792 × 440 for a 440 content height, which is what
         /// proves the identity.)
-        static let minContentHeight: CGFloat = 470
+        ///
+        /// **Raised from 470 to 560 for the Legend page** (#261). Matching System Settings' own floor
+        /// was right while every pane was a list of controls, which degrades gracefully: squeeze it and
+        /// you scroll a row at a time. Legend is diagrams — a bar with captions pointing into it — and a
+        /// window short enough to cut one in half turns the page from a reference into a puzzle. 560 is
+        /// the height at which its tallest section (the two bar anatomies with their headings) is whole
+        /// with the form's own padding, so a reader who drags the window down still meets complete
+        /// figures. Every other pane keeps scrolling exactly as it did; the floor only stops them
+        /// getting shorter than the one page that cannot take it.
+        static let minContentHeight: CGFloat = 560
     }
 
     /// The single observable state object, alive for the controller's lifetime (so background

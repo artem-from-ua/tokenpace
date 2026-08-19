@@ -467,7 +467,7 @@ final class StatusItemView: NSView {
         case .usagePollingOff:
             // #341: `zzz` alone. The status dot above is deliberately still drawn — in this mode it
             // is the item's only live signal, so suppressing it would leave a widget saying nothing.
-            drawGlyphAlone("zzz", accessibilityDescription: "usage monitoring off",
+            drawGlyphAlone(WidgetGlyph.usageTrackingOff, accessibilityDescription: "usage monitoring off",
                            atX: contentRect.minX + Metrics.hPadding, in: contentRect)
         case .nothingMonitored:
             drawGlyphAlone("exclamationmark.triangle", accessibilityDescription: "monitoring off",
@@ -606,7 +606,7 @@ final class StatusItemView: NSView {
         let config = NSImage.SymbolConfiguration(pointSize: Metrics.awaitingIconSize, weight: .semibold)
             .applying(.init(paletteColors: [tint]))
         guard let symbol = NSImage(
-            systemSymbolName: "hand.raised", accessibilityDescription: "sessions awaiting input")?
+            systemSymbolName: WidgetGlyph.awaitingInput, accessibilityDescription: "sessions awaiting input")?
             .withSymbolConfiguration(config) else { return }
         let size = symbol.size
 
@@ -799,7 +799,7 @@ final class StatusItemView: NSView {
     private func drawPauseGlyph(atX x: CGFloat, in rect: NSRect) -> CGFloat {
         let config = NSImage.SymbolConfiguration(pointSize: Metrics.pauseGlyphSize, weight: .semibold)
             .applying(.init(paletteColors: [accent(Palette.pauseRed)]))
-        guard let symbol = NSImage(systemSymbolName: "pause.fill", accessibilityDescription: "all limits reached")?
+        guard let symbol = NSImage(systemSymbolName: WidgetGlyph.paused, accessibilityDescription: "all limits reached")?
             .withSymbolConfiguration(config) else {
             return x
         }
@@ -926,7 +926,7 @@ final class StatusItemView: NSView {
     /// ``drawNoDataGlyph(in:)``.
     @discardableResult
     private func drawErrorGlyph(atX x: CGFloat, in rect: NSRect) -> CGFloat {
-        drawGlyphAlone("exclamationmark.triangle", accessibilityDescription: "reset time unknown",
+        drawGlyphAlone(WidgetGlyph.dataConflict, accessibilityDescription: "reset time unknown",
                        atX: x, in: rect)
     }
 
