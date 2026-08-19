@@ -33,8 +33,8 @@ struct ColorAdviceTests {
 
     /// The one case whose flags differ from a plain "muted or not" reading — kept as its own test because
     /// it is the whole difference between the two muting modes, and the reason #381 could not simply
-    /// collapse them into a boolean: under Gauge and Progress the below-pace half **saturates** past the
-    /// middle of a window (`gaugeOffset` clamps at −1), so colour is the only thing left that separates a
+    /// collapse them into a boolean: under Balance and Progress the below-pace half **saturates** past the
+    /// middle of a window (`balanceOffset` clamps at −1), so colour is the only thing left that separates a
     /// large surplus from a small one.
     @Test func onlyTheQuietestModeMutesBlue() {
         let mutingBlue = ColorAdvice.allCases.filter(\.mutesBlue)

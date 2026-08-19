@@ -185,11 +185,11 @@ public struct BarLayout: Sendable, Equatable {
         return (usageFraction - timeFraction) / remaining
     }
 
-    /// The **Pressure** ribbon's length — the **ahead half of ``gaugeOffset``**, and nothing else
+    /// The **Pressure** ribbon's length — the **ahead half of ``balanceOffset``**, and nothing else
     /// (#307, rescaled by ADR-0101).
     ///
     ///     r      = (u − t) / (1 − t)          // signed lead, in units of the time remaining
-    ///     length = clamp(r, 0, 1)             // i.e. max(0, gaugeOffset)
+    ///     length = clamp(r, 0, 1)             // i.e. max(0, balanceOffset)
     ///
     /// The ribbon's zero sits **at `t`**: every state at or behind pace is zero, and the renderers
     /// floor that to the minimum pill. Above pace the ribbon grows to `u` — **signed, never
@@ -222,14 +222,14 @@ public struct BarLayout: Sendable, Equatable {
     /// and renders as the minimum pill. That is the deliberate trade: on the calm side the action
     /// is carried by the colour (green "do nothing" vs blue "you can push"), and gradation *within*
     /// "do nothing" maps to no different action. The style that *does* draw the calm side is
-    /// ``BarStyle/gauge``, which spends its left half on exactly that quantity.
+    /// ``BarStyle/balance``, which spends its left half on exactly that quantity.
     ///
     /// Only the marker-less **Pressure** presentation uses this; **Progress** (`BarStyle.progress`)
     /// keeps drawing `gapStart..gapEnd` on the window scale, where its time marker is meaningful.
     /// A marker is impossible here — on this track it would sit at zero forever.
-    public var pressureLength: Double { max(0, gaugeOffset) }
+    public var pressureLength: Double { max(0, balanceOffset) }
 
-    /// The **Gauge** ribbon's signed offset from the bar's **centre** (#326, ADR-0079).
+    /// The **Balance** ribbon's signed offset from the bar's **centre** (#326, ADR-0079).
     ///
     ///     r      = (u − t) / (1 − t)          // the signed lead, in units of the time remaining
     ///     offset = clamp(r, −1, +1)
@@ -257,10 +257,10 @@ public struct BarLayout: Sendable, Equatable {
     /// Edge cases live in ``signedLead`` — `u >= 1` is `+1` at any `t`, and a due reset (`t = 1`)
     /// is `+1` for any `u`.
     ///
-    /// Used directly by ``BarStyle/gauge`` and, through `max(0, …)`, by ``BarStyle/pressure``. It is
+    /// Used directly by ``BarStyle/balance`` and, through `max(0, …)`, by ``BarStyle/pressure``. It is
     /// **render-only** geometry and carries no colour of its own — the same `(u, t)` yields the same
     /// ``severity`` in every style.
-    public var gaugeOffset: Double {
+    public var balanceOffset: Double {
         guard let r = signedLead else { return 1 }
         return min(1, max(-1, r))
     }

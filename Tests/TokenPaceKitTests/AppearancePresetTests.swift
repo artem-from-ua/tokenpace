@@ -23,16 +23,16 @@ struct AppearancePresetTests {
         #expect(v.dropdownStyle == .pressure)
     }
 
-    /// Work harder! = Chill but with Work harder on and **Gauge** bars. The calm menu-bar
+    /// Work harder! = Chill but with Work harder on and **Balance** bars. The calm menu-bar
     /// toggles and per-model rows all still match `.chill`.
-    @Test func workHarderIsChillPlusWorkHarderAndGauge() {
+    @Test func workHarderIsChillPlusWorkHarderAndBalance() {
         let wh = AppearancePreset.workHarder.values
         let chill = AppearancePreset.chill.values
         #expect(wh.colorsTell == .slowDownOrSpeedUp)       // difference 1 — far-behind blue stays coloured
         #expect(chill.colorsTell == .slowDown)
-        // Difference 2 — Gauge on both surfaces (#329; was the per-surface `.mixed` pair before).
-        #expect(wh.menuBarStyle == .gauge)
-        #expect(wh.dropdownStyle == .gauge)
+        // Difference 2 — Balance on both surfaces (#329; was the per-surface `.mixed` pair before).
+        #expect(wh.menuBarStyle == .balance)
+        #expect(wh.dropdownStyle == .balance)
         #expect(chill.menuBarStyle == .pressure)
         // The rest matches Chill.
         #expect(wh.hideTop5hBar == chill.hideTop5hBar)   // both `.untilItNeedsAttention` (ADR-0086)
