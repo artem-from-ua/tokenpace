@@ -400,6 +400,23 @@ final class SettingsWindowController: NSWindowController {
             guard let self, let sidebar, event.window === sidebar.window else { return event }
             let point = sidebar.convert(event.locationInWindow, from: nil)
             guard sidebar.bounds.contains(point) else { return event }
+            // **Not the titlebar band.** The sidebar column runs to the very top of the window — its
+            // strip is merged into the titlebar (`mergeSidebarTitlebarStrip`), which is what makes the
+            // sidebar material continue behind the traffic lights. So the close button sits
+            // geometrically *inside* this view, and without this guard closing the window counted as a
+            // sidebar click: the deferred pop then ran, and the child page the user was reading was
+            // gone when they opened Settings again. Found by logging every `childPage` write — the
+            // reset arrived with `selection` unchanged, which ruled the binding out and left this.
+            //
+            // Measured against the window's own content-layout guide rather than a constant, so it
+            // holds at whatever height AppKit gives the bar.
+            if let window = sidebar.window {
+                let titlebarHeight = window.frame.height - window.contentLayoutRect.height
+                let inTitlebar = sidebar.isFlipped
+                    ? point.y < titlebarHeight
+                    : point.y > sidebar.bounds.height - titlebarHeight
+                guard !inTitlebar else { return event }
+            }
             // Captured now, checked later: the page that was open when the click landed.
             let openPage = MainActor.assumeIsolated { self.model.childPage }
             DispatchQueue.main.async {

@@ -68,18 +68,6 @@ final class SettingsModel {
     var selection: SettingsSection = .about {
         didSet {
             guard selection != oldValue, !isReplayingHistory else { return }
-            // A write that lands back on the section the open child page already belongs to is the
-            // List restating what is on screen, not the user picking a row. SwiftUI keeps the parent
-            // row highlighted while a child is open, so when the sidebar rebuilds — which is what a
-            // reopened window does — it can echo that highlight back through the binding. Treating
-            // the echo as a pick dropped the reader out of `Menu bar`, `Dropdown` or `Legend` and
-            // back to `Appearance` every time the window was closed and opened again.
-            //
-            // The guard is on the *route*, not on a flag: it holds however the write arrives, and it
-            // cannot mask a real click, because clicking a different row changes the section and
-            // clicking the current one never writes the binding at all (that click is caught in
-            // AppKit — see `SettingsWindowController.watchSidebarClicks(in:)`).
-            guard childPage?.section != selection else { return }
             // Picking a different sidebar row cannot leave the window inside the previous section's
             // child page (#341) — the section is entered at its own root.
             childPage = nil

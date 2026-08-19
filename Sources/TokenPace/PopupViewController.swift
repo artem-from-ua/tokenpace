@@ -364,6 +364,17 @@ final class PopupBarView: NSView {
     /// The tone this bar's base zones actually draw in.
     private var trackColour: NSColor { trackTint ?? Self.monochromeGrey }
 
+    /// Scales the time marker's halo for **this** bar. `1` is the shipped glow.
+    ///
+    /// Also for the Legend page, and for the same reason as ``trackTint``: the popup's glow is tuned
+    /// against a vibrant card, where a marker has to lift off a busy surface. On a flat Settings form
+    /// it blooms instead — the halo reads as part of the mark, and the diagram's callout then points at
+    /// something fuzzier than the 7 pt it is naming.
+    var markerGlowScale: CGFloat = 1
+
+    /// The marker halo's radius after ``markerGlowScale``.
+    private var markerGlow: CGFloat { Self.markerGlowRadius * markerGlowScale }
+
     /// The exhausted-pacing red (`aheadColor`'s cap rung). Exposed so the popup can paint the **one**
     /// blocking reset time red (#158) in the same tone the bars use for an exhausted limit. Computed (not
     /// a `static let`) for the same appearance-freshness reason as ``monochromeGrey``.
@@ -635,7 +646,7 @@ final class PopupBarView: NSView {
         let inner = NSBezierPath(roundedRect: innerRect,
                                  xRadius: max(0, Metrics.indicatorCorner - bw),
                                  yRadius: max(0, Metrics.indicatorCorner - bw))
-        withGlow(colour, radius: Self.markerGlowRadius, strength: Self.markerGlowStrength) {
+        withGlow(colour, radius: markerGlow, strength: Self.markerGlowStrength) {
             border.setFill()
             marker.fill()
             colour.setFill()

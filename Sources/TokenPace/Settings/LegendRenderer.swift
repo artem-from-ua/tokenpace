@@ -96,6 +96,10 @@ enum LegendRenderer {
         // block below. Computing it inside the provider is the same shape `Palette.monochromeGrey`
         // uses, and for the same reason — it is what makes the tone flip with the theme instead of
         // freezing at whatever the theme was when the view was configured.
+        // The marker's halo, dialled down for the same surface reason as the track above. At full
+        // strength it blooms on a flat form, and this page has a callout pointing *at* the marker —
+        // a label naming a 7 pt mark should not sit under a glow twice that wide.
+        view.markerGlowScale = 0.4
         view.trackTint = NSColor(name: nil) { appearance in
             var mixed: NSColor = .tertiaryLabelColor
             appearance.performAsCurrentDrawingAppearance {
