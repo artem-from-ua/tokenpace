@@ -75,6 +75,7 @@ enum LegendRenderer {
     /// the same holds here. Shapes and their order are identical, which is what the rows are about.
     static func dropdownBarImage(_ layout: BarLayout, style: BarStyle, width: CGFloat,
                                  subdivisions: Int = 0, isBaseLimit: Bool = true,
+                                 showsRuler: Bool = false,
                                  appearance: NSAppearance? = nil) -> NSImage {
         let view = PopupBarView(frame: .zero)
         view.bar = layout
@@ -108,9 +109,18 @@ enum LegendRenderer {
             }
             return mixed
         }
-        // `optionHeld` stays false: ⌥ reveals the ruler's explanatory teeth *while held*, so a
-        // specimen baked with them on advertises a state the page is not in. The mark that identifies
-        // a marker-less style — the zero struck through the track — is drawn unconditionally.
+        // **The ruler is on for the anatomy bars**, unlike every other specimen in the app.
+        //
+        // ADR-0098 puts the teeth behind ⌥ because in the live dropdown they are the explanatory half
+        // of the ruler, and a bar that showed them unheld would be permanently louder than it needs to
+        // be. The style tiles keep them off for a second reason: a tile baked with ⌥ on advertises a
+        // state the row is not in.
+        //
+        // This page is the case both arguments were carving out. It exists to *name the parts*, and the
+        // ruler is one of them — a diagram captioned "ticks — hours / days" beside a bar with no ticks
+        // explains nothing. Off by default so the reading-rule bars, which are about the ribbon rather
+        // than the scale, stay uncluttered.
+        view.optionHeld = showsRuler
 
         let size = NSSize(width: width, height: PopupBarView.viewHeight)
         let image = NSImage(size: size)

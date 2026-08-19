@@ -179,7 +179,8 @@ struct LegendPane: View {
             anatomy(LegendCatalog.progressSpecimen, style: .progress, subdivisions: 5,
                     caption: "the limit window edge to edge · two readings: time and usage",
                     name: "Progress",
-                    callouts: Self.progressCallouts)
+                    callouts: Self.progressCallouts,
+                    marker: Self.markerCallout)
             ForEach(Array(Self.progressRules.enumerated()), id: \.offset) { _, rule in
                 ruleRow(style: .progress, layout: rule.layout, text: rule.text)
             }
@@ -214,11 +215,19 @@ struct LegendPane: View {
     /// colliding with the capsule's own.
     private static let progressCallouts: [Callout] = [
         Callout(x: 112.5, text: "used tokens/credits so far", anchor: .leading),
-        Callout(x: 160.0, text: "now-marker", anchor: .center),
         Callout(x: 255.0, text: "ticks — hours / days", anchor: .trailing),
     ]
 
-    /// One label under an anatomy bar, pointing at `x`.
+    /// The marker's own callout, which sits **above** the bar.
+    ///
+    /// Alone up there, and for the reason the other two are below: the marker stands proud of the
+    /// track on both sides, so a label under it would have to clear the ruler as well, and the three
+    /// captions would then be competing for one strip of space — which is exactly how they ended up
+    /// overlapping. Splitting them across the bar gives each room, and puts the marker's name on the
+    /// side the marker is read from.
+    private static let markerCallout = Callout(x: 160.0, text: "now-marker", anchor: .center)
+
+    /// One label beside an anatomy bar, pointing at `x`.
     private struct Callout {
         let x: CGFloat
         let text: String
@@ -432,7 +441,7 @@ struct LegendPane: View {
     /// end is one reading, a marker that is another, and a ruler — so it is the one that needs them.
     private func anatomy(_ layout: BarLayout, style: BarStyle, subdivisions: Int = 0,
                          caption: String, name: String,
-                         callouts: [Callout] = []) -> some View {
+                         callouts: [Callout] = [], marker: Callout? = nil) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             // The name in full ink, the rest dimmed — the same split the row pairs use, and for the
             // same reason: what the thing is called ranks above what it does here, because the caption
@@ -440,12 +449,16 @@ struct LegendPane: View {
             (Text(name).font(.callout).bold()
              + Text(" · ").font(.callout).foregroundColor(.secondary)
              + Text(.init(caption)).font(.callout).foregroundColor(.secondary))
+            if let marker {
+                calloutRow([marker], pointingDown: true)
+            }
             // Pinned to the width it was baked at. Without this the form stretches the image to the
-            // row, and every callout below then points at a mark that has moved — which is exactly
-            // what the first screenshot of this section showed.
+            // row, and every callout then points at a mark that has moved — which is exactly what the
+            // first screenshot of this section showed.
             Image(nsImage: LegendRenderer.dropdownBarImage(
                 layout, style: style, width: Self.anatomyWidth,
-                subdivisions: subdivisions, appearance: barAppearance))
+                subdivisions: subdivisions, showsRuler: !callouts.isEmpty || marker != nil,
+                appearance: barAppearance))
                 .frame(width: Self.anatomyWidth, alignment: .leading)
             if !callouts.isEmpty {
                 calloutRow(callouts)
@@ -462,31 +475,71 @@ struct LegendPane: View {
     /// the fourth tooth — and a label that merely sits nearby names nothing in particular. The x values
     /// come from the same `scaleX` inset the renderer uses, so they land on the mark rather than beside
     /// it.
-    private func calloutRow(_ callouts: [Callout]) -> some View {
-        ZStack(alignment: .topLeading) {
+    /// `pointingDown` puts the label above its leader line, for the callouts that sit over the bar.
+    ///
+    /// Laid out with `GeometryReader` + `position`, not `alignmentGuide`. The guide version collapsed
+    /// every label onto one point: inside a `ZStack` the guide moves the *stack's* alignment rather
+    /// than the child within it, so all three resolved to the same origin and printed on top of each
+    /// other. `position` places a view's centre at an explicit coordinate, which is what "this label
+    /// belongs at x = 112.5" actually means.
+    private func calloutRow(_ callouts: [Callout], pointingDown: Bool = false) -> some View {
+        GeometryReader { _ in
             ForEach(Array(callouts.enumerated()), id: \.offset) { _, callout in
-                VStack(alignment: callout.anchor, spacing: 2) {
-                    Rectangle()
-                        .fill(Color.secondary.opacity(0.35))
-                        .frame(width: 1, height: 6)
-                    Text(callout.text)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize()
-                }
-                // The tick is what must land on `x`; the label hangs off it by its own anchor. Both
-                // are placed by the same guide, so the pair moves together.
-                .alignmentGuide(.leading) { dimension in
-                    switch callout.anchor {
-                    case .center:   return dimension.width / 2 - callout.x
-                    case .trailing: return dimension.width - callout.x
-                    default:        return -callout.x
+                VStack(alignment: .center, spacing: 2) {
+                    if pointingDown {
+                        Text(callout.text).font(.callout).foregroundStyle(.secondary).fixedSize()
+                        leaderLine
+                    } else {
+                        leaderLine
+                        Text(callout.text).font(.callout).foregroundStyle(.secondary).fixedSize()
                     }
                 }
+                // Centred on `x`, then nudged so the label's near edge — rather than its middle —
+                // sits over the mark for the two outer callouts. Without that the leftmost label
+                // would start well off the bar and the rightmost would run past its end.
+                .fixedSize()
+                .modifier(CalloutPlacement(x: callout.x, anchor: callout.anchor))
             }
         }
-        .frame(width: Self.anatomyWidth, alignment: .leading)
+        .frame(width: Self.anatomyWidth, height: Self.calloutHeight)
     }
+
+    private var leaderLine: some View {
+        Rectangle()
+            .fill(Color.secondary.opacity(0.35))
+            .frame(width: 1, height: 6)
+    }
+
+    /// Places a callout so that `anchor` of it lands on `x`.
+    ///
+    /// A modifier rather than inline maths because it needs the view's measured width, which only a
+    /// `background(GeometryReader)` read can supply — the label's width depends on its text, and the
+    /// two outer callouts must hang off their mark rather than straddle it.
+    private struct CalloutPlacement: ViewModifier {
+        let x: CGFloat
+        let anchor: HorizontalAlignment
+        @State private var width: CGFloat = 0
+
+        func body(content: Content) -> some View {
+            content
+                .background(GeometryReader { proxy in
+                    Color.clear.onAppear { width = proxy.size.width }
+                })
+                .position(x: x + offset, y: 12)
+        }
+
+        /// How far the label's centre sits from the mark, so the requested edge lands on it.
+        private var offset: CGFloat {
+            switch anchor {
+            case .leading:  return width / 2 - 1     // left edge on the mark
+            case .trailing: return 1 - width / 2     // right edge on the mark
+            default:        return 0                 // centred on it
+            }
+        }
+    }
+
+    /// Height reserved for a callout strip: leader line, gap, and one line of text.
+    private static let calloutHeight: CGFloat = 24
 
     /// A short specimen beside the rule it demonstrates.
     ///
