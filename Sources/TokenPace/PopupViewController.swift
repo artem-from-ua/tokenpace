@@ -1854,26 +1854,27 @@ final class PopupViewController: NSViewController {
         // "Claude" mark and ⌥ restores "Claude ･ Max (5x)". `brandTitleLabel` already renders the mark
         // alone for a nil plan, so this is a gate on the argument, not a second code path.
         let brand = Self.brandTitleLabel(plan: optionHeld ? layout.planLabel : nil)
-        // The age takes the same `･` separator the brand mark uses before the plan (#396) — without it
-        // "Claude just now" read as one phrase, the timestamp looking like part of the heading rather
-        // than a fact about the data under it.
+        // The age rides the ⌥ layer with the plan label (#396): at rest the header is the bare "Claude"
+        // mark, and ⌥ restores the whole tail — `Claude ･ Max (20x) ･ just now`.
         //
-        // **Only while ⌥ is up.** Under ⌥ the mark already ends in `･ Max (20x)`, and a second dot
-        // would make the header a list of three things joined by the same punctuation. There the plan
-        // label itself is the separation the age needs.
+        // The two belong together. Both answer questions asked once rather than watched: which plan
+        // this is, and how fresh the numbers are. Leaving the age visible while the plan hid split one
+        // tail across two layers, so the header changed shape twice on one modifier.
         //
-        // The dot leads the age's own string rather than sitting in the stack's spacing: one text
+        // The `･` leads the age's own string rather than sitting in the stack's spacing: one text
         // object means one baseline, and the gap either side is the glyph's own side bearing. The
-        // stack's spacing then drops to 4 — 8 was tuned for two labels meeting with no punctuation
-        // between them, and on top of the dot's bearing it read as a double space.
-        let age = NSTextField(
-            labelWithString: (optionHeld ? "" : Self.separatorPrefix) + ageString)
-        age.font = .systemFont(ofSize: Metrics.textSize)
-        age.textColor = Self.dimmedLabelColor
-        let leading = NSStackView(views: [brand, age])
+        // stack's spacing is 4 — 8 was tuned for two labels meeting with no punctuation between them,
+        // and on top of the dot's bearing it read as a double space.
+        let leading = NSStackView(views: [brand])
+        if optionHeld {
+            let age = NSTextField(labelWithString: Self.separatorPrefix + ageString)
+            age.font = .systemFont(ofSize: Metrics.textSize)
+            age.textColor = Self.dimmedLabelColor
+            leading.addArrangedSubview(age)
+        }
         leading.orientation = .horizontal
         leading.alignment = .firstBaseline
-        leading.spacing = optionHeld ? 8 : 4
+        leading.spacing = 4
         // Right slot: the summary badge when there is an awaiting count and ⌥ is up; nothing when ⌥ is
         // held (the per-project breakdown below supersedes it — but the age stays put next to the brand
         // title, it does not move to where the badge was) or when there is no awaiting count at all.
