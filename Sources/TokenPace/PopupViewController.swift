@@ -230,6 +230,22 @@ final class PopupBarView: NSView {
         max(0, (Metrics.indicatorHeight - Metrics.barHeight) / 2)
     }
 
+    /// How far the tick ruler reaches **below** the track — its gap plus a tooth.
+    ///
+    /// ``viewHeight`` deliberately excludes this (#388): the live popup shows the teeth only under ⌥,
+    /// and reserving the strip permanently read as padding under every bar. A caller that draws a bar
+    /// *with* its ruler — the Legend page — has to add the depth back, or the canvas clips the teeth
+    /// part-way down and the specimen misreports their size.
+    static var rulerDepth: CGFloat { Metrics.tickGap + Metrics.tickLength }
+
+    /// The blank the teeth hang across before they begin.
+    ///
+    /// Exposed alongside ``rulerDepth`` because a caller placing something *under* the ruler needs the
+    /// two apart: the depth says where the teeth end, this says how much of it was never ink. The
+    /// Legend page's captions subtract it so the clear space under the lowest mark matches the space
+    /// over the highest one.
+    static var tickGap: CGFloat { Metrics.tickGap }
+
     // MARK: - Effective presentation
 
     /// The scale this bar is actually **drawn** on — the user's `BarStyle` choice, except on the
@@ -347,6 +363,35 @@ final class PopupBarView: NSView {
     /// `drawBar` reads it live the same way.
     static var monochromeGrey: NSColor { Palette.monochromeGrey }
 
+    /// Overrides the track tone for **this** bar, or `nil` to use ``monochromeGrey``.
+    ///
+    /// Exists for the Legend page (#261) and nothing else. The popup's grey is tuned to be barely
+    /// there: it sits on a vibrant card among rows of text, where the track's job is to be the absence
+    /// of colour rather than a shape in its own right. On a Settings form the same tone all but
+    /// disappears — the plate behind it is flatter and lighter, and the bar is no longer surrounded by
+    /// content telling the reader where it is. A legend whose specimen is hard to see fails at the one
+    /// thing it exists for.
+    ///
+    /// A per-instance override rather than a brighter shared constant, because the popup is right for
+    /// the popup: raising the shipped grey would repaint every live bar to fix a page none of them are
+    /// on.
+    var trackTint: NSColor?
+
+    /// The tone this bar's base zones actually draw in.
+    private var trackColour: NSColor { trackTint ?? Self.monochromeGrey }
+
+    /// Scales the time marker's halo for **this** bar. `1` is the shipped glow.
+    ///
+    /// Also for the Legend page, and for the same reason as ``trackTint``: the popup's glow is tuned
+    /// against a vibrant card, where a marker has to lift off a busy surface. On a flat Settings form
+    /// it blooms instead — the halo reads as part of the mark, and the diagram's callout then points at
+    /// something fuzzier than the 7 pt it is naming.
+    var markerGlowScale: CGFloat = 1
+
+    /// The marker halo's radius after ``markerGlowScale``.
+    private var markerGlow: CGFloat { Self.markerGlowRadius * markerGlowScale }
+
+
     /// The exhausted-pacing red (`aheadColor`'s cap rung). Exposed so the popup can paint the **one**
     /// blocking reset time red (#158) in the same tone the bars use for an exhausted limit. Computed (not
     /// a `static let`) for the same appearance-freshness reason as ``monochromeGrey``.
@@ -395,14 +440,14 @@ final class PopupBarView: NSView {
             // dropped rather than moved: idle answers one question. The weekly gate still does its real
             // work on every *active* row's `blueAllowed` (ADR-0081), and the menu bar drops the same
             // distinction in the same release, so the two surfaces cannot disagree about idle.
-            let idleTarget = blocked ? Self.monochromeGrey : ColorRole.green.defaultColor
+            let idleTarget = blocked ? trackColour : ColorRole.green.defaultColor
             let idleColor = blocked ? idleTarget : animated(idleTarget, part: .fill)
             // The zero tick goes down BEFORE the track: the track then covers its middle and only the
             // ends stand proud, which is what keeps it from reading as a time marker.
             drawZeroTick(in: rect)
             // The grey track goes down first, exactly as the pacing path does — without it the mark
             // hangs in empty space while every neighbouring row shows a track.
-            Self.monochromeGrey.setFill()
+            trackColour.setFill()
             NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner).fill()
             // Balance's zero is the centre, so its idle pill sits there (ADR-0078's shape, drawn on this
             // style's own scale) — struck through by the zero tick laid down just above.
@@ -441,7 +486,7 @@ final class PopupBarView: NSView {
         drawZeroTick(in: rect)
 
         // 1. Full-length grey track (rounded), drawn first as the base.
-        Self.monochromeGrey.setFill()
+        trackColour.setFill()
         NSBezierPath(roundedRect: rect, xRadius: Metrics.corner, yRadius: Metrics.corner).fill()
 
         // 2. Coloured strip laid exactly over its span, both ends fully rounded (capsule). Progress uses
@@ -603,11 +648,14 @@ final class PopupBarView: NSView {
         // Measured: computed here, the border came out 13,96,26 under **both** themes — the dark tone
         // baked into the light one. Resolved per appearance it is 185,239,190 in dark against 13,96,26
         // in light, which is the pair the live bar shows.
+        // Captured before the closure so the dynamic colour does not hold the view alive — it outlives
+        // this call, and `trackColour` is a plain lookup with nothing to gain from being deferred.
+        let track = trackColour
         let border = NSColor(name: nil) { appearance in
-            var blended = Self.monochromeGrey
+            var blended = track
             appearance.performAsCurrentDrawingAppearance {
-                blended = (Self.monochromeGrey.blended(withFraction: 0.4, of: colour)
-                    ?? Self.monochromeGrey).withAlphaComponent(0.9)
+                blended = (track.blended(withFraction: 0.4, of: colour)
+                    ?? track).withAlphaComponent(0.9)
             }
             return blended
         }
@@ -615,7 +663,7 @@ final class PopupBarView: NSView {
         let inner = NSBezierPath(roundedRect: innerRect,
                                  xRadius: max(0, Metrics.indicatorCorner - bw),
                                  yRadius: max(0, Metrics.indicatorCorner - bw))
-        withGlow(colour, radius: Self.markerGlowRadius, strength: Self.markerGlowStrength) {
+        withGlow(colour, radius: markerGlow, strength: Self.markerGlowStrength) {
             border.setFill()
             marker.fill()
             colour.setFill()

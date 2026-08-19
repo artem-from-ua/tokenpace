@@ -222,11 +222,9 @@ struct SettingsNavigationRow: View {
                     .foregroundStyle(.tertiary)
                     .font(.system(size: Metrics.chevron, weight: .semibold))
             }
-            // Without this the hit target is only the drawn content, leaving the gap between the
-            // subtitle and the chevron dead — but the whole row is what looks clickable.
-            .contentShape(Rectangle())
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(NavigationRowButtonStyle())
     }
 
     private enum Metrics {
@@ -235,6 +233,45 @@ struct SettingsNavigationRow: View {
         static let chevron: CGFloat = 11
         /// The state line, one step down from the row's own text — System Settings' proportion.
         static let subtitle: CGFloat = 11
+    }
+}
+
+// MARK: - NavigationRowButtonStyle
+
+/// A navigator row's press behaviour: the **whole block** takes the click and lights up, the way
+/// System Settings' own drill-in rows do.
+///
+/// `.plain` gave neither. Its hit target is the drawn content, so a click in the row's margins fell
+/// through, and it draws no pressed state at all — the row that looked like one target behaved like a
+/// piece of text with some dead space around it.
+///
+/// **The negative insets are the point.** A grouped `Form` lays each row inside its own padding, and a
+/// background added inside that padding paints a stripe narrower than the row, with a gap on either
+/// side that still swallows clicks. Expanding by the same insets pushes both the fill and the hit area
+/// back out to the card's edges, which is where the row's boundary actually is.
+private struct NavigationRowButtonStyle: ButtonStyle {
+
+    /// The form's own row padding, which this reaches back across.
+    ///
+    /// Measured off a grouped `Form` on macOS 15 rather than derived: SwiftUI exposes no metric for it.
+    /// If a future macOS changes the padding these numbers follow it — the failure is visible (a fill
+    /// that stops short of the card edge, or bleeds past it), which is the kind worth having.
+    private enum Inset {
+        static let horizontal: CGFloat = 10
+        static let vertical: CGFloat = 6
+    }
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, Inset.horizontal)
+            .padding(.vertical, Inset.vertical)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.09 : 0)))
+            // After the background, so the shape covers the padding above and not just the label.
+            .contentShape(Rectangle())
+            .padding(.horizontal, -Inset.horizontal)
+            .padding(.vertical, -Inset.vertical)
     }
 }
 

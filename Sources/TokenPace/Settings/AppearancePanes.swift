@@ -46,6 +46,23 @@ struct AppearancePane: View {
             // stashes the setup it overwrites, so Custom can restore it. It falls back to
             // indicator-only (visible, highlightable, inert) while nothing is stashed — a fresh install
             // has nothing to come back to — and says so on its own second line.
+            // MARK: The legend — its own section, above everything (#261)
+            //
+            // First on the page, and alone in its section, because it is the only row here that
+            // **explains** rather than configures: read the marks, then change them. A divider is the
+            // cheapest way to say that, and putting it first follows the order a newcomer needs — the
+            // presets below are meaningless until the colours they set have names.
+            //
+            // Not folded into the surfaces' section below: those two rows lead to controls, and a
+            // reference page filed beside them would promise settings it does not have.
+            Section {
+                SettingsNavigationRow(
+                    title: SettingsChildPage.appearanceLegend.title,
+                    subtitle: "What the colors, bars and icons mean.",
+                    badge: .page(.appearanceLegend),
+                    action: { model.drill(into: .appearanceLegend) })
+            }
+
             Section {
                 VStack(alignment: .leading, spacing: 10) {
                     // Heading block: the section's own label with the copy-config button trailing, and

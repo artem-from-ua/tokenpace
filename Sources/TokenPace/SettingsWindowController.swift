@@ -25,6 +25,15 @@ import TokenPaceKit
 @MainActor
 final class SettingsWindowController: NSWindowController {
 
+    /// The window's pinned content width, readable from outside the controller.
+    ///
+    /// `Metrics` itself stays private — this is the one number anything else needs, and it needs it for
+    /// one reason: the preview parks beside this window, so it has to know how much of the screen the
+    /// pair will take (`SettingsPreviewWindowController.Metrics.pairWidth`). Exposed as a single
+    /// constant rather than by opening the whole enum, so the rest of the geometry stays this type's
+    /// own business.
+    nonisolated static let pinnedContentWidth: CGFloat = 792
+
     private enum Metrics {
         /// Fixed window content width. Pinned min == max: only the **height** resizes (ADR-0069).
         ///
@@ -35,7 +44,11 @@ final class SettingsWindowController: NSWindowController {
         /// reflow every pane; the split is tuned to this width, which is why it is not draggable.
         ///
         /// Change one of the two and the other must follow, or the detail column silently resizes.
-        static let contentWidth: CGFloat = 792
+        ///
+        /// The number itself lives on ``SettingsWindowController/pinnedContentWidth``, which the
+        /// preview reads to work out how wide the pair is; this alias keeps the rest of the file
+        /// reading as `Metrics.contentWidth` while there is still only one copy of the value.
+        static let contentWidth: CGFloat = SettingsWindowController.pinnedContentWidth
         /// Content height the window **opens at** — a default since ADR-0069, a hard size before it.
         /// It was hand-bumped every time the Appearance pane grew an option: 480 → 520 (#199) → 560
         /// (#211) → 600 (#215) → 636 (the "Work harder" toggle) → 684 → 776 (#224 — "Bar style", the
@@ -58,7 +71,16 @@ final class SettingsWindowController: NSWindowController {
         /// (Deriving it from a screenshot first gave 443, because that subtracted a title bar which does
         /// not exist here; the live window measured 792 × 440 for a 440 content height, which is what
         /// proves the identity.)
-        static let minContentHeight: CGFloat = 470
+        ///
+        /// **Raised from 470 to 560 for the Legend page** (#261). Matching System Settings' own floor
+        /// was right while every pane was a list of controls, which degrades gracefully: squeeze it and
+        /// you scroll a row at a time. Legend is diagrams — a bar with captions pointing into it — and a
+        /// window short enough to cut one in half turns the page from a reference into a puzzle. 560 is
+        /// the height at which its tallest section (the two bar anatomies with their headings) is whole
+        /// with the form's own padding, so a reader who drags the window down still meets complete
+        /// figures. Every other pane keeps scrolling exactly as it did; the floor only stops them
+        /// getting shorter than the one page that cannot take it.
+        static let minContentHeight: CGFloat = 560
     }
 
     /// The single observable state object, alive for the controller's lifetime (so background
@@ -247,12 +269,18 @@ final class SettingsWindowController: NSWindowController {
         // toolbar material: content blurs *under* it rather than through it, which is what System
         // Settings does.
         window.titlebarAppearsTransparent = false
-        window.level = .floating               // float above other apps from a menu-bar app (ADR-0012 §6)
+        // **An ordinary window level, not `.floating`.** ADR-0012 §6 floated it so a menu-bar app's
+        // Settings could be found again after clicking away — but the cost is that it then sits over
+        // *everything*, including the editor or terminal the reader is comparing it against, and it
+        // cannot be pushed behind them. A Settings window is somewhere you go, not something you
+        // consult while working in another app; the widget's own menu reopens it in one click.
+        //
+        // The preview is unaffected: it is a **child** window, so it follows this one's ordering
+        // whatever level that is.
         window.isReleasedWhenClosed = false    // keep the controller alive so re-opening reuses it
         // Zoom means "as tall as the screen" here, not "as large as the screen" — see
-        // `windowWillUseStandardFrame`. Full screen is refused outright: a `.floating` window in its
-        // own Space fights whatever app is actually full-screen (the conflict that made ADR-0020 drop
-        // `.floating` from Troubleshoot; here we keep the level and drop full screen instead).
+        // `windowWillUseStandardFrame`. Full screen stays refused: the window is a fixed-width form
+        // with a companion parked beside it, and neither survives being blown up to a Space of its own.
         window.collectionBehavior.insert(.fullScreenNone)
         // No `setFrameAutosaveName`, even though the frame *is* persisted now (ADR-0069): autosave
         // restores a frame before anything can check it against the current screen layout, which is
@@ -389,8 +417,26 @@ final class SettingsWindowController: NSWindowController {
         guard sidebarClickMonitor == nil else { return }
         sidebarClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self, weak sidebar] event in
             guard let self, let sidebar, event.window === sidebar.window else { return event }
+            // **A click on a row**, not merely a click inside the column.
+            //
+            // The pop is meant for one gesture: clicking the row you are already on, to come back out
+            // of its child page. Everything else in this view means nothing — and the column contains
+            // a good deal of "everything else". Its strip is merged into the titlebar
+            // (`mergeSidebarTitlebarStrip`), so the close button sits geometrically inside it, and
+            // below the last row there is empty list. Treating either as a row click threw the reader
+            // out of the page they were reading: first on closing the window, then on clicking the
+            // blank space under the list.
+            //
+            // Both fall out of asking the table where its rows are instead of measuring bands. The
+            // sidebar is an `NSTableView` under the SwiftUI `List`, and `row(at:)` answers the exact
+            // question this needs — returning -1 for the blank space below the last row and for the
+            // titlebar strip, which is not inside the table at all. Geometry would need a fresh
+            // special case for each such region; this needs none.
             let point = sidebar.convert(event.locationInWindow, from: nil)
-            guard sidebar.bounds.contains(point) else { return event }
+            guard sidebar.bounds.contains(point),
+                  let table = Self.enclosedTableView(in: sidebar) else { return event }
+            let inTable = table.convert(event.locationInWindow, from: nil)
+            guard table.row(at: inTable) >= 0 else { return event }
             // Captured now, checked later: the page that was open when the click landed.
             let openPage = MainActor.assumeIsolated { self.model.childPage }
             DispatchQueue.main.async {
@@ -398,6 +444,20 @@ final class SettingsWindowController: NSWindowController {
             }
             return event
         }
+    }
+
+    /// The `NSTableView` a SwiftUI `List` is built on, somewhere below `root`.
+    ///
+    /// SwiftUI gives no way to ask "is this point on a row", but the table underneath it does, and
+    /// finding the table is a short walk. Returns `nil` if the structure ever changes, and the caller
+    /// then simply does nothing — the pop is an extra, so failing to find the table costs the
+    /// click-the-current-row shortcut and breaks nothing else.
+    private static func enclosedTableView(in root: NSView) -> NSTableView? {
+        if let table = root as? NSTableView { return table }
+        for child in root.subviews {
+            if let found = enclosedTableView(in: child) { return found }
+        }
+        return nil
     }
 
     /// Stop the divider advertising a drag the pinned sidebar will refuse.
@@ -605,7 +665,10 @@ final class SettingsWindowController: NSWindowController {
             model.openAtLaunch(section)
             return
         }
-        let pages = SettingsChildPage.pages(of: section)
+        // `reachablePages`, not `pages`: the latter is the surfaces-only list the parent page draws
+        // its unlabelled section from, and a hook that could not name Legend left it verifiable only
+        // by hand.
+        let pages = SettingsChildPage.reachablePages(of: section)
         guard let childIndex = Int(parts[1]), pages.indices.contains(childIndex) else {
             AppLogger.lifecycle.notice(
                 "settings hook: unknown child \(raw, privacy: .public) — opening the section")
@@ -630,6 +693,13 @@ final class SettingsWindowController: NSWindowController {
             toolbarController.update(title: model.currentPaneTitle,
                                      canGoBack: model.canGoBack,
                                      canGoForward: model.canGoForward)
+            // Make room *before* the preview appears, not after: the constraint in `windowDidMove`
+            // only fires while the window is being dragged, so a window parked far right — dragged
+            // there on a pane that has no preview, or restored from a session that did not — would
+            // otherwise have the preview open straight across it. Ordered first so the parent has
+            // already slid left by the time the child is shown, rather than the pair jumping apart
+            // once it is on screen.
+            if model.selection.showsDropdownPreview { makeRoomForPreview() }
             preview.isEnabledForCurrentPane = model.selection.showsDropdownPreview
         } onChange: { [weak self] in
             Task { @MainActor in
@@ -824,8 +894,45 @@ extension SettingsWindowController: NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
+        keepPreviewRoomOnTheRight()
         persistFrame()
         preview.reposition()
+    }
+
+    /// Stop the window being dragged so far right that the preview has nowhere to sit.
+    ///
+    /// The preview lives to the **right**, always — a window that jumped sides mid-session made the
+    /// reader hunt for it, and one that overlapped Settings hid the very controls it was previewing.
+    /// Keeping the side fixed means the constraint has to go on the parent instead: it may not cross
+    /// the point where the pair stops fitting on screen.
+    ///
+    /// Only while the preview is actually showing (`Appearance` and its pages, ADR-0083). Everywhere
+    /// else the window is the user's to put where they like, and clamping it there would take space
+    /// away for a companion that is not on screen.
+    ///
+    /// Nudged rather than refused: AppKit has no "you may not move there" for a user drag, so the frame
+    /// is corrected after the fact. In practice the window slides along the invisible wall, which is
+    /// what a maximum position should feel like.
+    private func keepPreviewRoomOnTheRight() {
+        guard preview.isEnabledForCurrentPane else { return }
+        makeRoomForPreview()
+    }
+
+    /// Slide the window left, if it has to, so the preview fits beside it.
+    ///
+    /// Called from two places, and both are needed. `windowDidMove` catches a drag in progress, which
+    /// is the wall the user feels. This is also called when a pane that *has* a preview is selected —
+    /// the window may already be parked far right, dragged there while a preview-less pane was showing
+    /// or restored from a session that ended on one, and the drag hook cannot see a move that never
+    /// happened.
+    private func makeRoomForPreview() {
+        guard let window, let visible = (window.screen ?? NSScreen.main)?.visibleFrame else { return }
+        let maxX = visible.maxX - SettingsPreviewWindowController.roomNeededOnTheRight
+        guard window.frame.maxX > maxX else { return }
+        // Never past the left edge: on a display too narrow for the pair, hugging the left is the best
+        // available answer, and it is the one the preview's own clamp then completes.
+        let x = max(visible.minX, maxX - window.frame.width)
+        window.setFrameOrigin(NSPoint(x: x, y: window.frame.origin.y))
     }
 
     /// The state the window was in when it went away is the one to reopen at — a resize immediately

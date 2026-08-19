@@ -113,6 +113,7 @@ struct SettingsRootView: View {
             case .providersClaude:      ProvidersClaudePane(model: model)
             case .appearanceMenuBar:    MenuBarPane(model: model)
             case .appearanceDropdown:   DropdownPane(model: model)
+            case .appearanceLegend:     LegendPane()
             }
         } else {
             switch model.selection {

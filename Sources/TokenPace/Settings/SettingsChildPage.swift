@@ -19,6 +19,14 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
     case appearanceMenuBar = 51
     /// Appearance › Dropdown — everything that configures the popup.
     case appearanceDropdown = 52
+    /// Appearance › Legend — the visual language explained (#261): what a bar's colour says, how each
+    /// style is read, what every glyph means.
+    ///
+    /// A child of `Appearance` rather than a sidebar row of its own: it explains the marks the other
+    /// two pages configure, so it belongs to the same topic. It is the one page under this section
+    /// that **sets nothing** — reference, not control — which is why its row sits in a section of its
+    /// own above the presets rather than beside the two surfaces.
+    case appearanceLegend = 53
 
     var id: Int { rawValue }
 
@@ -27,9 +35,18 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
     var section: SettingsSection {
         switch self {
         case .providersClaude: return .providers
-        case .appearanceMenuBar, .appearanceDropdown: return .appearance
+        case .appearanceMenuBar, .appearanceDropdown, .appearanceLegend: return .appearance
         }
     }
+
+    /// Whether this page configures one of the app's **surfaces**, and so belongs in the unlabelled
+    /// section of navigator rows its parent draws for them.
+    ///
+    /// `Legend` is the one child page that does not: it sets nothing. Its row sits in a section of its
+    /// own, above the presets, so the divider says what the two groups are — read the marks here,
+    /// change them below. Without this the `pages(of:)` filter would file it beside `Menu bar` and
+    /// `Dropdown`, where a reader would reasonably expect it to have controls too.
+    var configuresSurface: Bool { self != .appearanceLegend }
 
     /// The page's name — the navigator row's title on the parent page, and the title the toolbar
     /// shows while the page is open (the same slot a section's own name uses).
@@ -38,6 +55,7 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
         case .providersClaude: return "Claude"
         case .appearanceMenuBar: return "Menu bar"
         case .appearanceDropdown: return "Dropdown"
+        case .appearanceLegend: return "Legend"
         }
     }
 
@@ -53,6 +71,14 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
         case .providersClaude: return nil
         case .appearanceMenuBar: return "distribute.vertical"
         case .appearanceDropdown: return "chart.bar.horizontal.page"
+        // A map's legend is the direct reading of the page's name, and the page is a key to marks
+        // rather than a set of instructions — which ruled out the `book`/`questionmark` family, whose
+        // glyphs promise reading material or troubleshooting the page does not give. Verified to
+        // resolve on macOS 15 (17×15 pt) with `NSImage(systemSymbolName:)`, the check that caught
+        // `zzz.circle` not existing (#341).
+        //
+        // The glyph is tied to the name: rename the page and the metaphor stops supporting anything.
+        case .appearanceLegend: return "map.fill"
         }
     }
 
@@ -80,12 +106,58 @@ enum SettingsChildPage: Int, CaseIterable, Identifiable {
         case .providersClaude: return nil
         case .appearanceMenuBar: return CapsuleTint(flat: 0x000000)
         case .appearanceDropdown: return CapsuleTint(flat: 0xFFFFFF, glyph: .black, needsBorder: true)
+        // **About's blue**, the sidebar's reference colour — not a third flat tone.
+        //
+        // The two flats above are literal: each chip *depicts* the surface it configures, the dark
+        // strip and the light panel. Legend depicts nothing, because it configures nothing, so a flat
+        // would be inventing a surface that does not exist. Borrowing the blue that marks the other
+        // page in this app whose job is to inform (`SettingsSection.about`) says the true thing
+        // instead — and, sitting in its own section above the presets, it never appears beside the
+        // two flats for the difference to read as inconsistency.
+        case .appearanceLegend: return CapsuleTint(dark: 0x0D81FA, light: 0x41A6FF)
         }
     }
 
     /// The child pages that belong to `section`, in the order their navigator rows are drawn.
+    ///
+    /// **Surface pages only** — see ``configuresSurface``. The one caller is the unlabelled section a
+    /// parent draws for the surfaces it owns, and `Legend` is placed by hand elsewhere on the page;
+    /// returning it here would put it in both.
     static func pages(of section: SettingsSection) -> [SettingsChildPage] {
-        allCases.filter { $0.section == section }
+        allCases.filter { $0.section == section && $0.configuresSurface }
+    }
+
+    /// Every child page of `section`, in the order the page draws their rows — including the ones
+    /// that configure nothing.
+    ///
+    /// Separate from ``pages(of:)`` because the two callers ask different questions. That one asks
+    /// "what goes in the surfaces section", and must exclude `Legend` or it would be drawn twice.
+    /// The `TOKENPACE_SETTINGS_SECTION` dev hook asks "what can I open", and the answer is every page
+    /// a user can reach — a recipe that cannot name a page is a page that cannot be verified.
+    ///
+    /// Legend was unreachable through the hook until this existed: `2.0`–`2.1` addressed the two
+    /// surfaces and there was no index left for it, so the hook logged nothing and the window opened
+    /// wherever it had last been left — which reads exactly like a recipe that worked.
+    ///
+    /// Ordered by ``rowOrder``, not by raw value. The hook's contract is "count the rows down the
+    /// page", and Legend's row is drawn above the two surfaces while its raw value is the highest of
+    /// the three. Sorting by raw would make `2.0` name the second row.
+    static func reachablePages(of section: SettingsSection) -> [SettingsChildPage] {
+        allCases.filter { $0.section == section }.sorted { $0.rowOrder < $1.rowOrder }
+    }
+
+    /// Where this page's navigator row sits on its parent, top to bottom.
+    ///
+    /// Only the hook reads it. The page itself draws Legend from a separate section above the presets
+    /// and the surfaces from `pages(of:)` below them, so nothing else needs the two orders unified —
+    /// but a recipe that says "the first page under Appearance" has to mean the first one you see.
+    private var rowOrder: Int {
+        switch self {
+        case .appearanceLegend:   return 0
+        case .appearanceMenuBar:  return 1
+        case .appearanceDropdown: return 2
+        case .providersClaude:    return 0
+        }
     }
 }
 

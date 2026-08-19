@@ -1130,12 +1130,13 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_STUB=screenshot swift run
 | 0 | About |
 | 1 | General |
 | **2** | **Appearance** |
-| **2.0** | **Appearance › Menu bar** (дочірня сторінка) |
-| **2.1** | **Appearance › Dropdown** (дочірня сторінка) |
+| **2.0** | **Appearance › Legend** (дочірня сторінка) |
+| **2.1** | **Appearance › Menu bar** (дочірня сторінка) |
+| **2.2** | **Appearance › Dropdown** (дочірня сторінка) |
 | 3 | Notifications |
 | ~~4~~ | ~~Extra features~~ — пан прибрано ([#341](https://github.com/artem-from-ua/tokenpace/issues/341)); індекс **виведено з обігу й не перевикористано** |
-| ~~5~~ | ~~Menu bar~~ — більше не секція, а дитина `Appearance`: адресується `2.0` |
-| ~~6~~ | ~~Dropdown~~ — те саме, `2.1` |
+| ~~5~~ | ~~Menu bar~~ — більше не секція, а дитина `Appearance`: адресується `2.1` |
+| ~~6~~ | ~~Dropdown~~ — те саме, `2.2` |
 | **7** | **Providers** |
 | **7.0** | **Providers › Claude** (дочірня сторінка) |
 | 100–108 | scroll-філер (`TOKENPACE_SIDEBAR_FILLER`, див. нижче) |
@@ -1153,13 +1154,27 @@ Notifications**. Розділення саме таке, щоб перестан
 рахує сторінки **в порядку показу**, а не за raw-значенням. Невідома секція чи дитина тепер **пишеться
 в лог** (`settings hook: unknown …`), а не ігнорується мовчки.
 
+> ⚠️ **Дитину адресують крапковою формою, ніколи її raw-значенням.** `SettingsChildPage` має власні
+> raw (50+), і вони **не** є індексами хука: `=53` парситься як *секція* 53, якої немає. Хук напише
+> `settings hook: unknown section 53 — ignored` і відкриє вікно там, де воно лишалося минулого разу —
+> тобто рецепт, що нічого не робить, виглядатиме як робочий, якщо ти вже був на потрібній сторінці.
+> Саме так Legend «перевірялася» деякий час ([#261](https://github.com/artem-from-ua/tokenpace/issues/261),
+> [ADR-0110](../adr/0110-legend-is-a-static-page-rendered-by-the-live-code.md) §4). **Перевіряй лог**,
+> а не лише те, що на екрані: порожньо в `settings hook` = значення прийнято.
+>
+> Порядок показу ≠ порядок raw. Рядок `Legend` малюється **над** пресетами, а обидві поверхні —
+> нижче, тож `2.0` — це Legend, попри те, що її raw (53) найбільший із трьох. Хук читає
+> `SettingsChildPage.reachablePages(of:)`, який сортує саме за позицією рядка на сторінці; сусідній
+> `pages(of:)` віддає **лише поверхні** й годує безіменну секцію самої сторінки.
+
 (Monitored services тепер живе в **Providers › Claude** разом із тумблером Claude Usage API, #341.
 Monitored services, Sessions і Backup лишились на батьківській **Providers** — вони не належать жодному
 провайдеру. Секція «Usage history» — у General, #317.)
 
 ```sh
 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=3 swift run     # відкриє одразу на Notifications
-TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2.0 swift run   # одразу на Appearance › Menu bar
+TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2.0 swift run   # одразу на Appearance › Legend
+TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2.1 swift run   # одразу на Appearance › Menu bar
 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=7.0 swift run   # одразу на Providers › Claude
 ```
 
@@ -1170,10 +1185,13 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=7.0 swift run   # одра�
 
 Механіка описана в [ADR-0088](../adr/0088-settings-hosting-safe-area-and-manual-separator.md);
 режими відмови різні на різних висотах, тому кожен пункт перевіряється **і на мінімальній висоті
-(470), і на розтягнутій**.
+(560), і на розтягнутій**. Мінімум підняли з 470 разом із появою `Legend`
+([#261](https://github.com/artem-from-ua/tokenpace/issues/261)): на 470 її анатомічні бари з
+виносками не вміщалися без скролу, і сторінка відкривалася вже прокрученою.
 
 ```sh
-TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2.0 swift run  # Menu bar — найдовша
+TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2.1 swift run  # Menu bar — найдовша
+TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2.0 swift run  # Legend — найвища
 TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=3 swift run    # Notifications
 TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=7.0 swift run  # drill-in Providers › Claude
 ```
@@ -1203,11 +1221,34 @@ TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=7.0 swift 
    `Appearance` — зелений, `Notifications` — червоний, а `General` і `Providers` ділять **один**
    сірий ([ADR-0094](../adr/0094-provider-row-brand-badge.md)) — якщо чип `Providers` фіолетовий,
    ти дивишся на стару збірку.
-2. **Два навігаційні рядки** — на `Appearance`, під секцією пресетів: `Menu bar` і `Dropdown`, кожен
+2. **Три навігаційні рядки** — на `Appearance`. **`Legend` стоїть окремою секцією НАД пресетами**
+   (синій чип `map.fill`, той самий синій, що в `About` — обидві сторінки лише інформують), а під
+   секцією пресетів — `Menu bar` і `Dropdown`, кожен
    із чипом (чорний / білий із хайрлайном — ті самі, що були в sidebar) і **шевроном**. Підзаголовок
    рядка — поточний Style тієї поверхні **з міткою**: `Style: Pressure`, а не голе `Pressure`;
    перемкни стиль усередині й повернись ‹ — підпис має змінитись. Клікабельний **весь рядок**, не
    лише шеврон.
+2a. **Legend** ([#261](https://github.com/artem-from-ua/tokenpace/issues/261),
+   [ADR-0110](../adr/0110-legend-is-a-static-page-rendered-by-the-live-code.md)) — сторінка, що
+   **нічого не налаштовує**; у неї немає ані підзаголовка зі стилем, ані чипа поверхні, бо жодної
+   поверхні вона не конфігурує. Що перевіряти на ній самій:
+   - **Тема.** Перемкни системну тему при відкритій сторінці: дропдаун-бари й гліфи мусять
+     **перемалюватись**, а не застигнути. Це головний ризик сторінки — зразки випікаються в
+     `NSImage`, і кольори резолвляться в момент випікання. Менюбар-зразки навмисно лишаються
+     темними під світлою темою: менюбар темний під обома.
+   - **Сторінка статична.** Перемкни `Bar style` чи `Calm colors` на сусідніх сторінках і повернись:
+     Legend має виглядати **так само**. Вона пояснює словник, а не твою конфігурацію.
+   - **Тіки видно без ⌥** — і це єдине таке місце в застосунку
+     ([ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md)). На анатомічному
+     барі Progress зубці мають бути **тієї самої висоти й ширини**, що в живому дропдауні (звіряй
+     двома вікнами поруч); обрізані на висоту — регресія `rulerDepth`.
+   - **Виноски торкаються своїх позначок.** Лінія від `now-marker` доходить до маркера, від
+     `hour/day ticks` — до останнього зубця, від `tokens/credits spent` — до бару. Обидва
+     нижні підписи стоять **в один рядок**, і відступ текст↔бар однаковий зверху й знизу.
+   - **Підписи центровані по своїх виносках**, а не притиснуті до країв бару: середина тексту стоїть
+     рівно над лінією. Найлегше ламається при **перейменуванні підпису** — стара версія розтягувала
+     текст на всю ширину й тулила до краю, тож потрапляння в позначку залежало від довжини слів.
+     Перейменував підпис — перевір це першим.
 3. **Навігація** — drill-in ставить назву сторінки в тулбар (`Menu bar`), ‹ повертає на
    `Appearance`, а не «крізь» нього; перемикання рядка sidebar із відкритої дитини виходить на
    корінь нової секції.
@@ -1229,7 +1270,7 @@ TOKENPACE_STUB=1 TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=7.0 swift 
    повідомлення хибне. Звіряй із сусідніми опціями: назва `Custom` має бути такої ж яскравості, як
    `Chill`/`Work harder`, коли він вибраний.
 6. **Copy config** — кнопка на *Appearance* збирає значення з **усіх трьох** сторінок, включно з
-   обома дитинами.
+   обома дитинами-поверхнями. `Legend` у конфіг не входить: вона нічого не задає.
 7. **Awaiting-input** — вимкни «Detect sessions waiting for input» у *Providers → Sessions*, зайди
    на *Appearance › Menu bar*: тамтешній «Show waiting sessions» має бути **disabled**, а хінт
    читатись «…in Providers › Sessions first». Назви навмисно різні (#341): на Providers вмикається
@@ -1288,7 +1329,7 @@ AppKit-версії.
 живий дропдаун.
 
 ```sh
-TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2.1 TOKENPACE_STUB=screenshot swift run
+TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2.2 TOKENPACE_STUB=screenshot swift run
 ```
 
 **Своїх станів фіча не має — нового стуба додавати не треба.** Усе, що вона показує, приходить із
@@ -1298,8 +1339,10 @@ TOKENPACE_OPEN_SETTINGS=1 TOKENPACE_SETTINGS_SECTION=2.1 TOKENPACE_STUB=screensh
 
 1. **Видиме лише на Appearance та її дитинах.** Прев'ю прив'язане до **пана**, а не лише до
    відкритості вікна (`SettingsSection.showsDropdownPreview`): воно є на `Appearance`,
-   `Appearance › Menu bar` і `Appearance › Dropdown`, і **зникає** на About / General / Providers /
-   Notifications. Поклацай туди-сюди кілька разів — воно має щоразу повертатись на те саме місце,
+   `Appearance › Legend`, `Appearance › Menu bar` і `Appearance › Dropdown`, і **зникає** на
+   About / General / Providers / Notifications. На `Legend` воно теж є — і це навмисно
+   ([ADR-0110](../adr/0110-legend-is-a-static-page-rendered-by-the-live-code.md) §4): легенду читають
+   поруч із живим дропдауном, щоб звірити зубці й кольори зі справжніми. Поклацай туди-сюди кілька разів — воно має щоразу повертатись на те саме місце,
    а не з'являтись зі зсувом. Заразом: відкрий вікно **на панелі без прев'ю** (`…SECTION=0`) —
    Settings має бути **відцентроване саме собою**, без зсуву ліворуч на половину прев'ю
    (`occupiedWidth` = 0, коли прев'ю сховане).
