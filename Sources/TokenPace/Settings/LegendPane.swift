@@ -222,13 +222,16 @@ struct LegendPane: View {
     /// caption names. Only the horizontal positions are constants, and only because they come from the
     /// renderer's `scaleX` (see the note above).
     private static let progressCallouts: [Callout] = [
-        Callout(x: 112.5, text: "used tokens/credits so far", anchor: .leading),
-        // `hours/days` unspaced, matching `tokens/credits` on the other caption — one page should not
-        // punctuate the same "either of these" two ways.
+        Callout(x: 112.5, text: "tokens/credits spent"),
+        // `hour/day ticks`, not `ticks — hours/days`: the name and what it measures fold into one
+        // phrase, which drops a word and the page's only em dash (every other caption separates with
+        // `·`). Plural, because the leader points into a row of teeth — the singular would name one
+        // tooth while the reader is looking at six. `hour/day` unspaced, matching `tokens/credits` on
+        // the other caption: one page should not punctuate the same "either of these" two ways.
         // 254.5, not 255: the tooth is a 1 pt stroke centred on its coordinate, and so is the leader.
         // At an integer x the two land on opposite halves of the same device pixel under the 2× scale
         // and the line reads as sitting just right of the tick it names.
-        Callout(x: 254.5, text: "ticks — hours/days", anchor: .trailing, namesTheRuler: true),
+        Callout(x: 254.5, text: "hour/day ticks", namesTheRuler: true),
     ]
 
     /// The marker's own callout, which sits **above** the bar.
@@ -239,17 +242,15 @@ struct LegendPane: View {
     /// overlapping. Splitting them across the bar gives each room, and puts the marker's name on the
     /// side the marker is read from.
     ///
-    private static let markerCallout = Callout(x: 160.0, text: "now-marker", anchor: .center)
+    /// 159.5 for the reason the ruler callout is 254.5: a 1 pt leader centred on an integer x
+    /// splits across two device pixels at 2×, and the line then reads as standing just right of
+    /// the mark it points at.
+    private static let markerCallout = Callout(x: 159.5, text: "now-marker")
 
     /// One label beside an anatomy bar, pointing at `x`.
     private struct Callout {
         let x: CGFloat
         let text: String
-        /// Which edge of the label's **frame** sits at `x`.
-        ///
-        /// The label is pushed to that end of the bar's full width, so a caption near either end has
-        /// room to spread inward instead of running off the edge.
-        let anchor: HorizontalAlignment
         /// Whether this callout names the ruler rather than something on the track.
         ///
         /// The two sit at different depths, and this is the whole difference between their leaders —
@@ -533,10 +534,21 @@ struct LegendPane: View {
                     .offset(x: callout.x, y: markTop(callout, imageTop: imageTop))
             }
             ForEach(Array(callouts.enumerated()), id: \.offset) { _, callout in
+                // Centred on the leader, not pushed to an edge of the bar. `position` places a view's
+                // **centre** at a coordinate, which is exactly the claim being made — "this label
+                // belongs under that line". The earlier version stretched each caption across the
+                // full width and anchored it leading/trailing, which put the text near its mark only
+                // by luck of how long the words happened to be: rename either caption and it drifted.
+                //
+                // `position` needs a container to resolve against, so the frame stays full-width;
+                // what changed is that the text no longer fills it. Its y is the caption line's
+                // centre, since `position` measures from the middle rather than the top.
                 Text(callout.text)
                     .font(.callout).foregroundStyle(.secondary).fixedSize()
-                    .frame(width: Self.anatomyWidth, alignment: captionAlignment(for: callout))
-                    .offset(y: Geometry.captionTop(imageTop: imageTop))
+                    .position(x: callout.x,
+                              y: Geometry.captionTop(imageTop: imageTop) + Geometry.captionHeight / 2)
+                    .frame(width: Self.anatomyWidth,
+                           height: Geometry.height(imageTop: imageTop, hasCallouts: true))
             }
         }
         .frame(width: Self.anatomyWidth,
@@ -599,15 +611,6 @@ struct LegendPane: View {
                 : imageTop + imageHeight
         }
     }
-    /// Which end of the bar a caption is pushed to.
-    private func captionAlignment(for callout: Callout) -> Alignment {
-        switch callout.anchor {
-        case .leading:  return .leading
-        case .trailing: return .trailing
-        default:        return .center
-        }
-    }
-
 
     /// The hairline joining a caption to the mark it names.
     ///
