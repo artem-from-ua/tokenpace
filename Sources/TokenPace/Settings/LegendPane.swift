@@ -244,11 +244,15 @@ struct LegendPane: View {
     /// overlapping. Splitting them across the bar gives each room, and puts the marker's name on the
     /// side the marker is read from.
     ///
-    /// Its leader is exactly ``calloutGap``: the marker's top edge *is* the image's top edge, since the
-    /// marker is the tallest thing the bar draws, so the line has only the clear space to cross. The
-    /// two captions below start at the same gap but then have the ruler's depth to cross as well.
+    /// Its leader runs longer than ``calloutGap`` — the extra length *is* the extra space, since the
+    /// line has to reach the bar either way.
+    ///
+    /// The captions below can sit at the plain gap because the ruler's teeth already fill the space
+    /// between them and the track, so the eye reads a populated strip. Above the bar there is nothing
+    /// but the line, and at the same distance the caption crowded the marker. Lengthening the leader
+    /// buys the air without leaving the line hanging short of what it names.
     private static let markerCallout =
-        Callout(x: 160.0, text: "now-marker", anchor: .center, leader: Self.calloutGap)
+        Callout(x: 160.0, text: "now-marker", anchor: .center, leader: Self.calloutGap + 5)
 
     /// One label beside an anatomy bar, pointing at `x`.
     private struct Callout {
@@ -490,7 +494,11 @@ struct LegendPane: View {
             (Text(name).font(.callout).bold()
              + Text(" · ").font(.callout).foregroundColor(.secondary)
              + Text(.init(caption)).font(.callout).foregroundColor(.secondary))
-                .padding(.bottom, 5)
+                // More room under the heading when a caption follows it. Balance and Pressure put
+                // their bar directly below, where 5 pt reads as one block; Progress puts a line of
+                // text there first, and at that spacing the two lines ran together — the caption
+                // looked like a second line of the heading rather than a label on the diagram.
+                .padding(.bottom, marker == nil ? 5 : 11)
             if let marker {
                 calloutRow([marker], pointingDown: true)
             }
@@ -508,11 +516,10 @@ struct LegendPane: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
-        // A little more clearance above a diagram that captions the *top* of its bar. Balance and
-        // Pressure caption nothing up there, so their heading can sit close; Progress puts a line of
-        // text and a leader between the two, and without this the heading reads as belonging to that
-        // caption rather than to the section.
-        .padding(.top, marker == nil ? 0 : 6)
+        // And a little under the whole figure, for the same diagram: its lowest element is a caption
+        // hanging off a leader, which needs clear space beneath it before the next row starts —
+        // otherwise the reading rules below crowd the thing they are explaining.
+        .padding(.bottom, marker == nil ? 0 : 6)
     }
 
     /// The callouts under an anatomy bar: a tick at the x each one points to, its label beneath.
@@ -561,7 +568,10 @@ struct LegendPane: View {
                     // below the bar on different baselines, and both further out than the one above.
                     // The gap is now one constant on all three; the lines simply run past it by
                     // however much their own mark is buried.
-                    .padding(.bottom, pointingDown ? Self.calloutGap : 0)
+                    // Above the bar the text clears its **own** leader, which is longer than the plain
+                    // gap — below it, the gap is enough, because the leaders there start at the image's
+                    // edge and run downward away from the text.
+                    .padding(.bottom, pointingDown ? callout.leader : 0)
                     .padding(.top, pointingDown ? 0 : Self.calloutGap)
             }
         }
