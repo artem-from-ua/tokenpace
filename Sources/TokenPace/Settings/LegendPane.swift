@@ -218,30 +218,18 @@ struct LegendPane: View {
     /// Both start `calloutGap` below the image and run to their own mark. The image now includes the
     /// ruler, so its bottom edge *is* the teeth's foot:
     ///
-    /// **Measured from the image's bottom edge, which is below the ruler rather than at it.** The
-    /// canvas is `viewHeight 14 + rulerDepth 7 = 21` tall, while the marker's overhang puts the track
-    /// at y 4–10 and the teeth at 12–17 — so there are 4 pt of empty canvas under the last tooth that
-    /// a leader has to cross before it reaches anything:
-    ///
-    ///     ticks   calloutGap 7 + (21 − 17)                  = 11   — the tooth's foot
-    ///     capsule calloutGap 7 + (21 − 10)                  = 18   — back up to the track
-    ///
-    /// Getting this wrong is invisible in code and obvious on screen: both lines stopped 4 pt short,
-    /// pointing at nothing. Recompute alongside the `x` values above if the tick metrics,
-    /// ``calloutGap`` or `PopupBarView.viewHeight` change.
+    /// Leader lengths are no longer stated here — ``Geometry`` measures them from the mark each
+    /// caption names. Only the horizontal positions are constants, and only because they come from the
+    /// renderer's `scaleX` (see the note above).
     private static let progressCallouts: [Callout] = [
-        Callout(x: 112.5, text: "used tokens/credits so far", anchor: .leading, leader: 18),
+        Callout(x: 112.5, text: "used tokens/credits so far", anchor: .leading),
         // `hours/days` unspaced, matching `tokens/credits` on the other caption — one page should not
         // punctuate the same "either of these" two ways.
-        Callout(x: 255.0, text: "ticks — hours/days", anchor: .trailing, leader: 11),
+        // 254.5, not 255: the tooth is a 1 pt stroke centred on its coordinate, and so is the leader.
+        // At an integer x the two land on opposite halves of the same device pixel under the 2× scale
+        // and the line reads as sitting just right of the tick it names.
+        Callout(x: 254.5, text: "ticks — hours/days", anchor: .trailing, namesTheRuler: true),
     ]
-
-    /// The clear space between a caption and the bar, identical above and below.
-    ///
-    /// Everything else on the diagram is measured *from* this: the leaders are this gap plus however
-    /// deep their own mark sits, so the captions sit the same distance out on both sides even though
-    /// the lines they hang from are different lengths.
-    private static let calloutGap: CGFloat = 7
 
     /// The marker's own callout, which sits **above** the bar.
     ///
@@ -251,15 +239,7 @@ struct LegendPane: View {
     /// overlapping. Splitting them across the bar gives each room, and puts the marker's name on the
     /// side the marker is read from.
     ///
-    /// Its leader runs longer than ``calloutGap`` — the extra length *is* the extra space, since the
-    /// line has to reach the bar either way.
-    ///
-    /// The captions below can sit at the plain gap because the ruler's teeth already fill the space
-    /// between them and the track, so the eye reads a populated strip. Above the bar there is nothing
-    /// but the line, and at the same distance the caption crowded the marker. Lengthening the leader
-    /// buys the air without leaving the line hanging short of what it names.
-    private static let markerCallout =
-        Callout(x: 160.0, text: "now-marker", anchor: .center, leader: Self.calloutGap + 5)
+    private static let markerCallout = Callout(x: 160.0, text: "now-marker", anchor: .center)
 
     /// One label beside an anatomy bar, pointing at `x`.
     private struct Callout {
@@ -267,12 +247,16 @@ struct LegendPane: View {
         let text: String
         /// Which edge of the label's **frame** sits at `x`.
         ///
-        /// The text itself is always centred on the line (see ``calloutRow(_:pointingDown:)``); this
-        /// only decides which way the frame extends, so a caption near either end of the bar has room
-        /// to spread inward instead of off the edge.
+        /// The label is pushed to that end of the bar's full width, so a caption near either end has
+        /// room to spread inward instead of running off the edge.
         let anchor: HorizontalAlignment
-        /// How far the leader runs, in points, to reach the mark it names.
-        let leader: CGFloat
+        /// Whether this callout names the ruler rather than something on the track.
+        ///
+        /// The two sit at different depths, and this is the whole difference between their leaders —
+        /// which `Geometry` then measures. Stating *which mark* rather than *how long* is what stopped
+        /// the lengths drifting: a number here is a claim about layout that nothing checks, while a
+        /// mark is a fact the geometry can look up.
+        var namesTheRuler = false
     }
 
     private static var progressRules: [(layout: BarLayout, text: String)] {
@@ -490,10 +474,6 @@ struct LegendPane: View {
     private func anatomy(_ layout: BarLayout, style: BarStyle, subdivisions: Int = 0,
                          caption: String, name: String,
                          callouts: [Callout] = [], marker: Callout? = nil) -> some View {
-        // **No stack spacing.** Every gap on this diagram is drawn rather than reserved: a leader's own
-        // length is what separates its caption from the bar, so a stack gap on top of that would add an
-        // invisible amount the lines cannot cross, and the two sides would drift apart by it. The
-        // heading keeps its distance with an explicit padding instead.
         VStack(alignment: .leading, spacing: 0) {
             // The name in full ink, the rest dimmed — the same split the row pairs use, and for the
             // same reason: what the thing is called ranks above what it does here, because the caption
@@ -501,105 +481,124 @@ struct LegendPane: View {
             (Text(name).font(.callout).bold()
              + Text(" · ").font(.callout).foregroundColor(.secondary)
              + Text(.init(caption)).font(.callout).foregroundColor(.secondary))
-                // More room under the heading when a caption follows it. Balance and Pressure put
-                // their bar directly below, where 5 pt reads as one block; Progress puts a line of
-                // text there first, and at that spacing the two lines ran together — the caption
-                // looked like a second line of the heading rather than a label on the diagram.
-                .padding(.bottom, marker == nil ? 5 : 11)
-            if let marker {
-                calloutRow([marker], pointingDown: true)
-            }
-            // Pinned to the width it was baked at. Without this the form stretches the image to the
-            // row, and every callout then points at a mark that has moved — which is exactly what the
-            // first screenshot of this section showed.
-            Image(nsImage: LegendRenderer.dropdownBarImage(
-                layout, style: style, width: Self.anatomyWidth,
-                subdivisions: subdivisions, showsRuler: !callouts.isEmpty || marker != nil,
-                appearance: barAppearance))
-                .frame(width: Self.anatomyWidth, alignment: .leading)
-            if !callouts.isEmpty {
-                calloutRow(callouts)
-            }
+                .padding(.bottom, 6)
+            figure(layout, style: style, subdivisions: subdivisions,
+                   callouts: callouts, marker: marker)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
-        // And a little under the whole figure, for the same diagram: its lowest element is a caption
-        // hanging off a leader, which needs clear space beneath it before the next row starts —
-        // otherwise the reading rules below crowd the thing they are explaining.
-        .padding(.bottom, marker == nil ? 0 : 6)
     }
 
-    /// The callouts under an anatomy bar: a tick at the x each one points to, its label beneath.
+    /// The bar and everything pointing at it, laid out in **one coordinate space**.
     ///
-    /// Positioned by `alignmentGuide` against the bar's own coordinate space rather than laid out in a
-    /// stack, because each label names a **point** on the track — the capsule's left end, the marker,
-    /// the fourth tooth — and a label that merely sits nearby names nothing in particular. The x values
-    /// come from the same `scaleX` inset the renderer uses, so they land on the mark rather than beside
-    /// it.
-    /// `pointingDown` puts the label above its leader line, for the callouts that sit over the bar.
+    /// Rewritten from three stacked rows — caption, image, captions — each with paddings of its own.
+    /// That arrangement could not be made to work, and the reason is structural rather than a matter
+    /// of finding better numbers: a leader drawn in one row has no way to know where the bar sits in
+    /// another, so every length was a guess compensating for stack spacing, row heights and the
+    /// canvas's own empty margins. Each correction moved the error somewhere else — lines short of
+    /// their marks, then lines through their captions, then captions off their level.
     ///
-    /// Laid out with `GeometryReader` + `position`, not `alignmentGuide`. The guide version collapsed
-    /// every label onto one point: inside a `ZStack` the guide moves the *stack's* alignment rather
-    /// than the child within it, so all three resolved to the same origin and printed on top of each
-    /// other. `position` places a view's centre at an explicit coordinate, which is what "this label
-    /// belongs at x = 112.5" actually means.
-    private func calloutRow(_ callouts: [Callout], pointingDown: Bool = false) -> some View {
-        // Bottom-aligned for the row above the bar, so its line ends where the row does — which is
-        // where the bar begins. Top-aligned below it, for the mirror reason.
-        ZStack(alignment: pointingDown ? .bottomLeading : .topLeading) {
-            // **The line and its caption are placed as two layers**, and they have to be.
-            //
-            // The line belongs on its mark; the caption belongs at the nearer edge of the bar. In one
-            // stack those are the same x, and every arrangement of alignments trades one for the other
-            // — which is what the earlier versions kept doing. Two layers, each free to position
-            // itself across the bar's full width, lets each have its own answer.
-            //
-            // Why the captions sit at the edges rather than under their own marks: the two are 142 pt
-            // apart and together wider than that, so centred they overlap. At opposite ends they have
-            // the whole bar between them, and the leader is what pairs each with its line.
+    /// Here everything is placed by `offset` from the figure's top edge against ``Geometry``. A
+    /// leader's length is then the distance between two known values, and the code says exactly that:
+    /// `captionTop − trackBottom`, not a number arrived at by subtraction somewhere else.
+    private func figure(_ layout: BarLayout, style: BarStyle, subdivisions: Int,
+                        callouts: [Callout], marker: Callout?) -> some View {
+        let showsRuler = !callouts.isEmpty || marker != nil
+        let imageTop = marker == nil ? 0 : Geometry.imageTop
+        return ZStack(alignment: .topLeading) {
+            // The bar, at the width it was baked at. Without the explicit frame the form stretches it
+            // and every mark below points at a place the mark has left.
+            Image(nsImage: LegendRenderer.dropdownBarImage(
+                layout, style: style, width: Self.anatomyWidth,
+                subdivisions: subdivisions, showsRuler: showsRuler,
+                appearance: barAppearance))
+                .frame(width: Self.anatomyWidth, alignment: .leading)
+                .offset(y: imageTop)
+
+            if let marker {
+                // Above the bar: the caption sits at the top and its leader runs from the caption's
+                // foot down to the marker's tip — which is the image's own top edge, the marker being
+                // the tallest thing the bar draws.
+                Text(marker.text)
+                    .font(.callout).foregroundStyle(.secondary).fixedSize()
+                    .frame(width: Self.anatomyWidth, alignment: .center)
+                leaderLine(Geometry.imageTop - Geometry.captionHeight)
+                    .offset(x: marker.x, y: Geometry.captionHeight)
+            }
+
+            // Below the bar: each leader starts at the mark it names and ends on the shared caption
+            // line, so the two differ by exactly how deep their marks sit — no compensation needed.
             ForEach(Array(callouts.enumerated()), id: \.offset) { _, callout in
-                leaderLine(callout.leader)
-                    .padding(.leading, callout.x)
+                leaderLine(Geometry.captionTop(imageTop: imageTop) - markTop(callout, imageTop: imageTop))
+                    .offset(x: callout.x, y: markTop(callout, imageTop: imageTop))
             }
             ForEach(Array(callouts.enumerated()), id: \.offset) { _, callout in
                 Text(callout.text)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
+                    .font(.callout).foregroundStyle(.secondary).fixedSize()
                     .frame(width: Self.anatomyWidth, alignment: captionAlignment(for: callout))
-                    // **Every caption sits `calloutGap` from the bar**, whatever its leader's length.
-                    //
-                    // Two things were conflated before: how far the text sits out, and how far the line
-                    // has to travel. They are not the same number — the marks are at different depths,
-                    // so the lines differ — and driving the text from the line put the two captions
-                    // below the bar on different baselines, and both further out than the one above.
-                    // The gap is now one constant on all three; the lines simply run past it by
-                    // however much their own mark is buried.
-                    // Above the bar the text clears its **own** leader, which is longer than the plain
-                    // gap — below it, the gap is enough, because the leaders there start at the image's
-                    // edge and run downward away from the text.
-                    .padding(.bottom, pointingDown ? callout.leader : 0)
-                    // Below the bar the captions clear the **longest** leader in the row, not their
-                    // own. The lines start at the image's edge and run down toward the text, so a
-                    // caption placed at the plain gap sits underneath the longer of them — which is
-                    // what put the line through "used tokens/credits so far". One baseline, set by
-                    // the line that reaches furthest, keeps every caption clear and the two on the
-                    // same level.
-                    .padding(.top, pointingDown ? 0 : longestLeader(callouts))
+                    .offset(y: Geometry.captionTop(imageTop: imageTop))
             }
         }
-        // Height comes from the content, not a constant. The row above the bar holds a caption over a
-        // 6 pt line; a fixed 24 pt left empty space under it, and that space is exactly what pulled the
-        // line away from the marker it is supposed to touch.
-        .frame(width: Self.anatomyWidth, alignment: .topLeading)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: Self.anatomyWidth,
+               height: Geometry.height(imageTop: imageTop, hasCallouts: !callouts.isEmpty),
+               alignment: .topLeading)
     }
 
-    /// The furthest any leader in a row reaches — where its captions start.
-    private func longestLeader(_ callouts: [Callout]) -> CGFloat {
-        callouts.map(\.leader).max() ?? Self.calloutGap
+    /// Where a below-bar leader begins: at the foot of the mark it names.
+    private func markTop(_ callout: Callout, imageTop: CGFloat) -> CGFloat {
+        callout.namesTheRuler
+            ? Geometry.rulerBottom(imageTop: imageTop)
+            : Geometry.trackBottom(imageTop: imageTop)
     }
 
+    /// The figure's vertical arithmetic, in one place, measured from its top edge.
+    ///
+    /// Derived from `PopupBarView`'s own metrics rather than written down, so a change there moves the
+    /// captions with it instead of leaving them pointing at nothing.
+    @MainActor
+    private enum Geometry {
+        /// One line of `.callout` text, plus its leading.
+        static let captionHeight: CGFloat = 17
+        /// Clear space between a caption and the bar, the same above and below.
+        ///
+        /// One constant feeds both sides — `imageTop` above, `captionTop` below — so the figure cannot
+        /// drift out of symmetry when this is tuned. At 7 the captions crowded the marks they name;
+        /// the leaders were long enough to read, but the text sat close enough to the bar to look like
+        /// part of it rather than a label on it.
+        static let gap: CGFloat = 10
+
+        /// Where the bar's image starts when a caption sits above it.
+        static var imageTop: CGFloat { captionHeight + gap }
+        /// The image's height, including the ruler strip the renderer adds for this page.
+        static var imageHeight: CGFloat { PopupBarView.viewHeight + PopupBarView.rulerDepth }
+
+        /// The track's lower edge — where the capsule's leader begins.
+        static func trackBottom(imageTop: CGFloat) -> CGFloat {
+            imageTop + PopupBarView.markerOverhang + PopupBarView.trackHeight
+        }
+        /// The teeth's lower edge — where the ruler's leader begins.
+        static func rulerBottom(imageTop: CGFloat) -> CGFloat {
+            trackBottom(imageTop: imageTop) + PopupBarView.rulerDepth
+        }
+        /// The line the below-bar captions share: clear of the **teeth**, minus the gap they already
+        /// hang across.
+        ///
+        /// Neither end of the obvious range is right. Measured from the image's foot the caption sat
+        /// ~14 pt below the track and the figure read bottom-heavy; measured from the track's foot it
+        /// came within a couple of points of the teeth. The reason is that `rulerDepth` is not solid
+        /// mark — `tickGap` of it is already blank, the same blank the caption's own gap would add. So
+        /// the teeth's length is cleared and the gap counted once, which puts the same clear space
+        /// under the lowest mark as `imageTop` puts over the highest one.
+        static func captionTop(imageTop: CGFloat) -> CGFloat {
+            rulerBottom(imageTop: imageTop) + gap - PopupBarView.tickGap
+        }
+
+        static func height(imageTop: CGFloat, hasCallouts: Bool) -> CGFloat {
+            hasCallouts
+                ? captionTop(imageTop: imageTop) + captionHeight
+                : imageTop + imageHeight
+        }
+    }
     /// Which end of the bar a caption is pushed to.
     private func captionAlignment(for callout: Callout) -> Alignment {
         switch callout.anchor {

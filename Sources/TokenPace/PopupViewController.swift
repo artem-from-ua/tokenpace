@@ -238,6 +238,14 @@ final class PopupBarView: NSView {
     /// part-way down and the specimen misreports their size.
     static var rulerDepth: CGFloat { Metrics.tickGap + Metrics.tickLength }
 
+    /// The blank the teeth hang across before they begin.
+    ///
+    /// Exposed alongside ``rulerDepth`` because a caller placing something *under* the ruler needs the
+    /// two apart: the depth says where the teeth end, this says how much of it was never ink. The
+    /// Legend page's captions subtract it so the clear space under the lowest mark matches the space
+    /// over the highest one.
+    static var tickGap: CGFloat { Metrics.tickGap }
+
     // MARK: - Effective presentation
 
     /// The scale this bar is actually **drawn** on — the user's `BarStyle` choice, except on the
