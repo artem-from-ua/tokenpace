@@ -79,3 +79,86 @@ struct WorkAvailabilityTests {
         #expect(WorkAvailability.canWork(snap) == true)
     }
 }
+
+// MARK: - WorkAvailability.subscriptionAvailable
+
+/// The "Back to work!" signal since #161: only the 5h / 7d subscription windows count, and Extra Usage
+/// Credit never moves it in either direction. The two credit-bearing cases below are exactly where this
+/// parts ways with `canWork` — they are the reason the predicate exists.
+@Suite("WorkAvailability.subscriptionAvailable")
+struct SubscriptionAvailabilityTests {
+
+    @Test func bothWindowsLowIsAvailable() {
+        let snap = UsageSnapshot(fiveHour: lowWindow(), sevenDay: lowWindow())
+        #expect(WorkAvailability.subscriptionAvailable(snap) == true)
+    }
+
+    @Test func sevenDayExhaustedIsUnavailable() {
+        let snap = UsageSnapshot(fiveHour: lowWindow(), sevenDay: fullWindow(), spend: nil)
+        #expect(WorkAvailability.subscriptionAvailable(snap) == false)
+    }
+
+    @Test func fiveHourExhaustedIsUnavailable() {
+        // Either main window spends the subscription on its own — you wait for that window's reset.
+        let snap = UsageSnapshot(fiveHour: fullWindow(), sevenDay: lowWindow(), spend: nil)
+        #expect(WorkAvailability.subscriptionAvailable(snap) == false)
+    }
+
+    @Test func exhaustedWhileCreditsCoverIsStillUnavailable() {
+        // The case `canWork` gets "wrong" for this notification: credits are actively paying, so work is
+        // possible, but the subscription quota is spent. Reading it as unavailable is what makes the
+        // later subscription reset a real edge — under `canWork` this state is already workable, the
+        // block is never entered, and the reset is announced to nobody.
+        let spend = SpendInfo(enabled: true, spendLimitReached: false)
+        let snap = UsageSnapshot(fiveHour: lowWindow(), sevenDay: fullWindow(), spend: spend)
+        #expect(WorkAvailability.canWork(snap) == true)
+        #expect(WorkAvailability.subscriptionAvailable(snap) == false)
+    }
+
+    @Test func creditsResetWhileSubscriptionStillSpentIsUnavailable() {
+        // The mirror case: credits hit the cap and then reset (spend_limit_reached false, enabled true)
+        // while 7d is still at 100 %. `canWork` crosses false → true here and would announce "Back to
+        // work" off a credits reset; the subscription signal does not move.
+        let spend = SpendInfo(enabled: true, spendLimitReached: false)
+        let snap = UsageSnapshot(fiveHour: lowWindow(), sevenDay: fullWindow(), spend: spend)
+        #expect(WorkAvailability.subscriptionAvailable(snap) == false)
+
+        let capped = SpendInfo(enabled: false, spendLimitReached: true)
+        let before = UsageSnapshot(fiveHour: lowWindow(), sevenDay: fullWindow(), spend: capped)
+        #expect(WorkAvailability.canWork(before) == false)
+        #expect(WorkAvailability.subscriptionAvailable(before) == false)
+    }
+
+    @Test func subscriptionResetWhileCreditsEnabledIsAvailable() {
+        // The payoff: 7d back under 100 % with credits still enabled → available, the edge fires.
+        let spend = SpendInfo(enabled: true, spendLimitReached: false)
+        let snap = UsageSnapshot(fiveHour: lowWindow(), sevenDay: lowWindow(), spend: spend)
+        #expect(WorkAvailability.subscriptionAvailable(snap) == true)
+    }
+
+    @Test func idleFiveHourWithLowSevenDayIsAvailable() {
+        // sessionIdle: the 5h window carries utilization 0 → "ready to start", not exhausted.
+        let idle = UsageWindow(utilization: 0, resetsAt: "")
+        let snap = UsageSnapshot(fiveHour: idle, sevenDay: lowWindow(), sessionIdle: true)
+        #expect(WorkAvailability.subscriptionAvailable(snap) == true)
+    }
+
+    @Test func perModelWeeklyExhaustedIsAvailable() {
+        // A per-model sub-window at 100 % is not a subscription gate (#177) — no spurious edge.
+        let opus = UsageSnapshot(
+            fiveHour: lowWindow(),
+            sevenDay: lowWindow(),
+            sevenDayOpus: fullWindow(),
+            spend: nil
+        )
+        #expect(WorkAvailability.subscriptionAvailable(opus) == true)
+
+        let sonnet = UsageSnapshot(
+            fiveHour: lowWindow(),
+            sevenDay: lowWindow(),
+            sevenDaySonnet: fullWindow(),
+            spend: nil
+        )
+        #expect(WorkAvailability.subscriptionAvailable(sonnet) == true)
+    }
+}

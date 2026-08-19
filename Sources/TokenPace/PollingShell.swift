@@ -415,6 +415,7 @@ actor StubUsageTransport: UsageTransport {
         /// set; every later poll returns a **workable** body (7-day back to 40 %), which is a genuine
         /// blocked→unblocked edge that fires the notification (subject to quiet hours + authorization).
         case justUnblocked
+        case subscriptionResetOnCredits
         /// The "Now using Extra Usage Credit" edge frame: the first poll returns a **not-on-credits**
         /// body (7-day at 40 %, so no main window is exhausted even though credits are enabled →
         /// `ExtraUsageOnset.isOnCredits == false`); every later poll pins the 7-day window at 100 % with
@@ -1423,6 +1424,32 @@ actor StubUsageTransport: UsageTransport {
             {"five_hour":{"utilization":18.0,"resets_at":"\(fiveReset)"},\
             "seven_day":{"utilization":\(sevenUtil),"resets_at":"\(sevenReset)"},\
             "limits":[]}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+            return (body, response)
+        }
+
+        // Subscription-reset-while-covered frame (#161): first poll = 7-day at 100 % **with credits
+        // enabled and uncapped**, so work never actually stops (`canWork` stays true) but the
+        // subscription quota is spent; every later poll = 7-day at 40 %. The notification tracks
+        // `subscriptionAvailable`, so the reset fires the "Back to work!" banner once — the edge the
+        // old "can I work?" signal could not see, because it never entered a blocked state here.
+        if mode == .subscriptionResetOnCredits {
+            let spent = calls == 0
+            calls += 1
+            let sevenUtil = spent ? 100.0 : 40.0
+            let fiveReset = self.resetsAt(inSeconds: 3 * 3600)
+            let sevenReset = self.resetsAt(inSeconds: 5 * 24 * 3600)
+            // A `weekly_all` critical limit only while the 7-day window is actually exhausted.
+            let weeklyLimit = spent
+                ? #""limits":[{"kind":"weekly_all","group":"weekly","percent":100,"severity":"critical","resets_at":"\#(sevenReset)","scope":null,"is_active":true}],"#
+                : #""limits":[],"#
+            let body = """
+            {"five_hour":{"utilization":18.0,"resets_at":"\(fiveReset)"},\
+            "seven_day":{"utilization":\(sevenUtil),"resets_at":"\(sevenReset)"},\
+            \(weeklyLimit)\
+            \(CreditsFrame.active.blocks)}
             """.data(using: .utf8)!
             let response = HTTPURLResponse(
                 url: UsageClient.endpoint, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!

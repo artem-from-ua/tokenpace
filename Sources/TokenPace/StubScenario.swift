@@ -73,6 +73,7 @@ enum StubScenario: String, CaseIterable {
     case allExhaustedTokenBlocks = "all-exhausted-token-blocks"
     case creditsMonthEnd = "credits-month-end"
     case justUnblocked = "just-unblocked"
+    case subscriptionResetOnCredits = "subscription-reset-on-credits"
     case creditsOnset = "credits-onset"
     case resetGrace = "reset-grace"
     case colorCycle = "color-cycle"
@@ -202,6 +203,7 @@ enum StubScenario: String, CaseIterable {
         case .allExhaustedTokenBlocks:  return "All spent · 7-day frees you last"
         case .creditsMonthEnd:     return "Credits · late in the month (time marker near the end)"
         case .justUnblocked:       return "Back to work! edge"
+        case .subscriptionResetOnCredits: return "Back to work! edge · while credits cover"
         case .creditsOnset:        return "Extra Usage Credit onset"
         case .resetGrace:          return "Reset-boundary idle grace"
         case .colorCycle:          return "Colour transitions (frozen bars)"
@@ -447,6 +449,12 @@ enum StubScenario: String, CaseIterable {
         case .justUnblocked:
             return "Back-to-work edge (#160): first poll blocked (7d 100 %), then workable → fires the "
                  + "\"Back to work!\" notification once (quiet hours + authorization permitting)."
+        case .subscriptionResetOnCredits:
+            return "Back-to-work edge while credits cover the gap (#161): first poll 7d 100 % **with "
+                 + "credits enabled** — work never stops, but the subscription is spent — then 7d 40 %. "
+                 + "The notification tracks the subscription, so the reset fires it once even though "
+                 + "work was possible throughout. This is the case the old \"can I work?\" signal "
+                 + "stayed silent on."
         case .creditsOnset:
             return "Extra-usage onset: first poll not on credits (7d 40 %), then 7d 100 % with credits "
                  + "enabled → work overflows onto paid credit, firing the \"Now using Extra Usage "
@@ -551,6 +559,8 @@ enum StubScenario: String, CaseIterable {
             return StubUsageTransport(mode: .credits(.allExhaustedTokenBlocks), now: now)
         case .creditsMonthEnd:     return StubUsageTransport(mode: .credits(.active), now: now)
         case .justUnblocked:       return StubUsageTransport(mode: .justUnblocked, now: now)
+        case .subscriptionResetOnCredits:
+            return StubUsageTransport(mode: .subscriptionResetOnCredits, now: now)
         case .creditsOnset:        return StubUsageTransport(mode: .creditsOnset, now: now)
         case .resetGrace:          return StubUsageTransport(mode: .resetGrace, now: now)
         // The colour walk is driven by `AppDelegate`'s own timer overlaying the retained snapshot, so
@@ -625,7 +635,7 @@ enum StubScenario: String, CaseIterable {
     var advancesPerPoll: Bool {
         switch self {
         case .weeklyInterp, .standByFloor, .optimisticReset, .resetGrace,
-             .justUnblocked, .creditsOnset, .staleError,
+             .justUnblocked, .subscriptionResetOnCredits, .creditsOnset, .staleError,
              // Seeds the anchor on its first two polls, then blacks out — the whole point is that
              // the countdown *stops* moving across the handover, which one frame cannot show.
              .weeklyResetBlackout:
