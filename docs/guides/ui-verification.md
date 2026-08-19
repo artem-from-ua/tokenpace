@@ -616,7 +616,7 @@ Settings → Notifications → **Preview** біля «Claude service incidents»
   Безіменної секції вгорі **більше немає** — її єдиний контрол (Far behind pace interval) прибрано
   разом з опцією (ADR-0081).
   Стилі: «Pressure» — стрічка від лівого краю без маркера, довжиною `pressureLength` =
-  `max(0, gaugeOffset)` = `clamp(r, 0, 1)`, де `r = (u − t)/(1 − t)` (нуль бару = рівно за планом,
+  `max(0, balanceOffset)` = `clamp(r, 0, 1)`, де `r = (u − t)/(1 − t)` (нуль бару = рівно за планом,
   16 % = початок помаранчевого, [ADR-0101](../adr/0101-pressure-is-the-gauge-ahead-half.md));
   «Progress» — gap + маркер часу в шкалі вікна; «Balance»
   ([ADR-0079](../adr/0079-centred-zero-gauge-scale.md), #326) — стрічка від **центру**,
