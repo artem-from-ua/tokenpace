@@ -56,8 +56,9 @@ struct NotificationsPane: View {
                     // Descriptive hints dim with the control they describe (#381) …
                     Group {
                         SettingsHint(
-                            text: "If you hit a Claude usage limit, notifies you when it resets so you "
-                                + "can get back to work.")
+                            text: "If you hit your 5-hour or weekly subscription limit, notifies you "
+                                + "when it resets so you can get back to work. Extra Usage Credit "
+                                + "doesn't count — neither hitting its cap nor its reset.")
                         SettingsHint(
                             text: "It best suits the *Work harder!* and *Control freak* presets on the "
                                 + "*Appearance* page.")

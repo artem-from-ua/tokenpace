@@ -1250,32 +1250,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Detect the blocked→unblocked edge for the "Back to work!" notification (#160) and post when it
-    /// fires. Called at the top of `apply`, before `lastOutput` is overwritten.
+    /// Detect the spent→available edge of the **subscription** quota for the "Back to work!"
+    /// notification (#160) and post when it fires. Called at the top of `apply`, before `lastOutput` is
+    /// overwritten.
     ///
-    /// The "was blocked" state is **persisted** (`PersistedConfig.backToWorkWasBlocked`), not an
-    /// in-memory flag, so the edge survives an app restart or a Mac sleep/reboot between the block and
-    /// the reset. Tracking and posting live in separate guards on purpose:
+    /// The tracked signal is `WorkAvailability.subscriptionAvailable` — "is my 5h/7d quota back?" —
+    /// **not** `canWork` (#161). Extra Usage Credit is deliberately outside this notification in both
+    /// directions: a subscription reset is announced even when credits were covering the work in the
+    /// meantime (under `canWork` that state is already "workable", so the block is never entered and the
+    /// reset passes unannounced), and a credits reset on its own announces nothing while the
+    /// subscription is still spent. Switching onto paid credit has its own banner
+    /// (`detectExtraUsageEdge`, ADR-0050).
+    ///
+    /// The persisted flag `backToWorkWasBlocked` is reused as-is across this change, with no migration:
+    /// it is a `Bool` defaulting to `false`, and the first successful poll after the update overwrites
+    /// it with the new signal's value. The worst case at the upgrade boundary is one missed or one extra
+    /// banner — not worth a second key.
+    ///
+    /// The "quota was spent" state is **persisted** (`PersistedConfig.backToWorkWasBlocked`), not an
+    /// in-memory flag, so the edge survives an app restart or a Mac sleep/reboot between hitting the
+    /// limit and the reset. Tracking and posting live in separate guards on purpose:
     /// - **Tracking runs on every successful poll**, regardless of whether the feature is enabled, so
     ///   the persisted state is always current — toggling the feature off→on never forgets a pending
     ///   edge, and never fires a stale one for a reset that happened while the feature was off.
-    /// - **Posting runs only when the feature is enabled** *and* the previous successful reading was
-    ///   genuinely blocked *and* we are now workable.
+    /// - **Posting runs only when the feature is enabled** *and* the previous successful reading had the
+    ///   subscription spent *and* it is available now.
     ///
     /// Only genuine successful polls update the state: a failing/stale poll carries the last-known
     /// snapshot forward (`health.failingSince != nil`), and the optimistic-reset overlay bypasses
-    /// `apply` entirely (it calls `render`, not `apply`), so neither can produce a false "unblocked".
+    /// `apply` entirely (it calls `render`, not `apply`), so neither can produce a false "available".
     private func detectBackToWorkEdge(_ output: PollOutput) {
         // `hasLiveUsageData`, not `failingSince == nil` (#341): the service-only mode is not failing
-        // either, and a frozen snapshot there would re-assert "workable" on every tick. The engine
+        // either, and a frozen snapshot there would re-assert "available" on every tick. The engine
         // also drops the snapshot on entry, so this is belt and braces — but the guard should say
         // what it means rather than lean on that.
         guard output.health.hasLiveUsageData, let snapshot = output.snapshot else { return }
-        let nowWorkable = WorkAvailability.canWork(snapshot)
-        if PersistedConfig.backToWorkEnabled, PersistedConfig.backToWorkWasBlocked, nowWorkable {
+        let nowAvailable = WorkAvailability.subscriptionAvailable(snapshot)
+        if PersistedConfig.backToWorkEnabled, PersistedConfig.backToWorkWasBlocked, nowAvailable {
             maybePostBackToWork()
         }
-        PersistedConfig.backToWorkWasBlocked = !nowWorkable
+        PersistedConfig.backToWorkWasBlocked = !nowAvailable
     }
 
     /// Apply the quiet-hours gate and post the "Back to work!" banner if allowed (#160). The pure
