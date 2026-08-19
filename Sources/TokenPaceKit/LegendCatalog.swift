@@ -118,13 +118,19 @@ public enum LegendCatalog {
     public static let exhaustedSpecimen = PacingModel.barLayout(
         utilization: 100, resetsAt: fiveHourReset(elapsed: 0.80), now: now, window: .fiveHour)
 
-    /// The state Progress is drawn from — `u = 35 %, t = 50 %`, behind pace and green.
+    /// The state Progress is drawn from — `u = 35 %, t = 71 %`, behind pace and green.
     ///
     /// Behind rather than ahead, so the marker sits to the **right** of the capsule. That is the
     /// arrangement the section's first reading rule names, and a specimen that showed the other one
     /// would make the rule's example contradict the picture above it.
+    ///
+    /// The gap between the two is wide on purpose. At `t = 50 %` the marker stood 47.5 pt from the
+    /// capsule's edge while the captions naming them are two and three times that wide, so the two
+    /// labels had to be pushed apart to avoid overlapping and each then sat off its own mark. At
+    /// 71 % the marks are as far apart as their names are, and the marker still clears the fourth
+    /// tooth — the ruler's own caption points at 0.80, and a marker any further along would crowd it.
     public static let progressSpecimen = PacingModel.barLayout(
-        utilization: 35, resetsAt: fiveHourReset(elapsed: 0.50), now: now, window: .fiveHour)
+        utilization: 35, resetsAt: fiveHourReset(elapsed: 0.71), now: now, window: .fiveHour)
 
     // MARK: Menu-bar specimens
 

@@ -101,6 +101,13 @@ enum LegendRenderer {
         // strength it blooms on a flat form, and this page has a callout pointing *at* the marker —
         // a label naming a 7 pt mark should not sit under a glow twice that wide.
         view.markerGlowScale = 0.4
+        // The coloured strip's own halo, dialled down for the same reason and not as far. The popup's
+        // radius is sized to lift a ribbon off vibrant material; on this flat form it spreads over the
+        // page instead, and the specimens on this page sit in a stacked list where one bar's bloom
+        // reaches the next row. Half rather than the marker's 0.4: the strip is the widest coloured
+        // thing here and the halo is what tells the reader its colour carries the verdict, so it is
+        // tightened rather than removed.
+        view.stripGlowScale = 0.5
         // Teeth at shipped size. Enlarging them was tried — the ruler is a named part on this page, and
         // 2 × 5 pt of tertiary label is easy to miss — but a legend that redraws the thing it explains
         // at a size the app never uses teaches the wrong picture, and the leader pointing at them does

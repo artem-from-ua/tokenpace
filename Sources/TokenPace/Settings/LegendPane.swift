@@ -200,16 +200,17 @@ struct LegendPane: View {
     ///     width      = anatomyWidth = 320
     ///
     ///     used   f = usageFraction 0.35  →  112.5
-    ///     marker f = timeFraction  0.50  →  160.0
+    ///     marker f = timeFraction  0.71  →  226.5
     ///     tick 4 f = 4/5           0.80  →  255.0
     ///
     /// **Recompute these if `anatomyWidth`, `PopupBarView.trackHeight`, `minStripWidth` or the
     /// specimen's fractions change.** Any of the four moves every mark on this diagram.
     ///
-    /// The alignment differs per label because the marks are not evenly spread: `used` and `marker`
-    /// are 47.5 pt apart while their labels are two and three times that wide, so centring all three
-    /// overlaps the first two. Anchoring the outer labels by their near edges and centring only the
-    /// middle one spreads them across the width the bar actually occupies.
+    /// The marker sits at 0.71 rather than half: at `t = 0.50` it stood 47.5 pt from the capsule's
+    /// edge, closer than either of their captions is wide, so the labels had to be spread by hand and
+    /// each then read as pointing between the two marks rather than at one of them. The wider specimen
+    /// lets every caption sit centred on its own leader, while staying clear of the fourth tooth at
+    /// 0.80 that the ruler's caption points at.
     ///
     /// The fourth tooth rather than the first: it is the one with room for a label under it without
     /// colliding with the capsule's own.
@@ -242,10 +243,10 @@ struct LegendPane: View {
     /// overlapping. Splitting them across the bar gives each room, and puts the marker's name on the
     /// side the marker is read from.
     ///
-    /// 159.5 for the reason the ruler callout is 254.5: a 1 pt leader centred on an integer x
+    /// 226.5 for the reason the ruler callout is 254.5: a 1 pt leader centred on an integer x
     /// splits across two device pixels at 2×, and the line then reads as standing just right of
     /// the mark it points at.
-    private static let markerCallout = Callout(x: 159.5, text: "now-marker")
+    private static let markerCallout = Callout(x: 226.5, text: "now-marker")
 
     /// One label beside an anatomy bar, pointing at `x`.
     private struct Callout {
@@ -557,9 +558,15 @@ struct LegendPane: View {
     }
 
     /// Where a below-bar leader begins: at the foot of the mark it names.
+    ///
+    /// The ruler's leader starts a hair below where the teeth actually end. Butted straight onto a
+    /// tooth, it read as that tooth grown long rather than as a line pointing at it — both are 1 pt
+    /// of the same ink, so nothing marked where one stopped and the other began. A small break
+    /// restores the distinction. The track's edge needs none: the capsule is a filled shape, not a
+    /// hairline, so a line leaving it is already legible as a separate mark.
     private func markTop(_ callout: Callout, imageTop: CGFloat) -> CGFloat {
         callout.namesTheRuler
-            ? Geometry.rulerBottom(imageTop: imageTop)
+            ? Geometry.rulerBottom(imageTop: imageTop) + Geometry.rulerLeaderGap
             : Geometry.trackBottom(imageTop: imageTop)
     }
 
@@ -578,6 +585,13 @@ struct LegendPane: View {
         /// the leaders were long enough to read, but the text sat close enough to the bar to look like
         /// part of it rather than a label on it.
         static let gap: CGFloat = 10
+
+        /// The break between the ruler's teeth and the leader that points at them.
+        ///
+        /// Only the ruler's leader takes it — see ``LegendPane/markTop(_:imageTop:)``. It shortens
+        /// that leader without moving the caption line, which stays where ``captionTop(imageTop:)``
+        /// puts it for every callout, so the captions stay level with each other.
+        static let rulerLeaderGap: CGFloat = 1
 
         /// Where the bar's image starts when a caption sits above it.
         static var imageTop: CGFloat { captionHeight + gap }

@@ -391,6 +391,21 @@ final class PopupBarView: NSView {
     /// The marker halo's radius after ``markerGlowScale``.
     private var markerGlow: CGFloat { Self.markerGlowRadius * markerGlowScale }
 
+    /// Scales the **coloured strip's** ambient halo for this bar. `1` is the shipped glow.
+    ///
+    /// The companion to ``markerGlowScale``, and set for the same reason on the same surface: the
+    /// popup's halo is sized for a vibrant card, where the ribbon has to lift off a busy material.
+    /// A Settings form is flat and opaque, so the same radius spreads instead of lifting — the
+    /// colour bleeds past the strip's own edge and the specimen reads softer than the bar it is
+    /// meant to be a picture of.
+    ///
+    /// Scales the radius, not the strength: dimming the halo would change what colour the specimen
+    /// shows, while a tighter one shows the same colour over less of the form.
+    var stripGlowScale: CGFloat = 1
+
+    /// The strip halo's radius after ``stripGlowScale``.
+    private var stripGlow: CGFloat { Self.gapGlowRadius * stripGlowScale }
+
 
     /// The exhausted-pacing red (`aheadColor`'s cap rung). Exposed so the popup can paint the **one**
     /// blocking reset time red (#158) in the same tone the bars use for an exhausted limit. Computed (not
@@ -462,7 +477,7 @@ final class PopupBarView: NSView {
                 } else {
                     // The idle strip carries the same ambient glow as a pacing strip (#188),
                     // with the same parameters — one halo treatment across every strip.
-                    withGlow(idleColor, radius: Self.gapGlowRadius, strength: Self.gapGlowStrength) {
+                    withGlow(idleColor, radius: stripGlow, strength: Self.gapGlowStrength) {
                         idleColor.setFill()
                         idlePath.fill()
                     }
@@ -570,13 +585,13 @@ final class PopupBarView: NSView {
                 // where they overlap and falls off outward. See the radius constants for why three passes
                 // rather than one larger `strength`.
                 for radius in [Self.pillHaloRadius, Self.pillMidGlowRadius, Self.pillGlowRadius] {
-                    withGlow(gapColor, radius: radius, strength: Self.pillGlowStrength) {
+                    withGlow(gapColor, radius: radius * stripGlowScale, strength: Self.pillGlowStrength) {
                         gapColor.setFill()
                         stripPath.fill()
                     }
                 }
             } else {
-                withGlow(gapColor, radius: Self.gapGlowRadius, strength: Self.gapGlowStrength) {
+                withGlow(gapColor, radius: stripGlow, strength: Self.gapGlowStrength) {
                     gapColor.setFill()
                     stripPath.fill()
                 }
