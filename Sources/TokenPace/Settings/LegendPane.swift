@@ -491,59 +491,86 @@ struct LegendPane: View {
     /// other. `position` places a view's centre at an explicit coordinate, which is what "this label
     /// belongs at x = 112.5" actually means.
     private func calloutRow(_ callouts: [Callout], pointingDown: Bool = false) -> some View {
-        GeometryReader { _ in
+        ZStack(alignment: .topLeading) {
             ForEach(Array(callouts.enumerated()), id: \.offset) { _, callout in
-                VStack(alignment: .center, spacing: 2) {
+                VStack(alignment: callout.anchor, spacing: 0) {
                     if pointingDown {
                         Text(callout.text).font(.callout).foregroundStyle(.secondary).fixedSize()
-                        leaderLine
+                        leaderStem(tall: true)
+                        leader(pointingDown: true)
                     } else {
-                        leaderLine
+                        leader(pointingDown: false)
+                        leaderStem(tall: false)
                         Text(callout.text).font(.callout).foregroundStyle(.secondary).fixedSize()
                     }
                 }
-                // Centred on `x`, then nudged so the label's near edge — rather than its middle —
-                // sits over the mark for the two outer callouts. Without that the leftmost label
-                // would start well off the bar and the rightmost would run past its end.
-                .fixedSize()
-                .modifier(CalloutPlacement(x: callout.x, anchor: callout.anchor))
+                // **A padded frame, not an offset.** Two earlier attempts failed on the same thing:
+                // both needed the label's own width, and neither could have it in time —
+                // `alignmentGuide` inside a `ZStack` moves the stack rather than the child, and a
+                // `GeometryReader` read into `@State` arrives a layout pass *after* the position is
+                // used, so every label placed itself as if it were zero-wide and they piled up in the
+                // middle.
+                //
+                // Here the width is never needed. A leading label is given a frame that starts at `x`
+                // and runs to the bar's end, aligned leading; a trailing one gets a frame from zero to
+                // `x`, aligned trailing; a centred one is centred in a symmetric frame around `x`. The
+                // layout system does the arithmetic with a width it already knows.
+                .frame(width: frameWidth(for: callout), alignment: frameAlignment(for: callout))
+                .padding(.leading, framePadding(for: callout))
             }
         }
-        .frame(width: Self.anatomyWidth, height: Self.calloutHeight)
+        .frame(width: Self.anatomyWidth, height: Self.calloutHeight, alignment: .topLeading)
     }
 
-    private var leaderLine: some View {
+    /// How wide a callout's own frame is, given where it must anchor.
+    private func frameWidth(for callout: Callout) -> CGFloat {
+        switch callout.anchor {
+        case .leading:  return Self.anatomyWidth - callout.x
+        case .trailing: return callout.x
+        // A symmetric window around the mark: whichever side is shorter bounds it, so the label stays
+        // centred on `x` without running off either end of the bar.
+        default:        return min(callout.x, Self.anatomyWidth - callout.x) * 2
+        }
+    }
+
+    private func frameAlignment(for callout: Callout) -> Alignment {
+        switch callout.anchor {
+        case .leading:  return .leading
+        case .trailing: return .trailing
+        default:        return .center
+        }
+    }
+
+    private func framePadding(for callout: Callout) -> CGFloat {
+        switch callout.anchor {
+        case .leading:  return callout.x
+        case .trailing: return 0
+        default:        return max(0, callout.x - frameWidth(for: callout) / 2)
+        }
+    }
+
+    /// A leader: a hairline with an arrowhead at the end that touches the bar.
+    ///
+    /// An arrow rather than a plain rule because these point at marks a few points wide — a bare line
+    /// ending near a 7 pt marker reads as another tick in the ruler, which is the one thing it must not
+    /// be mistaken for. The head names a direction, and a direction is what a callout is.
+    ///
+    /// `pointingDown` flips it for the caption above the bar: the head always sits on the bar's side.
+    private func leader(pointingDown: Bool) -> some View {
+        Image(systemName: pointingDown ? "arrowtriangle.down.fill" : "arrowtriangle.up.fill")
+            .font(.system(size: 5))
+            .foregroundStyle(.secondary.opacity(0.55))
+    }
+
+    /// The stem between a callout's text and its arrowhead.
+    ///
+    /// Taller for the marker's callout, which sits above the bar: the marker stands proud of the track,
+    /// so its leader has further to travel before it reaches what it is naming. The lower captions
+    /// start just under the ruler and need only clear it.
+    private func leaderStem(tall: Bool) -> some View {
         Rectangle()
             .fill(Color.secondary.opacity(0.35))
-            .frame(width: 1, height: 6)
-    }
-
-    /// Places a callout so that `anchor` of it lands on `x`.
-    ///
-    /// A modifier rather than inline maths because it needs the view's measured width, which only a
-    /// `background(GeometryReader)` read can supply — the label's width depends on its text, and the
-    /// two outer callouts must hang off their mark rather than straddle it.
-    private struct CalloutPlacement: ViewModifier {
-        let x: CGFloat
-        let anchor: HorizontalAlignment
-        @State private var width: CGFloat = 0
-
-        func body(content: Content) -> some View {
-            content
-                .background(GeometryReader { proxy in
-                    Color.clear.onAppear { width = proxy.size.width }
-                })
-                .position(x: x + offset, y: 12)
-        }
-
-        /// How far the label's centre sits from the mark, so the requested edge lands on it.
-        private var offset: CGFloat {
-            switch anchor {
-            case .leading:  return width / 2 - 1     // left edge on the mark
-            case .trailing: return 1 - width / 2     // right edge on the mark
-            default:        return 0                 // centred on it
-            }
-        }
+            .frame(width: 1, height: tall ? 12 : 6)
     }
 
     /// Height reserved for a callout strip: leader line, gap, and one line of text.

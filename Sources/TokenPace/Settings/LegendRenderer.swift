@@ -101,6 +101,10 @@ enum LegendRenderer {
         // strength it blooms on a flat form, and this page has a callout pointing *at* the marker —
         // a label naming a 7 pt mark should not sit under a glow twice that wide.
         view.markerGlowScale = 0.4
+        // Teeth at 1.6×: on this page the ruler is a named part with an arrow pointing at it, and at
+        // shipped size (2 × 5 pt of tertiary label) the thing being named is barely there. Only where
+        // the ruler is actually shown, so the reading-rule bars are unaffected.
+        view.tickScale = showsRuler ? 1.6 : 1
         view.trackTint = NSColor(name: nil) { appearance in
             var mixed: NSColor = .tertiaryLabelColor
             appearance.performAsCurrentDrawingAppearance {
