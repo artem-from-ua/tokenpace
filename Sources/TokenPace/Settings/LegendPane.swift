@@ -327,11 +327,11 @@ struct LegendPane: View {
 
     /// The six service states in the order they escalate.
     ///
-    /// **`degraded` is yellow**, which is what the popup draws and what the escalation reads as: grey,
-    /// yellow, orange, red is a scale a reader can follow without being told. The menu bar currently
-    /// mutes this one state to the neutral (`StatusItemView.statusDotTarget`, #381) — a decision that
-    /// pre-dates this page and is tracked separately (#410). The legend shows the scale rather than
-    /// that exception: a reference whose own example is the odd case out teaches the exception.
+    /// **`degraded` is yellow**, which is what the escalation reads as: grey, yellow, orange, red is a
+    /// scale a reader can follow without being told. The menu bar muted this one state to the neutral
+    /// from #381 until #410 — this page, which has to name what each colour means, is what made the
+    /// split visible; it showed the scale rather than the exception, and the widget then followed
+    /// (ADR-0111). All three surfaces now draw the same six tones.
     @MainActor
     private static var serviceStates: [(name: String, colour: NSColor)] {
         [("operational", ColorRole.green.defaultColor),
