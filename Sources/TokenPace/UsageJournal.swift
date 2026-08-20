@@ -254,9 +254,10 @@ actor UsageJournal {
             state = carried
             guard outcome.changedAnything else { continue }
 
-            // `changedAnything` guarantees at least one line was rewritten, so the pass knows which
-            // generation it came from; the fallback keeps the call total rather than force-unwrapping.
-            let wasVersion = outcome.migratedFromVersion ?? 1
+            // A rewrite driven purely by a colour-model bump (#426) leaves the file at the current
+            // format, so the pass reports no older generation and the backup is named after what the
+            // file still is. `?? 1` would have claimed it was v1 — the one thing it certainly is not.
+            let wasVersion = outcome.migratedFromVersion ?? UsageSample.currentVersion
             if swapIn(rewritten, at: url, wasVersion: wasVersion) {
                 migratedFiles += 1
                 backupSuffixesWritten.insert(Self.backupSuffix(forVersion: wasVersion))

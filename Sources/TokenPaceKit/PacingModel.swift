@@ -128,11 +128,24 @@ public struct BarLayout: Sendable, Equatable {
     /// to plain green at any surplus — the same early exit the retired `FarBehindInterval.off` used to
     /// provide, now driven by data rather than by a user setting.
     ///
-    /// Set `false` for every bar whose blue would be a **lie about the week**: the 5-hour bar (and the
-    /// 7-day-paced per-model bars) when the weekly window has no headroom left. Blue reads as "there is
-    /// room to push"; that advice must not appear while the 7-day quota is spent or running ahead of
-    /// pace — see ``PacingModel/weeklyHasHeadroom(in:now:)``. The 7-day bar itself is always `true`
-    /// (it never gates on itself), and the inert idle placeholders are `false` (no pacing at all).
+    /// Blue is one specific piece of advice — *the seven-day window has room you are not using* — so
+    /// it is `false` wherever that sentence would be untrue, unaddressed, or meaningless. Three
+    /// independent reasons, and a bar needs only one of them:
+    ///
+    /// 1. **The week has no room to offer.** The 5-hour bar when the weekly window is spent or running
+    ///    ahead of pace — see ``PacingModel/weeklyHasHeadroom(in:now:)``. The advice would be a lie
+    ///    about the week. The 7-day bar itself is always `true`: it never gates on itself.
+    /// 2. **The bar *is* the week.** Per-model rows (Opus / Sonnet / `weekly_scoped`) are slices of the
+    ///    same seven-day limit, so "the week has spare capacity" is advice addressed to itself. Their
+    ///    own idleness says nothing a reader would act on differently — whatever there is to push into
+    ///    has already been said by the 5h and 7d rows.
+    /// 3. **The bar gives no pacing advice at all.** Credits (a money window, not a token limit — see
+    ///    ``CreditsPacing/barLayout(for:now:timeZone:)``) and the inert idle placeholders.
+    ///
+    /// Reason 2 is the one that was learned late. It lived only in the render layer, as
+    /// `PopupBarView.isBaseLimit`, so the popup painted per-model rows green while the model happily
+    /// reported blue — and the journal, which reads the model, recorded 2 211 blue scoped samples that
+    /// were never on screen. Stating it here instead is what makes the two agree by construction.
     ///
     /// Mirrored onto the layout so ``severity`` and the AppKit `behindColor`/`isFarBehind` — which read
     /// it off this struct — cannot disagree about whether blue is on the table.
@@ -612,8 +625,12 @@ public enum PacingModel {
 
     // MARK: weeklyHasHeadroom
 
-    /// Whether the **7-day** window still has room to spend — the gate that lets a 5-hour (or
-    /// 7-day-paced per-model) bar render the blue `farBehind` zone.
+    /// Whether the **7-day** window still has room to spend — the gate that lets the 5-hour bar render
+    /// the blue `farBehind` zone.
+    ///
+    /// Only the 5-hour bar: per-model rows used to carry this gate too, but they are slices of the very
+    /// week it asks about and are now `blueAllowed: false` unconditionally (reason 2 on
+    /// ``BarLayout/blueAllowed``).
     ///
     /// Blue says *there is room to push*. Computed per-window, that advice becomes a lie whenever the
     /// week itself is spent or running ahead of pace: a freshly reset 5-hour window turns blue 20 min
@@ -639,7 +656,23 @@ public enum PacingModel {
         guard let resetsAt = ResetClock.parse(snapshot.sevenDay.resetsAt) else { return false }
         let weekly = barLayout(utilization: snapshot.sevenDay.utilization,
                                resetsAt: resetsAt, now: now, window: .sevenDay)
-        return weekly.pacing == .onPaceOrBehind && weekly.usageFraction < 1
+        return weeklyHasHeadroom(weeklyTimeFraction: weekly.timeFraction,
+                                 weeklyUsageFraction: weekly.usageFraction)
+    }
+
+    /// The gate's arithmetic on its own, for callers that already hold the weekly fractions and cannot
+    /// build a snapshot — specifically ``JournalMigration``, which replays the rule over archived
+    /// samples where only `timePct` and `util` survive.
+    ///
+    /// Extracted rather than copied: the docblock above promises the gate "cannot disagree with the
+    /// 7-day row the user is looking at", and a second hand-written `>=` elsewhere is exactly how that
+    /// promise breaks. Callers that *can* build a snapshot must use the overload above — this one
+    /// cannot apply the closed-by-default rule for them, because a missing reset is not visible in a
+    /// pair of fractions.
+    public static func weeklyHasHeadroom(weeklyTimeFraction: Double, weeklyUsageFraction: Double) -> Bool {
+        // `pacing == .onPaceOrBehind` is `timeFraction >= usageFraction` (see `barLayout`), and the
+        // tie goes to on-pace, so the gate is open on equality.
+        weeklyTimeFraction >= weeklyUsageFraction && weeklyUsageFraction < 1
     }
 
     // MARK: blockIndex (popup-only derivative)

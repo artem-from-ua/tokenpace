@@ -73,14 +73,17 @@ enum LegendRenderer {
     /// not its length — so a narrower bar spends proportionally more of itself on that inset and its
     /// marks shift by up to ~2 % of the width. Measured and accepted in ADR-0097 for the 56 pt tile;
     /// the same holds here. Shapes and their order are identical, which is what the rows are about.
+    /// Whether a row may show blue rides on the `layout` the caller passes
+    /// (``BarLayout/blueAllowed``), as it does everywhere else since #426 — the legend's specimens
+    /// build theirs through `PacingModel.barLayout`, so a blue rung stays blue here without this
+    /// renderer having to claim anything about which rows are "base".
     static func dropdownBarImage(_ layout: BarLayout, style: BarStyle, width: CGFloat,
-                                 subdivisions: Int = 0, isBaseLimit: Bool = true,
+                                 subdivisions: Int = 0,
                                  showsRuler: Bool = false,
                                  appearance: NSAppearance? = nil) -> NSImage {
         let view = PopupBarView(frame: .zero)
         view.bar = layout
         view.subdivisions = subdivisions
-        view.isBaseLimit = isBaseLimit
         view.barStyle = style
         // A step brighter than the popup's own track, and only here (#261). `monochromeGrey` is
         // `tertiaryLabelColor` blended halfway toward `quaternary` — right on a vibrant card, where the

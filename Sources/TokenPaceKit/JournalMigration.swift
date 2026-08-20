@@ -25,6 +25,20 @@ import Foundation
 /// "backfilled" marker — the algorithm and the result are the same, so a distinction would suggest a
 /// difference that does not exist.
 ///
+/// ## Why `sev` is the opposite case (#426)
+///
+/// The v4 pass recomputes each window's colour bucket and **does** leave a marker — `sevRaw` on every
+/// window whose verdict changed, plus ``UsageSample/sevV`` naming the model that decided it. That is
+/// not an inconsistency with the paragraph above; it is the same rule applied to a different fact.
+/// `util` is replayed through the algorithm that was always meant to produce it, so old and new agree
+/// by construction. `sev` is replayed through a **different** algorithm from the one that wrote it —
+/// thresholds moved, and per-model windows stopped being eligible for blue — so old and new genuinely
+/// disagree, on 2 398 windows of the maintainer's August journal. Here a distinction records a
+/// difference that exists, and dropping it would erase the only evidence of what the user was shown.
+///
+/// The two version counters follow from the same split: `v` says how to read a line, `sevV` says which
+/// colour model judged it, and a future threshold change bumps only the second.
+///
 /// ## What the migration must survive
 ///
 /// - **Lines that are not usage samples** (`status`, `error`, `resume`) pass through verbatim.
@@ -49,9 +63,17 @@ public enum JournalMigration {
         /// Lines whose timestamp went backwards relative to the line before it.
         public let outOfOrder: Int
         /// Lines whose weekly `resets_at` was a `now + 7d` estimate and has been rolled back onto the
-        /// real grid, with `timePct` recomputed (ADR-0107). Counted separately from `migrated`
-        /// because it is the one part of the pass that recovers *data* rather than reshaping it.
+        /// real grid, with `timePct` recomputed (ADR-0107). Counted separately from `migrated` because
+        /// it recovers *data* rather than reshaping it.
         public let resetsRepaired: Int
+        /// Individual **windows** whose colour bucket changed when the current model was replayed over
+        /// them (#426) — each one now carries a `sevRaw` with its original verdict.
+        ///
+        /// Windows, not lines: one sample holds up to six of them, and a line where only the scoped row
+        /// moved is a different event from one where `h5` and `d7` both did. Distinct from
+        /// ``resetsRepaired`` in kind as well as in count — that one restores a fact the app got wrong,
+        /// this one re-judges a fact it recorded correctly under rules that have since changed.
+        public let severitiesRecomputed: Int
         /// The **lowest** format version found among the lines this pass rewrote, or `nil` when it
         /// rewrote nothing.
         ///
@@ -61,26 +83,40 @@ public enum JournalMigration {
         /// that spans an upgrade legitimately holds several generations — the journal is append-only
         /// and outlives app versions — and the backup has to be labelled by the oldest thing in it,
         /// or the label overstates how recent the archive is.
+        ///
+        /// **`nil` when the pass rewrote lines that were already at the current format** — which
+        /// happens when only the colour model moved (`sevV` behind ``UsageSample/currentColorVersion``,
+        /// `v` already current). There is no older format in the file to name a backup after, and
+        /// calling it `.v4.bak` when the contents are still v4 would make the suffix lie. The shell
+        /// falls back to the current version in that case, which is the honest description.
         public let migratedFromVersion: Int?
 
         public init(migrated: Int, passedThrough: Int, skipped: Int, outOfOrder: Int,
-                    resetsRepaired: Int = 0, migratedFromVersion: Int? = nil) {
+                    resetsRepaired: Int = 0, severitiesRecomputed: Int = 0,
+                    migratedFromVersion: Int? = nil) {
             self.migrated = migrated
             self.passedThrough = passedThrough
             self.skipped = skipped
             self.outOfOrder = outOfOrder
             self.resetsRepaired = resetsRepaired
+            self.severitiesRecomputed = severitiesRecomputed
             self.migratedFromVersion = migratedFromVersion
         }
 
         /// Whether the pass changed anything — `false` means the file is already current and the
         /// caller can skip the rewrite (and the backup) entirely.
+        ///
+        /// Keyed on `migrated`, which counts every line the pass rewrote **for any reason**: a stale
+        /// format, a stale colour model, or both. A future pass that only re-judges colours must keep
+        /// incrementing it, or the shell would compute a new file and then silently decline to write
+        /// it.
         public var changedAnything: Bool { migrated > 0 }
 
         /// A `.public`-safe one-liner for the migration log.
         public var logMessage: String {
             var out = "journal migrated: \(migrated) rewritten, \(passedThrough) unchanged"
             if resetsRepaired > 0 { out += ", \(resetsRepaired) weekly resets repaired" }
+            if severitiesRecomputed > 0 { out += ", \(severitiesRecomputed) severities recomputed" }
             if skipped > 0 { out += ", \(skipped) unparseable" }
             if outOfOrder > 0 { out += ", \(outOfOrder) out of order" }
             return out
@@ -119,6 +155,7 @@ public enum JournalMigration {
         var interpolator = state
         var lastAccepted: Date?
         var migrated = 0, passedThrough = 0, skipped = 0, outOfOrder = 0, resetsRepaired = 0
+        var severitiesRecomputed = 0
         var out: [String] = []
         // The oldest generation this pass had to rewrite — what the file *was*, which is what its
         // backup should be named after (#401).
@@ -151,12 +188,19 @@ public enum JournalMigration {
                 continue
             }
 
-            guard sample.v < UsageSample.currentVersion else {
-                out.append(line)                 // already current
+            // Two independent reasons to rewrite, either sufficient: the line's *format* is behind, or
+            // its *colour model* is (#426). The second can be true on its own — a v4 line judged by a
+            // superseded set of thresholds — which is precisely what `sevV` exists to make askable.
+            let formatIsStale = sample.v < UsageSample.currentVersion
+            let coloursAreStale = sample.sevV < UsageSample.currentColorVersion
+            guard formatIsStale || coloursAreStale else {
+                out.append(line)                 // already current on both axes
                 passedThrough += 1
                 continue
             }
-            lowestVersion = min(lowestVersion ?? sample.v, sample.v)
+            // Only a stale *format* names a backup: a colour-only pass leaves the file at its current
+            // version, and labelling its backup `.v4.bak` would describe contents that are still v4.
+            if formatIsStale { lowestVersion = min(lowestVersion ?? sample.v, sample.v) }
 
             // Drive the estimator only with lines that move time forward. An out-of-order line is
             // rewritten from its own values but must not teach the estimator anything, or it would
@@ -185,17 +229,49 @@ public enum JournalMigration {
                 weeklyAnchor = real          // a genuine server date: the anchor for what follows
             }
 
+            // The seven-day window, rebuilt first: everything below needs its final values. `util` and
+            // `reset`/`timePct` are settled here, and only then is the colour judged — the v2 → v3 pass
+            // rewrote the date and kept the old `sev`, which left blackout lines carrying a verdict
+            // reached against a `timePct` that had since been corrected.
+            let d7Util = weekly.effective
+            let d7Sev = recomputedSeverity(
+                util: d7Util, timePct: repaired.timePct, reset: repaired.reset,
+                at: at, window: .sevenDay,
+                // The 7-day bar never gates on itself.
+                blueAllowed: true)
+            // The weekly gate for the 5-hour bar, from this same line's final weekly values — the one
+            // input a window cannot supply for itself. Closed by default: without a usable date there
+            // is no trustworthy weekly clock, and the advice is withheld rather than guessed
+            // (`PacingModel.weeklyHasHeadroom`).
+            let weeklyHeadroom = ResetClock.parse(repaired.reset) == nil ? false
+                : PacingModel.weeklyHasHeadroom(weeklyTimeFraction: repaired.timePct,
+                                                weeklyUsageFraction: min(1, max(0, d7Util / 100)))
+
+            let d7 = WindowSample(
+                util: d7Util, raw: weekly.raw,
+                utilSrc: weekly.source.rawValue, resetSrc: repaired.source.rawValue,
+                n: weekly.ratio,
+                reset: repaired.reset, timePct: repaired.timePct,
+                sev: d7Sev, sevRaw: sample.d7.sev,
+                windowSeconds: LimitWindow.sevenDay.durationSeconds)
+            let h5 = recoloured(sample.h5, window: .fiveHour, at: at, blueAllowed: weeklyHeadroom)
+            // Per-model windows never take the weekly gate — they are slices of that same week
+            // (reason 2 on `BarLayout.blueAllowed`). This is where the bulk of the v4 changes land.
+            let opus = sample.opus.map { recoloured($0, window: .sevenDay, at: at, blueAllowed: false) }
+            let sonnet = sample.sonnet.map { recoloured($0, window: .sevenDay, at: at, blueAllowed: false) }
+            let scoped = sample.scoped.map { recoloured($0, at: at) }
+
+            severitiesRecomputed += [d7.sevRaw, h5.sevRaw, opus?.sevRaw, sonnet?.sevRaw]
+                .compactMap { $0 }.count
+                + scoped.filter { $0.sevRaw != nil }.count
+
             let rewritten = UsageSample(
                 v: UsageSample.currentVersion,
+                sevV: UsageSample.currentColorVersion,
                 t: sample.t, ms: sample.ms, plan: sample.plan, tier: sample.tier,
-                h5: sample.h5,
-                d7: WindowSample(
-                    util: weekly.effective, raw: weekly.raw,
-                    utilSrc: weekly.source.rawValue, resetSrc: repaired.source.rawValue,
-                    n: weekly.ratio,
-                    reset: repaired.reset, timePct: repaired.timePct, sev: sample.d7.sev,
-                    windowSeconds: LimitWindow.sevenDay.durationSeconds),
-                opus: sample.opus, sonnet: sample.sonnet, scoped: sample.scoped,
+                h5: h5,
+                d7: d7,
+                opus: opus, sonnet: sonnet, scoped: scoped,
                 sessionIdle: sample.sessionIdle, spend: sample.spend,
                 blocked: sample.blocked, credits: sample.credits,
                 brokenReset: sample.brokenReset, blockingReset: sample.blockingReset)
@@ -213,7 +289,64 @@ public enum JournalMigration {
         return (out.joined(separator: "\n"), interpolator,
                 Outcome(migrated: migrated, passedThrough: passedThrough,
                         skipped: skipped, outOfOrder: outOfOrder, resetsRepaired: resetsRepaired,
+                        severitiesRecomputed: severitiesRecomputed,
                         migratedFromVersion: lowestVersion))
+    }
+
+    // MARK: - Severity recomputation (#426)
+
+    /// Re-judge one window's colour with the **current** model, from the values the line carries.
+    ///
+    /// Mirrors ``JournalRecord`` 's live `window(...)` factory branch for branch, including the idle
+    /// one: when the reset does not parse there is no pacing geometry to colour, and the verdict falls
+    /// back to exhausted-or-green from utilisation alone. That branch is not an edge case in the
+    /// archive — 1 551 of 5 789 five-hour windows on the maintainer's journal are idle — so a pass that
+    /// skipped it, or pushed it through `barLayout` anyway, would corrupt more lines than it fixed.
+    ///
+    /// - Parameter at: the line's own timestamp. `nil` (unparseable) leaves the window uncoloured by
+    ///   geometry for the same reason a missing reset does: `remainingSeconds` cannot be derived.
+    private static func recomputedSeverity(
+        util: Double, timePct: Double, reset: String, at: Date?,
+        window: LimitWindow, blueAllowed: Bool
+    ) -> PacingBucket {
+        guard let at, let resetsAt = ResetClock.parse(reset) else {
+            return util >= 100 ? .red : .green
+        }
+        // Built from the stored fields rather than re-derived: `timePct` is what the app acted on, and
+        // recomputing it from the dates here could disagree with it in the last decimal.
+        let layout = BarLayout(
+            usageFraction: min(1, max(0, util / 100)),
+            timeFraction: timePct,
+            pacing: timePct >= min(1, max(0, util / 100)) ? .onPaceOrBehind : .ahead,
+            remainingSeconds: resetsAt.timeIntervalSince(at),
+            windowDurationSeconds: window.durationSeconds,
+            blueAllowed: blueAllowed)
+        return PacingBucket.of(layout)
+    }
+
+    /// A window sample with its colour re-judged and the original kept as `sevRaw` where it moved.
+    private static func recoloured(
+        _ w: WindowSample, window: LimitWindow, at: Date?, blueAllowed: Bool
+    ) -> WindowSample {
+        let sev = recomputedSeverity(util: w.util, timePct: w.timePct, reset: w.reset,
+                                     at: at, window: window, blueAllowed: blueAllowed)
+        return WindowSample(
+            util: w.util, raw: w.raw, utilSrc: w.utilSrc, resetSrc: w.resetSrc, n: w.n,
+            reset: w.reset, timePct: w.timePct, sev: sev,
+            // The verdict the poll wrote. Where a line had already been migrated once, that is its
+            // *current* `sev`, not the `sevRaw` it happens to carry — the marker always names the value
+            // being replaced, so a second pass never overwrites the original with an intermediate one.
+            sevRaw: w.sevRaw ?? w.sev,
+            windowSeconds: window.durationSeconds)
+    }
+
+    /// The scoped counterpart of ``recoloured(_:window:at:blueAllowed:)``. Always `blueAllowed: false`:
+    /// a scoped limit is part of the weekly window blue talks about.
+    private static func recoloured(_ s: ScopedSample, at: Date?) -> ScopedSample {
+        let sev = recomputedSeverity(util: s.pct, timePct: s.timePct, reset: s.reset,
+                                     at: at, window: .sevenDay, blueAllowed: false)
+        return ScopedSample(name: s.name, pct: s.pct, reset: s.reset, timePct: s.timePct,
+                            sev: sev, sevRaw: s.sevRaw ?? s.sev)
     }
 
     /// What a repaired weekly window carries: the date, its recomputed elapsed fraction, where it

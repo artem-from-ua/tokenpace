@@ -123,8 +123,21 @@ public struct WindowSample: Sendable, Equatable, Codable {
     public let reset: String
     /// Elapsed fraction of the window in [0, 1] (``PacingModel/elapsedFraction(resetsAt:now:window:)``).
     public let timePct: Double
-    /// The objective 5-way pacing colour bucket (``PacingBucket/of(_:)``), ``ColorAdvice``-independent.
+    /// The objective 5-way pacing colour bucket (``PacingBucket/of(_:)``), ``ColorAdvice``-independent,
+    /// as decided by the colour model named in ``UsageSample/sevV``. On a migrated line this is the
+    /// **current** model's verdict, not the one written at poll time — see ``sevRaw``.
     public let sev: PacingBucket
+    /// The verdict this window carried when the poll was written, kept **only where it differs** from
+    /// the recomputed ``sev``.
+    ///
+    /// `nil` therefore means "the two agree", not "unknown" — which is the common case (on the
+    /// maintainer's August journal, 2 398 of ~23 000 windows disagreed). Writing it out every time
+    /// would add six duplicated strings per line to say nothing; omitting it makes every remaining
+    /// occurrence a real change of verdict, greppable on sight.
+    ///
+    /// Live polls never set it: there, computing and recording are the same call, so the two cannot
+    /// differ. It exists for archived lines, where the model has moved since.
+    public let sevRaw: PacingBucket?
 
     /// - Parameter windowSeconds: the window this sample describes, which sets how many decimals
     ///   `timePct` keeps (``JournalPrecision``). Defaults to the seven-day length — the coarser of
@@ -138,6 +151,7 @@ public struct WindowSample: Sendable, Equatable, Codable {
         reset: String,
         timePct: Double,
         sev: PacingBucket,
+        sevRaw: PacingBucket? = nil,
         windowSeconds: Int = LimitWindow.sevenDay.durationSeconds
     ) {
         // Rounded at construction, so every path into the journal is covered — including fixtures
@@ -151,10 +165,13 @@ public struct WindowSample: Sendable, Equatable, Codable {
         self.timePct = JournalPrecision.round(
             timePct, decimals: JournalPrecision.forFraction(ofWindowSeconds: windowSeconds))
         self.sev = sev
+        // Normalised at construction so "differs" is the only state that survives: a caller passing the
+        // same bucket twice means "unchanged", and that is exactly what an absent field says.
+        self.sevRaw = sevRaw == sev ? nil : sevRaw
     }
 
     private enum CodingKeys: String, CodingKey {
-        case util, raw, utilSrc, resetSrc, n, reset, timePct, sev
+        case util, raw, utilSrc, resetSrc, n, reset, timePct, sev, sevRaw
         /// The pre-v3 spelling of ``utilSrc``, read-only. Migration rewrites every line to the new
         /// key, but a decoder that met an un-migrated file (a `.v2.bak`, a hand-copied line) should
         /// still read it rather than silently reporting no source at all.
@@ -178,12 +195,21 @@ public struct WindowSample: Sendable, Equatable, Codable {
         self.n = try c.decodeIfPresent(Double.self, forKey: .n)
         self.reset = try c.decodeIfPresent(String.self, forKey: .reset) ?? ""
         self.timePct = try c.decodeIfPresent(Double.self, forKey: .timePct) ?? 0
-        self.sev = try c.decodeIfPresent(PacingBucket.self, forKey: .sev) ?? .green
+        let sev = try c.decodeIfPresent(PacingBucket.self, forKey: .sev) ?? .green
+        self.sev = sev
+        // Absent (the usual case) reads as "the recomputed verdict matched", not as missing data. An
+        // equal pair is normalised to `nil` here too, so the decoded shape matches what we would write.
+        let sevRaw = try c.decodeIfPresent(PacingBucket.self, forKey: .sevRaw)
+        self.sevRaw = sevRaw == sev ? nil : sevRaw
     }
 
-    /// Explicit rather than synthesized because ``CodingKeys/legacySrc`` is **read-only**: the v2
-    /// spelling is accepted on the way in so an un-migrated line still parses, but never written —
-    /// otherwise every new line would carry both keys and the rename would never actually land.
+    /// Explicit rather than synthesized, for **two** reasons — either alone is enough to keep it:
+    ///
+    /// 1. ``CodingKeys/legacySrc`` is **read-only**: the v2 spelling is accepted on the way in so an
+    ///    un-migrated line still parses, but never written — otherwise every new line would carry both
+    ///    keys and the rename would never actually land.
+    /// 2. ``sevRaw`` is written **only when it differs** from ``sev`` (see its doc). A synthesized
+    ///    encoder would emit it on every window, which is the redundancy the field is shaped to avoid.
     public func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(util, forKey: .util)
@@ -194,6 +220,7 @@ public struct WindowSample: Sendable, Equatable, Codable {
         try c.encode(reset, forKey: .reset)
         try c.encode(timePct, forKey: .timePct)
         try c.encode(sev, forKey: .sev)
+        try c.encodeIfPresent(sevRaw, forKey: .sevRaw)
     }
 
     /// The pacing **gap** in percentage points: `timePct·100 − util`. Positive = headroom (behind
@@ -210,8 +237,11 @@ public struct WindowSample: Sendable, Equatable, Codable {
 // MARK: - ScopedSample
 
 /// One per-model weekly limit as journalled (from ``ScopedModelWindow``): the model name, its
-/// percent, raw reset, and objective bucket. No `timePct` — scoped windows borrow `seven_day`'s
-/// reset and are all 7-day-paced, so `d7.timePct` already carries their elapsed fraction.
+/// percent, raw reset, elapsed fraction and objective bucket.
+///
+/// The elapsed fraction is carried rather than inferred even though scoped windows borrow
+/// `seven_day`'s reset and are all 7-day-paced: `d7.timePct` would usually equal it, and a reader
+/// having to know that — and to know when it stops being true — is the trap a plain field avoids.
 public struct ScopedSample: Sendable, Equatable, Codable {
     /// `scope.model.display_name`, e.g. `"Fable"`.
     public let name: String
@@ -221,10 +251,20 @@ public struct ScopedSample: Sendable, Equatable, Codable {
     public let reset: String
     /// Elapsed fraction of the (7-day-paced) window in [0, 1].
     public let timePct: Double
-    /// Objective 5-way pacing bucket for this model's 7-day-paced bar.
+    /// Objective 5-way pacing bucket for this model's 7-day-paced bar, as decided by the colour model
+    /// named in ``UsageSample/sevV``. Never `blue`: a scoped window is a slice of the very week that
+    /// blue talks about (reason 2 on ``BarLayout/blueAllowed``).
     public let sev: PacingBucket
+    /// The verdict written at poll time, kept **only where it differs** from ``sev`` — the scoped
+    /// counterpart of ``WindowSample/sevRaw``, with the same "absent means agreed" reading.
+    ///
+    /// This is where the #426 migration leaves most of its marks: scoped rows carried the blue that
+    /// the popup was suppressing in the view, so 2 211 of them on the maintainer's journal recompute
+    /// to green and keep `"sevRaw": "blue"` as the record of what was written then.
+    public let sevRaw: PacingBucket?
 
-    public init(name: String, pct: Double, reset: String, timePct: Double, sev: PacingBucket) {
+    public init(name: String, pct: Double, reset: String, timePct: Double, sev: PacingBucket,
+                sevRaw: PacingBucket? = nil) {
         self.name = name
         self.pct = JournalPrecision.round(pct, decimals: JournalPrecision.percentPoints)
         self.reset = reset
@@ -235,9 +275,22 @@ public struct ScopedSample: Sendable, Equatable, Codable {
             decimals: JournalPrecision.forFraction(
                 ofWindowSeconds: LimitWindow.sevenDay.durationSeconds))
         self.sev = sev
+        self.sevRaw = sevRaw == sev ? nil : sevRaw
     }
 
-    private enum CodingKeys: String, CodingKey { case name, pct, reset, timePct, sev }
+    private enum CodingKeys: String, CodingKey { case name, pct, reset, timePct, sev, sevRaw }
+
+    /// Explicit rather than synthesized so ``sevRaw`` is written **only when it differs** from ``sev``
+    /// — the same rule, and the same reason, as ``WindowSample/encode(to:)``.
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(name, forKey: .name)
+        try c.encode(pct, forKey: .pct)
+        try c.encode(reset, forKey: .reset)
+        try c.encode(timePct, forKey: .timePct)
+        try c.encode(sev, forKey: .sev)
+        try c.encodeIfPresent(sevRaw, forKey: .sevRaw)
+    }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -245,7 +298,10 @@ public struct ScopedSample: Sendable, Equatable, Codable {
         self.pct = try c.decodeIfPresent(Double.self, forKey: .pct) ?? 0
         self.reset = try c.decodeIfPresent(String.self, forKey: .reset) ?? ""
         self.timePct = try c.decodeIfPresent(Double.self, forKey: .timePct) ?? 0
-        self.sev = try c.decodeIfPresent(PacingBucket.self, forKey: .sev) ?? .green
+        let sev = try c.decodeIfPresent(PacingBucket.self, forKey: .sev) ?? .green
+        self.sev = sev
+        let sevRaw = try c.decodeIfPresent(PacingBucket.self, forKey: .sevRaw)
+        self.sevRaw = sevRaw == sev ? nil : sevRaw
     }
 
     /// Pacing gap in percentage points — derived, not stored, for the same reason as

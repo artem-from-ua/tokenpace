@@ -21,13 +21,19 @@ extension JournalRecord {
     ) -> JournalRecord {
         // The weekly gate, hoisted **out** of the `UsageSample(...)` literal below: `d7` is built at the
         // same expression level as `h5`, so the 7-day state has to be resolved before the literal or the
-        // 5-hour sample could not see it. Recording it here also keeps the journal's bucket identical to
-        // the pixel the user saw — the render layer applies the same gate.
+        // 5-hour sample could not see it. Only `h5` reads it now — the per-model rows used to as well —
+        // but the ordering constraint is unchanged, and the `let` is what makes it visible.
         //
         // Computed on the **reconstructed** snapshot (#386), not the raw one: the render layer applies
         // that overlay before anything reads the weekly window, so a gate derived from the raw value
         // could disagree with the bar the user was looking at — which is the one thing this line
         // exists to prevent.
+        //
+        // Matching the gate was never sufficient on its own, though this comment once claimed it was.
+        // The popup carried a second gate in the view (`PopupBarView.isBaseLimit`) that forced every
+        // per-model row green; the model did not know about it, so this factory recorded scoped blues
+        // the user never saw — 2 211 of them on the maintainer's journal. That rule now lives on
+        // `BarLayout.blueAllowed` where both sides can read it, and the rows below pass `false`.
         let rendered = weekly?.applied(to: snapshot) ?? snapshot
         let weeklyHeadroom = PacingModel.weeklyHasHeadroom(in: rendered, now: now)
 
@@ -49,9 +55,11 @@ extension JournalRecord {
             // through, and `optimisticReset` can add a `-rolled` suffix the raw snapshot never had.
             d7: window(snapshot.sevenDay, window: .sevenDay, now: now, blueAllowed: true,
                        weekly: weekly, resetSource: rendered.sevenDayResetSource),
-            opus: snapshot.sevenDayOpus.map { window($0, window: .sevenDay, now: now, blueAllowed: weeklyHeadroom) },
-            sonnet: snapshot.sevenDaySonnet.map { window($0, window: .sevenDay, now: now, blueAllowed: weeklyHeadroom) },
-            scoped: snapshot.scopedModelWindows.map { scoped($0, now: now, blueAllowed: weeklyHeadroom) },
+            // Per-model rows: `blueAllowed: false` unconditionally — they are slices of the very week
+            // the blue advice is about (reason 2 on `BarLayout.blueAllowed`), so it can never apply.
+            opus: snapshot.sevenDayOpus.map { window($0, window: .sevenDay, now: now, blueAllowed: false) },
+            sonnet: snapshot.sevenDaySonnet.map { window($0, window: .sevenDay, now: now, blueAllowed: false) },
+            scoped: snapshot.scopedModelWindows.map { scoped($0, now: now) },
             sessionIdle: snapshot.sessionIdle,
             spend: snapshot.spend.map { SpendSample($0, now: now) },
             // These three read the **rendered** snapshot too, so the record describes one consistent
@@ -141,13 +149,16 @@ extension JournalRecord {
             windowSeconds: kind.durationSeconds)
     }
 
-    /// Journal a scoped per-model window — all 7-day-paced, so it borrows the 7-day pacing math (and
-    /// the same weekly gate: a scoped limit spends from the weekly budget too).
+    /// Journal a scoped per-model window — all 7-day-paced, so it borrows the 7-day pacing math, but
+    /// **not** the weekly gate: a scoped limit is a slice of the weekly budget, so "the week has spare
+    /// capacity" is advice it would be giving about itself. `blueAllowed: false` is therefore fixed,
+    /// not a parameter — a caller able to pass `true` is a caller able to reintroduce the very
+    /// mismatch this fixed (see reason 2 on ``BarLayout/blueAllowed``).
     ///
     /// Never reconstructed: a scoped window meters different spend and has no five-hour counter of
     /// its own, so a single `N` cannot describe it (ADR-0103).
-    private static func scoped(_ s: ScopedModelWindow, now: Date, blueAllowed: Bool) -> ScopedSample {
-        let w = window(s.window, window: .sevenDay, now: now, blueAllowed: blueAllowed)
+    private static func scoped(_ s: ScopedModelWindow, now: Date) -> ScopedSample {
+        let w = window(s.window, window: .sevenDay, now: now, blueAllowed: false)
         return ScopedSample(name: s.name, pct: s.window.utilization, reset: s.window.resetsAt,
                             timePct: w.timePct, sev: w.sev)
     }

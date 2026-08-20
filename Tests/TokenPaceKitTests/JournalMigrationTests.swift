@@ -390,3 +390,166 @@ struct BackupGenerationTests {
         #expect(JournalMigration.belongsToBuild(fileName: "usage-journal-dev-2026-08.jsonl", isRelease: false))
     }
 }
+
+// MARK: - Severity recomputation (v3 → v4, #426)
+
+/// The archived counterpart of the model fix: every window's `sev` is re-judged by the current colour
+/// model, the superseded verdict survives as `sevRaw` where the two differ, and `sevV` stamps which
+/// model decided. Most of the real-world effect is per-model rows losing a blue they only ever had in
+/// the file — the popup was already painting them green.
+@Suite("JournalMigration — severity recomputation")
+struct SeverityRecomputationTests {
+
+    /// A v3 line, written verbatim so a fixture can carry verdicts the current model disagrees with.
+    private static func v3Line(
+        t: String, reset: String,
+        h5: (util: Double, timePct: Double, sev: String),
+        d7: (util: Double, timePct: Double, sev: String),
+        scoped: (pct: Double, timePct: Double, sev: String)? = nil
+    ) -> String {
+        let scopedJSON = scoped.map {
+            "{\"name\":\"Fable\",\"pct\":\($0.pct),\"reset\":\"\(reset)\","
+                + "\"timePct\":\($0.timePct),\"sev\":\"\($0.sev)\"}"
+        } ?? ""
+        // The 5-hour window needs its **own** reset, placed to match its `timePct`: the recomputation
+        // derives `remainingSeconds` from `reset − t`, and borrowing the weekly date would put the
+        // window hours past its own length — landing every fixture in the 20-minute start override.
+        let h5Reset = ResetClock.isoString(
+            from: ResetClock.parse(t)!.addingTimeInterval(
+                Double(LimitWindow.fiveHour.durationSeconds) * (1 - h5.timePct)))
+        return """
+        {"kind":"usage","v":3,"t":"\(t)",\
+        "h5":{"util":\(h5.util),"raw":\(h5.util),"reset":"\(h5Reset)","timePct":\(h5.timePct),"sev":"\(h5.sev)"},\
+        "d7":{"util":\(d7.util),"raw":\(d7.util),"utilSrc":"interpolated","resetSrc":"server","n":10,\
+        "reset":"\(reset)","timePct":\(d7.timePct),"sev":"\(d7.sev)"},\
+        "scoped":[\(scopedJSON)],"sessionIdle":false,"blocked":false,\
+        "credits":{"active":false,"showIcon":false,"onCredits":false},"brokenReset":false}
+        """
+    }
+
+    /// A real weekly reset (microsecond precision, so `repairWeeklyReset` leaves it alone) and a poll
+    /// two days before it — clear of either 20-minute override on both scales.
+    private static let reset = "2026-08-25T07:00:00.058036+00:00"
+    private static var pollTime: String {
+        ResetClock.isoString(from: ResetClock.parse(reset)!.addingTimeInterval(-2 * 24 * 3600))
+    }
+
+    private static func migrated(_ line: String) -> UsageSample? {
+        decodeUsage(JournalMigration.migrate(contents: line).contents)
+    }
+
+    /// The headline case: a scoped row recorded blue becomes green, and keeps what it was.
+    @Test func aScopedBlueBecomesGreenAndKeepsItsOriginal() throws {
+        let line = Self.v3Line(
+            t: Self.pollTime, reset: Self.reset,
+            h5: (util: 20, timePct: 0.5, sev: "green"),
+            d7: (util: 10, timePct: 0.714, sev: "green"),
+            scoped: (pct: 1, timePct: 0.714, sev: "blue"))
+        let s = try #require(Self.migrated(line))
+        #expect(s.scoped.first?.sev == .green)
+        #expect(s.scoped.first?.sevRaw == .blue)
+        #expect(s.v == UsageSample.currentVersion)
+        #expect(s.sevV == UsageSample.currentColorVersion)
+    }
+
+    /// …and the marker appears **only** where the verdict moved: an unchanged window writes no
+    /// `sevRaw` at all, which is what keeps every remaining marker meaningful.
+    @Test func anUnchangedVerdictWritesNoMarker() {
+        let line = Self.v3Line(
+            t: Self.pollTime, reset: Self.reset,
+            h5: (util: 45, timePct: 0.5, sev: "green"),
+            d7: (util: 60, timePct: 0.714, sev: "green"))
+        let result = JournalMigration.migrate(contents: line)
+        #expect(!result.contents.contains("sevRaw"))
+        #expect(result.outcome.severitiesRecomputed == 0)
+    }
+
+    /// The 5-hour bar keeps taking the weekly gate — from **this line's** `d7`, which is the one input
+    /// a window cannot supply for itself.
+    @Test func theFiveHourBarStillTakesTheWeeklyGate() throws {
+        func h5Sev(weeklyUtil: Double) throws -> PacingBucket {
+            let line = Self.v3Line(
+                t: Self.pollTime, reset: Self.reset,
+                h5: (util: 0, timePct: 0.6, sev: "green"),      // surplus 0.60 > the 0.40 threshold
+                d7: (util: weeklyUtil, timePct: 0.714, sev: "green"))
+            return try #require(Self.migrated(line)).h5.sev
+        }
+        #expect(try h5Sev(weeklyUtil: 10) == .blue)    // week calm with room → gate open
+        #expect(try h5Sev(weeklyUtil: 90) == .green)   // week ahead of pace → gate shut
+    }
+
+    /// The 7-day window never gates on itself: a deep-behind week stays blue.
+    @Test func theSevenDayWindowIsUngated() throws {
+        let line = Self.v3Line(
+            t: Self.pollTime, reset: Self.reset,
+            h5: (util: 20, timePct: 0.5, sev: "green"),
+            d7: (util: 1, timePct: 0.714, sev: "green"))
+        #expect(try #require(Self.migrated(line)).d7.sev == .blue)
+    }
+
+    /// An idle window (empty `reset`) has no pacing geometry, so the verdict comes from utilisation
+    /// alone — it must not go through the bar arithmetic, and must not crash the pass. On the live
+    /// journals this is over a quarter of all five-hour windows.
+    @Test func anIdleWindowIsColouredFromUtilisationAlone() throws {
+        let line = """
+        {"kind":"usage","v":3,"t":"\(Self.pollTime)",\
+        "h5":{"util":0,"raw":0,"reset":"","timePct":0,"sev":"green"},\
+        "d7":{"util":100,"raw":100,"reset":"","timePct":0,"sev":"green"},\
+        "scoped":[],"sessionIdle":true,"blocked":false,\
+        "credits":{"active":false,"showIcon":false,"onCredits":false},"brokenReset":false}
+        """
+        let s = try #require(Self.migrated(line))
+        #expect(s.h5.sev == .green)     // idle, nothing spent
+        #expect(s.d7.sev == .red)       // exhausted reads red even with no window geometry
+        #expect(s.d7.sevRaw == .green)  // and that is a change from what was recorded
+    }
+
+    /// Re-running must be a no-op: after one pass every line is current on both axes.
+    @Test func theRecomputationIsIdempotent() {
+        let line = Self.v3Line(
+            t: Self.pollTime, reset: Self.reset,
+            h5: (util: 20, timePct: 0.5, sev: "green"),
+            d7: (util: 10, timePct: 0.714, sev: "green"),
+            scoped: (pct: 1, timePct: 0.714, sev: "blue"))
+        let once = JournalMigration.migrate(contents: line).contents
+        let twice = JournalMigration.migrate(contents: once)
+        #expect(twice.outcome.migrated == 0)
+        #expect(twice.outcome.severitiesRecomputed == 0)
+        #expect(twice.contents == once)
+    }
+
+    /// A colour-only pass must still be written, but names no older generation — its backup would
+    /// otherwise be labelled after a format the file never held.
+    @Test func aColourOnlyPassIsWrittenAndNamesNoOlderGeneration() {
+        let line = Self.v3Line(
+            t: Self.pollTime, reset: Self.reset,
+            h5: (util: 20, timePct: 0.5, sev: "green"),
+            d7: (util: 10, timePct: 0.714, sev: "green"),
+            scoped: (pct: 1, timePct: 0.714, sev: "blue"))
+        let once = JournalMigration.migrate(contents: line)
+        #expect(once.outcome.migratedFromVersion == 3)    // a real format bump names its generation
+
+        // The same file at the current format, but judged by a superseded colour model.
+        let stale = once.contents.replacingOccurrences(
+            of: "\"sevV\":\(UsageSample.currentColorVersion)", with: "\"sevV\":0")
+        let second = JournalMigration.migrate(contents: stale)
+        #expect(second.outcome.changedAnything)               // it must still be rewritten…
+        #expect(second.outcome.migratedFromVersion == nil)    // …but claims no older format
+    }
+
+    /// `sevRaw` always names what the **poll** wrote, however many times the model moves afterwards: a
+    /// later pass must not overwrite the original verdict with an intermediate one.
+    @Test func aSecondRecomputationKeepsTheOriginalVerdict() {
+        let line = Self.v3Line(
+            t: Self.pollTime, reset: Self.reset,
+            h5: (util: 20, timePct: 0.5, sev: "green"),
+            d7: (util: 10, timePct: 0.714, sev: "green"),
+            scoped: (pct: 1, timePct: 0.714, sev: "blue"))
+        let once = JournalMigration.migrate(contents: line).contents
+        // What a future `currentColorVersion` bump looks like to the pass.
+        let stale = once.replacingOccurrences(
+            of: "\"sevV\":\(UsageSample.currentColorVersion)", with: "\"sevV\":0")
+        let again = decodeUsage(JournalMigration.migrate(contents: stale).contents)
+        #expect(again?.scoped.first?.sevRaw == .blue)   // the poll's verdict, not the migrated green
+    }
+}

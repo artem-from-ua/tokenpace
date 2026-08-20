@@ -51,6 +51,15 @@ struct PacingBucketTests {
         #expect(PacingBucket.of(layout(usage: 0.0, time: 0.5)) == .blue)      // surplus 0.50 > 0.40
     }
 
+    /// A bar that withholds blue stays green at **any** surplus — there is no depth of idleness that
+    /// gets a per-model or credits row past the gate (#426). Pinned at the extreme so a future change
+    /// that reordered the tests in `of(_:)` could not slip blue back in for the deepest cases.
+    @Test func aBarThatWithholdsBlueIsGreenAtEverySurplus() {
+        for time in stride(from: 0.5, through: 1.0, by: 0.1) {
+            #expect(PacingBucket.of(layout(usage: 0.0, time: time, blueAllowed: false)) == .green)
+        }
+    }
+
     @Test func orangeOverrideNearReset() {
         // Within 20 min of reset, any ahead lead is orange regardless of the dynamic threshold.
         let l = BarLayout(

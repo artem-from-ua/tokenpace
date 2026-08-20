@@ -242,7 +242,10 @@ struct PopupLayoutModelTests {
         )
         let p = layout(from: snap)
         let parsed = ResetClock.parse(snap.sevenDaySonnet!.resetsAt)!
-        let expected = PacingModel.barLayout(utilization: 95, resetsAt: parsed, now: now, window: .sevenDay)
+        // `blueAllowed: false` is part of what a per-model row *is* since #426 — it is a slice of the
+        // weekly window blue talks about — so the expectation carries it rather than the default.
+        let expected = PacingModel.barLayout(utilization: 95, resetsAt: parsed, now: now,
+                                             window: .sevenDay, blueAllowed: false)
         #expect(p.rows[2].bar == expected)
         #expect(p.rows[2].pacing == expected.pacing)
     }
@@ -283,7 +286,9 @@ struct PopupLayoutScopedModelTests {
         )
         let p = layout(from: snap)
         let parsed = ResetClock.parse(snap.scopedModelWindows[0].window.resetsAt)!
-        let expected = PacingModel.barLayout(utilization: 95, resetsAt: parsed, now: now, window: .sevenDay)
+        // See `modelPacedAsSevenDay`: scoped rows are 7-day-paced but never blue-eligible (#426).
+        let expected = PacingModel.barLayout(utilization: 95, resetsAt: parsed, now: now,
+                                             window: .sevenDay, blueAllowed: false)
         #expect(p.rows[2].bar == expected)
         #expect(p.rows[2].subdivisions == 7)
     }

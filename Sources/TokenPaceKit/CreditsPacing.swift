@@ -208,7 +208,9 @@ public enum CreditsPacing {
         let pacing: PacingState = timeFraction >= usageFraction ? .onPaceOrBehind : .ahead
         // Credits are out of the blue-zone scope: the money window is not a token limit, so "you are
         // far behind pace, push harder" is not advice that applies to spending. `blueAllowed: false`
-        // states that in the model rather than relying on the render layer never setting `isBaseLimit`.
+        // states that in the model rather than leaving it to the render layer — which is the pattern
+        // per-model rows were moved onto in #426, after the view-only version of that gate let the
+        // journal record blues the popup was painting green.
         // The window length is the 7-day one purely as a stable placeholder for the monthly window.
         return BarLayout(usageFraction: usageFraction, timeFraction: timeFraction,
                          pacing: pacing, remainingSeconds: remaining,
