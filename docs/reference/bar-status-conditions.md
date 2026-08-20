@@ -35,20 +35,31 @@
 | **credits (money)** | `snapshot.spend` | календарний місяць, UTC | **ні** | лише попап |
 | **idle-h5** | плейсхолдер | немає | **ні** — пейсингу не має | menu bar + попап |
 
-**Чому синій лише для h5/d7.** Рендер гейтить його прапорцем `isBaseLimit`, який ставиться за
-індексом рядка `index <= 1` ([PopupViewController.swift:1618](../../Sources/TokenPace/PopupViewController.swift)).
-Per-model і credits проходять гілкою `Palette.gapGreen`
-([PopupViewController.swift:607, 619](../../Sources/TokenPace/PopupViewController.swift)).
-Menu bar per-model барів не має взагалі.
+**Чому синій лише для h5/d7.** Синій каже «у **тижня** є запас, який ти не використовуєш». Per-model
+рядки — зрізи того самого тижня, тож порада була б адресована сама собі; credits — не токенне вікно
+взагалі. Обидва отримують `blueAllowed: false` **у моделі**
+([PopupLayout.swift](../../Sources/TokenPaceKit/PopupLayout.swift),
+[CreditsPacing.swift](../../Sources/TokenPaceKit/CreditsPacing.swift)), і `behindColor` віддає їм
+зелений на першій же перевірці. Menu bar per-model барів не має взагалі.
+
+> До [ADR-0115](../adr/0115-no-blue-on-per-model-windows.md) це робив прапорець рендера
+> `PopupBarView.isBaseLimit`, що ставився за індексом рядка. Він і був причиною розбіжності нижче:
+> модель про нього не знала.
 
 **Чому в idle «ні».** Idle-бар не має пейсингу як такого — він не проходить через `severity` і не
 може набути `farBehind`. Його заливка — це стан «ready to start», а не вердикт: із
 [#381](https://github.com/artem-from-ua/cc-timer/issues/381) вона **завжди зелена** (сіра при
 blocked), і тижневий gate до неї більше не входить. Детально — §6.
 
-> **Журнал і UI збігаються.** `PacingBucket.of` читає те саме `blueAllowed`, що й рендер, а
-> per-model рядки несуть той самий weekly-gate, тож у `usage-journal-*.jsonl` scoped-вікно більше
-> не може отримати `sev: "blue"`, якого користувач не бачив.
+> **Журнал і UI збігаються — від [ADR-0115](../adr/0115-no-blue-on-per-model-windows.md).**
+> `PacingBucket.of` читає те саме `blueAllowed`, що й рендер, і per-model рядки мають його `false`
+> **у моделі**, тож scoped-вікно не може отримати `sev: "blue"`, якого користувач не бачив.
+>
+> Раніше тут стояло те саме твердження з іншою підставою — «per-model рядки несуть той самий
+> weekly-gate» — і воно **було хибним**. Gate закривається лише коли тиждень іде поперед темпу; при
+> спокійному тижні він відкритий, і синій проходив у файл, поки попап глушив його своїм
+> `isBaseLimit`. У серпневому журналі мейнтейнера так з'явилося **2 214** scoped-синіх записів.
+> Міграція v4 перерахувала їх у зелений, лишивши `sevRaw: "blue"`.
 
 ---
 
@@ -88,7 +99,8 @@ blocked), і тижневий gate до неї більше не входить.
 | Бар | `blueAllowed` |
 |---|---|
 | d7 | `true` завжди — сам себе не гейтить |
-| h5, Opus/Sonnet/scoped | `PacingModel.weeklyHasHeadroom(in:now:)` |
+| h5 | `PacingModel.weeklyHasHeadroom(in:now:)` |
+| Opus / Sonnet / scoped | **`false` завжди** — вони є зрізами того тижня, про який говорить синій ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)) |
 | credits, idle-плейсхолдери | `false` — пейсингу не мають |
 
 `weeklyHasHeadroom` = `d7.pacing == .onPaceOrBehind && d7.usageFraction < 1`, тобто d7-бакет ∈
@@ -158,8 +170,10 @@ Ahead-поріг **звужується** з часом (лід наприкін
 Пейсяться **як 7-денні** — беруть `LimitWindow.sevenDay` і позичають `seven_day.resets_at`, коли
 власного немає ([UsageSnapshot.swift:591](../../Sources/TokenPaceKit/UsageSnapshot.swift)).
 
-Таблиця з §3 діє **з одним винятком**: рядок 2 (синій) недосяжний у UI — замість нього завжди
-зелений, бо `isBaseLimit == false`.
+Таблиця з §3 діє **з одним винятком**: рядок 2 (синій) недосяжний — замість нього завжди зелений,
+бо ці бари будуються з `blueAllowed: false` ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)).
+Не «недосяжний у UI», а недосяжний узагалі: правило живе в моделі, тож його бачать і рендер, і
+`PacingBucket`.
 
 | # | Умова | Колір у попапі |
 |---|---|---|
@@ -169,12 +183,15 @@ Ahead-поріг **звужується** з часом (лід наприкін
 | 6 | лід < `0.16×(1−t)` | жовтий |
 | 7 | решта | помаранчевий |
 
-Слово «far behind pace» їм теж недоступне — `isFarBehind` гейтиться тим самим прапорцем
-([PopupViewController.swift:2569](../../Sources/TokenPace/PopupViewController.swift)); вони
-показують «on pace».
+Слово «far behind pace» їм теж недоступне — `isFarBehind` віддає `false` для будь-якого бару з
+`blueAllowed == false` ([PopupViewController.swift](../../Sources/TokenPace/PopupViewController.swift));
+вони показують «on pace».
 
-**У журналі так само.** Вони несуть `blueAllowed = weeklyHasHeadroom`, тож `sev` для них ніколи не
-`blue` — раніше журнал міг записати синій, якого користувач не бачив.
+**У журналі так само — і це нове.** До [ADR-0115](../adr/0115-no-blue-on-per-model-windows.md) тут
+стояло, що вони «несуть `blueAllowed = weeklyHasHeadroom`, тож `sev` для них ніколи не `blue`». Друге
+з першого не випливає: при спокійному тижні gate відкритий, і синій записувався — **2 214** разів у
+серпневому журналі, тоді як попап глушив його своїм `isBaseLimit`. Тепер `blueAllowed` для них
+безумовне `false`, а міграція v4 перерахувала архів (`sevRaw` зберігає те, що було записано).
 
 ---
 
@@ -245,9 +262,10 @@ Ahead-поріг **звужується** з часом (лід наприкін
   [StatusItemView.swift:995](../../Sources/TokenPace/StatusItemView.swift).
 - Разом із кольором пішов і прапорець: полів `LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom`
   **немає** — idle-бару більше нема чого питати про тиждень.
-- `PacingModel.weeklyHasHeadroom` лишається й далі гейтить `blueAllowed` для **активних** барів
-  ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md) у цій частині чинний) — просто idle до
-  нього більше не входить.
+- `PacingModel.weeklyHasHeadroom` лишається й далі гейтить `blueAllowed` — але тепер лише для
+  **5-годинного** бару ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md) чинний у цій
+  частині; per-model рядки вийшли з-під нього в
+  [ADR-0115](../adr/0115-no-blue-on-per-model-windows.md), idle — ще раніше).
 - **Слово не змінюється** між зеленою й (колишньою) синьою: працювати справді можна. Раніше текст
   обіцяв «ready to start, full quota available» — цю частину прибрано.
 
@@ -332,10 +350,10 @@ Menu bar зветься **«Colors tell me»**, сегменти — нижче 
 
 | Комбінація | Чому неможлива |
 |---|---|
-| Синій per-model / credits рядок | `isBaseLimit == false` → завжди `gapGreen` |
+| Синій per-model / credits рядок | `blueAllowed == false` у самому лейауті → зелений і на екрані, і в журналі ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)) |
 | Синій у перші 20 хв вікна | start-override, гілка 1 |
 | Помаранчевий при `u <= t` | кінець-override недосяжний на спокійному боці |
-| Синій бар зі словом «far behind» на Opus | `isFarBehind` гейтиться `isBaseLimit` |
+| Синій бар зі словом «far behind» на Opus | `isFarBehind` віддає `false` при `blueAllowed == false` |
 | Credits-бар при `limit == nil` | `barLayout` повертає `nil` — бару немає |
 | Credits-бар у Pressure чи Balance | Завжди шкала вікна, незалежно від `dropdownStyle` ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)) |
 | Credits-бар із тіками | Його лінійка — два підписи країв місяця, зубців немає (0092); та й самі підписи видно **лише під ⌥** ([ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md)) — без нього бар стоїть без лінійки взагалі |
@@ -373,7 +391,7 @@ else:
     else:                                   -> ПОМАРАНЧЕВИЙ
 ```
 
-Далі: якщо бар не базовий (`isBaseLimit == false`) — синій замінюється зеленим. Якщо menu bar і цей
+Далі: якщо бар не має права на синій (`blueAllowed == false`) — синій замінюється зеленим. Якщо menu bar і цей
 тон глушиться — колір стає білим; глушить його `ColorAdvice` (§7) **або**, безумовно, стиль
 Pressure.
 
