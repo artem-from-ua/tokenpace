@@ -5,8 +5,14 @@ import Foundation
 /// A successful usage poll as journalled — every window, the credits state, and the derived UI
 /// states, so downstream analytics never has to recompute what the app already showed.
 public struct UsageSample: Sendable, Equatable, Codable {
-    /// The sample-format version, written on **every** line and bumped monotonically whenever the
-    /// shape or the meaning of a field changes.
+    /// The sample-**format** version, written on every line and bumped monotonically whenever the set
+    /// of fields or the meaning of one of them changes.
+    ///
+    /// Since v4 this is one of **two** version counters, and the split is deliberate: `v` answers "how
+    /// do I read this line", ``sevV`` answers "which colour model decided its verdicts". A colour
+    /// threshold can move without a single key changing shape, and folding that into `v` would force a
+    /// format bump for a purely semantic change — and, worse, leave no way to ask "is this line's `sev`
+    /// current?" without knowing which `v` happened to ship which thresholds.
     ///
     /// Carried per line rather than once per file because the journal is append-only and spans
     /// upgrades: a single file legitimately holds lines from several app versions, so a header could
@@ -23,7 +29,21 @@ public struct UsageSample: Sendable, Equatable, Codable {
     ///   carried a `now + 7d` estimate that crept forward every poll, pinning `timePct` to 0 for
     ///   hours. Recovering them is what makes the archived series usable — the marker in those lines
     ///   never moved, so any analysis over them was reading a flat line that never happened.
+    /// - **4** — #426: every window's `sev` is recomputed by the **current** colour model and stamped
+    ///   with ``sevV``; the value written at poll time survives as `sevRaw` on the windows where the
+    ///   two disagree. Adds the field, so it is a format bump as well as a colour-model one.
     public let v: Int
+    /// Which generation of the **colour model** produced this line's `sev` values — the second axis
+    /// described on ``v``.
+    ///
+    /// One number for the whole line, not per window: a poll evaluates every window through the same
+    /// thresholds at the same instant, so six copies could only ever agree, and the day they did not
+    /// would be a bug rather than information.
+    ///
+    /// `0` on lines written before the field existed, mirroring how an absent `v` reads as 1: both say
+    /// "older than the first generation that named itself". That is what makes a re-run cheap to scope
+    /// — migrate the lines whose `sevV` is below ``currentColorVersion``, leave the rest alone.
+    public let sevV: Int
     /// Poll timestamp (ISO-8601, UTC, no fractional seconds — ``ResetClock/isoString(from:)``).
     public let t: String
     /// Usage-API response latency in milliseconds, or `nil` when unmeasured.
@@ -49,10 +69,19 @@ public struct UsageSample: Sendable, Equatable, Codable {
     public let blockingReset: BlockingResetSample?
 
     /// The version this build writes. Bump together with the case list on ``v``.
-    public static let currentVersion = 3
+    public static let currentVersion = 4
+
+    /// The colour-model generation this build writes into ``sevV``. Bump it whenever a change to
+    /// ``PacingBucket``/``PacingModel`` would give an existing sample a different `sev` — that is the
+    /// signal ``JournalMigration`` uses to decide which archived lines need recomputing.
+    ///
+    /// **1** — the model as of #426: dynamic ahead-threshold (ADR-0044), fixed-width behind-threshold
+    /// (ADR-0061), weekly-capacity gate on the 5-hour bar (ADR-0081), and no blue on per-model windows.
+    public static let currentColorVersion = 1
 
     public init(
         v: Int = UsageSample.currentVersion,
+        sevV: Int = UsageSample.currentColorVersion,
         t: String,
         ms: Int? = nil,
         plan: String? = nil,
@@ -70,6 +99,7 @@ public struct UsageSample: Sendable, Equatable, Codable {
         blockingReset: BlockingResetSample? = nil
     ) {
         self.v = v
+        self.sevV = sevV
         self.t = t
         self.ms = ms
         self.plan = plan
@@ -88,7 +118,7 @@ public struct UsageSample: Sendable, Equatable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case v, t, ms, plan, tier, h5, d7, opus, sonnet, scoped, sessionIdle, spend
+        case v, sevV, t, ms, plan, tier, h5, d7, opus, sonnet, scoped, sessionIdle, spend
         case blocked, credits, brokenReset, blockingReset
     }
 
@@ -97,6 +127,9 @@ public struct UsageSample: Sendable, Equatable, Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         // An absent `v` is a v1 line — the field did not exist before #386.
         self.v = try c.decodeIfPresent(Int.self, forKey: .v) ?? 1
+        // Absent means "written before any colour model named itself" — see the field's doc. Not 1:
+        // that number is claimed by the model #426 shipped, and a v1 line has no claim to it.
+        self.sevV = try c.decodeIfPresent(Int.self, forKey: .sevV) ?? 0
         self.t = try c.decodeIfPresent(String.self, forKey: .t) ?? ""
         self.ms = try c.decodeIfPresent(Int.self, forKey: .ms)
         self.plan = try c.decodeIfPresent(String.self, forKey: .plan)

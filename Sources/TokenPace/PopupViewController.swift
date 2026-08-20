@@ -68,16 +68,10 @@ final class PopupBarView: NSView {
     // No `weeklyHeadroom` here since #381: the idle "ready" fill is green whatever the week is doing, so
     // the bar no longer needs the weekly verdict alongside its inert layout.
 
-    /// Whether this is a **base** 5h/7d limit row (as opposed to a per-model/per-service row or the
-    /// credits bar). Only base bars render the far-behind **blue** zone (``behindColor``); everything
-    /// else keeps the plain green on the calm side. Set from the row-build loop; the raw
-    /// `addBar(bar:…)` path (credits) leaves it `false`.
-    var isBaseLimit: Bool = false {
-        didSet {
-            guard isBaseLimit != oldValue else { return }
-            needsDisplay = true
-        }
-    }
+    // No `isBaseLimit` here since #426: "only base 5h/7d rows render blue" was a view-side flag set by
+    // row index, invisible to the model — so `PacingBucket` recorded scoped blues the popup was
+    // painting green. The rule now lives on `BarLayout.blueAllowed` (reason 2 there), which every
+    // surface already reads, so the bars need no second gate of their own.
 
     /// Bar presentation style for **this surface** (#224, per-surface since #329) — fed from
     /// `PersistedConfig.dropdownStyle` and pushed in from `PopupViewController.addBar`.
@@ -963,8 +957,9 @@ final class PopupBarView: NSView {
         if l.usageFraction > l.timeFraction {
             target = Self.aheadColor(usage: l.usageFraction, time: l.timeFraction, remainingSeconds: l.remainingSeconds)
         } else {
-            // Calm side: base 5h/7d bars split green↔blue via behindColor; per-model/credits stay green.
-            target = isBaseLimit ? Self.behindColor(l) : Palette.gapGreen
+            // Calm side: `behindColor` splits green↔blue on its own, returning green for any bar whose
+            // layout says blue is not on offer (per-model, credits, closed weekly gate).
+            target = Self.behindColor(l)
         }
         return animated(target, part: .marker)
     }
@@ -975,8 +970,8 @@ final class PopupBarView: NSView {
             return Self.aheadColor(usage: l.usageFraction, time: l.timeFraction,
                                    remainingSeconds: l.remainingSeconds)
         }
-        // Calm side: base 5h/7d bars split green↔blue via behindColor; per-model/credits stay green.
-        return isBaseLimit ? Self.behindColor(l) : Palette.gapGreen
+        // Calm side: `behindColor` splits green↔blue on its own (see `indicatorColor`).
+        return Self.behindColor(l)
     }
 
     /// Route a colour through the transition layer (ADR-0070), or return it unchanged when no
@@ -1020,8 +1015,9 @@ final class PopupBarView: NSView {
     /// - otherwise → green
     ///
     /// Takes the whole `BarLayout` (it carries `windowDurationSeconds`, needed for the start override)
-    /// so this and Kit's `BarLayout.severity` compute the identical split and never drift. Restricted
-    /// to base 5h/7d bars by the caller (`isBaseLimit`); per-model / credits rows stay green.
+    /// so this and Kit's `BarLayout.severity` compute the identical split and never drift. Which bars
+    /// may show blue at all is the layout's own answer (``BarLayout/blueAllowed``) — per-model and
+    /// credits rows arrive with it `false` and fall out green on the first test below.
     static func behindColor(_ l: BarLayout) -> NSColor {
         let green = ColorRole.green.defaultColor
         // Blue is off the table for this bar (weekly gate closed, or an inert/non-token bar) → green.
@@ -2117,7 +2113,7 @@ final class PopupViewController: NSViewController {
 
         for (index, row) in layout.rows.enumerated() {
             if index >= layout.perModelRowsStart, !showPerModel { continue }
-            addTitleStatusLine(title: row.title, status: Self.statusText(row, isBaseLimit: index <= 1),
+            addTitleStatusLine(title: row.title, status: Self.statusText(row),
                                style: barStyleCaption())
             // The idle 5-hour row (#100) has **no** second line at all — no "0%", no reset — so it reads
             // as a compact "5-hour  ready to start" (or "waiting for limit reset" when blocked, #158) +
@@ -2141,10 +2137,7 @@ final class PopupViewController: NSViewController {
             // so it needs the normal inter-section gap; the credits block then owns the tight-to-separator
             // bottom instead.
             let isLastLimitRow = index == lastVisibleRowIndex
-            // The far-behind blue zone is restricted to the base 5h/7d rows. `PopupLayout.rows`
-            // always emits them first (index 0 = 5h, 1 = 7d); everything appended after is a
-            // per-model / per-service row and stays green on the calm side.
-            addBar(row, isLast: isLastLimitRow && !showCredits, isBaseLimit: index <= 1)
+            addBar(row, isLast: isLastLimitRow && !showCredits)
         }
 
         // The "Extra usage" (money-credits) section (#145), rendered below the limit windows when
@@ -2859,10 +2852,10 @@ final class PopupViewController: NSViewController {
 
     /// Add a pacing bar for one ``LimitRow`` (token windows) — a thin wrapper over the raw
     /// ``addBar(bar:subdivisions:idle:isLast:)`` that unpacks the row's geometry.
-    private func addBar(_ row: LimitRow, isLast: Bool, isBaseLimit: Bool) {
+    private func addBar(_ row: LimitRow, isLast: Bool) {
         addBar(bar: row.bar, subdivisions: row.subdivisions, idle: row.sessionIdle,
                blocked: row.sessionBlocked,
-               isLast: isLast, isBaseLimit: isBaseLimit, tweenRow: row.title)
+               isLast: isLast, tweenRow: row.title)
     }
 
     /// Add a pacing bar from raw geometry — shared by the token limit rows and the "Extra usage"
@@ -2875,7 +2868,7 @@ final class PopupViewController: NSViewController {
     /// window's first and last day **and** puts the bar into its always-Progress presentation, since
     /// both follow from the same fact — this window is a calendar month.
     private func addBar(bar: BarLayout?, subdivisions: Int, idle: Bool, blocked: Bool = false,
-                        isLast: Bool, isBaseLimit: Bool = false, tweenRow: String? = nil,
+                        isLast: Bool, tweenRow: String? = nil,
                         monthBounds: (start: String, end: String)? = nil) {
         let view = PopupBarView()
         view.bar = bar
@@ -2890,7 +2883,6 @@ final class PopupViewController: NSViewController {
         view.subdivisions = subdivisions
         view.idle = idle   // green knobless pill when the 5h window is idle (#100)
         view.blocked = blocked   // grey instead of green when that idle state is blocked (#158)
-        view.isBaseLimit = isBaseLimit   // only base 5h/7d rows render the far-behind blue zone
         view.barStyle = barStyle   // Progress (gap+marker) vs Pressure/Balance (marker-less ribbons) — #224
         view.optionHeld = optionHeld   // the under-bar ruler (teeth + month captions) is ⌥-on-demand
         // Credits only: captions the month's ends and pins the bar to Progress, overriding `barStyle`.
@@ -3388,8 +3380,10 @@ final class PopupViewController: NSViewController {
     }
 
     /// Index of the **7-day** row in `PopupLayout.rows`. The layout always emits the two base windows
-    /// first — `0` = 5-hour, `1` = 7-day — with the per-model rows appended after (the same ordering
-    /// `isBaseLimit: index <= 1` relies on when gating the far-behind blue).
+    /// first — `0` = 5-hour, `1` = 7-day — with the per-model rows appended after; the same ordering is
+    /// stated in Kit as `PopupLayout.baseRowCount` / `perModelRowsStart`, which is what to keep this in
+    /// step with. (A second reader of it, the `isBaseLimit: index <= 1` blue gate, was retired in #426
+    /// when that rule moved onto `BarLayout.blueAllowed`.)
     static let sevenDayRowIndex = 1
 
     /// The ⌥ stand-by line: `"stand by 3h for green"` — how long to stop spending for this
@@ -3500,7 +3494,7 @@ final class PopupViewController: NSViewController {
     /// window elapsed) — that was a statusline carry-over, and our bar has outgrown it. `.warning` and
     /// `.neutral` now read the same "(well) ahead of pace" wording; only the exhausted rung (`.critical`,
     /// `usage == 100`) still gets its own "limit reached".
-    private static func statusText(_ row: LimitRow, isBaseLimit: Bool) -> String {
+    private static func statusText(_ row: LimitRow) -> String {
         // Idle 5-hour row (#100): "ready to start" instead of a pacing phrase — there is no active
         // window to pace. When that idle state is also blocked (#158 — 7d exhausted, credits cannot
         // cover) it becomes "waiting for limit reset". Guarded first so the inert placeholder
@@ -3508,10 +3502,11 @@ final class PopupViewController: NSViewController {
         if row.sessionIdle { return row.sessionBlocked ? blockedStatusText : idleStatusText }
         if row.indicator == .critical { return "limit reached" }
         if row.pacing == .ahead { return aheadPhrase(row) }
-        // On-pace/behind side: base 5h/7d bars read "far behind pace" when the gap is blue
-        // (``PopupBarView/behindColor``); everything closer to the line (and all per-model rows) is
-        // "on pace". Word and colour agree via ``isFarBehind(_:)`` (gated by `isBaseLimit`).
-        return (isBaseLimit && isFarBehind(row.bar)) ? "far behind pace" : "on pace"
+        // On-pace/behind side: a bar reads "far behind pace" when its gap is blue
+        // (``PopupBarView/behindColor``); everything closer to the line is "on pace". Word and colour
+        // agree because both go through ``isFarBehind(_:)``, which returns `false` for any row whose
+        // layout withholds blue — per-model rows included.
+        return isFarBehind(row.bar) ? "far behind pace" : "on pace"
     }
 
     /// "well ahead of pace" when the bar reads orange (the ``isWellAhead(_:)`` condition), else "ahead
@@ -3532,8 +3527,8 @@ final class PopupViewController: NSViewController {
     /// Whether this bar reads **blue** (far behind pace) — the exact match of the `>` blue test in
     /// ``PopupBarView/behindColor``, so the wording and the gap colour always agree: on the
     /// on-pace/behind side, past the 20-min start override, with a surplus `>` the fixed-width
-    /// ``PacingModel/behindThreshold(windowDurationSeconds:)``. The caller gates this on `isBaseLimit` so only
-    /// the base 5h/7d rows (which render blue) get the "far behind pace" wording.
+    /// ``PacingModel/behindThreshold(windowDurationSeconds:)``. No caller-side gate: the `blueAllowed`
+    /// test below is what keeps the wording off the rows that do not render blue (per-model, credits).
     private static func isFarBehind(_ bar: BarLayout) -> Bool {
         guard bar.pacing == .onPaceOrBehind else { return false }
         // Mirror of `behindColor`'s first test — keep the two edited together (see that method).

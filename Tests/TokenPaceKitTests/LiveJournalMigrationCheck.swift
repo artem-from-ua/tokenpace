@@ -89,6 +89,27 @@ struct LiveJournalMigrationCheck {
                 longestZeroRun = max(longestZeroRun, currentZeroRun)
             }
 
+            // Which verdicts the current colour model changed, and where (#426). Printed as a matrix
+            // because the aggregate hides the shape: on the measured journals almost all of it is one
+            // cell — scoped `blue → green`, the per-model blue that only ever existed in the file.
+            var transitions: [String: Int] = [:]
+            var blueLeftInPerModel = 0
+            for sample in samples {
+                for (label, w) in [("h5", sample.h5), ("d7", sample.d7)] + [
+                    ("opus", sample.opus), ("sonnet", sample.sonnet),
+                ].compactMap({ label, w in w.map { (label, $0) } }) {
+                    if let was = w.sevRaw { transitions["\(label): \(was) → \(w.sev)", default: 0] += 1 }
+                    if label != "h5", label != "d7", w.sev == .blue { blueLeftInPerModel += 1 }
+                }
+                for s in sample.scoped {
+                    if let was = s.sevRaw { transitions["scoped: \(was) → \(s.sev)", default: 0] += 1 }
+                    if s.sev == .blue { blueLeftInPerModel += 1 }
+                }
+            }
+            let matrix = transitions.sorted { $0.value > $1.value }
+                .map { "\n                  \($0.key.padding(toLength: 24, withPad: " ", startingAt: 0)) \($0.value)" }
+                .joined()
+
             print("""
 
             ── \(name)
@@ -96,11 +117,20 @@ struct LiveJournalMigrationCheck {
                usage samples    : \(samples.count)
                rewritten        : \(outcome.migrated)
                resets repaired  : \(outcome.resetsRepaired)
+               severities recomputed : \(outcome.severitiesRecomputed)\(matrix)
                out of order     : \(outcome.outOfOrder)
                unparseable      : \(outcome.skipped)
                worst error      : \(String(format: "%.3f", worstError)) s
                longest 0 run    : \(longestZeroRun)
             """)
+
+            // The invariant the whole change exists for: after the pass, no per-model window claims a
+            // colour the popup would never paint.
+            #expect(blueLeftInPerModel == 0,
+                    "\(name): \(blueLeftInPerModel) per-model windows still blue after migration")
+            // Every recorded transition must be accounted for by the counter, and vice versa.
+            #expect(transitions.values.reduce(0, +) == outcome.severitiesRecomputed,
+                    "\(name): transition matrix disagrees with the counter")
 
             #expect(repairedSeen == outcome.resetsRepaired,
                     "\(name): counter disagrees with the rewritten lines")

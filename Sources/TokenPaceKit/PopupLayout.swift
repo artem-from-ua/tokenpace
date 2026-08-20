@@ -632,23 +632,28 @@ public struct PopupLayout: Sendable, Equatable {
         // it shows the normal "limit reached" — only the red blocking-reset badge marks it, via
         // `blockingReset`.)
         let idleBlocked = snapshot.sessionIdle && CreditsPacing.isBlocked(in: snapshot)
-        // The weekly gate (`PacingModel.weeklyHasHeadroom`): blue is "there is room to push", so every
-        // row that spends from the weekly budget — the 5-hour window and the 7-day-paced per-model
-        // rows — may only go blue while the 7-day window itself has headroom. The 7-day row never
-        // gates on itself.
+        // The weekly gate (`PacingModel.weeklyHasHeadroom`): blue is "the week has room you are not
+        // using", so the 5-hour bar may only go blue while the 7-day window itself has headroom. The
+        // 7-day row never gates on itself and passes `true`.
+        //
+        // Per-model rows do **not** take this gate — they are slices of that same week, so the advice
+        // would be addressed to itself, and they pass `false` outright (reason 2 on
+        // `BarLayout.blueAllowed`). They used to take it, which let the model report blue while the
+        // popup silenced them again through `PopupBarView.isBaseLimit` — and the journal, which reads
+        // the model, recorded blues that were never on screen.
         let weeklyHeadroom = PacingModel.weeklyHasHeadroom(in: snapshot, now: now)
         var rows: [LimitRow] = [
             snapshot.sessionIdle ? idleFiveHourRow(blocked: idleBlocked) : row(title: "5-hour", window: snapshot.fiveHour, as: .fiveHour, now: now, blueAllowed: weeklyHeadroom),
             row(title: "7-day", window: snapshot.sevenDay, as: .sevenDay, now: now, blueAllowed: true),
         ]
         if let opus = snapshot.sevenDayOpus {
-            rows.append(row(title: "Opus", window: opus, as: .sevenDay, now: now, blueAllowed: weeklyHeadroom))
+            rows.append(row(title: "Opus", window: opus, as: .sevenDay, now: now, blueAllowed: false))
         }
         if let sonnet = snapshot.sevenDaySonnet {
-            rows.append(row(title: "Sonnet", window: sonnet, as: .sevenDay, now: now, blueAllowed: weeklyHeadroom))
+            rows.append(row(title: "Sonnet", window: sonnet, as: .sevenDay, now: now, blueAllowed: false))
         }
         for scoped in snapshot.scopedModelWindows {
-            rows.append(row(title: scoped.name, window: scoped.window, as: .sevenDay, now: now, blueAllowed: weeklyHeadroom))
+            rows.append(row(title: scoped.name, window: scoped.window, as: .sevenDay, now: now, blueAllowed: false))
         }
         return rows
     }

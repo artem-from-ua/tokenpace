@@ -2,10 +2,17 @@
 status: accepted
 date: 2026-08-02
 supersedes: []
-superseded_by: [0062, 0081]
+superseded_by: [0062, 0081, 0115]
 ---
 
 # ADR-0061: Синя зона пейсингу «far behind» + опція «Work harder»
+
+> **§4 «Обсяг — лише базові 5h/7d» підтверджено й перенесено
+> [ADR-0115](0115-no-blue-on-per-model-windows.md)** ([#426](https://github.com/artem-from-ua/tokenpace/issues/426)).
+> Саме рішення чинне й ніколи не скасовувалося — витіснений лише **механізм**: прапорця
+> `PopupBarView.isBaseLimit` більше немає, правило живе на `BarLayout.blueAllowed`, де його бачать
+> усі поверхні. Гейт у рендері виявився причиною того, що модель (а отже й журнал) роками не знала
+> про це обмеження й записувала синій для scoped-вікон, яких на екрані не було.
 
 > **Частково витіснений [ADR-0081](0081-weekly-capacity-gate-for-blue.md).** Behind-поріг знову
 > фіксований (множник — константа ×2, опцію прибрано), але з'явилася нова умова: синій показується
@@ -96,6 +103,11 @@ behindThreshold = LimitWindow.blueBehindWidthSeconds / windowDurationSeconds
 - **Popup** ділить один `PopupBarView` між базою, per-model і credits, тож додано прапорець
   `PopupBarView.isBaseLimit` — `true` лише для рядків 0/1 (`PopupLayout.rows` завжди починає з 5h,
   7d), `false` для per-model; credits йдуть сирим `addBar(bar:…)` і прапорця не отримують.
+
+  > ⚠️ **Прапорець видалено [ADR-0115](0115-no-blue-on-per-model-windows.md).** Правило те саме, але
+  > живе тепер на `BarLayout.blueAllowed`, який читають і рендер, і `PacingBucket`. Гейт, видимий
+  > лише рендеру, був тією самою вадою, що зробила журнал розбіжним з екраном: модель про нього не
+  > знала й писала синій там, де попап малював зелений.
 
 ### 5. Опція «Work harder» (не-calm синій)
 

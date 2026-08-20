@@ -140,20 +140,52 @@ struct WeeklyGateFiveHourTests {
 @Suite("Weekly gate — per-model rows")
 struct WeeklyGatePerModelTests {
 
-    /// Per-model windows are 7-day paced and spend from the same weekly budget, so they carry the same
-    /// gate. In the popup they never render blue anyway (`isBaseLimit`), but the journal has no such
-    /// gate — this is what keeps the recorded bucket equal to the pixel the user saw.
-    @Test func perModelRowsCarryTheWeeklyGate() {
-        let opusDeepBehind = UsageSnapshot(
+    /// Per-model windows never render blue, **whatever the week is doing** — they are slices of the
+    /// very seven-day limit blue talks about, so "the week has room to push" would be advice addressed
+    /// to itself (reason 2 on `BarLayout.blueAllowed`).
+    ///
+    /// This replaces a test that pinned the opposite arrangement: per-model rows used to carry the
+    /// weekly gate, and its docblock claimed that "the journal has no such gate — this is what keeps
+    /// the recorded bucket equal to the pixel the user saw". Both halves were wrong. The popup did have
+    /// a second gate (`PopupBarView.isBaseLimit`, view-side and invisible to the model), so an *open*
+    /// week produced exactly the disagreement the comment promised was impossible — 2 211 blue scoped
+    /// samples in a journal whose popup was painting them green. The open-week case below is the one
+    /// that used to fail; the closed-week case passed for the wrong reason.
+    @Test func perModelRowsNeverAllowBlue() {
+        func opusRow(weeklyUtil: Double) -> LimitRow? {
+            let snap = UsageSnapshot(
+                fiveHour: UsageWindow(utilization: 5, resetsAt: resetsAt(inSeconds: 2 * 3600)),
+                sevenDay: UsageWindow(utilization: weeklyUtil, resetsAt: resetsAt(inSeconds: 5 * 24 * 3600)),
+                sevenDayOpus: UsageWindow(utilization: 2, resetsAt: resetsAt(inSeconds: 5 * 24 * 3600)),
+                limits: [],
+                spend: nil)
+            return PopupLayout.make(from: snap, now: now, lastUpdate: now, interval: 60)
+                .rows.first { $0.title == "Opus" }
+        }
+        // Week ahead of pace (gate would be closed anyway) and week calm with room to spare (gate
+        // open) — a barely-used Opus window is deep behind pace in both, and stays green in both.
+        for weeklyUtil in [70.0, 10.0] {
+            let opus = opusRow(weeklyUtil: weeklyUtil)
+            #expect(opus?.bar.blueAllowed == false)
+            #expect(opus?.bar.severity == .calm)
+        }
+    }
+
+    /// The scoped rows go the same way, and they are where it actually bit: `Fable` sat far behind pace
+    /// for 38 % of the maintainer's August journal.
+    @Test func scopedRowsNeverAllowBlue() {
+        let snap = UsageSnapshot(
             fiveHour: UsageWindow(utilization: 5, resetsAt: resetsAt(inSeconds: 2 * 3600)),
-            sevenDay: UsageWindow(utilization: 70, resetsAt: resetsAt(inSeconds: 5 * 24 * 3600)),
-            sevenDayOpus: UsageWindow(utilization: 2, resetsAt: resetsAt(inSeconds: 5 * 24 * 3600)),
-            limits: [],
+            sevenDay: UsageWindow(utilization: 10, resetsAt: resetsAt(inSeconds: 5 * 24 * 3600)),
+            limits: [UsageLimit(
+                kind: "weekly_scoped", group: "weekly", percent: 1, severity: "normal",
+                resetsAt: resetsAt(inSeconds: 5 * 24 * 3600), isActive: false,
+                modelDisplayName: "Fable")],
             spend: nil)
-        let opus = PopupLayout.make(from: opusDeepBehind, now: now, lastUpdate: now, interval: 60)
-            .rows.first { $0.title == "Opus" }
-        #expect(opus?.bar.blueAllowed == false)     // week is orange → gate closed
-        #expect(opus?.bar.severity == .calm)
+        let fable = PopupLayout.make(from: snap, now: now, lastUpdate: now, interval: 60)
+            .rows.first { $0.title == "Fable" }
+        #expect(fable?.bar.blueAllowed == false)
+        #expect(fable?.bar.severity == .calm)
     }
 }
 
@@ -242,6 +274,31 @@ struct WeeklyGateJournalTests {
     /// inline, the 5-hour sample stops seeing the exhausted week and this flips to `.blue`.
     @Test func exhaustedWeekIsVisibleToTheFiveHourSample() {
         #expect(h5Sample(snapshot(sevenDayUtil: 100))?.sev == .green)
+    }
+
+    /// The same invariant on the rows that broke it. It was only ever asserted for `h5` above, which is
+    /// exactly how the per-model mismatch survived: the journal factory and the popup were compared on
+    /// the one window where they happened to agree.
+    @Test func journalBucketMatchesRenderedSeverityForPerModelRows() {
+        // A week with plenty of headroom — the state that used to make scoped rows blue in the file
+        // while the popup drew them green.
+        let snap = UsageSnapshot(
+            fiveHour: UsageWindow(utilization: 5, resetsAt: resetsAt(inSeconds: 2 * 3600)),
+            sevenDay: UsageWindow(utilization: 10, resetsAt: resetsAt(inSeconds: 5 * 24 * 3600)),
+            sevenDayOpus: UsageWindow(utilization: 2, resetsAt: resetsAt(inSeconds: 5 * 24 * 3600)),
+            limits: [UsageLimit(
+                kind: "weekly_scoped", group: "weekly", percent: 1, severity: "normal",
+                resetsAt: resetsAt(inSeconds: 5 * 24 * 3600), isActive: false,
+                modelDisplayName: "Fable")],
+            spend: nil)
+        guard case let .usage(sample) = JournalRecord.usage(from: snap, now: now) else {
+            Issue.record("expected a usage record"); return
+        }
+        let rows = PopupLayout.make(from: snap, now: now, lastUpdate: now, interval: 60).rows
+        #expect(sample.opus?.sev == .green)
+        #expect(rows.first { $0.title == "Opus" }?.bar.severity == .calm)
+        #expect(sample.scoped.first?.sev == .green)
+        #expect(rows.first { $0.title == "Fable" }?.bar.severity == .calm)
     }
 
     /// The 7-day sample itself is ungated — a deep-behind week is still recorded blue.

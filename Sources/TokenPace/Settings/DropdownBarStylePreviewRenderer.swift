@@ -81,7 +81,6 @@ enum DropdownBarStylePreviewRenderer {
             resetsAt: now.addingTimeInterval(Specimen.fiveHourRemaining),
             now: now, window: .fiveHour, blueAllowed: false)
         fiveHour.subdivisions = 5
-        fiveHour.isBaseLimit = true
         fiveHour.barStyle = style
 
         let sevenDay = PopupBarView(frame: .zero)
@@ -90,7 +89,6 @@ enum DropdownBarStylePreviewRenderer {
             resetsAt: now.addingTimeInterval(Specimen.sevenDayRemaining),
             now: now, window: .sevenDay)
         sevenDay.subdivisions = 7
-        sevenDay.isBaseLimit = true
         sevenDay.barStyle = style
 
         // `optionHeld` is left at its `false` default on both, and that is the whole decision about the
