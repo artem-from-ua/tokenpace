@@ -1,8 +1,20 @@
 #!/bin/bash
 
-# Swift build + test gate — runs only when the commit touches Swift code, so doc-only or
-# config-only commits stay fast. Mirrors CLAUDE.md's "swift build / swift test" commands.
-# Set TOKENPACE_SKIP_SWIFT_HOOK=1 to bypass (e.g. an intentional WIP commit).
+# Swift **build** gate — runs only when the commit touches Swift code, so doc-only or config-only
+# commits stay fast. Set TOKENPACE_SKIP_SWIFT_HOOK=1 to bypass (e.g. an intentional WIP commit).
+#
+# Build only, deliberately. `swift test` ran here too until the pair was measured at ~31 s on a warm
+# cache (6 s build, 25 s tests) — far enough past the point where a hook stops being worth its wait
+# that the whole gate ended up deleted from a working copy rather than tolerated. A gate that gets
+# removed protects nothing; six seconds is a gate that survives.
+#
+# The half that stayed is the half worth blocking on: code that does not compile is never an
+# acceptable commit. A failing *test* sometimes is — a deliberate WIP, a behaviour mid-change — and
+# that is exactly why blocking on it grated.
+#
+# The gap is real and named: logic regressions that compile fine reach `main` unchallenged. That is
+# CI's job, not a pre-commit hook's; until this repo has one, `swift test` before opening a PR is
+# the manual half of the bargain (CLAUDE.md asks for it in the verification loop anyway).
 SWIFT_STAGED=$(git diff --cached --name-only --diff-filter=ACM -- '*.swift' 'Package.swift' 'Package.resolved')
 
 if [ -n "$SWIFT_STAGED" ] && [ "$TOKENPACE_SKIP_SWIFT_HOOK" != "1" ]; then
@@ -11,17 +23,11 @@ if [ -n "$SWIFT_STAGED" ] && [ "$TOKENPACE_SKIP_SWIFT_HOOK" != "1" ]; then
         if ! swift build; then
             echo ""
             echo "Commit blocked: swift build failed."
-            exit 1
-        fi
-        echo "Running swift test…"
-        if ! swift test; then
-            echo ""
-            echo "Commit blocked: swift test failed."
             echo "  Bypass (WIP only): TOKENPACE_SKIP_SWIFT_HOOK=1 git commit …"
             exit 1
         fi
     else
-        echo "warning: swift not found on PATH — skipping build/test gate." >&2
+        echo "warning: swift not found on PATH — skipping build gate." >&2
     fi
 fi
 
