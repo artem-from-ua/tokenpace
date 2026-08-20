@@ -128,12 +128,25 @@ struct LiveJournalMigrationCheck {
             // colour the popup would never paint.
             #expect(blueLeftInPerModel == 0,
                     "\(name): \(blueLeftInPerModel) per-model windows still blue after migration")
-            // Every recorded transition must be accounted for by the counter, and vice versa.
-            #expect(transitions.values.reduce(0, +) == outcome.severitiesRecomputed,
-                    "\(name): transition matrix disagrees with the counter")
-
-            #expect(repairedSeen == outcome.resetsRepaired,
-                    "\(name): counter disagrees with the rewritten lines")
+            // The counters describe **this** pass; the markers in the file describe every pass ever run
+            // over it. They only have to agree when this pass is the one that put them there — pointed
+            // at an already-migrated journal (a re-run, or a copy someone migrated yesterday) the file
+            // still carries its `sevRaw`/`resetSrc` while the pass correctly reports zero.
+            if outcome.changedAnything {
+                #expect(transitions.values.reduce(0, +) == outcome.severitiesRecomputed,
+                        "\(name): transition matrix disagrees with the counter")
+                #expect(repairedSeen == outcome.resetsRepaired,
+                        "\(name): counter disagrees with the rewritten lines")
+            } else {
+                // Nothing to rewrite is a valid, meaningful outcome: it says the file is already current
+                // on both axes. Pin that rather than skipping — a pass that reports zero while leaving
+                // stale lines behind would otherwise look identical to success.
+                #expect(outcome.severitiesRecomputed == 0 && outcome.resetsRepaired == 0,
+                        "\(name): reported work without rewriting anything")
+                #expect(samples.allSatisfy { $0.v == UsageSample.currentVersion
+                                             && $0.sevV == UsageSample.currentColorVersion },
+                        "\(name): pass rewrote nothing but the file is not current")
+            }
             // The repaired dates must land on the real grid, not near it.
             #expect(worstError < 1, "\(name): worst repair error \(worstError) s")
             // And the whole point: the marker moves again instead of sitting at zero for hours.
