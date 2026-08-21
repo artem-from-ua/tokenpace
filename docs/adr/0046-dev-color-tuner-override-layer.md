@@ -4,75 +4,84 @@ date: 2026-07-30
 superseded_by: [0106]
 ---
 
-# ADR-0046: Централізований `ColorStore` override-шар для dev color-tuner
+# ADR-0046: A centralized `ColorStore` override layer for the dev color tuner
 
-> Витіснено [ADR-0106](0106-remove-dev-color-tuner-and-dissolve-colorstore.md): тюнер і `ColorStore`
-> видалені, обидві `Palette` читають `ColorRole.defaultColor` напряму. Чинним лишається сам
-> **каталог ролей** — але як палітра застосунку, а не як реєстр для UI інструмента; розділення
-> menu-bar / popup із «Уточнення D2» теж живе далі, на власних підставах.
+> Superseded by [ADR-0106](0106-remove-dev-color-tuner-and-dissolve-colorstore.md): the tuner and
+> `ColorStore` are removed, and both `Palette`s now read `ColorRole.defaultColor` directly. What
+> still stands is the **role catalog itself** — but as the app's palette, not as a registry for a UI
+> tool; the menu-bar / popup split from "Clarification D2" also lives on, on its own merits.
 
-## Контекст
+## Context
 
-Кольори інтерфейсу TokenPace жили у **двох незалежних приватних `enum Palette`**: menu-bar
-(`StatusItemView.Palette`, фіксований sRGB — non-template image) і popup (`PopupBarView.Palette`,
-appearance-aware `NSColor(name:dynamicProvider:)`), плюс кілька окремих семантичних кольорів
-(`claudeBrandColor`, `dimmedLabelColor`). Кожен колір — `static let`-літерал, читаний прямо в місцях
-малювання. Ahead-of-pace градація (yellow/orange/red) вже була single-source у `PopupBarView.aheadColor`
-(її крос-файлово реюзає й menu-bar).
+TokenPace's UI colors lived in **two independent private `enum Palette`s**: menu bar
+(`StatusItemView.Palette`, fixed sRGB — a non-template image) and popup (`PopupBarView.Palette`,
+appearance-aware `NSColor(name:dynamicProvider:)`), plus a handful of separate semantic colors
+(`claudeBrandColor`, `dimmedLabelColor`). Each color was a `static let` literal, read directly at
+its drawing site. The ahead-of-pace grading (yellow/orange/red) was already single-sourced in
+`PopupBarView.aheadColor` (already reused cross-file by the menu bar).
 
-Підбір кольору означав цикл «правка літерала → `swift build` → дивись → знову»: жодного способу
-побачити наживо, як зміна впливає на menu-bar іконку та popup. Потрібен був dev-інструмент (#185) —
-вікно з дропдауном ролей + **вбудований inline-пікер** (RGB/HSB-повзунки + 16-бітні поля), що
-перемальовує обидві поверхні негайно.
+Picking a color meant a "edit the literal → `swift build` → look → repeat" loop: no way to see live
+how a change affects the menu-bar icon and the popup together. A dev tool was needed (#185) — a
+window with a role dropdown plus an **embedded inline color picker** (RGB/HSB sliders + 16-bit
+fields) that redraws both surfaces instantly.
 
-Питання: як дати такому інструменту **перевизначати** будь-який колір у рантаймі, не зачепивши
-звичайних користувачів і не роздувши hot draw-path.
+The question: how to let such a tool **override** any color at runtime, without affecting ordinary
+users and without bloating the hot draw path.
 
-## Розглянуті варіанти
+## Alternatives considered
 
-1. **`#if DEBUG`-гейт.** Компілятор викидає код у release. Але: фіча має працювати й на нотаризованому
-   /release-білді (мейнтейнер підбирає кольори на реальному встановленому застосунку), а `#if DEBUG`
-   це унеможливлює.
-2. **Мінімальний override-dict у кожному `Palette`.** Найменше рефактору, але дублює логіку у двох
-   місцях і не дає єдиного каталогу ролей для UI (назви/групи/описи/трансформації).
-3. **Централізований `ColorStore` + `ColorRole`-каталог (обране).** Один enum усіх ролей і один
-   store, через який обидва `Palette` читають кожен колір.
+1. **An `#if DEBUG` gate.** The compiler strips the code from release. But: the feature needs to
+   work on a notarized/release build too (the maintainer tunes colors on the real installed app),
+   which `#if DEBUG` rules out.
+2. **A minimal override dict inside each `Palette`.** The least amount of refactoring, but it
+   duplicates the logic in two places and gives no single role catalog for the UI (names/groups/
+   descriptions/transforms).
+3. **A centralized `ColorStore` plus a `ColorRole` catalog (chosen).** One enum of every role and
+   one store that both `Palette`s read every color through.
 
-## Рішення
+## Decision
 
-**Ввести `ColorRole` (плоский каталог ролей) і `ColorStore` (`@MainActor` singleton), через який
-обидва `Palette` читають кожен колір.** Кожен `static let X = <literal>` став `static var X: NSColor
-{ ColorStore.shared.color(.x) }`; дефолти перенесені 1:1 у `ColorRole.defaultColor`
-(appearance-aware провайдери лишилися на боці `PopupBarView`/`PopupViewController` як `default*`
-статики, щоб per-appearance логіка не дублювалась). Трансформації (`lightened`, alpha, calm-swap)
-лишилися на місцях — вони обгортають значення зі store.
+**Introduce `ColorRole` (a flat catalog of roles) and `ColorStore` (an `@MainActor` singleton),
+through which both `Palette`s read every color.** Every `static let X = <literal>` became
+`static var X: NSColor { ColorStore.shared.color(.x) }`; the defaults were carried over 1:1 into
+`ColorRole.defaultColor` (appearance-aware providers stayed on the `PopupBarView`/
+`PopupViewController` side as `default*` statics, so the per-appearance logic isn't duplicated).
+Transforms (`lightened`, alpha, calm-swap) stayed at their call sites — they wrap the value coming
+from the store.
 
-**Гейт — env-var `TOKENPACE_DEVTOOLS`, а не тип білда.** Коли він порожній, `ColorStore.color(role)`
-завжди повертає default і словник override взагалі не читається — нульовий вплив на draw-path і
-неможливість випадково змінити колір. Незалежно від dev/notarized/release. Той самий прапорець гейтить
-і пункт меню «Development tools…» (плюс ⌥ Option), і сам override.
+**The gate is the env var `TOKENPACE_DEVTOOLS`, not the build type.** When it's empty,
+`ColorStore.color(role)` always returns the default and the override dictionary is never even
+read — zero impact on the draw path and no risk of accidentally changing a color. Independent of
+dev/notarized/release. The same flag gates both the "Development tools…" menu item (plus ⌥ Option)
+and the override itself.
 
-Override-и **ephemeral**: тримаються в памʼяті, не персистяться; вихід повертає всі дефолти. Зміна
-кольору смикає `onChange` → `AppDelegate.reRenderForCurrentTime()`, що ре-снапшотить menu-bar і
-перебудовує popup за один прохід (той самий шлях, що вже використовує toggle «Calm colors»).
+Overrides are **ephemeral**: held in memory, never persisted; quitting restores every default.
+Changing a color fires `onChange` → `AppDelegate.reRenderForCurrentTime()`, which re-snapshots the
+menu bar and rebuilds the popup in one pass (the same path the "Calm colors" toggle already uses).
 
-## Уточнення D2: розділення menu-bar / popup pacing
+## Clarification D2: splitting menu-bar / popup pacing
 
-Спершу ahead-of-pace кольори (yellow/orange/red) були single-source у `PopupBarView.aheadColor`, і
-menu-bar тягнув їх крос-файлово. Для тюнера це означало, що один повзунок керує обома поверхнями —
-джерело плутанини («де окремий menu-bar червоний?»). **Рішення:** розділити — додати окремі
-`menuGapRed/Yellow/Orange` і параметризувати `aheadColor` за `PacingSurface { popup, menuBar }`.
-Menu-bar-виклики передають `.menuBar` (і додатково лайтенять ~10%), popup — `.popup`. Дефолти
-menu-констант стартують з тих самих значень, що popup (щоб вигляд не змінився), далі тюняться
-незалежно. Каталог також розширено до ~35 ролей — додано popup service-доти (окремі appearance-aware
-`.system*`, на відміну від fixed-sRGB menu-дотів), popup warning red, «in use» pill, link, label.
+Initially the ahead-of-pace colors (yellow/orange/red) were single-sourced in
+`PopupBarView.aheadColor`, and the menu bar pulled them in cross-file. For the tuner this meant one
+slider controlled both surfaces — a source of confusion ("where's the separate menu-bar red?").
+**Decision:** split them — add separate `menuGapRed/Yellow/Orange` and parameterize `aheadColor` by
+`PacingSurface { popup, menuBar }`. Menu-bar call sites pass `.menuBar` (and additionally lighten
+~10%), the popup passes `.popup`. The menu constants' defaults start at the same values as the
+popup's (so the look doesn't change), then tune independently. The catalog was also expanded to
+~35 roles — adding the popup's service dots (separate appearance-aware `.system*` colors, unlike
+the menu's fixed-sRGB dots), the popup warning red, the "in use" pill, links, and labels.
 
-## Наслідки
+## Consequences
 
-- **+** Живий підбір будь-якого з ~20 кольорів без перезбірки; єдиний каталог ролей із назвами,
-  групами, вичерпним описом використання й позначкою трансформацій — джерело підписів у tuner.
-- **+** Кольори тепер мають один шар доступу; якщо колись знадобиться тема/персистентність — місце вже є.
-- **−** Кожен `Palette`-колір — тепер computed `var` (виклик `ColorStore.color`) замість `static let`:
-  дешевий Bool-чек + словниковий lookup лише коли dev-tools увімкнено, інакше Bool-чек + default.
-- **−** `enum Palette` довелося позначити `@MainActor` (store — `@MainActor`); draw-код і так на main.
-- Правило: змінюючи `Palette`-колір, оновлюй `ColorRole.defaultColor` у тому ж коміті (мають збігатись).
+- **+** Live tuning of any of the ~20 colors with no rebuild; a single role catalog with names,
+  groups, a thorough usage description, and a note on transforms — the source of the tuner's
+  labels.
+- **+** Colors now have one access layer; if theming/persistence is ever needed, the place for it
+  already exists.
+- **−** Every `Palette` color is now a computed `var` (a call to `ColorStore.color`) instead of a
+  `static let`: a cheap Bool check plus a dictionary lookup only when dev tools are on, otherwise
+  just a Bool check plus the default.
+- **−** `enum Palette` had to be marked `@MainActor` (the store is `@MainActor`); the draw code was
+  already on main.
+- Rule: when changing a `Palette` color, update `ColorRole.defaultColor` in the same commit (they
+  must match).

@@ -3,45 +3,47 @@ status: draft
 date: 2026-08-01
 ---
 
-# ADR-0057 (draft): Перенос I/O-половини `TokenProvider` у helper
+# ADR-0057 (draft): Moving `TokenProvider`'s I/O half into the helper
 
-> **Чернетка (draft).** За гейтом #E0. Уточнює, як `TokenProvider` розколюється на межі
-> [ADR-0056](0056-thin-helper-thick-app-build-flavors.md), і що механізм [ADR-0019](0019-token-read-via-security-cli.md)
-> переноситься без змін.
+> **Draft.** Gated on #E0. Clarifies how `TokenProvider` splits at the boundary from
+> [ADR-0056](0056-thin-helper-thick-app-build-flavors.md), and that the
+> [ADR-0019](0019-token-read-via-security-cli.md) mechanism carries over unchanged.
 
-## Контекст
+## Context
 
-`TokenProvider` читає **чужий** Keychain-айтем `Claude Code-credentials` (створений Claude Code CLI).
-[ADR-0019](0019-token-read-via-security-cli.md) вимагає робити це **спавном `/usr/bin/security`**, а
-не `SecItemCopyMatching`: Claude Code на кожному refresh переписує айтем через
-`security add-generic-password -U`, що скидає ACL partition list на `apple-tool:` — прямий API-read
-після цього промптить. Спавн `security` (сам у партиції `apple-tool:`) лишається тихим.
+`TokenProvider` reads **someone else's** Keychain item `Claude Code-credentials` (created by the
+Claude Code CLI). [ADR-0019](0019-token-read-via-security-cli.md) requires doing this by
+**spawning `/usr/bin/security`**, not `SecItemCopyMatching`: on every refresh, Claude Code rewrites
+the item via `security add-generic-password -U`, which resets the ACL partition list to
+`apple-tool:` — a direct API read after that prompts. Spawning `security` (itself in the
+`apple-tool:` partition) stays silent.
 
-І спавн бінарника, і читання чужого Keychain-айтема **заборонені App Sandbox**. Отже ця робота
-фізично не може бути в MAS-застосунку — вона мусить бути в не-sandboxed helper'і
+Both spawning a binary and reading someone else's Keychain item are **forbidden by App Sandbox**.
+So this work physically cannot live in the MAS app — it has to live in the non-sandboxed helper
 ([ADR-0054](0054-mas-present-if-installed-helper.md)).
 
-Але `TokenProvider` **уже має purity split** (ADR-0019, ADR-0007): pure-частина (`decode`,
-`parseSecretOutput`, `mapExitStatus`, `OAuthCredentials`, `TokenCredentials`) відділена від I/O
-(`readRawData`, що спавнить `security`).
+But `TokenProvider` **already has a purity split** (ADR-0019, ADR-0007): the pure part (`decode`,
+`parseSecretOutput`, `mapExitStatus`, `OAuthCredentials`, `TokenCredentials`) is separated from I/O
+(`readRawData`, which spawns `security`).
 
-## Рішення
+## Decision
 
-Розколоти `TokenProvider` по наявному purity-шву:
+Split `TokenProvider` along its existing purity seam:
 
-- **Pure-половина лишається в `TokenPaceKit`** — `decode`, `parseSecretOutput`, `mapExitStatus`,
-  `OAuthCredentials`, `TokenCredentials`, `TokenError`. Юніт-тести не рухаються.
-- **I/O-половина (`readRawData` + спавн `security`) переїжджає в `TokenPaceShellIO`** (лінкує лише
-  helper/DevID — [ADR-0056](0056-thin-helper-thick-app-build-flavors.md)).
+- **The pure half stays in `TokenPaceKit`** — `decode`, `parseSecretOutput`, `mapExitStatus`,
+  `OAuthCredentials`, `TokenCredentials`, `TokenError`. Unit tests don't move.
+- **The I/O half (`readRawData` + the `security` spawn) moves into `TokenPaceShellIO`** (linked
+  only by the helper/DevID — [ADR-0056](0056-thin-helper-thick-app-build-flavors.md)).
 
-**Механізм ADR-0019 не змінюється** — той самий спавн `security find-generic-password -s
-"Claude Code-credentials" -w`, та сама причина (ACL partition reset). Змінюється лише **host-процес**:
-з застосунку на helper. Так само делегований refresh ([ADR-0017](0017-delegated-token-refresh.md)) —
-спавн `claude` — тепер у helper'і.
+**The ADR-0019 mechanism doesn't change** — the same spawn of
+`security find-generic-password -s "Claude Code-credentials" -w`, the same reason (the ACL
+partition reset). Only the **host process** changes: from the app to the helper. Likewise,
+delegated refresh ([ADR-0017](0017-delegated-token-refresh.md)) — the `claude` spawn — now lives in
+the helper.
 
 ```plantuml
 @startuml
-title ADR-0057: Цикл читання/refresh токена всередині helper'а
+title ADR-0057: The token read/refresh cycle inside the helper
 skinparam sequenceArrowThickness 1.5
 skinparam LifeLineBorderColor #C0C0C0
 
@@ -53,38 +55,39 @@ participant "usage API" as API
 
 Engine -> TP : currentCredentials()
 TP -> Sec : spawn find-generic-password
-Sec --> TP : сирий secret
-TP -> TP : decode (pure, в киті)
+Sec --> TP : raw secret
+TP -> TP : decode (pure, in the kit)
 TP --> Engine : TokenCredentials
 
-alt токен прострочений
-  Engine -> CLI : spawn claude --safe-mode -p /usage\n(делегований refresh, ADR-0017)
-  CLI --> Engine : Claude Code переписав айтем
-  Engine -> TP : currentCredentials() ще раз
-  TP -> Sec : spawn (тихо: apple-tool: партиція)
-  Sec --> TP : свіжий secret
-  TP --> Engine : свіжий TokenCredentials
+alt token expired
+  Engine -> CLI : spawn claude --safe-mode -p /usage\n(delegated refresh, ADR-0017)
+  CLI --> Engine : Claude Code rewrote the item
+  Engine -> TP : currentCredentials() again
+  TP -> Sec : spawn (silent: apple-tool: partition)
+  Sec --> TP : fresh secret
+  TP --> Engine : fresh TokenCredentials
 end
 
-Engine -> API : authed запит (Bearer)
+Engine -> API : authed request (Bearer)
 note right of Engine
-  Похідні числа → status.json.
+  Derived numbers → status.json.
   accessToken/refreshToken
-  НЕ покидають helper.
+  do NOT leave the helper.
 end note
 @enduml
 ```
 
-![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/TLJHIXj157tVhxZeGoEuYL94oKDHOmH1C5GV-pBTJ9Afw-nsPhRIDoEe54g5GlDM-jRdnPeQQzLVcFc5VadFR5QQr9ObJ7Rdt7lElUVEh6h3bCaEui084tDQstWUBYmiBTV9VhKZ-yFUa3kp8tTiStjhRzrvJV6Euhf7-7I7_I4-vsGlNDyEtH5UBn5swmRKut7ArHER1tfVo9GfTa2QlywuZFYQKidXNaz4-v9hJOlLfGdGjkZmRI7vUgBQN3MIE54qsrZmJn00OaGaKYODpRIIE1QosvHTm5_8ofXoReQOfl57cjrysbpPt9YEsqlskMofv8q00MtLTX2xY-1uQsSSlDT2u4PpfRao7LZBjAgz5BAcUPGfOTuMw5qU0Rxadsbu5BEipQcnlLNWiFuRbsdMHUjROnZM82ZbXy-ybZg1JN5f6egtiGWMwyfSW1tiU_OwwPGTIke8sGwxN78beZ1bMX-YXu57X0-PuDC8FetiDTo853TbccAppQC4WYjfflWyJ2KO3E_TO4m6MAchJaKF9_G40OlDn52GlGVDdUiZtAzdnQI0DY3wKvnloOFuibjXg5c7XmTUI9XIhMWE3C9W3UqDVjz0SL6Ceo-Y7CVvSd8Nb-T0uDDEgMsKJlYazhwSr7lKraSYb9dRQqWVsfzJwlxRUdBlx92G9BTNY7XiH0NPHkx4tjM9fMdCGvCaSTrJv-wes3jr0tVkjVxjpeKRsE-J_eppJrOpXNfa19VjoVd1E264PQR7ssIl8DdNVKoLTSuKJaiW4yD9YMxFKD8fIK1gly2r4z1S5iUvk0NwC22dNwSV2TU6oNJrbKva5M0MHJZ8XPI72w9uyNa-sq--S3yN8oJBtGUCnFloVgXwkUGb1AluXuleDm00)
+![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/TLJ1Rjf04BtlLuoI2qWn9ggY80vL4Y0I4YgeuPZBP3sOBSkkExk6vWVw0Vt4VabdRQE2qig71S-RcRVlpVWXHEHOxwsA9bg2n-dNR3Yykn_3UaiG_OuSC66HCssOmXRqknQOSS4K4XVCbcn5hCBEk0ePzn3eUqrEqoEpFwwtHkySXG2tWxipqC9iQ64SFNakY2VUUeRhoJ0zIWaa6cqgT16kLjvQuygPAmN-wdfjl_uLO83s9Lm_VvgDdgUNUUl4VSN-84GPvlbISbyasSwNRV9w9OdJsMWskapCwy3vct5v85spYUyD-eMqmE_ISmdN5ckHOhAODpWv_ush0vQYxwg5oQbKHp_xdBYCGRenkJXXAkGmQ4ElhoGYyTHz3A72euEDSKLMaYCsEgimXADeg18YErLYF8eDcYbs-StRWhGNfhsgPheH2nlxTYQsJGJLyH7latPdF9H26xjfe1-LaOW2-4i_NVf4hzCZom9kADkdZba5UNDziQ0WIoL6Ag2Rg9jkvcxl-r8pLRgWCkdaJNMOZknZEtOcqlw2mtyb12pHEC5-bB8NZ1NS6B2gB6NHUpk6nhLel4jyBcHjDw0JjgrtJhKDVz2EN75kjJWlMApb4aa3sPKGeVT4o3BLogNxiIct4VocAosjfcBsGV2kthyH1_ZzynV8viOw3Bu5xmO2GQrbpPhkfsLj_aYeyF1bkGPBU3ZVsK6Y1gcZUf1VyX7u0m00)
 
-## Наслідки
+## Consequences
 
-- **ADR-0019 чинний** — його рішення й аргументація переносяться незмінними; змінюється лише, який
-  процес виконує спавн. Post-scriptum до ADR-0019 не потрібен (механізм той самий).
-- **Токен не перетинає межу** ([ADR-0055](0055-ipc-file-darwin-bookmark.md)) — наверх іде лише
-  decoded `UsageSnapshot`, ніколи `accessToken`/`refreshToken`.
-- **TCC-відповідальність за спавн `claude --safe-mode`** тепер на процесі helper'а, не застосунку —
-  поведінка має бути еквівалентною, але треба пере-верифікувати (частина #E3).
-- Пов'язано: [ADR-0056](0056-thin-helper-thick-app-build-flavors.md) (де саме проходить лінк-межа),
-  [ADR-0017](0017-delegated-token-refresh.md) (delegated refresh), [ADR-0033](0033-automatic-update-install.md)
-  / [ADR-0025](0025-check-for-updates.md) (updater/fetch — теж helper-side).
+- **ADR-0019 still stands** — its decision and reasoning carry over unchanged; only which process
+  performs the spawn changes. No postscript to ADR-0019 is needed (the mechanism is the same).
+- **The token never crosses the boundary** ([ADR-0055](0055-ipc-file-darwin-bookmark.md)) — only
+  the decoded `UsageSnapshot` goes upward, never `accessToken`/`refreshToken`.
+- **TCC responsibility for spawning `claude --safe-mode`** now sits with the helper's process, not
+  the app — behavior should be equivalent, but needs re-verification (part of #E3).
+- Related: [ADR-0056](0056-thin-helper-thick-app-build-flavors.md) (exactly where the link boundary
+  falls), [ADR-0017](0017-delegated-token-refresh.md) (delegated refresh),
+  [ADR-0033](0033-automatic-update-install.md) / [ADR-0025](0025-check-for-updates.md)
+  (updater/fetch — also helper-side).

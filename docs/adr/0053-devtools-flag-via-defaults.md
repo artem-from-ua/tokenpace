@@ -4,53 +4,57 @@ date: 2026-07-31
 supersedes: [0052]
 ---
 
-# ADR-0053: Гейт dev-tools через `UserDefaults` (`defaults`), а не env-var
+# ADR-0053: Gate dev-tools via `UserDefaults` (`defaults`), not an env var
 
-## Контекст
+## Context
 
-`TOKENPACE_DEVTOOLS` (#185) розблоковує ⌥-пункт «Development tools…» і живий колор-тюнер. Прапорець
-читався з оточення процесу, тож при запуску встановленого `.app` з Launchpad/Finder/при логіні пункт
-**не з'являвся**: launchd стартує бінарник **без шелла**, тож `export TOKENPACE_DEVTOOLS=1` з `~/.zshrc`
-не потрапляє в `ProcessInfo`.
+`TOKENPACE_DEVTOOLS` (#185) unlocks the ⌥ "Development tools…" menu item and the live color tuner.
+The flag was read from the process environment, so launching the installed `.app` from
+Launchpad/Finder/at login made the item **not appear**: launchd starts the binary **without a
+shell**, so `export TOKENPACE_DEVTOOLS=1` from `~/.zshrc` never reaches `ProcessInfo`.
 
-[ADR-0052](0052-shared-prod-env-flag-resolver.md) намагався закрити це «спільним резолвером»
-`ProdEnvFlag`, який робив fallback у login-шелл (`zsh -l -i -c`) через `ShellEnvironment` і кешував
-результат асинхронно на старті. Механізм працював, але виявився крихким: асинхронний subprocess на
-кожному launch, залежність від того, що GUI-процес успадкує коректний `SHELL`, і гонка «прапорець
-резолвиться вже після перших відкриттів меню». Діагностика показала, що навіть за правильного
-відтворення це складно тримати надійним.
+[ADR-0052](0052-shared-prod-env-flag-resolver.md) tried to close this with a "shared resolver"
+`ProdEnvFlag`, which fell back to the login shell (`zsh -l -i -c`) via `ShellEnvironment` and
+cached the result asynchronously at startup. The mechanism worked, but turned out fragile: an
+async subprocess on every launch, a dependency on the GUI process inheriting the correct `SHELL`,
+and a race where "the flag resolves only after the first menu openings". Diagnosis showed that
+even with correct reproduction, this was hard to keep reliable.
 
-## Рішення
+## Decision
 
-Прибрати env-механізм для dev-tools і зберігати прапорець як звичайне налаштування в `UserDefaults`,
-поряд з рештою конфігу застосунку (`PersistedConfig`, ADR-0023):
+Remove the env-based mechanism for dev-tools and store the flag as an ordinary setting in
+`UserDefaults`, alongside the rest of the app's config (`PersistedConfig`, ADR-0023):
 
-- **Новий ключ `devToolsEnabled`** у `PersistedConfig` (`UserDefaults.standard`, домен = bundle id
-  `com.artem-n.tokenpace`). Дефолт **off** (opt-in): `object(forKey:) as? Bool ?? false` — відсутній
-  ключ читається як `false`, відрізняється від явного `false`, за конвенцією решти opt-in тумблерів.
-- **`ColorStore.devToolsEnabled`** тепер `{ PersistedConfig.devToolsEnabled }` — синхронне читання з
-  defaults, без shell-probe і без warm-up. GUI/login-запуск вшановує ключ так само, як термінальний.
-- Env `TOKENPACE_DEVTOOLS` **більше не читається взагалі**.
-- Вмикання: `defaults write com.artem-n.tokenpace devToolsEnabled -bool true` на встановленому `.app`.
-  Settings-перемикача немає — це maintainer/dev-switch (пункт меню лишається ⌥-gated поверх прапорця).
+- **A new key `devToolsEnabled`** in `PersistedConfig` (`UserDefaults.standard`, domain = the
+  bundle id `com.artem-n.tokenpace`). Default **off** (opt-in): `object(forKey:) as? Bool ?? false`
+  — a missing key reads as `false`, distinct from an explicit `false`, following the convention of
+  the rest of the opt-in toggles.
+- **`ColorStore.devToolsEnabled`** is now `{ PersistedConfig.devToolsEnabled }` — a synchronous
+  read from defaults, no shell probe, no warm-up. GUI/login launch honors the key the same way a
+  terminal launch does.
+- The env var `TOKENPACE_DEVTOOLS` is **no longer read at all**.
+- Enabling: `defaults write com.artem-n.tokenpace devToolsEnabled -bool true` on the installed
+  `.app`. There is no Settings toggle — this is a maintainer/dev switch (the menu item stays
+  ⌥-gated on top of the flag).
 
-`ProdEnvFlag` видалено (обидва його споживачі зникли). `TOKENPACE_GH_AUTH` повертається до свого
-самостійного `AppDelegate.resolveGHAuth()` (`ProcessInfo` → `ShellEnvironment` login-shell fallback),
-рівно як було до ADR-0052 — тобто **ADR-0025 знову чинний і не змінюється**. `ShellEnvironment`
-лишається як login-shell probe для `TOKENPACE_GH_AUTH`.
+`ProdEnvFlag` was removed (both of its consumers are gone). `TOKENPACE_GH_AUTH` reverts to its
+standalone `AppDelegate.resolveGHAuth()` (`ProcessInfo` → `ShellEnvironment` login-shell fallback),
+exactly as before ADR-0052 — that is, **ADR-0025 still stands unchanged**. `ShellEnvironment`
+remains as the login-shell probe for `TOKENPACE_GH_AUTH`.
 
-Це формально **скасовує ADR-0052** (#201).
+This formally **cancels ADR-0052** (#201).
 
-## Наслідки
+## Consequences
 
-- **Надійно й просто.** Гейт — синхронне читання `UserDefaults`; жодного subprocess, гонки чи
-  залежності від `SHELL` при GUI-запуску. Однаково працює для Launchpad/Finder/логіну й термінала.
-- **`defaults write … devToolsEnabled` діє лише на встановлений `.app`.** Бінарник із `swift run`
-  bundle id не має, тож його `UserDefaults.standard` — інший домен. Тобто **`TOKENPACE_DEVTOOLS=1
-  swift run` більше не вмикає dev-tools** — свідомий компроміс: dev-tuner тепер перевіряється на
-  встановленому бандлі (де він і потрібен вживу), а для швидких перевірок лишаються стуб-змінні
-  (`TOKENPACE_STUB`, `TOKENPACE_OPEN_DEVTOOLS`), які самі по собі не є гейтом.
-- **`TOKENPACE_GH_AUTH` без змін.** `export` у `~/.zshrc` і далі вшановується при login-запуску через
+- **Reliable and simple.** The gate is a synchronous `UserDefaults` read; no subprocess, race, or
+  dependency on `SHELL` at GUI launch. Works the same for Launchpad/Finder/login and a terminal.
+- **`defaults write … devToolsEnabled` only affects the installed `.app`.** The binary from
+  `swift run` has no bundle id, so its `UserDefaults.standard` is a different domain. So
+  **`TOKENPACE_DEVTOOLS=1 swift run` no longer enables dev-tools** — a deliberate trade-off: the
+  dev tuner is now verified on the installed bundle (where it's actually needed live), while quick
+  checks keep the stub variables (`TOKENPACE_STUB`, `TOKENPACE_OPEN_DEVTOOLS`), which are not
+  themselves a gate.
+- **`TOKENPACE_GH_AUTH` unchanged.** An `export` in `~/.zshrc` is still honored at login launch via
   `resolveGHAuth`/`ShellEnvironment` (ADR-0025).
-- Прапорець тепер персистентний між запусками (лишається `true`, доки не прибрати ключ), на відміну
-  від env-var, який задавали щоразу.
+- The flag is now persistent across launches (stays `true` until the key is removed), unlike the
+  env var, which had to be set every time.

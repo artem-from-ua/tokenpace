@@ -3,70 +3,70 @@ status: accepted
 date: 2026-07-06
 ---
 
-# ADR-0016: Перейменування проєкту cc-timer → TokenPace
+# ADR-0016: Renaming the project from cc-timer to TokenPace
 
-## Контекст
+## Context
 
-Назва `cc-timer` («Claude Code timer») жорстко прив'язана до одного вендора, а продукт рухається до
-vendor-neutral пейсингу token-вікон різних LLM-агентів (#60). Потрібна назва, що сигналізує «пейсинг
-token/usage-вікон», не називаючи конкретного постачальника.
+The name `cc-timer` ("Claude Code timer") is tightly bound to a single vendor, while the product
+is moving toward vendor-neutral pacing of token windows across different LLM agents (#60). We need
+a name that signals "pacing token/usage windows" without naming a specific provider.
 
-Шортлист (#60): `AgentPace`, `TokenPace`, `LLMeter`. Обрано **TokenPace** — «token» є спільною
-одиницею для всіх LLM-вендорів. Доступність перевірено 2026-07-04: GitHub / npm / PyPI / App Store
-вільні; домени `.io` / `.ai` / `.dev` вільні (`.com` / `.app` зайняті). Trademark-пошук не робився —
-окремий крок перед публікацією в App Store.
+Shortlist (#60): `AgentPace`, `TokenPace`, `LLMeter`. **TokenPace** was chosen — "token" is a common
+unit across all LLM vendors. Availability was checked on 2026-07-04: GitHub / npm / PyPI / App
+Store are free; the `.io` / `.ai` / `.dev` domains are free (`.com` / `.app` are taken). A trademark
+search wasn't done — that's a separate step before publishing to the App Store.
 
-Відкритим лишалося, як саме розкласти назву на ідентифікатори: bundle id (`dev.tokenpace.*` на базі
-незареєстрованого домена чи наявний особистий префікс), регістр executable-таргета, доля локального
-notarytool-профілю.
+What remained open was exactly how to break the name down into identifiers: the bundle id
+(`dev.tokenpace.*` based on an unregistered domain, or an existing personal prefix), the
+executable target's casing, and the fate of the local notarytool profile.
 
-## Рішення
+## Decision
 
-Повний ребрендинг у Фазі 1 (#61) з такими ідентифікаторами:
+A full rebrand in Phase 1 (#61) with the following identifiers:
 
-| Що | Було | Стало |
+| What | Was | Becomes |
 |---|---|---|
-| Продукт / display name | cc-timer | **TokenPace** |
-| SwiftPM package / executable-таргет | `cc-timer` | `TokenPace` (`swift run TokenPace`) |
-| Бібліотека (таргет + namespace-enum) | `CCTimerKit` | `TokenPaceKit` |
-| Тестовий таргет | `CCTimerKitTests` | `TokenPaceKitTests` |
+| Product / display name | cc-timer | **TokenPace** |
+| SwiftPM package / executable target | `cc-timer` | `TokenPace` (`swift run TokenPace`) |
+| Library (target + namespace enum) | `CCTimerKit` | `TokenPaceKit` |
+| Test target | `CCTimerKitTests` | `TokenPaceKitTests` |
 | Bundle ID | `com.artem-n.cc-timer` | `com.artem-n.tokenpace` |
-| os_log subsystem (= bundle id, інваріант) | `com.artem-n.cc-timer` | `com.artem-n.tokenpace` |
-| Env var стаба транспорту | `CC_TIMER_STUB` | `TOKENPACE_STUB` |
-| Env var обходу pre-commit hook | `CC_TIMER_SKIP_SWIFT_HOOK` | `TOKENPACE_SKIP_SWIFT_HOOK` |
-| notarytool-профіль (локальний Keychain) | `cc-timer-notary` | `tokenpace-notary` |
-| Репозиторій GitHub | `artem-from-ua/cc-timer` | `artem-from-ua/tokenpace` |
-| Release-архів | `cc-timer-X.Y.Z.zip` | `TokenPace-X.Y.Z.zip` |
+| os_log subsystem (= bundle id, an invariant) | `com.artem-n.cc-timer` | `com.artem-n.tokenpace` |
+| Transport stub env var | `CC_TIMER_STUB` | `TOKENPACE_STUB` |
+| Pre-commit hook bypass env var | `CC_TIMER_SKIP_SWIFT_HOOK` | `TOKENPACE_SKIP_SWIFT_HOOK` |
+| notarytool profile (local Keychain) | `cc-timer-notary` | `tokenpace-notary` |
+| GitHub repository | `artem-from-ua/cc-timer` | `artem-from-ua/tokenpace` |
+| Release archive | `cc-timer-X.Y.Z.zip` | `TokenPace-X.Y.Z.zip` |
 
-Ключові вибори:
+Key choices:
 
-- **Bundle id лишається на особистому префіксі** (`com.artem-n.tokenpace`), а не `dev.tokenpace.*`:
-  домен `tokenpace.dev` не зареєстрований, тож reverse-DNS від нього був би фікцією. Поки продукту
-  немає в App Store, змінити bundle id пізніше дешево; зробити це зараз на незакріплений домен —
-  ризик без виграшу.
-- **Executable-таргет — TitleCase `TokenPace`**: конвенція macOS-застосунків
-  (`TokenPace.app/Contents/MacOS/TokenPace`), а не CLI-стиль lowercase.
-- **Історія не переписується**: згадки `cc-timer`/`CCTimerKit` в ADR 0006–0015 (тіла
-  Контекст/Рішення/Наслідки) лишаються як незмінний запис стану кодової бази на момент рішення.
-  Перейменовуються лише живі доки (README, SPEC, architecture, building, conventions,
-  log-messages, releasing).
-- **Keychain-сервіс `"Claude Code-credentials"` не чіпається** — це ім'я айтема, який створює
-  Claude Code CLI; воно не походить від назви нашого застосунку.
+- **The bundle id stays on the personal prefix** (`com.artem-n.tokenpace`), not
+  `dev.tokenpace.*`: the domain `tokenpace.dev` isn't registered, so a reverse-DNS id built from it
+  would be a fiction. While the product isn't in the App Store, changing the bundle id later is
+  cheap; doing it now against an unclaimed domain is risk with no payoff.
+- **The executable target is TitleCase `TokenPace`**: the macOS app convention
+  (`TokenPace.app/Contents/MacOS/TokenPace`), not CLI-style lowercase.
+- **History is not rewritten**: mentions of `cc-timer`/`CCTimerKit` in ADRs 0006–0015 (in the
+  Context/Decision/Consequences bodies) stay as an unaltered record of the codebase's state at the
+  time of the decision. Only living docs are renamed (README, SPEC, architecture, building,
+  conventions, log-messages, releasing).
+- **The Keychain service `"Claude Code-credentials"` is left untouched** — that's the item name
+  created by the Claude Code CLI itself; it isn't derived from our app's name.
 
-## Наслідки
+## Consequences
 
-- **Breaking для бібліотеки:** продукт `CCTimerKit` зникає — кожен `import CCTimerKit` міняється на
-  `import TokenPaceKit`. Перейменування коду зроблено атомарно в одному PR, збірка не ламається
-  посередині.
-- **Осиротілий login item:** `SMAppService.mainApp` реєструється за bundle id, тож стара реєстрація
-  `com.artem-n.cc-timer` лишається в System Settings → Login Items після встановлення TokenPace.app
-  — прибирається вручну разом зі старим `.app`. Міграційного коду немає (свідомо: одноразовий
-  ручний крок одного користувача). `UserDefaults` застосунок не використовує — інших втрат стану
-  немає.
-- **notarytool-профіль перестворюється вручну** (`xcrun notarytool store-credentials
-  tokenpace-notary …` з новим app-specific password) — інакше нотаризація в `build-app.sh` тихо
-  скіпається. Старий профіль `cc-timer-notary` нешкідливий, може лишатися.
-- **Старі релізи не перейменовуються:** asset-и `cc-timer-*.zip` v0.11.0 і раніших лишаються як є;
-  GitHub тримає редірект зі старого URL репозиторію.
-- Згадки в тілах/коментарях GitHub-issues (відкритих і закритих) зачищаються окремим кроком після
-  merge, крім історичних цитат (напр., naming-комент у #60).
+- **Breaking for the library:** the `CCTimerKit` product disappears — every `import CCTimerKit`
+  changes to `import TokenPaceKit`. The code rename was done atomically in a single PR, so the
+  build never breaks midway.
+- **An orphaned login item:** `SMAppService.mainApp` registers by bundle id, so the old
+  `com.artem-n.cc-timer` registration stays in System Settings → Login Items after installing
+  TokenPace.app — it's removed by hand along with the old `.app`. There's no migration code
+  (deliberately: a one-time manual step for a single user). The app doesn't use `UserDefaults`, so
+  there's no other state loss.
+- **The notarytool profile has to be recreated by hand** (`xcrun notarytool store-credentials
+  tokenpace-notary …` with a new app-specific password) — otherwise notarization in `build-app.sh`
+  silently gets skipped. The old `cc-timer-notary` profile is harmless and can stay.
+- **Old releases are not renamed:** the `cc-timer-*.zip` assets for v0.11.0 and earlier stay as
+  they are; GitHub keeps a redirect from the old repository URL.
+- Mentions in the bodies/comments of GitHub issues (open and closed) are cleaned up as a separate
+  step after the merge, except for historical quotes (e.g., the naming comment in #60).

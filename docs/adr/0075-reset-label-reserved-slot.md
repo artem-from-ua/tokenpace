@@ -3,131 +3,144 @@ status: accepted
 date: 2026-08-07
 ---
 
-# ADR-0075: Зарезервований слот лейбла ресету — від наявності лейбла, з центруванням тексту
+# ADR-0075: A reserved slot for the reset label — keyed on presence, with centered text
 
-## Контекст
+## Context
 
-Меню-бар вирівняний **праворуч**, тож будь-яка зміна ширини віджета зсуває все, що ліворуч від
-нього, — включно зі статус-айтемами інших застосунків. Це вже двічі було предметом рішення:
+The menu bar is **right-aligned**, so any change to the widget's width shifts everything to its left
+— including other apps' status items. This has already been the subject of a decision twice:
 [ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md)
-([#283](https://github.com/artem-from-ua/tokenpace/issues/283)) прибрав високочастотне джерело
-(awaiting-долоня), а [ADR-0074](0074-one-reset-format-on-both-surfaces.md)
-([#284](https://github.com/artem-from-ua/tokenpace/issues/284)) звузив найширший лейбл 37.2 → 23.6 pt
-і прибрав стрибок на **зміні формату**.
+([#283](https://github.com/artem-from-ua/tokenpace/issues/283)) removed a high-frequency source (the
+awaiting-hand icon), and [ADR-0074](0074-one-reset-format-on-both-surfaces.md)
+([#284](https://github.com/artem-from-ua/tokenpace/issues/284)) narrowed the widest label from 37.2 to
+23.6 pt and removed the jump at the **format change**.
 
-Лишилося те, чого формат не лікує: ширина лейбла залежить від **кількості гліфів**. `10h` — три
-символи, `9h` — два. `resetLabelWidth` міряла намальований рядок, тож віджет «дихав» на кожній зміні
-розрядності ([#303](https://github.com/artem-from-ua/tokenpace/issues/303)).
+What is left is something the format change cannot cure: the label's width depends on **glyph
+count**. `10h` is three characters, `9h` is two. `resetLabelWidth` measured the drawn string, so the
+widget "breathed" on every digit-count change
+([#303](https://github.com/artem-from-ua/tokenpace/issues/303)).
 
-Виміряно `monospacedDigitSystemFont(ofSize: 11)`, з `ceil`, як робить код:
+Measured with `monospacedDigitSystemFont(ofSize: 11)`, with `ceil`, exactly as the code does:
 
-| Лейбл | Ширина |
+| Label | Width |
 |---|---|
-| `1h` · `9h` · `4d` · `7d` | 14 pt — найвужчий |
+| `1h` · `9h` · `4d` · `7d` | 14 pt — narrowest |
 | `9m` | 17 pt |
 | `10h` · `22h` · `15d` · `30d` | 21 pt |
-| `10m` · `45m` · `49m` · `<1m` | **24 pt — максимум** |
+| `10m` · `45m` · `49m` · `<1m` | **24 pt — maximum** |
 
-Стрибки, які бачив користувач: `10h → 9h` — 7 pt (раз на 5-годинне вікно), `49m → 1h` — 10 pt,
+Jumps the user actually saw: `10h → 9h` — 7 pt (once per 5-hour window), `49m → 1h` — 10 pt,
 `10m → 9m` — 7 pt.
 
-## Рішення
+## Decision
 
-**Резервувати слот у ширину найширшого можливого лейбла й центрувати текст усередині нього — але
-лише тоді, коли лейбл справді малюється.**
+**Reserve a slot the width of the widest possible label and center the text inside it — but only
+while the label is actually being drawn.**
 
-### 1. Слот резервується з наявності лейбла, а не з опції
+### 1. The slot is reserved from the label's presence, not from an option
 
-Це свідома **відмінність** від §1 [ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md), де слот
-резервується з налаштування й тримається, навіть коли гліфа немає. Різницю диктує частота: долоня
-перемикається десятки разів на день **під час звичайної роботи**, тож резерв від опції був єдиним
-способом зупинити дрижання.
+This is a deliberate **departure** from §1 of [ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md),
+where the slot is reserved from a setting and held even when the glyph is absent. The frequency
+dictates the difference: the hand icon toggles dozens of times a day **during ordinary work**, so
+reserving from the option was the only way to stop the jitter.
 
-Лейбл ресету поводиться інакше. У дефолтному `smart` його показ вирішує severity через
-`MenuBarLayout.selectReset` ([ADR-0029](0029-reset-countdown-selection-by-severity.md)), тобто **більшість часу
-лейбла немає взагалі**. Резерв від опції означав би тримати 24 pt порожнечі в спокійному стані — рівно
-те, що [ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md) відкинув у варіанті «резервувати всі
-п'ять слотів»: спокійний стан платить за аварійний на поверхні, де ширина в дефіциті.
+The reset label behaves differently. In the default `smart` mode, whether it shows at all is decided
+by severity through `MenuBarLayout.selectReset` ([ADR-0029](0029-reset-countdown-selection-by-severity.md)),
+meaning **most of the time there is no label at all**. Reserving from an option would mean holding
+24 pt of emptiness in the calm state — exactly what
+[ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md) rejected in its "reserve all five slots"
+alternative: the calm state paying for the emergency state on a surface where width is already scarce.
 
-Отже: `resetToShow == nil` → 0 pt, як було; лейбл є → повний слот.
+So: `resetToShow == nil` → 0 pt, as before; the label is present → the full slot.
 
-**Поява/зникнення самого лейбла і далі зсуває віджет** (слот + `labelGap` ≈ 29 pt). Це лишено
-свідомо: у `smart` цей перехід збігається з подією, на яку користувач і так дивиться, — аргумент
-«стрибок, що сам себе пояснює» з [ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md).
+**The label's own appearance/disappearance still shifts the widget** (slot + `labelGap` ≈ 29 pt). This
+is left as is, deliberately: in `smart` mode, that transition coincides with an event the user is
+already watching for — the "a jump that explains itself" argument from
+[ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md).
 
-### 2. Одна ширина на всі одиниці
+### 2. One width for every unit
 
-Per-unit (хвилини 24 pt, години й дні 21 pt) заощадив би 3 pt, але повернув би стрибок на зміні
-одиниці (`49m` → `1h`) — половину того самого дефекту. Відкинуто: слот, що сам стрибає, не є слотом.
+A per-unit width (24 pt for minutes, 21 pt for hours and days) would save 3 pt, but would bring back a
+jump at the unit change (`49m` → `1h`) — half of the very defect being fixed. Rejected: a slot that
+jumps by itself is not a slot.
 
-### 3. Ширина обчислюється, а не хардкодиться
+### 3. The width is computed, not hardcoded
 
-`resetLabelSlot` — `static let`, порахований лениво з `resetLabelFont`, тієї самої, якою лейбл
-малюється. Літерал `24` мовчазно перестав би відповідати тексту при зміні `ofSize: 11` або
-системного шрифту; обчислене число не може розійтися з намальованим.
+`resetLabelSlot` is a `static let`, computed lazily from `resetLabelFont` — the same font the label is
+drawn in. A literal `24` would silently stop matching the text if `ofSize: 11` or the system font ever
+changed; a computed number cannot drift from what is actually drawn.
 
-Проб чотири — `<1m`, `00m`, `00h`, `00d`. Цього досить, бо шрифт monospaced-**digit**: усі цифри
-однакової ширини, тож двозначні проби стоять за кожне значення своєї одиниці, а `<1m` — за єдину
-нецифрову форму. Повний перебір `1…49m` / `1…22h` / `1…30d` дає те саме число за ~500× ціни
-(45 мс проти 0.095 мс), тож проби — це весь простір, а не його вибірка.
+Four probes suffice — `<1m`, `00m`, `00h`, `00d`. This is enough because the font is
+monospaced-**digit**: every digit has the same width, so a two-digit probe stands in for every value
+of its unit, and `<1m` stands in for the single non-digit form. An exhaustive sweep of `1…49m` /
+`1…22h` / `1…30d` produces the same number at ~500× the cost (45 ms versus 0.095 ms), so the probes
+are the whole space, not a sample of it.
 
-**Масштаб екрана нічого не міняє.** Метрики тексту — у **points**; backing scale (1×/2×/3×) впливає
-на растеризацію гліфа, не на ширину. Перевірено: `10m` = 23.6220703125 в усіх трьох контекстах.
-Переїзд між Retina і звичайним монітором, зміна «Scaled» роздільності чи зовнішній дисплей
-перерахунку не потребують — тому `static let` (один раз за життя процесу), а не обчислення на кожен
-кадр чи підписка на зміну екрана.
+**Screen scale changes nothing.** Text metrics are in **points**; the backing scale (1×/2×/3×) affects
+glyph rasterization, not width. Verified: `10m` = 23.6220703125 in all three contexts. Moving between
+Retina and a non-Retina monitor, changing a "Scaled" resolution, or an external display need no
+recomputation — hence `static let` (computed once per process lifetime), rather than a per-frame
+computation or a subscription to screen-change notifications.
 
-### 4. `max`, а не голий слот — запобіжник, а не покриття кейсу
+### 4. `max`, not a bare slot — a safeguard, not case coverage
 
-`resetLabelWidth` повертає `max(resetLabelSlot, measured)`. Жоден живий стан до другої гілки не
-доходить: заблокований відлік резолвиться через `BlockingReset.forBlocked`, якому потрібні **всі**
-вікна вичерпані, а 7-денне ресетиться щонайбільше через 7 днів (`7d`, 14 pt); навіть
-credits/monthly упирається в `30d` (21 pt). Тризначних днів не буває.
+`resetLabelWidth` returns `max(resetLabelSlot, measured)`. No live state ever reaches the second
+branch: a blocked countdown resolves through `BlockingReset.forBlocked`, which requires **every**
+window exhausted, and the 7-day window resets in at most 7 days (`7d`, 14 pt); even credits/monthly
+tops out at `30d` (21 pt). There is no such thing as a three-digit day count.
 
-`max` тут страхує від **тихого обрізання** в майбутньому: зміна формтера чи вікно з довшим
-горизонтом дали б рядок поза пробами, і голий слот відрізав би гліф без жодного сигналу, тоді як
-`max` просто розширить елемент — сьогоднішня поведінка.
+`max` here is insurance against **silent clipping** in the future: a formatter change or a window with
+a longer horizon would produce a string outside the probes, and a bare slot would cut off the glyph
+with no signal at all, whereas `max` simply widens the element — today's behavior.
 
-### 5. Текст центрується в слоті
+### 5. The text is centered in the slot
 
-Порожнеча ділиться навпіл. Ліве вирівнювання зсипало б усі 10 pt до правого краю елемента, і лейбл
-читався б як відклеєний від нього; праве — навпаки, в розрив після барів. Зсув округлюється до цілого
-пункту, щоб гліфи лишались на піксельній сітці й не м'якшали проти барів поруч.
+The empty space splits in half. Left alignment would dump all 10 pt against the element's right edge,
+and the label would read as detached from it; right alignment would do the opposite, into the gap
+after the bars. The offset is rounded to a whole point, so the glyphs stay on the pixel grid and don't
+go soft next to the bars beside them.
 
-### 6. Шрифт — одна константа
+### 6. The font is one constant
 
-`monospacedDigitSystemFont(ofSize: 11, weight: .regular)` дублювався у вимірі й у малюванні. Тепер
-від їхньої тотожності залежить ще й центрування (розбіжність зсунула б текст усередині власного
-слота), тож шрифт винесено в `resetLabelFont` — одне джерело для слота, виміру й рендера.
+`monospacedDigitSystemFont(ofSize: 11, weight: .regular)` was duplicated between measurement and
+drawing. Now that centering also depends on their identity (a mismatch would shift the text within its
+own slot), the font was factored out into `resetLabelFont` — a single source for the slot, the
+measurement, and the render.
 
-### 7. Пастка §2 ADR-0073 тут не спрацьовує — перевірено, а не припущено
+### 7. The ADR-0073 §2 trap does not apply here — checked, not assumed
 
-Там резервування ширини без просування `originX` кинуло б порожнечу праворуч від усього вмісту, і
-фікс не працював би. Лейбл ресету — **останній** елемент перед правим `hPadding` в обох гілках
-(`drawBars`, `drawBlockedReset`), тож просувати після нього нічого. Але саме тому центрування
-(§5) є частиною рішення, а не оздобою: без нього вся порожнеча лягла б одним блоком праворуч.
+There, reserving width without advancing `originX` would have left an empty space to the right of all
+the content, and the fix would not have worked. The reset label is the **last** element before the
+right `hPadding` in both branches (`drawBars`, `drawBlockedReset`), so there is nothing to advance
+after it. But that is exactly why the centering (§5) is part of the decision, not decoration: without
+it, all the empty space would sit as a single block on the right.
 
-## Наслідки
+## Consequences
 
-- **Ціна — до 10 pt порожнечі** навколо коротких лейблів (`1h`, `4d`), поки лейбл на екрані.
-  Центрування ділить її навпіл (5 pt з боку), тож вона читається як відступ, а не як дірка.
-- **Ширина віджета більше не залежить від того, що показує лейбл.** Перевірено на реальному барі:
-  при `5h` (14 pt) і `12m` (24 pt) сусідній системний елемент стоїть на тій самій позиції.
-- **Таблиця джерел дрижання [ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md) закривається
-  ще на один рядок.** Лишаються іконка кредитів, pause-гліф і крапка сервісу — усі низькочастотні й
-  усі перемикаються тоді, коли користувач дивиться на віджет із тієї ж причини.
-- **Проби прив'язані до формтера.** Якщо `ResetClock.relativeRounded` колись почне видавати форму
-  поза `<1m`/`Nm`/`Nh`/`Nd`, проби доведеться оновити; до того часу `max` (§4) не дасть обрізати.
-- **Автотестів на це немає** — `StatusItemView` живе в AppKit-таргеті, який проєкт не тестує
-  (те саме застереження, що в «Наслідках» [ADR-0074](0074-one-reset-format-on-both-surfaces.md)).
-  Регресія ширини видима лише на скріншоті реального бару.
+- **The cost is up to 10 pt of empty space** around short labels (`1h`, `4d`) while the label is on
+  screen. Centering splits it in half (5 pt on each side), so it reads as padding rather than a hole.
+- **The widget's width no longer depends on what the label shows.** Verified on a real bar: at `5h`
+  (14 pt) and at `12m` (24 pt), the neighboring system item sits at the same position.
+- **The jitter-source table from [ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md) closes off
+  one more row.** What remains is the credits icon, the pause glyph, and the service dot — all
+  low-frequency and all toggling exactly when the user is already looking at the widget for that same
+  reason.
+- **The probes are pinned to the formatter.** If `ResetClock.relativeRounded` ever starts emitting a
+  shape outside `<1m`/`Nm`/`Nh`/`Nd`, the probes will need updating; until then `max` (§4) prevents
+  clipping.
+- **There are no automated tests for this** — `StatusItemView` lives in the AppKit target, which the
+  project does not test (the same caveat as in the "Consequences" section of
+  [ADR-0074](0074-one-reset-format-on-both-surfaces.md)). A width regression is only visible on a
+  screenshot of a real bar.
 
-## Пов'язане
+## Related
 
-- [ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md) — зарезервований слот awaiting-долоні;
-  звідси взято сам патерн і аргумент «стрибок, що сам себе пояснює». **Не** superseded: інше джерело
-  ширини, обидва рішення чинні, і резервування тут навмисно ключується інакше (§1).
-- [ADR-0074](0074-one-reset-format-on-both-surfaces.md) — один формат на обох поверхнях; звузив
-  максимум до 23.6 pt, чим зробив цей резерв прийнятним за ціною.
-- [ADR-0029](0029-reset-countdown-selection-by-severity.md) — коли відлік узагалі показується.
-- [#303](https://github.com/artem-from-ua/tokenpace/issues/303) — тікет із вимірами і трейд-офом.
+- [ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md) — the awaiting-hand icon's reserved slot;
+  this ADR borrows the pattern itself and the "a jump that explains itself" argument. **Not**
+  superseded: it's a different width source, both decisions still stand, and the reservation here is
+  deliberately keyed differently (§1).
+- [ADR-0074](0074-one-reset-format-on-both-surfaces.md) — one format on both surfaces; it narrowed the
+  maximum to 23.6 pt, which is what made this reservation affordable.
+- [ADR-0029](0029-reset-countdown-selection-by-severity.md) — when the countdown shows at all.
+- [#303](https://github.com/artem-from-ua/tokenpace/issues/303) — the ticket with the measurements and
+  the trade-off.

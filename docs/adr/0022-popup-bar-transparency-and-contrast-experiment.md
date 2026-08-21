@@ -4,97 +4,108 @@ date: 2026-07-23
 superseded_by: [0059, 0060, 0064]
 ---
 
-# ADR-0022: Вигляд пейсинг-барів попапа — монохромні непрозорі бари на суцільному фоні
+# ADR-0022: Popup pacing-bar appearance — opaque monochrome bars on a solid background
 
-> **Частково superseded [ADR-0059](0059-menu-bar-native-semantic-colours.md):** клауза в «Наслідках»,
-> що **menu-bar-бар** лишається фіксованими statusline-значеннями (ADR-0005), скасована — menu-bar тепер
-> малює системними semantic-кольорами (track = `labelColor@0.22`, акценти = `.system*`).
+> **Partially superseded by [ADR-0059](0059-menu-bar-native-semantic-colours.md):** the clause in
+> "Consequences" that the **menu-bar bar** stays on fixed statusline values (ADR-0005) is revoked —
+> the menu bar now draws with system semantic colors (track = `labelColor@0.22`, accents =
+> `.system*`).
 >
-> **Частково superseded [ADR-0060](0060-popup-native-semantic-colours.md):** popup pacing-палітра теж
-> перейшла на системні semantic-кольори — трійка `.systemRed/Yellow/Orange` (замість числових
-> наближень) і **напівпрозорий** track `labelColor@0.22` (реверс непрозорого монохромного бару, §4.2).
-> Claude-бренд лишається sRGB.
->
-> **Superseded [ADR-0064](0064-popup-translucent-card-and-glow-bars.md) (#188):** рішення про **суцільний
-> непрозорий фон** усього дропдауна (`SolidBackdropView` + overlay нативних пунктів, #86) **скасовано**.
-> Попап тепер **безумовно** напівпрозорий: секція «Claude» сидить на заокругленій плашці
-> (`CardBackdropView`) над рідним menu-матеріалом; `SolidBackdropView` та opaque-режим видалено. Бари
-> також перебудовано (капсульні кольорові стріпи + glow) — див. ADR-0064.
+> **Partially superseded by [ADR-0060](0060-popup-native-semantic-colours.md):** the popup pacing
+> palette also moved to system semantic colors — the trio `.systemRed/Yellow/Orange` (instead of
+> numeric approximations) and a **semi-transparent** track, `labelColor@0.22` (a reversal of the
+> opaque monochrome bar, §4.2). The Claude brand color stays sRGB.
 
-## Контекст
+> **Superseded by [ADR-0064](0064-popup-translucent-card-and-glow-bars.md) (#188):** the decision
+> for a **solid opaque background** across the whole dropdown (`SolidBackdropView` + an overlay for
+> native items, #86) **is revoked**. The popup is now **unconditionally** translucent: the "Claude"
+> section sits on a rounded card (`CardBackdropView`) over the native menu material;
+> `SolidBackdropView` and the opaque mode were removed. The bars were also rebuilt (capsule colored
+> strips + glow) — see ADR-0064.
 
-Попап-дропдаун (`PopupViewController`) **не малює власного непрозорого фону** — його контент
-хоститься в `NSMenuItem.view`, а під ним просвічує vibrancy-матеріал самого `NSMenu`. Коли ми
-пробували зробити пейсинг-бари напівпрозорими (щоб pacing-акцент читався на м'якшій основі), крізь
-зони бару почав просвічувати **довільний фон під попапом** (чужі вікна, шпалери) — і контраст барів
-та тексту став нестабільним: той самий колір на світлій плямі виглядає інакше, ніж на темній.
+## Context
 
-Гарантувати мінімальний контраст поверх *довільного* фону, який ми не контролюємо, — неможливо:
-AppKit не дає доступу до того, що система композитить під vibrancy-шаром.
+The popup dropdown (`PopupViewController`) **does not draw its own opaque background** — its
+content is hosted inside `NSMenuItem.view`, with `NSMenu`'s own vibrancy material showing through
+underneath. When we tried making the pacing bars semi-transparent (so the pacing accent would read
+against a softer base), an **arbitrary background under the popup** (other windows, the wallpaper)
+started showing through the bar's zones — and the contrast of both the bars and the text became
+unstable: the same color looks different on a light patch versus a dark one.
 
-Щоб знайти робочий вигляд, ми провели **живий A/B-експеримент** — тимчасово додали в dev-дропдаун
-перемикачі кількох осей (прозорість зон бару, стратегія контрасту, forced light/dark) і порівняли
-підходи на реальному плямистому фоні в обох темах. Цей ADR фіксує **підсумок** експерименту й
-фінальне рішення; самі перемикачі після вибору прибрано.
+Guaranteeing a minimum contrast over an *arbitrary* background we don't control is impossible:
+AppKit gives no access to whatever the system composites under the vibrancy layer.
 
-## Що тестували (історичний контекст)
+To find a workable appearance, we ran a **live A/B experiment** — temporarily adding toggles for
+several axes to the dev dropdown (bar-zone transparency, contrast strategy, forced light/dark) and
+compared approaches against a real, mottled background in both themes. This ADR records the
+experiment's **outcome** and the final decision; the toggles themselves were removed after the
+choice was made.
 
-Тимчасово існували (усі в dev-дропдауні, з env-seed'ами):
+## What we tested (historical context)
 
-- **Прозорість зон бару** (`BarAppearance`, `TOKENPACE_BAR_ALPHA`): `opaque` / `all` (весь бар) /
-  `gap` (лише pacing-gap) / `background` (used+future+тіки) / `opaqueSolid` (усе непрозоре + суцільна
-  підкладка). Прозорість — 0.8 / 0.75 для gap.
-- **Контраст/підкладка** (`BarContrast`, `TOKENPACE_POPUP_CONTRAST`): `none` / `backingPlate`
-  (непрозора плашка під баром) / `vibrancy` (`NSVisualEffectView`). Прототип **`adaptive halo`**
-  (обвідка кольору фону навколо барів) — відкинуто: читалось «брудно» й не вирішувало проблему.
-- **Монохромні бари** — used+future обидва в світлому сірому замість темного-used + teal-хвоста.
-- **Force light/dark** (`ThemeOverride`, `TOKENPACE_THEME`) — форсована тема попапа для перевірки
-  кольорів в обох appearance без перемикання всієї системи.
+These existed temporarily (all in the dev dropdown, with env seeds):
 
-## Ключові знахідки
+- **Bar-zone transparency** (`BarAppearance`, `TOKENPACE_BAR_ALPHA`): `opaque` / `all` (the whole
+  bar) / `gap` (the pacing gap only) / `background` (used+future+ticks) / `opaqueSolid` (everything
+  opaque + a solid backing plate). Transparency was 0.8 / 0.75 for the gap.
+- **Contrast/backing** (`BarContrast`, `TOKENPACE_POPUP_CONTRAST`): `none` / `backingPlate` (an
+  opaque plate under the bar) / `vibrancy` (`NSVisualEffectView`). The **`adaptive halo`** prototype
+  (a background-colored outline around the bars) was rejected — it read as "muddy" and didn't solve
+  the problem.
+- **Monochrome bars** — both used+future in light gray instead of dark-used + a teal tail.
+- **Force light/dark** (`ThemeOverride`, `TOKENPACE_THEME`) — a forced popup theme, to check colors
+  in both appearances without switching the whole system.
 
-1. **Прозорий бар на довільному фоні нестабільний** — тож фінал непрозорий.
-2. **`opaqueSolid` + overlay покриває весь дропдаун.** `SolidBackdropView`, вставлений як
-   найнижчий subview `NSPopupMenuWindow.contentView` (перевірено на macOS 15 — ADR/issue #86),
-   робить суцільним **увесь** дропдаун, включно з нативними `Settings…`/`Quit`. Приватна ієрархія
-   меню — крихко, але з graceful-деградацією (guard нічого не знаходить → no-op).
-3. **Монохромні бари читаються найкраще** — used+future в суцільному appearance-aware сірому, а
-   pacing-gap + крапка — єдиний кольоровий акцент.
-4. **`ThemeOverride` уперся в обмеження NSMenu:** форс appearance меню/вікна перефарбовує **фон**
-   пунктів, але їхній **текст** NSMenu малює сам і **ігнорує** і forced appearance, і явний
-   `attributedTitle` foreground для enabled-пунктів (перевірено діагностикою — колір у об'єкті
-   правильний, візуально — ні). Тобто цілісний forced-dark із читабельним текстом нативних пунктів
-   недосяжний. Перемикач прибрано; теми тестуються через системне System Settings.
+## Key findings
 
-## Рішення
+1. **A transparent bar over an arbitrary background is unstable** — so the final decision is
+   opaque.
+2. **`opaqueSolid` + an overlay covers the whole dropdown.** `SolidBackdropView`, inserted as the
+   lowest subview of `NSPopupMenuWindow.contentView` (verified on macOS 15 — issue #86), makes the
+   **entire** dropdown solid, including the native `Settings…`/`Quit` items. This relies on a
+   private menu hierarchy — fragile, but with graceful degradation (a guard that finds nothing is a
+   no-op).
+3. **Monochrome bars read best** — used+future in a solid appearance-aware gray, with the
+   pacing gap + dot as the sole color accent.
+4. **`ThemeOverride` ran into an NSMenu limitation:** forcing the menu/window appearance recolors
+   the items' **background**, but `NSMenu` draws their **text** itself and **ignores** both the
+   forced appearance and an explicit `attributedTitle` foreground for enabled items (verified by
+   diagnostics — the color on the object is correct, visually it isn't). So a fully consistent
+   forced-dark look with readable text on native items is unreachable. The toggle was removed;
+   themes are tested via the system's own System Settings.
 
-1. **Зашити єдину поведінку, прибрати всі перемикачі й осі.** Видалено `BarAppearance`,
-   `BarContrast`, `ThemeOverride`, `adaptive halo`, hover-прев'ю, env `TOKENPACE_BAR_ALPHA` /
-   `TOKENPACE_POPUP_CONTRAST` / `TOKENPACE_THEME` / `TOKENPACE_FUTURE_GREY`.
-2. **Фіксований вигляд:** непрозорі **монохромні** бари (used+future — суцільний сірий
-   `Palette.monochromeGrey`), суцільний непрозорий фон **усього** дропдауна (`SolidBackdropView` +
-   overlay нативних пунктів), без контраст-ефектів.
-3. **Пейсинг-кольори — системні** (`.systemGreen/.systemRed/.systemYellow/.systemOrange`), ті самі,
-   що в статус-крапках сервісів. Ahead-of-pace градуюється за випередженням: нижче динамічного порога
-   `0.16·(1−timeFraction)` — жовтий, на/вище (або ресет `≤ 20 хв`) — помаранчовий, вичерпано —
-   червоний (`PopupBarView.aheadColor`; поріг — ADR-0044, історично статичні `15` пунктів).
-4. **`dimmedLabelColor` — dynamic** `NSColor(name:)` (блендинг у цільовому appearance), а не
-   `static let .blended(...)`, який запікав appearance першого доступу й виходив near-black у dark.
+## Decision
 
-## Наслідки
+1. **Hardcode a single behavior, remove all toggles and axes.** `BarAppearance`, `BarContrast`,
+   `ThemeOverride`, `adaptive halo`, the hover preview, and the env vars `TOKENPACE_BAR_ALPHA` /
+   `TOKENPACE_POPUP_CONTRAST` / `TOKENPACE_THEME` / `TOKENPACE_FUTURE_GREY` were all removed.
+2. **The fixed appearance:** opaque **monochrome** bars (used+future — a solid gray,
+   `Palette.monochromeGrey`), a solid opaque background across the **whole** dropdown
+   (`SolidBackdropView` + an overlay for native items), no contrast effects.
+3. **Pacing colors are system colors** (`.systemGreen/.systemRed/.systemYellow/.systemOrange`), the
+   same ones used in the service status dots. Ahead-of-pace grades by how far ahead: below the
+   dynamic threshold `0.16·(1−timeFraction)` is yellow, at/above it (or a reset `≤ 20 min` away) is
+   orange, exhausted is red (`PopupBarView.aheadColor`; the threshold is from ADR-0044, historically
+   a static `15` points).
+4. **`dimmedLabelColor` is now dynamic**, an `NSColor(name:)` (blending in the target appearance),
+   rather than `static let .blended(...)`, which baked in the appearance from the first access and
+   came out near-black in dark mode.
 
-- Реліз-білд має стабільний, передбачуваний вигляд; жодного «експериментального» меню.
-- Menu-bar бар (`StatusItemView`) малює ті самі монохромні зони; пейсинг-кольори там лишаються
-  фіксованими statusline-значеннями (ADR-0005), бо menu bar немає плямистого фону. _(Superseded
-  ADR-0059/0060: обидві поверхні тепер малюють системними semantic-кольорами.)_
-- Повне покриття фону через приватну NSMenu-ієрархію лишається задокументованим ризиком
-  ([issue #86](https://github.com/artem-from-ua/tokenpace/issues/86)); деградує безпечно.
-- Якщо колись знадобиться forced-тема з read-only нативними пунктами — потрібен
-  `popUpMenuPositioningItem:inView:` з окремим вікном (Apple DTS forums 106894), не `item.menu`.
+## Consequences
 
-## Пов'язані
+- The release build has a stable, predictable appearance; no "experimental" menu.
+- The menu-bar bar (`StatusItemView`) draws the same monochrome zones; its pacing colors there stay
+  on fixed statusline values (ADR-0005), because the menu bar has no mottled background.
+  _(Superseded by ADR-0059/0060: both surfaces now draw with system semantic colors.)_
+- Full background coverage via the private NSMenu hierarchy remains a documented risk
+  ([issue #86](https://github.com/artem-from-ua/tokenpace/issues/86)); it degrades safely.
+- If a forced theme with read-only native items is ever needed, it will require
+  `popUpMenuPositioningItem:inView:` with a separate window (Apple DTS forums 106894), not
+  `item.menu`.
 
-- [ADR-0021](0021-popup-two-column-layout-and-uniform-dropdown-typography.md) — двоколонковий
-  layout попапа й `addSplitLine`, поверх якого малюються ці бари.
+## Related
+
+- [ADR-0021](0021-popup-two-column-layout-and-uniform-dropdown-typography.md) — the popup's
+  two-column layout and `addSplitLine`, on top of which these bars are drawn.
 - [ADR-0005](0005-pacing-fractions-not-blocks.md) / [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md)
-  — геометрія пейсинг-барів і кольори (`Palette`).
+  — the pacing bars' geometry and colors (`Palette`).

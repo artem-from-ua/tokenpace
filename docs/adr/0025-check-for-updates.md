@@ -4,119 +4,126 @@ date: 2026-07-24
 superseded_by: [0036]
 ---
 
-# ADR-0025: Перевірка оновлень — подвійний fetch-шлях, системний банер, launch-time чек
+# ADR-0025: Update checking — dual fetch path, system banner, launch-time check
 
-> **Частково superseded [ADR-0036](0036-update-signals-single-dropdown-item.md).** Банерна частина
-> (Рішення §3, `UpdateNotifier`, `UNUserNotificationCenter`) **видалена** — жодних системних
-> нотифікацій; сигнал зведено в один пункт дропдауна (0036). Fetch-шлях (§1), `SemanticVersion` (§2),
-> cadence-маркер (§4) і launch-time чек (§5) лишаються чинними. Запис нижче — незмінний історичний
-> контекст; читати про сигнальний UX слід у 0036.
+> **Partially superseded by [ADR-0036](0036-update-signals-single-dropdown-item.md).** The banner
+> part (Decision §3, `UpdateNotifier`, `UNUserNotificationCenter`) is **removed** — no more system
+> notifications; the signal is consolidated into a single dropdown item (0036). The fetch path (§1),
+> `SemanticVersion` (§2), the cadence marker (§4), and the launch-time check (§5) still stand. The
+> record below is unchanged historical context; read about the signal UX in 0036.
 
-## Контекст
+## Context
 
-Досі TokenPace ніяк не сигналізував про вихід новішої версії — користувач мав сам ходити на GitHub
-Releases. Issue #37 (епік #3) додає **періодичну перевірку** (двічі на день) останнього релізу з
-ненав'язливим сигналом.
+Until now TokenPace had no way to signal that a newer version was out — the user had to check GitHub
+Releases themselves. Issue #37 (epic #3) adds a **periodic check** (twice a day) for the latest
+release with an unobtrusive signal.
 
-Під час уточнення вимог обсяг розширився відносно початкового тікета (який виключав нотифікації й
-menu-bar-пункт): користувач попросив **системний банер macOS**, **пункт меню** з синьою крапкою
-(як індикатори статусів) і кнопку **[Check now]** у вікні налаштувань.
+While clarifying requirements the scope grew beyond the original ticket (which excluded
+notifications and a menu-bar item): the user asked for a **system macOS banner**, a **menu item**
+with a blue dot (like the status indicators), and a **[Check now]** button in the settings window.
 
-Постають рішення, специфічні для цієї фічі:
+This raises decisions specific to this feature:
 
-1. **Джерело релізу за приватного репо.** Репозиторій наразі **private**, тож анонімний GitHub
-   Releases API віддає 404. Але фіча має бути працездатною для мейнтейнерів (Артем + Остап) вже
-   зараз, а не «дрімати» до публічності.
-2. **Перший системний notification** у застосунку — раніше UserNotifications не використовувався;
-   застосунок — `LSUIElement`-агент (без Dock-іконки), що впливає на презентацію банера й на те, чи
-   взагалі доступний фреймворк на непідписаному білді.
-3. **Перший запис мережевого шару в persisted-конфіг** — маркер `lastUpdateCheck` треба радити при
-   кожній перевірці, що семантично відрізняється від `StatusCadence`.
+1. **Release source against a private repo.** The repository is currently **private**, so the
+   anonymous GitHub Releases API returns 404. But the feature needs to work for the maintainers
+   (Artem + Ostap) right now, not "sleep" until the repo goes public.
+2. **The app's first system notification** — `UserNotifications` was never used before; the app is
+   an `LSUIElement` agent (no Dock icon), which affects how the banner is presented and whether the
+   framework is even available on an unsigned build.
+3. **The first network-layer write into persisted config** — the `lastUpdateCheck` marker needs to
+   advance on every check, which is semantically different from `StatusCadence`.
 
-## Рішення
+## Decision
 
-1. **Подвійний fetch-шлях за протоколом `UpdateFetcher`.** Один seam («видай сирі байти JSON
-   релізу») з двома конформерами:
-   - `HTTPUpdateFetcher` (у `TokenPaceKit`) — анонімний HTTPS через наявний `UsageTransport` (без
-     другого транспортного протоколу, ADR-0008); 404 → `.notFound`. Працює, коли репо стане
-     публічним.
-   - `GHReleaseFetcher` (у `TokenPace`) — запускає `gh api …/releases/latest` як **subprocess**, тож
-     локально автентифікований `gh` читає приватний репо власними креденшалами з keyring. Обирається
-     рантаймом, коли встановлено env-змінну **`TOKENPACE_GH_AUTH`** (прапорець присутності).
+1. **A dual fetch path behind the `UpdateFetcher` protocol.** One seam ("hand back the raw JSON
+   bytes of the release") with two conformers:
+   - `HTTPUpdateFetcher` (in `TokenPaceKit`) — anonymous HTTPS through the existing `UsageTransport`
+     (no second transport protocol, ADR-0008); 404 → `.notFound`. Works once the repo goes public.
+   - `GHReleaseFetcher` (in `TokenPace`) — runs `gh api …/releases/latest` as a **subprocess**, so a
+     locally authenticated `gh` reads the private repo with its own credentials from the keyring.
+     Selected at runtime when the **`TOKENPACE_GH_AUTH`** env var is set (a presence flag).
 
-   **Резолвинг `TOKENPACE_GH_AUTH`:** застосунок стартує при логіні через `SMAppService`, тобто
-   launchd запускає `.app` **без шелла**, тож `export TOKENPACE_GH_AUTH=1` у `~/.zshrc` невидимий
-   через `ProcessInfo`. Тому прапорець резолвиться раз (memoised): спершу `ProcessInfo` (запуск із
-   термінала / `launchctl setenv`), потім — fallback — із rc-файлів login-шелла через `ShellEnvironment`
-   (`zsh -l -i`). Так користувачу достатньо `export` у `.zshrc`, без `launchctl`/LaunchAgent.
+   **Resolving `TOKENPACE_GH_AUTH`:** the app starts at login through `SMAppService`, meaning
+   launchd starts the `.app` **without a shell**, so `export TOKENPACE_GH_AUTH=1` in `~/.zshrc` is
+   invisible through `ProcessInfo`. So the flag is resolved once (memoized): first `ProcessInfo`
+   (launched from a terminal / `launchctl setenv`), then — as a fallback — from the login shell's rc
+   files via `ShellEnvironment` (`zsh -l -i`). This way, `export` in `.zshrc` is enough for the user,
+   with no `launchctl`/LaunchAgent needed.
 
-   Обидва шляхи годують байти в **той самий** чистий `GitHubReleaseDecoder` і те саме порівняння
-   `SemanticVersion`/`UpdateComparison`, тож decode/порівняння лишаються тестованими без живої мережі
-   чи процесу. Subprocess — платформний side-effect, тож живе у shell за kit-протоколом (як
-   `DelegatedRefresher`/`ClaudeCLIRefresher`); успадковує середовище (`gh` потребує `HOME`/keyring).
+   Both paths feed bytes into the **same** pure `GitHubReleaseDecoder` and the same
+   `SemanticVersion`/`UpdateComparison` comparison, so decoding/comparison stay testable without a
+   live network or process. The subprocess is a platform side effect, so it lives in the shell behind
+   a kit protocol (like `DelegatedRefresher`/`ClaudeCLIRefresher`); it inherits the environment (`gh`
+   needs `HOME`/keyring).
 
-2. **`SemanticVersion` пишеться з нуля** (семверу в проєкті не було) як чиста `Comparable`-структура:
-   консервативний парсинг (рівно 3 числові компоненти після опційного `v`), суфікс `-beta`/`+meta`
-   толерується (репо-теги — плоскі `vX.Y.Z`, тож pre-release-ordering §11 поза обсягом).
-   **`UpdateComparison.isNewer` повертає `false` на будь-якій помилці парсингу** — контракт «ніколи
-   не смикати на смітті»: жоден непарсибельний тег не показує фантомне оновлення.
+2. **`SemanticVersion` is written from scratch** (there was no semver in the project) as a pure
+   `Comparable` struct: conservative parsing (exactly 3 numeric components after an optional `v`), a
+   `-beta`/`+meta` suffix is tolerated (repo tags are flat `vX.Y.Z`, so pre-release ordering §11 is
+   out of scope). **`UpdateComparison.isNewer` returns `false` on any parse error** — a "never act on
+   garbage" contract: no unparseable tag surfaces a phantom update.
 
-3. **Системний банер — бонусний канал, не первинний.** Завжди-доступні сигнали — **пункт меню** й
-   **рядок у Settings…**; вони працюють на будь-якому білді. `UNUserNotificationCenter` функціонує
-   лише в **підписаному, встановленому `.app`** (bare `swift run` не має bundle id, і запит дозволу
-   там падає), тож усі точки входу `UpdateNotifier` гейтяться на `LaunchAtLoginController.isAppBundle`
-   і толерують відмову. Делегат виставляється до кінця запуску: `willPresent → [.banner]`
-   (accessory-застосунок ніколи не «frontmost», інакше банер придушується; **без звуку** — чек
-   версії низькопріоритетний), `didReceive` реагує лише на кнопку. Банер несе **одну** власну дію
-   `UNNotificationCategory` — **Update** (`.foreground`, відкриває сторінку релізу); парну кнопку
-   **Close** додає сама система. Свідомо одна дія, а не дві: macOS згортає *кілька* власних дій в
-   дропдаун «Options», а одна показується окремою кнопкою поряд із системним Close (патерн Reminders).
-   Тіло-клік навмисно нічого не робить (відкриває лише кнопка Update). Показ обох кнопок vs дропдаун
-   також залежить від системного стилю (Alerts vs Banners) — це вибір користувача, не код.
-   Де-дуплікується на версію (`lastSeenLatestVersion`), щоб не сповіщати повторно про ту саму версію.
-   > **`UNUserNotificationCenter` completion-хендлери виконуються на не-main черзі**, тож будь-який
-   > `@MainActor`-ізольований код у них падає `SIGTRAP` (`dispatch_assert_queue`) — виявлено при
-   > ручному прогоні нотаризованого `.app`. Тіла хендлерів винесено в `nonisolated`-хелпери; це
-   > головний аргумент за правило «прогнати GUI перед комітом» (unit-тести цього не ловлять).
-   > Показ банера на **замкненому екрані** — системне налаштування per-app, не контролюється кодом.
+3. **The system banner is a bonus channel, not the primary one.** Always-available signals are the
+   **menu item** and the **row in Settings…**; they work on any build. `UNUserNotificationCenter`
+   only functions in a **signed, installed `.app`** (a bare `swift run` has no bundle id, and the
+   permission request fails there), so every `UpdateNotifier` entry point is gated on
+   `LaunchAtLoginController.isAppBundle` and tolerates a refusal. The delegate is set before the app
+   finishes launching: `willPresent → [.banner]` (an accessory app is never "frontmost," otherwise
+   the banner is suppressed; **no sound** — a version check is low priority), `didReceive` reacts
+   only to the button. The banner carries **one** custom action `UNNotificationCategory` —
+   **Update** (`.foreground`, opens the release page); the matching **Close** button is added by the
+   system. Deliberately one action, not two: macOS collapses *several* custom actions into an
+   "Options" dropdown, and a single one shows as a separate button next to the system Close (the
+   Reminders pattern). A tap on the body deliberately does nothing (only the Update button opens
+   anything). Whether both buttons show versus a dropdown also depends on the system style (Alerts vs
+   Banners) — that's the user's choice, not code. Deduplicated per version
+   (`lastSeenLatestVersion`) so we don't notify repeatedly about the same version.
+   > **`UNUserNotificationCenter` completion handlers run on a non-main queue**, so any
+   > `@MainActor`-isolated code inside them crashes with `SIGTRAP` (`dispatch_assert_queue`) —
+   > discovered during a manual run of the notarized `.app`. The handler bodies were moved out into
+   > `nonisolated` helpers; this is the main argument for the "run the GUI before committing" rule
+   > (unit tests don't catch this). Showing the banner on a **locked screen** is a system per-app
+   > setting, not controlled by code.
 
-4. **Маркер `lastUpdateCheck` радиться на КОЖНІЙ спробі** (успіх або graceful-фейл), а не лише на
-   успіху. Це **протилежність** `StatusCadence` (той рухає маркер лише на успіху, бо status-сторінка
-   має швидко ретраїти): інакше приватний анонімний шлях бив би GitHub щохартбіту після кожного 404.
-   Гейт 12-год каденсу — на **спробі**, не на результаті.
+4. **The `lastUpdateCheck` marker advances on EVERY attempt** (success or graceful failure), not
+   only on success. This is the **opposite** of `StatusCadence` (which only moves the marker on
+   success, because the status page needs to retry quickly): otherwise the private anonymous path
+   would hit GitHub every heartbeat after every 404. The 12-hour cadence gate is on the **attempt**,
+   not the result.
 
-5. **Безумовна перевірка при старті** (за увімкненої опції), плюс 12-год ре-чек на heartbeat.
-   Свіжовстановлений/перезапущений білд має показати доступне оновлення одразу, а не за пів доби;
-   `UpdateCheckCadence` регулює лише ре-чеки під час довгої сесії. Перевірка їде на usage-heartbeat
-   (як `pollStatusIfDue`, #31), без окремого таймера.
+5. **An unconditional check at startup** (when the option is enabled), plus a 12-hour re-check on
+   heartbeat. A freshly installed/restarted build should show an available update right away, not
+   half a day later; `UpdateCheckCadence` only governs re-checks during a long session. The check
+   rides the usage heartbeat (like `pollStatusIfDue`, #31), with no separate timer.
 
-6. **Опція `automaticUpdateChecks` — default-on (opt-out)**, персиститься через `PersistedConfig`
-   ідіомою `object(forKey:) as? Bool ?? true` (відсутній ключ → `true`; `bool(forKey:)` мовчки дав би
-   `false` і зламав дефолт).
+6. **The `automaticUpdateChecks` option is default-on (opt-out)**, persisted through
+   `PersistedConfig` with the `object(forKey:) as? Bool ?? true` idiom (a missing key → `true`;
+   `bool(forKey:)` would silently give `false` and break the default).
 
-## Наслідки
+## Consequences
 
-- **Пункт «New version available»** (синя `circle.fill` як в статус-рядках) стоїть перед `Quit` за
-  власним сепаратором; сепаратор і пункт ховаються в лок-степ, тож відсутнє оновлення не лишає
-  «висячої» риски.
-- **`TOKENPACE_GH_AUTH`** приєднується до сімейства верифікаційних env-змінних (`TOKENPACE_STUB`).
-  Плюс `TOKENPACE_FAKE_LATEST=vX.Y.Z` — верифікаційний override (форсує «доступне оновлення»/«up to
-  date» без мережі), як stub-транспорти; пріоритетніший за `TOKENPACE_GH_AUTH`. Обидва — лише для
-  діагностики, ніколи в нормальному запуску.
-- Фіча **деградує тихо**: 404 (приватний репо), таймаут, відсутній `gh`, мережева помилка — усе
-  мапиться в «немає оновлення», без краху й нав'язливих помилок.
-- **Тестова межа** (ADR-0009): чисте ядро (`SemanticVersion`, `GitHubReleaseDecoder`,
-  `UpdateCheckCadence`, `GitHubReleaseClient` зі stub-fetcher) покрите unit-тестами; shell
-  (`GHReleaseFetcher`, `UpdateNotifier`, меню, `PersistedConfig`) — вручну.
-- **Обмеження банера**: на непідписаному/`swift run`-білді банер і запит дозволу — no-op; повний
-  флоу перевіряється лише на нотаризованому `.app`, запущеному з `/Applications`.
+- **The "New version available" item** (blue `circle.fill`, like the status rows) sits above `Quit`
+  behind its own separator; the separator and the item hide in lockstep, so no update leaves a
+  "dangling" divider line.
+- **`TOKENPACE_GH_AUTH`** joins the family of verification env vars (`TOKENPACE_STUB`). Plus
+  `TOKENPACE_FAKE_LATEST=vX.Y.Z` — a verification override (forces "update available"/"up to date"
+  with no network), like the stub transports; it takes priority over `TOKENPACE_GH_AUTH`. Both are
+  for diagnostics only, never in a normal run.
+- The feature **degrades silently**: 404 (private repo), timeout, missing `gh`, network error — all
+  map to "no update available," with no crash and no intrusive errors.
+- **Test boundary** (ADR-0009): the pure core (`SemanticVersion`, `GitHubReleaseDecoder`,
+  `UpdateCheckCadence`, `GitHubReleaseClient` with a stub fetcher) is covered by unit tests; the
+  shell (`GHReleaseFetcher`, `UpdateNotifier`, the menu, `PersistedConfig`) is verified by hand.
+- **Banner limitation**: on an unsigned/`swift run` build the banner and the permission request are
+  no-ops; the full flow is only verified on a notarized `.app` launched from `/Applications`.
 
-## Пов'язані
+## Related
 
-- [ADR-0008](0008-usageclient-pure-backoff-and-transport-seam.md) — `UsageTransport` seam, перевикористаний HTTP-шляхом.
-- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — чисте ядро / тонкий shell.
-- [ADR-0013](0013-claude-status-line.md) — «їзда на heartbeat» і cadence-seam (`StatusCadence`), за
-  зразком якого зроблено `UpdateCheckCadence`.
-- [ADR-0017](0017-delegated-token-refresh.md) — subprocess-seam (`DelegatedRefresher`), за зразком
-  якого зроблено `GHReleaseFetcher`.
-- [ADR-0023](0023-persisted-config-version-marker.md) — `PersistedConfig`, розширений ключами #37.
+- [ADR-0008](0008-usageclient-pure-backoff-and-transport-seam.md) — the `UsageTransport` seam, reused
+  by the HTTP path.
+- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — pure core / thin shell.
+- [ADR-0013](0013-claude-status-line.md) — "riding the heartbeat" and the cadence seam
+  (`StatusCadence`), which `UpdateCheckCadence` follows as a model.
+- [ADR-0017](0017-delegated-token-refresh.md) — the subprocess seam (`DelegatedRefresher`), which
+  `GHReleaseFetcher` follows as a model.
+- [ADR-0023](0023-persisted-config-version-marker.md) — `PersistedConfig`, extended with keys for
+  #37.

@@ -3,71 +3,76 @@ status: accepted
 date: 2026-06-23
 ---
 
-# ADR-0015: Прибрати компактний idle-режим — завжди показувати смужки
+# ADR-0015: Remove the compact idle mode — always show the strips
 
-> **Див. також [ADR-0027](0027-session-idle-no-phantom-reset.md).** Той вводить API-driven стан «немає
-> активної 5h-сесії» (перефарбування 5h-бара, бари **не** зникають) — це не повернення прибраного тут
-> display-колапсу за порогом utilization; операційне рішення «смужки завжди видно» лишається чинним.
+> **See also [ADR-0027](0027-session-idle-no-phantom-reset.md).** That ADR introduces an
+> API-driven "no active 5h session" state (recoloring the 5h bar; the bars do **not** disappear) —
+> this is not a return of the display collapse-past-a-utilization-threshold removed here; the
+> operational decision "strips are always visible" still stands.
 
-## Контекст
+## Context
 
-[ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) ввів «компактний idle-режим»: коли
-**обидва** вікна мають `utilization < 5%`, menu bar згортався з двох pacing-смужок до однієї малої
-іконки — жирного `*`. Орієнтир узято зі SPEC §135 («Компактний режим при idle … Коли Claude Code не
-використовується активно»).
+[ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) introduced a "compact idle mode":
+when **both** windows had `utilization < 5%`, the menu bar collapsed from two pacing strips down to
+one small icon — a bold `*`. The reference point was SPEC §135 ("Compact mode on idle … when Claude
+Code isn't actively in use").
 
-На практиці виявилося, що реалізація **не відповідає наміру**, і це вилізло живим багом:
+In practice the implementation turned out **not to match the intent**, and it surfaced as a live
+bug:
 
-- Намір SPEC: згортати, **коли Claude не використовується активно**.
-- Реалізація: згортати, **коли обидва ліміти < 5%** — суто за відсотком витрат, без жодного зв'язку
-  з активністю процесу `claude`.
+- SPEC's intent: collapse **when Claude isn't actively in use**.
+- The implementation: collapse **when both limits are < 5%** — purely by spend percentage, with no
+  connection to whether the `claude` process is active.
 
-Результат: одразу після ресету вікна (`five_hour` 3%, `seven_day` 0% — обидва < 5%) menu bar
-показував зірочку **під час активної роботи користувача в Claude Code**. Тобто стан, який мав
-означати «нічого не відбувається», з'являвся саме тоді, коли відбувалося найбільше.
+Result: right after a window reset (`five_hour` 3%, `seven_day` 0% — both < 5%), the menu bar showed
+the asterisk **while the user was actively working in Claude Code**. In other words, the state meant
+to signal "nothing is happening" appeared exactly when the most was happening.
 
-Іронія в тому, що детектор реальної активності в проєкті **вже є** — `ProcessClaudeActivityProbe`
-(`sysctl(KERN_PROC_ALL)`, шукає процес `claude`), його використовує `PollingEngine` для cadence. Але
-`MenuBarLayout` його не питав: рішення idle/expanded дивилося лише на `utilization`.
+The irony is that a real activity detector already **exists** in the project —
+`ProcessClaudeActivityProbe` (`sysctl(KERN_PROC_ALL)`, looking for the `claude` process), used by
+`PollingEngine` for cadence. But `MenuBarLayout` never asked it: the idle/expanded decision looked
+only at `utilization`.
 
-Постало рішення: (a) полагодити idle, прив'язавши його до реальної активності Claude
-(`ProcessClaudeActivityProbe`), чи (b) прибрати idle-режим узагалі.
+Two options came up: (a) fix idle by tying it to real Claude activity
+(`ProcessClaudeActivityProbe`), or (b) remove idle mode entirely.
 
-## Рішення
+## Decision
 
-**Прибрати idle-режим повністю.** Поки є валідні дані (здоровий шлях), menu bar **завжди** показує
-дві pacing-смужки + час до ресету — незалежно від рівня `utilization`. Смужки відсутні **лише** у
-стані помилки / на холодному старті (токен протух, API недоступне, ще не було першого успішного
-полла) — тоді показується ⚠️ ([ADR-0010](0010-usage-health-and-error-states.md)).
+**Remove idle mode entirely.** As long as there's valid data (the healthy path), the menu bar
+**always** shows two pacing strips plus time to reset — regardless of `utilization` level. The
+strips are absent **only** in the error state / on cold start (a stale token, the API unavailable,
+no successful poll yet) — then a ⚠️ is shown ([ADR-0010](0010-usage-health-and-error-states.md)).
 
-Конкретно:
+Specifically:
 
-1. **`MenuBarMode.idle` видалено.** Лишаються `expanded` (здоровий шлях, завжди) і `error` (#12).
-2. **`MenuBarLayout.idleUtilizationThreshold` (5 %) і гілку `bothLow` видалено** з `make(from:now:)`
-   — `make` тепер завжди повертає `.expanded`.
-3. **Cold-start fallback** (`snapshot == nil` на здоровому шляху, до першого полла) тепер дає
-   `.error(nil, nil, nil, nil)` (голий ⚠️ — даних нема), а не `.idle`.
-4. **`StatusItemView.drawIdleGlyph` (`*`) і його гілку switch видалено.**
+1. **`MenuBarMode.idle` removed.** What remains is `expanded` (the healthy path, always) and
+   `error` (#12).
+2. **`MenuBarLayout.idleUtilizationThreshold` (5%) and the `bothLow` branch removed** from
+   `make(from:now:)` — `make` now always returns `.expanded`.
+3. **The cold-start fallback** (`snapshot == nil` on the healthy path, before the first poll) now
+   returns `.error(nil, nil, nil, nil)` (a bare ⚠️ — no data), instead of `.idle`.
+4. **`StatusItemView.drawIdleGlyph` (`*`) and its switch branch removed.**
 
-Чому **не** варіант (a) — прив'язати idle до активності Claude:
+Why **not** option (a) — tying idle to Claude activity:
 
-- Цінність сумнівна. Сенс menu-bar віджета — бачити ліміт **на один погляд**. Згортання до зірочки
-  ховає саме ту інформацію, заради якої віджет існує — навіть коли Claude справді неактивний,
-  смужки не заважають (вони й так компактні).
-- Менше прихованого стану — менше способів збити користувача з пантелику. Один передбачуваний вигляд
-  («завжди смужки, крім помилки») простіший і чесніший за два режими з нетривіальним порогом.
-- `ProcessClaudeActivityProbe` лишається доречним там, де він і є — у *cadence* (як часто
-  опитувати), а не у *відображенні*.
+- Its value is questionable. The point of a menu-bar widget is to see the limit **at a glance**.
+  Collapsing to an asterisk hides exactly the information the widget exists for — and even when
+  Claude really is inactive, the strips don't get in the way (they're already compact).
+- Less hidden state means fewer ways to confuse the user. One predictable appearance ("always
+  strips, except on error") is simpler and more honest than two modes with a non-trivial threshold.
+- `ProcessClaudeActivityProbe` remains useful exactly where it already is — in *cadence* (how often
+  to poll), not in *display*.
 
-## Наслідки
+## Consequences
 
-- **Передбачуваний вигляд.** Menu bar завжди показує те, заради чого існує — ліміти. Жодних
-  «зникнень у зірочку» посеред роботи.
-- **Простіший код і модель.** `MenuBarMode` — дві гілки замість трьох; зник поріг і його межова
-  семантика (строге `<`, межа 5.0).
-- **Тести оновлено:** колишні `bothWindowsLowIsIdle`/`zeroUtilizationIsIdle`/межові тести → тести,
-  що низький `utilization` усе одно дає `.expanded`; cold-start тест очікує голий `.error`.
-- **Цей ADR супpersedes частину [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md)** —
-  саме рішення §2 (поріг idle 5 %) і §4 (idle-гліф `*`). Решта ADR-0009 (розкол pure/shell,
-  `MenuBarMode` як відкритий enum, малювання смужок) лишається чинною.
-- SPEC §135 переписано з «компактний режим при idle» на «без idle-режиму».
+- **Predictable appearance.** The menu bar always shows what it exists for — the limits. No more
+  "vanishing into an asterisk" mid-session.
+- **Simpler code and model.** `MenuBarMode` — two branches instead of three; the threshold and its
+  boundary semantics (strict `<`, the 5.0 cutoff) are gone.
+- **Tests updated:** the former `bothWindowsLowIsIdle`/`zeroUtilizationIsIdle`/boundary tests became
+  tests asserting that low `utilization` still yields `.expanded`; the cold-start test expects a
+  bare `.error`.
+- **This ADR supersedes part of [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md)** —
+  specifically the decisions in §2 (the 5% idle threshold) and §4 (the idle glyph `*`). The rest of
+  ADR-0009 (the pure/shell split, `MenuBarMode` as an open enum, drawing the strips) still stands.
+- SPEC §135 was rewritten from "compact mode on idle" to "no idle mode."

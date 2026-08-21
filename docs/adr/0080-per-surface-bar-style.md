@@ -4,152 +4,156 @@ date: 2026-08-11
 supersedes: []
 ---
 
-# ADR-0080: Стиль бару обирається окремо для кожної поверхні
+# ADR-0080: Bar style is chosen separately for each surface
 
-> Частково витісняє [ADR-0062](0062-configurable-bar-presentation.md) (§1 `BarStyle`): вибір стилю
-> більше **не** один ключ, чиї значення кодують пару поверхонь, і кейса `.mixed` більше немає —
-> `BarStyle` тепер описує подачу **однієї** поверхні, а поверхонь дві, кожна зі своїм ключем. Решта
-> 0062 (`CalmColorMode`, `FarBehindInterval`, сам механізм пресетів як єдиного джерела
-> дефолтів) лишається чинною.
+> Partially supersedes [ADR-0062](0062-configurable-bar-presentation.md) (§1 `BarStyle`): the style
+> choice is **no longer** a single key whose values encode a pair of surfaces, and the `.mixed` case is
+> gone — `BarStyle` now describes the presentation of **one** surface, and there are two surfaces,
+> each with its own key. The rest of 0062 (`CalmColorMode`, `FarBehindInterval`, the presets
+> mechanism itself as the single source of defaults) still stands.
 
-> Частково витісняє [ADR-0079](0079-centred-zero-gauge-scale.md) (§«Що лишилось незмінним», пункт
-> «Пресети»): `.workHarder` більше не Mixed, а **Gauge**, і Gauge більше не «доступний лише вручну».
-> Решта 0079 — шкала `gaugeOffset`, `BarScale`, центральна риска, її роль `centreTick` — чинна
-> повністю.
+> Partially supersedes [ADR-0079](0079-centred-zero-gauge-scale.md) (§"What stayed unchanged," the
+> "Presets" point): `.workHarder` is no longer Mixed, it's **Gauge**, and Gauge is no longer
+> "manual-selection only." The rest of 0079 — the `gaugeOffset` scale, `BarScale`, the center tick,
+> its `centreTick` role — stands unchanged in full.
 
-## Контекст
+## Context
 
-[ADR-0062](0062-configurable-bar-presentation.md) увів `BarStyle` як **триставний** вибір, де кожне
-значення задавало пару «що малювати в меню-барі / що в попапі»:
+[ADR-0062](0062-configurable-bar-presentation.md) introduced `BarStyle` as a **three-way** choice
+where each value set a pair: "what to draw in the menu bar / what in the popup":
 
-| кейс | menu bar | dropdown |
+| case | menu bar | dropdown |
 |---|---|---|
 | `.progress` | Progress | Progress |
 | `.mixed` | Pressure | **Progress** |
 | `.pressure` | Pressure | Pressure |
-| `.gauge` (з [0079](0079-centred-zero-gauge-scale.md)) | Gauge | Gauge |
+| `.gauge` (from [0079](0079-centred-zero-gauge-scale.md)) | Gauge | Gauge |
 
-`.mixed` існував із конкретної причини, і причина була слушна: маркер часу в 34-pt меню-барному барі
-тісний, а в попапі місця вдосталь — «маркер лише там, де є місце». Але спосіб, у який це виражено,
-змішує дві незалежні речі в одному значенні: **яка подача** і **на якій поверхні**. Наслідки:
+`.mixed` existed for a specific reason, and the reason was sound: a time marker is cramped on a
+34 pt menu-bar bar, and the popup has plenty of room — "a marker only where there's room for one."
+But the way this was expressed mixes two independent things into one value: **which presentation**
+and **on which surface**. Consequences:
 
-- **Тип знає про поверхні.** `BarStyle` ніс чотири похідні властивості — `menuBarScale`, `popupScale`,
-  `menuBarShowsTimeMarker`, `popupShowsTimeMarker` — і кожна була таблицею «кейс → поверхня». Додати
-  стиль означало дописати рядок у дві таблиці, які легко розсинхронити.
-- **Більшість комбінацій недосяжна.** Три подачі × дві поверхні — це дев'ять пар; кейсів було чотири.
-  «Gauge у барі, Progress у попапі» — цілком розумний вибір (у попапі є місце на дві позиційні мітки,
-  у барі — ні), і його не можна було задати ніяк.
-- **`.mixed` не масштабується.** Він фіксує рівно одну з дев'яти пар. Кожна наступна вимагала б
-  власного кейса з власним ім'ям — а «Pressure-menu-bar-Gauge-dropdown» уже не назва стилю, а опис
-  комбінації.
-- **Gauge лишився сиротою серед пресетів.** [0079](0079-centred-zero-gauge-scale.md) додав четвертий
-  стиль, але не дав його жодному пресету, тож його вибір **завжди** скидав пресет-контрол у «Custom».
-  Стиль, який не належить жодному пресету, стоїть осторонь моделі, у якій пресет — єдине джерело
-  дефолтів (0062).
+- **The type knows about surfaces.** `BarStyle` carried four derived properties —
+  `menuBarScale`, `popupScale`, `menuBarShowsTimeMarker`, `popupShowsTimeMarker` — each a "case →
+  surface" table. Adding a style meant adding a row to two tables that were easy to let drift apart.
+- **Most combinations were unreachable.** Three presentations × two surfaces is nine pairs; there
+  were four cases. "Gauge in the bar, Progress in the popup" is a perfectly reasonable choice (the
+  popup has room for two positional labels, the bar doesn't), and there was no way to express it.
+- **`.mixed` doesn't scale.** It pins exactly one of the nine pairs. Each additional one would need
+  its own case with its own name — and "Pressure-menu-bar-Gauge-dropdown" stops being a style name
+  and becomes a description of a combination.
+- **Gauge was left orphaned among the presets.** [0079](0079-centred-zero-gauge-scale.md) added a
+  fourth style but didn't give it to any preset, so choosing it **always** flipped the preset control
+  to "Custom." A style that belongs to no preset sits outside the model where the preset is the sole
+  source of defaults (0062).
 
-## Рішення
+## Decision
 
-**`BarStyle` описує подачу однієї поверхні; поверхню обирає той, хто його читає.**
+**`BarStyle` describes the presentation for one surface; whoever reads it picks the surface.**
 
 ```swift
 public enum BarStyle: String, … { case progress, pressure, gauge }
 
-public var scale: BarScale { … }                        // замість menuBarScale/popupScale
-public var showsTimeMarker: Bool { scale == .window }   // замість пари прапорців
+public var scale: BarScale { … }                        // replaces menuBarScale/popupScale
+public var showsTimeMarker: Bool { scale == .window }   // replaces the pair of flags
 ```
 
-Зберігається двома незалежними ключами — `menuBarStyle` і `dropdownStyle` — і читається двома
-акцесорами `PersistedConfig`. Доступні всі дев'ять пар; колишній `.mixed` — просто пара
-`(.pressure, .progress)`, яку тепер можна не лише відтворити, а й вимовити.
+Stored as two independent keys — `menuBarStyle` and `dropdownStyle` — and read through two
+`PersistedConfig` accessors. All nine pairs are available; the former `.mixed` is simply the pair
+`(.pressure, .progress)`, which can now not only be reproduced but named.
 
-`BarScale` не змінюється: рендерери й далі гілкуються на ньому, а `switch`і лишаються вичерпними.
+`BarScale` doesn't change: renderers still branch on it, and the `switch`es stay exhaustive.
 
-### Пресети дають один стиль обом поверхням
+### Presets give one style to both surfaces
 
-| Пресет | menu bar | dropdown | було |
+| Preset | menu bar | dropdown | before |
 |---|---|---|---|
-| Chill | Pressure | Pressure | без змін |
-| **Work harder!** (дефолт) | **Gauge** | **Gauge** | Pressure / Progress (`.mixed`) |
-| Control freak | Progress | Progress | без змін |
+| Chill | Pressure | Pressure | unchanged |
+| **Work harder!** (default) | **Gauge** | **Gauge** | Pressure / Progress (`.mixed`) |
+| Control freak | Progress | Progress | unchanged |
 
-Пресети — це три **узгоджені** образи, тож пресет, який сам із собою не згоден між поверхнями, був
-би четвертим образом. Змішувати поверхні — рівно те, для чого існує випадання в «Custom». Побічний
-наслідок: три пресети покривають три стилі рівно по разу, тож Gauge більше не сирота, і жоден стиль
-не є недосяжним із самого лише ряду пресетів (тест `everyPresetUsesOneStyleOnBothSurfaces`).
+Presets are three **coherent** looks, so a preset that disagrees with itself between surfaces would
+be a fourth look. Mixing surfaces is exactly what falling into "Custom" is for. A side effect: the
+three presets cover the three styles exactly once each, so Gauge is no longer an orphan, and no
+style is unreachable from the preset row alone (the `everyPresetUsesOneStyleOnBothSurfaces` test).
 
-### Міграція: `"mixed"` розкладається, а не колапсує
+### Migration: `"mixed"` decomposes, it doesn't collapse
 
-Правило живе в одному місці — `BarStyle.legacySurfaceStyles(for:)`, що повертає **пару**:
+The rule lives in one place — `BarStyle.legacySurfaceStyles(for:)`, which returns a **pair**:
 
-| збережений raw | menu bar | dropdown |
+| stored raw value | menu bar | dropdown |
 |---|---|---|
 | `"mixed"` | `.pressure` | `.progress` |
 | `"pacing"` / `"progress"` | `.progress` | `.progress` |
 | `"simple"` / `"pressure"` | `.pressure` | `.pressure` |
 | `"gauge"` | `.gauge` | `.gauge` |
 
-`"mixed"` — єдине значення, чиї поверхні розходяться, і саме тому хелпер повертає пару, а не один
-стиль: відобразити його в **один** стиль означало б обрати переможця й тихо змінити вигляд однієї з
-поверхонь. Тому в `legacyRawValues` його немає — та таблиця мапить raw у один `BarStyle`, і `"mixed"`
-у неї не вміщається за конструкцією.
+`"mixed"` is the only value whose surfaces diverge, and that's exactly why the helper returns a pair
+rather than a single style: mapping it to **one** style would mean picking a winner and silently
+changing the look of one of the surfaces. That's why it isn't in `legacyRawValues` — that table maps
+a raw value to a single `BarStyle`, and `"mixed"` doesn't fit it by construction.
 
-Хелпер читають **обидва** споживачі — `PersistedConfig.migrateBarStyleIfNeeded` (збережений ключ) і
-декод `AppearancePresetValues` (експортований конфіг зі старішого білда). Тож оновлення на місці й
-імпорт старого дампа дають однаковий результат; це той самий мотив, з якого 0076 тримав
-`legacyRawValues` спільними для міграції та декоду.
+The helper is read by **both** consumers — `PersistedConfig.migrateBarStyleIfNeeded` (the stored key)
+and the `AppearancePresetValues` decode (a config exported by an older build). So an in-place update
+and importing an old dump give the same result; this is the same reason 0076 kept `legacyRawValues`
+shared between migration and decode.
 
-### Кого зачіпає зміна дефолту
+### Who the default change affects
 
-Міграція спирається **лише** на збережений ключ, бо пресет ніде не зберігається — він **виводиться**
-з набору значень (`AppearancePreset.matching(_:)`). Тому «мігрувати тих, у кого був Work harder!»
-технічно неможливо, та й не потрібно:
+Migration relies **only** on the stored key, because the preset is never stored — it's **derived**
+from the set of values (`AppearancePreset.matching(_:)`). So "migrate whoever had Work harder!" is
+technically impossible, and also unnecessary:
 
-- **Ключ є** → користувач свідомо обрав стиль; розкладаємо його по двох поверхнях, вигляд не
-  змінюється **ні на піксель**, зокрема й для `"mixed"`.
-- **Ключа немає** → користувач вибору не робив і бачив дефолт від `.workHarder`. Нічого не пишемо,
-  обидва getter'и падають на новий дефолт — Gauge. Це і є «був Work harder! → став Gauge», причому
-  саме для тих, для кого це твердження взагалі означене.
+- **The key exists** → the user deliberately chose a style; it's decomposed across the two surfaces,
+  and the look doesn't change **by a single pixel**, including for `"mixed"`.
+- **The key is absent** → the user never made a choice and was seeing `.workHarder`'s default.
+  Nothing is written, and both getters fall through to the new default — Gauge. This is exactly "was
+  Work harder! → became Gauge," and only for those the claim actually applies to.
 
-Отже зсув дефолту зачіпає рівно тих, хто не висловив уподобання, і нікого більше.
+So the default shift affects exactly those who never expressed a preference, and no one else.
 
-## Наслідки
+## Consequences
 
-- **Дев'ять пар замість чотирьох.** Зокрема ті, що раніше не існували: щільніший стиль у просторому
-  попапі й тихіший у тісному барі — та сама логіка, що породила `.mixed`, тепер доступна в будь-якій
-  комбінації, а не в одній зашитій.
-- **`BarStyle` не знає про поверхні.** Одна `scale`, один `showsTimeMarker`; новий стиль додає один
-  рядок в один `switch` замість двох рядків у двох таблицях.
-- **Два рядки в Settings, кожен у своїй секції.** Контрол «Bar style» стоїть першим у **Menu Bar
-  Widget** і першим у **Dropdown Widget** — там, де вже живуть інші налаштування тієї ж поверхні.
-  Безіменна секція над ними лишалася з самим **Far behind pace interval**; після
-  [ADR-0081](0081-weekly-capacity-gate-for-blue.md) ту опцію прибрано, тож секція зникла зовсім.
-- **Підказки не дублюються.** Повний опис трьох стилів стоїть під меню-барним рядком; під
-  дропдаунним — один рядок, що це ті самі три стилі, обрані окремо. Повторювати три абзаци за кілька
-  рядків нижче означало б роздути панель без нової інформації.
-- **Наявний користувач із явним вибором не бачить змін.** Включно з тими, хто обрав Mixed: він
-  отримує рівно ту саму пару, просто записану двома ключами.
-- **Хто вибору не робив — бачить Gauge.** Дефолт зсунувся, і це навмисно: Gauge єдиний малює
-  недовитратний бік ([0079](0079-centred-zero-gauge-scale.md)), а `.workHarder` — пресет, що має
-  підштовхувати.
-- **Ключ `barStyle` став legacy-only.** Читається лише міграцією, після чого видаляється;
-  `resetAppearanceToDefaults()` теж його змітає, щоб стара величина не чекала нагоди пересіяти нові
-  ключі на пізнішому запуску.
-- **Експорт конфігу має тринадцять ключів** замість дванадцяти, і два з них стоять у різних секціях
-  панелі — порядок ключів дампа й далі дзеркалить порядок контролів на екрані.
+- **Nine pairs instead of four.** Including ones that didn't exist before: a denser style in the
+  roomy popup and a quieter one in the cramped bar — the same logic that produced `.mixed` is now
+  available in any combination, not just one hardcoded one.
+- **`BarStyle` doesn't know about surfaces.** One `scale`, one `showsTimeMarker`; a new style adds
+  one row to one `switch` instead of two rows to two tables.
+- **Two rows in Settings, each in its own section.** The "Bar style" control sits first in **Menu Bar
+  Widget** and first in **Dropdown Widget** — right where the other settings for that surface already
+  live. The unnamed section above them used to hold only **Far behind pace interval**; after
+  [ADR-0081](0081-weekly-capacity-gate-for-blue.md) that option was removed, so the section vanished
+  entirely.
+- **Hints aren't duplicated.** The full description of the three styles sits under the menu-bar row;
+  under the dropdown row there's a single line saying these are the same three styles, chosen
+  separately. Repeating three paragraphs a few lines down would bloat the panel with no new
+  information.
+- **An existing user with an explicit choice sees no change.** Including anyone who chose Mixed: they
+  get exactly the same pair, just written as two keys.
+- **Anyone who never chose sees Gauge.** The default shifted, and that's deliberate: Gauge is the
+  only one that draws the under-spending side ([0079](0079-centred-zero-gauge-scale.md)), and
+  `.workHarder` is the preset meant to nudge toward that.
+- **The `barStyle` key became legacy-only.** It's read only by migration, after which it's deleted;
+  `resetAppearanceToDefaults()` sweeps it too, so the old value doesn't sit around waiting to
+  re-seed the new keys on a later launch.
+- **Config export has thirteen keys** instead of twelve, and two of them sit in different sections of
+  the panel — the dump's key order still mirrors the order of the on-screen controls.
 
-## Альтернативи
+## Alternatives considered
 
-- **Лишити `.mixed` як четвертий сегмент поряд із двома новими рядками.** Дало б «сумісність без
-  міграції», але ціною двох способів сказати одне й те саме: `.mixed` і пара `(.pressure, .progress)`
-  давали б однаковий рендер із різних станів конфігу. Пресет-індикатор мусив би вважати їх рівними,
-  а `matching(_:)` — порівнювати не значення, а класи еквівалентності.
-- **Мігрувати `"mixed"` у Pressure на обидві поверхні.** Простіше (одна таблиця `legacyRawValues`
-  замість пари), але міняє вигляд попапа тим, хто свідомо обрав Mixed саме заради маркера в
-  дропдауні. Оскільки цей вибір і був єдиною причиною існування `.mixed`, така міграція скасовувала б
-  рівно те, що користувач висловив.
-- **Зберігати пару як один рядок (`"pressure/progress"`).** Один ключ замість двох, але тоді
-  парсинг/валідація пари стають власним форматом, а два незалежні контролі в UI все одно писали б у
-  нього по половині. Два ключі — рівно та структура, яку має налаштування.
-- **Дати Gauge власний пресет замість зміни `.workHarder`.** Четвертий сегмент у ряду пресетів, який
-  і без того має чотири позиції разом із «Custom». Пресети описують **гучність** подачі, а не
-  геометрію; окремий «Gauge»-пресет змішав би дві осі в одному ряду.
+- **Keep `.mixed` as a fourth segment alongside the two new rows.** Would give "compatibility without
+  migration," at the cost of two ways to say the same thing: `.mixed` and the pair
+  `(.pressure, .progress)` would render identically from different config states. The preset
+  indicator would have to treat them as equal, and `matching(_:)` would have to compare equivalence
+  classes rather than values.
+- **Migrate `"mixed"` to Pressure on both surfaces.** Simpler (one `legacyRawValues` table instead of
+  a pair), but it changes the popup's look for anyone who deliberately chose Mixed specifically for
+  the marker in the dropdown. Since that choice was the entire reason `.mixed` existed, such a
+  migration would undo exactly what the user expressed.
+- **Store the pair as one string (`"pressure/progress"`).** One key instead of two, but then
+  parsing/validating the pair becomes its own format, and the two independent UI controls would still
+  each be writing half of it. Two keys is exactly the structure the setting has.
+- **Give Gauge its own preset instead of changing `.workHarder`.** A fourth segment in the preset
+  row, which already has four positions counting "Custom." Presets describe how **loud** the
+  presentation is, not the geometry; a separate "Gauge" preset would mix two axes into one row.

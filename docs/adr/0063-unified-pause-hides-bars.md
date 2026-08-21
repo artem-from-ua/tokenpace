@@ -4,84 +4,89 @@ date: 2026-08-02
 superseded_by: [0090]
 ---
 
-# ADR-0063: Єдиний тумблер «Pause icon hides bars» замість двох незалежних опцій блокування
+# ADR-0063: A single "Pause icon hides bars" toggle instead of two independent blocking options
 
-> **Заміщено [ADR-0090](0090-menu-bar-answers-can-we-work.md).** Тумблера більше немає: ховання
-> смужок під pause-іконкою стало єдиною поведінкою, а звуження предиката до `isBlocked` (розділ
-> «Тумблер керує лише барами») відкочено — стан «підписка вичерпана, кредити покривають» тепер теж
-> без смужок, зі знаком валюти замість паузи. Чинним лишається опис самої pause-іконки: вона
-> завжди-on під `isBlocked` і червона.
+> **Superseded by [ADR-0090](0090-menu-bar-answers-can-we-work.md).** The toggle is gone: hiding the
+> strips under the pause icon became the single behavior, and the narrowing of the predicate to
+> `isBlocked` (section "The toggle governs only the bars") was rolled back — the state "subscription
+> exhausted, credits cover it" now also has no strips, with a currency glyph instead of pause. What
+> still stands is the description of the pause icon itself: it is always on under `isBlocked` and
+> red.
 
-## Контекст
+## Context
 
-Стан **повної зупинки** (`CreditsPacing.isBlocked` — кожне головне вікно 5h/7d вичерпане **й** платні
-credits не покривають) обслуговували **два незалежні** тумблери Appearance:
+The **fully stopped** state (`CreditsPacing.isBlocked` — every main 5h/7d window exhausted **and**
+paid credits do not cover it) was served by **two independent** Appearance toggles:
 
-- **«Show pacing bars when 5h/7d limits reached»** (#194, ADR-0049) — зберігався інвертовано як
-  `hideBarsWhenBlocked`; вирішував, чи прибрати обидва бари й лишити лише countdown.
-- **«Show pause icon when fully blocked»** (#199, ADR-0051) — гейт `showBlockedPause`; вирішував, чи
-  малювати оранжевий `pause.fill` як провідний гліф.
+- **"Show pacing bars when 5h/7d limits reached"** (#194, ADR-0049) — stored inverted as
+  `hideBarsWhenBlocked`; decided whether to remove both bars and leave only the countdown.
+- **"Show pause icon when fully blocked"** (#199, ADR-0051) — the `showBlockedPause` gate; decided
+  whether to draw the orange `pause.fill` as the leading glyph.
 
-Два прапорці давали 2×2 = чотири комбінації, з яких дві осмислені, а дві збивали з пантелику: «бари
-приховані, але й pause вимкнено» — віджет під повною зупинкою показував **самий countdown без жодного
-маркера зупинки**; «pause увімкнено, бари увімкнено» дублювало сигнал. Реальний вибір користувача під
-блокуванням лише один: **«лише іконка»** проти **«іконка + бари»**. Крім того, два тумблери мали два
-**різні предикати** ховання/показу — hide-bars гейтив за ширшим `mainWindowExhausted`, а pause за
-вужчим `isBlocked`, — тож у зоні «вікно вичерпане, але credits покривають» бари ховались, хоч зупинки
-не було.
+Two flags produced 2×2 = four combinations, of which two made sense and two were confusing: "bars
+hidden, but pause off" left the widget under full stoppage showing **the countdown alone, with no
+stoppage marker at all**; "pause on, bars on" duplicated the signal. There is really only one
+choice a user makes under blocking: **"icon only"** versus **"icon + bars."** On top of that, the
+two toggles had two **different predicates** for hide/show — hide-bars gated on the wider
+`mainWindowExhausted`, while pause gated on the narrower `isBlocked` — so in the zone "window
+exhausted, but credits cover it," bars were hidden even though there was no stoppage.
 
-## Рішення
+## Decision
 
-**Злито в один тумблер «Pause icon hides bars»**, збережений як новий ключ `PersistedConfig.pauseHidesBars`.
+**Merge into a single "Pause icon hides bars" toggle**, stored as a new key
+`PersistedConfig.pauseHidesBars`.
 
-### Pause-іконка — завжди, і **червона**
+### The pause icon — always, and **red**
 
-Коли `CreditsPacing.isBlocked`, `pause.fill` малюється **завжди** (більше не опційно) — повна зупинка
-має однозначний маркер. Колір змінено з оранжевого на **червоний**: гліф переведено з ролі `.orange`
-на уніфіковану роль `.red` (Palette-accessor перейменовано `pauseOrange` → `pauseRed`), спільну з
-вичерпаними барами й пігулкою блокуючого ресету — щоб відрізнити «зупинку» від оранжевого «попереду
-плану» й узгодити з червоним «Effective blocker» бейджем попапа. Прапорець `MenuBarLayout.blockedPause`
-лишається (обчислюється на health-обізнаному `make`-шві: `true` коли `isBlocked` **І**
-`mode ∈ {.expanded, .blockedReset}`; ніколи для `.error`), але його гейт-складову прибрано — він тепер
-чиста функція від `isBlocked`.
+When `CreditsPacing.isBlocked`, `pause.fill` is drawn **always** (no longer optional) — a full
+stoppage gets an unambiguous marker. The color changed from orange to **red**: the glyph moved from
+the `.orange` role to the unified `.red` role (the Palette accessor was renamed `pauseOrange` →
+`pauseRed`), shared with exhausted bars and the blocking-reset pill — to distinguish "stoppage" from
+the orange "ahead of plan" and to align with the red "Effective blocker" badge in the popup. The
+`MenuBarLayout.blockedPause` flag remains (computed at the health-aware `make` seam: `true` when
+`isBlocked` **and** `mode ∈ {.expanded, .blockedReset}`; never for `.error`), but its gating role is
+removed — it is now a pure function of `isBlocked`.
 
-### Тумблер керує лише барами, за **єдиним** предикатом `isBlocked`
+### The toggle governs only the bars, on a **single** `isBlocked` predicate
 
-`pauseHidesBars` вирішує тільки, чи ховати бари поряд із завжди-видимою pause-іконкою:
+`pauseHidesBars` decides only whether to hide the bars alongside the always-visible pause icon:
 
-- **ON** → `make` повертає `MenuBarMode.blockedReset(reset:which:)` — pause-іконка + countdown, без
-  барів (countdown форсується попри `resetMode`, `BlockingReset.forBlocked`, як раніше).
-- **OFF** → `.expanded` — pause-іконка + бари.
+- **ON** → `make` returns `MenuBarMode.blockedReset(reset:which:)` — pause icon + countdown, no
+  bars (the countdown is forced regardless of `resetMode`, `BlockingReset.forBlocked`, as before).
+- **OFF** → `.expanded` — pause icon + bars.
 
-Предикат ховання барів звужено з `mainWindowExhausted` (ADR-0049) до `isBlocked` — той самий, що
-керує іконкою. Наслідок: поки credits ще покривають вичерпане вікно
-(`subscriptionExhaustedWhileCovered`), бари **не** ховаються — робота триває на платному тарифі, це не
-зупинка. Тепер обидві поведінки читають один предикат і не розходяться.
+The bar-hiding predicate is narrowed from `mainWindowExhausted` (ADR-0049) to `isBlocked` — the same
+one that governs the icon. Consequence: while credits still cover an exhausted window
+(`subscriptionExhaustedWhileCovered`), the bars are **not** hidden — work continues on the paid
+tier, this is not a stoppage. Now both behaviors read the same predicate and never diverge.
 
-### Іконка грошових кредитів — у провідну позицію
+### The paid-credits icon — moved to the leading position
 
-Гліф валюти (¤/€/$…) перенесено з трейлінг-позиції (праворуч від барів, ліворуч від service-крапки) у
-**провідну**: між pause-іконкою і барами, у режимах `.expanded` і `.blockedReset`. У діагностичному
-`.error` лишається трейлінг. Порядок зліва направо в режимах барів: pause → credits → бари → countdown
-→ (service-крапка найправіша). Так усі «стан сервісу»-маркери групуються ліворуч, а бари не
-розриваються іконкою.
+The currency glyph (¤/€/$…) is moved from the trailing position (right of the bars, left of the
+service dot) to the **leading** one: between the pause icon and the bars, in `.expanded` and
+`.blockedReset` modes. It stays trailing in the diagnostic `.error` mode. Left-to-right order in the
+bar modes: pause → credits → bars → countdown → (service dot rightmost). This groups all "service
+state" markers on the left, and the icon no longer breaks up the bars.
 
-### Дефолти за пресетами + одноразова міграція
+### Defaults by preset + a one-time migration
 
-Per-preset дефолти `pauseHidesBars`: **Chill** = `true` (лише іконка), **Work harder!** = `false`,
-**Control freak** = `false`. Factory-fallback (ключ не виставлено) = дефолт `.workHarder` = `false`.
+Per-preset defaults for `pauseHidesBars`: **Chill** = `true` (icon only), **Work harder!** =
+`false`, **Control freak** = `false`. Factory fallback (key not set) = the `.workHarder` default =
+`false`.
 
-Одноразова міграція `PersistedConfig.migratePauseKeysIfNeeded()` (з
-`App.runConfigMigrationsIfNeeded`) читає legacy-значення `hideBarsWhenBlocked` у новий ключ
-`pauseHidesBars` і **чистить обидва** legacy-ключі (`hideBarsWhenBlocked`, `showBlockedPause`).
+A one-time migration, `PersistedConfig.migratePauseKeysIfNeeded()` (called from
+`App.runConfigMigrationsIfNeeded`), reads the legacy `hideBarsWhenBlocked` value into the new
+`pauseHidesBars` key and **clears both** legacy keys (`hideBarsWhenBlocked`, `showBlockedPause`).
 
-## Наслідки
+## Consequences
 
-- Один осмислений вибір під блокуванням замість чотирьох комбінацій; неможливо потрапити в стан «повна
-  зупинка без жодного маркера».
-- Бари більше **не** ховаються, поки credits покривають вичерпане вікно (звуження предиката з
-  `mainWindowExhausted` до `isBlocked`) — свідома зміна поведінки проти ADR-0049.
-- pause-іконка тепер завжди-on під `isBlocked` і **червона** (уніфікована роль `.red`, accessor `Palette.pauseRed`).
-- Legacy-ключі `hideBarsWhenBlocked` та `showBlockedPause` прибрано з конфігу (мігровано + очищено).
-- ADR-0049 і ADR-0051 повністю витіснено цим рішенням.
-- Лише menu bar; попап не зачеплено. #227
+- One meaningful choice under blocking instead of four combinations; it is no longer possible to
+  land in "full stoppage with no marker at all."
+- Bars are now **not** hidden while credits cover an exhausted window (the predicate narrowed from
+  `mainWindowExhausted` to `isBlocked`) — a deliberate behavior change from ADR-0049.
+- The pause icon is now always on under `isBlocked` and **red** (the unified `.red` role, accessor
+  `Palette.pauseRed`).
+- The legacy keys `hideBarsWhenBlocked` and `showBlockedPause` are removed from the config (migrated
+  and cleared).
+- ADR-0049 and ADR-0051 are both fully superseded by this decision.
+- Menu bar only; the popup is untouched. #227

@@ -4,119 +4,134 @@ date: 2026-08-02
 superseded_by: [0064]
 ---
 
-# ADR-0060: Уніфікована палітра — системні semantic-кольори, спільні для menu-bar і попапа (крім Claude-бренду)
+# ADR-0060: A unified palette — system semantic colours shared by the menu bar and the popup (except the Claude brand)
 
-> **Extends [ADR-0059](0059-menu-bar-native-semantic-colours.md)** на попап **і об'єднує колірні ролі
-> обох поверхонь**. ADR-0059 переніс на системні semantic-кольори лише **menu-bar**, свідомо лишивши
-> popup-палітру на фіксованих значеннях. Цей ADR (а) поширює ту саму філософію на попап і (б) **зливає
-> дубльовані menu-vs-popup ролі в один плаский набір семантичних кольорів** — один колір на відтінок,
-> спільний для pacing-барів і сервіс-крапок обох поверхонь.
-> **Експериментальний статус (`draft`):** фіналізується (→ `accepted`) після підтвердження мейнтейнером
-> на реальному попапі в обох темах.
+> **Extends [ADR-0059](0059-menu-bar-native-semantic-colours.md)** to the popup **and merges the
+> color roles of both surfaces**. ADR-0059 moved only the **menu bar** to system semantic colors,
+> deliberately leaving the popup palette on fixed values. This ADR (a) extends that same philosophy
+> to the popup and (b) **merges duplicated menu-vs-popup roles into one flat set of semantic
+> colors** — one color per tone, shared by both surfaces' pacing bars and service dots.
+> **Experimental status (`draft`):** finalizes (→ `accepted`) after the maintainer confirms it on
+> the real popup in both themes.
 
-## Контекст
+## Context
 
-Після ADR-0059 menu-bar малює виключно системними semantic-кольорами (`.system*`, `labelColor@alpha`),
-а popup-палітра лишилась сумішшю: сервіс-крапки й on-pace зелений — уже `.system*`, але **ahead-of-pace
-трійка** (`popupGapRed/Yellow/Orange`) і **сірі** (track, tick, indicator-ring) — числові sRGB-константи
-або appearance-гілковані сирі greys у `PopupBarView`.
+After ADR-0059 the menu bar draws exclusively with system semantic colors (`.system*`,
+`labelColor@alpha`), while the popup palette stayed a mix: the service dots and the on-pace green
+were already `.system*`, but the **ahead-of-pace trio** (`popupGapRed/Yellow/Orange`) and the
+**greys** (track, tick, the indicator ring) were numeric sRGB constants or appearance-branched raw
+greys in `PopupBarView`.
 
-ADR-0022 §4.3 уже задумував popup pacing як «системні» (`.systemGreen/Red/Yellow/Orange`), але реалізація
-жила через **числові sRGB-наближення** цих системних кольорів у `ColorRole.defaultColor` — hand-tuned
-`#E12D23`/`#E6B419`/`#F8760F`. Наслідок: попап **не фліпав** light/dark-варіант і не ніс Increase-Contrast,
-на відміну від menu-bar, який ті самі `.menuGap*` уже читає як `.systemRed/Yellow/Orange`. Так само track
-попапа (`monochromeGrey`) був **непрозорим** сірим (ADR-0022 §4.2), тоді як menu-bar track перейшов на
-напівпрозорий `labelColor@0.22`, що дихає матеріалом-підкладкою.
+ADR-0022 §4.3 already envisioned popup pacing as "systemic" (`.systemGreen/Red/Yellow/Orange`), but
+the implementation lived through **numeric sRGB approximations** of those system colors in
+`ColorRole.defaultColor` — hand-tuned `#E12D23`/`#E6B419`/`#F8760F`. Consequence: the popup **didn't
+flip** its light/dark variant and carried no Increase Contrast, unlike the menu bar, which already
+reads those same `.menuGap*` as `.systemRed/Yellow/Orange`. Likewise, the popup's track
+(`monochromeGrey`) was an **opaque** grey (ADR-0022 §4.2), while the menu-bar track had moved to a
+translucent `labelColor@0.22` that breathes with the material underneath it.
 
-Питання (#217): чи довести popup-палітру до тієї самої нативної адаптивності, що й menu-bar — тобто
-замінити числові наближення справжніми системними кольорами й подивитися вживу, як воно фліпає теми.
+Question (#217): whether to bring the popup palette to the same native adaptivity as the menu bar —
+that is, replace the numeric approximations with real system colors and see live how it flips
+themes.
 
-Додатковий висновок під час роботи: після переходу обидві поверхні дефолтяться на **ті самі** `.system*`
-кольори, але `ColorRole` тримав **окремі** ролі для кожної (`menuGapRed` vs `popupGapRed`, `menuStatusYellow`
-vs `popupServiceYellow` тощо) — ~40 ролей, де багато пар резолвляться в один колір. Це плутало (зміна
-menu-ролі в тюнері не міняла попап і навпаки) без реальної користі. Тож рішення розширено до **повної
-уніфікації**: один плаский набір семантичних ролей, спільний для обох поверхонь.
+An additional finding during the work: after the switch, both surfaces default to the **same**
+`.system*` colors, but `ColorRole` kept **separate** roles for each (`menuGapRed` vs `popupGapRed`,
+`menuStatusYellow` vs `popupServiceYellow`, and so on) — ~40 roles, many pairs resolving to the same
+color. This was confusing (changing a menu role in the tuner didn't change the popup and vice
+versa) with no real benefit. So the decision was expanded to **full unification**: one flat set of
+semantic roles, shared by both surfaces.
 
-## Рішення
+## Decision
 
-**Popup-палітра малює системними/semantic-кольорами, як menu-bar. Виняток — Claude-бренд.**
+**The popup palette draws with system/semantic colors, like the menu bar. The exception is the
+Claude brand.**
 
-1. **Ahead-of-pace трійка → `.system*`.** `popupGapRed → .systemRed`, `popupGapYellow → .systemYellow`,
-   `popupGapOrange → .systemOrange` у `ColorRole.defaultColor`. Це вирівнює попап із menu-bar (де
-   `.menuGapRed/Yellow/Orange` вже системні) — обидві поверхні тепер беруть той самий системний відтінок,
-   що фліпає теми й несе Increase-Contrast. Числові наближення `#E12D23`/`#E6B419`/`#F8760F` прибрано.
-2. **Сірі → semantic.** Провайдери у `PopupBarView`:
-   - `defaultIndicatorStroke` → `.separatorColor` (той самий hairline, що й menu-bar-ring
+1. **The ahead-of-pace trio → `.system*`.** `popupGapRed → .systemRed`,
+   `popupGapYellow → .systemYellow`, `popupGapOrange → .systemOrange` in
+   `ColorRole.defaultColor`. This aligns the popup with the menu bar (where `.menuGapRed/Yellow/
+   Orange` are already system colors) — both surfaces now take the same system tone, which flips
+   themes and carries Increase Contrast. The numeric approximations `#E12D23`/`#E6B419`/`#F8760F`
+   are removed.
+2. **Greys → semantic.** Providers in `PopupBarView`:
+   - `defaultIndicatorStroke` → `.separatorColor` (the same hairline as the menu-bar ring
      `.menuIndicatorStroke`);
-   - `defaultTick` → `.tertiaryLabelColor` (приглушений нейтрал, слабший за крапку);
-   - `defaultMonochromeGrey` → `labelColor.withAlphaComponent(0.22)` — **той самий track-тон, що й
-     menu-bar** (`.menuUnusedGrey`). Це **реверсить непрозорість** popup-бару з ADR-0022 §4.2: track
-     стає напівпрозорим і композититься з NSMenu-матеріалом попапа (дихає ним), а не суцільним сірим.
-3. **Claude-бренд лишається числовим.** `popupClaudeBrand` (`#D97757`) — фірмова терракота Claude;
-   системного semantic-відповідника немає, тож він свідомо тримається як sRGB-константа.
-4. **Мертвий код прибрано.** Після переходу сірих на semantic зникли єдині виклики `paletteGray(_:)` та
-   `paletteDynamic(_:)` — обидва хелпери видалено.
-5. **Preview-only chrome недоторканий.** `popupMenuMatchedBackground` (`#212121`) і `popupMenuBorder`
-   (`#4D4D4D`/`#C4C4C4`) — це матеріал-матч і hairline **прев'ю** dev-тюнера, ніколи не малювалися в
-   живому UI (audit #206); лишалися фіксованими. Обидва видалені разом із тюнером
-   ([ADR-0106](0106-remove-dev-color-tuner-and-dissolve-colorstore.md)); виміряне `#212121` живе далі
-   як орієнтир методики (CLAUDE.md, розділ про кольори).
-6. **Повна уніфікація ролей (~40 → 18).** Дубльовані menu-vs-popup ролі злиті в один плаский набір:
-   - **6 семантичних відтінків** — `green/yellow/orange/red/blue/gray` — по одному на відтінок,
-     спільні для pacing-гепів **і** сервіс-статус-крапок обох поверхонь (напр. `.systemGreen` тепер
-     обслуговує menu on-pace, popup on-pace, credits-¤ і operational-крапку — одна роль `green`).
+   - `defaultTick` → `.tertiaryLabelColor` (a dimmed neutral, weaker than the dot);
+   - `defaultMonochromeGrey` → `labelColor.withAlphaComponent(0.22)` — **the same track tone as the
+     menu bar** (`.menuUnusedGrey`). This **reverses the opacity** of the popup bar from ADR-0022
+     §4.2: the track becomes translucent and composites with the popup's NSMenu material (breathes
+     with it), instead of a solid grey.
+3. **The Claude brand stays numeric.** `popupClaudeBrand` (`#D97757`) — Claude's signature
+   terracotta; there's no system semantic equivalent, so it's deliberately kept as an sRGB
+   constant.
+4. **Dead code removed.** After the greys moved to semantic, the only callers of `paletteGray(_:)`
+   and `paletteDynamic(_:)` disappeared — both helpers were removed.
+5. **Preview-only chrome untouched.** `popupMenuMatchedBackground` (`#212121`) and
+   `popupMenuBorder` (`#4D4D4D`/`#C4C4C4`) are the material match and hairline for the dev tuner's
+   **preview**, never drawn in the live UI (audit #206); they stayed fixed. Both were removed along
+   with the tuner ([ADR-0106](0106-remove-dev-color-tuner-and-dissolve-colorstore.md)); the
+   measured `#212121` lives on as a methodology reference (CLAUDE.md, the colors section).
+6. **Full role unification (~40 → 18).** Duplicated menu-vs-popup roles merged into one flat set:
+   - **6 semantic tones** — `green/yellow/orange/red/blue/gray` — one per tone, shared by both
+     surfaces' pacing gaps **and** service status dots (e.g. `.systemGreen` now serves menu
+     on-pace, popup on-pace, credits-¤, and the operational dot — one role, `green`).
    - **Chrome:** `barTrack` (`labelColor@0.22`), `indicatorRing` (`separatorColor`), `tick`
      (`tertiaryLabelColor`), `inUsePill`.
-   - **Текст/calm/бренд** лишаються (`foreground`, `label`, `link`, `dimmedLabel`, `pillText`,
+   - **Text/calm/brand** stay (`foreground`, `label`, `link`, `dimmedLabel`, `pillText`,
      `calmWhite`, `idleCalmGrey`, `claudeBrand`).
-   Обидва приватні `Palette`-акцесори тепер вказують на ту саму роль; тюнер показує кожен колір **раз**
-   із нейтральною назвою. Override-шар ефемерний (у пам'яті), тож ренейм/видалення ролей нічого не
-   осиротило.
-7. **Desaturation idle-blue прибрано.** Провайдер `defaultIdleBlue` десатурував `.systemBlue` ~15% до
-   сірого (+~22% до білого на світлій темі). Він **видалений** — popup idle тепер малює **чистим**
-   `.systemBlue`, ідентично menu-bar. Це **навмисна візуальна зміна** (за рішенням мейнтейнера: «тільки
-   без desaturated»): на світлій темі popup idle-бар стане насиченішим/важчим.
-8. **Тривіальні провайдери інлайнено.** `defaultIndicatorStroke/Tick/MonochromeGrey` (однорядкові після
-   уніфікації) інлайнено прямо в `ColorRole.defaultColor` і видалено; лишається лише `defaultDimmedLabel`
-   (per-appearance blend). Разом із `defaultIdleBlue` та хелперами `paletteGray`/`paletteDynamic` це
-   прибрало весь per-element колірний плумбінг попапа.
+   Both private `Palette` accessors now point at the same role; the tuner shows each color **once**
+   with a neutral name. The override layer is ephemeral (in-memory), so renaming/removing roles
+   orphaned nothing.
+7. **Idle-blue desaturation removed.** The `defaultIdleBlue` provider desaturated `.systemBlue` by
+   ~15% toward grey (+~22% toward white on the light theme). It has been **removed** — popup idle
+   now draws **pure** `.systemBlue`, identical to the menu bar. This is a **deliberate visual
+   change** (per the maintainer's decision: "just without the desaturation"): on the light theme,
+   the popup idle bar becomes more saturated/heavier.
+8. **Trivial providers inlined.** `defaultIndicatorStroke/Tick/MonochromeGrey` (one-liners after
+   unification) were inlined directly into `ColorRole.defaultColor` and removed; only
+   `defaultDimmedLabel` remains (a per-appearance blend). Together with `defaultIdleBlue` and the
+   `paletteGray`/`paletteDynamic` helpers, this removed all of the popup's per-element color
+   plumbing.
 
-**Правило (ADR-0046/0059) дотримано:** зміна `Palette`-акцесорів і `ColorRole.defaultColor` — в одному
-коміті. (Саме правило згодом стало безпредметним — після
-[ADR-0106](0106-remove-dev-color-tuner-and-dissolve-colorstore.md) значення зберігається в одному
-місці, тож розходитися нема чому.)
+**The rule (ADR-0046/0059) is honored:** changing the `Palette` accessors and
+`ColorRole.defaultColor` happens in one commit. (This rule itself later became moot — after
+[ADR-0106](0106-remove-dev-color-tuner-and-dissolve-colorstore.md) the value is stored in one
+place, so there's nothing left to diverge.)
 
-## Наслідки
+## Consequences
 
-- **+** Popup-палітра фліпає light/dark і несе Increase-Contrast автоматично, як menu-bar і нативні
-  іконки; попап і menu-bar тепер збігаються за pacing-відтінком (обидва `.system*`).
-- **+** Прибрано числові sRGB-наближення й appearance-гілкування сирих greys + супутній мертвий код.
-- **−** Системні `.systemRed/Yellow/Orange` відрізняються від hand-tuned тонів (`.systemYellow` зокрема
-  може читатися блідішим/зеленкуватим за ручний амбер) — свідомий обмін ручного відтінку на нативну
-  адаптацію; фіналізується живою перевіркою.
-- **−** Track попапа стає напівпрозорим (реверс ADR-0022 §4.2): тепер залежить від alpha-compositing з
-  NSMenu-матеріалом. Точну alpha (0.22) звірено з menu-bar, але на попапі вона може потребувати
-  підкрутки; fallback — `.secondaryLabelColor` (непрозорий semantic).
-- **+** Один плаский набір ролей замість ~40 дубльованих: тюнер показує кожен колір раз, а зміна
-  відтінку застосовується до обох поверхонь одразу — узгоджено за визначенням.
-- **−** Втрачено можливість тюнити menu vs popup (чи pacing vs status) **незалежно** — це і є ціль
-  уніфікації, але хто покладався на роздільне тюнення, того більше немає. Оскільки override-шар
-  ефемерний і ніколи не шипиться, на звичайний запуск це не впливає.
-- **−** Popup idle-blue втрачає desaturation → стає чистим `.systemBlue` (єдина навмисна візуальна
-  зміна; menu-bar idle був чистим і так). На світлій темі помітно насиченіший.
-- **Експериментально:** решта злиттів — піксель-у-піксель (усі поглинуті ролі вже мали той самий
-  `.system*` дефолт), тож єдиний реальний зсув вигляду — idle-blue; його й перевіряємо вживу.
+- **+** The popup palette flips light/dark and carries Increase Contrast automatically, like the
+  menu bar and native icons; the popup and menu bar now match in pacing tone (both `.system*`).
+- **+** Removed the numeric sRGB approximations and appearance branching of raw greys, plus the
+  associated dead code.
+- **−** The system `.systemRed/Yellow/Orange` differ from the hand-tuned tones (`.systemYellow` in
+  particular may read paler/greener than the manual amber) — a deliberate trade of a hand-tuned
+  tone for native adaptation; finalized by a live check.
+- **−** The popup's track becomes translucent (reversing ADR-0022 §4.2): now depends on
+  alpha-compositing with the NSMenu material. The exact alpha (0.22) was matched against the menu
+  bar, but on the popup it may need tuning; the fallback is `.secondaryLabelColor` (an opaque
+  semantic).
+- **+** One flat set of roles instead of ~40 duplicated ones: the tuner shows each color once, and
+  changing a tone applies to both surfaces at once — consistent by construction.
+- **−** Lost the ability to tune menu vs popup (or pacing vs status) **independently** — that is the
+  point of the unification, but anyone who relied on separate tuning no longer has it. Since the
+  override layer is ephemeral and never ships, this has no effect on a normal launch.
+- **−** Popup idle-blue loses its desaturation → becomes pure `.systemBlue` (the one deliberate
+  visual change; the menu-bar idle was already pure). Noticeably more saturated on the light theme.
+- **Experimental:** the rest of the merges are pixel-for-pixel (all absorbed roles already had the
+  same `.system*` default), so the only real visual shift is idle-blue; that's what's being checked
+  live.
 
-## Пов'язане
+## Related
 
-- [ADR-0059](0059-menu-bar-native-semantic-colours.md) — menu-bar semantic-кольори; цей ADR поширює те
-  саме рішення на попап.
-- [ADR-0022](0022-popup-bar-transparency-and-contrast-experiment.md) — вигляд popup-барів; клауза про
-  **непрозорий монохромний** track (§4.2) та числову реалізацію pacing-кольорів (§4.3) superseded цим
-  ADR; рішення про суцільний фон дропдауна (`SolidBackdropView`) далі superseded
-  [ADR-0064](0064-popup-translucent-card-and-glow-bars.md) — попап тепер завжди напівпрозорий (плашка),
-  `SolidBackdropView` видалено.
-- [ADR-0046](0046-dev-color-tuner-override-layer.md) — ColorStore/ColorRole, який це рішення розширює.
-  Спостереження, що тюнер «flattens» адаптацію системних кольорів, і що експеримент робиться
-  редагуванням `defaultColor`, а не тюнером, згодом стало підставою прибрати його зовсім
-  ([ADR-0106](0106-remove-dev-color-tuner-and-dissolve-colorstore.md)).
+- [ADR-0059](0059-menu-bar-native-semantic-colours.md) — menu-bar semantic colors; this ADR extends
+  the same decision to the popup.
+- [ADR-0022](0022-popup-bar-transparency-and-contrast-experiment.md) — the look of the popup bars;
+  the clause on the **opaque monochrome** track (§4.2) and the numeric implementation of pacing
+  colors (§4.3) are superseded by this ADR; the decision on the dropdown's solid backdrop
+  (`SolidBackdropView`) is further superseded by
+  [ADR-0064](0064-popup-translucent-card-and-glow-bars.md) — the popup is now always translucent
+  (a card), and `SolidBackdropView` was removed.
+- [ADR-0046](0046-dev-color-tuner-override-layer.md) — ColorStore/ColorRole, which this decision
+  extends. The observation that the tuner "flattens" system-color adaptation, and that the
+  experiment was done by editing `defaultColor` rather than through the tuner, later became the
+  basis for removing it entirely ([ADR-0106](0106-remove-dev-color-tuner-and-dissolve-colorstore.md)).

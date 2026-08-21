@@ -5,145 +5,159 @@ supersedes: []
 superseded_by: []
 ---
 
-# ADR-0112: Пресети Appearance — клік це прев'ю, застосовує лише `Apply`
+# ADR-0112: Appearance presets — a click is a preview, only `Apply` commits
 
-> Витісняє останній абзац секції «Пресети — радіо з поясненнями, а не сегментед»
-> [ADR-0099](0099-appearance-nests-its-two-surfaces.md) (правило «`Custom` неклікабельний, поки нема
-> збереженого сетапу») і §«Пресети (розширені)» [ADR-0062](0062-configurable-bar-presentation.md)
-> (`Custom` як некликабельний індикатор). Решта обох ADR чинна — зокрема радіо-група з прозою
-> замість сегментів і три правила формулювань з 0099, та «єдине джерело дефолтів — пресет
-> `.workHarder`» з 0062.
-> Не змінює нічого в [ADR-0080](0080-per-surface-bar-style.md) (стиль на поверхню) і
-> [ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md) (імена ключів).
+> Supersedes the last paragraph of the "Presets — radio buttons with explanations, not a
+> segmented control" section of
+> [ADR-0099](0099-appearance-nests-its-two-surfaces.md) (the rule "`Custom` is unclickable until
+> there's a saved setup") and the "Presets (extended)" § of
+> [ADR-0062](0062-configurable-bar-presentation.md) (`Custom` as an unclickable indicator). The
+> rest of both ADRs still stands — including the prose radio group instead of segments and the
+> three wording rules from 0099, and "the single source of defaults is the `.workHarder` preset"
+> from 0062.
+> Changes nothing in [ADR-0080](0080-per-surface-bar-style.md) (style per surface) or
+> [ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md) (key names).
 
-## Контекст
+## Context
 
-Один рядок списку означав **два різні конфіги одночасно**.
+One list row meant **two different configs at once**.
 
-`Custom` підсвічувався, коли живий конфіг не збігався з жодним пресетом — тобто показував *поточний
-стан*. Але клік по ньому відновлював `customAppearanceValues` — снапшот, зроблений колись раніше, і
-цілком можливо інший. Дві ролі, одне ім'я, і побачити різницю з UI було неможливо.
+`Custom` lit up whenever the live config didn't match any preset — i.e. it showed the *current
+state*. But clicking it restored `customAppearanceValues` — a snapshot taken at some earlier point,
+quite possibly a different one. Two roles, one name, and there was no way to see the difference
+from the UI.
 
-Клікабельність теж плавала: `canRestoreCustom = activePreset != nil && customAppearanceValues != nil`.
-Рядок то можна натиснути, то ні, з причини, невидимої користувачеві.
+Clickability itself was also unstable: `canRestoreCustom = activePreset != nil && customAppearanceValues != nil`.
+The row was sometimes pressable and sometimes not, for a reason invisible to the user.
 
-Найгірше — **снапшот був рухомою мішенню**. `apply(_:)` перезаписував його щоразу, коли користувач
-клацав пресет із немодифікованого стану. Звідси сценарій, який тихо знищував роботу:
+Worst of all — **the snapshot was a moving target**. `apply(_:)` overwrote it every time the user
+clicked a preset from an unmodified state. That produced a scenario that silently destroyed work:
 
-1. Ручний сетап **A** → клік `Chill` → снапшот = A.
-2. Правка однієї опції → конфіг `Chill′`, снапшот **досі A**, рядок `Custom` підсвічений (він показує
-   `Chill′`, а поверне A — ті самі дві ролі).
-3. Клік іншого пресета → снапшот перезаписано на `Chill′`. **A зникло назавжди**, без жодного сигналу.
+1. Manual setup **A** → click `Chill` → snapshot = A.
+2. Edit one option → config becomes `Chill′`, snapshot is **still A**, the `Custom` row is lit (it
+   shows `Chill′` but would restore A — the same two roles again).
+3. Click another preset → the snapshot is overwritten with `Chill′`. **A is gone forever**, with no
+   signal at all.
 
-Мейнтейнер, який цей код і писав, не зміг вивести з UI, як воно працює — і припускав протилежне
-(«після закриття вікна користувач не зможе повернутися до старих налаштувань»). Це і є діагноз: не
-бракувало пояснення, бракувало моделі, яку можна пояснити.
+The maintainer who wrote this code couldn't work out from the UI how it behaved — and assumed the
+opposite ("after closing the window, the user won't be able to get back to their old settings").
+That's the actual diagnosis: it wasn't missing an explanation, it was missing a model that could be
+explained.
 
-Дві речі, які користувач тут насправді робить, жодна з них не обслуговувалася:
+There are two things the user is actually doing here, and neither was served:
 
-1. **Приміряти** пресет і порівняти зі своїм — можливо, лишитися на своєму.
-2. **Взяти стандартний** пресет за базу й почати модифікувати.
+1. **Try on** a preset and compare it with their own — possibly staying with their own.
+2. **Take a stock** preset as a base and start modifying it.
 
-Обидві вимагають, щоб клік по пресету був **необоротним лише за явним підтвердженням**.
+Both require that clicking a preset be **irreversible only on explicit confirmation**.
 
-## Рішення
+## Decision
 
-### 1. Клік — прев'ю; застосовує лише `Apply`
+### 1. A click is a preview; only `Apply` commits
 
-Клік по рядку пресета кладе його значення в **overlay**, який консультує кожен Appearance-геттер
-`PersistedConfig`. Обидві поверхні малюють пресет; у `UserDefaults` не пишеться нічого. Закриття вікна
-Settings скидає overlay. Кнопка **`Apply`** у рядку прев'юваного пресета — єдине, що пише.
+Clicking a preset row puts its values into an **overlay** that every Appearance getter on
+`PersistedConfig` consults. Both surfaces render the preset; nothing is written to `UserDefaults`.
+Closing the Settings window discards the overlay. The **`Apply`** button on the previewed preset's
+row is the only thing that writes.
 
-Перемикатися можна в будь-якому порядку, скільки завгодно: немає модального стану, з якого треба
-виходити, і немає `Cancel`. Саме це робить рядки безпечними для клацання — а клацання і є те, по що
-сюди приходять.
+You can switch between presets in any order, as many times as you like: there's no modal state to
+exit, and no `Cancel`. That's exactly what makes the rows safe to click — and clicking is what
+people come here to do.
 
-### 2. `Custom` → `My setup`: сам збережений конфіг, не снапшот
+### 2. `Custom` → `My setup`: the saved config itself, not a snapshot
 
-Четвертий рядок називає **збережений конфіг**. Не снапшот, не «те, що було колись» — те, що зараз у
-сімох ключах. Він завжди клікабельний (повертає з прев'ю), і означає рівно одне.
+The fourth row names the **saved config**. Not a snapshot, not "what it used to be" — what's
+currently in the seven keys. It's always clickable (it restores from the preview), and it means
+exactly one thing.
 
-`customAppearanceValues` виведено з обігу: конфіг більше ніколи не перезаписується за спиною
-користувача, тож сташити нема чого. Ключ підмітається на старті й при Reset; значення **свідомо не
-мігрується** — згорнути снапшот у живі ключі означало б мовчки змінити вигляд віджета при оновленні.
+`customAppearanceValues` is retired: the config is never overwritten behind the user's back again,
+so there's nothing left to snapshot. The key is swept away at startup and on Reset; the value is
+**deliberately not migrated** — folding the snapshot into the live keys would silently change the
+widget's appearance on update.
 
-Коли збережений конфіг випадково дорівнює пресету, рядок каже це нотаткою вторинним чорнилом —
-`My setup · same as *Chill* preset`, назва пресета курсивом. Це **спостереження, а не вибір**:
-конфіг, що сьогодні збігається з `Chill`, перестане збігатися після першої ж правки, і підсвічування
-рядка `Chill` обіцяло б, що віджет далі стежить за пресетом. Нотатка каже те саме без обіцянки — і
-зникає сама, щойно конфіг розійдеться.
+When the saved config happens to equal a preset, the row says so with a secondary-ink note —
+`My setup · same as *Chill* preset`, the preset name in italics. This is an **observation, not a
+choice**: a config that matches `Chill` today will stop matching after the very first edit, and
+lighting up the `Chill` row would promise that the widget keeps tracking the preset. The note says
+the same thing without the promise — and disappears on its own the moment the config diverges.
 
-Звідси випливає, що **без прев'ю активний завжди `My setup`**, навіть коли він дорівнює пресету.
+It follows that **`My setup` is always the active row without a preview**, even when it equals a
+preset.
 
-### 3. Overlay живе в `PersistedConfig`, а не в моделі
+### 3. The overlay lives in `PersistedConfig`, not in the model
 
-Шлях рендеру читає Appearance майже цілком через сім геттерів `PersistedConfig`. Затінивши їх, прев'ю
-дістає **всі поверхні одразу** — меню-бар, дропдаун і вікно прев'ю поруч із Settings — і жодне місце
-виклику не знає, що прев'ю існує.
+The render path reads Appearance almost entirely through seven `PersistedConfig` getters. Shadowing
+them gets the preview to **every surface at once** — the menu bar, the dropdown, and the preview
+window next to Settings — and no call site needs to know the preview exists.
 
-Альтернативу «записати пресет, відновити на закритті» відхилено: краш або Quit посеред прев'ю лишив би
-чужий конфіг записаним назавжди, і користувач не мав би як дізнатися, що це не його налаштування.
-`windowWillClose` до того ж викликається не на всіх шляхах `NSApp.terminate`. Відновлювати довелося б
-зі снапшота — тобто повернувся б рівно той механізм, який ми викорінюємо. Overlay такого стану не має
-за конструкцією: у сховище не пишеться жодного байта, а втрата процесу втрачає лише прев'ю.
+The alternative "write the preset, restore on close" was rejected: a crash or a Quit mid-preview
+would leave someone else's config written permanently, with no way for the user to find out it
+wasn't their own setting. `windowWillClose` also doesn't fire on every `NSApp.terminate` path.
+Restoring would then have to come from a snapshot — bringing back exactly the mechanism we're
+eliminating. The overlay has no such state by construction: not a single byte is written to
+storage, and losing the process only loses the preview.
 
-Ціна: `PersistedConfig` перестає бути чистим фасадом сховища. Пом'якшено тим, що
-`beginAppearancePreview`/`endAppearancePreview` — **єдина** пара входу-виходу, а кожен геттер робить
-рівно один виклик `previewOr(_:_:)`, тож «чи цей геттер шанує прев'ю?» не є рішенням на кожну
-властивість: геттер, який забув би, тихо виключив би свою поверхню з прев'ю.
+The cost: `PersistedConfig` stops being a pure storage facade. Mitigated by
+`beginAppearancePreview`/`endAppearancePreview` being the **only** enter/exit pair, and each getter
+making exactly one call to `previewOr(_:_:)`, so "does this getter honor the preview?" isn't a
+per-property decision: a getter that forgot would silently exclude its own surface from the
+preview.
 
-### 4. Сеттери гасять прев'ю **перед** записом
+### 4. Setters clear the preview **before** writing
 
-Правка окремої опції на дочірній сторінці пише в сховище як і раніше. Але спершу вона скидає overlay і
-пересинхронізує модель — інакше шість полів, яких вона не торкається, лишилися б затіненими, екран
-показував би мішанину, а закриття вікна відкрило б третій стан.
+Editing a single option on a child page still writes to storage as before. But it first clears the
+overlay and resyncs the model — otherwise the six fields it doesn't touch would stay shadowed, the
+screen would show a mix, and closing the window would surface a third state.
 
-### 5. Логіка вибору — в киті, під тестами
+### 5. The choice logic lives in the Kit, under tests
 
-`AppearanceChoice` (`Sources/TokenPaceKit/`) відповідає на три питання: який рядок активний, що
-називає нотатка, і чи має `Apply` що робити. `SettingsModel` живе в app-таргеті, який **не лінкує
-жоден тест-таргет** — та сама діра, яку називає [ADR-0111](0111-degraded-dot-is-yellow-on-every-surface.md).
-Винесення цих трьох рішень у кит — найдешевший спосіб покрити найплутанішу частину екрана.
+`AppearanceChoice` (`Sources/TokenPaceKit/`) answers three questions: which row is active, what the
+note says, and whether `Apply` has anything to do. `SettingsModel` lives in the app target, which
+**links no test target at all** — the same gap named in
+[ADR-0111](0111-degraded-dot-is-yellow-on-every-surface.md). Pulling these three decisions into the
+Kit is the cheapest way to cover the most confusing part of the screen.
 
-## Наслідки
+## Consequences
 
-- **Втратити ручний сетап клацанням стало неможливо.** Сценарій із трьох кроків вище не має кроку,
-  на якому щось зникає: прев'ю не пише, а `Apply` пише те, що користувач бачить і підтвердив.
-- **Пресет не можна «носити» — його можна лише скопіювати в свій.** Прев'ю не переживає закриття
-  вікна, тож єдиний спосіб жити на `Chill` — натиснути `Apply`, після чого `My setup` **дорівнює**
-  `Chill`. Це навмисно: конфіг рівно один, і він завжди твій.
-- **Після `Apply` вибір переходить на `My setup`**, а не лишається на рядку пресета. Модель
-  послідовна (`My setup` і є збережений конфіг), але візуально вибір «тікає» з рядка, який щойно
-  натиснули — місце, за яким варто стежити на живому екрані.
-- **`selectable` в `RadioGroup` і `SegmentedControl` лишився без жодного споживача.** Він існував
-  саме для `Custom`. Механізм збережено (для `SegmentedControl` це єдиний шлях до `inactiveHelp`), але
-  обидва докстрінги це називають, щоб читач не шукав грепом.
-- **Кнопка копіювання переїхала в рядок `My setup`** і читає сховище повз overlay. З заголовка секції
-  вона виглядала б так, ніби копіює те, що на екрані — а під час прев'ю це пресет, якого користувач не
-  обирав.
-- **Регресію в саму механіку прев'ю `swift test` не спіймає** — overlay і сеттери в app-таргеті.
-  Під тестами лише `AppearanceChoice`; решта — рецептом у
+- **Losing a manual setup by clicking is no longer possible.** The three-step scenario above has no
+  step where anything disappears: the preview doesn't write, and `Apply` writes exactly what the
+  user sees and confirmed.
+- **A preset can't be "worn" — it can only be copied into your own.** The preview doesn't survive
+  closing the window, so the only way to live on `Chill` is to press `Apply`, after which
+  `My setup` **equals** `Chill`. This is deliberate: there is exactly one config, and it's always
+  yours.
+- **After `Apply`, the selection moves to `My setup`**, rather than staying on the preset row. The
+  model is consistent (`My setup` is the saved config), but visually the selection "flees" the row
+  that was just pressed — worth watching for on a live screen.
+- **`selectable` on `RadioGroup` and `SegmentedControl` is left without a consumer.** It existed
+  specifically for `Custom`. The mechanism is kept (for `SegmentedControl` it's the only path to
+  `inactiveHelp`), but both doc comments say so, so a reader doesn't go hunting with grep.
+- **The copy button moved to the `My setup` row** and reads storage past the overlay. From the
+  section header it would look like it copies what's on screen — but during a preview that's a
+  preset the user never chose.
+- **`swift test` can't catch a regression in the preview mechanism itself** — the overlay and
+  setters live in the app target. Only `AppearanceChoice` is under tests; the rest is a recipe in
   [ui-verification.md](../guides/ui-verification.md).
-- Два нові логи, `appearance preview: <preset>` і `appearance preview: ended`, роблять діагностованим
-  новий клас скарг «віджет виглядає не так, як налаштовано».
+- Two new log lines, `appearance preview: <preset>` and `appearance preview: ended`, make a new
+  class of complaint ("the widget doesn't look like what I configured") diagnosable.
 
-## Альтернативи
+## Alternatives considered
 
-**Просто сховати `Custom`, коли конфіг збігається з пресетом** — з цього почалася задача. Відхилено:
-рядок клікабельний саме тоді, коли активний пресет, тож ховати його в цьому стані означало б прибрати
-єдиний стан, у якому він працює. Симптом лікувався б, механізм лишався б.
+**Just hide `Custom` when the config matches a preset** — this is where the task started. Rejected:
+the row is clickable precisely when a preset is active, so hiding it in that state would remove the
+one state where it works. The symptom would be treated; the mechanism would remain.
 
-**Кнопка «Restore my setup» замість четвертого рядка.** Чесно відображала б разову дію, але зробила б
-«своє» нерівноправним пунктом порівняння — щоб глянути на свій конфіг посеред приміряння, довелося б
-виходити з режиму.
+**A "Restore my setup" button instead of a fourth row.** Would honestly represent a one-shot
+action, but would make "your own" an unequal item for comparison — glancing at your own config
+mid-tryout would require leaving the mode.
 
-**Прев'ю з `Cancel`/`Keep`.** Модальність: почав — мусиш завершити одним із двох виходів. Порівняння ж
-за природою нелінійне (Chill → своє → Chill → Work harder!), і повернення «на секунду глянути»
-закінчувало б сесію прев'ю.
+**A preview with `Cancel`/`Keep`.** Modal: once started, you have to exit through one of two paths.
+But the comparison is inherently non-linear (Chill → your own → Chill → Work harder!), and going
+back "just to glance" would end the preview session.
 
-**Мініатюри пресетів замість живого прев'ю.** Нічого не чіпають, але показують лише частину: правила
-на кшталт `hide until it needs attention` залежать від стану даних. Мокап не відповідає на питання
-«як це виглядатиме **в мене**», а саме воно тут і стоїть.
+**Preset thumbnails instead of a live preview.** Touch nothing, but show only part of the picture:
+rules like `hide until it needs attention` depend on data state. A mockup doesn't answer "what will
+this look like **on my data**" — which is exactly the question here.
 
-**Блокувати дочірні сторінки під час прев'ю** (замість гасіння overlay у сеттерах). Простіше в коді,
-але вводить ту саму модальність, яку відхилено вище.
+**Lock the child pages during a preview** (instead of clearing the overlay in the setters). Simpler
+in code, but introduces the same modality rejected above.

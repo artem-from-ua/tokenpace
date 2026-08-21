@@ -5,137 +5,155 @@ supersedes: []
 superseded_by: [0100, 0104]
 ---
 
-# ADR-0087: Режим `aboveZero` для секцій дропдауна, і чому кредити втрачають `nonCalm`
+# ADR-0087: The `aboveZero` mode for dropdown sections, and why credits lose `nonCalm`
 
-> **Витіснений [ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md)**
-> ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)). Не лишилося жодного raw-значення,
-> яким цей ADR оперує: `aboveZero` → `onceUsed`, `nonCalm` → `whenItNeedsAttention`, а `.optionOnly`
-> **видалено з enum** — старі raw розвʼязуються через `PopupSectionVisibility.legacyRawValues`.
-> Маркерний ключ `extraUsageVisibilityMigratedFromNonCalm`, який тут запроваджено, ретировано:
-> перенесення значення відбувається дорогою при переїзді ключа на `dropdown.showExtraUsage`, тож
-> ідемпотентність тримає сама конструкція, а не прапорець. Порядок сегментів розвернуто (тихіше
-> ліворуч). **Чинним лишається зміст рішення** — предикат «значення, а не вердикт», два різні
-> предикати на дві групи, і те, що кредитний рядок не пропонує режим за вердиктом (сліпа зона
-> безлімітного капу); у коді це `PopupSectionVisibility.creditsOffered` / `foldedForCredits`.
+> **Superseded by [ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md)**
+> ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)). None of the raw values this ADR
+> operates on survive: `aboveZero` → `onceUsed`, `nonCalm` → `whenItNeedsAttention`, and
+> `.optionOnly` was **removed from the enum** — old raw values are resolved through
+> `PopupSectionVisibility.legacyRawValues`. The marker key
+> `extraUsageVisibilityMigratedFromNonCalm`, introduced here, has been retired: the value now
+> carries over along the way when the key itself moves to `dropdown.showExtraUsage`, so
+> idempotency is guaranteed by the construction rather than by a flag. The segment order has been
+> reversed (quieter goes on the left). **The substance of the decision still stands** — the
+> predicate "value, not verdict," two different predicates for the two groups, and the fact that
+> the credits row doesn't offer a verdict-driven mode (the blind spot for an unlimited cap); in
+> code this is `PopupSectionVisibility.creditsOffered` / `foldedForCredits`.
 
-> **Частково витіснений [ADR-0100](0100-dropdown-style-tiles-and-retired-option-segment.md)** (#374): сегмент **`With ⌥ Option`** знято з **обох** рядків — ⌥ і так додається через `||` до кожного іншого режиму, тож `.optionOnly` відрізнявся лише тим, що **ховав** групу, коли її дані ставали цікавими. Кейс лишився в enum для декодування збережених значень (та сама процедура, що тут застосована до `.nonCalm` на кредитному рядку), з міграцією на `.aboveZero`. Сам режим `aboveZero`, його предикат і дефолти — чинні; **назву сегмента змінено** на `Once used`, тож аргумент нижче про «два коротких слова» і про чотири сегменти в рядку більше не описує UI.
+> **Partially superseded by [ADR-0100](0100-dropdown-style-tiles-and-retired-option-segment.md)**
+> (#374): the **`With ⌥ Option`** segment was removed from **both** rows — ⌥ is already added
+> through `||` on top of every other mode, so `.optionOnly` differed only in that it **hid** the
+> group when its data became interesting. The case remains in the enum for decoding stored values
+> (the same procedure applied here to `.nonCalm` on the credits row), with migration to
+> `.aboveZero`. The `aboveZero` mode itself, its predicate, and its defaults still stand;
+> **the segment's name changed** to `Once used`, so the argument below about "two short words" and
+> about four segments in one row no longer describes the UI.
 
-Розвиває [ADR-0072](0072-dropdown-section-visibility.md), який запровадив тристанову
-`PopupSectionVisibility`. Той ADR лишається чинним описом механіки гейта (предикат «non-calm»,
-розташування гейта у в'юсі, ховання рядків пропуском); тут переглянуто **набір режимів** і **дефолти**
-— зокрема відкинуту там альтернативу «четвертий режим».
+Builds on [ADR-0072](0072-dropdown-section-visibility.md), which introduced the three-state
+`PopupSectionVisibility`. That ADR remains the standing description of the gate's mechanics (the
+"non-calm" predicate, the gate's placement in the view, hiding rows by skipping them); this one
+revisits the **set of modes** and the **defaults** — including the "a fourth mode" alternative it
+rejected.
 
-## Контекст
+## Context
 
-ADR-0072 дав обом необов'язковим групам попапа спільні три режими: `always` / `nonCalm` /
-`optionOnly`. Середній мав означати «показуй, коли варто дивитися», і вимірював це через
-`PacingSeverity.isNonCalm` — помаранчевий або червоний.
+ADR-0072 gave both optional popup groups the same three modes: `always` / `nonCalm` /
+`optionOnly`. The middle one was meant to mean "show it when it's worth looking at," and it
+measured that through `PacingSeverity.isNonCalm` — orange or red.
 
-Експлуатація показала, що severity — поганий проксі для «варто дивитися», причому кожна група
-ламається по-своєму.
+Use in practice showed that severity is a poor proxy for "worth looking at," and each group breaks
+in its own way.
 
-**Per-model рядки розгортаються надто рано.** Це передбачив сам ADR-0072 у «Наслідках»: на початку
-7-денного вікна мале використання пейситься як `.ahead` («випереджаєш темп»), а це помаранчевий.
-Формально коректно — група справді не-calm — але на практиці рядки Opus/Sonnet/Fable вилазять уже при
-2–4 %, тобто рівно тоді, коли числа найменш цікаві. ADR радив у такому разі «піднімати поріг у
-`PacingModel`».
+**Per-model rows expand too early.** ADR-0072 itself predicted this, in its "Consequences": early
+in the 7-day window, small usage paces as `.ahead` ("ahead of the target pace"), which is orange.
+Formally correct — the group really is non-calm — but in practice the Opus/Sonnet/Fable rows pop
+out already at 2–4%, i.e. exactly when the numbers are least interesting. The ADR advised "raising
+the threshold in `PacingModel`" for this case.
 
-**Кредити мають сліпу зону, і вона гірша за передчасність.** Severity кредитів береться з
-`credits.bar`, а той — `nil` при безлімітному капі (`spend.limit == null`, стуб `credits-no-limit`).
-Отже `creditsIsNonCalm` там **завжди** `false`, і в режимі `nonCalm` секція не з'явиться ніколи,
-скільки б грошей не витратили. Користувач, який свідомо зняв стелю витрат, отримує найменше
-видимості — при тому, що `nonCalm` був **дефолтом** для `.chill` і `.workHarder`.
+**Credits have a blind spot, and it's worse than being premature.** The credits' severity comes
+from `credits.bar`, which is `nil` under an unlimited cap (`spend.limit == null`, the
+`credits-no-limit` stub). So `creditsIsNonCalm` is **always** `false` there, and in `nonCalm` mode
+the section never appears, no matter how much money gets spent. A user who deliberately removed
+their spending ceiling gets the least visibility — even though `nonCalm` was the **default** for
+`.chill` and `.workHarder`.
 
-## Рішення
+## Decision
 
-### Новий режим `aboveZero`, який читає значення, а не вердикт
+### A new `aboveZero` mode that reads a value, not a verdict
 
 ```swift
 case .aboveZero:  return isAboveZero || optionHeld
 ```
 
-- per-model: будь-який рядок групи має `utilization > 0` (базові 5h/7d відкидаються так само, як у
-  `groupIsNonCalm`);
-- кредити: `!credits.spent.isZero`.
+- per-model: any row in the group has `utilization > 0` (the base 5h/7d values are discarded the
+  same way as in `groupIsNonCalm`);
+- credits: `!credits.spent.isZero`.
 
-Наскрізний принцип проєкту — **значення це вхід моделі, колір і вердикт — її вихід**. `nonCalm` питає
-модель, що вона думає про число; `aboveZero` питає саме число. Це не два формулювання одного порогу, і
-жодне не виводиться з іншого: 2 % — одночасно `aboveZero` і `.ahead`, а безлімітні €10.80 —
-`aboveZero` і ніколи не `nonCalm`. Тому предикати обчислюються незалежно, і `shows(...)` приймає обидва.
+The project's cross-cutting principle: **a value is the model's input, a color and a verdict are
+its output**. `nonCalm` asks the model what it thinks about a number; `aboveZero` asks the number
+itself. These are not two phrasings of one threshold, and neither derives from the other: 2% is
+simultaneously `aboveZero` and `.ahead`, and an unlimited €10.80 is `aboveZero` and never
+`nonCalm`. So the predicates are computed independently, and `shows(...)` takes both.
 
-### Поріг у видимості, а не в `PacingModel`
+### The threshold lives in visibility, not in `PacingModel`
 
-ADR-0072 радив піднімати поріг у `PacingModel`. Відкинуто: `PacingModel` фарбує **всі** поверхні, і
-зсув порога `.ahead` змінив би колір меню-барних смужок, попапних барів і вердиктів усюди заради
-проблеми компонування однієї групи. Крім того, це не полікувало б кредитну сліпу зону: при
-безлімітному капі бару немає взагалі, тож жоден поріг у пейсингу там не існує.
+ADR-0072 advised raising the threshold in `PacingModel`. Rejected: `PacingModel` colors **every**
+surface, and shifting the `.ahead` threshold would change the color of menu bar bars, popup bars,
+and verdicts everywhere just to fix one group's layout problem. It also wouldn't cure the credits
+blind spot: under an unlimited cap there's no bar at all, so no pacing threshold exists there to
+shift.
 
-### Кредитний рядок втрачає `nonCalm`
+### The credits row loses `nonCalm`
 
-Сегмент `Non-calm only` прибрано з «Show extra usage». Дві причини, і кожної окремо досить:
+The `Non-calm only` segment is removed from "Show extra usage." Two reasons, each sufficient on its
+own:
 
-1. **При безлімітному капі він недосяжний** — severity не існує (вище).
-2. **При наявному капі він надлишковий** — щоб дійти до помаранчевого, треба спершу витратити
-   ненульову суму, тож `aboveZero` спрацьовує завжди раніше. Різниця між режимами звелася б до
-   «показати пізніше», без власного сенсу.
+1. **It's unreachable under an unlimited cap** — severity doesn't exist there (above).
+2. **It's redundant under a set cap** — reaching orange first requires spending a nonzero amount,
+   so `aboveZero` always fires earlier. The difference between the modes would reduce to "show it
+   later," with no meaning of its own.
 
-Сам кейс `.nonCalm` **лишається в enum** — це збережене значення, яке має декодуватися. Прибрано лише
-його пропозицію в контролі; збережені значення переносить міграція.
+The `.nonCalm` case itself **stays in the enum** — it's a stored value that must still decode.
+Only its offer in the control is removed; stored values are carried over by migration.
 
-### Асиметричні набори сегментів
+### Asymmetric segment sets
 
-Наслідок: два рядки більше не діляться одним списком. `DropdownPane` тримає два явні масиви замість
-`allCases` — так само, як `AppearanceBarStyle.segments`, який теж перелічений вручну.
+A consequence: the two rows no longer share one list. `DropdownPane` holds two explicit arrays
+instead of `allCases` — the same as `AppearanceBarStyle.segments`, which is also enumerated by
+hand.
 
 ```
 Show model & service limits   [ Always | Above zero | Non-calm only | With ⌥ Option ]
 Show extra usage              [ Always | Above zero | With ⌥ Option ]
 ```
 
-Це знімає заперечення ADR-0072 проти четвертого режиму («чотири сегменти в один рядок Settings не
-вміщаються») там, де воно було найгострішим: рядок кредитів лишається трисегментним, а чотири сегменти
-має тільки рядок моделей. Підписи тримаються короткими з тієї ж причини — `Above zero` навмисно два
-слова, і на відміну від `Non-calm only` не потребує «only»: порогова фраза вже виключна.
+This removes ADR-0072's objection to a fourth mode ("four segments don't fit one Settings row")
+exactly where it was sharpest: the credits row stays three-segment, and only the model row has
+four. The labels stay short for the same reason — `Above zero` is deliberately two words, and
+unlike `Non-calm only` it needs no "only": the threshold phrase is already exclusive.
 
-### Дефолти
+### Defaults
 
-| Пресет | `modelLimitsVisibility` | `extraUsageVisibility` |
+| Preset | `modelLimitsVisibility` | `extraUsageVisibility` |
 |---|---|---|
-| `.chill` | `nonCalm` (без змін) | **`aboveZero`** (було `nonCalm`) |
-| `.workHarder` (фабричний) | `nonCalm` (без змін) | **`aboveZero`** (було `nonCalm`) |
-| `.controlFreak` | `always` (без змін) | `always` (без змін) |
+| `.chill` | `nonCalm` (unchanged) | **`aboveZero`** (was `nonCalm`) |
+| `.workHarder` (factory) | `nonCalm` (unchanged) | **`aboveZero`** (was `nonCalm`) |
+| `.controlFreak` | `always` (unchanged) | `always` (unchanged) |
 
-Per-model дефолт не змінено навмисно: передчасне розгортання дратує, але воно **видиме**, і той, кого
-воно зачіпає, тепер має куди перемкнутися. Кредитний дефолт змінено, бо його вада — **невидимість**:
-мовчазна сліпа зона, якої користувач не помітить, щоб на неї поскаржитися.
+The per-model default is left unchanged deliberately: premature expansion is annoying, but it's
+**visible**, and whoever it affects now has somewhere to switch to. The credits default changed
+because its flaw is **invisibility**: a silent blind spot the user has no way to notice, let alone
+complain about.
 
-## Наслідки
+## Consequences
 
-- **Міграція `nonCalm` → `aboveZero` для кредитів** (`migrateExtraUsageVisibilityIfNeeded`). Зберігає
-  намір, який робив `nonCalm` дефолтом («не показуй, доки нема на що дивитися»), і доносить його до
-  всіх білінгових конфігурацій. Ідемпотентність — через власний маркер-ключ, а не через видалення
-  legacy-ключа: тут переписується **значення** ключа, що лишається в ужитку, і `nonCalm` досі
-  легальний для сусіднього рядка. Без маркера користувач, який повернув би `nonCalm` через
-  імпорт конфігу, отримав би тихе переписування вдруге.
-- **`PopupLayout` виріс на два поля** — `perModelRowsAreAboveZero`, `creditsIsAboveZero`. Гейт
-  лишається у в'юсі з обох причин ADR-0072 (живий `optionHeld` без реполу; індекси `BlockingReset`).
-- **`Money.isZero`** — новий хелпер, що звіряє цілі мінорні одиниці, а не `majorUnitValue`: точний за
-  будь-якого `exponent` і без похибки ділення.
-- **`shows(...)` став трипараметричним.** Обидва предикати передаються завжди, дефолтів немає навмисно:
-  дефолт дозволив би новому call-site тихо передати вічний `false` і зламати режим.
-- **Кредитна секція тепер за замовчуванням з'являється раніше** — на першому витраченому центі замість
-  помаранчевого. Для тих, хто платить рідко, це помітна зміна; `With ⌥ Option` лишається способом
-  прибрати її зовсім.
+- **Migration `nonCalm` → `aboveZero` for credits** (`migrateExtraUsageVisibilityIfNeeded`).
+  Preserves the intent that made `nonCalm` the default ("don't show it until there's something to
+  look at") and carries it to every billing configuration. Idempotency comes from its own marker
+  key, not from deleting the legacy key: this rewrites the **value** of a key that stays in use,
+  and `nonCalm` is still legal for the neighboring row. Without the marker, a user who restored
+  `nonCalm` via a config import would get silently rewritten a second time.
+- **`PopupLayout` grew two fields** — `perModelRowsAreAboveZero`, `creditsIsAboveZero`. The gate
+  stays in the view for both of ADR-0072's original reasons (a live `optionHeld` without a
+  re-poll; `BlockingReset` indices).
+- **`Money.isZero`** — a new helper that compares whole minor units rather than `majorUnitValue`:
+  exact for any `exponent` and free of division error.
+- **`shows(...)` became three-parameter.** Both predicates are always passed, deliberately with no
+  default: a default would let a new call site silently pass a permanent `false` and break the
+  mode.
+- **The credits section now appears earlier by default** — on the first cent spent instead of at
+  orange. For those who pay rarely, this is a noticeable change; `With ⌥ Option` remains a way to
+  remove it entirely.
 
-## Альтернативи
+## Alternatives considered
 
-- **Підняти поріг `.ahead` у `PacingModel`** (порада ADR-0072) — відкинуто: зачіпає колір на всіх
-  поверхнях і не лікує кредитну сліпу зону.
-- **Лишити `nonCalm` у кредитному рядку заради симетрії** — відкинуто: недосяжний або надлишковий
-  режим у контролі гірший за асиметрію, бо виглядає працездатним і мовчки не працює.
-- **Полікувати сліпу зону, зробивши `creditsIsNonCalm` істинним при безлімітному капі** — відкинуто:
-  це збрехало б про severity (немає стелі — немає й тривоги), щоб пропхати крізь гейт факт витрати.
-  Витрата — це значення, і їй належить власний предикат.
-- **Ховати нульові per-model рядки поштучно, а не групою** — відкинуто в цьому підході: гейт групи
-  лишається однією величиною, а порядок рядків зберігається задля індексів `BlockingReset`. Варте
-  окремого розгляду, якщо групи з наполовину нульовими рядками виявляться частими.
+- **Raise the `.ahead` threshold in `PacingModel`** (ADR-0072's suggestion) — rejected: it affects
+  color on every surface and doesn't cure the credits blind spot.
+- **Keep `nonCalm` on the credits row for symmetry** — rejected: an unreachable or redundant mode
+  in the control is worse than asymmetry, because it looks functional and silently isn't.
+- **Cure the blind spot by making `creditsIsNonCalm` true under an unlimited cap** — rejected: that
+  would lie about severity (no ceiling means no alarm) just to push the fact of spending through
+  the gate. Spending is a value, and it deserves its own predicate.
+- **Hide zero per-model rows individually rather than as a group** — rejected in this pass: the
+  group gate stays a single value, and row order is preserved for `BlockingReset` indices. Worth
+  a separate look if groups with half-zero rows turn out to be common.

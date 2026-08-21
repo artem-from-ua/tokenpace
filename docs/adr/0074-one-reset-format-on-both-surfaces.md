@@ -4,125 +4,127 @@ date: 2026-08-07
 supersedes: [0006]
 ---
 
-# ADR-0074: Один формат «часу до ресету» на обох поверхнях — поріг 90 хв прибрано
+# ADR-0074: One "time to reset" format on both surfaces — the 90-minute threshold is gone
 
-## Контекст
+## Context
 
-Меню-бар і попап відповідали на те саме питання — «коли ресетиться це вікно» — двома різними
-правилами.
+The menu bar and the popup answered the same question — "when does this window reset" — with two
+different rules.
 
-Попап уніфіковано ще в [#167](https://github.com/artem-from-ua/tokenpace/issues/167)
-([ADR-0043](0043-unified-reset-line-and-remove-resetnow.md)): `ResetClock.resetLine` **завжди** веде
-числом із `relativeRounded` і лише додає кваліфікатор за відстанню — `15d`, `5d on Friday`,
-`20h at 03:00`. Число є завжди; змінюється тільки хвіст.
+The popup was already unified in [#167](https://github.com/artem-from-ua/tokenpace/issues/167)
+([ADR-0043](0043-unified-reset-line-and-remove-resetnow.md)): `ResetClock.resetLine` **always** leads
+with a number from `relativeRounded` and only adds a distance-dependent qualifier — `15d`, `5d on
+Friday`, `20h at 03:00`. The number is always there; only the tail changes.
 
-Меню-бар лишився зі своєю розвилкою, ухваленою в [ADR-0006](0006-reset-time-absolute-vs-relative.md):
-`ResetClock.timeToReset` перемикав формат на порозі **90 хв** — далі → настінний годинник `20:40`,
-ближче → `1h29m`. Тож один і той самий ресет в одну й ту саму хвилину читався як `20:40` у барі й
-`5h at 20:40` у попапі.
+The menu bar kept its own fork, adopted in [ADR-0006](0006-reset-time-absolute-vs-relative.md):
+`ResetClock.timeToReset` switched formats at a **90-minute** threshold — beyond it → the wall clock
+`20:40`, closer than it → `1h29m`. So the same reset, in the same minute, read as `20:40` in the bar
+and `5h at 20:40` in the popup.
 
-Підмітив [@kintecus](https://github.com/kintecus) у розборі меню-бару від 2026-08-04 (§6 «One time
-rule, keyed to cadence», інваріант C4). Діагноз слушний; запропоноване ним рішення — ні (див.
-«Розглянуті альтернативи»).
+Spotted by [@kintecus](https://github.com/kintecus) in his 2026-08-04 menu bar review (§6 "One time
+rule, keyed to cadence," invariant C4). The diagnosis is right; his proposed fix is not the one taken
+(see "Alternatives considered").
 
-### Ціна порога — не лише неконсистентність
+### The threshold's cost — not just inconsistency
 
-Ширина меню-бару вимірюється тим самим шрифтом, яким малюється лейбл
+The menu bar's width is measured with the same font the label is drawn in
 (`monospacedDigitSystemFont(ofSize: 11)`, [users-and-goals.md](../reference/users-and-goals.md)):
 
-| Стан | Було | Стало |
+| State | Before | After |
 |---|---|---|
-| **Найширший лейбл будь-де** | **37.2 pt** (`1h29m`) | **23.6 pt** (`10m`) |
-| Ресет за 4 год 41 хв | `20:40` · 31.3 pt | `5h` · 13 pt |
-| 89 хв — трохи під порогом | `1h29m` · 37.2 pt | `1h` · 13 pt |
-| 91 хв — трохи над ним | `20:40` · 31.3 pt | `2h` · 13 pt |
-| 45 хв · 20 хв | `45m` · 23 pt | `45m` · 23 pt — без змін |
+| **Widest label anywhere** | **37.2 pt** (`1h29m`) | **23.6 pt** (`10m`) |
+| Reset in 4 h 41 m | `20:40` · 31.3 pt | `5h` · 13 pt |
+| 89 min — just under the threshold | `1h29m` · 37.2 pt | `1h` · 13 pt |
+| 91 min — just over it | `20:40` · 31.3 pt | `2h` · 13 pt |
+| 45 min · 20 min | `45m` · 23 pt | `45m` · 23 pt — unchanged |
 
-**Найширший стан звужується на 13.6 pt, і ніщо не стає ширшим.**
+**The widest state shrinks by 13.6 pt, and nothing gets wider.**
 
-Окремо — **стрибок ширини**: послідовність `1h29m` (37.2 pt) → `1h30m` (37.2 pt) → `20:40` (31.3 pt)
-зсувала віджет на ~6 pt у міру наближення ресету. Це рівно та «смуга формату лейбла ресету», що вже
-стояла останнім рядком у таблиці джерел дрижання в
+Separately — **a width jump**: the sequence `1h29m` (37.2 pt) → `1h30m` (37.2 pt) → `20:40` (31.3 pt)
+shifted the widget by ~6 pt as the reset approached. This is exactly the "reset label format band"
+that already sat as the last row in the jitter-source table in
 [ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md)
-([#283](https://github.com/artem-from-ua/tokenpace/issues/283)) — тільки там її визнали
-низькочастотною й лишили. Без порога формат не змінюється взагалі, тож джерело зникає, а не
-пом'якшується.
+([#283](https://github.com/artem-from-ua/tokenpace/issues/283)) — only there it was judged
+low-frequency and left alone. With no threshold, the format never changes at all, so the source
+disappears rather than being merely softened.
 
-## Рішення
+## Decision
 
-**Меню-бар форматує лейбл тією самою `relativeRounded`, що дає числове ядро попапа.** Порога 90 хв
-і настінного годинника в барі більше немає ([#284](https://github.com/artem-from-ua/tokenpace/issues/284)).
+**The menu bar formats its label with the same `relativeRounded` that produces the popup's numeric
+core.** The 90-minute threshold and the wall clock in the bar are gone
+([#284](https://github.com/artem-from-ua/tokenpace/issues/284)).
 
-Наслідки в коді, всі свідомі:
+Consequences in code, all deliberate:
 
-- **`enum TimeToReset` прибрано; лейбл — звичайний `String`.** Форматів більше не два, тож
-  розрізняти нічого: єдиний `switch` по ньому (`StatusItemView.resetText`) обидві гілки повертав
-  ідентично, а на колір, позицію чи ширину кейс не впливав ніколи. Тип із двома кейсами документував
-  би неіснуючу розвилку. Зовнішнього сліду заміна не має — `TimeToReset` ніде не серіалізувався,
-  не логувався й не персистився.
-- **`timeToResetCompactDays` злилася з `timeToReset`.** Компактні дні
+- **`enum TimeToReset` is removed; the label is a plain `String`.** There are no longer two formats
+  to distinguish between: the only `switch` over it (`StatusItemView.resetText`) returned identically
+  from both branches, and the case never affected color, position, or width. A two-case type would
+  have documented a fork that no longer exists. The removal leaves no external trace —
+  `TimeToReset` was never serialized, logged, or persisted anywhere.
+- **`timeToResetCompactDays` merged into `timeToReset`.** Compact days
   ([#100](https://github.com/artem-from-ua/tokenpace/issues/100),
-  [ADR-0027](0027-session-idle-no-phantom-reset.md)) існували **тільки** тому, що `timeToReset` за
-  90 хв перемикався на годинник, а `20:40` для ресету через кілька днів читається безглуздо. Прибрали
-  поріг — і `timeToReset` **став** `relativeRounded`, тобто рівно тим, що робила компактна варіація.
-  Емпірично перевірено на діапазоні 22–26 год: гілка `≥ 24 h` не додавала нічого, `relativeRounded`
-  і так дає `Nd`.
-- **`relativeString` (комбінований `1h29m`) видалено** — його не викликає ніхто.
-- **`absoluteString` лишається живим:** його далі викликає `resetLine` для попапного `at 03:00`.
-  Мертвим став лише шлях меню-бару до нього.
-- **Параметри `locale`/`timeZone` прибрано** з `timeToReset` / `resetDisplay` /
-  `MenuBarLayout.selectReset`: гола тривалість локаль-інваріантна, вони були потрібні лише
-  видаленій годинниковій гілці.
+  [ADR-0027](0027-session-idle-no-phantom-reset.md)) existed **only** because `timeToReset` switched to
+  the clock past 90 minutes, and `20:40` for a reset several days out reads as nonsense. With the
+  threshold gone, `timeToReset` **became** `relativeRounded` — exactly what the compact variant already
+  did. Verified empirically over the 22–26 h range: the `≥ 24 h` branch added nothing,
+  `relativeRounded` already produces `Nd` on its own.
+- **`relativeString` (the combined `1h29m`) was deleted** — nothing calls it anymore.
+- **`absoluteString` stays alive:** `resetLine` still calls it for the popup's `at 03:00`. Only the
+  menu bar's path to it went dead.
+- **The `locale`/`timeZone` parameters were removed** from `timeToReset` / `resetDisplay` /
+  `MenuBarLayout.selectReset`: a bare duration is locale-invariant, and they were only needed by the
+  now-deleted clock branch.
 
-### Що це коштує користувачеві
+### What this costs the user
 
-- **З бару зникає прив'язка до настінного годинника.** За 4 години `5h` не каже, що ресет о 20:40.
-  Пом'якшень два: годинник лишається в попапі за один клік (`5h at 20:40`), де для нього є місце; і
-  `20:40` у барі й так було **неповним** — воно не казало, *якого дня*.
-- **Хвилини зникають у смузі 50–90 хв:** `1h29m` → `1h`. Прийнято свідомо: нижче 50 хв
-  `relativeRounded` сама вертається до хвилин (`49m`, `45m`), тож точність є саме там, де вона
-  дієва — в останню годину перед ресетом.
+- **The bar loses its tie to the wall clock.** At 4 hours out, `5h` no longer says the reset lands at
+  20:40. Two things soften this: the clock survives in the popup one click away (`5h at 20:40`), where
+  there is room for it; and `20:40` in the bar was already **incomplete** — it never said *which day*.
+- **Minutes disappear in the 50–90 min band:** `1h29m` → `1h`. Accepted deliberately: below 50
+  minutes `relativeRounded` returns to minutes on its own (`49m`, `45m`), so precision is present
+  exactly where it matters — the last hour before the reset.
 
-## Наслідки
+## Consequences
 
-- **Інваріант C4 виконано:** один ресет-інстант дає однакове число на обох поверхнях у ту саму
-  хвилину; попап відрізняється лише доданим кваліфікатором. Це закріплено тестом
-  `menuBarAgreesWithPopupNumber`, що прогонить обидві функції по всіх смугах.
-- **Формат не змінює форму ніде** в діапазоні 1 хв – 7 д; змінюється тільки одиниця (`m` → `h` →
-  `d`). Стрибок ширини на межі формату зник разом із межею.
-- **Покриття DST і 12/24-год збережено, але переїхало.** Кейси з видаленої сюїти
-  `timeToReset.absolute` (`en_US` меридіем, `en_GB`, `uk_UA`, обидва боки переходу
-  `America/New_York` 2026-03-08) перенесено в `ResetLineClockTests` — вони перевіряють живий
-  `absoluteString` через попап. Це **єдине** покриття DST у проєкті, тож видалити їх разом із
-  сюїтою було б мовчазною втратою; `ResetLineTests.clockRespectsLocaleHourCycle` його не замінює,
-  бо асертить лише «gb ≠ us», не конкретну годину.
-- **Ризик, який автотести не ловлять:** тестів ширини меню-бару в проєкті немає (`Tests/` покриває
-  лише `TokenPaceKit`; `StatusItemView` не тестується). Регресію ширини видно лише на скріншоті
-  реального бару — тому додано стуб `mid-band-reset` на смугу 90 хв – 24 год, якої досі не було
-  чим перевірити вживу.
+- **Invariant C4 holds:** one reset instant produces the same number on both surfaces in the same
+  minute; the popup differs only by its added qualifier. Locked in by a test,
+  `menuBarAgreesWithPopupNumber`, which runs both functions across every band.
+- **The format never changes shape** anywhere in the 1 min – 7 d range; only the unit changes (`m` →
+  `h` → `d`). The width jump at the format boundary is gone along with the boundary.
+- **DST and 12/24-hour coverage is preserved, but moved.** The cases from the deleted
+  `timeToReset.absolute` suite (`en_US` meridiem, `en_GB`, `uk_UA`, both sides of the
+  `America/New_York` 2026-03-08 transition) were moved into `ResetLineClockTests` — they now exercise
+  the live `absoluteString` through the popup. This is the project's **only** DST coverage, so
+  deleting them along with the suite would have been a silent loss;
+  `ResetLineTests.clockRespectsLocaleHourCycle` does not replace them, since it only asserts "gb ≠ us,"
+  not a specific hour.
+- **A risk the automated tests do not catch:** the project has no menu bar width tests (`Tests/`
+  covers `TokenPaceKit` only; `StatusItemView` is untested). A width regression is only visible on a
+  screenshot of the real bar — which is why the `mid-band-reset` stub was added for the 90 min – 24 h
+  band, which until now had no way to be checked live.
 
-## Розглянуті альтернативи
+## Alternatives considered
 
-**§6 розбору — три правила за типом вікна** (тривалість для 5h, weekday + час для 7d, дні для
-кредитів). Відхилено:
+**§6 of the review — three rules keyed to window type** (a duration for 5h, weekday + time for 7d,
+days for credits). Rejected:
 
-- **`Wed 23:00` — 57.8 pt**, найширший із виміряних варіантів, і припав би саме на 7d. За 20 хв до
-  тижневого ресету показував би день тижня замість `20m` — рівно та арифметика в голові, проти якої
-  розбір заперечує деінде.
-- **Кредити втрачають годинник в останню добу:** `1d left` не відрізняє «завтра вранці» від
-  «за 40 хвилин».
-- **Вносить C4 по іншій осі:** за 12 год до ресету три вікна надрукували б три різні форми для
-  однакової відстані.
+- **`Wed 23:00` — 57.8 pt**, the widest of the measured options, and it would have landed exactly on
+  7d. 20 minutes before the weekly reset it would show a day of the week instead of `20m` — exactly the
+  mental arithmetic the review argues against elsewhere.
+- **Credits lose the clock in the final day:** `1d left` does not distinguish "tomorrow morning" from
+  "in 40 minutes."
+- **It reintroduces C4 along a different axis:** 12 hours before a reset, the three windows would
+  print three different shapes for the same distance.
 
-**Прибрати лише годинникову гілку, лишивши `1h29m`.** Не досягає інваріанта саме там, де часу
-лишилося найменше (бар `1h29m` проти попапного `1h at 20:40`), і не дає виграшу в ширині — максимум
-лишається 37.2 pt.
+**Remove only the clock branch, keeping `1h29m`.** Fails to reach the invariant exactly where the
+least time is left (bar `1h29m` versus popup `1h at 20:40`), and buys no width win — the maximum
+stays at 37.2 pt.
 
-**Лишити `TimeToReset` з одним кейсом.** Проміжна форма: фактично той самий `String` в обгортці.
-Оскільки тести й так переписувалися, економія на diff зникала.
+**Keep `TimeToReset` with a single case.** A halfway form: effectively the same `String` in a wrapper.
+Since the tests had to be rewritten anyway, the diff savings vanished.
 
-Див. також: [#284](https://github.com/artem-from-ua/tokenpace/issues/284) (цей тікет),
-[ADR-0006](0006-reset-time-absolute-vs-relative.md) (скасоване рішення),
-[ADR-0043](0043-unified-reset-line-and-remove-resetnow.md) (уніфікація попапа, #167),
-[ADR-0027](0027-session-idle-no-phantom-reset.md) (компактні дні, #100),
-[ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md) (джерела дрижання ширини, #283).
+See also: [#284](https://github.com/artem-from-ua/tokenpace/issues/284) (this ticket),
+[ADR-0006](0006-reset-time-absolute-vs-relative.md) (the decision this supersedes),
+[ADR-0043](0043-unified-reset-line-and-remove-resetnow.md) (popup unification, #167),
+[ADR-0027](0027-session-idle-no-phantom-reset.md) (compact days, #100),
+[ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md) (width jitter sources, #283).

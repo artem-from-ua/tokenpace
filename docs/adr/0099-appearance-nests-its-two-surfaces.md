@@ -5,119 +5,129 @@ supersedes: []
 superseded_by: [0112]
 ---
 
-# ADR-0099: `Appearance` знову один пан, а дві поверхні — його дочірні сторінки
+# ADR-0099: `Appearance` is one pane again, and the two surfaces are its child pages
 
-> Витісняє рішення [#333](https://github.com/artem-from-ua/tokenpace/issues/333) розкласти
-> `Appearance` на **три сусідні рядки sidebar**. Вісь поділу (поверхня, яку налаштовує опція) чинна й
-> не змінюється — змінюється лише рівень, на якому вона живе. Механіка drill-in — [ADR-0084](0084-settings-drill-in-child-pages.md),
-> без змін; прив'язку прев'ю до пана див. нижче, вона частково витісняє [ADR-0083](0083-live-dropdown-preview-in-settings.md).
+> Supersedes the decision in [#333](https://github.com/artem-from-ua/tokenpace/issues/333) to split
+> `Appearance` into **three adjacent sidebar rows**. The axis of the split (the surface an option
+> configures) still stands and doesn't change — only the level it lives at changes. The drill-in
+> mechanics are [ADR-0084](0084-settings-drill-in-child-pages.md), unchanged; the preview's binding
+> to the pane is discussed below and partially supersedes
+> [ADR-0083](0083-live-dropdown-preview-in-settings.md).
 >
-> **Останній абзац §«Пресети — радіо з поясненнями» витіснено
-> [ADR-0112](0112-appearance-presets-preview-apply-commits.md):** `Custom` більше не існує — його
-> замінив `My setup`, який завжди клікабельний, бо називає сам збережений конфіг, а не снапшот. Решта
-> секції (радіо замість сегментів, три правила формулювань) чинна.
+> **The last paragraph of §"Presets — radio buttons with explanations" is superseded by
+> [ADR-0112](0112-appearance-presets-preview-apply-commits.md):** `Custom` no longer exists — it's
+> replaced by `My setup`, which is always clickable because it names the saved config itself, not a
+> snapshot. The rest of the section (radio buttons instead of segments, the three wording rules)
+> still stands.
 
-## Контекст
+## Context
 
-[#333](https://github.com/artem-from-ua/tokenpace/issues/333) розділив пан `Appearance` на
-`UI presets` · `Menu bar` · `Dropdown` і поставив усі три рядками верхнього рівня. Аргумент був
-простий: у sidebar є місце на три рядки, а роздільник скаже, що вони одне ціле — і це дешевше за
-зайвий клік, якого коштувала б батьківська сторінка.
+[#333](https://github.com/artem-from-ua/tokenpace/issues/333) split the `Appearance` pane into
+`UI presets` · `Menu bar` · `Dropdown` and set all three as top-level rows. The argument was
+simple: the sidebar has room for three rows, and a divider would signal they belong together —
+cheaper than the extra click a parent page would cost.
 
-Те, що вийшло насправді, видно на живому вікні. У sidebar сім рядків, і **два з них — половини однієї
-теми**: `Menu bar` і `Dropdown` не відповідають на питання «що застосунок робить» (як `General` чи
-`Providers`) і не є окремими темами — це дві поверхні, на яких малюється те саме. Спорідненість між
-ними ніс **лише роздільник плюс спільний зелений тінт капсул**, тобто дві суто візуальні ознаки, які
-читаються після того, як користувач уже прочитав список.
+What actually resulted is visible on the live window. The sidebar has seven rows, and **two of them
+are halves of one topic**: `Menu bar` and `Dropdown` don't answer "what does the app do" (the way
+`General` or `Providers` does) and aren't separate topics — they're two surfaces the same thing gets
+drawn on. Their kinship was carried **only by the divider plus a shared green capsule tint** — two
+purely visual cues that only read after a user has already read the list.
 
-Окремо виявилася друга проблема, яку перша маскувала: `Notifications` стояв **власною групою знизу**,
-відрізаний роздільником від UI-трійці. Обґрунтування 0333 було, що він конфігурує поверхню поза
-вікнами застосунку (Notification Center). Але щойно дві поверхні йдуть на рівень нижче, у верхньому
-списку лишаються `Appearance` і `Notifications` — і обидва відповідають на одне питання: **як
-застосунок себе показує**. Роздільник між ними малював різницю, якої на цьому рівні вже немає.
+A second problem the first one had been masking showed up separately: `Notifications` sat in **its
+own group at the bottom**, cut off by a divider from the UI trio. #333's rationale was that it
+configures a surface outside the app's windows (Notification Center). But once the two surfaces move
+down a level, the top list is left with `Appearance` and `Notifications` — and both answer the same
+question: **how the app presents itself**. The divider between them was drawing a distinction that
+no longer exists at this level.
 
-## Рішення
+## Decision
 
-**Дві поверхні стають дочірніми сторінками `Appearance`**, а `Appearance` і `Notifications` ділять
-одну групу sidebar без роздільника між ними.
+**The two surfaces become child pages of `Appearance`**, and `Appearance` and `Notifications` share
+one sidebar group with no divider between them.
 
-Sidebar: `About` / **`General` · `Providers`** / **`Appearance` · `Notifications`** — п'ять рядків
-замість семи, три групи замість чотирьох.
+Sidebar: `About` / **`General` · `Providers`** / **`Appearance` · `Notifications`** — five rows
+instead of seven, three groups instead of four.
 
-- **Механізм — той самий drill-in, що в `Providers › Claude`** ([ADR-0084](0084-settings-drill-in-child-pages.md)):
-  `SettingsNavigationRow` на батьківській сторінці, назва дитини в тулбарі, ‹ повертає на батька.
-  Нічого нового не будувалося — `SettingsChildPage` просто отримав два кейси.
-- **`SettingsSection.appearance` зберігає raw-значення `2`** через обидва перейменування
-  (`Appearance` → `UI presets` → `Appearance`): це той самий пан, тож задокументовані рецепти й
-  `TOKENPACE_SETTINGS_SECTION=2` ведуть туди ж, куди й вели.
-- **`5` і `6` виводяться з обігу, як свого часу `4`.** Сторінки, які вони називали, нікуди не
-  зникли — вони переїхали на рівень нижче й адресуються крапковою формою `2.0` / `2.1`. Напрямити
-  старий `5` на якийсь інший пан означало б рецепт, що **бреше**, а не падає.
-- **Чипи поверхонь переїжджають на бейджі навігаційних рядків.** Чорний (menu bar) і білий із
-  хайрлайном (dropdown) — ті самі виміряні `CapsuleTint`, що були в sidebar, тепер через
-  `SettingsRowBadge.tinted`. Обрізка `distribute.vertical` (смуга `0.28…0.72`, заміряна на гліфі 64 pt)
-  винесена в спільний `SymbolTrim`: смуга — властивість **гліфа**, а не місця, де він намальований,
-  тож вона мала пережити переїзд із чипа sidebar на більший бейдж рядка.
-- **Підзаголовок рядка — поточний Bar style тієї поверхні**, узятий із того самого
-  `AppearanceBarStyle.segments`, яким підписані сегменти на самій дитині: рядок, що каже «Gauge», поки
-  контрол усередині каже інше, був би гірший за рядок без підзаголовка. Пишеться з міткою —
-  `Style: Gauge`, а не голою назвою стилю: заголовок рядка називає лише **поверхню**, тож саме
-  «Gauge» лишало читачеві гадати, котре з кількох налаштувань сторінки він бачить. Мітка дослівно
-  повторює підпис контролу на дитині («Style»), тож підсумок і контрол, який він підсумовує,
-  називають налаштування однаково.
+- **The mechanism is the same drill-in as `Providers › Claude`**
+  ([ADR-0084](0084-settings-drill-in-child-pages.md)): a `SettingsNavigationRow` on the parent page,
+  the child's name in the toolbar, ‹ returns to the parent. Nothing new was built —
+  `SettingsChildPage` simply gained two cases.
+- **`SettingsSection.appearance` keeps its raw value of `2`** through both renamings
+  (`Appearance` → `UI presets` → `Appearance`): it's the same pane, so documented recipes and
+  `TOKENPACE_SETTINGS_SECTION=2` still lead where they always led.
+- **`5` and `6` are retired from circulation, the way `4` was before them.** The pages they used to
+  name haven't gone anywhere — they moved down a level and are addressed with the dotted form
+  `2.0` / `2.1`. Pointing the old `5` at some other pane would be a recipe that **lies**, rather than
+  one that fails.
+- **The surface chips move to navigation-row badges.** Black (menu bar) and white with a hairline
+  (dropdown) — the same measured `CapsuleTint`s that lived in the sidebar, now via
+  `SettingsRowBadge.tinted`. The `distribute.vertical` crop (the `0.28…0.72` band, measured on a
+  64 pt glyph) is factored into a shared `SymbolTrim`: the band is a property of the **glyph**, not
+  of where it's drawn, so it had to survive the move from the sidebar chip to the larger row badge.
+- **The row's subtitle is that surface's current Bar style**, taken from the same
+  `AppearanceBarStyle.segments` that labels the segments on the child page itself: a row saying
+  "Gauge" while the control inside says something else would be worse than a row with no subtitle.
+  It's written with a label — `Style: Gauge`, not a bare style name — because the row's title names
+  only the **surface**, so "Gauge" alone would leave the reader guessing which of the page's several
+  settings they were looking at. The label repeats the child page's control caption verbatim
+  ("Style"), so the summary and the control it summarizes name the setting the same way.
 
-### Прев'ю дропдауна прив'язується до пана
+### The dropdown preview binds to the pane
 
-[ADR-0083](0083-live-dropdown-preview-in-settings.md) свідомо **не** прив'язував прев'ю до вибраної
-секції: аргумент був, що реєстр «секцій, які показують прев'ю» — це ще одна річ, яку треба тримати в
-синхроні, і що майбутній пан (Guide/Legend, #261) отримає прев'ю задарма.
+[ADR-0083](0083-live-dropdown-preview-in-settings.md) deliberately did **not** bind the preview to
+the selected section: the argument was that a registry of "sections that show a preview" is one more
+thing to keep in sync, and that a future pane (Guide/Legend, #261) would get the preview for free.
 
-Тепер це рішення переглянуто в один бік. Прев'ю — **друге вікно, що займає реальну ширину** поруч із
-Settings; на `About` чи `Notifications` воно займає цю ширину, щоб відповісти на питання, якого на
-сторінці ніхто не ставив. Реєстр виявився однією обчислюваною властивістю `SettingsSection.showsDropdownPreview`,
-на яку кожен новий пан відповідає в момент, коли його додають, — ціна, названа в 0083, на практиці
-виявилася меншою за незручність.
+That decision is now revisited in one direction. The preview is a **second window occupying real
+width** next to Settings; on `About` or `Notifications` it would occupy that width to answer a
+question nobody asked on that page. The registry turned out to be a single computed property,
+`SettingsSection.showsDropdownPreview`, which each new pane answers the moment it's added — the cost
+named in 0083 turned out, in practice, to be smaller than the awkwardness it caused.
 
-Наслідок, який легко пропустити: `occupiedWidth` віддає **0**, поки прев'ю сховане. Центрування
-рахує пару «вікно + прев'ю» як одне ціле, тож без цього вікно, відкрите на панелі без прев'ю, з'їхало
-б ліворуч на половину вікна, якого не видно.
+An easy-to-miss consequence: `occupiedWidth` returns **0** while the preview is hidden. Centering
+treats the "window + preview" pair as one unit, so without this, a window opened on a pane without a
+preview would drift left by half the width of a preview nobody sees.
 
-### Пресети — радіо з поясненнями, а не сегментед
+### Presets — radio buttons with explanations, not a segmented control
 
-Три назви (`Chill` / `Work harder!` / `Control freak`) читаються як **настрій**, а не як поведінка, і
-питання, на яке користувач насправді має відповісти — *які сигнали цей пресет робить найпомітнішими* —
-у сегменті не має де поміститися. Радіо-група дає рядок прози на опцію; текст лежить у
-`AppearancePreset.summary`, поряд зі значеннями, які він описує.
+The three names (`Chill` / `Work harder!` / `Control freak`) read as **a mood**, not as behavior, and
+the question a user actually needs answered — *which signals does this preset make most
+prominent* — has nowhere to fit in a segment. A radio group gives one line of prose per option; the
+text lives in `AppearancePreset.summary`, next to the values it describes.
 
-Три правила, кожне з живого перегляду:
+Three rules, each drawn from a live review:
 
-- **Кожен рядок самодостатній.** Чернетка `Work harder!` починалася з «Like Chill, but…» — у списку
-  кожен пункт для когось перший, і середній ставав нечитабельним без попереднього.
-- **Називати ціну, а не лише вигоду.** `Control freak` каже «Maximum info, but signals take a bit
-  longer to spot»: вимкнені приглушення — це і те, що показує всю картину, і те, що робить її
-  повільнішою для читання.
-- **Не обіцяти того, чого ⌥ не робить.** Модифікатор розкриває приховані рядки й підписи, але
-  **ніколи не міняє стиль бару** — Pressure лишається Pressure під ⌥. Формулювання «повна картина без
-  ⌥» описувало б підміну, якої клавіша не виконує.
+- **Every line stands on its own.** The `Work harder!` draft started with "Like Chill, but…" — in a
+  list, every item is someone's first read, and the middle one became unreadable without the one
+  before it.
+- **Name the cost, not just the benefit.** `Control freak` says "Maximum info, but signals take a
+  bit longer to spot": turning off the dimming both shows the whole picture and makes it slower to
+  read.
+- **Never promise what ⌥ doesn't do.** The modifier reveals hidden rows and labels, but **never
+  changes the bar style** — Pressure stays Pressure under ⌥. Wording like "the full picture without
+  ⌥" would describe a swap the key doesn't actually perform.
 
-Опис під опцією **не змінюється** залежно від стану опції: другий текст, що з'являвся б лише в
-якомусь одному стані, переверстував би список під курсором.
+The description under an option **does not change** with the option's state: a second string that
+would appear only in one particular state would reflow the list under the cursor.
 
-> ~~`Custom` неклікабельний, поки нема збереженого сетапу, — але його рядок описує саму опцію, а не її
-> поточну досяжність.~~ Витіснено [ADR-0112](0112-appearance-presets-preview-apply-commits.md):
-> четвертий рядок зветься `My setup`, називає сам збережений конфіг і клікабельний завжди. Правило про
-> сталий опис пережило заміну — стан рядка тепер повідомляє **нотатка біля назви** (`· same as *Chill*
-> preset`), яка коротша й не рухає рядки під курсором.
+> ~~`Custom` is unclickable until there's a saved setup — but its row describes the option itself,
+> not its current reachability.~~ Superseded by
+> [ADR-0112](0112-appearance-presets-preview-apply-commits.md): the fourth row is now called
+> `My setup`, names the saved config itself, and is always clickable. The rule about a stable
+> description survived the replacement — a row's state is now conveyed by **a note next to the
+> name** (`· same as *Chill* preset`), which is shorter and doesn't move rows under the cursor.
 
-## Наслідки
+## Consequences
 
-- Sidebar перестав змішувати рівні: усі п'ять рядків — теми, жоден не є половиною сусіда.
-- Дві поверхні коштують один клік. Це та сама ціна, якої 0333 уникав, — і вона визнана прийнятною:
-  налаштування поверхні відкривають рідше, ніж читають список.
-- `TOKENPACE_SETTINGS_SECTION` має **три** мертві індекси (`4`, `5`, `6`) замість одного. Кожен
-  задокументований у таблиці [ui-verification.md](../guides/ui-verification.md) з причиною й заміною.
-- `TitlePlaqueView` отримав **опційний** другий рядок; dev-тюнер його не передає й лишається без змін.
-  У прев'ю Settings він каже про ⌥ — інакше цю можливість знаходять випадково.
-- Прев'ю більше не «завжди при відкритому вікні», тож будь-який новий пан, на якому воно доречне,
-  мусить сказати про це явно. Це свідома вартість: мовчазний дефолт саме й показував його там, де
-  воно не потрібне.
+- The sidebar stopped mixing levels: all five rows are topics, none of them half of its neighbor.
+- The two surfaces cost one click. That's the same cost 0333 avoided — and it's accepted as
+  reasonable: surface settings are opened less often than the list is read.
+- `TOKENPACE_SETTINGS_SECTION` has **three** dead indices (`4`, `5`, `6`) instead of one. Each is
+  documented in the table in [ui-verification.md](../guides/ui-verification.md) with the reason and
+  its replacement.
+- `TitlePlaqueView` gained an **optional** second line; the dev tuner doesn't pass it and stays
+  unchanged. In the Settings preview it mentions ⌥ — otherwise this feature is found only by
+  accident.
+- The preview is no longer "always on while the window is open," so any new pane where it makes
+  sense has to say so explicitly. This is a deliberate cost: the silent default was exactly what
+  showed it where it wasn't needed.

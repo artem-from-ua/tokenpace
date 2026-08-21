@@ -4,64 +4,73 @@ date: 2026-08-03
 supersedes: [0022]
 ---
 
-# ADR-0064: Попап — безумовно напівпрозорий, плашка Control Center, перебудовані бари з glow
+# ADR-0064: The popup — unconditionally translucent, a Control Center card, rebuilt bars with glow
 
-## Контекст
+## Context
 
-[ADR-0022](0022-popup-bar-transparency-and-contrast-experiment.md) зафіксував **суцільний непрозорий фон**
-усього дропдауна (`SolidBackdropView` під барною секцією + overlay нативних `Settings…`/`Quit`, #86), бо
-напівпрозорий бар над *довільним* фоном (шпалера/чужі вікна) давав нестабільний контраст.
+[ADR-0022](0022-popup-bar-transparency-and-contrast-experiment.md) settled on a **solid opaque
+background** for the whole dropdown (`SolidBackdropView` under the bar section + an overlay on the
+native `Settings…`/`Quit`, #86), because a translucent bar over an *arbitrary* background
+(wallpaper/other windows) produced unstable contrast.
 
-Спочатку (#188) ми додали це як **опційний тумблер** «Translucent system background» (Settings → Appearance,
-default-off, поза пресетами), що повертав рідний menu-матеріал. Під час живого доведення виявилося:
+At first (#188) we added this as an **optional toggle**, "Translucent system background" (Settings
+→ Appearance, default off, outside the presets), which restored the native menu material. Live
+verification found:
 
-- Суцільний фон робив попап важким і несистемним; напівпрозорий menu-look користувач стабільно вважав
-  кращим — тож «опційність» була зайвою складністю (два режими, тумблер, persist, гейт живого re-apply).
-- Головне джерело нестабільного контрасту з ADR-0022 — сам **напівпрозорий бар**. Якщо натомість
-  посадити всю секцію на **власну плашку** (щільна заокруглена картка над матеріалом), контент читається
-  на стабільній підкладці, а прозорість дає лише «дихання» матеріалу по краях — ризику контрасту немає.
+- The solid background made the popup feel heavy and off-system; users consistently rated the
+  translucent menu look better — so the "optionality" was extra complexity for no benefit (two
+  modes, a toggle, persistence, a live-re-apply gate).
+- The real source of unstable contrast in ADR-0022 was the **translucent bar itself**. If instead
+  the whole section sits on its **own card** (a dense, rounded card over the material), the content
+  reads against a stable backing, and translucency only lets the material "breathe" at the edges —
+  no contrast risk.
 
-Паралельно бари попапа перемальовувалися: старий вигляд (монохромні зони + темні `indicatorStroke`-
-роздільники) не пасував до нової плашки й потребував акуратніших торців/відділень.
+At the same time, the popup's bars were being redrawn: the old look (monochrome zones + dark
+`indicatorStroke` separators) didn't fit the new card and needed cleaner endcaps/separation.
 
-## Рішення
+## Decision
 
-1. **Попап безумовно напівпрозорий.** Тумблер, `PersistedConfig.popupTranslucentBackground`, `SolidBackdropView`,
-   whole-menu overlay (`installOpaqueMenuBackdropIfNeeded`, #86) та весь opaque-режим **видалено** (−230 рядків).
-   Реальне menu-вікно (`NSPopupMenuWindow`) і так малює свій vibrancy-матеріал — ми більше нічим його не
-   накриваємо.
-2. **Плашка Control Center** (`CardBackdropView`): уся Claude-секція сидить на заокругленій layer-backed
-   картці з м'якою тінню, `fill = controlBackgroundColor@0.85`, inset від країв (навколо просвічує menu-
-   матеріал), hairline-бордер. Ширина = роздільника між нативними пунктами; сепаратор перед `Settings…`
-   прибрано (плашка сама відділяє секцію).
-3. **Бари перебудовано:** суцільний сірий track → кольоровий **стріп із капсульними торцями** (обидва кінці
-   round; торець біля краю бару зливається з ним) + ambient **glow** → **повзунок** із filled-frame сірим
-   бордером (не centred-stroke, що читався криво) і сильнішим glow. Idle-бар (5h «ready to start») має
-   власний, компактніший і сильніший glow.
-4. **Status-крапки** сервісів — `GlowDotView` (layer-backed з glow), а не запечений symbol-image: fill і
-   колір тіні re-resolve у `updateLayer`, тож вони **переживають зміну світлої/темної теми**. (Правило: жодних
-   запікань кольору в bitmap — усе на динамічних системних кольорах.)
-5. **Dev color-tuner preview** форсує **Vibrant**-appearance (`vibrantDark`/`vibrantLight`) поточної теми, бо
-   реальне menu-вікно є `NSAppearanceNameVibrantDark`, і системні label-кольори резолвляться під vibrancy
-   інакше (напр. `monochromeGrey` → непрозорий `#323232` у VibrantDark vs світлий `white@0.17` у DarkAqua).
-   Без форсу нейтралі превью читалися світлішими за живе меню. Превью також реагує на зміну Bar style/ticks.
+1. **The popup is unconditionally translucent.** The toggle, `PersistedConfig.popupTranslucentBackground`,
+   `SolidBackdropView`, the whole-menu overlay (`installOpaqueMenuBackdropIfNeeded`, #86), and the
+   entire opaque mode are **removed** (−230 lines). The real menu window (`NSPopupMenuWindow`)
+   already draws its own vibrancy material — we no longer cover it with anything else.
+2. **A Control Center card** (`CardBackdropView`): the whole Claude section sits on a rounded,
+   layer-backed card with a soft shadow, `fill = controlBackgroundColor@0.85`, an inset from the
+   edges (the menu material shows through around it), and a hairline border. Its width matches the
+   separator between native items; the separator before `Settings…` is removed (the card itself
+   sets the section apart).
+3. **The bars were rebuilt:** a solid gray track → a colored **strip with capsule endcaps** (both
+   ends round; the endcap near the bar's edge blends into it) + an ambient **glow** → a **slider**
+   with a filled-frame gray border (rather than a centered stroke, which read crooked) and a
+   stronger glow. The idle bar (5h "ready to start") has its own, more compact and stronger glow.
+4. **Service status dots** — `GlowDotView` (layer-backed with glow) rather than a baked symbol
+   image: the fill and shadow color re-resolve in `updateLayer`, so they **survive a light/dark
+   theme switch**. (Rule: no color baking into a bitmap — everything runs on dynamic system
+   colors.)
+5. **The dev color-tuner preview** forces the **Vibrant** appearance (`vibrantDark`/`vibrantLight`)
+   of the current theme, because the real menu window is `NSAppearanceNameVibrantDark`, and system
+   label colors resolve differently under vibrancy (e.g. `monochromeGrey` → opaque `#323232` in
+   VibrantDark vs. light `white@0.17` in DarkAqua). Without forcing it, neutrals in the preview read
+   lighter than the live menu. The preview also reacts to Bar style/ticks changes.
 
-## Наслідки
+## Consequences
 
-- Один режим замість двох — простіший код і UX; конвенція «жодних baking» дотримана (тема-фліп коректний
-  для крапок і барів).
-- Справжній тон шпалери на плашці **всередині `NSMenu` недосяжний** (вікно системне/непрозоре — див.
-  дослідження #188): плашка бере тон **власного menu-матеріалу**, не десктопу. У dev-preview (вікно наше)
-  vibrancy можлива, але дає інші нейтралі — тому preview лишили на flat `#212121` + Vibrant-appearance як
-  **точний кольоровий референс**, а не демонстрацію прозорості.
-- ADR-0022 (клауза про суцільний непрозорий фон) і крос-лінк в [ADR-0060](0060-popup-native-semantic-colours.md)
-  цим superseded.
+- One mode instead of two — simpler code and UX; the "no baking" convention is honored (theme flips
+  work correctly for dots and bars).
+- The wallpaper's real tone on the card is **unreachable from inside `NSMenu`** (the window is
+  system-owned/opaque — see the #188 investigation): the card takes its tone from the **menu's own
+  material**, not the desktop. In the dev preview (our own window), vibrancy is possible, but it
+  yields different neutrals — so the preview stays on a flat `#212121` + Vibrant appearance as an
+  **exact color reference**, not a demonstration of transparency.
+- ADR-0022 (the clause about a solid opaque background) and the cross-link in
+  [ADR-0060](0060-popup-native-semantic-colours.md) are superseded by this.
 
-## Пов'язані
+## Related
 
-- [ADR-0022](0022-popup-bar-transparency-and-contrast-experiment.md) — попереднє рішення про суцільний фон
-  (superseded цим ADR).
-- [ADR-0060](0060-popup-native-semantic-colours.md) — системні semantic-кольори попап-барів.
-- [ADR-0062](0062-configurable-bar-presentation.md) — `barStyle`, який тут малюється на новій
-  композиції.
-- [ADR-0046](0046-dev-color-tuner-override-layer.md) — dev color-tuner, чиє preview тепер форсує Vibrant.
+- [ADR-0022](0022-popup-bar-transparency-and-contrast-experiment.md) — the earlier decision on a
+  solid background (superseded by this ADR).
+- [ADR-0060](0060-popup-native-semantic-colours.md) — the system semantic colors for popup bars.
+- [ADR-0062](0062-configurable-bar-presentation.md) — `barStyle`, which is drawn here on the new
+  composition.
+- [ADR-0046](0046-dev-color-tuner-override-layer.md) — the dev color tuner, whose preview now forces
+  Vibrant.

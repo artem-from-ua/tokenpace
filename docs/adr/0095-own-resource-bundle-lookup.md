@@ -5,22 +5,23 @@ supersedes: []
 superseded_by: []
 ---
 
-# ADR-0095: Ресурсний бандл шукаємо самі, а не через `Bundle.module`
+# ADR-0095: We look up the resource bundle ourselves, not through `Bundle.module`
 
-> Дописано пізніше: **єдиний споживач цього рішення зник.**
-> [ADR-0097](0097-bar-style-preview-rendered-at-runtime.md) перевів прев'ю стилю бару на рантайм-
-> рендер, тож три PNG, ресурсний бандл і сам `BarStylePicker.resourceBundle` видалено — у
-> застосунку більше немає жодного ресурсу.
+> Added later: **the sole consumer of this decision is gone.**
+> [ADR-0097](0097-bar-style-preview-rendered-at-runtime.md) switched the bar-style preview to a
+> runtime render, so the three PNGs, the resource bundle, and `BarStylePicker.resourceBundle`
+> itself were all removed — the app has no resources left at all.
 >
-> **Правило лишається чинним**, і ADR не витіснено: воно стосується будь-якого **майбутнього**
-> ресурсу, а не лише тих картинок. Щойно ресурси знадобляться знову, читати їх треба описаним тут
-> способом, а не `Bundle.module` — інакше повториться той самий креш у `.app`. Формулювання в
-> [conventions.md](../reference/conventions.md) переписано в умовний спосіб саме тому.
+> **The rule still stands**, and the ADR isn't superseded: it applies to any **future** resource,
+> not just those pictures. The moment resources are needed again, they must be read the way
+> described here, not through `Bundle.module` — otherwise the same crash in `.app` repeats. That's
+> exactly why the wording in [conventions.md](../reference/conventions.md) is phrased
+> conditionally.
 
-## Контекст
+## Context
 
-Реліз 0.94.0 крешив у встановленому `.app` при відкритті `Settings → Appearance`. Crash report
-(`EXC_BREAKPOINT`, головний потік) вказує на рядок, де закінчується будь-яке розслідування:
+Release 0.94.0 crashed in the installed `.app` when opening `Settings → Appearance`. The crash
+report (`EXC_BREAKPOINT`, main thread) points to the line where any investigation ends:
 
 ```
 0  libswiftCore.dylib  _assertionFailure(_:_:file:line:flags:)
@@ -32,9 +33,10 @@ superseded_by: []
 13 TokenPace           BarStylePicker.tile(for:title:)
 ```
 
-Падав не наш код, а **згенерований SwiftPM аксесор** `Bundle.module`, який `BarStylePicker.images`
-викликає при першому малюванні пікера стилю бару ([ADR-0093](0093-bar-style-picked-by-picture.md)).
-Ось він, дослівно з `.build/…/DerivedSources/resource_bundle_accessor.swift`:
+What crashed wasn't our code but the **SwiftPM-generated accessor** `Bundle.module`, which
+`BarStylePicker.images` calls the first time the bar-style picker draws
+([ADR-0093](0093-bar-style-picked-by-picture.md)). Here it is, verbatim, from
+`.build/…/DerivedSources/resource_bundle_accessor.swift`:
 
 ```swift
 let mainPath = Bundle.main.bundleURL.appendingPathComponent("TokenPace_TokenPace.bundle").path
@@ -44,56 +46,58 @@ guard let bundle = Bundle(path: mainPath) ?? Bundle(path: buildPath) else {
 }
 ```
 
-Обидва кандидати в реальному `.app` хибні:
+Both candidates are wrong in a real `.app`:
 
-- `Bundle.main.bundleURL` для застосунку — це **сам** `/Applications/TokenPace.app`, тож `mainPath`
-  вказує на `/Applications/TokenPace_TokenPace.bundle`, тобто **поруч** із застосунком. Ресурси в
-  `.app` так не лежать і лежати не можуть: їхнє місце — `Contents/Resources/`, куди їх і кладе
-  `scripts/build-app.sh`.
-- `buildPath` — абсолютний шлях у `.build/` **машини, де збирали**, ще й `debug`-конфігурації. На
-  Mac користувача такого каталогу немає.
+- For an app, `Bundle.main.bundleURL` is `/Applications/TokenPace.app` **itself**, so `mainPath`
+  points at `/Applications/TokenPace_TokenPace.bundle` — i.e. **next to** the app. Resources
+  cannot live there in a `.app`: their place is `Contents/Resources/`, which is exactly where
+  `scripts/build-app.sh` puts them.
+- `buildPath` is an absolute path into the `.build/` directory **of the machine that built it**,
+  and a `debug` configuration at that. That directory doesn't exist on a user's Mac.
 
-Промах обох → `fatalError`. Замір це підтверджує напряму: `Bundle(path:)` за шляхом SPM повертає
-`nil`, а за фактичним шляхом у `Contents/Resources/` — відкриває бандл, і всі три PNG вантажаться
-(`bar-style-{pressure,gauge,progress}`, 54×33).
+Both missing → `fatalError`. Measurement confirms this directly: `Bundle(path:)` at the SPM path
+returns `nil`, while at the real `Contents/Resources/` path it opens the bundle, and all three
+PNGs load (`bar-style-{pressure,gauge,progress}`, 54×33).
 
-Чому це доїхало до релізу: у `swift run` бандл справді лежить поруч із бінарником, тож `mainPath`
-влучає, і в дев-режимі пікер працює бездоганно. Перевірка «чи скопійовано бандл у `.app`», додана
-разом із ADR-0093, теж проходила — бандл **був** на місці. Хибним було припущення, що `Bundle.module`
-його там шукатиме.
+Why this shipped: under `swift run`, the bundle really does sit right next to the binary, so
+`mainPath` hits, and the picker works flawlessly in dev mode. The check "was the bundle copied
+into `.app`," added alongside ADR-0093, also passed — the bundle **was** in place. The false
+assumption was that `Bundle.module` would look for it there.
 
-## Рішення
+## Decision
 
-**Не використовувати `Bundle.module`.** `BarStylePicker` резолвить бандл сам —
-`BarStylePicker.resourceBundle`: `Contents/Resources/` (розкладка `.app`), далі поруч із `.app`,
-далі поруч із виконуваним файлом (розкладка `swift run`).
+**Don't use `Bundle.module`.** `BarStylePicker` resolves the bundle itself —
+`BarStylePicker.resourceBundle`: `Contents/Resources/` (the `.app` layout), then next to the
+`.app`, then next to the executable (the `swift run` layout).
 
-Два наслідки цього вибору:
+Two consequences of this choice:
 
-- **Промах повертає `nil`, а не вбиває процес.** Декоративне прев'ю не має права зносити застосунок:
-  без картинок плитки лишаються клікабельними, вибір стилю працює. `fatalError` у коді, що виконується
-  при малюванні панелі налаштувань, — неприйнятна ціна за відсутню PNG.
-- **Порядок кандидатів починається з `Contents/Resources/`** — з розкладки, у якій застосунок
-  реально їде до користувачів, а не з дев-режимної.
+- **A miss returns `nil` instead of killing the process.** A decorative preview has no business
+  taking the app down: without the pictures the tiles stay clickable, and picking a style still
+  works. A `fatalError` in code that runs while drawing the Settings pane is an unacceptable price
+  for a missing PNG.
+- **The candidate order starts with `Contents/Resources/`** — the layout the app actually ships to
+  users in, not the dev-mode one.
 
-Додатково `scripts/build-app.sh` тепер перевіряє не лише наявність каталогу бандла, а й що в ньому
-**щонайменше три PNG** (по одному на `BarStyle`). Порожній каталог копіюється `cp -R` без помилки й
-проявився б лише в UI.
+On top of that, `scripts/build-app.sh` now checks not just that the bundle directory exists, but
+that it holds **at least three PNGs** (one per `BarStyle`). An empty directory gets copied by
+`cp -R` without error and would only have shown up in the UI.
 
-## Наслідки
+## Consequences
 
-**Це стосується будь-якого майбутнього ресурсу**, не лише цих трьох картинок: щойно ресурси
-знадобляться ще десь, читати їх треба тим самим шляхом, а не `Bundle.module`. Конвенція записана в
-[conventions.md](../reference/conventions.md).
+**This applies to any future resource**, not just these three pictures: the moment resources are
+needed anywhere else, they must be read the same way, not through `Bundle.module`. The convention
+is recorded in [conventions.md](../reference/conventions.md).
 
-**Ціна — власний код замість стандартного механізму.** Перейменування таргету чи пакета змінить ім'я
-бандла, і константу `"TokenPace_TokenPace.bundle"` доведеться оновити руками — `Bundle.module`
-генерувався б автоматично. Це свідомий розмін: аксесор, який автоматично вказує не туди й падає,
-гірший за константу, яку видно.
+**The cost is custom code instead of the standard mechanism.** Renaming the target or the package
+changes the bundle's name, and the `"TokenPace_TokenPace.bundle"` constant will have to be updated
+by hand — `Bundle.module` would have been generated automatically. This is a deliberate trade-off:
+an accessor that automatically points at the wrong place and crashes is worse than a constant you
+can see.
 
-**Останній кандидат — `Bundle.main`.** Якщо ресурси колись покладуть плоско в сам `.app`, пошук
-все одно спрацює замість того, щоб повернути `nil`.
+**The last candidate is `Bundle.main`.** If resources are ever placed flat inside the `.app`
+itself, the lookup will still succeed instead of returning `nil`.
 
-**Що це не лагодить:** тести цього класу дефектів не ловлять у принципі — вони виконуються з
-розкладкою, у якій шлях SPM влучає. Єдина перевірка, що ловить, — запуск зібраного `.app`, як і
-вимагає [ui-verification.md](../guides/ui-verification.md).
+**What this doesn't fix:** tests of this class of defect can't catch it in principle — they run in
+a layout where the SPM path happens to hit. The only check that catches it is launching the built
+`.app`, exactly as [ui-verification.md](../guides/ui-verification.md) requires.

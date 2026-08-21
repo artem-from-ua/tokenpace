@@ -3,80 +3,86 @@ status: accepted
 date: 2026-07-22
 ---
 
-# ADR-0019: Читання токена сабпроцесом `security` CLI (скидання partition list)
+# ADR-0019: Reading the token through a `security` CLI subprocess (the partition list gets reset)
 
-## Контекст
+## Context
 
-Симптом (липень 2026, нотаризований `.app` з /Applications): при кожному протуханні токена macOS
-знову показує keychain-промпти (по два за цикл), і «Always Allow» не допомагає — наступного
-протухання промпти повертаються. Між протуханнями читання тихе.
+The symptom (July 2026, a notarized `.app` from /Applications): every time the token expires, macOS
+shows the keychain prompts again (two per cycle), and "Always Allow" does not help — at the next
+expiry the prompts are back. Between expiries, reading is silent.
 
-Діагностика на живому Keychain (read-only дамп ACL через `SecKeychainItemCopyAccess`):
+Diagnosis against the live Keychain (a read-only ACL dump through `SecKeychainItemCopyAccess`):
 
-- Item `Claude Code-credentials` **не пересоздається**: `cdat` = 2026-01-21, `mdat` оновлюється
-  щорефрешу — Claude Code переписує його на місці. Гіпотеза «назва/об'єкт щоразу інші» хибна.
-- У trusted-apps ACL — **46 записів**, майже всі дублі dev- і release-бінарів TokenPace: кожен
-  клік «Always Allow» додавав запис, записи зберігаються — але не допомагають.
-- **Partition list** item-а — лише `apple-tool:`. Із macOS Sierra тихий доступ вимагає *двох*
-  умов: застосунок у trusted apps **і** його code-signing партиція (`teamid:S5A4U9798Y`) у
-  partition list. Другої умови GUI-збірки TokenPace не задовольняють ніколи надовго:
-- Claude Code читає й пише item через `/usr/bin/security` (у бінарнику CLI є рядки
-  `add-generic-password` / `find-generic-password` / `delete-generic-password`; партиція
-  створення `apple-tool:`; жодного node/claude у trusted apps). **Симуляція підтвердила
-  механізм**: на тестовому item-і зі списком `apple-tool:,teamid:S5A4U9798Y` виклик
-  `security add-generic-password -U` (саме так CC оновлює креденшали) **скидає partition list
-  до `apple-tool:`**. Тобто кожен refresh (~кожні 8 год) відкликає доступ, виданий юзером.
+- The `Claude Code-credentials` item is **not recreated**: `cdat` = 2026-01-21, while `mdat` updates
+  on every refresh — Claude Code overwrites it in place. The "the name/object is different every
+  time" hypothesis is false.
+- The trusted-apps ACL holds **46 entries**, nearly all of them duplicates of TokenPace's dev and
+  release binaries: every "Always Allow" click added an entry, and the entries persist — yet they do
+  not help.
+- The item's **partition list** contains only `apple-tool:`. Since macOS Sierra, silent access
+  requires *two* conditions: the app in trusted apps **and** its code-signing partition
+  (`teamid:S5A4U9798Y`) in the partition list. TokenPace's GUI builds never satisfy the second one
+  for long:
+- Claude Code reads and writes the item through `/usr/bin/security` (the CLI binary contains the
+  strings `add-generic-password` / `find-generic-password` / `delete-generic-password`; the creating
+  partition is `apple-tool:`; there is no node or claude in trusted apps at all). **A simulation
+  confirmed the mechanism**: on a test item whose list was `apple-tool:,teamid:S5A4U9798Y`, calling
+  `security add-generic-password -U` (exactly how CC updates the credentials) **resets the partition
+  list to `apple-tool:`**. So every refresh (roughly every 8 hours) revokes the access the user
+  granted.
 
-Розглянуті варіанти:
+Alternatives considered:
 
-1. **Разовий `security set-generic-password-partition-list -S "apple-tool:,teamid:…"`** —
-   працює лише до наступного refresh (див. симуляцію вище). Відпадає.
-2. **Кешування креденшалів у пам'яті** — зменшує кількість промптів, але перше читання після
-   кожного refresh все одно промптить. Відпадає.
-3. **Власна копія токена у власному keychain item** — щоб синхронізувати копію, треба спершу
-   прочитати оригінал → промпт лишається. Відпадає.
-4. **Читання сабпроцесом `/usr/bin/security find-generic-password -w`** — той самий канал, яким
-   користується сам Claude Code: `security` — Apple-tool, завжди всередині партиції
-   `apple-tool:` і (як creator item-а) у trusted apps, тож читає тихо незалежно від того, як
-   часто CC переписує item, і незалежно від підпису збірки TokenPace (ad-hoc `swift run`
-   включно). Обрано.
+1. **A one-off `security set-generic-password-partition-list -S "apple-tool:,teamid:…"`** — works
+   only until the next refresh (see the simulation above). Rejected.
+2. **Caching the credentials in memory** — reduces the number of prompts, but the first read after
+   each refresh still prompts. Rejected.
+3. **Our own copy of the token in our own keychain item** — keeping the copy in sync means reading
+   the original first → the prompt remains. Rejected.
+4. **Reading through a `/usr/bin/security find-generic-password -w` subprocess** — the same channel
+   Claude Code itself uses: `security` is an Apple tool, always inside the `apple-tool:` partition
+   and (as the item's creator) in trusted apps, so it reads silently no matter how often CC
+   overwrites the item, and regardless of how the TokenPace build is signed (ad-hoc `swift run`
+   included). Chosen.
 
-Місце зміни: `TokenProvider.readRawData()` (kit) — єдина точка Keychain-читання; через неї
-проходять і полінг (`KeychainTokenProvider`), і `ClaudeCLIRefresher` (before/after-перевірки).
-Альтернатива «shell-side seam у таргеті `TokenPace`» (за прикладом `ClaudeCLIRefresher`)
-відхилена: розмазує зміну на два таргети, вимагає розширення протоколу `TokenProviding` та
-інжекції в refresher, а Фаза 2 keychain-читання не реюзає (iOS/watchOS отримують дані з
-CloudKit) — тож «чистота kit без сабпроцесів» не купує нічого практичного.
+Where the change goes: `TokenProvider.readRawData()` (in the kit) — the single point of Keychain
+reading, used by both polling (`KeychainTokenProvider`) and `ClaudeCLIRefresher` (its before/after
+checks). The alternative, "a shell-side seam in the `TokenPace` target" (following
+`ClaudeCLIRefresher`'s example), was rejected: it smears the change across two targets, requires
+extending the `TokenProviding` protocol and injecting it into the refresher, and Phase 2 does not
+reuse keychain reading anyway (iOS/watchOS get their data from CloudKit) — so "a kit free of
+subprocesses" buys nothing practical.
 
-## Рішення
+## Decision
 
-1. `TokenProvider.readRawData()` спавнить `/usr/bin/security find-generic-password -s
-   "Claude Code-credentials" -w` (фіксований шлях бінарника; матч лише за service) замість
-   `SecItemCopyMatching`. stdin → `/dev/null`, stdout/stderr — у pipe (stderr ніколи не
-   логується — може містити атрибути item-а). Жорсткий таймаут 10 с (`SIGTERM`).
-2. Pure-обробка, юніт-тестована: `parseSecretOutput` (зрізання одного trailing newline,
-   захисний hex-декод — `-w` hex-кодує не-текстові секрети; JSON-обгортка починається з `{` і з
-   hex не колізує) та `mapExitStatus` (exit 44 → `.itemNotFound`, перевірено емпірично; інші
-   коди → `.keychainError(код)`).
-3. `TokenError` не змінюється (public enum, exhaustive-switch у `FailureReason`):
-   `.accessDenied` новим шляхом не продукується, але лишається; `.keychainError` тепер несе
-   exit code тулзи або локальні сентинели `-1` (spawn failed) / `-2` (timeout).
-4. Політика ADR-0017 незмінна: TokenPace у Keychain **не пише**; refresh так само делегується
-   `claude` CLI.
+1. `TokenProvider.readRawData()` spawns `/usr/bin/security find-generic-password -s
+   "Claude Code-credentials" -w` (a fixed binary path; matching on the service only) instead of
+   `SecItemCopyMatching`. stdin → `/dev/null`, stdout/stderr into a pipe (stderr is never logged — it
+   may contain the item's attributes). A hard 10 s timeout (`SIGTERM`).
+2. Pure processing, unit-tested: `parseSecretOutput` (trimming a single trailing newline, plus a
+   defensive hex decode — `-w` hex-encodes non-text secrets; the JSON wrapper starts with `{` and does
+   not collide with hex) and `mapExitStatus` (exit 44 → `.itemNotFound`, verified empirically; other
+   codes → `.keychainError(code)`).
+3. `TokenError` does not change (it is a public enum with an exhaustive switch in `FailureReason`):
+   `.accessDenied` is no longer produced by the new path but stays; `.keychainError` now carries the
+   tool's exit code or the local sentinels `-1` (spawn failed) / `-2` (timeout).
+4. ADR-0017's policy is unchanged: TokenPace **never writes** to the Keychain; the refresh is still
+   delegated to the `claude` CLI.
 
-## Наслідки
+## Consequences
 
-- **(+) Промптів немає назавжди** — для нотаризованої, dev- і будь-якої майбутньої збірки;
-  жодних разових ритуалів із partition list. Верифіковано на ad-hoc dev-бінарі: читання тихе,
-  `usage 200 ok` за ~300 мс від старту.
-- **(+)** Issue #20 (pre-auth UX-діалог перед першим keychain-промптом) втрачає предмет —
-  промпта більше немає; #21 (перевірка ACL signed vs unsigned) закривається цим дослідженням.
-- **(−)** Другий спавн сабпроцесу в кодовій базі, тепер у kit (відступ від «спавн лише
-  shell-side», зафіксованого в ADR-0017) — свідомо, див. Контекст.
-- **(−)** Залежність від формату виводу `security -w` (plaintext + `\n`, hex для бінарних
-  даних) — покрито `parseSecretOutput` і тестами; зміна формату зламає читання показово
-  (`malformedData`), не мовчки.
-- **(−)** Синхронний виклик із таймаутом 10 с: у патології (залочений keychain) полінг-потік
-  блокується до таймаута; штатно — десятки мілісекунд.
-- Секрет проходить через stdout-pipe сабпроцеса в межах процесу TokenPace — не в аргументах,
-  не в env, не в логах (логуються лише exit status і байт-каунт).
+- **(+) The prompts are gone for good** — for the notarized build, for dev builds and for any future
+  build; no one-off partition-list rituals. Verified on an ad-hoc dev binary: reading is silent, with
+  `usage 200 ok` about 300 ms after launch.
+- **(+)** Issue #20 (a pre-auth UX dialog before the first keychain prompt) loses its subject — there
+  is no prompt any more; #21 (checking the ACL on signed versus unsigned builds) is closed by this
+  investigation.
+- **(−)** A second subprocess spawn in the codebase, and this one in the kit (a departure from "spawn
+  only shell-side", recorded in ADR-0017) — deliberately, see the Context.
+- **(−)** A dependency on the output format of `security -w` (plaintext plus `\n`, hex for binary
+  data) — covered by `parseSecretOutput` and its tests; a format change breaks reading demonstrably
+  (`malformedData`), not silently.
+- **(−)** A synchronous call with a 10 s timeout: in a pathological case (a locked keychain) the
+  polling thread blocks until the timeout; normally it is tens of milliseconds.
+- The secret travels through the subprocess's stdout pipe inside the TokenPace process — not in
+  arguments, not in the environment, not in logs (only the exit status and a byte count are logged).

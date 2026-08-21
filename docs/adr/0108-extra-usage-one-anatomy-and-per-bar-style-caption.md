@@ -5,204 +5,218 @@ supersedes: []
 superseded_by: []
 ---
 
-# ADR-0108: «Extra usage» має одну анатомію на всі стани, кожен бар підписує свою шкалу під ⌥
+# ADR-0108: "Extra usage" has one anatomy for every state, each bar labels its own scale under ⌥
 
-> Продовжує [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md) (розкол лінійки
-> «впізнати завжди / пояснити під ⌥») на **словесний** шар, але **витісняє його підписи** — `0` і краї
-> місяця (див. §6). Витісняє **анатомію** маркера з [ADR-0068](0068-credits-in-use-marker-anatomy.md):
-> `PillView` лишається, але маркер переїжджає у **праву** половину, змінює заливку на нейтральний
-> `barTrack` і **більше не є knockout** — його чорнило стало звичайним `label`.
-> Ширина попапа, зафіксована [ADR-0083](0083-live-dropdown-preview-in-settings.md) як «312 pt», стає
-> однією константою на дві поверхні.
+> Extends [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md) (the ruler split
+> "identify always / explain under ⌥") into the **wording** layer, but **supersedes its labels** —
+> `0` and the month edges (see §6). Supersedes the marker's **anatomy** from
+> [ADR-0068](0068-credits-in-use-marker-anatomy.md): `PillView` stays, but the marker moves to the
+> **right** half, changes its fill to the neutral `barTrack`, and is **no longer a knockout** — its
+> ink is now plain `label`.
+> The popup width, pinned by [ADR-0083](0083-live-dropdown-preview-in-settings.md) as "312 pt,"
+> becomes one constant shared by both surfaces.
 
-## Контекст
+## Context
 
-Секція «Extra usage» малювала **різну форму на кожен стан**, і жоден із них не називав себе.
+The "Extra usage" section drew a **different shape for every state**, and none of them named
+itself.
 
-Три окремі спостереження, які виявилися однією проблемою ([#396](https://github.com/artem-from-ua/tokenpace/issues/396)):
+Three separate observations that turned out to be one problem
+([#396](https://github.com/artem-from-ua/tokenpace/issues/396)):
 
-1. **Бейдж стояв не біля того, чого стосується.** Маркер `[$]`/`active` сидів у провідній половині,
-   одразу після слова `Extra usage` — тобто позначка про **гроші** стояла біля **назви рядка**, а не
-   біля суми чи вердикту.
+1. **The badge sat next to the wrong thing.** The `[$]`/`active` marker sat in the leading half,
+   right after the word `Extra usage` — that is, the marker for **money** sat next to the **row's
+   name**, not next to the amount or the verdict.
 
-2. **Два з трьох станів балансу не мали позначки взагалі.** `inUse` — це
-   `enabled && !spend_limit_reached && baseLimitExhausted` (`CreditsPacing.isSpending`). Отже
-   користувач із увімкненими кредитами, які ще нічого не покривають, і користувач із **вичерпаним**
-   балансом бачили **однаковий** рядок — без жодного бейджа. Найгірше саме друге: вичерпаний баланс
-   означає, що вичерпаний план тепер реально блокує роботу.
+2. **Two of the three balance states had no marker at all.** `inUse` is
+   `enabled && !spend_limit_reached && baseLimitExhausted` (`CreditsPacing.isSpending`). So a user
+   with credits enabled that aren't covering anything yet, and a user with an **exhausted** balance,
+   saw the **same** row — with no badge at all. The second case is the worse one: an exhausted
+   balance means the exhausted plan is now actually blocking work.
 
-3. **Безлімітний рядок мав іншу анатомію.** При `limit: null` бара немає, ресету немає, і сума
-   ставала **статусом** у правій половині заголовка: `Extra usage … €10.8 spent`. Один рядок замість
-   двох, число не в тій колонці, де числа в усіх інших секціях. Плюс слово `spent` стояло **в кінці**
-   без ⌥ і **на початку** під ⌥ (`€10.8 spent` → `spent €10.77`), тобто стрибало по рядку при
-   натисканні модифікатора.
+3. **The unlimited row had a different anatomy.** With `limit: null` there's no bar and no reset,
+   and the amount became a **status** in the right half of the header:
+   `Extra usage … €10.8 spent`. One row instead of two, the number not in the column where numbers
+   sit in every other section. Plus the word `spent` sat **at the end** without ⌥ and **at the
+   start** under ⌥ (`€10.8 spent` → `spent €10.77`) — jumping around the row when the modifier was
+   pressed.
 
-Паралельно — четверта, незалежна діра: **стиль бара ніде не названий**. Користувач має три стилі
-(`Pressure`/`Gauge`/`Progress`), а в попапі жодного слова про те, який увімкнено; упізнати можна лише
-за формою. І найгірше саме на кредитному барі: він **завжди** Progress незалежно від налаштування
-([ADR-0092](0092-extra-usage-own-ruler.md)), тож у колонці Pressure-стрічок читається як збій.
+In parallel — a fourth, independent gap: **the bar style is named nowhere**. The user has three
+styles (`Pressure`/`Gauge`/`Progress`), and the popup says not a word about which one is active; it
+can only be identified by shape. And it's worst on exactly the credit bar: it's **always** Progress
+regardless of the setting ([ADR-0092](0092-extra-usage-own-ruler.md)), so in a column of Pressure
+strips it reads as a glitch.
 
-## Рішення
+## Decision
 
-### 1. Одна анатомія на всі стани
+### 1. One anatomy for every state
 
-Кожен стан секції малює **ті самі два рядки**:
+Every state of the section draws **the same two rows**:
 
 ```
-Extra usage  progress ......... [бейдж] статус
+Extra usage  progress ......... [badge] status
 spent $10.77 of $15.00 ........ resets in 5d on Friday
 ```
 
-Безлімітний рядок отримує **другий рядок** із сумою там, де числа в усіх інших секціях, а в слот
-статусу — `no limit set`: це **конфігурація білінгу**, а не вердикт, бо без стелі немає темпу, щодо
-якого бути «on pace». Слова стилю він не отримує — бара немає, називати нічого.
+The unlimited row gets a **second row** with the amount where numbers sit in every other section,
+and `no limit set` in the status slot: this is **a billing configuration**, not a verdict, because
+without a ceiling there's no pace to be "on" in the first place. It gets no style word — there's no
+bar, nothing to name.
 
-`addDetailLine` приймає опційний `reset` і йде тим самим шляхом, яким fit-гейт уже скидає праву
-половину — дві форми рендеряться одним кодом, а не двома layout'ами.
+`addDetailLine` accepts an optional `reset` and follows the same path the fit gate already uses to
+drop the right half — both shapes are rendered by one code path, not two layouts.
 
-### 2. Бейдж стану — у праву половину, і лише там, де він щось додає
+### 2. The state badge — into the right half, and only where it adds something
 
-Бейдж переїжджає до статус-слова й кваліфікує його: `[$] well ahead of pace` читається як одне
-речення.
+The badge moves next to the status word and qualifies it: `[$] well ahead of pace` reads as one
+sentence.
 
-| Стан | Бейдж | Колір |
+| State | Badge | Color |
 |---|---|---|
-| гроші рухаються зараз (`credits.inUse`) | `[$]` → `active` під ⌥ | нейтральний сірий (`barTrack`) |
-| стеля витрачена, **cap є** (`usageFraction >= 1`) | **немає** — червоне на бейджі ресету нижче | — |
-| стеля витрачена, **cap немає** (`spendLimitReached`) | `out of credits` | червоний (`gapRed`) |
-| увімкнено, нічого не переливається | **немає** | — |
+| money is moving right now (`credits.inUse`) | `[$]` → `active` under ⌥ | neutral gray (`barTrack`) |
+| ceiling spent, **a cap exists** (`usageFraction >= 1`) | **none** — red is on the reset badge below | — |
+| ceiling spent, **no cap** (`spendLimitReached`) | `out of credits` | red (`gapRed`) |
+| enabled, nothing being spent | **none** | — |
 
-**Один залитий червоний на рядок, і він на тому, чого чекаєш.** Коли cap є, чекають на **ресет** —
-там і стоїть червона капсула (`resetIsBlocking`, [#158](https://github.com/artem-from-ua/tokenpace/issues/158)), а заголовок каже `limit reached` звичайним
-текстом. Коли cap немає, ресету не існує (без стелі немає чого скидати), тож єдиний носій червоного —
-сам заголовок. Спершу було намальовано обидва одночасно; це витрачало єдиний тривожний колір попапа
-двічі на один факт.
+**One solid red per row, and it's on the thing you're actually waiting for.** When a cap exists,
+you're waiting for the **reset** — that's where the red capsule sits
+(`resetIsBlocking`, [#158](https://github.com/artem-from-ua/tokenpace/issues/158)), and the header
+says `limit reached` in plain text. When there's no cap, there's no reset (with no ceiling there's
+nothing to reset), so the header itself is the only carrier of red. Both used to be drawn at once;
+that spent the popup's one alarm color twice on one fact.
 
-**Бейджа `available` не існує.** Спроба показувати стан спокою окремою сірою капсулою протрималася
-рівно до першого живого рендера: вона повторювала три речі, які рядок уже каже — секція **взагалі не
-будується** без активних кредитів (`CreditsPacing.isActive`, `PopupLayout.creditsRow`), тож сама її
-присутність означає «ввімкнено»; відсутність червоного означає «не вичерпано»; відсутність плашки —
-«нічого не переливається». Капсула зі значенням «нічого не відбувається» — це те, для чого існує
-порожнє місце. Заразом вона була **найширшим** бейджем попапа й задавала ширину вікна для стану, в
-якому нічого не відбувається.
+**There's no `available` badge.** An attempt to show the calm state as a separate gray capsule
+survived exactly until the first live render: it repeated three things the row already says — the
+section **doesn't even get built** without active credits (`CreditsPacing.isActive`,
+`PopupLayout.creditsRow`), so its mere presence means "enabled"; the absence of red means "not
+exhausted"; the absence of a badge means "nothing is being spent." A capsule whose value is "nothing
+is happening" is exactly what empty space is for. It also happened to be the popup's **widest**
+badge, and it set the window's width for a state in which nothing is happening.
 
-**Плашка `in use` — сіра, з чорнилом `label`.** У кольорі мітки вона звучала так само гучно, як бейдж
-блокуючого ресету поруч, тобто ставила «гроші рухаються» (факт) в один візуальний клас із «ти
-заблокований» (проблема). Заливкою став `barTrack`, і разом із нею відпав **knockout**: вирізати
-отвір крізь світлий сірий означає показати картку майже того самого тону, тож гліф не читався б, а
-блякнув. Звичайне чорнило `label` на сірому — те саме відношення, що й у будь-якого іншого рядка до
-картки ([ADR-0068](0068-credits-in-use-marker-anatomy.md) описував саме knockout — ця частина
-витіснена).
+**The `in use` capsule is gray, with `label` ink.** In accent color it read exactly as loud as the
+blocking-reset badge next to it, putting "money is moving" (a fact) in the same visual class as
+"you're blocked" (a problem). The fill became `barTrack`, and **knockout** dropped along with it:
+cutting a hole through a light gray means showing a card of almost the same tone, so the glyph
+wouldn't read — it would just fade. Plain `label` ink on gray is the same relationship every other
+row has to the card ([ADR-0068](0068-credits-in-use-marker-anatomy.md) described exactly this
+knockout — that part is superseded).
 
-### 3. Кожен бар підписує свою шкалу — під ⌥
+### 3. Each bar labels its own scale — under ⌥
 
-Рядок заголовка кожної секції несе слово стилю тим самим тьмяним чорнилом, що й підтримувальні числа:
+Every section's header row carries the style word in the same dim ink as the supporting numbers:
 `5-hour  gauge … on pace`.
 
-Два правила, кожне з яких один спільний підпис у шапці порушив би:
+Two rules, each of which one shared label in the header would violate:
 
-- **Лише під ⌥.** Слово **пояснює**, а не ідентифікує, і [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md)
-  кладе пояснення на модифікатор: риска нуля вже ідентифікує шкалу з першого погляду, а повторювати
-  одне глобальне налаштування на кожному рядку — шум у спокої.
-- **Від фактично намальованої шкали, не від `barStyle`.** Кредитний рядок підписує себе `progress`
-  навіть під Pressure; підпис із налаштування брехав би рівно там, де він єдине, що пояснює дивний
-  на вигляд рядок.
+- **Only under ⌥.** The word **explains**, it doesn't identify, and
+  [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md) puts explanation on the
+  modifier: the zero tick already identifies the scale at a glance, and repeating one global setting
+  on every row would be noise at rest.
+- **From the scale that's actually drawn, not from `barStyle`.** The credit row labels itself
+  `progress` even under Pressure; a label taken from the setting would lie exactly where it's the
+  one thing explaining a row that looks unusual.
 
-Слово живе в `BarStyle.displayName` (kit) з `caption` як його lowercase-формою. Сегменти Settings
-читають **ту саму** властивість замість власних літералів: [#387](https://github.com/artem-from-ua/tokenpace/issues/387)/[#388](https://github.com/artem-from-ua/tokenpace/issues/388)
-пропонують перейменувати Gauge, і два літерали означали б два піврейнейми.
+The word lives in `BarStyle.displayName` (kit), with `caption` as its lowercase form. The Settings
+segments read **the same** property instead of their own literals:
+[#387](https://github.com/artem-from-ua/tokenpace/issues/387)/[#388](https://github.com/artem-from-ua/tokenpace/issues/388)
+propose renaming Gauge, and two literals would mean two half-renames.
 
-**Мала літера — лише в попапі.** Там це анотація біля назви рядка, і Title Case читався б як другий
-заголовок, що конкурує з власною назвою секції; у Settings те саме слово підписує **контрол** і
-лишається Title Case, як усі інші сегменти.
+**Lowercase — only in the popup.** There it's an annotation next to the row's name, and Title Case
+would read as a second heading competing with the section's own name; in Settings the same word
+labels a **control** and stays Title Case, like every other segment.
 
-### 4. Мітка плану — на той самий ⌥-шар
+### 4. The plan label — on the same ⌥ layer
 
-У спокої шапка — голий знак `Claude`. Під ⌥ повертається **весь хвіст** одразу:
+At rest, the header is a bare `Claude` mark. Under ⌥, **the whole tail** returns at once:
 `Claude ･ Max (20x) ･ just now`.
 
-Мітка й вік ідуть разом, бо відповідають на питання одного класу — «який це план» і «наскільки свіжі
-числа»: їх питають раз, а не стежать за ними. Спершу під ⌥ ховалася лише мітка, а вік лишався
-видимим; тоді шапка змінювала форму **двічі** на один модифікатор, і крапка перед `just now` висіла в
-спокої без нічого зліва від себе.
+The plan label and the age travel together because they answer questions of the same class — "which
+plan is this" and "how fresh are these numbers" — asked once, not tracked continuously. At first,
+only the label was hidden under ⌥ while the age stayed visible; then the header changed shape
+**twice** on one modifier, and the dot before `just now` hung at rest with nothing to its left.
 
-Роздільник — той самий `･`, що й усередині мітки, тож на весь попап одна пунктуація, а не свій знак на
-кожному місці.
+The separator is the same `･` used inside the label, so the whole popup uses one piece of
+punctuation, not a different mark in every spot.
 
-### 5. Ширина — 380 pt, одна константа на дві поверхні
+### 5. Width — 380 pt, one constant shared by both surfaces
 
-Колонка контенту йде 252 → **320 pt** (`380 − 2·14 cardInset − 2·16 hPadding`). Її диктує найширший
-рядок, який **мусить** влізти: `Extra usage ･ progress … [active] well ahead of pace` = **307 pt** при
-13 pt.
+The content column goes from 252 → **320 pt** (`380 − 2·14 cardInset − 2·16 hPadding`). It's dictated
+by the widest row that **must** fit: `Extra usage ･ progress … [active] well ahead of pace` =
+**307 pt** at 13 pt.
 
-Рядок **деталей** може бути ширшим (`spent $5,000.00 of $5,000.00` із найдовшим ресетом — 321 pt) і
-ширини не задає: переповнення — це штатна робота fit-гейта, він скидає ресет за задумом. Ширину задає
-лише те, що не має права не влізти.
+The **details** row can be wider (`spent $5,000.00 of $5,000.00` with the longest reset — 321 pt)
+and doesn't set the width: overflow is the fit gate's normal job, and it drops the reset by design.
+Only what has no right to fail to fit sets the width.
 
-Спершу було взято 390/330 — під бейдж `available`, який згодом видалено (§2); з його зникненням
-найширший обов'язковий рядок став на 15 pt вужчим, і вікно поїхало назад.
+390/330 was tried first — sized for the `available` badge, which was later removed (§2); once it
+was gone, the widest mandatory row got 15 pt narrower, and the window moved back down.
 
-Альтернативою було **скоротити фрази** (`well ahead of pace` → `well ahead`, −49 pt), але вони
-спільні з токенними рядками дослівно — скорочення заради кредитного рядка змінило б слова на всіх
-барах, а скорочення лише тут дало б різні слова на сусідніх рядках.
+An alternative was to **shorten the phrases** (`well ahead of pace` → `well ahead`, −49 pt), but
+they're shared verbatim with the token rows — shortening them for the credit row's sake would change
+the wording on every bar, while shortening only here would produce different wording on neighboring
+rows.
 
-Ширина живе в `PopupViewController.popupWidth`, звідки її читають і `Metrics.width`, і
-`SettingsPreviewWindowController.Metrics.nominalWidth`. Раніше це були **два літерали `312`**, тобто
-прев'ю могло тихо відкриватися іншої ширини, ніж попап, який воно показує.
+The width lives in `PopupViewController.popupWidth`, from which both `Metrics.width` and
+`SettingsPreviewWindowController.Metrics.nominalWidth` read it. Previously these were **two
+literal `312`s**, meaning the preview could silently open at a different width than the popup it's
+showing.
 
-### 6. Підписи лінійки прибрано — лишилися самі зубці
+### 6. Ruler labels are removed — only the ticks remain
 
-Витіснює частину [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md) і
-[ADR-0092](0092-extra-usage-own-ruler.md): підпис `0` під рискою нуля й підписи країв місяця
-(`Jan 1` / `Feb 1`) на кредитному барі **видалено**.
+Partially supersedes [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md) and
+[ADR-0092](0092-extra-usage-own-ruler.md): the `0` label under the zero tick, and the month-edge
+labels (`Jan 1` / `Feb 1`) on the credit bar, are **removed**.
 
-Кожен із них проговорював те, що його ж позначка вже показує: риска **і є** нулем, а дати місяця
-стоять на рядку ресету одразу над баром. Тобто це був другий спосіб сказати те саме — рівно той клас
-рішень, проти якого застерігає наскрізний принцип («значення — вхід моделі, колір і вердикт — її
-вихід»).
+Each one was saying out loud what its own mark already shows: the tick **is** the zero, and the
+month dates already sit on the reset line right above the bar. This was a second way of saying the
+same thing — exactly the class of decision the cross-cutting principle warns against ("the value is
+the model's input; color and verdict are its output").
 
-Друга причина — **ритм**. Підписи сиділи *під* баром, там, де починається заголовок наступної секції,
-тож утримання ⌥ додавало кожному рядку пів рядка тексту, і композиція попапа змінювалася разом із
-модифікатором. Пояснювальний шар має додавати слова **в** рядок, а не між рядками.
+The second reason is **rhythm**. The labels sat *under* the bar, right where the next section's
+header begins, so holding ⌥ added half a line of text to every row, and the popup's composition
+changed along with the modifier. An explanatory layer should add words **inside** a row, not between
+rows.
 
-**Зубці лишаються:** вони ділять вікно на частки — факт, якого більше ніде в рядку немає.
+**The ticks stay:** they divide the window into fractions — a fact nothing else in the row provides.
 
-Наслідок для геометрії: кредитний бар більше не вищий за інші на текстовий рядок (`creditsViewHeight`
-видалено разом із метриками підписів), а нижній внутрішній відступ картки трохи стиснуто (12 → 8 pt) —
-ті 12 були розраховані саме на те, щоб слова не тиснулися до заокругленого краю.
+Consequence for the geometry: the credit bar is no longer taller than the others by one text line
+(`creditsViewHeight` is removed along with the label metrics), and the card's bottom inset is
+slightly tightened (12 → 8 pt) — those 12 were sized precisely to keep the words off the rounded
+edge.
 
-## Наслідки
+## Consequences
 
-- **Fit-гейт спрацьовує рідше — свідомо.** На 320 pt звичайні ⌥-рядки (`spent €10.77 of €15.00` +
-  `resets in 5d on Friday`, 281 pt) **зберігають** обидві половини — раніше на 252 pt вони втрачали
-  ресет. Гейт лишається для чотиризначних сум: `spent €1,234.56 of €2,000.00` (322 pt) стоїть одразу
-  за краєм колонки, а стеля з найдовшою фразою ресету (376 pt) — далеко за ним.
-  Це задокументовано у **трьох** місцях, які довелося переписати разом зі зміною: блерб стуба
-  `credits-wide-amounts`, таблиця калібрування `detailHalvesFit` і
+- **The fit gate fires less often — deliberately.** At 320 pt, ordinary ⌥ rows (`spent €10.77 of
+  €15.00` + `resets in 5d on Friday`, 281 pt) **keep** both halves — previously, at 252 pt, they lost
+  the reset. The gate remains for four-digit amounts: `spent €1,234.56 of €2,000.00` (322 pt) sits
+  just past the column's edge, and a ceiling with the longest reset phrase (376 pt) sits well beyond
+  that. This is documented in **three** places that had to be rewritten alongside the change: the
+  `credits-wide-amounts` stub's blurb, the `detailHalvesFit` calibration table, and
   [ui-verification.md](../guides/ui-verification.md).
-- **Ширина тексту інцидента** 233 → 301 pt, тож те, де кожне ім’я переноситься, зсунулося, а з ним і
-  рядок. Очікування в `scripts/check-incident-chip-alignment.swift` перезняті **з фактичного
-  рендера**, не передбачені.
-- **Три скрипти-дзеркала** (`check-detail-line-fit`, `check-incident-chip-alignment`,
-  `check-badge-column`) міряли неіснуючий попап: `cardInset` 8 проти 14, `hPadding` 14 проти 16,
-  точка 8/8 проти 9/10 — тобто колонку 268 pt замість реальних 252. Полагоджено окремим комітом
-  **до** зміни ширини, щоб було видно, що зламано зараз, окремо від того, що змінює тікет. Жоден із
-  них не запускається автоматично (`.github/` немає, pre-commit робить лише build+test) — саме тому
-  розсинхрон і жив непоміченим.
-- **Тестів на геометрію попапа не існує і не може існувати:** `PopupViewController` живе в
-  executable-таргеті `TokenPace`, який `TokenPaceKitTests` не імпортує. Тому підпис стилю покладено
-  в kit — `BarStyle.displayName`/`caption` — і це єдина частина зміни з юніт-покриттям
-  (`BarStyleTests`). Решта перевіряється скриптами й живими стубами.
-- **Три нових стуби** позначають межі й раніше недосяжні стани: `credits-max-header` (найширший
-  перший рядок, 307 pt проти 320), `credits-max-detail` (найширший другий, який гейт усе ще скидає) і
-  `credits-no-limit-spent` (безліміт із вичерпаним балансом — єдиний стан, де червоний бейдж стоїть у
-  заголовку). Останній вимагав ще й правки самого стуб-шару: **усі** кредитні кадри жорстко ставили
-  `seven_day: 100 %`, тож базовий ліміт завжди був вичерпаний, і стан «кредити ввімкнені, але нічого
-  не покривають» був у стубах **недосяжний**.
+- **The incident-text width** goes from 233 to 301 pt, so where each name wraps has shifted, and the
+  row with it. The expectations in `scripts/check-incident-chip-alignment.swift` were recaptured
+  **from the actual render**, not predicted.
+- **Three mirror scripts** (`check-detail-line-fit`, `check-incident-chip-alignment`,
+  `check-badge-column`) were measuring a popup that no longer existed: `cardInset` 8 versus 14,
+  `hPadding` 14 versus 16, an 8/8 point versus 9/10 — a 268 pt column instead of the real 252. Fixed
+  in a separate commit **before** the width change, so it's visible what's broken right now, apart
+  from what the ticket changes. None of them run automatically (there's no `.github/`, and the
+  pre-commit hook only does build+test) — which is exactly how the drift lived unnoticed.
+- **No test exists, or can exist, for popup geometry:** `PopupViewController` lives in the
+  `TokenPace` executable target, which `TokenPaceKitTests` doesn't import. That's why the style label
+  was put in the kit — `BarStyle.displayName`/`caption` — and it's the only part of this change with
+  unit coverage (`BarStyleTests`). Everything else is checked by scripts and live stubs.
+- **Three new stubs** mark boundaries and previously unreachable states: `credits-max-header` (the
+  widest first row, 307 pt against 320), `credits-max-detail` (the widest second row, which the gate
+  still drops), and `credits-no-limit-spent` (unlimited with an exhausted balance — the only state
+  where the red badge sits in the header). The last one also required a fix to the stub layer itself:
+  **every** credit frame hardcoded `seven_day: 100%`, so the base limit was always exhausted, and the
+  state "credits enabled but covering nothing" was **unreachable** in the stubs.
 
-## Відкрите
+## Open questions
 
-Чи обнуляє біллінг Anthropic лічильник `used` 1-го числа, коли cap **не** виставлений — з нашого
-коду не видно: `resetLine`, `resetLineVerbose` і `monthBounds` гейтяться на `bar == nil`, а сума
-приходить готовим числом від сервера. Поки це не з'ясовано на реальних даних, безлімітний рядок
-нічого не обіцяє про місяць — він каже лише `no limit set` і показує суму.
+Whether Anthropic's billing zeroes the `used` counter on the 1st of the month when there's **no**
+cap set isn't visible from our code: `resetLine`, `resetLineVerbose`, and `monthBounds` are all
+gated on `bar == nil`, and the amount arrives as a ready-made number from the server. Until this is
+confirmed against real data, the unlimited row promises nothing about the month — it only says
+`no limit set` and shows the amount.

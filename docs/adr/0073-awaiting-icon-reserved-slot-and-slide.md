@@ -3,180 +3,195 @@ status: accepted
 date: 2026-08-07
 ---
 
-# ADR-0073: Зарезервований слот awaiting-долоні та її виїзд знизу — перша анімація руху
+# ADR-0073: A reserved slot for the awaiting-hand icon, and its slide from below — the first motion animation
 
-## Контекст
+## Context
 
-Меню-бар вирівняний **праворуч**, тож будь-яка зміна ширини віджета зсуває все, що ліворуч від
-нього, — включно зі статус-айтемами інших застосунків. `StatusItemView.itemWidth(for:)` рахує ширину
-з того, що намальовано **просто зараз**, тож віджет «дихає» на кожній зміні даних, і меню-бар
-користувача перекладається сам собою.
+The menu bar is **right-aligned**, so any change to the widget's width shifts everything to its left —
+including other apps' status items. `StatusItemView.itemWidth(for:)` computes its width from what is
+drawn **right now**, so the widget "breathes" on every data change, and the user's menu bar keeps
+rearranging itself.
 
-Джерел ширини п'ять, але важить із них одне (діагноз — [#283](https://github.com/artem-from-ua/cc-timer/issues/283),
-підмічено @kintecus у його розборі меню-бару від 2026-08-04, розділ 4 «Fixed slots»):
+There are five sources of width, but only one of them matters (diagnosed in
+[#283](https://github.com/artem-from-ua/cc-timer/issues/283), spotted by @kintecus in his 2026-08-04
+menu bar review, section 4 "Fixed slots"):
 
-| Джерело | Ширина | Як часто перемикається |
+| Source | Width | How often it toggles |
 |---|---|---|
-| **Awaiting-долоня** ([#233](https://github.com/artem-from-ua/cc-timer/issues/233)) | ≈18 pt | **Десятки разів на день** — щойно сесія починає/перестає чекати вводу |
-| Іконка кредитів ([#144](https://github.com/artem-from-ua/cc-timer/issues/144)) | ≈16 pt | 1–2 рази на 5-годинне вікно |
-| Pause-гліф ([#199](https://github.com/artem-from-ua/cc-timer/issues/199), [#227](https://github.com/artem-from-ua/cc-timer/issues/227)) | ≈14 pt | 1–2 рази на вікно, у момент блокування |
-| Крапка сервісу ([#31](https://github.com/artem-from-ua/cc-timer/issues/31)) | 10 pt | Рідко — на інциденті |
-| Смуга формату лейбла ресету | різна | ≈1 раз на вікно (`1h0m` → `59m`) |
+| **Awaiting-hand icon** ([#233](https://github.com/artem-from-ua/cc-timer/issues/233)) | ≈18 pt | **Dozens of times a day** — the moment a session starts or stops awaiting input |
+| Credits icon ([#144](https://github.com/artem-from-ua/cc-timer/issues/144)) | ≈16 pt | 1–2 times per 5-hour window |
+| Pause glyph ([#199](https://github.com/artem-from-ua/cc-timer/issues/199), [#227](https://github.com/artem-from-ua/cc-timer/issues/227)) | ≈14 pt | 1–2 times per window, at the moment of blocking |
+| Service dot ([#31](https://github.com/artem-from-ua/cc-timer/issues/31)) | 10 pt | Rare — on an incident |
+| Reset label format band | varies | ≈once per window (`1h0m` → `59m`) |
 
-Високочастотне лише перше. Решта чотири спрацьовують саме тоді, коли користувач і так дивиться на
-віджет **із цієї ж причини**, — стрибок, що сам себе пояснює, коштує значно менше за той, що не
-пояснює нічого. Долоня ж перемикається під час звичайної роботи й не несе жодної новини про
-компонування самого віджета.
+Only the first one is high-frequency. The other four fire exactly when the user is already looking at
+the widget **for that very reason** — a jump that explains itself costs far less than one that
+explains nothing. The hand icon, by contrast, toggles during ordinary work and carries no news about
+the widget's layout at all.
 
-Причина — властивість, чия назва виглядає як прапорець налаштування, але є кон'юнкцією з живими
-даними:
+The root cause is a property whose name looks like a settings flag but is actually a conjunction with
+live data:
 
 ```swift
-// StatusItemView.swift, до зміни
+// StatusItemView.swift, before the change
 private var showAwaitingInMenuBar: Bool {
-    layout?.awaitingInput != nil                   // дані
-        && PersistedConfig.awaitingInputInMenuBar  // налаштування
+    layout?.awaitingInput != nil                   // data
+        && PersistedConfig.awaitingInputInMenuBar  // setting
 }
 let awaitingInset = showAwaitingInMenuBar ? awaitingIconWidth() + Metrics.awaitingIconGap : 0
 ```
 
-Друга половина контексту: щойно слот стабільний, поява іконки перестає бути подією компонування — і
-з'являється місце для питання, якого раніше не було сенсу ставити. Досі єдиною анімацією в проєкті
-був **колір** ([ADR-0070](0070-smooth-bar-colour-transitions.md)); геометрія свідомо не анімувалась.
+The second half of the context: once the slot is stable, the icon's appearance stops being a layout
+event — and that opens up a question that had no point asking before. Until now the project's only
+animation was **color** ([ADR-0070](0070-smooth-bar-colour-transitions.md)); geometry was deliberately
+never animated.
 
-## Рішення
+## Decision
 
-**Резервувати слот долоні за налаштуванням, а всередині зарезервованого слоту — плавно висувати
-іконку знизу і ховати вниз за ті самі 0.8 с.**
+**Reserve the hand icon's slot from the setting, and inside that reserved slot, smoothly slide the
+icon out from below and hide it the same way over the same 0.8 s.**
 
-### 1. Слот резервується з опції, а не з даних
+### 1. The slot is reserved from the option, not from the data
 
-`reservesAwaitingSlot` = `awaitingInputEnabled && awaitingInputInMenuBar`, і від неї рахується
-`awaitingInset` в `itemWidth(for:)`. Малювання гліфа лишається за наявністю лічильника.
+`reservesAwaitingSlot` = `awaitingInputEnabled && awaitingInputInMenuBar`, and `awaitingInset` in
+`itemWidth(for:)` is computed from it. Drawing the glyph itself still depends on the counter being
+present.
 
-**Обидва тумблери обов'язкові.** Вимикання master'а «Show sessions awaiting input» (Extra features)
-лише *дизейблить* Appearance-опцію — її збережене значення лишається `true`. Умова, яку це рішення
-замінило, покривала той випадок **через дані** (`layout?.awaitingInput` завжди `nil`, поки master
-вимкнено), тож саме тому master доводиться називати явно, щойно резервування перестало дивитись на
-дані. Інакше ≈18 pt лишалися б зайнятими під фічу, вимкнену повністю.
+**Both toggles are required.** Turning off the master "Show sessions awaiting input" switch (Extra
+features) only *disables* the Appearance option — its saved value stays `true`. The condition this
+decision replaced covered that case **through data** (`layout?.awaitingInput` is always `nil` while
+the master is off), which is exactly why the master now has to be named explicitly, now that the
+reservation no longer looks at data. Otherwise ≈18 pt would stay occupied for a feature that is
+completely off.
 
-Це змінює **значення наявного перемикача**: «Show awaiting-input icon in the menu bar» тепер означає
-«резервувати слот», а не «іконка присутня цієї секунди». Нового налаштування не додано — воно було б
-тринадцятим тумблером заради деталі компонування, і та сама позиція на екрані означала б різне в
-різних користувачів.
+This changes **the meaning of an existing toggle**: "Show awaiting-input icon in the menu bar" now
+means "reserve the slot," not "the icon is present this instant." No new setting was added — it would
+have been a thirteenth toggle for a layout detail, and the same on-screen position would mean
+different things to different users.
 
-Решта чотирьох джерел ширини лишаються як є (див. таблицю вище).
+The other four sources of width stay as they are (see the table above).
 
-### 2. Просування origin теж іде від слоту — інакше фікс не працює
+### 2. Advancing the origin has to come from the slot too — otherwise the fix does not work
 
-Це не деталь реалізації, а частина рішення. `drawLeadingDecorations` просував `originX` за тією ж
-умовою «гліф намальовано», тож саме лише резервування ширини додало б порожнє місце **праворуч** від
-усього вмісту, а бари лишились би зліва — і зсувались би далі. Обидва місця тепер ключуються на
-`reservesAwaitingSlot`, а крок береться з **виміряного резерву** `awaitingIconWidth()`, а не з ширини
-намальованого символу, тож слот і гліф не можуть розійтись на субпіксель.
+This is not an implementation detail, it is part of the decision. `drawLeadingDecorations` advanced
+`originX` under the same "glyph was drawn" condition, so reserving the width alone would only have
+added empty space **to the right** of all the content, while the bars would stay left-aligned — and
+keep shifting anyway. Both places now key off `reservesAwaitingSlot`, and the step is taken from the
+**measured reservation** `awaitingIconWidth()`, not from the width of the drawn glyph, so the slot and
+the glyph can never drift apart by a subpixel.
 
-### 3. Рух — тільки по Y, з обрізанням; без fade і без анімації ширини
+### 3. Motion is Y-only, with clipping; no fade, no width animation
 
-Іконка виїжджає з-під нижньої межі віджета й ховається туди ж, обрізана по власному слоту. Хід —
-`Metrics.height` (22 pt), а не виміряна висота символу: гліф ~13 pt відцентрований у рядку 22 pt, тож
-від його спокійного верхнього краю до низу рядка ≈17.5 pt; 22 перекриває із запасом і лишається
-однією константою замість числа, похідного від того, що сьогодні повертає SF Symbols.
+The icon slides out from under the widget's bottom edge and hides back the same way, clipped to its
+own slot. The travel distance is `Metrics.height` (22 pt), not the glyph's measured height: the ~13 pt
+glyph is centered in a 22 pt row, so from its resting top edge to the bottom of the row is ≈17.5 pt;
+22 clears that with margin and stays one constant instead of a number derived from whatever SF Symbols
+returns today.
 
-Ширина під час руху **не** анімується — вона вже стабільна за §1, і в цьому вся суть: рух іконки
-нічого не зсуває.
+Width is **not** animated during the motion — it is already stable per §1, and that is the whole
+point: the icon's motion moves nothing else.
 
-### 4. Скалярний твін — брат `ColorTween`, а не його узагальнення
+### 4. A scalar tween — a sibling of `ColorTween`, not a generalization of it
 
-`ScalarTween` / `ScalarTweenSet` / `ScalarTweenKey` — новий AppKit-free файл у Kit поруч із
-`ColorTween.swift`, із тією ж трибранговою `update`, тим же `pruneStale(45)`, тим же
-`TweenCurve.smoothstep` і **тим же епсилоном на кінці** (дефект `Date` той самий, і без нього твін
-назавжди лишається «майже завершеним», а кадровий таймер не згортається).
+`ScalarTween` / `ScalarTweenSet` / `ScalarTweenKey` — a new AppKit-free file in Kit next to
+`ColorTween.swift`, with the same three-branch `update`, the same `pruneStale(45)`, the same
+`TweenCurve.smoothstep`, and **the same end-of-run epsilon** (the same `Date` quirk, and without it a
+tween stays "almost done" forever, and the frame timer never winds down).
 
-Узагальнювати `ColorTween` над lerpable-типом відкинуто: його доккоментарі — це запис ADR-0070 у
-коді, і генералізація переписала б ~140 рядків несучої прози заради одного нового виклику. Окремий
-`ScalarTweenKey` — бо контракт `TweenKey` явно каже «ідентичність одного анімованого **кольору**», а
-присутність кольору не має.
+Generalizing `ColorTween` over a lerpable type was rejected: its doc comments are ADR-0070 written
+into code, and generalizing it would rewrite ~140 lines of load-bearing prose for the sake of one new
+call site. A separate `ScalarTweenKey` — because the `TweenKey` contract explicitly says "the identity
+of one animated **color**," and this has no color to speak of.
 
-`ScalarTween.defaultDuration` **прив'язана** до `ColorTween.defaultDuration` (0.8 с), а не повторена
-числом: один перемикач може змінити колір і присутність одночасно, і два різні числа дали б помітно
-різний час приземлення. Тест це стереже.
+`ScalarTween.defaultDuration` is **pinned** to `ColorTween.defaultDuration` (0.8 s) rather than
+repeated as a literal: a single toggle can change color and presence at the same time, and two
+different numbers would produce a noticeably different landing time. A test guards this.
 
-### 5. Стан «іконка зникає» живе в аніматорі
+### 5. The "icon is disappearing" state lives in the animator
 
-Коли лічильник стає `nil`, view не має жодної памʼяті про іконку, що відходить, — тож за
-[ADR-0070](0070-smooth-bar-colour-transitions.md) §3 стан лежить у `ColorAnimator` (другий реєстр,
-`scalars`), а не на view.
+When the counter becomes `nil`, the view has no memory at all of an icon that is on its way out — so
+per [ADR-0070](0070-smooth-bar-colour-transitions.md) §3, the state lives in `ColorAnimator` (a second
+registry, `scalars`), not on the view.
 
-Звідси **головний інваріант фічі**: draw-сайт викликає `resolve(.awaitingIcon…)` **на кожному кадрі,
-де існує слот**, зокрема й тоді, коли нічого не чекає (`target: 0`). Це дає дві речі — ключ лишається
-живим, тож вихідна анімація взагалі можлива, і ключ постійно «торкається», тож `pruneStale` не викине
-його, поки слот на екрані. Викинутий ключ повернувся б через гілку «перша поява» й стрибнув би — той
-самий клас помилки, що й поріг 5 с → 45 с в ADR-0070.
+Hence **the feature's central invariant**: the draw site calls `resolve(.awaitingIcon…)` **on every
+frame where the slot exists**, including when nothing is awaiting (`target: 0`). This buys two things
+— the key stays alive, so the outbound animation is even possible, and the key keeps getting
+"touched," so `pruneStale` won't discard it while the slot is on screen. A discarded key would come
+back through the "first appearance" branch and jump — the same class of bug as the 5 s → 45 s
+threshold in ADR-0070.
 
-Там само кешується `lastAwaitingUrgency`: долоня, що їде геть, не має urgency в лейауті (лічильник
-уже зник), тож червона рука посіріла б посеред виїзду.
+The same site also caches `lastAwaitingUrgency`: a hand icon that is sliding away has no urgency in
+the layout (the counter is already gone), so the red hand would turn gray mid-slide.
 
-### 6. Перша поява не їде
+### 6. First appearance does not slide
 
-Гілка «перша поява ключа адоптує ціль із `duration: 0`», успадкована від `ColorTweenSet`, дає рівно
-потрібну поведінку: сесія, що вже чекала на старті застосунку, — це **поточний стан**, а не зміна,
-тож іконка просто є. Наслідок для перемикача: вмикання опції при активних сесіях реєструє ключ
-уперше → миттєва поява. Це навмисно — користувач щойно сам попросив, і виїзд читався б як лаг.
+The "first appearance of a key adopts the target with `duration: 0`" branch, inherited from
+`ColorTweenSet`, produces exactly the behavior needed: a session that was already awaiting input when
+the app launched is a **current state**, not a change, so the icon simply is. Consequence for the
+toggle: turning the option on while sessions are already active registers the key for the first time →
+an instant appearance. This is deliberate — the user just asked for this, and a slide-in would read as
+lag.
 
-### 7. Reduce Motion вимикає рух, але не кольорові фейди
+### 7. Reduce Motion disables the motion but not the color fades
 
-При `NSWorkspace.accessibilityDisplayShouldReduceMotion` тривалість руху стає 0 — гліф просто
-з'являється й зникає, кадровий таймер не піднімається взагалі. Вмикання тумблера посеред виїзду
-приземляє все, що в польоті (підписка на `accessibilityDisplayOptionsDidChangeNotification`).
+With `NSWorkspace.accessibilityDisplayShouldReduceMotion`, the motion's duration becomes 0 — the glyph
+simply appears and disappears, and the frame timer never spins up at all. Toggling the setting
+mid-slide lands anything in flight (subscribed to
+`accessibilityDisplayOptionsDidChangeNotification`).
 
-Кольорові переходи ADR-0070 **лишаються** працювати: налаштування стосується руху — формулювання
-Apple прямо каже «UI should avoid large animations, especially those that simulate the third
-dimension», — а в кросфейді нічого не рухається. Reduce Motion не є проханням про статичний меню-бар;
-пейсинг-кольори однаково змінювались би, лише різко — тобто саме тим блиманням, яке ADR-0070 прибрав.
+ADR-0070's color transitions **keep working**: the setting is about motion — Apple's own wording says
+"UI should avoid large animations, especially those that simulate the third dimension" — and nothing
+moves in a crossfade. Reduce Motion is not a request for a static menu bar; the pacing colors would
+change either way, only abruptly — which is exactly the flicker ADR-0070 removed.
 
-### 8. 30 fps перевірено заново, а не успадковано
+### 8. 30 fps re-checked from scratch, not inherited
 
-ADR-0070 обґрунтовував 30 fps тим, що «за відсутності **рухомої межі** 30 достатньо — стробувати нема
-чому». Рухома межа тепер є, тож число переперевірено: ~24 кадри на 0.8 с при ході ≈18 pt дають
-~0.75 pt на кадр, а smoothstep ставить найшвидшу фазу в середину, де сходинки найменш помітні.
-Подвоєння частоти подвоїло б кількість повних `snapshotImage()` для декорації, що з'являється десятки
-разів на день. Лишено 30; важіль — та сама одна константа.
+ADR-0070 justified 30 fps on the grounds that "with no **moving edge**, 30 is enough — there's nothing
+to strobe." A moving edge now exists, so the number was re-checked: ~24 frames over 0.8 s with an
+≈18 pt travel gives ~0.75 pt per frame, and smoothstep puts the fastest phase in the middle, where the
+steps are least noticeable. Doubling the frame rate would double the number of full `snapshotImage()`
+calls for a decoration that appears dozens of times a day. 30 stays; the lever is still the same one
+constant.
 
-### 9. Стуб `TOKENPACE_AWAITING_CYCLE`
+### 9. The `TOKENPACE_AWAITING_CYCLE` stub
 
-`TOKENPACE_AWAITING` заморожує лічильник, а живий watcher на вимогу не перемкнеш — перехід нічим
-відтворити. Ручка на **наявному** стубі, а не новий `StubScenario`-кейс: виїзд треба перевіряти в
-кожному світі даних, з яким іконка ділить віджет (бари, `blockedReset`, pause-гліф), а сценарій
-пришпилив би один; і `_DAYS`/`_PROJECTS` далі працюють, тож випадок «червона рука лишається червоною
-дорогою вниз» досяжний. Тікає через `reRenderForCurrentTime()` (не голий `refreshStatusImage()` —
-пастка ADR-0070) у `.common` run-loop mode.
+`TOKENPACE_AWAITING` freezes the counter, and a live watcher cannot be toggled on demand — the
+transition has nothing to reproduce it with. A handle on the **existing** stub, rather than a new
+`StubScenario` case: the slide needs checking against every data world the icon shares the widget with
+(bars, `blockedReset`, the pause glyph), and a scenario would pin down just one; meanwhile `_DAYS` /
+`_PROJECTS` keep working, so the case "the red hand stays red all the way down" stays reachable. It
+ticks through `reRenderForCurrentTime()` (not a bare `refreshStatusImage()` — the ADR-0070 trap) in
+`.common` run-loop mode.
 
-## Наслідки
+## Consequences
 
-- **Ціна — ≈18 pt стабільної порожнечі** ліворуч від барів, поки черга порожня, для тих, хто ввімкнув
-  індикатор. Стабільна порожнеча за день читається як тло; стрибок щоразу перехоплює увагу заново.
-  Хто тримає індикатор вимкненим, не платить нічого.
-- **Значення перемикача змінилось** (резервує слот, а не описує поточний екран) — без нового
-  налаштування.
-- **Політика «геометрія не анімується» (ADR-0070) звужена, а не скасована.** Анімується рух **однієї
-  декорації всередині зарезервованого слоту**; довжина gap і позиція маркера й далі стрибають — там
-  анімація ховала б саме той факт, який бар покликаний показати.
-- **Інваріант безумовного `resolve` крихкий.** Якщо майбутній рефакторинг пропустить виклик при
-  `nil`-лічильнику, вихідна анімація тихо помре, а ключ викинеться через 45 с. Застережено
-  коментарями з обох кінців.
-- Відкинуто: **fade** (край не читається як обрізаний, рух менш виразний), **анімацію ширини** (24
-  перерахунки `statusItem.length` за анімацію, і сусідні елементи їхали б разом — тобто рівно те, що
-  фікс прибирає), **резервувати всі п'ять слотів** (початкова пропозиція розбору: ≈58 pt резерву на
-  додачу до 34 pt барів, здебільшого порожніх ~95 % часу — спокійний стан платить за аварійний на
-  поверхні, де ширина в дефіциті), **окреме налаштування** (тринадцятий тумблер заради деталі
-  компонування).
-- Свідомо **не** анімовано pause-гліф і символ валюти: вони перемикаються 1–2 рази на вікно, їхній
-  слот не резервується (див. таблицю), а рух без зарезервованого місця зсував би сусідів.
+- **The cost is ≈18 pt of stable empty space** to the left of the bars while the queue is empty, for
+  anyone with the indicator turned on. Stable emptiness reads as background over the course of a day;
+  a jump recaptures attention every single time. Anyone who keeps the indicator off pays nothing.
+- **The toggle's meaning changed** (it now reserves a slot, rather than describing the current screen)
+  — with no new setting.
+- **The "geometry never animates" policy (ADR-0070) is narrowed, not repealed.** What animates is
+  the motion of **a single decoration inside a reserved slot**; the gap length and the marker position
+  still jump — there, an animation would hide exactly the fact the bar exists to show.
+- **The unconditional-`resolve` invariant is fragile.** If a future refactor skips the call when the
+  counter is `nil`, the outbound animation will silently die, and the key will be discarded after
+  45 s. Guarded by comments at both ends.
+- Rejected: **fade** (the edge doesn't read as clipped, the motion is less legible), **animating the
+  width** (24 recomputations of `statusItem.length` per animation, and neighboring items would ride
+  along — exactly what the fix removes), **reserving all five slots** (the review's original proposal:
+  ≈58 pt of reserved space on top of the 34 pt of bars, mostly empty ~95% of the time — the calm state
+  paying for the emergency state on a surface where width is already scarce), **a separate setting**
+  (a thirteenth toggle for a layout detail).
+- Deliberately **not** animated: the pause glyph and the currency symbol — they toggle 1–2 times per
+  window, their slot is not reserved (see the table), and motion without a reserved slot would shift
+  their neighbors.
 
-## Пов'язане
+## Related
 
-- [ADR-0070](0070-smooth-bar-colour-transitions.md) — кольорові переходи; звідси взято тривалість,
-  криву, епсилон, дисципліну таймера й правило «стан живе поза view». Аргумент про `framesPerSecond`
-  там стосується лише кольору — для руху число переперевірено (§8).
-- [ADR-0066](0066-detect-sessions-awaiting-input.md) — сам індикатор awaiting-input.
-- [#283](https://github.com/artem-from-ua/cc-timer/issues/283) — тікет із діагнозом і таблицею джерел.
+- [ADR-0070](0070-smooth-bar-colour-transitions.md) — the color transitions; this ADR borrows the
+  duration, the curve, the epsilon, the timer discipline, and the rule "state lives outside the view."
+  The `framesPerSecond` argument there is about color only — for motion, the number was re-checked
+  (§8).
+- [ADR-0066](0066-detect-sessions-awaiting-input.md) — the awaiting-input indicator itself.
+- [#283](https://github.com/artem-from-ua/cc-timer/issues/283) — the ticket with the diagnosis and the
+  source table.

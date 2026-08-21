@@ -3,110 +3,122 @@ status: accepted
 date: 2026-07-23
 ---
 
-# ADR-0024: Конфігуровані логічні сервіси статусу замість двох фіксованих компонентів
+# ADR-0024: Configurable logical services instead of two fixed status components
 
-> Замінює [ADR-0013](0013-claude-status-line.md) у частині обсягу («рівно два фіксовані компоненти
-> `Claude Code` + `Claude API`»). Решта ADR-0013 (джерело стану = лише `component.status`, інциденти
-> не декодуються, cadence-підлоги, чисте ядро/тонкий shell) лишається чинною.
+> Replaces [ADR-0013](0013-claude-status-line.md) in scope ("exactly two fixed components,
+> `Claude Code` + `Claude API`"). The rest of ADR-0013 (state source = `component.status` only,
+> incidents not decoded, cadence floors, pure core/thin shell) still stands.
 
-## Контекст
+## Context
 
-[ADR-0013](0013-claude-status-line.md) §1 навмисно зашив обсяг у **два фіксовані компоненти**
-status.claude.com — `Claude Code` + `Claude API (api.anthropic.com)` — як поля `claudeCode`/
-`claudeAPI` структури `StatusHealth`, з `worstProblem` = worst-of-2 по них.
+[ADR-0013](0013-claude-status-line.md) §1 deliberately hardcoded the scope into **two fixed
+components** of status.claude.com — `Claude Code` + `Claude API (api.anthropic.com)` — as the
+`claudeCode`/`claudeAPI` fields of the `StatusHealth` struct, with `worstProblem` being a
+worst-of-2 over them.
 
-Issue #89 робить набір **конфігурованим**: користувач у вікні Configure… обирає, які логічні сервіси
-моніторити. Під час уточнення вимог модель спростилася відносно початкового формулювання тікета
-(замість «один перемикач `Claude Code` на два компоненти worst-of-two»):
+Issue #89 makes the set **configurable**: in the Configure… window, the user chooses which logical
+services to monitor. While the requirements were being refined, the model simplified relative to
+the ticket's initial phrasing (instead of "one `Claude Code` toggle over two worst-of-two
+components"):
 
 ```
-[x] Claude API          ← сірий, ЗАВЖДИ on, не редагується   → монітор: "Claude API (api.anthropic.com)"
-[x] Claude Code                                              → монітор: "Claude Code"
-[x] Claude WEB/Desktop                                       → монітор: "claude.ai"
+[x] Claude API          ← gray, ALWAYS on, not editable       → monitors: "Claude API (api.anthropic.com)"
+[x] Claude Code                                                → monitors: "Claude Code"
+[x] Claude WEB/Desktop                                         → monitors: "claude.ai"
     (o) Chat only
-    ( ) Chat and Cowork                                      → додає:  "Claude Cowork"
+    ( ) Chat and Cowork                                        → adds:     "Claude Cowork"
 ```
 
-Постають рішення: як представити «логічний сервіс = група з 1–2 компонентів із worst-of-N кольором»,
-де живе конфіг, як менюбар-крапка агрегує кілька сервісів, і як не зламати всіх споживачів
-`StatusHealth`, зберігши поділ чисте-ядро/тонкий-shell (ADR-0009/0013).
+This raises decisions about: how to represent "a logical service = a group of 1–2 components with a
+worst-of-N color," where the config lives, how the menu-bar dot aggregates several services, and
+how to avoid breaking every consumer of `StatusHealth` while preserving the pure-core/thin-shell
+split (ADR-0009/0013).
 
-## Рішення
+## Decision
 
-1. **`StatusHealth` переходить від фіксованої пари полів до колекції `checks: [ServiceCheck]`.**
-   Кожен `ServiceCheck` = семантичний `ServiceID` (`claudeAPI`/`claudeCode`/`webDesktop`) +
-   `coworkEnabled` + `[ResolvedComponent]` (поіменні складові з їхнім `ServiceStatus`) + computed
-   `status` = **worst-of-N** по складових через наявний `ServiceStatus.severity` (без нової
-   severity-логіки). Це узагальнює ADR-0013 §3 (per-компонентний стан) до груп.
+1. **`StatusHealth` moves from a fixed pair of fields to a `checks: [ServiceCheck]` collection.**
+   Each `ServiceCheck` is a semantic `ServiceID` (`claudeAPI`/`claudeCode`/`webDesktop`) +
+   `coworkEnabled` + `[ResolvedComponent]` (named sub-components with their `ServiceStatus`) + a
+   computed `status` = **worst-of-N** over the sub-components, using the existing
+   `ServiceStatus.severity` (no new severity logic). This generalizes ADR-0013 §3 (per-component
+   state) to groups.
 
-2. **`Claude API` — незмінний, завжди-увімкнений сервіс, не частина конфігу.** Він завжди перший
-   `check`, безумовно — бо від нього залежить спроможність самого TokenPace викликати usage API.
-   Тому **порожнього стану немає**: status.claude.com опитується завжди (щонайменше заради Claude
-   API), і acceptance-критерій початкового тікета «обидва off → не опитувати» **не діє**. У
-   `MonitoredServices` немає прапорця для Claude API — нема чого зберігати.
+2. **`Claude API` is an immutable, always-on service, not part of the config.** It is always the
+   first `check`, unconditionally — because TokenPace's own ability to call the usage API depends on
+   it. So **there is no empty state**: status.claude.com is always polled (if only for Claude API),
+   and the original ticket's acceptance criterion "both off → don't poll" **does not apply**. There
+   is no flag for Claude API in `MonitoredServices` — there's nothing to store.
 
-3. **Конфіг — `MonitoredServices` (чистий Codable value-тип у `TokenPaceKit`).** Два прапорці
-   (`claudeCodeEnabled`/`webDesktopEnabled`) + `WebDesktopMode` (`chatOnly`/`chatAndCowork`). Обидва
-   типи `Codable` заради персистентності (ADR-0023: shell `PersistedConfig` тримає їх як JSON у
-   `UserDefaults`; kit лише описує форму). `WebDesktopMode` — raw-value `String` (`"chat_only"`/
-   `"chat_and_cowork"`) зі стабільними ключами, і forward-compat `init(from:)` (невідомий режим →
-   `.chatOnly`), як `ServiceStatus.unknown`. `MonitoredServices.init(from:)` декодує кожен ключ через
-   `decodeIfPresent` + дефолт (частковий/старий blob → дефолти, не падіння), як `StatusSummary`.
+3. **The config is `MonitoredServices` (a pure Codable value type in `TokenPaceKit`).** Two flags
+   (`claudeCodeEnabled`/`webDesktopEnabled`) plus `WebDesktopMode` (`chatOnly`/`chatAndCowork`).
+   Both types are `Codable` for persistence (ADR-0023: the `PersistedConfig` shell stores them as
+   JSON in `UserDefaults`; the kit only describes the shape). `WebDesktopMode` is a raw-value
+   `String` (`"chat_only"`/`"chat_and_cowork"`) with stable keys, and a forward-compatible
+   `init(from:)` (an unknown mode → `.chatOnly`), like `ServiceStatus.unknown`.
+   `MonitoredServices.init(from:)` decodes every key via `decodeIfPresent` + a default (a
+   partial/old blob → defaults, not a crash), like `StatusSummary`.
 
-4. **`from(_:config:)` і `unknown(for:)` замість `from(_:)` і `static let unknown`.** Обидва будують
-   `checks` через один приватний хелпер `checks(for:statusOf:)` — єдине джерело істини про те, які
-   сервіси/складові існують за конфігом; різняться лише джерелом статусу (summary vs константа
-   `.unknown`). Старий безпараметричний `from(_:)` прибрано (поля `claudeCode`/`claudeAPI` зникли),
-   тож тести переписані на `checks`.
+4. **`from(_:config:)` and `unknown(for:)` replace `from(_:)` and `static let unknown`.** Both build
+   `checks` through one private helper, `checks(for:statusOf:)` — the single source of truth for
+   which services/sub-components exist given a config; they differ only in the status source
+   (summary vs. the `.unknown` constant). The old parameterless `from(_:)` is gone (the
+   `claudeCode`/`claudeAPI` fields disappeared), so the tests were rewritten around `checks`.
 
-5. **Менюбар-крапка — одна, worst-of-all-enabled.** `StatusHealth.worstProblem` тепер найсерйозніший
-   non-operational стан серед **усіх** складових **усіх** увімкнених сервісів (з Cowork лише в режимі
-   `chatAndCowork`), або `nil`. **Сигнатура не змінилася** (`ServiceStatus?`) — тож `MenuBarLayout`,
-   `StatusItemView`, `StatusCadence` і status-loop у `App` не чіпаються. Це свідомий вибір проти
-   «крапка на кожен сервіс» (ширший віджет, поза обсягом): popup вже розрізняє сервіси по рядках.
+5. **The menu-bar dot is one, worst-of-all-enabled.** `StatusHealth.worstProblem` is now the most
+   severe non-operational state among **all** sub-components of **all** enabled services (Cowork
+   only in `chatAndCowork` mode), or `nil`. **The signature is unchanged** (`ServiceStatus?`), so
+   `MenuBarLayout`, `StatusItemView`, `StatusCadence`, and the status loop in `App` are untouched.
+   This is a deliberate choice against "one dot per service" (a wider widget, out of scope): the
+   popup already distinguishes services by row.
 
-6. **Popup рендерить один рядок на КОМПОНЕНТ, не на сервіс.** У dropdown кожен монітований компонент
-   — окремий рядок зі своїм статусом і кольоровою крапкою: `API` завжди, далі `Code`, `WEB/Desktop`,
-   і `Cowork` (коли режим `chatAndCowork`) — за увімкненими сервісами. Тобто WEB/Desktop у Cowork дає
-   **два окремі рядки** (`WEB/Desktop` + `Cowork`), а не один згорнутий «with Cowork». Це свідомий
-   вибір користувача: кожна складова читається окремо, без агрегації в popup. Заголовок секції popup
-   — **«Claude»** (був «Claude Code»).
+6. **The popup renders one line per COMPONENT, not per service.** In the dropdown, each monitored
+   component is its own line with its own status and colored dot: `API` always, then `Code`,
+   `WEB/Desktop`, and `Cowork` (when the mode is `chatAndCowork`) — following the enabled services.
+   So WEB/Desktop with Cowork produces **two separate lines** (`WEB/Desktop` + `Cowork`), not one
+   collapsed "with Cowork" line. This is a deliberate choice for the user: every sub-component reads
+   on its own, with no aggregation in the popup. The popup section header is now **"Claude"** (was
+   "Claude Code").
 
-7. **Display-назви компонентів — у view, matching-назви — у kit** (ADR-0009/0013 seam). View мапить
-   `ResolvedComponent.name` (kit-константа) на коротку мітку в `PopupViewController.displayName(_:)`:
-   `Code` / `API` / `WEB/Desktop` / `Cowork` — **без «Claude»-префікса** (він у заголовку секції),
-   невідома назва → сама назва (forward-safe). Matching-константи в kit стали `public`, щоб view
-   робив цей мапінг за іменем компонента. **⌥-розгортання прибрано** — кожен рядок атомарний
-   (один компонент), тож немає чого розгортати. Правило показу з ADR-0013 збережено: статус-рядки
-   з'являються лише за реальної проблеми (`worstProblem != nil`); Claude API не робиться «завжди
-   видимим» у popup. `ServiceCheck` лишається в моделі (несе `id`/`coworkEnabled`/`components` +
-   computed worst-of-N `status`), але popup тепер ітерує по `components` напряму; worst-of-N живе для
-   менюбар-крапки (`worstProblem`, worst-of-all по всіх компонентах).
+7. **Component display names live in the view, matching names live in the kit** (the ADR-0009/0013
+   seam). The view maps `ResolvedComponent.name` (a kit constant) to a short label in
+   `PopupViewController.displayName(_:)`: `Code` / `API` / `WEB/Desktop` / `Cowork` — **with no
+   "Claude" prefix** (that's in the section header); an unknown name falls back to the name itself
+   (forward-safe). The matching constants in the kit became `public`, so the view can do this
+   mapping by component name. **⌥ expansion was removed** — every line is now atomic (one
+   component), so there's nothing left to expand. The visibility rule from ADR-0013 is preserved:
+   status lines appear only on a real problem (`worstProblem != nil`); Claude API is not made
+   "always visible" in the popup. `ServiceCheck` remains in the model (carrying
+   `id`/`coworkEnabled`/`components` plus a computed worst-of-N `status`), but the popup now
+   iterates `components` directly; the worst-of-N computation still exists for the menu-bar dot
+   (`worstProblem`, worst-of-all across every component).
 
-## Наслідки
+## Consequences
 
-- `TokenPaceKit` лишається без AppKit: нові `ServiceID`/`ResolvedComponent`/`ServiceCheck`/
-  `MonitoredServices` — семантика + `Foundation`. Маппінг і worst-of-N покриті unit-тестами
-  (`StatusHealthTests` переписані на `checks`; `MonitoredServicesTests` — defaults, Codable
-  round-trip, forward-compat декод). Settings-UI і персистентність — manual-verify (shell).
-- **Зачеплення мінімальне завдяки збереженню `worstProblem: ServiceStatus?`**: реальні зміни —
-  `StatusHealth` (модель), `PopupViewController` (ітерація + `displayName` + ⌥-підрядки),
-  `from`-виклики та нове поле конфігу в `App`, `SettingsWindowController` (секції General/Monitored
-  services), `PersistedConfig` (+ключ `monitoredServices`). `StatusClient`/`StatusSummary`/
-  `StatusCadence`/`MenuBarLayout`/`PollingEngine` — без змін.
-- **Зміна конфігу застосовується наживо**: `AppDelegate.monitoredServicesChanged` скидає застарілий
-  `lastStatusHealth`, форсує негайний re-poll (через `.manualRefresh`-heartbeat) і перемальовує — щоб
-  крапка/рядки відповідали новому набору сервісів у межах моменту.
-- **ADR-0013 частково superseded** (обсяг двох фіксованих компонентів); його запис лишається
-  незмінним, у README номер/назву закреслено, frontmatter → `superseded`, зверху — постскрипт на цей
-  ADR. Решта рішень 0013 чинні й тут реюзуються.
+- `TokenPaceKit` stays free of AppKit: the new `ServiceID`/`ResolvedComponent`/`ServiceCheck`/
+  `MonitoredServices` are semantics + `Foundation`. Mapping and worst-of-N are covered by unit tests
+  (`StatusHealthTests` rewritten around `checks`; `MonitoredServicesTests` — defaults, a Codable
+  round-trip, forward-compatible decoding). The Settings UI and persistence are manual-verify
+  (shell).
+- **The blast radius is small thanks to keeping `worstProblem: ServiceStatus?`**: the real changes
+  are `StatusHealth` (the model), `PopupViewController` (iteration + `displayName` + the ⌥
+  sub-lines), the `from` call sites plus the new config field in `App`,
+  `SettingsWindowController` (the General/Monitored services sections), `PersistedConfig` (+ the
+  `monitoredServices` key). `StatusClient`/`StatusSummary`/`StatusCadence`/`MenuBarLayout`/
+  `PollingEngine` are unchanged.
+- **A config change applies live**: `AppDelegate.monitoredServicesChanged` drops the stale
+  `lastStatusHealth`, forces an immediate re-poll (via the `.manualRefresh` heartbeat), and redraws
+  — so the dot/lines match the new service set within a moment.
+- **ADR-0013 is partially superseded** (the two-fixed-components scope); its record stays
+  unchanged, its number/title is struck through in the README, its frontmatter becomes
+  `superseded`, and a postscript pointing to this ADR is added at the top. The rest of 0013's
+  decisions still stand and are reused here.
 
-## Пов'язані
+## Related
 
-- [ADR-0013](0013-claude-status-line.md) — попереднє рішення (два фіксовані компоненти), superseded у
-  частині обсягу; джерело стану / cadence / seam-поділ звідти чинні.
-- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — чисте ядро / тонкий shell,
-  локалізація у view; display-назви сервісів слідують тому ж поділу.
-- [ADR-0023](0023-persisted-config-version-marker.md) — persistence-шар (`PersistedConfig`), який
-  `MonitoredServices` розширює своїм ключем.
-- Issues: #89 (цей тікет), #31 (початковий рядок статусу), #71 (persistence-фундамент).
+- [ADR-0013](0013-claude-status-line.md) — the earlier decision (two fixed components), superseded
+  in scope; its state source / cadence / seam split still stand.
+- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — the pure core / thin shell split,
+  localization in the view; service display names follow the same split.
+- [ADR-0023](0023-persisted-config-version-marker.md) — the persistence layer (`PersistedConfig`),
+  which `MonitoredServices` extends with its own key.
+- Issues: #89 (this ticket), #31 (the original status line), #71 (the persistence foundation).

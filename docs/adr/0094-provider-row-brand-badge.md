@@ -5,108 +5,120 @@ supersedes: []
 superseded_by: []
 ---
 
-# ADR-0094: Рядок провайдера має бренд-бейдж, а чип Providers — пазл
+# ADR-0094: The provider row gets a brand badge, the Providers chip becomes a puzzle piece
 
-## Контекст
+## Context
 
-Сторінка `Providers` прийшла на зміну `Extra features` ([ADR-0084](0084-settings-drill-in-child-pages.md)),
-і разом із нею — рядок-навігатор `Claude`. Дві речі з того рішення трималися на аргументах, які з
-часом перестали відповідати тому, що є на екрані.
+The `Providers` page replaced `Extra features`
+([ADR-0084](0084-settings-drill-in-child-pages.md)), and brought with it the `Claude`
+navigation row. Two things from that decision rested on arguments that, over time, stopped
+matching what's on screen.
 
-**Чип секції показував хмару** (`cloud.fill`). Хмара зображає, *де* працюють сервіси, — але сторінка
-конфігурує не це. Вона конфігурує **підключення** до них: один рядок на провайдера, і рядків
-побільшає. Символ, що описує чужу інфраструктуру, нічого не каже про вісь, уздовж якої сторінка
-росте.
+**The section's chip showed a cloud** (`cloud.fill`). A cloud depicts *where* the services run —
+but that's not what the page configures. It configures the **connection** to them: one row per
+provider, and more rows are coming. A symbol that describes someone else's infrastructure says
+nothing about the axis the page grows along.
 
-**Колір чипа був фіолетовий** (`0x5E5CE6/0x8C8AFB`) — успадкований від знятого чипа `Extra features`.
-У самому коді біля нього стояло попередження, що це **стартове значення, а не замір**: пару знято
-піпеткою з *іншої* панелі System Settings, і вона чекала на перевірку проти тієї, на яку
-Providers зрештою стане схожою. Борг так і лишався невиплаченим.
+**The chip's color was purple** (`0x5E5CE6/0x8C8AFB`) — inherited from the now-retired
+`Extra features` chip. Right next to it in the code sat a warning that this was a **starting
+value, not a measurement**: the pair had been lifted with a color picker from a *different* System
+Settings pane, and it was waiting to be checked against the one Providers would eventually come to
+resemble. That debt just sat there, unpaid.
 
-**Рядок `Claude` не мав іконки взагалі**, і [ADR-0084](0084-settings-drill-in-child-pages.md)
-пояснював це так: «логотип провайдера юридично сумнівний, а generic-гліф був би декорацією на місці
-інформації». Перша половина слушна й лишається чинною. Друга — ні: `Інтернет-записи`, з яких і знято
-форму цього рядка, дають кожному запису кольоровий бейдж, і він там не декорація, а те, за чим рядок
-упізнають з одного погляду.
+**The `Claude` row had no icon at all**, and [ADR-0084](0084-settings-drill-in-child-pages.md)
+justified it this way: "a provider's logo is legally questionable, and a generic glyph would be
+decoration standing in for information." The first half is sound and still stands. The second one
+isn't: `Internet Accounts`, whose shape this row's form was lifted from, gives every entry a
+colored badge, and there it's not decoration — it's exactly what lets you recognize the row at a
+glance.
 
-## Рішення
+## Decision
 
-**1. Чип секції — `puzzlepiece.extension.fill`.** Пазл каже те, що сторінка робить: провайдер
-вставляється в застосунок, і місць під наступні шматочки більшає. Наявність символу перевірено
-`NSImage(systemSymbolName:)` на macOS 15 — тим самим способом, яким у #341 з'ясувалося, що
-`zzz.circle` не існує.
+**1. The section chip becomes `puzzlepiece.extension.fill`.** A puzzle piece says what the page
+does: a provider snaps into the app, and there's growing room for the next pieces. The symbol's
+existence was checked with `NSImage(systemSymbolName:)` on macOS 15 — the same method that
+revealed, in #341, that `zzz.circle` doesn't exist.
 
-**2. Колір чипа — виміряний сірий `General`** (`0x5E5E5F/0xC0C0C4`). `General` і `Providers` стоять
-однією групою сайдбару, бо відповідають на те саме питання «що застосунок робить» (а не «як він
-виглядає»), — і тепер сайдбар каже це кольором, як каже зеленим тінтом про трійцю UI. Побічно це
-гасить борг: замість неперевіреної пари з чужої панелі стоїть пара, зняту з панелі, поряд з якою
-чип і стоїть.
+**2. The chip's color becomes the measured `General` gray**
+(`0x5E5E5F/0xC0C0C4`). `General` and `Providers` sit in the same sidebar group, because they
+answer the same question, "what does the app do" (rather than "how does it look") — and now the
+sidebar says so in color, the same way it says green for the UI trio. As a side effect, this pays
+off the debt: instead of an unverified pair borrowed from an unrelated pane, the pair now comes
+from the very pane the chip sits next to.
 
-**3. `SettingsNavigationRow` отримує опційний leading-бейдж.** Слот під нього був передбачений з
-самого початку — метрика називалася `chipTextGap` і ніколи не використовувалася. Рядок без чого
-ідентифікувати передає `nil` і лишається з текстом при лівому краї.
+**3. `SettingsNavigationRow` gains an optional leading badge.** The slot for it was planned from
+the start — the metric was named `chipTextGap` and never used. A row with nothing to identify
+itself by passes `nil` and stays with its text flush to the left edge.
 
-**4. Бейдж несе generic-гліф на бренд-кольорі, ніколи не логотип.** Юридичне заперечення з
-[ADR-0084](0084-settings-drill-in-child-pages.md) чинне й обходиться саме так: колір належить бренду,
-форма — системі. Для Claude це `cloud.fill` на теракоті `#d97757` — хмара переїхала сюди з чипа
-секції, і тут вона доречна: провайдер справді **є** хмарним сервісом, навіть якщо сторінка про
-підключення до нього.
+**4. The badge carries a generic glyph on a brand color, never a logo.** The legal objection from
+[ADR-0084](0084-settings-drill-in-child-pages.md) still stands and is honored exactly this way:
+color belongs to the brand, shape belongs to the system. For Claude that's `cloud.fill` on
+terracotta `#d97757` — the cloud moved here from the section chip, and here it fits: the provider
+really **is** a cloud service, even though the page is about connecting to it.
 
-**5. Колір береться з тієї самої `ColorRole.claudeBrand`**, що й заголовок «Claude Code» у попапі
-([ADR-0021](0021-popup-two-column-layout-and-uniform-dropdown-typography.md)), а не дублюється
-константою. Два бренд-маркери в одному застосунку не можуть розійтися, якщо в них одне джерело.
+**5. The color comes from the same `ColorRole.claudeBrand`** as the "Claude Code" heading in the
+popup ([ADR-0021](0021-popup-two-column-layout-and-uniform-dropdown-typography.md)), rather than
+being duplicated as a separate constant. Two brand markers in one app can't drift apart if they
+share one source.
 
-**6. Розмір — 26 pt (гліф 16), як чип сайдбару.** Знято з `Інтернет-записів`: там бейдж запису
-помітно більший за чип сайдбару й перекриває обидва рядки — назву і рядок стану. На дворядковому
-рядку це читається як **іконка рядка**, а не як буліт перед текстом. Гліф трохи менший пропорційно
-за сайдбарний (16 з 26 проти 17 з 26): хмара заповнює свій квадрат щільніше за шестерню, і при
-сайдбарній пропорції тиснулася в кути.
+**6. Size — 26 pt (16 pt glyph), matching the sidebar chip.** Lifted from `Internet Accounts`:
+there, an entry's badge is noticeably larger than the sidebar chip and overlaps both lines — the
+name and the status line. On a two-line row this reads as **the row's icon**, not a bullet in
+front of text. The glyph is slightly smaller proportionally than the sidebar one (16 of 26 vs. 17
+of 26): a cloud fills its square more tightly than a gear does, and at the sidebar's proportions it
+crowded into the corners.
 
-**7. Градієнт бейджа виводиться з виміряних пар, а не вигадується.** Капсула сайдбару має **два**
-заміряні кінці; бренд дає **один** колір. Другий кінець — `dark + t·(255 − dark)` поканально, де `t`
-взято як середнє по чотирьох виміряних парах: 0.188 (UI presets), 0.191 (Notifications), 0.503
-(About), 0.616 (General) → **0.375**. Для теракоти це дає `#D97757` внизу-праворуч і `#E7AA96`
-вгорі-ліворуч, на тій самій осі, що й капсули сайдбару (`0.25,0 → 0.75,1`).
+**7. The badge's gradient is derived from measured pairs, not invented.** The sidebar capsule has
+**two** measured endpoints; the brand gives **one** color. The second endpoint is
+`dark + t·(255 − dark)` per channel, with `t` taken as the average across four measured pairs:
+0.188 (UI presets), 0.191 (Notifications), 0.503 (About), 0.616 (General) → **0.375**. For
+terracotta this gives `#D97757` at bottom-right and `#E7AA96` at top-left, on the same axis as the
+sidebar capsules (`0.25,0 → 0.75,1`).
 
-## Наслідки
+## Consequences
 
-**Світлий кінець градієнта — не замір, і в коді це сказано прямо.** Це єдиний колір у Settings,
-отриманий формулою, а не піпеткою. Виправдання — System Settings ніколи не малювала капсулу
-теракотою, тож заміряти нема з чого; але правило
-[«кольори міряються Digital Color Meter»](../reference/ui-state-truth.md) від цього не слабшає, і
-доккоментар просить звіряти `#E7AA96` піпеткою, а не вірити числу.
+**The gradient's light endpoint is not a measurement, and the code says so directly.** It's the
+only color in Settings derived by formula rather than by color picker. The justification: System
+Settings has never drawn a capsule in terracotta, so there's nothing to measure; but the rule
+["colors are measured with Digital Color Meter"](../reference/ui-state-truth.md) isn't weakened by
+this, and the doc comment asks that `#E7AA96` be checked with a color picker rather than trusted as
+a number.
 
-**Розкид `t` між панелями величезний — від 0.188 до 0.616.** Це не шум вимірювання, а те, про що
-попереджає доккоментар `CapsuleTint`: системні капсули — намальована вручну графіка, а не одна
-формула. Тому 0.375 чесніше називати замінником заміру, ніж «правильним» числом. Якщо теракотовий
-верх колись читатиметься замилено-рожевим, ближчі аналоги — насичені **хроматичні** панелі
-(UI presets і Notifications, обидві ≈ 0.19), і зміна це одна константа `lightenFraction`.
+**The spread of `t` across panes is huge — from 0.188 to 0.616.** This isn't measurement noise,
+it's exactly what `CapsuleTint`'s doc comment warns about: system capsules are hand-drawn artwork,
+not one formula. So 0.375 is more honestly called a stand-in for a measurement than a "correct"
+number. If the terracotta top ever reads as a washed-out pink, the closer analogues are the
+saturated **chromatic** panes (UI presets and Notifications, both ≈ 0.19), and the fix is a single
+constant, `lightenFraction`.
 
-**Заперечення «generic-гліф = декорація» з [ADR-0084](0084-settings-drill-in-child-pages.md) знято
-частково.** Юридична половина того аргументу лишається чинною й повторена тут пунктом 4 — саме вона
-тримає заборону на логотипи. Скасовано лише твердження, що будь-який generic-гліф на цьому рядку є
-декорацією.
+**The "generic glyph = decoration" objection from
+[ADR-0084](0084-settings-drill-in-child-pages.md) is partially withdrawn.** The legal half of that
+argument still stands and is repeated here as point 4 — it's exactly what keeps logos off the
+table. Only the claim that *any* generic glyph on this row is decoration is withdrawn.
 
-**Бейдж плоский за структурою, але не за виглядом.** Він не використовує `CapsuleTint`, бо той тип
-означає «дві заміряні точки», і класти в нього виведене число розмило б цю гарантію. Ціна — трохи
-дубльованої геометрії (радіус 5 pt, вісь градієнта) між `SidebarChip` і `SettingsRowBadgeView`;
-винесення спільного чипа лишено на той момент, коли з'явиться третій носій цієї форми.
+**The badge is flat in structure but not in appearance.** It doesn't use `CapsuleTint`, because
+that type means "two measured points," and feeding it a derived number would dilute that
+guarantee. The cost is a bit of duplicated geometry (5 pt radius, gradient axis) between
+`SidebarChip` and `SettingsRowBadgeView`; pulling out a shared chip is left for whenever a third
+carrier of this shape shows up.
 
-## Альтернативи
+## Alternatives considered
 
-**Логотип Anthropic на бейджі.** Відпадає з тієї ж причини, що й у [ADR-0084](0084-settings-drill-in-child-pages.md):
-перемальований вордмарк у чужому застосунку — юридично сумнівна річ, і жодна користь від упізнаваності
-цього не покриває.
+**The Anthropic logo on the badge.** Ruled out for the same reason as in
+[ADR-0084](0084-settings-drill-in-child-pages.md): a redrawn wordmark inside someone else's app is
+legally questionable, and no amount of recognizability offsets that.
 
-**Лишити бейдж плоским (без градієнта).** Так і було зроблено спочатку — саме тому, що бренд дає один
-колір. Відкинуто, бо плоский чип поряд із градієнтними капсулами сайдбару читається як інший
-матеріал; виведення другого кінця з виміряних пар виявилося дешевшим за цю неоднорідність.
+**Leave the badge flat (no gradient).** That's how it was done at first — precisely because the
+brand only gives one color. Rejected because a flat chip next to the sidebar's gradient capsules
+reads as a different material; deriving the second endpoint from the measured pairs turned out
+cheaper than that inconsistency.
 
-**Взяти `t` як середнє лише по хроматичних панелях (≈ 0.19).** Аргумент за: сірий `General` і
-синій `About` (у якого синій канал уже впирається в 255) світлішають інакше, ніж насичений колір.
-Аргумент проти, який переважив: середнє по **всіх** чотирьох — це те, що видно на сайдбарі загалом,
-і різниця між 0.19 і 0.375 для теракоти лишається в межах розкиду самих системних капсул.
+**Take `t` as the average of only the chromatic panes (≈ 0.19).** The argument for: the gray
+`General` and the blue `About` (whose blue channel is already pinned near 255) lighten
+differently than a saturated color does. The argument against, which won out: the average across
+**all four** is what's actually visible across the sidebar as a whole, and the gap between 0.19 and
+0.375 for terracotta stays within the spread of the system capsules themselves.
 
-**Перевикористати `SidebarChip` для рядка.** Він `private` і типізований на `SettingsSection`; щоб
-його розділити, довелося б параметризувати його примітивами й винести в окремий файл — рефакторинг
-заради одного носія нової форми. Відкладено до третього.
+**Reuse `SidebarChip` for the row.** It's `private` and typed to `SettingsSection`; splitting it
+out would mean parameterizing it with primitives and moving it to its own file — a refactor for the
+sake of a single carrier of the new shape. Deferred until a third one shows up.

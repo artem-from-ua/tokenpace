@@ -3,114 +3,116 @@ status: draft
 date: 2026-08-01
 ---
 
-# ADR-0054 (draft): Дистрибуція в Mac App Store через present-if-installed helper
+# ADR-0054 (draft): Mac App Store distribution via a present-if-installed helper
 
-> **Чернетка (draft).** Рішення ще не прийняте — воно за гейтом спайку #E0 (перевірка IPC-каналу)
-> і продуктового gut-check (чи standalone-частина самоцінна). Драфт фіксує напрям, не остаточне
-> рішення. Стане `accepted` лише після гейту.
+> **Draft.** The decision has not been made yet — it's gated on the #E0 spike (verifying the IPC
+> channel) and a product gut-check (whether the standalone part is worth anything on its own). The
+> draft records a direction, not a final decision. It becomes `accepted` only after the gate.
 
-## Контекст
+## Context
 
-Мета — **повноцінний TokenPace у Mac App Store** (MAS). TestFlight і MAS вимагають **App Sandbox**,
-з яким поточний застосунок архітектурно несумісний: він читає **чужий** Keychain-айтем
-`Claude Code-credentials` (створений Claude Code CLI), спавнить сторонні бінарники
-(`security`, `claude`, `zsh`, `gh`, `ditto`, `codesign`, `spctl`), сканує процес-таблицю
-(`sysctl(KERN_PROC_ALL)`), читає `~/.claude`/`~/.zshrc`, само-замінює `.app`. Усе це sandbox
-забороняє.
+The goal is a **full TokenPace in the Mac App Store** (MAS). TestFlight and MAS require **App
+Sandbox**, which the current app is architecturally incompatible with: it reads **someone else's**
+Keychain item `Claude Code-credentials` (created by the Claude Code CLI), spawns third-party
+binaries (`security`, `claude`, `zsh`, `gh`, `ditto`, `codesign`, `spctl`), scans the process table
+(`sysctl(KERN_PROC_ALL)`), reads `~/.claude`/`~/.zshrc`, and self-replaces the `.app`. The sandbox
+forbids all of this.
 
-Дослідження (Apple DTS / Quinn, живі App Store Review Guidelines) показало:
+Research (Apple DTS / Quinn, live App Store Review Guidelines) showed:
 
-- **Прямий гібрид «порожня MAS-оболонка + helper» нежиттєздатний**: сильний IPC (XPC/mach) до
-  не-вкладеного helper'а потребує `temporary-exception.mach-lookup.global-name`, який App Review
-  фактично не пропускає; loopback (`127.0.0.1`) під sandbox дає `EPERM`.
-- **Життєздатна модель — «self-sufficient app + present-if-installed helper»**, і вона має **живі
-  прецеденти, що пройшли ревʼю**: **iStat Menus** (MAS-застосунок + окремо завантажуваний helper) і
-  **Spark** (MAS + окремий CLI у `/usr/local/bin`).
+- **A direct hybrid of "empty MAS shell + helper" is not viable**: strong IPC (XPC/mach) to a
+  non-embedded helper requires `temporary-exception.mach-lookup.global-name`, which App Review
+  effectively rejects; loopback (`127.0.0.1`) under sandbox returns `EPERM`.
+- **The viable model is "self-sufficient app + present-if-installed helper"**, and it has **live
+  precedents that passed review**: **iStat Menus** (a MAS app + a separately downloadable helper)
+  and **Spark** (MAS + a separate CLI in `/usr/local/bin`).
 
-Guideline-опори: **2.1 (completeness)** — застосунок має бути корисним сам по собі; **2.4.5(iv)** —
-застосунок не має завантажувати/встановлювати сторонній код (лише детектити наявний).
+Guideline anchors: **2.1 (completeness)** — the app must be useful on its own; **2.4.5(iv)** — the
+app must not download/install third-party code (only detect what's already present).
 
-## Рішення
+## Decision
 
-Розділити TokenPace на **три артефакти**:
+Split TokenPace into **three artifacts**:
 
-- **(a) Developer ID full app** — наявний застосунок, лишається без змін (не MAS).
-- **(b) MAS sandboxed app** — App Store; **повноцінний сам по собі** (статус сервісів інференсу
-  через `StatusClient` — публічний `status.claude.com`, без токена, sandbox-safe; таймери
-  ресет-вікон). Задовольняє 2.1.
-- **(c) Helper** — окремий opensource продукт (Developer ID, notarized), який ставить **сам
-  користувач** (Homebrew/GitHub). Робить усе, що заборонено пісочниці. MAS-застосунок його лише
-  **детектить**, ніколи не завантажує/встановлює (2.4.5(iv)).
+- **(a) Developer ID full app** — the existing app, unchanged (not MAS).
+- **(b) MAS sandboxed app** — App Store; **fully useful on its own** (inference-service status via
+  `StatusClient` — the public `status.claude.com`, no token, sandbox-safe; reset-window timers).
+  Satisfies 2.1.
+- **(c) Helper** — a separate open-source product (Developer ID, notarized), which **the user**
+  installs themselves (Homebrew/GitHub). Does everything the sandbox forbids. The MAS app only
+  **detects** it, never downloads/installs it (2.4.5(iv)).
 
-Коли helper присутній, **той самий** UI (b) підвищується до повного досвіду з персональним pacing.
-**Токен ніколи не покидає helper** — назовні йдуть лише похідні usage-числа (приватність краща за
-поточну).
+When the helper is present, the **same** UI (b) upgrades to the full experience with personal
+pacing. **The token never leaves the helper** — only derived usage numbers go outward (better
+privacy than the current setup).
 
 ```plantuml
 @startuml
-title ADR-0054: Три артефакти TokenPace та межі дистрибуції
+title ADR-0054: TokenPace's three artifacts and the distribution boundary
 skinparam componentStyle rectangle
 skinparam packageStyle rectangle
 
-actor "Користувач" as User
+actor "User" as User
 
 package "Mac App Store" #E8F4FD {
   [MAS app (b)\nsandboxed] as MAS
 }
 
-package "Поза App Store\n(Developer ID, notarized)" #F3E8FD {
-  [Helper (c)\nне-sandboxed] as Helper
-  [Developer ID app (a)\nповний, наявний] as DevID
+package "Outside the App Store\n(Developer ID, notarized)" #F3E8FD {
+  [Helper (c)\nnon-sandboxed] as Helper
+  [Developer ID app (a)\nfull, existing] as DevID
 }
 
 cloud "Claude" {
-  [status.claude.com\n(без токена)] as Status
-  [usage API\n(з токеном)] as Usage
+  [status.claude.com\n(no token)] as Status
+  [usage API\n(with token)] as Usage
 }
 
 database "macOS Keychain\nClaude Code-credentials" as KC #F5F5F5
 
-User --> MAS : ставить з App Store
-User --> Helper : ставить сам\n(brew install)
+User --> MAS : installs from App Store
+User --> Helper : installs it themselves\n(brew install)
 
-MAS --> Status : завжди (sandbox-safe)
-MAS ..> Helper : детектить + читає\nпохідні числа (IPC)
+MAS --> Status : always (sandbox-safe)
+MAS ..> Helper : detects + reads\nderived numbers (IPC)
 
-Helper --> KC : читає токен
-Helper --> Usage : authed запити
+Helper --> KC : reads the token
+Helper --> Usage : authed requests
 DevID --> KC
 DevID --> Usage
 
 note bottom of Helper
-  Токен НЕ покидає helper.
-  MAS отримує лише
-  derived usage-числа.
+  The token does NOT leave the helper.
+  MAS only receives
+  derived usage numbers.
 end note
 
 legend right
-  Синій — App Store (sandboxed)
-  Фіолетовий — Developer ID (не-sandboxed)
+  Blue — App Store (sandboxed)
+  Purple — Developer ID (non-sandboxed)
 end legend
 @enduml
 ```
 
-![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/PLHTQnD157sVNt69BmaseM0BqWTfI2o6KYp6FbaV9hlJPEbcD-nkr2f2FzJw8FXIAmWY5dz06feshMdw5-xy1N-9PsRJPgi4aftCEVVSUy-zknWdCagwRLyaNk8hAbUV56Tdv-SMY8_qDW-9UtfRx_90l-CUN-1fI4_3JHMiIaSHZZtY4G_uL1yId_1Gx-XTm-DZlQS_w4FzLSIRNj2HaMoJ4xOxOQ22f9viGIjIJYA3fgyoa8vqDcLJ_GiGqad2Y7ByZSScl9NPupwosy-HZ6ajLf4G4pRbLgH3vKw7wc2f7DrvU7zfRgbARmJHivLodIJkyet2UX3Bm6s4hvJxt4J1bNYR2SC_UCndgF4crdgGhweNoWyxAg9QTOQ240tqNYkt09cbUn2Qo3nIli7a7QZm9G-AjwNIQmFCnaiJauPo1Ua-Y4C-do7yzlJdwxCD05gjQh9r_B3hKgxYowwBMgquN4swSScn_vNGT-JDn_3fp7WsvWiy8cJ1HgfRiA5rOrDsURLcuBUWOnwbu3K3CRAkJ6H3nkXIMpgFwxIijfoMz8Br8Cs4Ag6hYawaN1ZkIJ-sFYrNqALvyn72U4R5uWFJTbeWuobch0ztT_KdWlvDrwVGILV_G-iT74P8kn6fb-G5Q83l5uGmeGqlhH4yOoTOfsPOAJ_n1Dvig885bqeP4O06PlZJmRT2TqdlcqVuSP2wfD_hGm0liG7sQeT_OsBojTKAz2UXJ0eeVI53pdGtYxBz1L1savPoqtIlB6SehEMJM9b3Qed092fgX4aIjYdSc0uO7rth47_dBsGdwm9pT6BJQ5bS2K1JFif9ztU4_JqWb3BK7tc0MrT5tWjaP6UaEAsq95JWcZL02hvgcaFaDLk9KVw9GEWBdzEVxOEfdJTznzOOs2z0neWri2tfcn6tX5kRaR-zH0KhcmgAHNpX7VON)
+![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/NLJRRjD047tVhnY51nBHH9Le9PG7r91G4LMb4KcVA0zZxoHPTRrhzf8q82G-WY_aIvXTEusBB5csvymvCsTcVUK3kX0hBO8Acc0o-p8yFx-y6CFAFf9PO4clFOIj8m86gZMMmGCQoTy8fFB1gI86PGqKDXg9xY3yep8rEgoWj5Lj3Pcm30ScTrG6D1jD7KYDvIDkw7-0O1the7VloVK0FQG78Leqz6wnX4bTmv9Hr8DN7zzTNrpFuAS0-7exMG9oh5yC7epdMWlxHF9ROk6G-DMXkOl1AqcvcMUw1zEVqOwqhSd1V7O6nh99wWV90IjTlsMjLkaJwOJfbonah1c-56kY2TUbQqf3pbX7hS-0djX4PJOvXO7pMQgmr3PAw4qrHidzPJKULOX-LEPl8_QM2pKMGXhK8ASlCo9Xeq_zJHPpnknLs7PHzocMH2G6BD2p3nMMTqkueKEvHMKUJACBKojfM3gIF4A5skT9t4pPXCjq2P6c0iFX-sGiZ44Phb5h3sjdgvEX9rXhM0UfGZA_ygHtvBdOmj7-61q8aNXJOjCP9wBUuy53lxMQBL_J8CD6emw_f41fKz_mJg5aOabExKY2YLL1ZWdcYodpjmb9WliQD-Yy3jcmRZpRbYg879QC_1x91o_op5g6palZik3T8JuQ8R0XTdtQYTLH0gGb3v_lLg09TyqgRZDgnB3Kc3Nwa8u6SGDfkCTMcXct3Oq4yQ5CQa9esgGNfpRRmFWFEXBy_VtdD91d-tYb6R28hjODvCMczb_iz20hDDpYYc_yr_W7)
 
-## Наслідки
+## Consequences
 
-- **MAS-застосунок корисний без helper'а** — рецензент бачить робочий продукт (задовольняє 2.1).
-- **«Detect, never install»** — застосунок лише показує інструкцію (`brew install …`) і детектить
-  результат; ніколи не запускає інсталяцію (2.4.5(iv)). Деталі UX — [ADR-0058](0058-helper-distribution-homebrew.md).
-- **(a) і (c) — той самий engine-код** ((c) = (a) без UI). Конвергенцію (a) на «UI shell + bundled
-  helper» свідомо винесено в окремий пізніший epic.
-- **Ризик ревʼю лишається** — present-if-installed має прецеденти, але не гарантію; два ймовірні
-  вектори reject: (i) застосунок сприймається як «демо» без helper'а; (ii) копірайт читається як
-  «завантаж це, щоб працювало». Обидва — продуктові/політ., не інженерні.
-- **Найбільше відкрите питання** — чи standalone-частина (status + таймери) достатньо цінна, щоб
-  пройти ревʼю і бути вартою встановлення. Продуктовий gut-check передує MAS-build.
-- Розширює [ADR-0004](0004-build-system.md) (система збірки), референс
-  [ADR-0003](0003-agent-closed-source-for-now.md) (закритість агента).
-- Пов'язані драфти: [ADR-0055](0055-ipc-file-darwin-bookmark.md) (IPC-канал),
-  [ADR-0056](0056-thin-helper-thick-app-build-flavors.md) (розкол таргетів),
-  [ADR-0057](0057-token-provider-io-into-helper.md) (перенос `TokenProvider`),
-  [ADR-0058](0058-helper-distribution-homebrew.md) (дистрибуція helper'а).
+- **The MAS app is useful without the helper** — a reviewer sees a working product (satisfies
+  2.1).
+- **"Detect, never install"** — the app only shows an instruction (`brew install …`) and detects
+  the result; it never runs the installation itself (2.4.5(iv)). UX details in
+  [ADR-0058](0058-helper-distribution-homebrew.md).
+- **(a) and (c) are the same engine code** ((c) = (a) without the UI). Converging (a) into "UI
+  shell + bundled helper" is deliberately deferred to a separate later epic.
+- **Review risk remains** — present-if-installed has precedents, but no guarantee; two likely
+  rejection vectors: (i) the app is perceived as a "demo" without the helper; (ii) the copy reads
+  as "download this to make it work". Both are product/policy, not engineering, concerns.
+- **The biggest open question** — whether the standalone part (status + timers) is valuable enough
+  to pass review and be worth installing. A product gut-check precedes the MAS build.
+- Extends [ADR-0004](0004-build-system.md) (the build system), references
+  [ADR-0003](0003-agent-closed-source-for-now.md) (the agent staying closed-source).
+- Related drafts: [ADR-0055](0055-ipc-file-darwin-bookmark.md) (the IPC channel),
+  [ADR-0056](0056-thin-helper-thick-app-build-flavors.md) (the target split),
+  [ADR-0057](0057-token-provider-io-into-helper.md) (moving `TokenProvider`),
+  [ADR-0058](0058-helper-distribution-homebrew.md) (helper distribution).

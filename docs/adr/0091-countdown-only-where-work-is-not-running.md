@@ -4,183 +4,195 @@ date: 2026-08-14
 supersedes: [0029]
 ---
 
-# ADR-0091: Відлік — лише там, де робота не йде
+# ADR-0091: A countdown only where work isn't running
 
-> Замінює [ADR-0029](0029-reset-countdown-selection-by-severity.md) (вибір reset-часу за таблицею
-> severity + режим `ResetCountdownMode`) і частково витісняє
-> [ADR-0010](0010-usage-health-and-error-states.md) (три фази помилки, пороги 30/60 хв),
-> [ADR-0043](0043-unified-reset-line-and-remove-resetnow.md) (зламаний `resets_at` → ⚠️ замість
-> смужок) і [ADR-0090](0090-menu-bar-answers-can-we-work.md) (fallback до смужок при
-> нерозв'язному ресеті; діагностичні смужки в stale-фазі).
+> Replaces [ADR-0029](0029-reset-countdown-selection-by-severity.md) (choosing the reset time by
+> a severity table and the `ResetCountdownMode` mode) and partially supersedes
+> [ADR-0010](0010-usage-health-and-error-states.md) (the three error phases, 30/60 min
+> thresholds), [ADR-0043](0043-unified-reset-line-and-remove-resetnow.md) (a broken `resets_at` →
+> ⚠️ instead of bars), and [ADR-0090](0090-menu-bar-answers-can-we-work.md) (the fallback to bars
+> for an unresolvable reset; diagnostic bars in the stale phase).
 
-## Контекст
+## Context
 
-[#354](https://github.com/artem-from-ua/tokenpace/issues/354) поставив вузьке питання: гілка «обидва
-вікна спокійні» в `selectReset` брала **найближчий** ресет, а після
-[#344](https://github.com/artem-from-ua/tokenpace/pull/344) це могло назвати вікно, чия смужка не
-намальована. Тікет пропонував три правила на вибір.
+[#354](https://github.com/artem-from-ua/tokenpace/issues/354) raised a narrow question: the
+"both windows calm" branch in `selectReset` picked the **nearest** reset, and after
+[#344](https://github.com/artem-from-ua/tokenpace/pull/344) that could name a window whose bar
+wasn't even drawn. The ticket offered a choice of three rules.
 
-Але будь-яке з них лишало глибшу ваду: **число не каже, чиє воно**. «21m» поруч із двома смужками не
-вказує на вікно — користувач вгадує за величиною, і здогадка ламається, щойно тижневий ресет
-опиняється за три години. Правило «два помаранчевих → тижневий», яке довелося б запровадити,
-довелося б **памʼятати**: з екрана воно не читається.
+But any of them left a deeper flaw in place: **the number doesn't say whose it is**. "21m" next to
+two bars doesn't point at a window — the user guesses from the magnitude, and the guess breaks the
+moment the weekly reset is three hours out. The rule "two oranges → weekly" that would have been
+needed would have to be **memorized**: it doesn't read off the screen.
 
-Це та сама вада, що й у [#278](https://github.com/artem-from-ua/tokenpace/issues/278): смужка й
-відлік — два незалежні сигнали, і жоден не пояснює другий.
+This is the same flaw as in [#278](https://github.com/artem-from-ua/tokenpace/issues/278): the bar
+and the countdown are two independent signals, and neither explains the other.
 
-Постає питання ширше за #354: **де відлік взагалі має жити**, щоб його референт був однозначним.
+The question turns out to be bigger than #354: **where should a countdown live at all**, so its
+referent is unambiguous.
 
-## Рішення
+## Decision
 
-### 1. Відлік існує лише там, де немає смужок
+### 1. A countdown exists only where there are no bars
 
-Віджет має рівно два вигляди:
+The widget has exactly two shapes:
 
-| Вигляд | Коли | Що значить |
+| Shape | When | What it means |
 |---|---|---|
-| **смужки, без числа** | робота йде на підписці | питання лише в темпі — його несе колір |
-| **гліф + число, без смужок** | робота стала або коштує грошей | число — коли стан скінчиться |
+| **bars, no number** | work is running on the subscription | the only question is pace — carried by color |
+| **glyph + number, no bars** | work has stopped, or costs money | the number is when that state ends |
 
-Гліф поруч однозначно називає причину, тож питання «чиє це число» не виникає.
+The glyph next to it unambiguously names the cause, so the question "whose number is this" never
+comes up.
 
-**Це не «бінарний сигнал».** Пауза + `4d` означає «чекати 4 дні», валюта + `4d` — «платити 4 дні»;
-стани протилежні за формою однакові. Чесне формулювання: число ↔ смужки — це **перемикач
-поверхонь**, а не сигнал. Правило структурне (один референт, бо контекст один), а не семантичне.
+**This is not "a binary signal."** Pause + `4d` means "wait 4 days," currency + `4d` means "pay for
+4 days"; states that are opposite in meaning are shaped the same. The honest way to put it: number
+↔ bars is a **surface switch**, not a signal. The rule is structural (one referent, because there
+is one context), not semantic.
 
-### 2. Інваріант тримає тип, а не домовленість
+### 2. The type enforces the invariant, not a convention
 
-`MenuBarMode.expanded` втрачає поле `resetToShow`, тож «смужки + число» стає
-**нерепрезентовним**, а не просто недосяжним.
+`MenuBarMode.expanded` loses its `resetToShow` field, so "bars + number" becomes
+**unrepresentable**, not merely unreachable.
 
-Разом із полем пішов `selectReset` (і `ResetSelection`/`ResetToShow`): обидва його виклики жили
-**всередині** `expandedBars` — рівно на шляху, який більше не несе відліку, — тож уся таблиця
-severity обчислювала б значення, якого ніхто не читає. `BlockingReset` не зачеплено: саме він, а не
-`selectReset`, будує відлік для безсмужкових станів.
+The field's removal took `selectReset` with it (and `ResetSelection`/`ResetToShow`): both of its
+call sites lived **inside** `expandedBars` — exactly the path that no longer carries a countdown —
+so the whole severity table would have computed a value nobody reads. `BlockingReset` is
+untouched: it, not `selectReset`, builds the countdown for bar-free states.
 
-### 3. Вичерпане вікно ніколи не малюється смужкою
+### 3. An exhausted window never draws a bar
 
-Два шляхи це порушували; обидва закрито.
+Two paths violated this; both are closed.
 
-**Зламаний `resets_at`.** `blockedResetMode`/`paidResetMode`, повертаючи `nil`, провалювались на шлях
-зі смужками — саме так помилка даних і виринала, малюючи ту червону смужку, яку правило забороняє.
-Новий кейс `exhaustedUnknownReset`. Потрібен новий предикат `exhaustedWindowWithoutReset`:
-`hasBrokenActiveReset` каже лише «десь зламано» і однаково істинний для 5h-вікна на 12 %.
+**A broken `resets_at`.** `blockedResetMode`/`paidResetMode`, when returning `nil`, used to fall
+through to the bar path — that's exactly how a data error surfaced, drawing the very red bar the
+rule now forbids. A new case, `exhaustedUnknownReset`. This needs a new predicate,
+`exhaustedWindowWithoutReset`: `hasBrokenActiveReset` only says "something somewhere is broken,"
+and is just as true for a 5h window at 12%.
 
-**Stale-фаза 30–60 хв**, що перебудовувала діагностичні смужки біля ⚠️. Смужки такої давнини
-провокують єдине прочитання, якого не витримують («ось де я стою»), а попап уже пояснює збій
-словами.
+**The 30–60 min stale phase**, which used to rebuild diagnostic bars next to ⚠️. Bars that stale
+invite the one reading they can't support ("here's where I stand"), and the popup already explains
+the failure in words.
 
-### 4. Суперечливі дані отримують один сигнал, не два
+### 4. Contradictory data gets one signal, not two
 
-`exhaustedUnknownReset` малює **самотній ⚠️** — без паузи й без валюти, хоча модель знає, який із
-двох гліфів доречний.
+`exhaustedUnknownReset` draws a **lone ⚠️** — no pause, no currency — even though the model knows
+which of the two glyphs would otherwise apply.
 
-Це рішення прийнято **після живої перевірки**, і воно виправляє первісний задум цього ж ADR. На
-екрані пауза стверджує «ти заблокований», а ⚠️ поруч — «мені не можна вірити»; ніщо не каже, що
-недовіра стосується лише *часу*. Пара читається як зламаний віджет, а не як стан. Тож це єдине
-місце, де `isBlocked` істинний, але гліфа немає.
+This decision was made **after live verification**, and it corrects this ADR's own original
+intent. On screen, a pause claims "you are blocked," while ⚠️ next to it claims "don't trust me";
+nothing says the distrust is only about *the time*. The pair reads as a broken widget, not as a
+state. So this is the one place where `isBlocked` is true but no glyph appears.
 
-### 5. Поріг ⚠️ рахується у спробах, а не у хвилинах
+### 5. The ⚠️ threshold is counted in attempts, not minutes
 
-`glyphAfter(for:)` = `max(15 хв, 3 × pollInterval)`; `hideBarsAfter` видалено разом із фазою.
+`glyphAfter(for:)` = `max(15 min, 3 × pollInterval)`; `hideBarsAfter` is removed along with the
+phase.
 
-Пласкі 15 хв підняли б ⚠️ після **однієї** невдалої спроби на неактивній машині, бо
-`PollingEngine.inactiveInterval` сам дорівнює 15 хв. Поріг має означати «ми пробували, неодноразово»,
-а це **кількість**, не тривалість. `UsageHealth` отримує поле `pollInterval`.
+A flat 15 minutes would raise ⚠️ after a **single** failed attempt on an inactive machine, because
+`PollingEngine.inactiveInterval` itself is 15 minutes. The threshold should mean "we tried,
+repeatedly," and that's a **count**, not a duration. `UsageHealth` gets a `pollInterval` field.
 
-**429 більше не стартує серію збоїв.** Це сервер каже «не так швидко», і самого `Retry-After`
-вистачило б, щоб підняти ⚠️ на системі, яка працює як задумано. Backoff і причина в попапі
-лишаються.
+**A 429 no longer starts a failure streak.** It's the server saying "not so fast," and
+`Retry-After` alone would be enough to raise ⚠️ on a system working exactly as intended. The
+backoff and the reason shown in the popup remain unchanged.
 
-### 6. Опція «Show reset countdown» зникає
+### 6. The "Show reset countdown" option disappears
 
-`ResetCountdownMode` видалено: кожне з трьох значень обирало поведінку, якої більше немає. Ключ
-ретировано й підмітається, як `pauseHidesBars`.
+`ResetCountdownMode` is removed: each of its three values chose a behavior that no longer exists.
+The key is retired and swept up, like `pauseHidesBars`.
 
-**Зміна помітна всім, включно з дефолтом** — не лише тим, хто вмикав «Always»:
+**The change is visible to everyone, including on the default** — not just those who had
+"Always" turned on:
 
-| Було | Що втрачає |
+| Was | What it loses |
 |---|---|
-| `.always` | відлік у повному спокої |
-| `.smart` (**дефолт**) | **відлік на помаранчевому 5h** |
-| `.never` | нічого (у безсмужкових станах число форсувалося вже з ADR-0090) |
+| `.always` | the countdown while fully calm |
+| `.smart` (**default**) | **the countdown at orange 5h** |
+| `.never` | nothing (in bar-free states the number was already forced from ADR-0090 onward) |
 
-### 7. `.error` малює перекреслену антену, не ⚠️
+### 7. `.error` draws a crossed-out antenna, not ⚠️
 
-«Не можу дістатися API» — подія регулярна; «вікно вичерпане, але дата зламана» — рідкісний баг
-сервера. Обидва малювали той самий трикутник, і рідкісний стан мав вигляд частого. ⚠️ лишається
-виключно за «дані суперечать собі».
+"Can't reach the API" is a routine event; "window exhausted, but the date is broken" is a rare
+server bug. Both used to draw the same triangle, and the rare state looked like the common one.
+⚠️ is now reserved exclusively for "the data contradicts itself."
 
-## Наслідки
+## Consequences
 
-### Що це дає
+### What this buys
 
-- Питання «чиє це число» зникає — не як полагоджене, а як **непредставне**.
-- #354 закривається без вибору правила: гілки «обидва спокійні» більше немає.
-- Смужка й відлік не можуть розійтися, бо не співіснують.
-- Найчастіший стан тихіший: помаранчеве 5h-вікно рекурує кілька разів на день і саме себе лікує
-  ресетом — відлік там блимав, нічого не вимагаючи.
+- The question "whose number is this" disappears — not as fixed, but as **unrepresentable**.
+- #354 closes without picking a rule: the "both calm" branch no longer exists.
+- The bar and the countdown can never diverge, because they never coexist.
+- The most common state is quieter: an orange 5h window recurs several times a day and heals
+  itself with a reset — the countdown there used to blink without asking anything of the user.
 
-### Що це коштує
+### What this costs
 
-- **Далекий помаранчевий 7d втрачає число.** За дефолтом (`.smart`) він і так мовчав
-  (`showsSevenDayAheadWhenFar`), тож для більшості це no-op; для `.always` — втрата.
-- **Ширина стрибає різкіше.** Перехід у ⚠️ згортає віджет до компактного гліфа (≈22 pt проти ≈59 pt),
-  зсуваючи сусідні status items. Слот смужок у ⚠️-станах **не резервуємо**: аварія рідкісна, і
-  тримати заради неї 34 pt порожнечі решту часу не варто — на відміну від долоні
-  ([ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md)), де резерв виправдано частотою.
-- **Фліп на межі 100 %** тепер перемальовує всю композицію, а не лише колір. Гістерезису немає ніде;
-  ADR-0090 назвав це ціною, і вона зросла.
-- **Розрив між поверхнями.** Меню-бар мовчить у робочих станах, попап показує ресети завжди. Звідси
-  вимога: **рядок ресету в попапі не гейтиться severity ніколи** — інакше при
-  `PopupSectionVisibility = .nonCalm` обидві поверхні замовкнуть одночасно і число зникне із
-  застосунку повністю.
+- **A distant orange 7d loses its number.** Under the default (`.smart`) it was already silent
+  (`showsSevenDayAheadWhenFar`), so for most people this is a no-op; for `.always` it's a real
+  loss.
+- **Width jumps more sharply.** Switching to ⚠️ collapses the widget to a compact glyph
+  (≈22 pt vs. ≈59 pt), shifting neighboring status items. We do **not** reserve a bar slot in
+  ⚠️ states: the failure is rare, and keeping 34 pt of empty space for it the rest of the time
+  isn't worth it — unlike the palm icon
+  ([ADR-0073](0073-awaiting-icon-reserved-slot-and-slide.md)), where the reservation is justified
+  by frequency.
+- **The flip at the 100% boundary** now redraws the whole composition, not just the color. There
+  is no hysteresis anywhere; ADR-0090 named this a cost, and it has grown.
+- **A gap between the two surfaces.** The menu bar stays silent in working states, the popup
+  always shows resets. Hence the requirement: **the popup's reset line is never gated by
+  severity** — otherwise, under `PopupSectionVisibility = .nonCalm`, both surfaces would go quiet
+  at once and the number would vanish from the app entirely.
 
-### Що лишається відкритим
+### What stays open
 
-`users-and-goals.md` називає відлік до ресету корисним сигналом («чи встигну закінчити зараз»). Цей
-ADR його не скасовує, а **звужує**: відлік проходить перевірку «яку дію користувач виконає інакше»
-лише тоді, коли є що вирішувати **про «зараз»**. Коли робота стоїть — «чекати чи ні» це рішення
-зараз. Коли робота йде на помаранчевому — рішення «гальмувати чи ні», і на нього відповідає **колір**.
+`users-and-goals.md` calls the countdown to reset a useful signal ("will I finish in time").
+This ADR doesn't cancel that, it **narrows** it: a countdown passes the "which action would the
+user take differently" test only when there's something to decide **about "now."** When work has
+stopped, "wait or not" is a decision right now. When work is running at orange, the decision is
+"slow down or not," and **color** answers that one.
 
-Питання, чи має «спокій» припиняти означати «мовчати» при малому **абсолютному** запасі, залишається
-відкритим у [#278](https://github.com/artem-from-ua/tokenpace/issues/278) — але тепер воно стосується
-`severity` (чи має смужка жовтіти), а не відліку.
+Whether "calm" should stop meaning "stay silent" at a small **absolute** remaining balance stays
+open in [#278](https://github.com/artem-from-ua/tokenpace/issues/278) — but it's now about
+`severity` (should the bar turn yellow), not about the countdown.
 
-## Альтернативи
+## Alternatives considered
 
-**Правило «завжди 7-денний» у гілці «обидва спокійні»** (варіант B з #354). Полагодило б розбіжність
-смужки й числа, але лишило б відлік біля смужок — тобто зберегло б питання «чиє це число» в усіх
-інших гілках.
+**An "always weekly" rule in the "both calm" branch** (option B from #354). Would fix the
+bar/number mismatch, but would leave the countdown next to the bars — i.e. it would keep the
+"whose number is this" question alive in every other branch.
 
-**Правило «вікно видимої смужки»** (варіант C). Те саме, плюс новий параметр `hideCalmBar` (від
-[#381](https://github.com/artem-from-ua/cc-timer/issues/381) — `hideTopBar`) у
-`selectReset` — звʼязок, якого [ADR-0086](0086-tri-state-calm-bar-hiding.md) свідомо уникав.
+**A "window of the visible bar" rule** (option C). The same, plus a new `hideCalmBar` parameter
+(from [#381](https://github.com/artem-from-ua/cc-timer/issues/381) — `hideTopBar`) threaded into
+`selectReset` — a coupling [ADR-0086](0086-tri-state-calm-bar-hiding.md) deliberately avoided.
 
-**Опція з двох значень** («When well ahead» / «When paused only»). Розглядалася й відхилена: обидва
-значення дають осмислену поведінку, але «paused only» виграє за всіма трьома критеріями (швидкість
-зчитування, шум, простота правила), а лишати опцію заради програшного варіанта — це та сама логіка,
-яку [ADR-0090](0090-menu-bar-answers-can-we-work.md) уже відхилив для чотирьох інших опцій.
+**A two-value option** ("When well ahead" / "When paused only"). Considered and rejected: both
+values give sensible behavior, but "paused only" wins on all three criteria (glance speed, noise,
+rule simplicity), and keeping the option around for a losing value is the same logic
+[ADR-0090](0090-menu-bar-answers-can-we-work.md) already rejected for four other options.
 
-**Опційний `reset` в `iconOnlyReset`** замість нового кейса. Тип перестав би гарантувати наявність
-відліку, а `which` без числа втратив би сенс. Варіант «покласти туди `"⚠️"` рядком» неможливий:
-`resetLabelWidth` міряє його `monospacedDigitSystemFont`, тоді як решта віджета малює SF Symbol —
-вийшли б два різні ⚠️ і стрибок ширини.
+**An optional `reset` in `iconOnlyReset`** instead of a new case. The type would stop guaranteeing
+a countdown is present, and `which` without a number would lose its meaning. Putting `"⚠️"` there
+as a string is not possible: `resetLabelWidth` measures it with `monospacedDigitSystemFont`, while
+the rest of the widget draws an SF Symbol — that would produce two different-looking ⚠️s and a
+width jump.
 
-## Перевірено вживу
+## Verified live
 
-Сім станів на реальному меню-барі (`TOKENPACE_STUB`):
+Seven states on a real menu bar (`TOKENPACE_STUB`):
 
-| Стуб | На екрані |
+| Stub | On screen |
 |---|---|
-| `calm-both` | одна смужка, тиша |
-| `5h-orange` | дві смужки, **без числа** |
+| `calm-both` | one bar, silence |
+| `5h-orange` | two bars, **no number** |
 | `credits-active` | € + `5d` |
 | `credits-limit-reached` | ⏸ + `5d` |
-| `both-red` | ⏸ + `4d` — **пізніший** із двох ресетів |
-| `idle-blocked` | ⏸ + `4d`, без idle-заглушки |
-| `broken-reset` | **самотній ⚠️** |
+| `both-red` | ⏸ + `4d` — the **later** of the two resets |
+| `idle-blocked` | ⏸ + `4d`, no idle placeholder |
+| `broken-reset` | **lone ⚠️** |
 
-Смужки й число не зʼявилися разом у жодному кадрі.
+Bars and a number never appeared together in any frame.
 
-Stale-фази стубом не відтворюються (`failingSince` не перемотати) — лише unit-тестами.
+The stale phases aren't reproducible with a stub (`failingSince` can't be rewound) — unit tests
+only.

@@ -4,93 +4,96 @@ date: 2026-07-28
 supersedes: [0028, 0029]
 ---
 
-# ADR-0044: Динамічний yellow→orange поріг пейсингу + 20-хвилинний orange-override
+# ADR-0044: A dynamic yellow→orange pacing threshold, plus a 20-minute orange override
 
-## Контекст
+## Context
 
-Колір пейсинг-зазору («попереду плану» / ahead-of-pace) градуюється за тим, **наскільки** usage
-випереджає витрачений час вікна: `delta = usageFraction − timeFraction`. Досі межа yellow→orange
-була **статичною** — `delta < 0.15` → жовтий (мʼякий відрив), `delta >= 0.15` → помаранчевий. Цей
-поріг закладено в [ADR-0028](0028-hide-reset-label-when-pacing-is-calm.md) (таблиця кольорів) і
-[ADR-0029](0029-reset-countdown-selection-by-severity.md) (легенда `BarLayout.severity`), і
-продубльовано у двох шарах: `PopupBarView.aheadColor` (AppKit, дає `NSColor`) та `BarLayout.severity`
-(Kit, дає `PacingSeverity`).
+The pacing-gap color ("ahead of plan" / ahead-of-pace) is graded by **how far** usage is ahead of
+the window's elapsed time: `delta = usageFraction − timeFraction`. Until now the yellow→orange
+boundary was **static** — `delta < 0.15` → yellow (a mild lead), `delta >= 0.15` → orange. This
+threshold was set in [ADR-0028](0028-hide-reset-label-when-pacing-is-calm.md) (the color table) and
+[ADR-0029](0029-reset-countdown-selection-by-severity.md) (the `BarLayout.severity` legend), and was
+duplicated across two layers: `PopupBarView.aheadColor` (AppKit, produces an `NSColor`) and
+`BarLayout.severity` (Kit, produces a `PacingSeverity`).
 
-**Проблема.** Фіксовані 15 пунктів однаково трактують відрив на початку вікна й під його кінець. Але
-ці ситуації різні: на старті 5-годинного вікна відрив у 12 пунктів ще безпечний — попереду години,
-щоб зменшити темп і повернутися на пейс. Той самий відрив за 20 хвилин до ресету вже критичний —
-наздогнати пейс не встигнеш, вікно ось-ось скинеться (і ти або впертий у ліміт, або даремно
-недовикористав квоту). Статичний поріг фарбує обидва випадки однаково жовтим, приховуючи сигнал саме
-там, де він найпотрібніший.
+**The problem.** A fixed 15 points treats a lead at the start of a window the same as one near its
+end. But the two situations differ: at the start of a 5-hour window, a 12-point lead is still
+safe — there are hours ahead to ease off and get back on pace. The same lead 20 minutes before a
+reset is already critical — there's no time left to catch up, the window is about to reset (and
+you're either pinned against the limit or you've wasted quota by underusing it). A static threshold
+paints both cases the same yellow, hiding the signal exactly where it matters most.
 
-## Рішення
+## Decision
 
-**Зробити yellow→orange межу динамічною — вона звужується з витратою часу вікна — плюс додати
-абсолютний override «≤ 20 хв до ресету → завжди orange».**
+**Make the yellow→orange boundary dynamic — it narrows as the window's time elapses — plus add an
+absolute override: "≤ 20 min to reset → always orange."**
 
-### 1. Динамічний поріг
+### 1. The dynamic threshold
 
 ```
-threshold(timeFraction) = 0.16 · (1 − timeFraction),  затиснуто в [0, 0.16]
+threshold(timeFraction) = 0.16 · (1 − timeFraction),  clamped to [0, 0.16]
 ```
 
-| Витрачено часу вікна (`timeFraction`) | Поріг |
+| Window time elapsed (`timeFraction`) | Threshold |
 |---|---|
-| 0 % (щойно почалось) | 16 % |
-| 50 % | 8 % |
-| 75 % | 4 % |
-| 100 % (кінець) | 0 % |
+| 0% (just started) | 16% |
+| 50% | 8% |
+| 75% | 4% |
+| 100% (the end) | 0% |
 
-`delta < threshold` → жовтий (`.calm`); `delta >= threshold` → помаранчевий (`.ahead`). Порівняння
-строге (`<`, без epsilon): відрив рівно на порозі — помаранчевий. 16 пунктів слаку на старті
-поступово тане до нуля наприкінці вікна.
+`delta < threshold` → yellow (`.calm`); `delta >= threshold` → orange (`.ahead`). The comparison is
+strict (`<`, no epsilon): a lead exactly at the threshold is orange. 16 points of slack at the start
+gradually shrink to zero by the end of the window.
 
-### 2. 20-хвилинний orange-override
+### 2. The 20-minute orange override
 
-Якщо до ресету цього ліміту лишилося **≤ 20 хв** (`1200 с`) і бар «попереду плану» (`usage > time`,
-`usage < 1`), колір **завжди помаранчевий**, незалежно від формули. Override тримається в
-**абсолютних секундах**, а не в частці часу: 20 хв — це 6.7 % 5-годинного вікна, але лише 0.2 %
-7-денного, тож із `timeFraction` його не вивести. Правило єдине для всіх вікон — 5h, 7d **і**
-місячного credits-вікна (де кінець календарного місяця теж може бути < 20 хв).
+If **≤ 20 min** (`1200 s`) remain until this limit's reset, and the bar is "ahead of plan"
+(`usage > time`, `usage < 1`), the color is **always orange**, regardless of the formula. The
+override is held in **absolute seconds**, not a time fraction: 20 min is 6.7% of a 5-hour window
+but only 0.2% of a 7-day one, so it can't be derived from `timeFraction`. The rule is the same for
+every window — 5h, 7d, **and** the monthly credits window (whose calendar-month end can also be
+< 20 min away).
 
-### Джерело формули — одне
+### One source for the formula
 
-Формула живе в `PacingModel.aheadThreshold(timeFraction:)` (Kit, AppKit-free), а константа override —
-`PacingModel.pacingOrangeOverrideSeconds`. Обидва шари (`BarLayout.severity` і
-`PopupBarView.aheadColor`) викликають цей самий хелпер, тож колір і severity не розходяться. Свідоме
-дублювання з ADR-0028/0009 скорочується до самого порівняння + override; сама крива більше не
-дублюється.
+The formula lives in `PacingModel.aheadThreshold(timeFraction:)` (Kit, AppKit-free), and the
+override constant is `PacingModel.pacingOrangeOverrideSeconds`. Both layers
+(`BarLayout.severity` and `PopupBarView.aheadColor`) call this same helper, so color and severity
+never diverge. The deliberate duplication from ADR-0028/0009 shrinks down to the comparison plus
+override itself; the curve is no longer duplicated.
 
-### Прибрано warning-band ⚠ (statusline більше не референс)
+### The ⚠ warning band removed (the statusline is no longer the reference)
 
-Разом із динамічним порогом прибрано середню ланку `LimitIndicator.warning` — гліф `⚠`, який
-`statusText` додавав до «(well) ahead of pace», коли usage > 90 %, а часу минуло ≤ 90 %. Це був
-порт `get_limit_indicator` зі statusline; TokenPace його переріс — «наскільки попереду плану» тепер
-повністю несе колір бару (green→yellow→orange→red), тож окремий трикутник дублював сигнал.
-`LimitIndicator` став бінарним (`.critical` = ліміт вичерпано → «limit reached», інакше `.neutral`),
-а `PacingModel.limitIndicator` більше не бере `timePercent`. **Не плутати** з `⚠️`-error-станом
-(зламаний `resets_at` / помилка API, #167/ADR-0043) — той лишається.
+Along with the dynamic threshold, the middle rung `LimitIndicator.warning` is removed — the `⚠`
+glyph that `statusText` appended to "(well) ahead of pace" when usage was > 90% and time elapsed
+was ≤ 90%. This was a port of the statusline's `get_limit_indicator`; TokenPace has outgrown it —
+"how far ahead of plan" is now fully carried by the bar's color (green→yellow→orange→red), so a
+separate triangle duplicated the signal. `LimitIndicator` is now binary (`.critical` = limit
+exhausted → "limit reached", otherwise `.neutral`), and `PacingModel.limitIndicator` no longer takes
+`timePercent`. **Not to be confused** with the `⚠️` error state (a broken `resets_at` / an API
+error, #167/ADR-0043) — that one stays.
 
-### Плюмбінг «секунд до ресету»
+### Plumbing "seconds to reset"
 
-`BarLayout` отримує нове збережене поле `remainingSeconds: TimeInterval` (`resetsAt − now`),
-заповнюване в `PacingModel.barLayout(...)` та `CreditsPacing.barLayout(...)`. Inert-плейсхолдери
-(idle 5h) передають `0` — їхній `severity` форсується `.calm` через `.onPaceOrBehind` до читання
-поля. AppKit-виклики (`aheadColor`, `indicatorColor`) отримують `remainingSeconds` з наявного під
-рукою `BarLayout`.
+`BarLayout` gets a new stored field, `remainingSeconds: TimeInterval` (`resetsAt − now`), populated
+in `PacingModel.barLayout(...)` and `CreditsPacing.barLayout(...)`. Inert placeholders (idle 5h)
+pass `0` — their `severity` is forced to `.calm` via `.onPaceOrBehind` before the field is ever
+read. The AppKit call sites (`aheadColor`, `indicatorColor`) get `remainingSeconds` from the
+`BarLayout` already at hand.
 
-## Наслідки
+## Consequences
 
-- **Точніший сигнал під кінець вікна.** Помірний відрив стає помаранчевим раніше, коли часу
-  наздогнати вже мало — і завжди помаранчевий в останні 20 хв.
-- **Слово й колір лишаються в синхроні.** «well ahead of pace» / «ahead of pace» у popup
-  (`aheadPhrase`, `creditsStatusText`) обчислюються через `isWellAhead`, точний комплемент до `<` у
-  `aheadColor`.
-- **Reset-countdown видимість зсувається.** `MenuBarLayout.selectReset` читає ті самі severity, тож
-  бар, що раніше був жовтим (calm) під кінець вікна, тепер може стати помаранчевим — і countdown
-  зʼявиться там, де раніше ховався. Це навмисно (ADR-0028/0029 ховали countdown саме для «спокійних»
-  барів; тепер «спокій» звужується з часом).
-- **`severity`-рунги без змін у порядку:** `.onPaceOrBehind` → calm; `usage >= 1` → exhausted;
-  потім override; далі динамічний поріг. Override не перекриває «позаду плану» чи «вичерпано».
-- Класифікаційні таблиці в ADR-0028/0029 (статичний `< 0.15`) більше не описують поточну поведінку —
-  див. постскрипти в тих записах.
+- **A sharper signal near the end of the window.** A moderate lead turns orange earlier, when
+  there's little time left to catch up — and it's always orange in the last 20 minutes.
+- **The word and the color stay in sync.** "well ahead of pace" / "ahead of pace" in the popup
+  (`aheadPhrase`, `creditsStatusText`) are computed via `isWellAhead`, the exact complement of `<`
+  in `aheadColor`.
+- **Reset-countdown visibility shifts.** `MenuBarLayout.selectReset` reads the same severity, so a
+  bar that used to be yellow (calm) near the end of the window can now turn orange — and the
+  countdown appears where it used to hide. This is intentional (ADR-0028/0029 hid the countdown
+  precisely for "calm" bars; now "calm" itself narrows over time).
+- **The `severity` rungs are unchanged in order:** `.onPaceOrBehind` → calm; `usage >= 1` →
+  exhausted; then the override; then the dynamic threshold. The override never overrides "behind
+  plan" or "exhausted."
+- The classification tables in ADR-0028/0029 (the static `< 0.15`) no longer describe current
+  behavior — see the postscripts in those entries.

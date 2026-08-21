@@ -3,131 +3,134 @@ status: draft
 date: 2026-08-01
 ---
 
-# ADR-0055 (draft): IPC-канал app↔helper — файл + read-write bookmark + Darwin notification
+# ADR-0055 (draft): The app↔helper IPC channel — file + read-write bookmark + Darwin notification
 
-> **Чернетка (draft).** За гейтом спайку #E0, який має наскрізно довести цей канал (насамперед —
-> що read-write security-scoped bookmark переживає атомарний `rename()`, і що Darwin-нотифікації
-> будять sandboxed-застосунок під App Nap). Драфт — центральне рішення розколу.
+> **Draft.** Gated on the #E0 spike, which must prove this channel end to end (chiefly — that a
+> read-write security-scoped bookmark survives an atomic `rename()`, and that Darwin notifications
+> wake a sandboxed app under App Nap). The draft is the central decision of the split.
 
-## Контекст
+## Context
 
-MAS-застосунок ([ADR-0054](0054-mas-present-if-installed-helper.md)) sandboxed; helper — ні. Їм
-треба обмінюватися: helper віддає похідні usage-числа **вниз**, а застосунок (за вимогою «вся
-конфігурація helper'а — з UI») пише конфіг і команди **вгору**. Отже канал **двобічний**.
+The MAS app ([ADR-0054](0054-mas-present-if-installed-helper.md)) is sandboxed; the helper is not.
+They need to exchange data: the helper hands derived usage numbers **down**, and the app (per the
+requirement that "all helper configuration comes from the UI") writes config and commands **up**.
+So the channel is **bidirectional**.
 
-Обмеження (перевірено проти Apple-доків + DTS):
+Constraints (verified against Apple docs + DTS):
 
-- **XPC/mach до не-вкладеного helper'а** потребує `temporary-exception.mach-lookup.global-name` —
-  App Review до нього ворожий. **Відкинуто.**
-- **loopback `127.0.0.1`** під sandbox дає `EPERM`. **Відкинуто.**
-- **App Group container** неможливий — сторони мають різні Team ID / provisioning (helper —
-  Developer ID, застосунок — MAS). **Відкинуто.**
-- Єдиний sandbox-легальний шлях застосунку читати/писати поза контейнером — **user-granted
-  security-scoped bookmark** через `NSOpenPanel`.
+- **XPC/mach to a non-embedded helper** requires `temporary-exception.mach-lookup.global-name` —
+  App Review is hostile to it. **Rejected.**
+- **Loopback `127.0.0.1`** under sandbox returns `EPERM`. **Rejected.**
+- **An App Group container** is impossible — the two sides have different Team IDs / provisioning
+  (the helper is Developer ID, the app is MAS). **Rejected.**
+- The only sandbox-legal way for the app to read/write outside its container is a **user-granted
+  security-scoped bookmark** via `NSOpenPanel`.
 
-Модель — **не** синхронний RPC. Це асинхронна файлова «поштова скринька» в обидва боки, і цього
-**достатньо**, бо поточний код і так асинхронний push: UI не чекає на engine, а шле `.manualRefresh`
-і окремо отримує результат через `apply(_:)`.
+The model is **not** synchronous RPC. It's an asynchronous file "mailbox" in both directions, and
+that is **sufficient**, because the existing code is already an async push: the UI doesn't wait on
+the engine, it sends `.manualRefresh` and separately receives the result through `apply(_:)`.
 
-## Рішення
+## Decision
 
-Дві JSON-скриньки в одній теці, якою володіє helper (не-sandboxed), а застосунок читає/пише через
-**один folder-scoped read-write security-scoped bookmark**:
+Two JSON mailboxes in one folder owned by the helper (non-sandboxed), which the app reads/writes
+through **one folder-scoped read-write security-scoped bookmark**:
 
-- `~/Library/Application Support/com.artem-n.tokenpace-helper/status.json` — **helper→app** (сирі
-  usage-числа + health + версійність + liveness). **Токен, refresh-secret, вміст `~/.claude` —
-  ніколи не серіалізуються.**
-- `.../config.json` — **app→helper** (вузький конфіг: 5 полів + опційна разова команда).
+- `~/Library/Application Support/com.artem-n.tokenpace-helper/status.json` — **helper→app** (raw
+  usage numbers + health + version info + liveness). **The token, the refresh secret, and the
+  contents of `~/.claude` are never serialized.**
+- `.../config.json` — **app→helper** (a narrow config: 5 fields + an optional one-shot command).
 
-Атомарність — `*.tmp` → `rename()`. Свіжість сигналиться **payload-free Darwin notification**
+Atomicity — `*.tmp` → `rename()`. Freshness is signaled via a **payload-free Darwin notification**
 (`notify.h`): `com.artem-n.tokenpace.status-updated` (helper→app),
-`com.artem-n.tokenpace.config-updated` (app→helper). Кожна сторона — `notify_register_dispatch` +
-slow-timer fallback 30 с (Darwin coalesce'иться, не черга).
+`com.artem-n.tokenpace.config-updated` (app→helper). Each side uses
+`notify_register_dispatch` + a slow-timer fallback of 30 s (Darwin coalesces, it's not a queue).
 
-Версійність — двобічна: `schemaVersion` у `status.json`, `configSchemaVersion` у `config.json`;
-єдине джерело — `IPCSchema.swift` у `TokenPaceKit`, проти якого компілюються **обидва** бінарники.
-Команди — не RPC: застосунок пише `command.id`, helper виконує й відображає результат у наступному
-`status.json` + квитує `ackedCommandId`.
+Versioning is bidirectional: `schemaVersion` in `status.json`, `configSchemaVersion` in
+`config.json`; a single source of truth — `IPCSchema.swift` in `TokenPaceKit`, which **both**
+binaries compile against. Commands are not RPC: the app writes `command.id`, the helper executes
+it and reflects the result in the next `status.json` + acknowledges via `ackedCommandId`.
 
 ```plantuml
 @startuml
-title ADR-0055: Двобічний IPC-обмін app↔helper
+title ADR-0055: Bidirectional app↔helper IPC exchange
 skinparam sequenceArrowThickness 1.5
 skinparam LifeLineBorderColor #C0C0C0
 
-actor Користувач as U
+actor User as U
 participant "MAS app\n(sandboxed)" as App #E8F4FD
-participant "Тека helper'а\n(status.json / config.json)" as Dir #F5F5F5
-participant "Helper\n(не-sandboxed)" as Helper #F3E8FD
+participant "Helper's folder\n(status.json / config.json)" as Dir #F5F5F5
+participant "Helper\n(non-sandboxed)" as Helper #F3E8FD
 
-== First-run: грант доступу ==
-U -> App : «Connect helper»
-App -> App : NSOpenPanel → folder-scoped\nread-write bookmark (зберегти)
+== First run: granting access ==
+U -> App : "Connect helper"
+App -> App : NSOpenPanel → folder-scoped\nread-write bookmark (save it)
 
-== Конфіг вниз-у-теку (app→helper) ==
-U -> App : змінює налаштування
-App ->> Dir : пише config.json (atomic)
+== Config down into the folder (app→helper) ==
+U -> App : changes a setting
+App ->> Dir : writes config.json (atomic)
 App ->> Helper : notify: config-updated
-Helper -> Dir : читає config.json
-Helper -> Helper : застосовує до polling-циклу
+Helper -> Dir : reads config.json
+Helper -> Helper : applies it to the polling loop
 
-== Стан назад (helper→app) ==
-Helper -> Helper : poll usage (токен НЕ виходить)
-Helper ->> Dir : пише status.json (сирі числа, atomic)
+== State back (helper→app) ==
+Helper -> Helper : polls usage (token does NOT leave)
+Helper ->> Dir : writes status.json (raw numbers, atomic)
 Helper ->> App : notify: status-updated
-App -> Dir : читає status.json
-App -> App : рахує pacing/severity + рендерить
+App -> Dir : reads status.json
+App -> App : computes pacing/severity + renders
 
 legend right
   ->> async fire-and-forget (notify/write)
-  токен ніколи не перетинає межу
+  the token never crosses the boundary
 end legend
 @enduml
 ```
 
-![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/RPJFJnD15CVl-rUymC4ske3H9gP92PNQQ89AH6vSXjrf6RkTMMUd8ZUWykDWD278mSI3NhrKOALI2Wb_mSo_m5_YczssBc0sQR8pxttVzttUsyv4YaZLQWQEOYgWKAwySgUc2eKYw7rzgC_rBtDWTdHVT_KVU3O_wzeZVMOET1z865vjxw_G8AJIYHgCXqII9aJqROjoZvQb5AklLvZNu3IAuFv48HCqnsfqZd7wM4YVobaH20dZirFsSHpYANpLN_MvMTTTis4sJHlDTCmEa0WM7PHGp6CXuGh6dfSNh9Cbdei8zvV5U-hdnsnSEGnX_CcZwiDgvNg6_g5ZVQexa5g_episMH7LYYRUH8B397Y2rrWzUKl5AWpzLGlskIxsDD500MGKkpSif9UO-01zL1odL88gav5oPOiZuIDihwFxPXFqCVQQzdbXsb0gEOlWJYSj5E7ovwpWd7fgOFYovzYBqVsBXPSXvVE4qm2kjlUW9W9awaQU2Ac_n2KblhigcQAmB4IZIMG3Sle4nnXZ_HXTREfkFZ5daQEV3pZU8q3YTkmdhccx68B8q5ak6VfUQYH_moYA9fjXFfbzmEIExk7GTeVZmvE--JpmFfqWnPmBdF2kZhF8iOeIJURbHx43a4NWGh7QMd4GxRP2doZgEuDxTwYAAzj5pntqaT7DX8q4qNF7ahVyiVb3qxRUSHmGYY1WlEwQRQHmgdkcdJBwReLn_PC6CLiVGoxbWM0GJqBbFvMi7hGYKgUGi_LGCxOot_GNoxfhjl3isFes7_F_16w1ocvg3artpRevI3lUiC3lmP1UHYCTq91UAZ6YDzYcM-WobQvldDrRivMW2ec7a2OZ-exYYgt1NKYMge-TnCdNYzquJa3hbFiWMNr5EP0u8j4Qzw3697Nnet5hGjQfWbngSJBPrpo6PadrSRbEyRMdkvP-R9aaEsmts8x3ZkuCOt_Zh6ozjAmpWp_u5_SN)
+![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/RLJlJjim4F_kfpYL3skr1PYsIbEb8agxQfCsG0E-ySLrhgdNzCwp7KfVW0T0UqAUPESaT06XI54St_t-dPFJ4BMFrQPKqSOIOJBxbHqV3uSZEBEvzMYYPT8bQEUU7lwki7JeuVlb5F3Uh3GLgCBQajDURo3Wdmh9uCHxtbwlh5aJXW0V3uUTeXzsYJyiuHdx7FsKI_PmC3rEbrBQH5dU1E7G0MwKj4HhhDCKeVTpSfLat58_QCeNV8_ve9Vg9ix1mTSlyy_psSkERxNSTm6MN0fPwemwLk7mTs228p1CIrlKgmPfPaNCV9Ykjv04W9YoL_JDdlHz4WqpfSPZc5iV8lYAHb1u0R1KW3OcfJ4Ugnl8JchH8-XDcKX2XYRPdaglzxldLnSEwL8Jbl3qyDZQo89XX_ajUTHvjlKs8YoOrnljro3Pt27OEAXrJ6k3aFEMm59aY2jiKQ1VZ_In8HwyqjNCDe2MeSOalnLsKaSqWferT0CKlCWRQmRxoZQN4H17kzoDskgiShcEcAjsFtl6J7PUG7OgzbWYkhJ2R2EqTXoNPSgtP7QrwIkPiIIYZQJHk1ERqbTxV0Co0GIeWYuG-f7NI1AOK9nVN4E94kVWVzSh_ztZrFTw2rHj5kZ31tWEezFP9FiSHjEw3wETUpU93lZBOs5uuwf4xxGHvqS1xr3qxE2zT9BCDYXLOY6Fu6snYWfgVXrsP60f7tKc1pXRiYymGhyHT5Gx6aXfohH9WH8k6CyX25bwl-2ASkrtAc4t5EfKRlB_-0S0)
 
-Liveness — застосунок не бачить процес helper'а через sandbox, тож свіжість файлу (`writtenAt` +
-mtime) + наявність Darwin-нотифікацій = єдиний liveness-проксі:
+Liveness — the app can't see the helper's process through the sandbox, so file freshness
+(`writtenAt` + mtime) plus the presence of Darwin notifications is the only liveness proxy:
 
 ```plantuml
 @startuml
-title ADR-0055: Liveness-стани стику app↔helper (очима застосунку)
-[*] --> HelperНеВстановлено
+title ADR-0055: Liveness states of the app↔helper seam (from the app's view)
+[*] --> HelperNotInstalled
 
-state "Helper не встановлено" as HelperНеВстановлено #F5F5F5
-state "Встановлено, не запущено" as НеЗапущено #FFF8E1
-state "Запущено, дані застарілі" as Застарілі #FFF8E1
+state "Helper not installed" as HelperNotInstalled #F5F5F5
+state "Installed, not running" as NotRunning #FFF8E1
+state "Running, data stale" as Stale #FFF8E1
 state "Healthy & fresh" as Fresh #E8F5E9
 
-HelperНеВстановлено --> Fresh : bookmark виданий +\nсвіжий status.json
-Fresh --> Застарілі : health.failingSince != null\n(helper поллить, API падає)
-Fresh --> НеЗапущено : now − writtenAt > max(3×poll, 90с)\n+ нема notify
-НеЗапущено --> Fresh : знову свіжий writtenAt
-Застарілі --> Fresh : failingSince == null
-НеЗапущено --> HelperНеВстановлено : bookmark втрачено
-Застарілі --> HelperНеВстановлено : bookmark втрачено
+HelperNotInstalled --> Fresh : bookmark granted +\nfresh status.json
+Fresh --> Stale : health.failingSince != null\n(helper polls, API failing)
+Fresh --> NotRunning : now − writtenAt > max(3×poll, 90s)\n+ no notify
+NotRunning --> Fresh : writtenAt fresh again
+Stale --> Fresh : failingSince == null
+NotRunning --> HelperNotInstalled : bookmark lost
+Stale --> HelperNotInstalled : bookmark lost
 
-Fresh : норма — повний UI з pacing
-Застарілі : наявний stale-⚠️ + health.reason
-НеЗапущено : amber «helper не запущено?»
-HelperНеВстановлено : install-affordance (ADR-0058)
+Fresh : normal — full UI with pacing
+Stale : existing stale-⚠️ + health.reason
+NotRunning : amber "helper not running?"
+HelperNotInstalled : install affordance (ADR-0058)
 @enduml
 ```
 
-![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/fLJHQXD157sVhxYs88d9beW4qeNM1aoeu4En-6HycBOJitOo6tOtrhub3LWBGg6410J1Tr-MqDfeD8Nw0pE_a1_m5xmpcyOaRCY3B2opC_UUU-yvPtRB3wWNrAkS14x06UIVFBSocMpMXcVEMoQOxrkggKvaA7_9FfXbN_vGBQ2rskXzky9uZNcGa4DrYWS_PGZoMeOcReZl5gPXT9AyVF0AB6iJjas2_2olvCK4U2XxSe0xk2846meOh4I1W7jN87jneIj0_QLui5hCwkSEDZugFQw3hSiRrL9dKnKCTdVs056BnLpXuGHrxXpnBdKDrVb7HwWQgYC7gXEXTkUtvp6t6UL1vHZkGzbZViLa5VKALWkvOhQmJiZIuJNZKOuDUwvxMANU8RA9Ibr6Yihla2e9rKI6E_AR-TRbw_xQ6zyL9ChLA37zsb0nBQwLgSCTyNhN4ViCxcs0g7DU4ecnD-GDjZJ0fwzErCSqv7UUwhrGjw3QoUaQSKpR8DmZ67suW2FF2G8cyW5iGfM-IppwtQsvdATXFQEQoP986H6D1uKREELZ4WiupGcAOmX3FyzmC2b5OkQU1fWPVICQVN7PfNhDg8HqDR3iwVXYBEZalp39X0ZymXFDtQZHZZJhZGto0lMwXXhTnq7ZkZ3PeJgV9A23EBD6dxxywPz3wiub7gFQKWj4fjKzzChjryhqjP-xZezl1yijRuCZT0FSekMownrGhKnY_5lB9SaM4mVuk_iB)
+![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/ZLF1QXin5BphAwOEj7Pj1vTYS1QInb0lCPHI4dggUtY9jLurMccHv3YvvLHwAvH0eQT-Hk_z4_z0Vw6IThVP11_ANhJxPkRDctqwjewCMnUIEU4an_JrwN0q6eyJl15NN75huH6EM-WCBkUWijn-likvBBc1vLIWcnbTDBLd5bU2Rthim_EF60wFS1AHRxMRAoya9Lyo5XNHgKfGsa4qnGx8xk1WBns7fw7-AmmYtQoL4ceLoPvsMhrwKffEPYyQKlrvW2Kv2cD97XbduVGOVC99klm6Jv4PRlC8JCC9UxD9EfuTCBR3PfYuGYKur_go87E9bI7bVB6_K54h9hgs-v-iLgn21rvb8q4UE-zd9AHtUoRK1SUJGwYrb0lLhPCljPHsWEcxEMfWhoNLoY3n0Msm_V8D6oESushgS8I2hhilVtyFAWCSZ6nleVeU6C8KsGrhyTiJtIjKSz2AX6ALxpRkWVN3olfZpHtXjIAJshgMy7-0MTDSQLEGnFRs3fdlY_TpR8JBKTA5xysQbFcri2wOYNimtFxu-UVNL_IRz0sdy7SU14d5kK--az-lRRrthpgxTY5fjXgKPTeiAQJHhI_OfCUEkLhwY_SN)
 
-## Наслідки
+## Consequences
 
-- **Токен не перетинає межу** — інваріант; назовні лише derived-числа. Приватність краща за поточну.
-- **read-write bookmark** (не read-only) — застосунок пише конфіг у теку helper'а. Трейдоф: ширший
-  дозвіл + **вищий ризик ревʼю**, ніж read-only Spark/iStat (треба чітко пояснити в submission: це
-  конфіг користувача, не віддалене керування кодом).
-- **folder-scoped** (не file-scoped) — щоб атомарний `rename()` не інвалідував bookmark. **Це саме
-  те, що доводить спайк #E0.**
-- **Асинхронність — не регрес**: семантика «команда → застосунок побачить новий стан» ідентична
-  поточному async-push; різниця лише лаг (секунда-дві на watch/poll).
-- Референси: [ADR-0019](0019-token-read-via-security-cli.md) (чому читання токена лишається на
-  `security` CLI, отже helper-side), [ADR-0017](0017-delegated-token-refresh.md) (делегований
-  refresh — helper-side). Пов'язано: [ADR-0056](0056-thin-helper-thick-app-build-flavors.md),
+- **The token never crosses the boundary** — an invariant; only derived numbers go out. Better
+  privacy than the current setup.
+- **A read-write bookmark** (not read-only) — the app writes config into the helper's folder.
+  Trade-off: a broader permission + **higher review risk** than read-only Spark/iStat (needs to be
+  explained clearly in the submission: this is user config, not remote code control).
+- **Folder-scoped** (not file-scoped) — so that an atomic `rename()` doesn't invalidate the
+  bookmark. **This is exactly what the #E0 spike proves.**
+- **Asynchrony is not a regression**: the semantics of "command → the app will see the new state"
+  is identical to the current async push; the only difference is a lag (a second or two on
+  watch/poll).
+- References: [ADR-0019](0019-token-read-via-security-cli.md) (why reading the token stays on the
+  `security` CLI, hence helper-side), [ADR-0017](0017-delegated-token-refresh.md) (delegated
+  refresh — helper-side). Related: [ADR-0056](0056-thin-helper-thick-app-build-flavors.md),
   [ADR-0057](0057-token-provider-io-into-helper.md).

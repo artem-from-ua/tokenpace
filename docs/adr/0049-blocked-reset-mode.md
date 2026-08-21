@@ -4,78 +4,83 @@ date: 2026-07-31
 superseded_by: [0063]
 ---
 
-# ADR-0049: Окремий `MenuBarMode.blockedReset` для віджета «лише countdown»
+# ADR-0049: A separate `MenuBarMode.blockedReset` for the "countdown only" widget
 
-> **Витіснено [ADR-0063](0063-unified-pause-hides-bars.md).** Тумблер «Show pacing bars when 5h/7d
-> limits reached» (ключ `hideBarsWhenBlocked`) злито в єдиний `pauseHidesBars`, а предикат ховання
-> барів звужено з `mainWindowExhausted` до `isBlocked`. Кейс `MenuBarMode.blockedReset` лишається в
-> моделі, але тепер гейтиться новим ключем.
+> **Superseded by [ADR-0063](0063-unified-pause-hides-bars.md).** The "Show pacing bars when 5h/7d
+> limits reached" toggle (the `hideBarsWhenBlocked` key) was merged into a single `pauseHidesBars`,
+> and the hiding predicate narrowed from `mainWindowExhausted` to `isBlocked`. The
+> `MenuBarMode.blockedReset` case stays in the model, but is now gated by the new key.
 
-## Контекст
+## Context
 
-Коли ліміт вичерпано (заблоковано), pacing-бар у menu-bar-віджеті нічого корисного не показує — він
-просто червоний «на 100 %». Єдиний дієвий сигнал у цей момент — **час до найближчого ресету**. Опція
-«Hide pacing bars when blocked» (#194, default-on, opt-out) прибирає **обидва** бари у стані блокування
-й лишає тільки countdown.
+When a limit is exhausted (blocked), the pacing bar in the menu bar widget shows nothing useful —
+it is just red at "100%". The only actionable signal at that point is **time to the nearest
+reset**. The "Hide pacing bars when blocked" option (#194, default-on, opt-out) removes **both**
+bars in the blocked state and leaves only the countdown.
 
-Стан «заблоковано» тут — `CreditsPacing.mainWindowExhausted` (будь-яке головне вікно 5h/7d на
-`utilization ≥ 100`), **без** урахування credits: навіть якщо платні кредити ще покривають роботу, бар
-на 100 % не несе pacing-інформації. Це ширше, ніж `CreditsPacing.isBlocked` (той додає
-`&& !creditsCanCover`), і це свідомий вибір мейнтейнера.
+The "blocked" state here is `CreditsPacing.mainWindowExhausted` (any main 5h/7d window at
+`utilization ≥ 100`), **without** accounting for credits: even if paid credits still cover the
+work, a bar at 100% carries no pacing information. This is broader than
+`CreditsPacing.isBlocked` (which adds `&& !creditsCanCover`), and that is a deliberate choice by
+the maintainer.
 
-Питання цього ADR — **як виразити «лише countdown, без барів» у моделі `MenuBarMode`**. Наявний
-`.expanded(fiveHour: BarView, sevenDay: BarView?, resetToShow: ResetToShow?)` має **обов'язковий**
-`fiveHour`; `sevenDay` уже опційний (#94). Стан «жодного бару» в нього не вкладається.
+This ADR's question is **how to express "countdown only, no bars" in the `MenuBarMode` model**.
+The existing `.expanded(fiveHour: BarView, sevenDay: BarView?, resetToShow: ResetToShow?)` has a
+**mandatory** `fiveHour`; `sevenDay` is already optional (#94). A "no bars at all" state does not
+fit into it.
 
-## Розглянуті варіанти
+## Alternatives considered
 
-1. **Зробити `fiveHour` опційним у `.expanded`** (`fiveHour: BarView?`) — тоді `nil/nil + resetToShow`
-   = countdown-only. Але це торкається всієї геометрії малювання в hot draw-path
-   (`StatusItemView.drawExpanded` / `drawBars` / `barsBlockWidth` / вертикального центрування) і **ламає
-   всі наявні expanded-тести**: їхні хелпери деструктурують не-опційний `five`
-   (`MenuBarLayoutTests.swift`, `case let .expanded(five, …)`). Семантично «немає даних для 5h» і
-   «свідомо не малюємо 5h» злилися б в одному `nil`, хоча це різні речі (порівн. `sevenDay == nil`, яке
-   вже означає «свідомо приховано»).
+1. **Make `fiveHour` optional in `.expanded`** (`fiveHour: BarView?`) — then `nil/nil +
+   resetToShow` would mean countdown-only. But this touches the entire drawing geometry on the hot
+   draw path (`StatusItemView.drawExpanded` / `drawBars` / `barsBlockWidth` / vertical centering)
+   and **breaks all existing expanded tests**: their helpers destructure a non-optional `five`
+   (`MenuBarLayoutTests.swift`, `case let .expanded(five, …)`). Semantically, "no data for 5h" and
+   "deliberately not drawing 5h" would collapse into the same `nil`, even though they are different
+   things (compare `sevenDay == nil`, which already means "deliberately hidden").
 
-2. **Новий кейс `MenuBarMode.blockedReset(reset:which:)` (обране).** Локальний, явний варіант: чиста
-   нова гілка в `render`-switch, `itemWidth` і жодного дотику до `drawExpanded`/`drawBars`. Малювання
-   майже ідентичне наявному шляху «error-glyph alone» — центрований monospace-лейбл. Наявні
-   expanded-тести не зачеплені (їхня деструктуризація `.expanded` лишається валідною).
+2. **A new case `MenuBarMode.blockedReset(reset:which:)` (chosen).** A local, explicit variant: a
+   clean new branch in the `render` switch, `itemWidth`, and no touch to
+   `drawExpanded`/`drawBars`. The drawing is nearly identical to the existing "error-glyph alone"
+   path — a centered monospace label. Existing expanded tests are untouched (their `.expanded`
+   destructuring stays valid).
 
-## Рішення
+## Decision
 
-**Додано кейс `MenuBarMode.blockedReset(reset: TimeToReset, which: LimitWindow)`** — «лише countdown,
-без барів».
+**Added the case `MenuBarMode.blockedReset(reset: TimeToReset, which: LimitWindow)`** — "countdown
+only, no bars".
 
-- **Де вирішується (Kit).** У базовому `MenuBarLayout.make(from:now:…)`, **перед** розгалуженням на
-  idle/active бари, за прапорцем `hideBarsWhenBlocked` (пробрасується з `PersistedConfig`): якщо
-  `CreditsPacing.mainWindowExhausted(in:)` **і** `BlockingReset.forBlocked(snapshot:now:)` дає ресет →
-  повертаємо `.blockedReset`. `which`/формат визначає приватний `blockedResetMode(for:now:)`: 5h-вікно
-  (`.token(id: 0)`) → live `H:MM` countdown, 7d / per-model / credits → compact-days (`Nd`), рівно як
-  форматує `selectReset`.
+- **Where it's decided (Kit).** In the base `MenuBarLayout.make(from:now:…)`, **before** branching
+  into idle/active bars, behind the `hideBarsWhenBlocked` flag (threaded from `PersistedConfig`):
+  if `CreditsPacing.mainWindowExhausted(in:)` **and** `BlockingReset.forBlocked(snapshot:now:)`
+  yields a reset → return `.blockedReset`. `which`/format is determined by the private
+  `blockedResetMode(for:now:)`: the 5h window (`.token(id: 0)`) → a live `H:MM` countdown; 7d /
+  per-model / credits → compact-days (`Nd`), exactly as `selectReset` formats it.
 
-- **Форсований ресет.** Countdown показується **незалежно** від `resetMode` (навіть `.never`), бо без
-  барів це єдина корисна інформація. Це той самий вибір, що вже робить idle-blocked-гілка й попап (усі
-  три читають `BlockingReset.forBlocked`, тож завжди узгоджені).
+- **A forced reset.** The countdown is shown **regardless** of `resetMode` (even `.never`),
+  because without bars it is the only useful information. This is the same choice already made by
+  the idle-blocked branch and the popup (all three read `BlockingReset.forBlocked`, so they stay
+  consistent).
 
-- **Fallback.** Якщо `forBlocked` → `nil` (у вичерпаного вікна `resets_at` не парситься), у
-  `.blockedReset` **не** входимо — лишаємо звичайний шлях, де `hasBrokenActiveReset`/`selectReset`
-  чесно піднімають ⚠️ data-error (#167, ADR-0043), а не вигадують countdown.
+- **Fallback.** If `forBlocked` → `nil` (an exhausted window's `resets_at` fails to parse), we do
+  **not** enter `.blockedReset` — we keep the normal path, where `hasBrokenActiveReset`/
+  `selectReset` honestly raise a ⚠️ data error (#167, ADR-0043) instead of inventing a countdown.
 
-- **Error-шлях недоторканий.** `usageMode` у stale/error-фазі (#12) деструктурує результат `make` як
-  `.expanded`, щоб показати діагностичні stale-бари поряд з ⚠️. Тому туди `hideBarsWhenBlocked` **не**
-  пробрасується (default `false`) — exhausted-yet-stale стан завжди зберігає бари.
+- **The error path is untouched.** `usageMode` in the stale/error phase (#12) destructures the
+  result of `make` as `.expanded`, to show diagnostic stale bars next to ⚠️. So
+  `hideBarsWhenBlocked` is **not** threaded there (default `false`) — an exhausted-yet-stale state
+  always keeps its bars.
 
-- **Тільки menu bar.** Popup (`PopupLayout`) незмінний — при кліку користувач бачить повну картину з
-  барами.
+- **Menu bar only.** The popup (`PopupLayout`) is unchanged — clicking still shows the full
+  picture with bars.
 
-## Наслідки
+## Consequences
 
-- **Плюс:** локальна зміна, наявні тести й геометрія `.expanded` недоторкані; чиста точка юніт-тесту
-  (новий `@Suite` у `MenuBarLayoutTests.swift`). Розмежування «немає даних» (`.error`) vs «свідомо без
-  барів» (`.blockedReset`) явне на рівні типу.
-- **Мінус:** `MenuBarMode` тепер має три кейси замість двох — кожен новий `switch` по `mode` (view,
-  `itemWidth`) мусить обробити `.blockedReset`. Компілятор це гарантує (exhaustiveness).
-- **Гейт опції** — `PersistedConfig.hideBarsWhenBlocked` (default-on), тумблер у Settings → Appearance
-  → Menu Bar Widget; зміна перемальовує з останнього полу (`reRenderForCurrentTime`), рестарт не
-  потрібен.
+- **Plus:** a local change, existing tests and `.expanded` geometry untouched; a clean unit-test
+  point (a new `@Suite` in `MenuBarLayoutTests.swift`). The distinction between "no data" (`.error`)
+  and "deliberately no bars" (`.blockedReset`) is explicit at the type level.
+- **Minus:** `MenuBarMode` now has three cases instead of two — every new `switch` on `mode` (the
+  view, `itemWidth`) must handle `.blockedReset`. The compiler guarantees this (exhaustiveness).
+- **The option's gate** — `PersistedConfig.hideBarsWhenBlocked` (default-on), a toggle in Settings
+  → Appearance → Menu Bar Widget; changing it redraws from the last poll
+  (`reRenderForCurrentTime`), no restart needed.

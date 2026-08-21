@@ -5,94 +5,101 @@ supersedes: []
 superseded_by: []
 ---
 
-# ADR-0098: Лінійка бару ділиться надвоє — впізнати завжди, пояснити під ⌥
+# ADR-0098: The bar ruler splits in two — identify always, explain under ⌥
 
-> Витісняє §4 [ADR-0062](0062-configurable-bar-presentation.md) (`showTicks` — popup-only opt-out
-> засічок): опції більше немає, і лінійка більше не одне ціле, яке вмикають чи вимикають.
+> Supersedes §4 of [ADR-0062](0062-configurable-bar-presentation.md) (`showTicks` — the popup-only
+> opt-out for tick marks): the option is gone entirely, and the ruler is no longer one unit that
+> gets switched on or off.
 
-> **Уточнено** [ADR-0101](0101-pressure-is-the-gauge-ahead-half.md): теза «стилі розрізняються в
-> спокої» лишається чинною, але тепер тримається **лише** на позиції риски нуля (`0` проти `0.5`).
-> Раніше Pressure і Gauge розходилися ще й довжиною на боці випередження; тепер ahead-бік Pressure
-> **чисельно тотожний** ahead-половині Gauge, тож риска — єдине, що їх розрізняє поза спокоєм теж.
-> Заразом зникла остання підстава для колишнього тіка на 20 %: нуль шкали й «рівно за планом» — це
-> тепер та сама позиція.
+> **Refined by** [ADR-0101](0101-pressure-is-the-gauge-ahead-half.md): the claim "styles differ
+> even at rest" still stands, but now rests **solely** on the position of the zero tick (`0` versus
+> `0.5`). Pressure and Gauge used to also differ in the length of the ahead side; now Pressure's
+> ahead side is **numerically identical** to Gauge's ahead half, so the tick is the only thing that
+> tells them apart outside of rest too. This also removes the last reason for the old 20% tick: the
+> scale's zero and "exactly on pace" are now the same position.
 
-## Контекст
+## Context
 
-[ADR-0062](0062-configurable-bar-presentation.md) §4 дав засічкам попапа тумблер: `showTicks`,
-Bool-гейт на `PopupBarView.drawTicks`, popup-only. Пресет `.chill` вимикав його — «тихий вигляд
-скидає й лінійку».
+[ADR-0062](0062-configurable-bar-presentation.md) §4 gave the popup's tick marks a toggle:
+`showTicks`, a Bool gate on `PopupBarView.drawTicks`, popup-only. The `.chill` preset turned it off —
+"a quiet look drops the ruler too."
 
-Відтоді лінійка перестала бути однорідною. [ADR-0076](0076-pressure-scale-for-marker-less-bar.md)
-звів Pressure до одного тіка на 20 %, [ADR-0079](0079-centred-zero-gauge-scale.md) дав Gauge один
-тік на 0.5, [ADR-0092](0092-extra-usage-own-ruler.md) замінив зубці кредитного бару на два підписи
-країв місяця, а [ADR-0096](0096-zero-tick-on-pressure.md) увів у **меню-барі** риску нуля для обох
-безмаркерних стилів. Тумблер лишався один на все це — і вимикав разом і те, що пояснює шкалу, і те,
-що взагалі дозволяє впізнати стиль.
+Since then the ruler stopped being uniform. [ADR-0076](0076-pressure-scale-for-marker-less-bar.md)
+reduced Pressure to a single tick at 20%, [ADR-0079](0079-centred-zero-gauge-scale.md) gave Gauge a
+single tick at 0.5, [ADR-0092](0092-extra-usage-own-ruler.md) replaced the credit bar's teeth with
+two month-edge labels, and [ADR-0096](0096-zero-tick-on-pressure.md) introduced a zero tick in the
+**menu bar** for both marker-less styles. One toggle remained for all of this — and it switched off,
+together, both what explains the scale and what lets you identify the style at all.
 
-Саме тут він і почав шкодити. Стрічка Pressure і стрічка Gauge на спокійному барі — це та сама
-кольорова пігулка; відрізняє їх лише те, **звідки** вона росте. Меню-бар це вже показує рискою нуля,
-попап — ні. Тобто найтихіший пресет робив дві різні подачі візуально нерозрізненними, а користувач,
-який шукав, «чому бар виглядає не так», не мав на екрані нічого, що назвало б поточний стиль.
+That's exactly where it started to hurt. Pressure's strip and Gauge's strip on a calm bar are the
+same colored pill; the only thing telling them apart is **where** it grows from. The menu bar already
+shows this with the zero tick; the popup did not. So the quietest preset made two different
+presentations visually indistinguishable, and a user wondering "why does this bar look different" had
+nothing on screen that would name the current style.
 
-Водночас постійна лінійка під кожним баром — найщільніше, що є в спокійному попапі: ряд зубців під
-трьома барами при тому, що в спокої їх ніхто не читає.
+At the same time, a permanent ruler under every bar was the densest thing in a calm popup: a row of
+teeth under three bars that nobody reads while at rest.
 
-## Рішення
+## Decision
 
-**Лінійка ділиться за роботою, яку виконує кожна позначка, і тумблер зникає.**
+**The ruler splits by the job each mark does, and the toggle goes away.**
 
-1. **Риска нуля — завжди.** Позиція, з якої росте стрічка: у Gauge центр (0.5), у Pressure нуль
-   (центр нульової пігулки, як у меню-барі). Малюється **під треком**, наскрізь через бар, тож видно
-   лише кінчики. Це те, що дозволяє впізнати стиль з першого погляду: риска посередині — Gauge,
-   риска ліворуч — Pressure. **Progress не чіпаємо** — його маркер часу вже несе позицію, і друга
-   вертикальна позначка поруч читалася б як конкурент.
-2. **Решта — під ⌥ Option.** Межі годин/днів у Progress, підписи країв місяця на кредитному барі
-   ([ADR-0092](0092-extra-usage-own-ruler.md)) і підпис `0` під самою рискою. Це деталі шкали:
-   потрібні, коли бар допитують, зайві, коли на нього дивляться мимохідь. ⌥ у попапі вже означає
-   саме це («покажи подробиці» — розгорнуті рядки ресету, вік даних, згорнуті секції), тож лінійка
-   приєднується до наявного рівня, а не заводить власний перемикач.
-3. **`showTicks` видалено.** З `AppearancePresetValues`, з експорту конфіга, зі сторінки Settings;
-   ключ у `UserDefaults` став `Key.retiredShowTicks` і підмітається скиданням Appearance, а старі
-   дампи з цим ключем імпортуються через ignore-unknown-keys — тим самим шляхом, що
-   `farBehindInterval`. Пресет `.chill` більше не відрізняється від `.workHarder` тіками.
-4. **Тік Pressure на 20 % прибрано.** Поруч із підписаним нулем другий, безпідписний зуб за кілька
-   пунктів читався як випадкова позначка, а не як друге показання; межу, яку він мітив, і так несе
-   зміна кольору.
+1. **The zero tick — always.** The position the strip grows from: center (0.5) for Gauge, zero (the
+   center of the zero-length pill, as in the menu bar) for Pressure. Drawn **under the track**,
+   running through the bar, so only the tips show. This is what lets you identify the style at a
+   glance: a tick in the middle is Gauge, a tick on the left is Pressure. **Progress is left alone** —
+   its time marker already carries a position, and a second vertical mark next to it would read as a
+   competitor.
+2. **Everything else — under ⌥ Option.** Hour/day boundaries in Progress, the month-edge labels on
+   the credit bar ([ADR-0092](0092-extra-usage-own-ruler.md)), and the `0` label under the tick
+   itself. These are scale details: needed when a bar is interrogated, unnecessary when it's glanced
+   at in passing. ⌥ in the popup already means exactly this ("show details" — expanded reset lines,
+   data age, collapsed sections), so the ruler joins the existing level rather than starting its own
+   switch.
+3. **`showTicks` is removed.** From `AppearancePresetValues`, from config export, from the Settings
+   page; the `UserDefaults` key became `Key.retiredShowTicks` and is swept up by an Appearance reset,
+   and older dumps carrying this key import via the ignore-unknown-keys path — the same route as
+   `farBehindInterval`. The `.chill` preset no longer differs from `.workHarder` by its ticks.
+4. **The Pressure 20% tick is removed.** Next to the labeled zero, a second, unlabeled tooth a few
+   points away read as a stray mark rather than a second reading; the boundary it marked is already
+   carried by the color change.
 
-Риска в попапі — **та сама** позначка, що в меню-барі: спільна роль кольору `centreTick`, та сама
-конструкція (тонка, нейтральна, під треком, нерухома). Висота **масштабована**, не скопійована: у
-меню-барі 10 pt над 5 pt треком, у попапі 12 над 6 — та сама пропорція, бо фіксований виступ на
-вищому барі читався б куцим. Ширина — 5/7 нульової пігулки: на повній ширині пігулки риска читається
-плитою, на 1.5 pt — скалкою, що визирає з-за ширшої фігури.
+The popup's tick is **the same** mark as in the menu bar: they share the role of the `centreTick`
+color and the same construction (thin, neutral, under the track, static). The height is **scaled**,
+not copied: 10 pt over a 5 pt track in the menu bar, 12 over 6 in the popup — the same proportion,
+because a fixed protrusion on a taller bar would read as stubby. The width is 5/7 of the zero-length
+pill: at the pill's full width the tick reads as a slab; at 1.5 pt it reads as a sliver peeking out
+from behind the wider shape.
 
-Підпис `0` бере шрифт, чорнило й базову лінію підписів місяця, тож обидві підписані лінійки попапа —
-одна конвенція. Він звисає на ~4 pt за межі свого рядка в проміжок `limitSpacing`, куди ніхто не
-малює: висоти барів лишаються такими, як їх рендерить живе меню.
+The `0` label takes its font, ink, and baseline from the month labels, so both labeled ticks in the
+popup follow one convention. It hangs about 4 pt below its row into the `limitSpacing` gap that
+nothing else draws into: bar heights stay exactly what the live menu renders.
 
-## Наслідки
+## Consequences
 
-- **Стилі розрізняються в спокої**, без ⌥ і без налаштувань: три різні силуети — маркер (Progress),
-  риска посередині (Gauge), риска ліворуч (Pressure).
-- **Спокійний попап тихіший**: під барами немає нічого, крім однієї риски.
-- **Мінус одна опція.** Сьомий ключ Appearance замість восьмого; сторінка Dropdown Widget закінчується
-  двома рядками видимості секцій.
-- **Меню-бар не змінюється.** ⌥ до нього не доходить (модифікатор спостережуваний лише поки меню
-  відкрите, а тоді читач дивиться на попап), тож там лишається сама риска нуля
-  ([ADR-0096](0096-zero-tick-on-pressure.md)) — постійна пара зубців на 34 pt барі була б шумом,
-  якого ця конструкція й уникає.
-- **Кредитний бар у спокої без підписів.** [ADR-0092](0092-extra-usage-own-ruler.md) стверджував, що
-  підписи — це те, що робить бар читаним як календарний місяць; тепер вони на вимогу. Аргумент
-  лишається чинним для стану, у якому бар допитують; у спокої його роль бере на себе те, що бар
-  єдиний у попапі малюється в Progress.
+- **Styles differ at rest**, with no ⌥ and no settings: three distinct silhouettes — a marker
+  (Progress), a tick in the middle (Gauge), a tick on the left (Pressure).
+- **The calm popup is quieter**: nothing under the bars but a single tick.
+- **One fewer option.** Seven Appearance keys instead of eight; the Dropdown Widget page ends with
+  two section-visibility rows.
+- **The menu bar is unchanged.** ⌥ doesn't reach it (the modifier is only observable while the menu
+  is open, and at that point the reader is looking at the popup), so it keeps just the zero tick
+  ([ADR-0096](0096-zero-tick-on-pressure.md)) — a permanent pair of teeth on a 34 pt bar would be
+  exactly the noise this design avoids.
+- **The credit bar is label-free at rest.** [ADR-0092](0092-extra-usage-own-ruler.md) argued that the
+  labels are what make the bar read as a calendar month; now they're on demand. The argument still
+  stands for the state where a bar is interrogated; at rest, its role is taken over by the fact that
+  this is the only bar in the popup drawn in Progress.
 
-## Альтернативи
+## Alternatives considered
 
-- **Лишити тумблер, додати риску нуля.** Дає ту саму розрізнюваність, але зберігає опцію, чиє
-  вимкнення тепер ховає рівно нічого корисного: після поділу лінійки «вимкнути» означало б сховати
-  ⌥-половину, яка й так схована.
-- **Усе під ⌥.** Найтихіше, але тоді в спокої Pressure і Gauge знову нерозрізненні — рівно та
-  проблема, з якої почалося.
-- **Усе завжди.** Повертає щільність, заради якої тумблер колись і з'явився.
-- **Наскрізна риска й для Progress.** Відкинуто: маркер часу вже дає вертикаль, друга поруч
-  конкурує з нею (те саме заперечення, що й у [ADR-0096](0096-zero-tick-on-pressure.md)).
+- **Keep the toggle, add the zero tick.** Gives the same distinguishability but keeps an option whose
+  "off" now hides exactly nothing useful: after the ruler split, "off" would mean hiding the
+  ⌥-half, which is already hidden.
+- **Everything under ⌥.** Quietest, but then Pressure and Gauge are indistinguishable at rest
+  again — exactly the problem this started from.
+- **Everything always.** Brings back the density the toggle was created to remove in the first
+  place.
+- **A through-tick for Progress too.** Rejected: the time marker already gives a vertical, and a
+  second one next to it competes with it (the same objection as in
+  [ADR-0096](0096-zero-tick-on-pressure.md)).

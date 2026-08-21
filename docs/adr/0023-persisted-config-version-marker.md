@@ -3,93 +3,99 @@ status: accepted
 date: 2026-07-23
 ---
 
-# ADR-0023: Версійний маркер конфігу + межа тестованого в persistence-шарі
+# ADR-0023: A config version marker + the tested boundary in the persistence layer
 
-## Контекст
+## Context
 
-Issue #71 закладає **перший шар персистентності** в проєкті: до нього
-`grep -r UserDefaults Sources` порожній — жодного `UserDefaults`, `@AppStorage` чи запису
-налаштувань на диск. Єдине, що «запам'ятовувалося» між запусками, — це системний стан
-(`SMAppService` login-item через `LaunchAtLoginController`) та frame Troubleshoot-вікна
-(`setFrameAutosaveName`), а не конфіг застосунку.
+Issue #71 lays down the **first persistence layer** in the project: before it,
+`grep -r UserDefaults Sources` returns nothing — no `UserDefaults`, `@AppStorage`, or any settings
+written to disk. The only thing "remembered" between launches was system state (the `SMAppService`
+login item, via `LaunchAtLoginController`) and the Troubleshoot window's frame
+(`setFrameAutosaveName`), not the app's own config.
 
-Потреба: тримати в збереженому конфігу **версію, якою параметри були востаннє записані**
-(`lastRunVersion`), щоб новіший білд міг порівняти «остання збережена версія» ↔ «поточна» і за
-потреби виконати міграцію ключів або cleanup системного стану (напр. прибрати застарілі login-items
-від старої назви `cc-timer`) **до** того, як конфіг почне використовуватися.
+The need: keep, in the saved config, **the version that last wrote the parameters**
+(`lastRunVersion`), so a newer build can compare "last saved version" against "current" and, if
+needed, run key migrations or clean up system state (e.g., remove stale login items left over from
+the old name `cc-timer`) **before** the config starts being used.
 
-Постає той самий клас рішень про межу модуля, що в
+This raises the same class of module-boundary decision as in
 [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md),
 [ADR-0010](0010-usage-health-and-error-states.md),
-[ADR-0011](0011-polling-engine-adaptive-cadence-and-signal-seams.md): де живе side-effecting частина
-(`UserDefaults`), а де — чиста тестована логіка, і як не зчепити їх.
+[ADR-0011](0011-polling-engine-adaptive-cadence-and-signal-seams.md): where the side-effecting part
+lives (`UserDefaults`), where the pure, tested logic lives, and how to keep them uncoupled.
 
-Обсяг цього тікета навмисно вузький: **лише версійний маркер + каркас міграції**. Реальних
-міграцій немає, ширший typed config store — поза обсягом (окремий майбутній тікет). Ключове рішення,
-яке треба зафіксувати, — де провести межу тестованого, щоб перший persistence не приніс у проєкт
-непокриту логіку.
+This ticket's scope is deliberately narrow: **only the version marker + a migration scaffold**.
+There are no real migrations yet; a broader typed config store is out of scope (a separate future
+ticket). The key decision to pin down is where to draw the tested boundary, so this first bit of
+persistence doesn't bring uncovered logic into the project.
 
-## Рішення
+## Decision
 
-1. **Чиста частина — предикат рішення про міграцію — живе в `TokenPaceKit` (`MigrationPlan`) і
-   покрита тестами.** Framework-free `enum` без `Foundation`-I/O: `transition(stored:current:)`
-   класифікує старт у `firstRun` / `unchanged` / `upgraded(from:to:)`, а `needsMigration(_:)`
-   вирішує, чи є що виконувати. Це той самий поділ, що `LaunchAtLogin` (чисті предикати) vs
-   `LaunchAtLoginController` (SMAppService-glue): семантика й рішення — у kit, реюзовні у Фазі 2 й
-   тестовні без живого сховища.
+1. **The pure part — the migration decision predicate — lives in `TokenPaceKit`
+   (`MigrationPlan`) and is covered by tests.** A framework-free `enum` with no `Foundation` I/O:
+   `transition(stored:current:)` classifies a startup into `firstRun` / `unchanged` /
+   `upgraded(from:to:)`, and `needsMigration(_:)` decides whether there's anything to run. This is
+   the same split as `LaunchAtLogin` (pure predicates) vs. `LaunchAtLoginController` (the
+   `SMAppService` glue): the semantics and the decision live in the kit, reusable in Phase 2 and
+   testable without a live store.
 
-2. **Side-effecting частина — обгортка `UserDefaults` — живе в `TokenPace` shell
-   (`PersistedConfig`) і верифікується вручну.** `UserDefaults.standard` — системний синглтон, який
-   не інжектується й не мокається чисто (як `SMAppService`), тож код, що його читає/пише, лишається
-   в executable-таргеті й перевіряється manual-verify за конвенцією
-   ([ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) §«Наслідки»). Обгортка мінімальна:
-   один ключ `lastRunVersion` (String) з `get`/`set`. Це шов, який майбутній тікет розширює іншими
-   ключами (напр. конфіг monitored services, #89), а не універсальний store наперед.
+2. **The side-effecting part — a `UserDefaults` wrapper — lives in the `TokenPace` shell
+   (`PersistedConfig`) and is verified manually.** `UserDefaults.standard` is a system singleton
+   that can't be cleanly injected or mocked (like `SMAppService`), so the code that reads/writes it
+   stays in the executable target and is manual-verified by convention
+   ([ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) § "Consequences"). The wrapper is
+   minimal: one key, `lastRunVersion` (String), with `get`/`set`. This is a seam a future ticket
+   will extend with other keys (e.g., the monitored-services config, #89), not a universal store
+   built ahead of need.
 
-3. **`lastRunVersion == nil` трактується як `firstRun` — свіжа установка або доверсійний білд.**
-   Відсутній ключ означає, що параметри ще жодного разу не писалися під версійним маркером: або це
-   перший запуск після впровадження цього тікета, або апгрейд із білда, що персистентності не мав.
-   В обох випадках міграцій немає — просто записуємо поточну версію. Persistence-флаг «перший
-   запуск» окремо **не** вводимо: `nil`-маркера достатньо, і він не заважає майбутнім post-update
-   міграціям (на відміну від «зробити раз назавжди»-прапорця).
+3. **`lastRunVersion == nil` is treated as `firstRun` — a fresh install or a pre-versioning
+   build.** A missing key means the parameters have never been written under a version marker: this
+   is either the first launch after this ticket landed, or an upgrade from a build that had no
+   persistence at all. Either way, there's nothing to migrate — we just write the current version.
+   We deliberately do **not** introduce a separate "first launch" persistence flag: the `nil` marker
+   is enough, and it doesn't interfere with future post-update migrations (unlike a "do this once,
+   ever" flag would).
 
-4. **Хук міграції — найперша дія `applicationDidFinishLaunching`, до створення UI й полінгу.**
-   `AppDelegate.runConfigMigrationsIfNeeded()` читає `lastRunVersion`, класифікує через
-   `MigrationPlan.transition`, логує вихід (`AppLogger.lifecycle`, три стани) і **записує поточну
-   версію назад**. Розміщення першим гарантує, що майбутня міграція встигне підчистити стан, від
-   якого залежить решта старту, перш ніж той його прочитає. Структурно дзеркалить
-   `registerLaunchAtLoginIfNeeded()` — той самий клас lifecycle-хелперів.
+4. **The migration hook is the very first action in `applicationDidFinishLaunching`, before the UI
+   or polling are created.** `AppDelegate.runConfigMigrationsIfNeeded()` reads `lastRunVersion`,
+   classifies it via `MigrationPlan.transition`, logs the outcome (`AppLogger.lifecycle`, three
+   states), and **writes the current version back**. Placing it first guarantees that a future
+   migration has time to clean up state the rest of startup depends on, before that code reads it.
+   Structurally this mirrors `registerLaunchAtLoginIfNeeded()` — the same class of lifecycle
+   helper.
 
-5. **Порівняння версій — наразі рядкова нерівність (`stored != current`), не SemVer-впорядкування.**
-   Для каркаса без реальних міграцій цього достатньо: `.upgraded` спрацьовує на будь-яку відмінність
-   і несе обидва кінці (`from`/`to`), тож майбутня міграція зможе прив'язатися до точного кроку.
-   Повноцінний SemVer-compare («мігрувати лише якщо `old < X.Y.Z`») відкладено до першої реальної
-   міграції, яка його потребуватиме. «Даунґрейд» (старіший запущений білд, ніж той, що писав конфіг)
-   свідомо лишається просто `.upgraded` — не спецкейс.
+5. **Version comparison is currently a plain string inequality (`stored != current`), not a
+   SemVer ordering.** For a scaffold with no real migrations yet, this is enough: `.upgraded` fires
+   on any difference and carries both ends (`from`/`to`), so a future migration can key off the
+   exact transition. Full SemVer comparison ("migrate only if `old < X.Y.Z`") is deferred until the
+   first real migration that needs it. A "downgrade" (an older build running than the one that wrote
+   the config) is deliberately left as plain `.upgraded` — not a special case.
 
-## Наслідки
+## Consequences
 
-- `TokenPaceKit` лишається без залежностей: `MigrationPlan` оперує лише семантикою; платформенний
-  бік (`UserDefaults`) — у `TokenPace`. Предикат покритий unit-тестами (`MigrationPlanTests`);
-  обгортка й хук — manual-verify.
-- Каркас без реальних міграцій означає, що `needsMigration` наразі ніде не гейтить справжню роботу —
-  гілка `.upgraded` лише логує. Це навмисно: точка розширення готова, кроки додасть тікет, який
-  їх потребуватиме (перша реальна міграція / cleanup, напр. старі `cc-timer` login-items — #69).
-- **Логування** (`AppLogger.lifecycle`, `.notice`): «config: first run, no prior version (X)» /
-  «config: version unchanged (X)» / «config: version X → Y, running migrations». Версія — `.public`
-  (безпечний діагностичний рядок, не секрет). Записи додано в `docs/log-messages.md`.
-- **Перевірити (manual):**
-  - Перший запуск після оновлення (порожній `lastRunVersion`) → лог «first run, no prior version»;
-    `defaults read com.artem-n.tokenpace lastRunVersion` показує поточну версію.
-  - Другий запуск тієї самої версії → лог «version unchanged».
-  - Запуск білда з іншою версією (або підміненим `lastRunVersion`) → лог «version X → Y, running
-    migrations».
+- `TokenPaceKit` stays free of dependencies: `MigrationPlan` operates only on semantics; the
+  platform side (`UserDefaults`) lives in `TokenPace`. The predicate is covered by unit tests
+  (`MigrationPlanTests`); the wrapper and the hook are manual-verify.
+- A scaffold with no real migrations means `needsMigration` currently gates no actual work anywhere
+  — the `.upgraded` branch only logs. This is deliberate: the extension point is ready, and the
+  ticket that needs steps will add them (the first real migration/cleanup, e.g., old `cc-timer`
+  login items — #69).
+- **Logging** (`AppLogger.lifecycle`, `.notice`): "config: first run, no prior version (X)" /
+  "config: version unchanged (X)" / "config: version X → Y, running migrations." The version is
+  `.public` (a safe diagnostic string, not a secret). Entries added to `docs/log-messages.md`.
+- **To verify (manual):**
+  - First launch after an update (empty `lastRunVersion`) → the "first run, no prior version" log;
+    `defaults read com.artem-n.tokenpace lastRunVersion` shows the current version.
+  - A second launch of the same version → the "version unchanged" log.
+  - Launching a build with a different version (or a spoofed `lastRunVersion`) → the "version X → Y,
+    running migrations" log.
 
-## Пов'язані
+## Related
 
-- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — чиста-core / тонкий-shell поділ і
-  manual-verify для side-effecting glue; persistence-шар слідує тому ж поділу.
-- [ADR-0010](0010-usage-health-and-error-states.md) — `UsageHealth` як зразок чистого value-типу зі
-  станами; `MigrationPlan.Transition` — його аналог для migration-домену.
-- Issues: #71 (цей тікет), #69 (приклад системного стану, який майбутня міграція могла б чистити —
-  застарілі login-items), #89 (перший споживач, що розширить `PersistedConfig` конфіг-ключем).
+- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — the pure-core / thin-shell split
+  and manual-verify for side-effecting glue; the persistence layer follows the same split.
+- [ADR-0010](0010-usage-health-and-error-states.md) — `UsageHealth` as an example of a pure value
+  type with states; `MigrationPlan.Transition` is its analog for the migration domain.
+- Issues: #71 (this ticket), #69 (an example of system state a future migration could clean up —
+  stale login items), #89 (the first consumer that will extend `PersistedConfig` with a config
+  key).

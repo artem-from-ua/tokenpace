@@ -3,77 +3,85 @@ status: accepted
 date: 2026-07-31
 ---
 
-# ADR-0048: Червоний бейдж ресету, коли підписковий ліміт вичерпано, але кредити покривають
+# ADR-0048: A red reset badge when the subscription limit is exhausted but credits are covering it
 
-> Уточнює [ADR-0038](0038-idle-blocked-status.md) §D3 (червоний блокуючий бейдж). Той ADR показував
-> бейдж **лише** коли `isBlocked` (немає шляху працювати); тут він з'являється й у **не-blocked**
-> стані. Реалізовано в [#193](https://github.com/artem-from-ua/tokenpace/issues/193).
+> Refines [ADR-0038](0038-idle-blocked-status.md) §D3 (the red blocking badge). That ADR showed the
+> badge **only** when `isBlocked` (no path to work); here it also appears in a **non-blocked**
+> state. Implemented in [#193](https://github.com/artem-from-ua/tokenpace/issues/193).
 
-## Контекст
+## Context
 
-[ADR-0037](0037-extra-usage-credits-model.md) увів extra-usage credits як «останній рубіж»: коли 5h/7d
-вичерпано, платні кредити продовжують покривати роботу. [ADR-0038](0038-idle-blocked-status.md) додав
-**єдиний червоний бейдж** на ресет-час у попапі — але **тільки** коли `isBlocked`, тобто коли шляху
-працювати вже немає (`mainWindowExhausted AND NOT creditsCanCover`).
+[ADR-0037](0037-extra-usage-credits-model.md) introduced extra-usage credits as the "last line of
+defense": once 5h/7d is exhausted, paid credits keep covering work.
+[ADR-0038](0038-idle-blocked-status.md) added a **single red badge** on the popup's reset time — but
+**only** when `isBlocked`, i.e. when there is no longer any path to work
+(`mainWindowExhausted AND NOT creditsCanCover`).
 
-Проміжний стан лишився без сигналу: **5h або 7d вичерпано, але кредити активно покривають**
-(`enabled`, ще не досягнуто грошового cap). Формально це **не** blocked — робота триває, тому
-`WorkAvailability.canWork` тут `true`, і бейджа не було. Але користувач у цей момент **витрачає
-гроші**: підписка вже не покриває, і хочеться бачити, **коли** підписковий ліміт зресетиться й кредити
-перестануть списуватися.
+An in-between state went unsignaled: **5h or 7d is exhausted, but credits are actively covering
+it** (`enabled`, the money cap not yet reached). Formally this is **not** blocked — work continues,
+so `WorkAvailability.canWork` is `true` here, and there was no badge. But at this moment the user
+**is spending money**: the subscription no longer covers the work, and they want to see **when**
+the subscription limit will reset and credits will stop being drawn on.
 
-## Рішення
+## Decision
 
-### D1. Новий предикат `subscriptionExhaustedWhileCovered` (Kit)
+### D1. A new predicate, `subscriptionExhaustedWhileCovered` (Kit)
 
-Свідомий **доповнювач** `isBlocked` на вичерпаному головному вікні — обидва стартують з
-`mainWindowExhausted`, далі розходяться за покриттям кредитами:
+A deliberate **complement** to `isBlocked` on an exhausted main window — both start from
+`mainWindowExhausted`, then diverge on credit coverage:
 
 ```
 subscriptionExhaustedWhileCovered = mainWindowExhausted  AND  creditsCanCover(spend)
 isBlocked                         = mainWindowExhausted  AND NOT creditsCanCover(spend)
 ```
 
-Взаємно виключні — ніколи не `true` разом. `isBlocked` **не** розширюється: він лишається інверсією
-`WorkAvailability.canWork` (тодішній сигнал «Back to work!» мусив давати `false→true` лише на
-**реальному** розблокуванні, не коли кредити почали/перестали покривати — з #161 нотифікація читає
-інший предикат, див. постскриптум у «Наслідках»). Тому новий стан — окремий предикат, а не
-розширення блокування.
+Mutually exclusive — never both `true` at once. `isBlocked` is **not** widened: it stays the
+inverse of `WorkAvailability.canWork` (at the time, the "Back to work!" signal had to fire
+`false→true` only on a **real** unblock, not whenever credits started/stopped covering — as of #161
+the notification reads a different predicate, see the postscript in "Consequences"). So the new
+state is a separate predicate, not an extension of blocking.
 
-### D2. Червоний бейдж вказує на ресет **токенного** ліміта, не кредитів
+### D2. The red badge points at the **token** limit's reset, not the credits'
 
-Коли кредити покривають, кредитний (місячний) ресет — **не** те, чого чекає користувач: робота й так
-іде на кредитах. Розблокує підписку саме ресет **вичерпаного токенного вікна** (5h/7d) — момент, коли
-квота повернеться й списання кредитів припиниться.
+When credits are covering, the credits (monthly) reset is **not** what the user is waiting for —
+work keeps running on credits regardless. What unblocks the subscription is the reset of the
+**exhausted token window** (5h/7d) — the moment quota returns and credit draw-down stops.
 
-Тому `BlockingReset.forSubscriptionExhausted(snapshot:now:)` бере ті самі кандидати, що й
-`forBlocked` (кожне вікно з `utilization ≥ 100`, ключ = індекс рядка попапу), але передає
-`creditsReset: nil` — правило `select` колапсує до «найпізніший вичерпаний токенний ресет» (той самий
-вибір, що коли кредити взагалі не в грі). Кредитна секція **ніколи** не підсвічується в цьому стані.
+So `BlockingReset.forSubscriptionExhausted(snapshot:now:)` takes the same candidates as
+`forBlocked` (every window with `utilization ≥ 100`, keyed by the popup row's index), but passes
+`creditsReset: nil` — the `select` rule then collapses to "the latest exhausted token reset" (the
+same choice as when credits aren't in play at all). The credits section is **never** highlighted in
+this state.
 
-### D3. Лише попап; не blocked-стан
+### D3. Popup only; not a blocked state
 
-- `PopupLayout.blockingReset` тепер виставляється у **двох** випадках: `isBlocked` → `forBlocked`
-  (як раніше, може бути кредитний ресет); інакше `subscriptionExhaustedWhileCovered` →
-  `forSubscriptionExhausted` (лише токенний).
-- View **не змінюється**: `isBlockingRow`/`makeResetBadge` уже малюють червоний бейдж на рядку, що його
-  вказав `blockingReset`. Новий стан просто заповнює це поле там, де раніше було `nil`.
-- Це **не** blocked: idle-рядок не сіріє, статус лишається звичайним «limit reached» (не «waiting for
-  limit reset»), menu bar не чіпаємо (за рішенням мейнтейнера сигнал — лише в попапі).
+- `PopupLayout.blockingReset` is now set in **two** cases: `isBlocked` → `forBlocked` (as before,
+  possibly a credits reset); otherwise `subscriptionExhaustedWhileCovered` → `forSubscriptionExhausted`
+  (token only).
+- The view is **unchanged**: `isBlockingRow`/`makeResetBadge` already draw the red badge on
+  whichever row `blockingReset` points at. The new state simply fills that field where it used to
+  be `nil`.
+- This is **not** blocked: the idle row doesn't turn gray, the status stays the ordinary "limit
+  reached" (not "waiting for limit reset"), and the menu bar is untouched (per the maintainer's
+  decision, the signal lives in the popup only).
 
-## Наслідки
+## Consequences
 
-- Червоний бейдж більше не дорівнює `isBlocked`: він з'являється і коли робота триває на кредитах,
-  позначаючи ресет підпискового ліміта. Це **уточнює** §D3 [ADR-0038](0038-idle-blocked-status.md).
-- `isBlocked` та «Back to work!» лишаються недоторканими — жодного хибного edge на списанні кредитів.
+- The red badge no longer equals `isBlocked`: it also appears while work continues on credits,
+  marking the subscription limit's reset. This **refines** §D3 of
+  [ADR-0038](0038-idle-blocked-status.md).
+- `isBlocked` and "Back to work!" stay untouched — no false edge on credit draw-down.
 
-> **Постскриптум (#161, [ADR-0113](0113-back-to-work-tracks-the-subscription-quota.md)).** Гарантія
-> «`isBlocked` та "Back to work!" лишаються недоторканими» більше не є однією гарантією: нотифікація
-> відчепилася від `isBlocked`/`canWork` і стежить за `subscriptionAvailable`. `isBlocked` справді
-> недоторканий (як і рішення цього ADR), а «Back to work!» тепер спрацьовує **саме** на ресеті
-> підпискового ліміту — того самого, який цей ADR позначає червоним бейджем. Тобто
-> `subscriptionExhaustedWhileCovered`, введений тут, описує рівно той стан, що ADR-0113 читає як
-> «квота недоступна»: бейдж і нотифікація зійшлися на одному понятті з різних боків.
-- Вибір ресету лишається єдиним у Kit; кредитний ресет свідомо виключений з цього стану.
-- Верифікація: стуб `TOKENPACE_STUB=credits-active` (5h 18 %, 7d @100 %, кредити enabled/не-capped) —
-  у попапі ресет-рядок 7-day тепер **червоний бейдж** «5d», при звичайному (не сірому) рядку.
+> **Postscript (#161, [ADR-0113](0113-back-to-work-tracks-the-subscription-quota.md)).** The
+> guarantee "`isBlocked` and 'Back to work!' stay untouched" is no longer a single guarantee: the
+> notification detached from `isBlocked`/`canWork` and now watches `subscriptionAvailable`.
+> `isBlocked` is indeed untouched (as is this ADR's decision), but "Back to work!" now fires
+> **exactly** on the subscription limit's reset — the same one this ADR marks with the red badge.
+> In other words, `subscriptionExhaustedWhileCovered`, introduced here, describes exactly the state
+> ADR-0113 reads as "quota unavailable": the badge and the notification converged on the same
+> concept from two different directions.
+- Reset selection stays a single choice in Kit; the credits reset is deliberately excluded from this
+  state.
+- Verification: stub `TOKENPACE_STUB=credits-active` (5h 18%, 7d @100%, credits enabled/not capped)
+  — in the popup, the 7-day reset row now shows a **red badge**, "5d," on an otherwise ordinary
+  (not gray) row.

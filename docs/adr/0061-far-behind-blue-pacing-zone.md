@@ -5,51 +5,54 @@ supersedes: []
 superseded_by: [0062, 0081, 0115]
 ---
 
-# ADR-0061: Синя зона пейсингу «far behind» + опція «Work harder»
+# ADR-0061: The "far behind" blue pacing zone + the "Work harder" option
 
-> **§4 «Обсяг — лише базові 5h/7d» підтверджено й перенесено
+> **§4 "Scope — base 5h/7d only" reaffirmed and moved to
 > [ADR-0115](0115-no-blue-on-per-model-windows.md)** ([#426](https://github.com/artem-from-ua/tokenpace/issues/426)).
-> Саме рішення чинне й ніколи не скасовувалося — витіснений лише **механізм**: прапорця
-> `PopupBarView.isBaseLimit` більше немає, правило живе на `BarLayout.blueAllowed`, де його бачать
-> усі поверхні. Гейт у рендері виявився причиною того, що модель (а отже й журнал) роками не знала
-> про це обмеження й записувала синій для scoped-вікон, яких на екрані не було.
+> The decision itself still stands and was never reversed — only the **mechanism** is superseded:
+> the `PopupBarView.isBaseLimit` flag is gone; the rule now lives on `BarLayout.blueAllowed`, where
+> every surface can see it. The gate living only in rendering turned out to be the reason the model
+> (and hence the journal) didn't know about this restriction for years and recorded blue for scoped
+> windows that were never shown on screen.
 
-> **Частково витіснений [ADR-0081](0081-weekly-capacity-gate-for-blue.md).** Behind-поріг знову
-> фіксований (множник — константа ×2, опцію прибрано), але з'явилася нова умова: синій показується
-> лише поки **тижневе вікно саме має запас** (`BarLayout.blueAllowed` /
-> `PacingModel.weeklyHasHeadroom`). Роль `ColorRole.paceBlue` злито в `.blue`.
+> **Partially superseded by [ADR-0081](0081-weekly-capacity-gate-for-blue.md).** The behind
+> threshold is fixed again (the multiplier is a ×2 constant, the option is gone), but a new
+> condition was added: blue only shows while the **weekly window itself has headroom**
+> (`BarLayout.blueAllowed` / `PacingModel.weeklyHasHeadroom`). The `ColorRole.paceBlue` role is
+> merged into `.blue`.
 >
-> **Частково витіснений [ADR-0062](0062-configurable-bar-presentation.md) (#224).** Behind-поріг більше
-> не **фіксованої** ширини — тепер конфігурований через `FarBehindInterval` (множник ×1/×2/×3 або
-> off), дефолт 2h/2d. Bool-опція «Work harder» (розділ 5) замінена триставним `CalmColorMode`
-> (`.off` / `.yellowGreen` / `.yellowGreenBlue`). Чинними лишаються: синій severity-case `farBehind`
-> (розділ 3), 20-хв start-override (розділ 2), обсяг 5h/7d (розділ 4), роль `ColorRole.paceBlue` і
-> поле `BarLayout.windowDurationSeconds`.
+> **Partially superseded by [ADR-0062](0062-configurable-bar-presentation.md) (#224).** The behind
+> threshold is no longer a **fixed** width — it is now configurable via `FarBehindInterval`
+> (multiplier ×1/×2/×3, or off), defaulting to 2h/2d. The boolean "Work harder" option (section 5)
+> is replaced by the three-state `CalmColorMode` (`.off` / `.yellowGreen` / `.yellowGreenBlue`).
+> What still stands: the blue severity case `farBehind` (section 3), the 20-minute start override
+> (section 2), the 5h/7d scope (section 4), the `ColorRole.paceBlue` role, and the
+> `BarLayout.windowDurationSeconds` field.
 
-## Контекст
+## Context
 
-Колір пейсинг-зазору на боці «на пейсі / позаду плану» (`usage <= time`, `PacingState.onPaceOrBehind`)
-досі був **однорідно зеленим** — жодного внутрішнього порогу. Це віддзеркалення ще не завершене:
-бік «попереду плану» вже поділений на жовтий+помаранчовий динамічним порогом `aheadThreshold =
-0.16·(1 − timeFraction)` ([ADR-0044](0044-dynamic-pacing-threshold.md)), а бік «позаду» лишався
-пласким.
+The color of the pacing gap on the "on pace / behind plan" side (`usage <= time`,
+`PacingState.onPaceOrBehind`) has so far been **uniformly green** — no internal threshold at all.
+That mirroring is incomplete: the "ahead of plan" side is already split into yellow+orange by the
+dynamic threshold `aheadThreshold = 0.16·(1 − timeFraction)` ([ADR-0044](0044-dynamic-pacing-threshold.md)),
+while the "behind" side stayed flat.
 
-**Проблема.** «Трохи позаду пейсу» і «глибоко позаду з великим запасом» — це різні стани, а
-однорідний зелений їх злипає. Коли ти суттєво нижче лінії витрат — маєш реальний запас ліміту, і це
-варто показати окремим, найспокійнішим тоном.
+**The problem.** "Slightly behind pace" and "deeply behind with a large surplus" are different
+states, and a uniform green blends them together. When you are meaningfully below the spending
+line, you have real limit headroom, and that's worth showing with its own, calmest tone.
 
-## Рішення
+## Decision
 
-**Розбити зелену зону на синю (`farBehind`) + зелену (`calm`) порогом **фіксованої часової ширини**;
-синій — лише для базових 5h/7d барів; додати опцію «Work harder».**
+**Split the green zone into blue (`farBehind`) + green (`calm`) with a threshold of fixed time
+width; blue applies only to base 5h/7d bars; add a "Work harder" option.**
 
-### 1. Behind-поріг фіксованої часової ширини
+### 1. A behind threshold of fixed time width
 
-На відміну від динамічного `aheadThreshold`, перехід зелений→синій — це **фіксований проміжок
-реального часу**, різний для кожного вікна:
+Unlike the dynamic `aheadThreshold`, the green→blue transition is a **fixed span of wall-clock
+time**, different for each window:
 
-- **5h: 60 хв** → `behindThreshold = 3600/18000 = 0.20`
-- **7d: 24 год** → `behindThreshold = 86400/604800 ≈ 0.1429`
+- **5h: 60 min** → `behindThreshold = 3600/18000 = 0.20`
+- **7d: 24 h** → `behindThreshold = 86400/604800 ≈ 0.1429`
 
 ```
 behindThreshold = LimitWindow.blueBehindWidthSeconds / windowDurationSeconds
@@ -57,94 +60,101 @@ behindThreshold = LimitWindow.blueBehindWidthSeconds / windowDurationSeconds
 
 `surplus = timeFraction − usageFraction`:
 
-- `surplus > behindThreshold` → **синій** (`.farBehind`);
-- інакше → **зелений** (`.calm`).
+- `surplus > behindThreshold` → **blue** (`.farBehind`);
+- otherwise → **green** (`.calm`).
 
-Порівняння строге (`>`): запас рівно на порозі — зелений (гучніший із двох спокійних тонів).
+The comparison is strict (`>`): a surplus exactly at the threshold stays green (the louder of the
+two calm tones).
 
-**Чому фіксована ширина, а не динамічний мірор ahead.** «Позаду більше ніж на годину (5h) / на добу
-(7d)» — це стабільний, зрозумілий запас, що не залежить від того, скільки вікна вже минуло. Динамічний
-поріг (як на ahead-боці) робив би межу синього рухомою, що для «є куди розганятися» менш читабельно.
-Ширина зберігається як абсолютні секунди на `LimitWindow.blueBehindWidthSeconds` і ділиться на
-`windowDurationSeconds` (яке несе `BarLayout`) у `PacingModel.behindThreshold(windowDurationSeconds:)`.
+**Why a fixed width rather than a dynamic mirror of ahead.** "More than an hour behind (5h) / a day
+behind (7d)" is a stable, legible surplus that doesn't depend on how much of the window has already
+elapsed. A dynamic threshold (as on the ahead side) would make the blue boundary a moving target,
+which reads worse for "there's room to coast." The width is stored as absolute seconds on
+`LimitWindow.blueBehindWidthSeconds` and divided by `windowDurationSeconds` (carried by
+`BarLayout`) in `PacingModel.behindThreshold(windowDurationSeconds:)`.
 
-### 2. 20-хвилинний blue **start**-override
+### 2. The 20-minute blue **start** override
 
-У **перші 20 хв** вікна (`elapsed-since-start ≤ 1200 с`) бік «на пейсі/позаду» — **завжди зелений**,
-незалежно від порогу. На самому старті майже будь-який usage читається як великий запас, тож синій
-блимав би одразу. Це симетричний двійник orange-override з ADR-0044 (той стереже **кінець** вікна):
-`elapsed = windowDurationSeconds − remainingSeconds`, тож на відміну від orange-override, який
-працює лише з `remainingSeconds`, цей потребує **довжини вікна**. Константа —
-`PacingModel.pacingBlueStartOverrideSeconds` (1200 с).
+In the **first 20 min** of a window (`elapsed-since-start ≤ 1200 s`), the "on pace/behind" side is
+**always green**, regardless of the threshold. Right at the start, almost any usage reads as a large
+surplus, so blue would flash on immediately. This is the symmetric twin of the orange override from
+ADR-0044 (which guards the **end** of the window): `elapsed = windowDurationSeconds −
+remainingSeconds`, so unlike the orange override, which works purely off `remainingSeconds`, this
+one needs the **window's length**. The constant is
+`PacingModel.pacingBlueStartOverrideSeconds` (1200 s).
 
-### 3. `farBehind` — окремий severity-case, **спокійніший** за зелений
+### 3. `farBehind` — a separate severity case, **calmer** than green
 
-`PacingSeverity` тепер чотиритактний: `farBehind` (синій) → `calm` (зелений/жовтий) → `ahead`
-(помаранчевий) → `exhausted` (червоний). Порядок спокою — від найспокійнішого до найгучнішого.
+`PacingSeverity` is now a four-beat progression: `farBehind` (blue) → `calm` (green/yellow) →
+`ahead` (orange) → `exhausted` (red). The order runs from calmest to loudest.
 
-Критично: `farBehind` — **підвид спокою**, не гучності. Він не повинен вмикати reset-countdown чи
-інакше поводитись як «noisy». Тому:
+Critically: `farBehind` is a **subtype of calm**, not of loudness. It must not trigger the
+reset countdown or otherwise behave as "noisy." Hence:
 
-- `BarLayout.isCalm` (і `BarView.isCalm`) = `severity == .calm || severity == .farBehind` — обидва
-  «не варті прапорця»;
-- **але** `MenuBarLayout.selectReset` тестує «noisy» **явно** як `severity == .ahead || severity ==
-  .exhausted` (замість колишнього `!= .calm`). Без цієї правки додавання `farBehind` до `isCalm`
-  зробило б глибоко-позаду вікно «noisy» і почало б форсити countdown — регресія. Явний тест лишає
-  поведінку countdown **ідентичною** тій, що була до появи `farBehind`.
+- `BarLayout.isCalm` (and `BarView.isCalm`) = `severity == .calm || severity == .farBehind` — both
+  are "not worth a flag";
+- **but** `MenuBarLayout.selectReset` tests "noisy" **explicitly** as `severity == .ahead ||
+  severity == .exhausted` (instead of the former `!= .calm`). Without this fix, adding `farBehind`
+  to `isCalm` would have made a deeply-behind window "noisy" and started forcing the countdown — a
+  regression. The explicit test keeps countdown behavior **identical** to what it was before
+  `farBehind` existed.
 
-### 4. Обсяг — лише базові 5h/7d
+### 4. Scope — base 5h/7d only
 
-Синій показується **тільки** для базових 5-годинного та 7-денного барів. **Не** для
-моделеспецифічних (per-model / per-service) рядків і **не** для extra-usage (credits) — вони лишаються
-зеленими, як були. Розрізнення по поверхнях:
+Blue shows **only** for the base 5-hour and 7-day bars. **Not** for model-specific (per-model /
+per-service) rows, and **not** for extra-usage (credits) — those stay green, as before. The
+distinction across surfaces:
 
-- **Menu bar** уже несе лише 5h/7d (per-model там немає, credits — окрема `creditsIconColor`), тож
-  `calmedGapColor` пускає синю логіку без гейта, а `creditsIconColor` не чіпається.
-- **Popup** ділить один `PopupBarView` між базою, per-model і credits, тож додано прапорець
-  `PopupBarView.isBaseLimit` — `true` лише для рядків 0/1 (`PopupLayout.rows` завжди починає з 5h,
-  7d), `false` для per-model; credits йдуть сирим `addBar(bar:…)` і прапорця не отримують.
+- The **menu bar** already carries only 5h/7d (no per-model there; credits get their own
+  `creditsIconColor`), so `calmedGapColor` lets the blue logic through with no gate, and
+  `creditsIconColor` is left untouched.
+- The **popup** shares one `PopupBarView` across the base, per-model, and credits, so a
+  `PopupBarView.isBaseLimit` flag was added — `true` only for rows 0/1 (`PopupLayout.rows` always
+  starts with 5h, 7d), `false` for per-model; credits go through the raw `addBar(bar:…)` and never
+  get the flag.
 
-  > ⚠️ **Прапорець видалено [ADR-0115](0115-no-blue-on-per-model-windows.md).** Правило те саме, але
-  > живе тепер на `BarLayout.blueAllowed`, який читають і рендер, і `PacingBucket`. Гейт, видимий
-  > лише рендеру, був тією самою вадою, що зробила журнал розбіжним з екраном: модель про нього не
-  > знала й писала синій там, де попап малював зелений.
+  > ⚠️ **The flag was removed in [ADR-0115](0115-no-blue-on-per-model-windows.md).** The rule is
+  > the same, but now lives on `BarLayout.blueAllowed`, which both rendering and `PacingBucket`
+  > read. A gate visible only to rendering was the very flaw that made the journal diverge from the
+  > screen: the model had no idea about it and recorded blue where the popup was drawing green.
 
-### 5. Опція «Work harder» (не-calm синій)
+### 5. The "Work harder" option (non-calm blue)
 
-Нова appearance-опція (друга в секції *Menu Bar Widget*, одразу після «Calm non-critical colors»).
-Коли увімкнена, синя (`farBehind`) зона трактується як **не-calm**: вона **не** мутиться в білий під
-Calm colors, тобто синій завжди лишається кольоровим (нагадування «є куди розганятися»). Решта
-calm-станів (зелений/жовтий) мутяться як раніше. Ефект видно лише коли Calm colors увімкнено.
+A new appearance option (second in the *Menu Bar Widget* section, right after "Calm non-critical
+colors"). When enabled, the blue (`farBehind`) zone is treated as **non-calm**: it does **not** mute
+to white under Calm colors, i.e. blue always stays colored (a reminder that "there's room to
+coast"). The rest of the calm states (green/yellow) mute as before. The effect is visible only when
+Calm colors is on.
 
-- Дефолт — **вимкнено** (opt-in), ключ `PersistedConfig.workHarderColors`
+- Default is **off** (opt-in), key `PersistedConfig.workHarderColors`
   (`object(forKey:) as? Bool ?? false`).
-- У пресетах (#215): **Chill — вимкнено**, **Control freak — увімкнено**.
+- In the presets (#215): **Chill — off**, **Control freak — on**.
 
-### Колір і плюмбінг
+### Color and plumbing
 
-- Новий `ColorRole.paceBlue` (дефолт `.systemBlue`) — окрема семантична роль, щоб не перевантажувати
-  наявний `.blue` (idle-бар / maintenance-крапка).
-- `BarLayout` отримує нове збережене поле `windowDurationSeconds: Int`, заповнюване в
-  `PacingModel.barLayout(...)` з `window.durationSeconds`. Kit-`severity` і AppKit-`behindColor`
-  читають те саме поле, тож колір і severity не розходяться.
-- Формула — одна: `PacingModel.behindThreshold(...)`, спільна для `BarLayout.severity` (Kit) та
-  `PopupBarView.behindColor(_ l: BarLayout)` (AppKit). `behindColor` приймає цілий `BarLayout` (несе
-  `windowDurationSeconds`), тож start-override рахується однаково в обох шарах.
+- A new `ColorRole.paceBlue` (default `.systemBlue`) — a separate semantic role, so as not to
+  overload the existing `.blue` (the idle bar / maintenance dot).
+- `BarLayout` gets a new stored field `windowDurationSeconds: Int`, filled in
+  `PacingModel.barLayout(...)` from `window.durationSeconds`. Both the Kit's `severity` and
+  AppKit's `behindColor` read the same field, so color and severity never diverge.
+- The formula is a single one: `PacingModel.behindThreshold(...)`, shared by `BarLayout.severity`
+  (Kit) and `PopupBarView.behindColor(_ l: BarLayout)` (AppKit). `behindColor` takes the whole
+  `BarLayout` (which carries `windowDurationSeconds`), so the start override is computed the same
+  way in both layers.
 
-## Наслідки
+## Consequences
 
-- **Новий найспокійніший тон.** Глибоко-позаду тепер читається синім на базових барах обох поверхонь.
-- **Приховування спокійної смужки тепер ховає й синій.** Оскільки `farBehind ⊂ isCalm`,
-  глибоко-позаду бар ховається під тим самим вибором, що й зелений — **хай яке вікно обране**
-  ([ADR-0086](0086-tri-state-calm-bar-hiding.md); на час цього ADR це був булевий `hide-calm-7d`, що
-  вмів ховати лише 7-денну смужку). Це навмисно: синій спокійніший за зелений, тож якщо зелений
-  ховається — синій тим паче.
-- **Reset-countdown без змін.** `selectReset` рахує «noisy» через `.ahead`/`.exhausted`, тож
-  `farBehind` ніколи не форсить countdown — поведінка ідентична дореформеній.
-- **Порядок severity-рунгів на ahead-боці незмінний.** Змінена лише гілка `.onPaceOrBehind`: спершу
-  20-хв start-override → зелений, потім behind-поріг → синій/зелений.
-- **Credits та per-model поза обсягом.** Синій до них не застосовується; їхня поведінка (зокрема
-  мутинг credits-іконки) незмінна.
-- **ADR-0044 лишається чинним** для ahead-боку — цей запис лише додає behind-бік (з власним,
-  фіксованим порогом) і не
-  скасовує жодної його клаузи.
+- **A new calmest tone.** Deeply-behind now reads as blue on the base bars of both surfaces.
+- **Hiding the calm strip now also hides blue.** Since `farBehind ⊂ isCalm`, a deeply-behind bar
+  hides under the same choice as a green one — **regardless of which window is chosen**
+  ([ADR-0086](0086-tri-state-calm-bar-hiding.md); at the time of this ADR it was a boolean
+  `hide-calm-7d` that could only hide the 7-day strip). This is deliberate: blue is calmer than
+  green, so if green hides, blue hides even more so.
+- **No change to the reset countdown.** `selectReset` computes "noisy" via `.ahead`/`.exhausted`,
+  so `farBehind` never forces the countdown — behavior is identical to before the reform.
+- **The severity rung order on the ahead side is unchanged.** Only the `.onPaceOrBehind` branch
+  changed: first the 20-minute start override → green, then the behind threshold → blue/green.
+- **Credits and per-model are out of scope.** Blue does not apply to them; their behavior
+  (including credits-icon muting) is unchanged.
+- **ADR-0044 still stands** for the ahead side — this entry only adds the behind side (with its own,
+  fixed threshold) and doesn't revoke any of its clauses.

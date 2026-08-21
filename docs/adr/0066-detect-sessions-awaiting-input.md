@@ -3,50 +3,51 @@ status: proposed
 date: 2026-08-03
 ---
 
-# ADR-0066: Детекція сесій Claude Code, що очікують вводу користувача
+# ADR-0066: Detecting Claude Code sessions that are awaiting the user's input
 
-## Контекст
+## Context
 
-Виникла ідея показувати в TokenPace лічильник на кшталт «N awaiting input» — скільки локальних
-сесій Claude Code зараз **чекають на реакцію користувача** (permission-prompt, підтвердження плану,
-питання наприкінці ходу, `login required`). Це той самий стан, що рідний список агентів
-(FleetView) підписує як **«Needs input»**.
+The idea came up of showing a counter in TokenPace along the lines of "N awaiting input" — how many
+local Claude Code sessions are currently **waiting for the user to react** (a permission prompt, a
+plan confirmation, a question at the end of a turn, `login required`). This is the same state that
+the native agent list (FleetView) labels as **"Needs input"**.
 
-Питання розвилки: **звідки брати цей стан** — і як зробити це, не гатячи ресурси (застосунок
-опитує джерело періодично, поряд із poll-циклом usage-API).
+The question at the fork: **where to get that state from** — and how to do it without burning
+resources (the app polls its source periodically, alongside the usage API poll loop).
 
-Розглянуті джерела (усе — локальні файли під `~/.claude/`, лише читання):
+The sources considered (all of them local files under `~/.claude/`, read-only):
 
-1. **`~/.claude/projects/<proj>/<sessionId>.jsonl`** — повні транскрипти. Гіпотеза: останній
-   assistant-запис завершив хід (`stop_reason == end_turn`, або блок `AskUserQuestion`/
-   `ExitPlanMode`) і після нього немає user-відповіді → «awaiting input».
-2. **`~/.claude/sessions/<pid>.json`** — крихітні (~400 B) файли real-time стану, по одному на
-   живу сесію. Поле `status`: `busy` | `waiting` | `idle`.
-3. **`~/.claude/jobs/<jobId>/state.json`** — обчислений демоном агрегований стан сесії.
-   Поля: `state` (`working`/`blocked`/`done`), `tempo` (`active`/`blocked`/`idle`),
-   `needs` (текст на кшталт `"approve plan"` — присутнє **лише** коли потрібна реакція).
+1. **`~/.claude/projects/<proj>/<sessionId>.jsonl`** — full transcripts. The hypothesis: the last
+   assistant record ended the turn (`stop_reason == end_turn`, or an `AskUserQuestion`/
+   `ExitPlanMode` block) and there is no user reply after it → "awaiting input".
+2. **`~/.claude/sessions/<pid>.json`** — tiny (~400 B) real-time state files, one per live session.
+   The `status` field: `busy` | `waiting` | `idle`.
+3. **`~/.claude/jobs/<jobId>/state.json`** — the aggregated session state computed by the daemon.
+   The fields: `state` (`working`/`blocked`/`done`), `tempo` (`active`/`blocked`/`idle`), `needs`
+   (text along the lines of `"approve plan"` — present **only** when a reaction is required).
 
-Емпіричне тестування на живих сесіях (v2.1.212) показало вирішальні факти:
+Empirical testing on live sessions (v2.1.212) surfaced the decisive facts:
 
-- **JSONL ненадійний і оманливий.** Дві протилежні ситуації дають однаковий хвіст транскрипту:
-  і сесія, що реально чекає approve-plan, і сесія, що активно працює, закінчуються записом
-  `user`/`tool_result`. `ExitPlanMode`/permission-prompt у транскрипт як завершальний хід не
-  лягає. Плюс хвіст забитий мета-записами (`mode`, `permission-mode`, `last-prompt`, `attachment`,
-  `ai-title`, `agent-name`, `system` тощо), які треба відсіювати. Сигнал з JSONL збігся з реальним
-  станом лише в частині випадків.
-- **`sessions/status == "waiting"` — прямий real-time сигнал**, але **вужчий**: покриває активний
-  permission/plan-prompt, але семантичний «завершив хід питанням, чекаю підтвердження» він
-  подекуди все ще пише як `idle`. Приклад: сесія з `status: "idle"`, тоді як її `state.json` уже
-  знав `needs: "confirm the edit…"` — на екрані FleetView вона в списку «Needs input».
-- **`jobs/<jobId>/state.json → needs` — найточніший маркер**, бо його обчислює сам демон (він же
-  малює FleetView) і він охоплює **всі** підстани очікування одним прапорцем: permission,
-  approve-plan, end-turn-з-питанням, login-required. Бонус: текст `needs` — готова підказка для
-  тултипа («approve plan», «confirm the edit…»).
+- **The JSONL is unreliable and misleading.** Two opposite situations produce the same transcript
+  tail: a session genuinely waiting on approve-plan and a session working away both end with a
+  `user`/`tool_result` record. An `ExitPlanMode` or a permission prompt does not land in the
+  transcript as a closing turn. On top of that, the tail is stuffed with meta records (`mode`,
+  `permission-mode`, `last-prompt`, `attachment`, `ai-title`, `agent-name`, `system` and so on) that
+  have to be filtered out. The signal from the JSONL matched the real state only some of the time.
+- **`sessions/status == "waiting"` is a direct real-time signal**, but a **narrower** one: it covers
+  an active permission/plan prompt, but the semantic "ended the turn with a question, waiting for
+  confirmation" still sometimes gets written as `idle`. An example: a session with `status: "idle"`
+  whose `state.json` already knew `needs: "confirm the edit…"` — on the FleetView screen it sits in
+  the "Needs input" list.
+- **`jobs/<jobId>/state.json → needs` is the most accurate marker**, because the daemon itself
+  computes it (the same daemon that draws FleetView) and it covers **every** waiting substate under
+  one flag: permission, approve-plan, end-turn-with-a-question, login-required. A bonus: the `needs`
+  text is a ready-made hint for a tooltip ("approve plan", "confirm the edit…").
 
-## Рішення
+## Decision
 
-**Рахувати «awaiting input» із двох дешевих джерел (OR), джойнячи їх лише по живих сесіях.
-JSONL не читати взагалі.**
+**Count "awaiting input" from two cheap sources (OR), joining them only over live sessions. Do not
+read the JSONL at all.**
 
 ```
 needsInput(session) =
@@ -56,249 +57,271 @@ needsInput(session) =
       OR (status != "busy" AND fresh(state.json) AND jobs/<jobId>/state.json.tempo == "blocked"))
 
 alive(session) =
-      процес із session.pid існує AND його p_starttime == session.procStart
-      (нечитабельний pid/procStart → fail-open: вважаємо живою; див. постскриптум #275)
+      the process with session.pid exists AND its p_starttime == session.procStart
+      (unreadable pid/procStart → fail open: treat it as alive; see postscript #275)
 
 fresh(state.json) =
-      state.json.updatedAt (ISO) >= session.statusUpdatedAt (ms) − 60 с
-      (недоступний timestamp → fail-open: вважаємо свіжим)
+      state.json.updatedAt (ISO) >= session.statusUpdatedAt (ms) − 60 s
+      (unavailable timestamp → fail open: treat it as fresh)
 
 working(session)  =  status == "busy"  OR  state.json.state == "working"
-idle/done         =  інакше
+idle/done         =  otherwise
 ```
 
-> **Freshness-guard (див. постскриптум нижче).** Гілки `needs`/`tempo` беруться зі `state.json`,
-> який оновлює **власний** сканер Claude Code. Для worktree-сесій цей сканер розсинхронюється і
-> **заморожує** `state.json` на минулій фазі — тож ці дві гілки враховуємо лише коли `state.json`
-> не старший за живий session-файл. `status == "waiting"` (крок 1) — безумовний. Fail-open зберігає
-> дотеперішню поведінку там, де timestamp прочитати не вдалось.
+> **The freshness guard (see the postscript below).** The `needs`/`tempo` branches come from
+> `state.json`, which Claude Code's **own** scanner updates. For worktree sessions that scanner
+> desynchronizes and **freezes** `state.json` at a past phase — so we take those two branches into
+> account only while `state.json` is not older than the live session file. `status == "waiting"`
+> (step 1) is unconditional. Failing open preserves the previous behavior wherever the timestamp
+> could not be read.
 
-- Джерело переліку — **живі** `sessions/*.json` (їх одиниці). Для кожної беремо `jobId` і зазираємо
-  **тільки** в `jobs/<jobId>/state.json` — ніколи не скануємо весь `jobs/` (там десятки-сотні
-  **мертвих** каталогів завершених сесій; скан усіх дав би хибно завищений лічильник).
-- `sessions/*.json` пишеться компактно (`"status":"waiting"`), `state.json` — з пробілами
-  (`"needs": "approve plan"`). Тож патерни читання мають толерувати пробіли; повний `JSONDecoder`
-  не потрібен — вистачає таргетованих regex на 3-4 поля.
-- Текст `needs` показуємо як підказку (тултип/друга лінія), як це робить FleetView.
+- The list comes from **live** `sessions/*.json` (there are only a handful). For each one we take
+  the `jobId` and look **only** into `jobs/<jobId>/state.json` — we never scan the whole of `jobs/`
+  (it holds tens to hundreds of **dead** directories from finished sessions; scanning all of them
+  would give a falsely inflated counter).
+- `sessions/*.json` is written compactly (`"status":"waiting"`), `state.json` with whitespace
+  (`"needs": "approve plan"`). So the reading patterns have to tolerate whitespace; a full
+  `JSONDecoder` is unnecessary — targeted regexes over three or four fields are enough.
+- We show the `needs` text as a hint (a tooltip or a second line), the way FleetView does.
 
-### Чому саме так (вартість)
+### Why this way (the cost)
 
-Заміряно на реальних файлах:
+Measured against real files:
 
-| Підхід | Файли / байти | Час |
+| Approach | Files / bytes | Time |
 | --- | --- | --- |
-| Скан JSONL-транскриптів (хибний) | 102 файли, ~20 MB хвостів | десятки мс + мороки |
-| `sessions/*.json` + `jobs/<jobId>/state.json` | ~14 крихітних файлів, одиниці KB | **0.18 ms** (Swift, substring) |
+| Scanning the JSONL transcripts (wrong) | 102 files, ~20 MB of tails | tens of ms plus the hassle |
+| `sessions/*.json` + `jobs/<jobId>/state.json` | ~14 tiny files, a few KB | **0.18 ms** (Swift, substring) |
 
-### Каденція: FSEvents (основний канал) + рідкий safety-poll
+### Cadence: FSEvents (the main channel) plus a rare safety poll
 
-> Повний дизайн конвеєра оновлення (FSEvents + safety-poll + mtime-кеш, гейтинг, дебаунс,
-> дисципліна логування) — у [docs/design/awaiting-input-refresh.md](../design/awaiting-input-refresh.md).
+> The full design of the refresh pipeline (FSEvents plus the safety poll plus the mtime cache,
+> gating, debouncing, logging discipline) lives in
+> [docs/design/awaiting-input-refresh.md](../design/awaiting-input-refresh.md).
 
-Оновлення лічильника — **event-driven через FSEvents**, а не чистий polling. Підписуємось на дерева
-`~/.claude/sessions` і `~/.claude/jobs` (`FSEventStreamCreate` + `kFSEventStreamCreateFlagFileEvents`);
-система будить нас зі **списком змінених шляхів**, а не за таймером. Параметр `latency` (~0.5–1 с)
-коалесить сплеск змін у одну пачку — на кожну пачку робимо **один** інкрементальний скан лише
-змінених шляхів.
+Updating the counter is **event-driven through FSEvents**, not pure polling. We subscribe to the
+`~/.claude/sessions` and `~/.claude/jobs` trees (`FSEventStreamCreate` plus
+`kFSEventStreamCreateFlagFileEvents`); the system wakes us with a **list of changed paths** rather
+than on a timer. The `latency` parameter (~0.5–1 s) coalesces a burst of changes into one batch — for
+each batch we do **one** incremental scan of the changed paths only.
 
-Понад це — **дуже рідкий safety-net poll (~30–60 с)**, щоб догнати події, які FSEvents міг
-коалесити/пропустити (сплячка, логаут, перевантаження). Це та сама захисна філософія, що й
-graceful fallback на недокументований формат — не покладаємось на один крихкий канал.
+On top of that — a **very rare safety-net poll (~30–60 s)** to catch up on events FSEvents might
+have coalesced or dropped (sleep, logout, overload). This is the same defensive philosophy as
+gracefully falling back on an undocumented format — we do not rely on a single fragile channel.
 
-**Гейт «Claude запущений і екран не заблокований»** лягає природно на **старт/стоп стріму**:
-розблокування / поява процесу `claude` → стартуємо стрім і робимо один catch-up скан; блокування /
-вихід Claude → зупиняємо стрім. Ці сигнали в шелі вже є (`ProcessClaudeActivityProbe`, pause-when-
-screen-locked). Окремого фонового таймера в idle не тримаємо.
+**The "Claude is running and the screen is not locked" gate** maps naturally onto **starting and
+stopping the stream**: unlock / a `claude` process appearing → start the stream and do one catch-up
+scan; lock / Claude exiting → stop the stream. Those signals already exist in the shell
+(`ProcessClaudeActivityProbe`, pause-when-screen-locked). We keep no separate background timer while
+idle.
 
-**Трейдофи каналів** (чому гібрид, а не крайнощі):
+**The channels' trade-offs** (why a hybrid rather than either extreme):
 
-| | Poll 5 с | Тільки FSEvents | **Гібрид (обрано)** |
+| | Poll every 5 s | FSEvents only | **Hybrid (chosen)** |
 | --- | --- | --- | --- |
-| CPU у спокої | будиться завжди | ~0 | ~0 (рідкий safety-poll) |
-| Латентність | до 5 с | ~`latency`, майже миттєво | майже миттєво |
-| Ризик пропустити подію | низький | є (сон/логаут/коалесинг) | низький (poll підстраховує) |
-| Складність | низька | середня (catch-up після сну) | вища (обидва канали) |
+| CPU at rest | wakes up regardless | ~0 | ~0 (a rare safety poll) |
+| Latency | up to 5 s | ~`latency`, near-instant | near-instant |
+| Risk of missing an event | low | real (sleep/logout/coalescing) | low (the poll backstops it) |
+| Complexity | low | medium (catch-up after sleep) | higher (both channels) |
 
-- **Підписуємось на КАТАЛОГИ, не на файли.** FSEvents — path/directory-based (не inode/fd).
-  Реєструємо два шляхи-каталоги `sessions/` і `jobs/` (рекурсивно), а не конкретні `.json` —
-  бо набір файлів змінний: кожна нова сесія створює новий `sessions/<pid>.json`, старі
-  видаляються. Подія на каталог покриває create/modify/delete будь-чого всередині, тож нові
-  сесії підхоплюються самі. Watcher не інспектує шляхи з події — будь-яка пачка означає «дерево
-  змінилось» → один повний stateless-скан (перечитує каталог, отже й нові файли). Це також знімає
-  проблему атомарних перезаписів (`write temp + rename` міняє inode, але шлях/каталог лишаються).
-- **Скан stateless, без кешу.** Ядро (`AwaitingInputScanner`) — чистий value: `scan()` щоразу читає
-  жменю sub-KB файлів (~0.18 ms). Кеш `шлях → (mtime, awaiting)` **навмисно прибрано**: з FSEvents
-  ми й так скануємо лише коли дерево змінилось, тож кеш економив би мікросекунди ціною stateful-
-  класу й mtime-edge-кейсів. **Кеш доречний лише в дизайні polling БЕЗ FSEvents** (частий таймер,
-  де більшість тіків нічого не змінюють) — якщо колись повернемось до чистого polling, тоді й
-  повернути per-session mtime-кеш.
+- **We subscribe to DIRECTORIES, not files.** FSEvents is path/directory-based (not inode/fd). We
+  register the two directory paths `sessions/` and `jobs/` (recursively) rather than specific
+  `.json` files — because the set of files is a moving target: every new session creates a new
+  `sessions/<pid>.json`, and old ones get deleted. An event on the directory covers the creation,
+  modification or deletion of anything inside it, so new sessions are picked up on their own. The
+  watcher does not inspect the paths in the event — any batch means "the tree changed" → one full
+  stateless scan (which re-reads the directory, and therefore the new files too). That also removes
+  the problem of atomic overwrites (`write temp + rename` changes the inode, but the path and the
+  directory stay put).
+- **The scan is stateless, with no cache.** The core (`AwaitingInputScanner`) is a pure value:
+  `scan()` reads a handful of sub-KB files every time (~0.18 ms). The `path → (mtime, awaiting)`
+  cache was **deliberately removed**: with FSEvents we only scan when the tree has changed anyway, so
+  the cache would have saved microseconds at the price of a stateful class and mtime edge cases. **A
+  cache only makes sense in a polling design WITHOUT FSEvents** (a frequent timer where most ticks
+  change nothing) — if we ever go back to pure polling, that is when to bring the per-session mtime
+  cache back.
 
-Прецедент доступу до `~/.claude/…` уже є — архіватор логів (ADR-0031).
+There is already a precedent for reading `~/.claude/…` — the log archiver (ADR-0031).
 
-## Наслідки
+## Consequences
 
-**Плюси.** Точний збіг із тим, що показує FleetView; майже нульова вартість; готовий текст підказки;
-жодного крихкого евристичного парсингу транскриптів.
+**Upsides.** An exact match with what FleetView shows; near-zero cost; a ready-made hint text; no
+fragile heuristic transcript parsing.
 
-**Мінуси / ризики.**
+**Downsides / risks.**
 
-- **Приватний, недокументований формат.** `sessions/*.json`, `jobs/*/state.json` та значення полів
-  (`status`, `state`, `tempo`, `needs`) — внутрішня кухня Claude Code (спостережено на **v2.1.212**).
-  Можуть змінитися між версіями без попередження. Обов'язковий **graceful fallback**: відсутнє поле /
-  каталог / нове значення → трактуємо як «не awaiting», лічильник не падає, фіча деградує тихо.
-- **Стейл-файли.** `sessions/*.json` можуть лишатися після мертвого процесу. Перед зарахуванням —
-  liveness-перевірка по `pid` (`kill(pid, 0)`), і/або відсів за дуже старим `statusUpdatedAt`.
-- **Розсинхрон джерел** — саме тому OR обох, а не лише `status`.
-- **Сесії без `jobId`/без `state.json`** (інтерактивна в іншому репо; свіжозапущена з порожнім
-  `state.json`) — код мусить це толерувати й падати назад на `sessions/status`.
-- **Subagent/fan-out.** `state.json.fan[]`/`inFlight.tasks` — це підагенти всередині job, **не**
-  окремі сесії. Не рахувати їх як окремі одиниці «awaiting input»; стан очікування — на рівні
-  top-level job.
+- **A private, undocumented format.** `sessions/*.json`, `jobs/*/state.json` and the fields' values
+  (`status`, `state`, `tempo`, `needs`) are Claude Code's internal machinery (observed on
+  **v2.1.212**). They can change between versions without warning. A **graceful fallback** is
+  mandatory: a missing field, directory or new value → treat it as "not awaiting", the counter does
+  not crash, and the feature degrades quietly.
+- **Stale files.** `sessions/*.json` can survive a dead process. Before counting one, check liveness
+  by `pid` (`kill(pid, 0)`) and/or filter out a very old `statusUpdatedAt`.
+- **The sources desynchronize** — which is exactly why we OR both rather than taking `status` alone.
+- **Sessions with no `jobId` or no `state.json`** (an interactive one in another repo; a
+  freshly-launched one with an empty `state.json`) — the code has to tolerate that and fall back on
+  `sessions/status`.
+- **Subagents and fan-out.** `state.json.fan[]`/`inFlight.tasks` are subagents inside a job, **not**
+  separate sessions. Do not count them as separate "awaiting input" units; the waiting state lives at
+  the level of the top-level job.
 
-## Постскриптум: freshness-guard проти замороженого `state.json` (worktree-баг)
+## Postscript: a freshness guard against a frozen `state.json` (the worktree bug)
 
-Після впровадження виявився конкретний прояв ризику «Стейл-файли» вище, вартий окремого запису, бо
-він давав **фантомну «руку», що не гасне**.
+After this shipped, a specific instance of the "stale files" risk above turned up, worth its own
+record because it produced a **phantom hand that never went down**.
 
-**Симптом.** Worktree-сесія, яка давно пройшла approve-plan (працює далі або вже idle), нескінченно
-рахувалася як «awaiting input». У FleetView Claude Code вона так само лишалася з маркером «Needs
-input», хоча реального очікування не було.
+**The symptom.** A worktree session that had long since passed approve-plan (either working on or
+already idle) was counted as "awaiting input" forever. In Claude Code's own FleetView it likewise
+kept its "Needs input" marker, even though nothing was actually waiting.
 
-**Першопричина (у Claude Code, не в нас).** Поля `needs`/`tempo` у `jobs/<jobId>/state.json`
-оновлює не сесія, а окремий сканер демона, що дочитує транскрипт із збереженого `linkScanPath`. Для
-worktree-сесій цей шлях деривується з **не-worktree** каталогу проєкту й указує на транскрипт, якого
-там немає (реальний лежить у каталозі з worktree-суфіксом). Сканер ніколи не просувається → `state.json`
-**замерзає** на фазі, яку записав останньою (типово `needs:"approve plan"` + `tempo:"blocked"`).
-Сесія тим часом живе далі, а `state.json` досі рекламує «awaiting».
+**The root cause (in Claude Code, not in us).** The `needs`/`tempo` fields in
+`jobs/<jobId>/state.json` are updated not by the session but by a separate daemon scanner that reads
+the transcript from a stored `linkScanPath`. For worktree sessions that path is derived from the
+**non-worktree** project directory and points at a transcript that is not there (the real one lives
+in the directory with the worktree suffix). The scanner never advances → `state.json` **freezes** at
+whatever phase it wrote last (typically `needs:"approve plan"` plus `tempo:"blocked"`). The session
+meanwhile carries on, while `state.json` still advertises "awaiting".
 
-**Наш фікс — freshness-guard (`AwaitingInputScanner`).** Довіряємо `needs`/`tempo` **лише поки
-`state.json` не помітно старший за живий session-файл** (`sessions/*.json`, який демон переписує на
-кожну зміну статусу). Порівнюємо `session.statusUpdatedAt` (ms epoch) з `state.json.updatedAt`
-(ISO-8601 — **інший формат**, парситься окремо) з толерантністю **60 с** на нормальний
-міжпроцесний лаг. Заморожений стан відстає на хвилини-години, тож guard спрацьовує впевнено, а
-`status == "waiting"` (прямий real-time сигнал) лишається безумовним.
+**Our fix — a freshness guard (`AwaitingInputScanner`).** We trust `needs`/`tempo` **only while
+`state.json` is not noticeably older than the live session file** (`sessions/*.json`, which the
+daemon rewrites on every status change). We compare `session.statusUpdatedAt` (ms epoch) against
+`state.json.updatedAt` (ISO-8601 — a **different format**, parsed separately) with a **60 s**
+tolerance for normal inter-process lag. A frozen state lags by minutes to hours, so the guard fires
+confidently, while `status == "waiting"` (the direct real-time signal) stays unconditional.
 
-**Fail-open.** Якщо будь-який timestamp не читається — вважаємо стан свіжим (тобто поводимось як до
-guard). Guard **лише пригнічує** доведено-заморожений сигнал; він ніколи не глушить сесію, чию
-несвіжість не може довести. Тож дефект формату деградує до дотеперішньої поведінки, а не мовчазної
-втрати реальних «awaiting».
+**Fail open.** If either timestamp cannot be read, we treat the state as fresh (that is, behave as we
+did before the guard). The guard **only suppresses** a signal it has proven frozen; it never silences
+a session whose staleness it cannot demonstrate. So a format defect degrades to the previous behavior
+rather than silently losing real "awaiting" sessions.
 
-Обхід на боці демона (виправити `linkScanPath` у `state.json`) можливий, але точковий і нестійкий:
-нова worktree-сесія знову запише хибний шлях. Правильний остаточний фікс — у самому Claude Code
-(деривувати `linkScanPath` з `worktreePath`); guard у нас робить фічу стійкою незалежно від того.
+A workaround on the daemon's side (fixing `linkScanPath` in `state.json`) is possible, but it is a
+point fix and it does not hold: a new worktree session will write the wrong path again. The right
+final fix belongs in Claude Code itself (deriving `linkScanPath` from `worktreePath`); our guard makes
+the feature robust regardless.
 
-## Постскриптум: `busy`-гард проти залипання після схвалення плану
+## Postscript: a `busy` guard against sticking after a plan is approved
 
-Другий прояв тієї ж родини «job-state бреше», який freshness-guard **не** ловить.
+A second instance of the same "the job state lies" family, and one the freshness guard does **not**
+catch.
 
-**Симптом.** Одразу після схвалення плану рука горить, хоча сесія вже працює. У FleetView при цьому
-чесно `0 awaiting input`, а сесія — `Working · approve plan`. Гасне сама, без втручання; тривалість
-дорівнює тривалості ходу — від десятків секунд до десятків хвилин у фонових джобах.
+**The symptom.** Right after a plan is approved the hand lights up even though the session is already
+working. FleetView at that moment honestly reports `0 awaiting input`, and the session reads
+`Working · approve plan`. It goes out on its own, without intervention; it lasts exactly as long as
+the turn does — from tens of seconds to tens of minutes in background jobs.
 
-**Докази (Claude Code v2.1.220).** Знімок живих файлів у момент, коли рука горіла:
+**The evidence (Claude Code v2.1.220).** A snapshot of the live files at a moment when the hand was
+lit:
 
 ```
-sessions/47273.json:  status = "busy"             ← правда: сесія виконує хід
-jobs/83af0c92:        needs  = "approve plan"     ← залипло на фазі апруву
+sessions/47273.json:  status = "busy"             ← the truth: the session is running a turn
+jobs/83af0c92:        needs  = "approve plan"     ← stuck at the approval phase
                       state  = "blocked"
                       tempo  = "blocked"
-                      updatedAt = 15:58:25Z       ← заморожено в момент схвалення
+                      updatedAt = 15:58:25Z       ← frozen at the moment of approval
 ```
 
-У момент згасання той самий джоб: `state:"done"`, `tempo:"idle"`, `needs:null`. Тобто демон
-переписує job-state **лише наприкінці ходу** — доти `needs` реклами «awaiting» не втрачає.
+At the moment it went out, the same job read `state:"done"`, `tempo:"idle"`, `needs:null`. So the
+daemon rewrites the job state **only at the end of the turn** — until then `needs` keeps advertising
+"awaiting".
 
-**Чому freshness-guard безсилий.** Він *відносний*: порівнює `state.json.updatedAt` із
-`session.statusUpdatedAt`. Після апруву замерзають **обидва** таймстемпи на одному інстанті, тож
-пара виглядає «свіжою» (вердикт `fresh=fresh`) і залипле `needs` проходить. Guard закриває випадок
-«job-state відстає від живої сесії»; тут не відстає ніщо.
+**Why the freshness guard is powerless here.** It is *relative*: it compares `state.json.updatedAt`
+against `session.statusUpdatedAt`. After the approval **both** timestamps freeze at the same instant,
+so the pair looks "fresh" (the verdict is `fresh=fresh`) and the stuck `needs` sails through. The
+guard closes the case "the job state lags behind a live session"; here nothing lags.
 
-**Фікс — `status == "busy"` ⇒ не awaiting.** Session-файл у цій ситуації єдиний каже правду. Умова
-стоїть **після** кроку 1, щоб реальний prompt (`status == "waiting"`) лишався безумовним, і
-**перед** читанням job-state, який у цій фазі не заслуговує довіри. Це та сама `working(session)`,
-що вже визначена в «Рішенні» вище — просто тепер вона застосована.
+**The fix — `status == "busy"` ⇒ not awaiting.** In this situation the session file is the only one
+telling the truth. The condition sits **after** step 1, so a real prompt (`status == "waiting"`)
+stays unconditional, and **before** reading the job state, which does not deserve trust in this
+phase. This is the very same `working(session)` already defined in "Decision" above — only now it is
+actually applied.
 
-**Межі.** Гард довіряє тому, що демон акуратно веде `status`. Якби сесія колись реально чекала з
-`status:"busy"`, ми б таку руку загубили — на зібраних знімках такого не траплялося (всі фантоми
-мали `busy`, єдине справжнє очікування прийшло гілкою `status == "waiting"`).
+**The limits.** The guard trusts the daemon to maintain `status` carefully. If a session ever really
+did wait with `status:"busy"`, we would lose that hand — in the snapshots collected, that never
+happened (every phantom had `busy`, and the one genuine wait arrived through the `status == "waiting"`
+branch).
 
-**Альтернативи, які лишаються на столі**, якщо симптом колись повернеться в іншій формі:
+**Alternatives that stay on the table** if the symptom ever comes back in another form:
 
-- **Абсолютний stale-поріг** — ігнорувати `needs`/`tempo`, якщо `state.json` не оновлювався довше
-  за N хвилин. Ловить будь-яке залипання, не знаючи його природи, але N — вгадування: довгий хід і
-  справжнє довге очікування виглядають однаково.
-- **Liveness-перевірка по `pid`** (`kill(pid, 0)`) — відсіює осиротілі session-файли мертвих
-  процесів; ризик, уже названий у «Наслідках» вище й досі не закритий.
-- **Семантика `detail`** — поле, яке демон тепер веде замість/поряд із `needs`, містить репліку
-  користувача (у нашому знімку — «давай спробуємо»). Розбирати вільний текст крихко; не рекомендовано.
+- **An absolute stale threshold** — ignore `needs`/`tempo` if `state.json` has not been updated for
+  more than N minutes. It catches any freeze without knowing its nature, but N is guesswork: a long
+  turn and a genuinely long wait look identical.
+- **A liveness check by `pid`** (`kill(pid, 0)`) — filters out orphaned session files of dead
+  processes; a risk already named in "Consequences" above and still open.
+- **The semantics of `detail`** — a field the daemon now maintains instead of, or alongside, `needs`,
+  containing the user's own line (in our snapshot, "давай спробуємо"). Parsing free text is fragile;
+  not recommended.
 
-## Постскриптум: watcher не працює під data-стубами
+## Postscript: the watcher does not run under data stubs
 
-Гейт запуску watcher'а звужено третьою умовою — `currentScenario == .realNetwork`
-(`updateAwaitingInputWatcher()`). Причина: `TOKENPACE_STUB` існує, щоб дати **заморожений
-відтворюваний кадр** на канованих даних, а watcher читає **живі** `~/.claude/sessions|jobs`. Тобто на
-стубі в кадр протікав реальний стан: лічильник стрибав від сесій, які випадково чекали вводу в момент
-зйомки, і скриншот переставав бути детермінованим. Побічно це прибирає й FSEvents-стрім та
-45-секундний safety-таймер на стуб-запусках, де вони ні для чого.
+The watcher's start gate was narrowed with a third condition — `currentScenario == .realNetwork`
+(`updateAwaitingInputWatcher()`). The reason: `TOKENPACE_STUB` exists to give a **frozen,
+reproducible frame** on canned data, while the watcher reads the **live** `~/.claude/sessions|jobs`.
+So under a stub, real state leaked into the frame: the counter jumped around with whatever sessions
+happened to be waiting for input at capture time, and the screenshot stopped being deterministic. As
+a side effect this also removes the FSEvents stream and the 45-second safety timer on stub runs,
+where they serve no purpose.
 
-Це той самий гейт, що вже стоїть на журналі використання (ADR-0067): синтетика не потрапляє в живі
-підсистеми. Гейт перераховується і при **живому** перемиканні сценарію в dev-tools (#187, ADR-0047),
-тож перехід stub → real піднімає watcher без рестарту.
+This is the same gate that already stands over the usage journal (ADR-0067): synthetic data does not
+reach live subsystems. The gate is also recomputed when the scenario is switched **live** in dev
+tools (#187, ADR-0047), so going from stub to real brings the watcher up without a restart.
 
-Спосіб перевіряти індикатор під стубом лишається той самий — `TOKENPACE_AWAITING=N` синтезує сесії,
-оминаючи watcher і master-тумблер. У Settings (Extra features → Session status, Appearance) під стубом
-показано ⚠️ «Stubbed in this development build.»; тумблери лишаються активними, бо збережене значення
-далі діє для наступного реального запуску.
+The way to check the indicator under a stub is unchanged — `TOKENPACE_AWAITING=N` synthesizes
+sessions, bypassing the watcher and the master toggle. In Settings (Extra features → Session status,
+Appearance) a stub shows a ⚠️ "Stubbed in this development build."; the toggles stay active, because
+the saved value still applies to the next real run.
 
-## Постскриптум: крихкість декларуємо, а не детектимо (#243)
+## Postscript: fragility is declared, not detected (#243)
 
-Ризик «приватний, недокументований формат» вище має тихий режим відмови: якщо Claude Code перейменує
-поле, регекси перестануть матчитись, лічильник стане **0**, а при нулі індикатор ховається — тобто
-зламана фіча виглядає точно як спокійний день.
+The "private, undocumented format" risk above has a silent failure mode: if Claude Code renames a
+field, the regexes stop matching, the counter goes to **0**, and at zero the indicator hides — so a
+broken feature looks exactly like a calm day.
 
-У [#243](https://github.com/artem-from-ua/tokenpace/issues/243) пропонувалося це **детектити**:
-окремий стан «живі `sessions/*.json` є, але жоден не дав ані `status`, ані `jobId`» + рядок у
-Troubleshoot. Відхилено (closed as not planned) з двох причин:
+[#243](https://github.com/artem-from-ua/tokenpace/issues/243) proposed **detecting** that: a separate
+state for "there are live `sessions/*.json`, but none of them yielded either a `status` or a `jobId`"
+plus a line in Troubleshoot. Rejected (closed as not planned) for two reasons:
 
-- **Зміна невидима для користувача.** Menu bar і попап у кожному стані лишаються ідентичними (сам
-  автор issue на цьому наполягає — попередження в барі було б гіршим шумом за баг). Єдина поверхня —
-  рядок у ⌥-гейтованому Troubleshoot, тобто діагностика для мейнтейнера, а не фіча.
-- **Форма майбутнього зламу невідома.** Детект `live > 0, parsed == 0` ловить перейменування поля,
-  але **не** ловить перенесення каталогів (`live == 0` читається як «Claude не запущений») і **не**
-  ловить часткове перейменування (лічильник валідний, але тихо занижений). Покривається один сценарій
-  із трьох.
+- **The change is invisible to the user.** The menu bar and the popup stay identical in every state
+  (the issue's own author insists on this — a warning in the bar would be worse noise than the bug).
+  The only surface is a line in the ⌥-gated Troubleshoot, which is diagnostics for the maintainer,
+  not a feature.
+- **The shape of the future break is unknown.** Detecting `live > 0, parsed == 0` catches a renamed
+  field, but it does **not** catch the directories moving (`live == 0` reads as "Claude is not
+  running") and it does **not** catch a partial rename (the counter stays valid but is quietly
+  undercounting). One scenario out of three is covered.
 
-**Натомість крихкість зафіксовано як властивість фічі** — постійний ⚠️-рядок під тумблером у
-Settings → Extra features → Session status: фіча читає внутрішні файли Claude Code, які не
-документовані й можуть бути змінені на боці Anthropic будь-коли, і тоді лічильник може перестати
-коректно з'являтися й зникати. На відміну від умовної stub-підказки в заголовку секції, цей рядок
-видимий **завжди**, зокрема в релізній збірці.
+**Instead, the fragility is recorded as a property of the feature** — a permanent ⚠️ line under the
+toggle in Settings → Extra features → Session status: the feature reads Claude Code's internal files,
+which are undocumented and may be changed on Anthropic's side at any time, after which the counter may
+stop appearing and disappearing correctly. Unlike the conditional stub hint in the section's header,
+this line is visible **always**, including in a release build.
 
-Наявний transition-лог (`AwaitingInputWatcher`, `awaiting-input N → M`) лишається як є: він фіксує
-перехід у нуль, але не відрізняє злам формату від чесного завершення сесій. Повернутися до детекції
-варто тоді, коли формат реально зламається — реальна форма відмови підкаже точніший сигнал.
+The existing transition log (`AwaitingInputWatcher`, `awaiting-input N → M`) stays as it is: it
+records the transition to zero, but does not distinguish a format break from sessions honestly
+finishing. Coming back to detection is worth it once the format actually breaks — the real shape of
+the failure will suggest a more precise signal.
 
-## Альтернатива: hooks (відкладено)
+## Alternatives considered
 
-Замість polling — власні хуки Claude Code (`Stop`, `Notification`), що дописують подію в умовний
-`~/.tokenpace/awaiting.jsonl`, який TokenPace читає. Дає точний **момент** повернення ходу
-користувачу і не залежить від внутрішнього формату файлів стану. Мінус — вимагає, щоб користувач
-встановив хуки в свій `~/.claude/settings.json` (крок налаштування, крихкість при оновленнях). Для
-першої ітерації обрано **polling файлів стану** як zero-config; hooks лишаємо як можливий пізніший
-точніший канал, якщо formату файлів стане недостатньо.
+Instead of polling — Claude Code's own hooks (`Stop`, `Notification`) appending an event to a
+hypothetical `~/.tokenpace/awaiting.jsonl` that TokenPace reads. That gives the exact **moment** the
+turn returns to the user and does not depend on the internal format of the state files. The downside:
+it requires the user to install hooks into their `~/.claude/settings.json` (a setup step, and
+fragility across updates). For the first iteration we chose **polling the state files** as
+zero-config; hooks are deferred as a possible more precise channel later, if the file format proves
+insufficient.
 
-## Постскриптум: живої мережі мало — вона має бути обрана явно (#267)
+## Postscript: a live network is not enough — it has to be chosen explicitly (#267)
 
-Гейт із попереднього постскриптуму (`currentScenario == .realNetwork`) виявився недостатнім, і саме
-watcher це й викрив.
+The gate from the previous postscript (`currentScenario == .realNetwork`) turned out to be
+insufficient, and it was the watcher that exposed it.
 
-`TOKENPACE_STUB=healthy` — неіснуючий id — мовчки резолвився в `.realNetwork` (див. постскриптум
-ADR-0047), тож прогін, задуманий як стубовий, ішов у живу мережу. Візуально він був схожий на стуб
-у всьому — окрім `hand.raised`, який показував **реальні** сесії мейнтейнера, що чекали вводу. Тобто
-единий гейт «це `.realNetwork`?» не відрізняє живу мережу, яку **обрали**, від живої мережі, в якій
-випадково **опинились**.
+`TOKENPACE_STUB=healthy` — a non-existent id — silently resolved to `.realNetwork` (see ADR-0047's
+postscript), so a run intended as stubbed went out to the live network. Visually it looked like a stub
+in every respect — except for `hand.raised`, which showed the maintainer's **real** sessions waiting
+for input. In other words, the single gate "is this `.realNetwork`?" does not distinguish a live
+network that was **chosen** from a live network we merely **ended up in**.
 
-Гейт доповнено четвертою умовою — `scenarioWasExplicit`:
+The gate gained a fourth condition — `scenarioWasExplicit`:
 
 ```swift
 let wantWatcher = PersistedConfig.awaitingInputEnabled
@@ -307,97 +330,101 @@ let wantWatcher = PersistedConfig.awaitingInputEnabled
     && scenarioWasExplicit
 ```
 
-Явним вважається `TOKENPACE_STUB=real`, вибір «Real network (no stub)» у dev-tools
-(`switchScenario` виставляє прапорець) і звичайний запуск встановленого `.app` без env — штатний
-режим продакшену. Свідомо гейтимо на **намірі**, а не на типі збірки: інакше зникла б можливість
-перевіряти підняту руку на живих сесіях у `swift run`, а це єдиний спосіб вправити справжній сканер
-(`TOKENPACE_AWAITING=N` короткозамикає watcher і сканер не виконується).
+Explicit means `TOKENPACE_STUB=real`, picking "Real network (no stub)" in dev tools (`switchScenario`
+sets the flag), and an ordinary launch of the installed `.app` with no env — the normal production
+mode. We deliberately gate on **intent** rather than on the build type: otherwise it would become
+impossible to check the raised hand against live sessions under `swift run`, and that is the only way
+to exercise the real scanner (`TOKENPACE_AWAITING=N` short-circuits the watcher and the scanner never
+runs).
 
-Для кінцевого користувача не змінюється нічого.
+Nothing changes for the end user.
 
-## Постскриптум: «жива сесія» перевіряється за pid, а не припускається (#275)
+## Postscript: a "live session" is checked by pid, not assumed (#275)
 
-Формула рішення каже «джойн лише по **живих** сесіях», і так само формулює це docstring сканера. Але
-живість була **припущенням**: сканер брав кожен `sessions/*.json` як є. Насправді файл сесії
-переживає свій процес — його прибирає лише клінап Claude Code за `cleanupPeriodDays` (дефолт 30).
+The decision's formula says "join only over **live** sessions", and the scanner's docstring says the
+same. But liveness was an **assumption**: the scanner took every `sessions/*.json` at face value. In
+reality a session file outlives its process — only Claude Code's cleanup removes it, after
+`cleanupPeriodDays` (30 by default).
 
-Наслідок: `claude`, убитий або впалий саме тоді, коли на екрані стояв permission-prompt, лишає на
-диску `status:"waiting"`, і переписати його вже нікому. Піднята рука в menu bar не гасне **тижнями** —
-причому вказує на сесію, якої не існує.
+The consequence: a `claude` killed or crashed at exactly the moment a permission prompt was on screen
+leaves `status:"waiting"` on disk, and there is no one left to overwrite it. The raised hand in the
+menu bar stays lit for **weeks** — pointing at a session that does not exist.
 
-Тому формула отримує додатковий кон'юнкт:
+So the formula gains an extra conjunct:
 
 ```
-awaiting = процес сесії живий
+awaiting = the session's process is alive
        AND ( sessions/<pid>.json .status == "waiting"
-          OR (state.json свіжий AND .needs != null / .tempo == "blocked") )
+          OR (state.json is fresh AND .needs != null / .tempo == "blocked") )
 ```
 
-Реалізація — `ProcessLiveness` (`Sources/TokenPaceKit/ProcessLiveness.swift`), ін'єктований seam над
-`sysctl(KERN_PROC_PID)`. Дві умови, обидві обов'язкові:
+The implementation is `ProcessLiveness` (`Sources/TokenPaceKit/ProcessLiveness.swift`), an injected
+seam over `sysctl(KERN_PROC_PID)`. Two conditions, both required:
 
-1. **pid існує** — інакше сесія не здатна оновити власний файл;
-2. **це той самий процес** — ядро перевикористовує pid, тож звіряємо `procStart` із файлу сесії
-   (ctime-рядок у UTC) з ядерним `p_starttime`. Без цього сторонній процес, якому дістався той самий
-   номер, «воскресив» би мертву сесію.
+1. **the pid exists** — otherwise the session cannot update its own file;
+2. **it is the same process** — the kernel reuses pids, so we check the session file's `procStart` (a
+   ctime string in UTC) against the kernel's `p_starttime`. Without that, an unrelated process that
+   inherited the same number would "resurrect" a dead session.
 
-**Fail-open**, як і решта сканера: не читається pid чи `procStart` — сесію рахуємо. Фільтр лише
-прибирає те, що можна **довести** мертвим; прогалина в парсингу має деградувати до попередньої
-поведінки, а не ховати сесію, про яку користувача справді питають.
+**Fail open**, like the rest of the scanner: if the pid or `procStart` cannot be read, we count the
+session. The filter only removes what can be **proven** dead; a gap in parsing should degrade to the
+previous behavior rather than hide a session the user is genuinely being asked about.
 
-Це також замінило собою третій терм гейта вотчера («claude running») з
-[awaiting-input-refresh.md](../design/awaiting-input-refresh.md): той гейт мовчав би про всі сесії,
-поки жоден `claude` не запущений, тоді як перевірка за pid прибирає саме мертву сесію — навіть коли
-інші `claude` активні.
+This also replaced the watcher gate's third term ("claude running") from
+[awaiting-input-refresh.md](../design/awaiting-input-refresh.md): that gate would have stayed silent
+about every session while no `claude` was running, whereas the pid check removes exactly the dead
+session — even when other `claude` processes are active.
 
-## Постскриптум (#438): показуємо `name`, а не `needs`
+## Postscript (#438): we show `name`, not `needs`
 
-Рішення вище передбачало: «Текст `needs` показуємо як підказку (тултип/друга лінія), як це робить
-FleetView». Передбачення виконано — але **іншим полем**. Під ⌥ попап показує **`name`** сесії, тобто
-той самий заголовок, під яким її перелічує agentic view Claude Code.
+The decision above assumed: "we show the `needs` text as a hint (a tooltip or a second line), the way
+FleetView does". The prediction held — but with a **different field**. Under ⌥ the popup shows the
+session's **`name`**, the same title Claude Code's agentic view lists it under.
 
-Причина заміни: `needs` — це **категорія блокування** (`approve plan`, `confirm the edit`), і вона
-повторюється. Три сесії, що чекають схвалення плану, дали б три однакові рядки — тобто відповідь на
-питання «чим вони зайняті», тоді як користувач під ⌥ питає «**до якої з них іти**». `name` розрізняє
-сесії між собою і, головне, є **спільним словником** двох поверхонь: користувач бачить у попапі те
-саме слово, за яким шукатиме сесію в agentic view. `needs` лишається доступним — `state.json` уже
-читається в `isAwaiting` — і може колись доповнити тултип.
+The reason for the swap: `needs` is a **category of blocking** (`approve plan`, `confirm the edit`),
+and it repeats. Three sessions waiting on plan approval would produce three identical lines — an
+answer to "what are they busy with", whereas the user under ⌥ is asking "**which one do I go to**".
+`name` tells sessions apart and, crucially, is a **shared vocabulary** across two surfaces: the user
+sees in the popup the same word they will search for in the agentic view. `needs` stays available —
+`state.json` is already read in `isAwaiting` — and may one day enrich the tooltip.
 
-Технічні факти, зафіксовані під час реалізації:
+Technical facts recorded during implementation:
 
-- **Ім'я береться з `sessions/<pid>.json`**, який сканер і так читає цілком. Один додатковий regex
-  коштує ~2,6 µs (замір) і **нуль** додаткового I/O, тож ліниве читання «лише коли натиснуто ⌥»
-  свідомо відкинуто: воно вимагало б другого шляху читання й кешу з інвалідацією заради економії,
-  меншої за похибку.
-- **Безіменна сесія не має порожнього поля — вона має заповнювач.** Claude Code пише в `name` її
-  власний `jobId`, тобто перші 8 символів `sessionId`. Форми між файлами **не збігаються**: у
-  `jobs/<id>/state.json` таке ім'я просто відсутнє. Тому детекція — диз'юнкція (відсутнє / порожнє /
-  дорівнює `jobId` / дорівнює `sessionId.prefix(8)`), і вона звірює **рівність із власними id**
-  сесії, ніколи не форму рядка: справжня назва, що виглядає як hex-блоб, лишається назвою.
-- **Заповнювач не можна показувати**: він читається як ідентифікатор, придатний для копіювання, тоді
-  як `claude --resume` його відхиляє — приймає повний UUID **або** назву сесії (обидва перевірено на
-  v2.1.228). Замість нього рядок `<unnamed>` курсивом.
-- **Історії перейменувань не існує ніде** — `name` перезаписується на місці, тож поточне значення за
-  побудовою і є останнім. Питання «чи не показуємо ми застаріле ім'я» відпадає без механізму.
-  Перейменування фіксується окремим полем `nameSource` (`auto` / `user`), яке ми не читаємо.
-- **Наслідок для дедуплікації вотчера:** `name` увійшло в `Equatable`, тож перейменування сесії
-  тепер легітимно пробиває `result != lastResult` і дає рядок логу `awaiting-input N → N` без зміни
-  числа. Це не збій — попап зобов'язаний показати нову назву.
+- **The name comes from `sessions/<pid>.json`**, which the scanner reads in full anyway. One extra
+  regex costs ~2.6 µs (measured) and **zero** additional I/O, so lazy reading "only when ⌥ is held"
+  was deliberately rejected: it would have required a second read path and a cache with invalidation
+  for a saving smaller than the measurement error.
+- **An unnamed session does not have an empty field — it has a placeholder.** Claude Code writes its
+  own `jobId` into `name`, that is, the first 8 characters of the `sessionId`. The forms **do not
+  match** across files: in `jobs/<id>/state.json` such a name is simply absent. So the detection is a
+  disjunction (absent / empty / equal to the `jobId` / equal to `sessionId.prefix(8)`), and it checks
+  **equality against the session's own ids**, never the string's shape: a genuine name that happens to
+  look like a hex blob stays a name.
+- **The placeholder must not be shown**: it reads as an identifier fit for copying, whereas
+  `claude --resume` rejects it — it accepts a full UUID **or** a session name (both verified on
+  v2.1.228). In its place, the line reads `<unnamed>` in italics.
+- **No history of renames exists anywhere** — `name` is overwritten in place, so the current value is
+  by construction the latest. The question "are we showing a stale name" falls away for lack of a
+  mechanism. A rename is recorded by a separate `nameSource` field (`auto` / `user`), which we do not
+  read.
+- **A consequence for the watcher's deduplication:** `name` entered `Equatable`, so renaming a session
+  now legitimately breaks `result != lastResult` and produces the log line `awaiting-input N → N` with
+  no change in the number. That is not a fault — the popup is obliged to show the new name.
 
-## Постскриптум (#438): проєкти сортуються за назвою
+## Postscript (#438): projects are sorted by name
 
-Розбивка під ⌥ сортувала проєкти **most-urgent-first** (найбільше червоних згори). Тепер — за
-**назвою**.
+The ⌥ breakdown used to sort projects **most-urgent-first** (the most red at the top). Now it sorts by
+**name**.
 
-Зміна вимушена й узгоджена: ранжування спиралося на чіпи `2✋ 1✋`, які стояли в рядку проєкту, а
-тепер прибрані — кожна долоня переїхала до свого рядка сесії. Заголовок проєкту більше не показує
-жодної терміновості, тож упорядкування за нею означало б сортування за величиною, якої на екрані
-немає: користувач бачив би перелік назв і не мав би способу пояснити собі їхній порядок.
+The change was forced and is coherent: the ranking rested on the `2✋ 1✋` chips that used to sit in the
+project's row and have now been removed — each hand moved to its own session row. The project header no
+longer shows any urgency at all, so ordering by it would mean sorting by a quantity that is not on the
+screen: the user would see a list of names with no way to explain their order to themselves.
 
-Сесії всередині проєкту йдуть **свіжішими згори** — за спаданням `daysUntilDeletion`, що тотожно
-спаданню `updatedAt` (сканер рахує `daysLeft = cleanupDays − ageDays` з одним `cleanupDays` на весь
-скан). Окреме поле часу не заводили, щоб не тримати ту саму величину у двох системах координат.
-Долік за іменем, далі за проєктом — **обов'язковий**, а не косметичний: `ageDays` затиснуто через
-`max(0, …)`, тож усі щойно оновлені сесії схлопуються в однакове значення, і без тотального порядку
-рядки шикувалися б у порядку обходу каталогу — а `AwaitingSessions` є `Equatable`, тож кожне
-перетасування вотчер читав би як зміну.
+Sessions within a project run **freshest first** — by descending `daysUntilDeletion`, which is
+equivalent to descending `updatedAt` (the scanner computes `daysLeft = cleanupDays − ageDays` with a
+single `cleanupDays` for the whole scan). We did not introduce a separate time field, so as not to keep
+the same quantity in two coordinate systems. The tiebreak by name, then by project, is **mandatory**
+rather than cosmetic: `ageDays` is clamped through `max(0, …)`, so every just-updated session collapses
+to the same value, and without a total order the rows would line up in directory-traversal order — and
+`AwaitingSessions` is `Equatable`, so the watcher would read every reshuffle as a change.

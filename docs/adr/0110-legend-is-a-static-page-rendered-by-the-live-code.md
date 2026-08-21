@@ -5,176 +5,189 @@ supersedes: []
 superseded_by: []
 ---
 
-# ADR-0110: Legend — статична сторінка, намальована живим кодом
+# ADR-0110: Legend — a static page rendered by the live code
 
-> Завершує етап 3 реорганізації сторінок ([#317](https://github.com/artem-from-ua/tokenpace/issues/317)),
-> де довідкова сторінка планувалася під робочою назвою `Guide`.
-> Поширює прецедент [ADR-0097](0097-bar-style-preview-rendered-at-runtime.md) («прев'ю стилів
-> малюється в рантаймі справжнім кодом, не картинками») з **порівняння стилів** на **пояснення
-> позначок**, і користується швом `PopupBarView.render(in:)`, який для цього й виділяли
-> ([ADR-0093](0093-bar-style-picked-by-picture.md)).
-> Не змінює жодного правила з [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md)
-> (лінійка під ⌥) — але вводить єдине місце, де тіки видно **без** ⌥, і §3 пояснює, чому це не виняток
-> із того правила, а його прямий наслідок.
+> Completes stage 3 of the pages reorganization ([#317](https://github.com/artem-from-ua/tokenpace/issues/317)),
+> where the reference page was planned under the working name `Guide`.
+> Extends the precedent from [ADR-0097](0097-bar-style-preview-rendered-at-runtime.md) ("style
+> previews are drawn at runtime by real code, not by images") from **comparing styles** to
+> **explaining markers**, and uses the `PopupBarView.render(in:)` seam that was carved out
+> specifically for this ([ADR-0093](0093-bar-style-picked-by-picture.md)).
+> Does not change any rule from [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md)
+> (the ruler under ⌥) — but it introduces the one place where ticks are visible **without** ⌥, and
+> §3 explains why this is not an exception to that rule but its direct consequence.
 
-## Контекст
+## Context
 
-TokenPace кодує багато сенсу в дуже малій площі: п'ять кольорів темпу, три стилі барів
+TokenPace encodes a lot of meaning in very little space: five pacing colors, three bar styles
 ([ADR-0080](0080-per-surface-bar-style.md), [ADR-0101](0101-pressure-is-the-gauge-ahead-half.md),
-[ADR-0109](0109-centred-style-renamed-to-balance.md)), десяток SF Symbols, бейджі, лінійка.
-**Ніде в застосунку це не пояснено** ([#261](https://github.com/artem-from-ua/tokenpace/issues/261)).
-Користувач, що бачить синю смужку, підняту долоню чи символ валюти, не має жодного способу дізнатися,
-що вони означають: знання живе в `USER-GUIDE.md`, у тредах тікетів і в голові мейнтейнера.
+[ADR-0109](0109-centred-style-renamed-to-balance.md)), a dozen SF Symbols, badges, a ruler.
+**None of it is explained anywhere in the app** ([#261](https://github.com/artem-from-ua/tokenpace/issues/261)).
+A user who sees a blue strip, a raised palm, or a currency symbol has no way to find out what they
+mean: the knowledge lives in `USER-GUIDE.md`, in ticket threads, and in the maintainer's head.
 
-Три питання, на які треба було відповісти **до** написання коду, бо кожне визначає інше:
+Three questions had to be answered **before** writing any code, because each one determines the
+other:
 
-1. **Звідки беруться зображення.** Скріншоти й намальовані від руки схеми старіють мовчки: перша ж
-   зміна метрики чи порогу робить довідник таким, що бреше про застосунок, у якому лежить. Довідник,
-   що бреше, гірший за його відсутність.
+1. **Where the images come from.** Screenshots and hand-drawn diagrams go stale silently: the very
+   first change to a metric or a threshold makes the reference page lie about the app it lives
+   inside. A reference page that lies is worse than no reference page.
 
-2. **Чи реагує сторінка на налаштування користувача.** Спокуса очевидна: показувати саме той стиль
-   бара й саме ту палітру, які людина обрала. Але сторінка пояснює **всі** стилі й **усі** кольори —
-   зокрема ті, яких у поточній конфігурації не видно.
+2. **Whether the page reacts to the user's settings.** The temptation is obvious: show exactly the
+   bar style and palette the person picked. But the page explains **every** style and **every**
+   color — including the ones not visible in the current configuration.
 
-3. **Де вона живе.** Окремий рядок сайдбару, як спершу планувалося в
-   [#261](https://github.com/artem-from-ua/tokenpace/issues/261), чи дитина сторінки, чи власне вікно
-   за `HelpLink`. Питання не косметичне: воно визначає, чи можна читати пояснення **й одночасно**
-   крутити перемикач, який воно пояснює.
+3. **Where it lives.** A standalone sidebar row, as originally planned in
+   [#261](https://github.com/artem-from-ua/tokenpace/issues/261), a child of a page, or its own
+   window behind `HelpLink`. This isn't cosmetic: it determines whether you can read the
+   explanation **while also** operating the switch it explains.
 
-## Рішення
+## Decision
 
-### 1 · Кожен елемент малює бойовий код
+### 1 · Every element is drawn by the production code
 
-Жодного зображення в ресурсах, жодного дубляжу малювання. Бари йдуть крізь `PopupBarView.render(in:)`
-і `StatusItemView.snapshotImage()` — ті самі виклики, що й у попапі та в менюбарі. Кольори тірів
-беруться з `PopupBarView.aheadColor`/`behindColor`, які кличе сам віджет. Гліфи — з
-`LegendGlyphs`, який **читають і місця малювання** в `StatusItemView`.
+No images in resources, no duplicated drawing. Bars go through `PopupBarView.render(in:)` and
+`StatusItemView.snapshotImage()` — the same calls used by the popup and the menu bar. Tier colors
+come from `PopupBarView.aheadColor`/`behindColor`, called by the widget itself. Glyphs come from
+`LegendGlyphs`, which the drawing sites in `StatusItemView` **also read**.
 
-Останнє — не дрібниця. Доти імена SF Symbols були строковими літералами в кожному місці малювання,
-і легенда могла рекламувати гліф, якого віджет більше не малює. Спільний каталог робить такий
-розсинхрон неможливим: перейменування символу ламає обидві сторони одночасно й видимо.
+The last part is not a detail. Before this, SF Symbol names were string literals at every drawing
+site, and the legend could advertise a glyph the widget no longer drew. A shared catalog makes that
+drift impossible: renaming a symbol breaks both sides at once, and visibly.
 
-Стани, з яких малюються зразки, живуть у `LegendCatalog` **у Kit, а не в застосунку** — щоб бути
-покритими тестами (в app-таргеті тест-таргету немає взагалі,
-див. `Package.swift`). Кожен стан будується через
-`PacingModel.barLayout(utilization:resetsAt:now:window:blueAllowed:)`, ніколи літералом `BarLayout` —
-з тієї самої причини, з якої це заборонено в `ui-state-truth.md`: літерал дозволяє намалювати
-комбінацію, якої модель не породжує.
+The states the samples are drawn from live in `LegendCatalog` **in the Kit, not in the app** — so
+they're covered by tests (the app target has no test target at all,
+see `Package.swift`). Every state is built through
+`PacingModel.barLayout(utilization:resetsAt:now:window:blueAllowed:)`, never a `BarLayout` literal —
+for the same reason that's forbidden in `ui-state-truth.md`: a literal lets you draw a combination
+the model never produces.
 
-### 2 · Сторінка статична, і це не компроміс
+### 2 · The page is static, and that is not a compromise
 
-Демо-стани фіксовані. Сторінка **не** читає ані `BarStyle` користувача, ані його `ColorAdvice`.
+The demo states are fixed. The page does **not** read the user's `BarStyle` or their `ColorAdvice`.
 
-Реактивність спершу виглядала правильною й була відкинута, бо суперечить самому призначенню
-сторінки: вона пояснює **словник**, а не поточну конфігурацію. Користувач із Balance на обох
-поверхнях усе одно має дізнатися, що таке Progress і Pressure — інакше він не знатиме, що йому
-пропонує перемикач сусідньої сторінки. Сторінка, що показує лише вже обране, пояснює найменше саме
-тому, хто нічого не міняв.
+Reactivity looked correct at first and was rejected because it contradicts the page's whole
+purpose: it explains the **vocabulary**, not the current configuration. A user with Balance on both
+surfaces still needs to learn what Progress and Pressure are — otherwise they won't know what the
+switch on the neighboring page is offering them. A page that only shows what's already chosen
+explains the least to exactly the person who never changed anything.
 
-Другий, практичніший аргумент: реактивна сторінка має рівно стільки станів, скільки їх має
-Appearance, і жоден із них не перевіряється тестами. Статична має один — той, що на скріншоті в PR.
+The second, more practical argument: a reactive page has exactly as many states as Appearance does,
+and none of them are covered by tests. The static page has one — the one in the PR screenshot.
 
-Виняток рівно один і він не про налаштування: **тема**. Дропдаун-зразки — не-template `NSImage`,
-їхні семантичні кольори резолвляться в момент випікання, тож в'ю читає `@Environment(\.colorScheme)`
-і перемальовує їх при перемиканні. Гліфи вирішені інакше — template-зображення плюс
-`.foregroundStyle`, тобто платформною відповіддю на ту саму проблему. Менюбар-зразки імунні: вони
-навмисно припнуті до `.vibrantDark`, бо менюбар темний під будь-якою темою.
+There is exactly one exception, and it isn't about settings: **theme**. The dropdown samples are
+non-template `NSImage`s, their semantic colors are resolved at bake time, so the view reads
+`@Environment(\.colorScheme)` and redraws them on a switch. Glyphs are handled differently — a
+template image plus `.foregroundStyle`, i.e. the platform's own answer to the same problem. The
+menu-bar samples are immune: they are deliberately pinned to `.vibrantDark`, because the menu bar
+is dark under any theme.
 
-### 3 · Лінійка на анатомічних барах увімкнена завжди
+### 3 · The ruler on anatomy bars is always on
 
-[ADR-0098](0098-ruler-split-identify-always-explain-on-option.md) ховає тіки під ⌥, бо в живому
-попапі вони — пояснювальна половина лінійки, і бар, що показує їх постійно, гучніший, ніж потрібно.
-Плитки стилів тримають їх вимкненими з другої причини: плитка, випечена з ⌥, рекламує стан, у якому
-рядок не перебуває.
+[ADR-0098](0098-ruler-split-identify-always-explain-on-option.md) hides the ticks under ⌥, because
+in the live popup they are the explanatory half of the ruler, and a bar that shows them all the
+time is louder than it needs to be. The style tiles keep them off for a second reason: a tile baked
+with ⌥ on advertises a state the row isn't actually in.
 
-Ця сторінка — саме той випадок, який обидва аргументи вирізали. Вона існує, **щоб називати частини**,
-і лінійка — одна з них: діаграма з підписом «hour/day ticks» біля бара без тіків не пояснює
-нічого. Тому `showsRuler` — параметр рендерера, увімкнений на анатомічних барах і вимкнений на
-коротких зразках правил читання, які розповідають про стрічку, а не про шкалу.
+This page is exactly the case both arguments carve out. It exists **to name the parts**, and the
+ruler is one of them: a diagram captioned "hour/day ticks" next to a bar with no ticks explains
+nothing. So `showsRuler` is a renderer parameter, on for anatomy bars and off for the short reading-
+rule samples, which are about the strip, not the scale.
 
-Наслідок, який коштував окремої ітерації: `PopupBarView.viewHeight` **не включає** глибину лінійки —
-[#388](https://github.com/artem-from-ua/tokenpace/issues/388) навмисно прибрав ту смугу, бо в живому
-попапі вона читалася як порожній відступ. Канва заввишки `viewHeight` обрізала тіки на 2 з їхніх
-5 pt, і зразок брехав про їхній розмір. Звідси `PopupBarView.rulerDepth` — публічна константа для
-того, хто малює бар **разом** із лінійкою.
+A consequence that cost a separate iteration: `PopupBarView.viewHeight` **does not include** the
+ruler's depth —
+[#388](https://github.com/artem-from-ua/tokenpace/issues/388) deliberately removed that band because
+in the live popup it read as empty padding. A canvas exactly `viewHeight` tall clipped 2 of the
+ticks' 5 pt, and the sample lied about their size. Hence `PopupBarView.rulerDepth` — a public
+constant for anyone drawing a bar **together with** its ruler.
 
-### 4 · Дитина Appearance, а не рядок сайдбару
+### 4 · A child of Appearance, not a sidebar row
 
-Legend — `SettingsChildPage.appearanceLegend`, перша секція сторінки Appearance, **над** пресетами.
+Legend is `SettingsChildPage.appearanceLegend`, the first section on the Appearance page, **above**
+the presets.
 
-Початковий план ([#261](https://github.com/artem-from-ua/tokenpace/issues/261),
-[#317](https://github.com/artem-from-ua/tokenpace/issues/317)) ставив її окремим рядком сайдбару в
-парі з About. Це відкинуто з тієї самої причини, з якої в тікеті зважувався `HelpLink` у власне
-вікно: **щоб прочитати легенду, не треба залишати сторінку, де стоять перемикачі, які вона пояснює**.
-Дитина Appearance дає це майже задарма — крок «назад» веде рівно туди, звідки прийшов, а прев'ю
-дропдауна лишається на екрані.
+The original plan ([#261](https://github.com/artem-from-ua/tokenpace/issues/261),
+[#317](https://github.com/artem-from-ua/tokenpace/issues/317)) put it in a standalone sidebar row
+next to About. That was rejected for the same reason the ticket weighed `HelpLink` into its own
+window: **reading the legend shouldn't require leaving the page where the switches it explains
+live.** A child of Appearance gets this almost for free — the "back" step leads exactly where you
+came from, and the dropdown preview stays on screen.
 
-Побічна вигода, яка вирішила решту: індекси `TOKENPACE_SETTINGS_SECTION` **не зсуваються**. Окремий
-рядок сайдбару зсунув би кожну секцію після About на одиницю й переписав би всі рецепти в
-`ui-verification.md` ([#333](https://github.com/artem-from-ua/tokenpace/issues/333) вже показав, чого
-це коштує). Дочірні сторінки живуть у власному діапазоні raw-значень; Legend отримала `53`.
+A side benefit that settled everything else: `TOKENPACE_SETTINGS_SECTION` indices **don't shift**. A
+standalone sidebar row would have bumped every section after About by one and rewritten every
+recipe in `ui-verification.md`
+([#333](https://github.com/artem-from-ua/tokenpace/issues/333) already showed what that costs). Child
+pages live in their own range of raw values; Legend got `53`.
 
-Ціна, яку це рішення виставило не одразу: **сторінку не бачив dev-хук**. Крапковий індекс
-`TOKENPACE_SETTINGS_SECTION` резолвиться через `SettingsChildPage.pages(of:)`, а той фільтрує
-`configuresSurface` — Legend нічого не налаштовує, отже в списку її не було, і жоден індекс її не
-називав. Гірше за просту недосяжність: рецепти писалися як `=53`, тобто **raw-значенням**, яке
-парситься як *секція*; хук чесно писав `unknown section 53 — ignored` і відкривав те, де вікно
-лишалося минулого разу — а лишалося воно зазвичай саме на Legend. Рецепт виглядав робочим.
-Логування невідомих значень, додане в [#341](https://github.com/artem-from-ua/tokenpace/issues/341)
-рівно проти такого, тут не рятувало: значення ніколи й не було індексом дитини.
+A cost this decision didn't reveal right away: **the dev hook couldn't see the page.** The dotted
+index `TOKENPACE_SETTINGS_SECTION` resolves through `SettingsChildPage.pages(of:)`, which filters on
+`configuresSurface` — Legend configures nothing, so it wasn't in the list, and no index named it.
+Worse than plain unreachability: recipes were written as `=53`, i.e. as a **raw value**, which
+parses as a *section*; the hook honestly logged `unknown section 53 — ignored` and opened whatever
+the window had last shown — which was usually Legend itself. The recipe looked like it worked.
+The logging of unknown values added in [#341](https://github.com/artem-from-ua/tokenpace/issues/341)
+specifically against this didn't help here: the value was never a child index to begin with.
 
-Звідси `reachablePages(of:)` поруч із `pages(of:)` — два різні питання, дві різні відповіді. Батьківська
-сторінка питає «що малювати в безіменній секції поверхонь» (без Legend, інакше рядок задвоївся б),
-хук питає «що я можу відкрити» (усе, куди користувач може дійти). Сортування — **за порядком показу**,
-бо рядок Legend стоїть вище обох поверхонь, тоді як його raw найбільший із трьох; за raw `2.0` називав
-би другий рядок сторінки. Чинні індекси: `2.0` Legend, `2.1` Menu bar, `2.2` Dropdown.
+Hence `reachablePages(of:)` next to `pages(of:)` — two different questions, two different answers.
+The parent page asks "what do I draw in the unnamed surfaces section" (without Legend, or the row
+would double up); the hook asks "what can I open" (everything the user can reach). Sorting is **by
+display order**, because the Legend row sits above both surfaces while its raw value is the
+largest of the three; sorting by raw value would name the page's second row `2.0`. Current indices:
+`2.0` Legend, `2.1` Menu bar, `2.2` Dropdown.
 
-Варіант `HelpLink` → Help Book відкинуто остаточно: він вимагає `.help`-бандла зі статичним HTML,
-тобто прямо суперечить §1. Варіант `HelpLink` → власне вікно лишається можливим наступним кроком,
-якщо виявиться, що дитини Appearance замало для знаходжуваності — але він додає вікно, яке треба
-розміщувати поруч із двома наявними (Settings і прев'ю), і робити це варто з даних, а не наперед.
+The `HelpLink` → Help Book option is rejected for good: it requires a `.help` bundle with static
+HTML, which directly contradicts §1. `HelpLink` → its own window remains a possible next step if
+the Appearance child turns out to not be discoverable enough — but it adds a window that has to be
+placed alongside the two that already exist (Settings and the preview), and that's worth doing from
+data, not preemptively.
 
-### 5 · Геометрія діаграми виводиться, а не записується
+### 5 · Diagram geometry is derived, not hardcoded
 
-Виносні лінії й підписи анатомічного бара лежать в **одному** координатному просторі
-(`ZStack` + `.offset`), а вертикалі рахує `Geometry`, що читає метрики самого `PopupBarView`.
-Довжина виноски — це відстань від позначки до рядка підпису, а не число, записане поруч.
+The leader lines and captions of the anatomy bar live in **one** coordinate space
+(`ZStack` + `.offset`), and `Geometry` computes the verticals by reading the metrics of
+`PopupBarView` itself. A leader line's length is the distance from a marker to its caption row, not
+a number written next to it.
 
-Це вже друга редакція: перша розкладала підписи трьома стеками, кожен зі своїми відступами, і кожна
-правка одного зсувала інші — підписи з'їжджали з позначок, а лінії не доходили до маркера, тіків і
-треку по черзі. Різниця принципова: у виведеній геометрії розсинхрон **неможливий**, у записаній він
-лише невидимий доти, доки хтось не гляне на скріншот.
+This is already the second revision: the first laid out captions in three stacks, each with its own
+padding, and every edit to one shifted the others — captions drifted off their markers, and lines
+fell short of the marker, the ticks, and the track by turns. The distinction is fundamental: in
+derived geometry, drift is **impossible**; in hardcoded geometry it's merely invisible until someone
+looks at a screenshot.
 
-Горизонталі лишилися константами — і це свідомо. Вони походять від `scaleX` рендерера, і виведення
-зробило б сторінку залежною від його внутрішньої **форми**, а не лише від значень: зміна формули тоді
-тихо переставляла б підписи. Записане число з арифметикою поруч ламається **видимо** — підпис стає
-не над своєю позначкою, і це видно на першому ж скріншоті.
+The horizontals stayed as constants — deliberately. They come from the renderer's `scaleX`, and
+deriving them would make the page depend on its internal **shape**, not just its values: a formula
+change would then silently move the captions. A hardcoded number next to the arithmetic breaks
+**visibly** — the caption ends up not over its marker, and that shows up in the very first
+screenshot.
 
-## Наслідки
+## Consequences
 
-- **Легенда не може розійтися з віджетом у графіці.** Зміна метрики, порогу чи символу перемальовує
-  сторінку автоматично. Розійтися вона може лише **словами** — тому текст лишається тим, що треба
-  вичитувати руками при зміні поведінки.
-- **`USER-GUIDE.md` отримує джерело зображень.** За домовленістю з
-  [#247](https://github.com/artem-from-ua/tokenpace/issues/247) прозу володіє гайд, графіку — ця
-  сторінка; скріншоти для гайду знімаються з неї, а не малюються.
-- **Три нові публічні члени `PopupBarView`**: `rulerDepth`, `tickGap` і `trackTint`/`markerGlowScale`.
-  Перші два — арифметика лінійки для того, хто ставить щось під нею. Другі два — визнання, що на
-  пласкій формі Settings трек і німб маркера читаються інакше, ніж на вібрантній картці попапа.
-- **Індекси двох поверхонь зсунулися** — `2.0`/`2.1` тепер Legend і Menu bar, Dropdown став `2.2`.
-  Рецепти в `ui-verification.md` оновлені; сторонніх споживачів у хука немає.
-- **Сторінка не покрита тестами UI, і не буде** — в app-таргеті немає тест-таргету. Тому вся логіка,
-  яку можна перевірити, винесена в `LegendCatalog` у Kit, і вона перевірена.
-- **Тіки видно без ⌥ рівно в одному місці застосунку.** Це навмисно (§3), але це також єдиний
-  контрприклад до правила [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md), який
-  доведеться пам'ятати при наступній зміні лінійки.
+- **The legend can't drift from the widget graphically.** A change to a metric, a threshold, or a
+  symbol redraws the page automatically. It can only drift in **words** — so the text remains
+  something that has to be proofread by hand whenever behavior changes.
+- **`USER-GUIDE.md` gets a source for its images.** Per the agreement in
+  [#247](https://github.com/artem-from-ua/tokenpace/issues/247), the guide owns the prose, this page
+  owns the graphics; screenshots for the guide are taken from it, not drawn separately.
+- **Three new public members of `PopupBarView`**: `rulerDepth`, `tickGap`, and
+  `trackTint`/`markerGlowScale`. The first two are ruler arithmetic for anyone placing something
+  beneath it. The other two acknowledge that on the flat Settings surface, the track and the
+  marker's glow read differently than on the popup's vibrant card.
+- **The indices of two surfaces shifted** — `2.0`/`2.1` are now Legend and Menu bar, Dropdown
+  became `2.2`. The recipes in `ui-verification.md` were updated; the hook has no external
+  consumers.
+- **The page is not covered by UI tests, and won't be** — the app target has no test target. So all
+  the logic that can be verified was pulled out into `LegendCatalog` in the Kit, and it is verified.
+- **Ticks are visible without ⌥ in exactly one place in the app.** This is deliberate (§3), but it
+  is also the sole counterexample to the rule in
+  [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md), which will need to be
+  remembered the next time the ruler changes.
 
-## Відкрите
+## Open questions
 
-- **Знаходжуваність.** Legend лежить на два кліки вглиб (Appearance → Legend) і не згадана ніде
-  більше. Якщо виявиться, що її не знаходять, найдешевший наступний крок — рядок в About або пункт
-  у меню статус-айтема; обидва не потребують нового вікна.
-  Дотично до [#291](https://github.com/artem-from-ua/tokenpace/issues/291) (онбординг і підказки).
-- **Синхронізація тексту.** Слова на сторінці й у `USER-GUIDE.md` мають збігатися, і ніщо цього не
-  перевіряє. Поки що це ручна дисципліна, зафіксована в
+- **Discoverability.** Legend sits two clicks deep (Appearance → Legend) and is mentioned nowhere
+  else. If it turns out people can't find it, the cheapest next step is a row in About or an item in
+  the status-item menu; neither needs a new window.
+  Related to [#291](https://github.com/artem-from-ua/tokenpace/issues/291) (onboarding and hints).
+- **Text synchronization.** The words on the page and in `USER-GUIDE.md` need to match, and nothing
+  checks that. For now it's manual discipline, tracked in
   [#247](https://github.com/artem-from-ua/tokenpace/issues/247).

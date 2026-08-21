@@ -5,34 +5,37 @@ supersedes: []
 superseded_by: [0104]
 ---
 
-# ADR-0100: Дропдаун обирає стиль картинкою, а сегмент «With ⌥ Option» іде геть
+# ADR-0100: The dropdown picks a style by picture, and the `With ⌥ Option` segment goes away
 
-> **§5–§6 витіснено [ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md)**
-> ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)): `.optionOnly` більше **не лишається
-> в enum** — кейс видалено, а старий raw розвʼязується через `PopupSectionVisibility.legacyRawValues`
-> у `.onceUsed`; окрему міграцію `migrateOptionOnlyVisibilityIfNeeded()` і її маркер
-> `sectionVisibilityMigratedFromOptionOnly` ретировано на користь одного переїзду ключів. Legacy-
-> міграція булевого `showModelSpecificLimits == false` веде тепер на `whenItNeedsAttention` (те саме
-> значення під новою назвою). Перейменування §6 продовжено на всі рядки, ключі й значення панелі, а
-> сегменти обох рядків розвернуто (тихіше ліворуч). **Чинними лишаються §1–§4** — плитки на обидві
-> поверхні, запікання специмена під vibrant-появу теми, вимір треком без масштабування, і те, що ⌥ на
-> специмен не впливає.
+> **§5–§6 superseded by [ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md)**
+> ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)): `.optionOnly` **no longer stays in
+> the enum** — the case is removed, and the old raw value is resolved through
+> `PopupSectionVisibility.legacyRawValues` in `.onceUsed`; the separate
+> `migrateOptionOnlyVisibilityIfNeeded()` migration and its
+> `sectionVisibilityMigratedFromOptionOnly` marker are retired in favor of a single key move. The
+> legacy migration of the Boolean `showModelSpecificLimits == false` now leads to
+> `whenItNeedsAttention` (the same value under the new name). §6's renaming carries through to every
+> row, key, and value in the pane, and the segments in both rows are reversed (quieter on the left).
+> **§1–§4 still stand** — tiles on both surfaces, baking the specimen under the theme's vibrant
+> appearance, measuring by the track without scaling, and ⌥ having no effect on the specimen.
 
-> Доводить до кінця [ADR-0093](0093-bar-style-picked-by-picture.md) (§5 якого лишав дропдаун
-> текстовим сегментедом «тимчасово») і **виконує прогноз** [ADR-0097 §2](0097-bar-style-preview-rendered-at-runtime.md),
-> що прев'ю другої поверхні матиме свої правила появи. Частково витісняє
-> [ADR-0087](0087-above-zero-section-visibility.md) у частині складу сегментів.
+> Finishes what [ADR-0093](0093-bar-style-picked-by-picture.md) started (whose §5 left the dropdown
+> as a text segmented control "temporarily") and **fulfills the prediction** made in
+> [ADR-0097 §2](0097-bar-style-preview-rendered-at-runtime.md) that the second surface's preview
+> would have its own rules for appearance. Partially supersedes
+> [ADR-0087](0087-above-zero-section-visibility.md) as far as segment composition goes.
 
-## Контекст
+## Context
 
-Дві поверхні мали **різні контроли для одного вибору**: менюбарний рядок — три плитки з
-відрендереним віджетом, дропдаунний — текстовий `SegmentedControl` зі словами `Pressure | Gauge |
-Progress`. ADR-0093 §5 назвав цю асиметрію навмисною й тимчасовою: «перевіряємо форму на одній
-поверхні, дропдаун переводимо окремим PR». Форма прижилася — черга другої.
+The two surfaces had **different controls for the same choice**: the menu bar row used three tiles
+with a rendered widget; the dropdown row used a text `SegmentedControl` reading `Pressure | Gauge |
+Progress`. ADR-0093 §5 called this asymmetry deliberate and temporary: "we're testing the shape on
+one surface, the dropdown moves in a separate PR." The shape stuck. The second surface's turn had
+come.
 
-Паралельно накопичилася друга проблема, менша, але з того ж класу «опція, що нічого не додає».
-Обидва рядки видимості секцій дропдауна пропонували сегмент **`With ⌥ Option`**. Але ⌥ у
-`PopupSectionVisibility.shows(...)` додається через `||` до **кожного** іншого режиму:
+In parallel, a second problem accumulated — smaller, but the same class of "an option that adds
+nothing." Both of the dropdown's section-visibility rows offered a **`With ⌥ Option`** segment. But
+⌥ is already added via `||` to **every** other mode in `PopupSectionVisibility.shows(...)`:
 
 ```swift
 case .aboveZero:  return isAboveZero || optionHeld
@@ -40,110 +43,111 @@ case .nonCalm:    return isNonCalm   || optionHeld
 case .optionOnly: return optionHeld
 ```
 
-Тобто утримання ⌥ і так розкриває групу за будь-якого вибору. Єдине, чим `.optionOnly` відрізнявся, —
-він **ховав** групу тоді, коли її дані ставали цікавими (рядок почервонів, гроші пішли). Це не те, що
-хтось обирає свідомо.
+That is, holding ⌥ already reveals the group under any other choice. The only way `.optionOnly`
+differed was that it **hid** the group exactly when its data became interesting (the row turned red,
+money was spent). That isn't something anyone picks on purpose.
 
-## Рішення
+## Decision
 
-### 1. Дропдаунний рядок `Style` — такі самі плитки
+### 1. The dropdown's `Style` row — the same tiles
 
-Один контрол `BarStylePicker` на обидві поверхні, з `enum Surface { menuBar, dropdown }`. Спільними
-лишаються натиск, акцентна рамка, hover, підписи, accessibility; різниця — рівно там, де ADR-0097
-сказав, що вона має бути.
+One `BarStylePicker` control for both surfaces, with `enum Surface { menuBar, dropdown }`. Press
+state, the accent border, hover, labels, and accessibility are shared; the difference sits exactly
+where ADR-0097 said it should.
 
-Рядок перейменовано з `Bar style` на **`Style`**: він сидить на сторінці, яка вже зветься `Menu bar`
-або `Dropdown`, тож слово «bar» повторювало контекст.
+The row is renamed from `Bar style` to **`Style`**: it sits on a page already called `Menu bar` or
+`Dropdown`, so the word "bar" was repeating context already given.
 
-### 2. Специмен дропдауна запікається під **vibrant** появу поточної теми
+### 2. The dropdown specimen is baked under the current theme's **vibrant** appearance
 
-Не під `.aqua`/`.darkAqua`. Живі бари малюються всередині `NSMenu`, а це vibrant-поверхня, і палітра
-резолвиться там інакше. Заміряно, трек і пейсинг-зелений:
+Not under `.aqua`/`.darkAqua`. Live bars are drawn inside `NSMenu`, which is a vibrant surface, and
+the palette resolves differently there. Measured, the track and the pacing green:
 
-| поява | трек | зелений |
+| appearance | track | green |
 |---|---|---|
 | `aqua` | `0,0,0 α0.18` | `40,205,65` |
 | **`vibrantLight`** | **`211,211,211 α1.0`** | **`30,195,55`** |
 | `darkAqua` | `255,255,255 α0.17` | `50,215,75` |
 | **`vibrantDark`** | **`51,51,51 α1.0`** | **`60,225,85`** |
 
-Два наслідки, і другий не очевидний. Відтінки просто інші — aqua-зелений не той зелений, що малює
-попап. І під vibrant трек резолвиться **непрозорим**, тож перестає залежати від того, що під ним;
-під aqua він напівпрозорий, і саме тому раніше підбирав колір плашки. `211` — рівно той сірий, що
-виміряний із живого вікна прев'ю поруч.
+Two consequences, and the second isn't obvious. The hues are simply different — aqua's green isn't
+the green the popup actually draws. And under vibrant the track resolves **opaque**, so it stops
+depending on what's beneath it; under aqua it's semi-transparent, which is exactly why it used to
+pick up the card's color. `211` is exactly the gray measured off the live preview window next to it.
 
-Плашка плитки — **картка попапа** (`cardPlateFillOpaque`: 255 світла / 30 темна), а не плашка меню,
-на якій картка лежить (236/33). Бари сидять на картці, отже й специмен сидить на ній.
+The tile's backing is the **popup's card** (`cardPlateFillOpaque`: 255 light / 30 dark), not the menu
+plate the card sits on (236/33). Bars sit on the card, so the specimen sits on it too.
 
-Це і є та «інакшість», яку ADR-0097 §2 передбачив, але не міг назвати числом: дропдаунне прев'ю
-**слідує темі**, менюбарне — ні (menu bar темний і у світлій темі, тому там фіксована `.vibrantDark`
-на чорній плашці). **Дві поверхні свідомо мають різні правила.**
+This is the "difference" ADR-0097 §2 anticipated but couldn't put a number on: the dropdown preview
+**follows the theme**, the menu bar preview does not (the menu bar stays dark even in light mode, so
+it uses a fixed `.vibrantDark` over a black plate). **The two surfaces deliberately follow different
+rules.**
 
-### 3. Геометрія міряється **треком**, і нічого не масштабується
+### 3. Geometry is measured by the **track**, and nothing is scaled
 
-Плитка лишається менюбарною 80×48, щоб два рядки Settings читалися як пара. Усередині — два бари
-(5h згори, 7d знизу) з того самого кадру стуба `climbing`, що й у менюбарних плиток: дві поверхні
-пояснюють три стилі **одним набором чисел**, тож будь-яка різниця на екрані — різниця рендера, а не
-даних.
+The tile stays the menu bar's 80×48, so the two Settings rows read as a matched pair. Inside are two
+bars (5h on top, 7d below) taken from the same `climbing` stub frame as the menu bar tiles: the two
+surfaces explain three styles with **the same set of numbers**, so any difference on screen is a
+rendering difference, not a data difference.
 
-Бар малюється **1:1 в обох осях**, лише вкорочений до 56 pt. Товщина треку (6 pt) і маркер (7×14)
-лишаються живими — цього вимагає ADR-0093 §3, і будь-яке масштабування їх розмиває.
+The bar is drawn **1:1 on both axes**, only shortened to 56 pt. Track thickness (6 pt) and the marker
+(7×14) stay at their live size — ADR-0093 §3 requires this, and any scaling would blur them.
 
-Розставляння — за **треком**, не за кадром в'ю і не за маркером. `PopupBarView.viewHeight` резервує
-`tickGap + tickLength` під ⌥-лінійку, якої на плитці немає, а маркер виступає за трек на
-`(indicatorHeight − barHeight)/2` з кожного боку; міряння будь-чим із цього залишає пару **вище**
-центру. Два треки ділять плитку на три рівні частини.
+Layout is measured from the **track**, not the view's frame and not the marker. `PopupBarView.viewHeight`
+reserves `tickGap + tickLength` for the ⌥ ruler, which the tile doesn't have, and the marker
+overhangs the track by `(indicatorHeight − barHeight)/2` on each side; measuring from either of these
+leaves the pair sitting **above** center. Two tracks split the tile into three equal parts.
 
-Розглянуто й відкинуто: рендер на живій ширині 252 pt із показом лівого фрагмента. Заміряно — плитка
-виходить **голим сірим треком**, бо на цьому кадрі і маркер, і кольоровий штрих стоять далі за першу
-чверть бару. Вкорочення бару натомість зсуває позначку максимум на ~2 % ширини (інсет
-`minStripWidth/2` — константа від **висоти**, а не від довжини).
+Considered and rejected: rendering at the live 252 pt width and showing the left fragment. Measured —
+the tile comes out as a **bare gray track**, because in this frame both the marker and the colored
+strip sit past the bar's first quarter. Shortening the bar instead shifts the mark by at most ~2% of
+the width (the `minStripWidth/2` inset is a constant derived from **height**, not length).
 
-### 4. ⌥ не впливає на специмен
+### 4. ⌥ has no effect on the specimen
 
-`optionHeld` лишається `false`. У живому попапі модифікатор показує пояснювальну лінійку й підпис
-`0`, **поки його тримають** — плитка, запечена з ними, рекламувала б стан, у якому рядок не сидить.
-Нічого ідентифікуючого не втрачено: риска нуля, що відрізняє Pressure від Gauge, малюється
-безумовно.
+`optionHeld` stays `false`. In the live popup, the modifier shows the explanatory ruler and the `0`
+label **only while held** — a tile baked with them would advertise a state the row isn't actually in.
+Nothing identifying is lost: the zero tick that tells Pressure from Gauge is drawn unconditionally.
 
-### 5. Сегмент `With ⌥ Option` знято з **обох** рядків видимості
+### 5. The `With ⌥ Option` segment is removed from **both** visibility rows
 
-Кейс `.optionOnly` **лишається в enum** — старі збережені значення мусять декодуватися, і це та сама
-процедура, яку ADR-0087 застосував до `.nonCalm` на кредитному рядку. Але жоден контрол його не
-пропонує, а `PersistedConfig.migrateOptionOnlyVisibilityIfNeeded()` переписує збережене значення на
-`.aboveZero` — **на обох ключах, під одним маркером** `sectionVisibilityMigratedFromOptionOnly`. Без
-міграції рядок відкрився б без жодного підсвіченого сегмента.
+The `.optionOnly` case **stays in the enum** — old saved values still have to decode, and this is the
+same procedure ADR-0087 applied to `.nonCalm` on the credit row. But no control offers it anymore,
+and `PersistedConfig.migrateOptionOnlyVisibilityIfNeeded()` rewrites a saved value to `.aboveZero` —
+**on both keys, under one marker**, `sectionVisibilityMigratedFromOptionOnly`. Without the migration,
+the row would open with no segment highlighted at all.
 
-Заразом legacy-міграція старого булевого прапорця (`showModelSpecificLimits == false`) веде тепер на
-`.nonCalm` замість знятого `.optionOnly`.
+At the same time, the legacy migration of the old Boolean flag (`showModelSpecificLimits == false`)
+now leads to `.nonCalm` instead of the removed `.optionOnly`.
 
 ### 6. `Above zero` → `Once used`
 
-Стара назва описувала **механіку порогу** — число, що переходить нуль. Читач же обирає **поведінку**:
-показуй цей ліміт відтоді, як я почав ним користуватися. «Once» несе момент початку, який порогова
-фраза лише мала на увазі. Знятий ⌥-сегмент звільнив ширину, через яку назва мусила лишатися двома
-короткими словами.
+The old name described **threshold mechanics** — a number crossing zero. What the reader actually
+picks is **behavior**: show this limit from the moment I started using it. "Once" carries the
+starting moment that the threshold phrasing only implied. Removing the ⌥ segment freed up the width
+that had been forcing the name to stay two short words.
 
-## Наслідки
+## Consequences
 
-**Примітка ADR-0093 про «тимчасово різні контроли» більше не чинна** — обидві поверхні мають один
-контроль.
+**ADR-0093's note about "temporarily different controls" no longer stands** — both surfaces now
+share one control.
 
-**Прев'ю дропдауна треба перевіряти в обох темах.** Менюбарні плитки при зміні теми лишаються тими
-самими (фіксована `.vibrantDark`), дропдаунні **мусять перемалюватися**. Специмен — запечений
-`NSImage`, тож `BarStylePicker` читає `colorScheme`: без цієї залежності в'юха не перебудується й
-плитка застрягне в темі, під якою її намалювали першою.
+**The dropdown preview needs checking in both themes.** The menu bar tiles stay the same across a
+theme change (fixed `.vibrantDark`); the dropdown tiles **must redraw**. The specimen is a baked
+`NSImage`, so `BarStylePicker` reads `colorScheme`: without that dependency the view wouldn't rebuild
+and the tile would get stuck in whichever theme it was first drawn under.
 
-**Хто тримав `.optionOnly`, тихо переїде на `.aboveZero`.** Це видима зміна поведінки для нього:
-група, яку раніше показувало лише ⌥, тепер з'являтиметься сама, щойно в ній щось з'явиться. Обраний
-компроміс — найближчий уцілілий намір («не показуй порожнє»), і він єдиний, який пропонують **обидва**
-рядки.
+**Anyone who had `.optionOnly` set silently moves to `.aboveZero`.** This is a visible behavior
+change for them: a group that ⌥ used to be the only way to reveal now appears on its own as soon as
+it has something in it. The chosen compromise is the closest surviving intent ("don't show it
+empty"), and it's the only one **both** rows offer.
 
-**`PopupBarView` став подвійного призначення.** Він більше не лише живий бар — його `render(in:)`
-малює й плитки. Будь-яка зміна кресляра тепер зачіпає дві поверхні, і це навмисно: саме спільний
-кресляр робить неможливим розходження прев'ю з баром.
+**`PopupBarView` became dual-purpose.** It's no longer just the live bar — its `render(in:)` now
+draws the tiles too. Any change to the drawing code now touches two surfaces, and that's deliberate:
+it's exactly the shared drawing code that makes it impossible for the preview to diverge from the
+bar.
 
-**Виявлено й полагоджено баг живого попапа.** Обводка маркера рахувалася поза
-`performAsCurrentDrawingAppearance`, тож запікала один тон в обидві теми (`13,96,26`). Прев'ю, яке
-рендерить те саме в'ю під **явно заданою** появою, зробило дефект видимим; живий попап його не
-показував лише тому, що в'ю там завжди малюється у своїй справжній появі.
+**A live-popup bug was found and fixed along the way.** The marker's outline was computed outside
+`performAsCurrentDrawingAppearance`, so it baked one tone for both themes (`13,96,26`). The preview,
+which renders the same view under an **explicitly set** appearance, made the defect visible; the live
+popup never showed it only because the view there always draws in its actual, live appearance.

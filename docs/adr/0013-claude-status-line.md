@@ -4,132 +4,137 @@ date: 2026-06-23
 superseded_by: [0024, 0071]
 ---
 
-# ADR-0013: Рядок статусу сервісів Claude у попапі (status.claude.com)
+# ADR-0013: Claude services status line in the popup (status.claude.com)
 
-> **Superseded у частині обсягу** [ADR-0024](0024-configurable-logical-services.md): «рівно два
-> фіксовані компоненти `Claude Code` + `Claude API`» замінено конфігурованими логічними сервісами
-> (issue #89). Решта рішень нижче (джерело стану = лише `component.status`, інциденти не декодуються,
-> cadence-підлоги, чисте ядро / тонкий shell) **лишається чинною** і реюзується ADR-0024.
+> **Superseded in scope by** [ADR-0024](0024-configurable-logical-services.md): "exactly two
+> fixed components, `Claude Code` + `Claude API`" was replaced by configurable logical services
+> (issue #89). The rest of the decisions below (state source = `component.status` only, incidents
+> not decoded, cadence floors, pure core / thin shell) **still stands** and is reused by ADR-0024.
 >
-> **Додатково переглянуто §2** [ADR-0071](0071-incident-subscriptions.md) (draft): `incidents[]`
-> **тепер декодуються** — але лише як *контекст* і *об'єкт підписки*. Ядро §2 **лишається чинним**:
-> джерелом стану сервісів і надалі є виключно `components[].status`; жодне поле інциденту
-> (`status`, `impact`, `resolved_at`) на стан не впливає.
+> **§2 was additionally revisited by** [ADR-0071](0071-incident-subscriptions.md) (draft):
+> `incidents[]` is **now decoded** — but only as *context* and a *subscription object*. The core of
+> §2 **still stands**: the source of a service's state remains exclusively `components[].status`;
+> no incident field (`status`, `impact`, `resolved_at`) affects the state.
 
-## Контекст
+## Context
 
-Issue #31 додає у попап рядок зі станом сервісів Claude зі сторінки
-[status.claude.com](https://status.claude.com). Мета — відповісти на питання користувача «мій Claude
-Code тупить — це я (ліміт/мережа) чи Anthropic?»: усе про використання попап уже показує, бракувало
-другої половини — стану самих сервісів.
+Issue #31 adds a service-status line to the popup, sourced from
+[status.claude.com](https://status.claude.com). The goal is to answer the user's question "my
+Claude Code is lagging — is that me (limit/network) or Anthropic?": the popup already shows
+everything about usage, and the other half — the state of the services themselves — was missing.
 
-Джерело — JSON-ендпоінт Statuspage.io
-`https://status.claude.com/api/v2/summary.json`, що віддає `status` (overall `indicator`/
+The source is Statuspage.io's JSON endpoint,
+`https://status.claude.com/api/v2/summary.json`, which returns `status` (overall `indicator`/
 `description`), `components[]` (`name` + `status`: `operational` / `degraded_performance` /
 `partial_outage` / `major_outage` / `under_maintenance`), `incidents[]` (`name`, `status`,
-`impact`, `components[]`) та `scheduled_maintenances[]`.
+`impact`, `components[]`), and `scheduled_maintenances[]`.
 
-Постає той самий клас рішень про межі модуля, що в
+This is the same class of module-boundary decision as in
 [ADR-0008](0008-usageclient-pure-backoff-and-transport-seam.md),
 [ADR-0010](0010-usage-health-and-error-states.md),
-[ADR-0011](0011-polling-engine-adaptive-cadence-and-signal-seams.md): де живе парсинг/маппінг, як
-зробити його тестованим без живої мережі, і як накласти **друге** джерело даних, не зчепивши його з
-usage-поллінгом.
+[ADR-0011](0011-polling-engine-adaptive-cadence-and-signal-seams.md): where parsing/mapping lives,
+how to make it testable without a live network, and how to layer a **second** data source without
+coupling it to usage polling.
 
-1. **Які компоненти дотичні до консольного Claude Code.** Тікет просив дослідити. `Claude Code` —
-   інфраструктура продукту CLI (логін, апдейтер, роутинг моделей); `Claude API (api.anthropic.com)`
-   — бекенд інференсу, куди CLI шле кожен запит (помилки `5xx`/`429`/`529` у CLI = деградація саме
-   його, [docs](https://code.claude.com/docs/en/errors)). Решта (`claude.ai`, `Claude Console`,
-   `Claude Cowork`, `Claude for Government`) до консольного CLI прямо не дотичні.
-2. **Сигнал стану vs інциденти.** Перевірено вручну: компонент і інцидент можуть розходитися — обидва
-   наші компоненти бувають `operational`, тоді як активний `major` інцидент перелічує їх у
-   `components[]` (реальний кейс: призупинення доступу до Mythos 5 / Fable 5). Треба вирішити, що є
-   джерелом істини для рядка.
-3. **Cadence.** Це **інше** джерело, ніж usage API. Тікет прямо вимагав «окремий, **ввічливий**
-   інтервал — не плутати з cadence usage». Status.claude.com — сторонній сервіс.
+1. **Which components are relevant to the console Claude Code.** The ticket asked for this to be
+   researched. `Claude Code` is the CLI product's infrastructure (login, updater, model routing);
+   `Claude API (api.anthropic.com)` is the inference backend every CLI request goes to (`5xx`/
+   `429`/`529` errors in the CLI mean degradation of that component specifically,
+   [docs](https://code.claude.com/docs/en/errors)). The rest (`claude.ai`, `Claude Console`,
+   `Claude Cowork`, `Claude for Government`) is not directly relevant to the console CLI.
+2. **State signal vs. incidents.** Verified manually: a component and an incident can disagree —
+   both of our components can be `operational` while an active `major` incident lists them in
+   `components[]` (a real case: the suspension of access to Mythos 5 / Fable 5). We need to decide
+   which one is the source of truth for the line.
+3. **Cadence.** This is a **different** source than the usage API. The ticket explicitly required
+   "a separate, **polite** interval — not to be confused with the usage cadence." Status.claude.com
+   is a third-party service.
 
-## Рішення
+## Decision
 
-1. **Обсяг — два компоненти: `Claude Code` + `Claude API (api.anthropic.com)`.** Будь-який може
-   лежати окремо (зламаний логін/роутинг при робочому API, або навпаки), тож обидва релевантні для
-   відповіді «чи це Anthropic». Витягуються за **точним іменем** із `components[]`; відсутній
-   компонент (Anthropic перейменувала/прибрала) → `unknown`, а не мовчазний `operational`.
+1. **Scope — two components: `Claude Code` + `Claude API (api.anthropic.com)`.** Either can go
+   down independently (broken login/routing with a working API, or vice versa), so both are
+   relevant to answering "is this Anthropic." They're pulled by **exact name** from `components[]`;
+   a missing component (Anthropic renamed or removed it) becomes `unknown`, not a silent
+   `operational`.
 
-2. **Джерело стану — ВИКЛЮЧНО `component.status` цих двох компонентів. Інциденти / overall /
-   scheduled_maintenances НЕ декодуються взагалі.** Це навмисно й має три переваги: (а) збігається з
-   кольором, який Statuspage показує біля компонента на самій сторінці; (б) автоматично ховає
-   «відомі виключення» на кшталт призупинення Mythos/Fable — інцидент `major`, але компоненти
-   лишаються `operational`, тож попап показує `operational` без жодного спецкоду; (в) тримає
-   `StatusSummary` вузьким (одне поле `components`), без коду навколо інцидентів. `Decodable`
-   ігнорує немодельовані ключі безкоштовно.
+2. **State source — EXCLUSIVELY `component.status` for these two components. Incidents / overall /
+   scheduled_maintenances are NOT decoded at all.** This is deliberate and has three benefits:
+   (a) it matches the color Statuspage shows next to the component on the page itself; (b) it
+   automatically hides "known exceptions" like the Mythos/Fable suspension — a `major` incident
+   while the components stay `operational`, so the popup shows `operational` with no special case;
+   (c) it keeps `StatusSummary` narrow (a single `components` field), with no code around
+   incidents. `Decodable` ignores unmodeled keys for free.
 
-3. **Вигляд — завжди два незалежні рядки, по одному на компонент, з кольоровою крапкою-індикатором.**
-   Без агрегації в «overall», без згортання: `● Claude Code: operational` / `● Claude API:
-   operational`. Колір крапки = статус саме цього компонента
-   (`зелена/жовта/помаранчева/червона/синя/сіра`). Маппінг `status → крапка + слово` — у view
-   (`PopupViewController`, точка локалізації, ADR-0009), `CCTimerKit` несе лише семантичний
-   `ServiceStatus`.
+3. **Appearance — always two independent lines, one per component, with a colored dot indicator.**
+   No aggregation into an "overall," no collapsing: `● Claude Code: operational` / `● Claude API:
+   operational`. The dot's color equals that specific component's status
+   (`green/yellow/orange/red/blue/gray`). The `status → dot + word` mapping lives in the view
+   (`PopupViewController`, the localization point, ADR-0009); `CCTimerKit` carries only the
+   semantic `ServiceStatus`.
 
-4. **Слово стану — клікабельне посилання на `https://status.claude.com`, але ЛИШЕ коли стан не
-   `operational`.** На operational-рядку слово — звичайний secondary-текст без лінку (на
-   статус-сторінці нема на що дивитися); на будь-якій деградації/maintenance/unknown слово стає
-   лінком на статичну головну сторінку (не shortlink інциденту — інциденти ми не парсимо). Клік
-   відкриває браузер. Оскільки `.link`-обробка `NSTextField` ненадійна всередині `NSMenu`-hosted
-   view, клік обробляється явно (`StatusLineLabel.mouseDown` по діапазону слова + курсор-рука лише
-   за наявності лінку).
+4. **The status word is a clickable link to `https://status.claude.com`, but ONLY when the state is
+   not `operational`.** On an operational line, the word is plain secondary text with no link
+   (there's nothing to look at on the status page); on any degradation/maintenance/unknown, the
+   word becomes a link to the static home page (not an incident shortlink — we don't parse
+   incidents). A click opens the browser. Since `NSTextField`'s `.link` handling is unreliable
+   inside an `NSMenu`-hosted view, the click is handled explicitly (`StatusLineLabel.mouseDown`
+   over the word's range, plus a hand cursor only when a link is present).
 
-5. **Холодний старт → рядків немає; збій нашого fetch → обидва `unknown` (сіра крапка).** Доки немає
-   першої успішної відповіді — статус-рядки не показуються (`serviceStatus == nil`). Якщо наш запит
-   до status-сторінки впав (мережа/decode), shell підставляє `StatusHealth.unknown` — чесне «не
-   знаємо», а не брехливе `operational`. UI для «сервіс unknown» і «ми не змогли дізнатися» однаковий,
-   тож тип не несе окремого failure-поля.
+5. **Cold start → no lines shown; our fetch failing → both `unknown` (gray dot).** Until the first
+   successful response arrives, the status lines are not shown (`serviceStatus == nil`). If our
+   request to the status page fails (network/decode), the shell substitutes `StatusHealth.unknown`
+   — an honest "we don't know," not a false `operational`. The UI for "the service is unknown" and
+   "we failed to find out" is the same, so the type carries no separate failure field.
 
-6. **Чисте ядро в `CCTimerKit` + тонкий glue — дзеркало `UsageClient`/`UsageHealth`.**
-   `StatusSummary` (Decodable), `ServiceStatus`/`StatusHealth` (семантичний маппінг, без
-   локалізованих рядків), `StatusClient` (`buildRequest`/`decode`/`fetch`, реюз seam'а
-   `UsageTransport`, обов'язковий `User-Agent: claude-code/<version>`). HTTP-запит і таймер — у shell.
-   Тести підставляють stub-transport і фікстуру `summary.json` (із інцидентом усередині — щоб
-   довести, що зайві ключі ігноруються).
+6. **Pure core in `CCTimerKit` + thin glue — mirroring `UsageClient`/`UsageHealth`.**
+   `StatusSummary` (Decodable), `ServiceStatus`/`StatusHealth` (semantic mapping, no localized
+   strings), `StatusClient` (`buildRequest`/`decode`/`fetch`, reusing the `UsageTransport` seam,
+   the mandatory `User-Agent: claude-code/<version>`). The HTTP request and the timer live in the
+   shell. Tests substitute a stub transport and a `summary.json` fixture (with an incident inside —
+   to prove extra keys are ignored).
 
-7. **Cadence підв'язана до usage-tick із підлогою ввічливості, а не окремий таймер.** Інтервал
-   статусу = `max(floor, поточний usage-інтервал)` (`StatusCadence.interval`). На кожен `PollOutput`
-   shell питає `StatusCadence.isDue(...)` і фетчить лише коли пора. Так статус **слідує** за usage,
-   коли той повільний (простій/неактивність → 30 хв, обидва затихають разом), але **ніколи** не
-   частіше за `floor`, навіть коли usage молотить раз на 60 с чи в 429-backoff — це й є «ввічливість»
-   до стороннього сервісу. Статус **не** має власного 429-backoff і **не** впливає на usage-cadence:
-   `StatusFetchError` ловиться в shell і ніколи не ескалює usage-поллінг.
-   **Дві підлоги:** `floor = 5 хв` коли все operational; `problemFloor = 60 с` (наш загальний
-   `minInterval`), щойно будь-який компонент **не** operational — під час інциденту сторінку варто
-   стежити пильно (ескалація/відновлення стаються на хвилинній шкалі), тож підлога опускається, щоб
-   швидко зловити зміну. `isDue(... hasProblem:)` отримує цей прапорець від останнього відомого стану.
+7. **Cadence is tied to the usage tick with a politeness floor, rather than its own timer.** The
+   status interval equals `max(floor, current usage interval)` (`StatusCadence.interval`). On every
+   `PollOutput`, the shell asks `StatusCadence.isDue(...)` and fetches only when it's due. So status
+   **follows** usage when usage slows down (idle/inactivity → 30 min, both quiet down together),
+   but **never** more often than `floor`, even when usage is polling every 60 s or in 429 backoff —
+   that's the "politeness" toward a third-party service. Status has **no** backoff of its own for
+   429s and does **not** affect usage cadence: `StatusFetchError` is caught in the shell and never
+   escalates usage polling.
+   **Two floors:** `floor = 5 min` when everything is operational; `problemFloor = 60 s` (our
+   general `minInterval`) as soon as any component is **not** operational — during an incident the
+   page is worth watching closely (escalation/recovery happen on a minute-scale), so the floor
+   drops to catch a change quickly. `isDue(... hasProblem:)` receives this flag from the last known
+   state.
 
-8. **Кольоровий індикатор у menu bar — найлівіший елемент віджета, лише за проблеми.**
-   `StatusHealth.worstProblem` повертає найсерйозніший зі станів двох компонентів (severity-порядок:
-   operational < maintenance < unknown < degraded < partial < major) або `nil` коли обидва
-   operational. `MenuBarLayout` несе це як `serviceProblem: ServiceStatus?` (ортогонально до `mode`);
-   `StatusItemView` малює маленьку кольорову крапку зліва від смужок/гліфа, зсуваючи решту вправо.
-   `nil` (усе ОК / холодний старт) → крапки немає. Колір — фіксований sRGB (image non-template):
-   жовтий/помаранчевий/червоний/синій/сірий. `unknown` теж показує крапку (сіру) — чесно сигналить
-   «не знаємо», не ховаючи стан.
+8. **The colored indicator in the menu bar — the widget's leftmost element, shown only on a
+   problem.** `StatusHealth.worstProblem` returns the more severe of the two components' states
+   (severity order: operational < maintenance < unknown < degraded < partial < major) or `nil` when
+   both are operational. `MenuBarLayout` carries this as `serviceProblem: ServiceStatus?`
+   (orthogonal to `mode`); `StatusItemView` draws a small colored dot to the left of the
+   strips/glyph, shifting the rest right. `nil` (everything OK / cold start) → no dot. The color is
+   fixed sRGB (a non-template image): yellow/orange/red/blue/gray. `unknown` also shows a dot
+   (gray) — honestly signaling "we don't know" rather than hiding the state.
 
-## Наслідки
+## Consequences
 
-- `CCTimerKit` лишається без AppKit/Network: `StatusSummary`/`ServiceStatus`/`StatusHealth`/
-  `StatusCadence`/`StatusClient` оперують лише семантикою й `Foundation`; платформенний бік
-  (`URLSession`, таймінг) — у `cc-timer`. Маппінг і cadence покриті unit-тестами
-  (`StatusHealthTests`, `StatusClientTests`, `StatusCadenceTests`); рядок-лінк перевіряється E2E
-  через `CC_TIMER_STUB=1` (стаб віддає деградований API + інцидент — показує жовту крапку й доводить,
-  що інцидент ігнорується).
-- Два джерела даних ортогональні: usage-поллінг (ADR-0011) і статус-поллінг ділять `SignalHub`-ритм
-  (статус хантажиться з usage-tick), але мають окремі стани, окрему обробку помилок і незалежні
-  cadence-підлоги. Збій одного не зачіпає інший.
-- Якщо у Фазі 2 знадобиться показ інцидентів, історія, або статус у menu-bar (не лише в попапі) —
-  нове рішення → нова секція тут або окремий ADR. Поточне свідомо мінімалістичне: лише per-компонентний
-  `status`.
+- `CCTimerKit` stays free of AppKit/Network: `StatusSummary`/`ServiceStatus`/`StatusHealth`/
+  `StatusCadence`/`StatusClient` operate only on semantics and `Foundation`; the platform side
+  (`URLSession`, timing) lives in `cc-timer`. Mapping and cadence are covered by unit tests
+  (`StatusHealthTests`, `StatusClientTests`, `StatusCadenceTests`); the status line and its link
+  are verified end-to-end via `CC_TIMER_STUB=1` (the stub returns a degraded API plus an incident —
+  showing a yellow dot and proving the incident is ignored).
+- The two data sources are orthogonal: usage polling (ADR-0011) and status polling share the
+  `SignalHub` rhythm (status piggybacks on the usage tick), but have separate states, separate
+  error handling, and independent cadence floors. A failure in one does not affect the other.
+- If Phase 2 needs to show incidents, history, or status in the menu bar (not just the popup) —
+  that is a new decision → a new section here or a separate ADR. The current scope is deliberately
+  minimal: per-component `status` only.
 
-## Пов'язані
+## Related
 
-- [ADR-0008](0008-usageclient-pure-backoff-and-transport-seam.md) — `UsageClient`/`UsageTransport`; `StatusClient` дзеркалить його структуру й реюзає transport-seam.
-- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — чисте ядро / тонкий shell, локалізація у view; рядок статусу слідує тому ж поділу.
-- [ADR-0010](0010-usage-health-and-error-states.md) — `UsageHealth`/`FailureReason`; `StatusHealth` — його аналог для статус-домену.
-- [ADR-0011](0011-polling-engine-adaptive-cadence-and-signal-seams.md) — usage-поллінг, із якого статус бере свій heartbeat і поточний інтервал.
+- [ADR-0008](0008-usageclient-pure-backoff-and-transport-seam.md) — `UsageClient`/`UsageTransport`; `StatusClient` mirrors its structure and reuses the transport seam.
+- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — pure core / thin shell, localization in the view; the status line follows the same split.
+- [ADR-0010](0010-usage-health-and-error-states.md) — `UsageHealth`/`FailureReason`; `StatusHealth` is its analog for the status domain.
+- [ADR-0011](0011-polling-engine-adaptive-cadence-and-signal-seams.md) — usage polling, from which status takes its heartbeat and current interval.

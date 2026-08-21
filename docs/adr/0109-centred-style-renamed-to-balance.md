@@ -5,81 +5,85 @@ supersedes: []
 superseded_by: []
 ---
 
-# ADR-0109: Центральний стиль бару зветься **Balance**, а не Gauge
+# ADR-0109: The centered bar style is called **Balance**, not Gauge
 
-## Контекст
+## Context
 
-Стиль із нулем посередині ([ADR-0079](0079-centred-zero-gauge-scale.md)) звався **Gauge** від
-[#326](https://github.com/artem-from-ua/tokenpace/issues/326). Назва має дефект, який видно лише
-поруч із сусідньою: **`gauge` — родове ім'я приладу, і манометр теж gauge**. У ряду
-`Pressure · Gauge · Progress` друге слово є **гіперонімом** першого, тож найприродніша здогадка —
-що Gauge це якийсь варіант показу того самого тиску.
+The zero-in-the-middle style ([ADR-0079](0079-centred-zero-gauge-scale.md)) was called **Gauge**
+starting with [#326](https://github.com/artem-from-ua/tokenpace/issues/326). The name has a flaw
+that only shows up next to its neighbor: **`gauge` is the generic name for an instrument, and a
+pressure gauge is a gauge too**. In the row `Pressure · Gauge · Progress`, the second word is a
+**hypernym** of the first, so the most natural guess is that Gauge is some variant display of that
+same pressure.
 
-Насправді відношення зворотне за обсягом: `BarLayout.pressureLength` є буквально
-`max(0, balanceOffset)` — Pressure **є половиною** цієї шкали
-([ADR-0101](0101-pressure-is-the-gauge-ahead-half.md)). Тобто ім'я не просто не пояснювало, а
-вказувало в хибний бік.
+The actual relationship is the reverse in scope: `BarLayout.pressureLength` is literally
+`max(0, balanceOffset)` — Pressure **is half** of this scale
+([ADR-0101](0101-pressure-is-the-gauge-ahead-half.md)). So the name did not just fail to explain
+itself — it pointed the wrong way.
 
-Це окремий випадок принципу з [#381](https://github.com/artem-from-ua/tokenpace/issues/381):
-**назва описує поведінку, яку обирає користувач, а не механіку, якою вона реалізована**. `Gauge` —
-буквально механіка (прилад); `Balance` — поведінка.
+This is a specific case of the principle from
+[#381](https://github.com/artem-from-ua/tokenpace/issues/381): **a name describes the behavior the
+user picks, not the mechanism it is implemented with**. `Gauge` is literally the mechanism (an
+instrument); `Balance` is the behavior.
 
-Обговорення назви — [#387](https://github.com/artem-from-ua/tokenpace/issues/387), реалізація —
-[#388](https://github.com/artem-from-ua/tokenpace/issues/388).
+The naming discussion is [#387](https://github.com/artem-from-ua/tokenpace/issues/387); the
+implementation is [#388](https://github.com/artem-from-ua/tokenpace/issues/388).
 
-## Рішення
+## Decision
 
-**`BarStyle.gauge` → `BarStyle.balance`, `rawValue` `"gauge"` → `"balance"`, UI-підпис
-`Gauge` → `Balance`.** Разом із ними: `BarLayout.gaugeOffset` → `balanceOffset` і стуб
+**`BarStyle.gauge` → `BarStyle.balance`, `rawValue` `"gauge"` → `"balance"`, the UI label
+`Gauge` → `Balance`.** Along with them: `BarLayout.gaugeOffset` → `balanceOffset` and the stub
 `gauge-sweep` → `balance-sweep`.
 
-### Чому саме `Balance`
+### Why `Balance` specifically
 
-Терези — єдиний побутовий предмет, чий **стан спокою є середина**, тож «нуль посередині,
-відхилення в обидва боки» доходить без жодного пояснення. Це та сама логіка, якою
-[ADR-0076](0076-pressure-scale-for-marker-less-bar.md) обирав `Progress`: назва мусить
-**підтверджувати** прочитання, а не воювати з ним.
+A balance scale is the one everyday object whose **resting state is the middle**, so "zero in the
+middle, deviation to either side" lands without any explanation needed. This is the same logic
+[ADR-0076](0076-pressure-scale-for-marker-less-bar.md) used when it picked `Progress`: the name
+must **confirm** the reading, not fight it.
 
-Розглянуті й відкинуті: `Drift` (точний, але пасивний — «дрейф» це те, що стається з тобою
-повільно, тоді як ahead-половина про терміновість), `Balanced` (прикметник іменує **центральний
-стан**, тобто те, що бар показує, коли відхилення немає), `Center-zero` / `Bipolar` / `Diverging` /
-`Differential` (формально найточніші, але це терміни, а не назви: дефісні, прикметникові або
-чотирискладові).
+Considered and rejected: `Drift` (accurate but passive — "drift" is something that happens to you
+slowly, whereas the ahead-half is about urgency), `Balanced` (an adjective names the **centered
+state**, i.e. what the bar shows when there is no deviation, not the style itself),
+`Center-zero` / `Bipolar` / `Diverging` / `Differential` (formally the most precise, but these are
+terms, not names: hyphenated, adjectival, or four syllables long).
 
-### Прийнята вада назви
+### The accepted flaw in the name
 
-`Balance` **не ідеальне**, і це записано свідомо. Слово вже вживається в застосунку у **грошовому**
-значенні, і саме в сусідній частині UI:
+`Balance` **is not perfect**, and that is recorded deliberately. The word is already used in the
+app in a **monetary** sense, in an adjacent part of the UI, no less:
 
-- `spend.balance` — поле кредитного блока usage API. Значення ніколи не приходить (`null` у всіх
-  станах) і **не декодується**, тож компіляційної колізії немає — але словник уже зайнято;
-- [ADR-0037](0037-extra-usage-credits-model.md) вживає Title-case `Balance` у прозі й лишає
-  balance-логіку «окремою майбутньою фічею»;
-- у Settings хінт *«Extra usage bar always draws in Progress style»* прибитий до **того самого
-  рядка Style** ([ADR-0100](0100-dropdown-style-tiles-and-retired-option-segment.md)), тож підпис і
-  слова «Extra usage» стоять поруч.
+- `spend.balance` — a field of the usage API's credit block. The value never arrives (`null` in
+  every state) and **is never decoded**, so there is no compile-time collision — but the word is
+  already spoken for;
+- [ADR-0037](0037-extra-usage-credits-model.md) uses title-case `Balance` in prose and leaves
+  balance logic as "a separate future feature";
+- in Settings, the hint *"Extra usage bar always draws in Progress style"* is pinned to **that
+  same Style row** ([ADR-0100](0100-dropdown-style-tiles-and-retired-option-segment.md)), so the
+  label and the words "Extra usage" sit next to each other.
 
-**Чому прийнято попри це.** Проблема, яку `Balance` розв'язує, стосується **кожного**, хто відкриє
-пікер; проблема, яку створює, — лише того, хто читає доки чи код і тримає в голові обидва значення.
-Пом'якшення: доккоментар `case balance` прямо каже, що це не `spend.balance`, і цей розділ ADR
-фіксує розведення термінів. **ADR-0037 не переписуємо** — він `accepted`, отже незмінний.
+**Why it was accepted anyway.** The problem `Balance` solves affects **everyone** who opens the
+picker; the problem it creates affects only someone reading docs or code while holding both
+meanings in mind at once. The mitigation: the `case balance` doc comment states outright that this
+is not `spend.balance`, and this section of the ADR records the distinction between the two terms.
+**ADR-0037 is not rewritten** — it is `accepted`, hence immutable.
 
-### Ціна виявилася однорядковою — завдяки ADR-0108
+### The cost turned out to be one line — thanks to ADR-0108
 
-[ADR-0108](0108-extra-usage-one-anatomy-and-per-bar-style-caption.md) §3 звів слово стилю до
-`BarStyle.displayName` із похідним `caption`, і зробив це **в очікуванні саме цього
-перейменування** — дослівно: «#387/#388 пропонують перейменувати Gauge, і два літерали означали б
-два піврейнейми». Тож зміна підпису на обох поверхнях — правка **одного рядка**.
+[ADR-0108](0108-extra-usage-one-anatomy-and-per-bar-style-caption.md) §3 reduced the style word to
+`BarStyle.displayName` with a derived `caption`, and did so **anticipating exactly this rename** —
+verbatim: "#387/#388 propose renaming Gauge, and two literals would mean two half-renames." So
+changing the label on both surfaces is a **one-line** edit.
 
-Друге, що це дало: `displayName` свідомо **не** виводиться з `rawValue` («the raw values are
-persisted keys»), тож UI-назву й збережене значення можна було міняти **незалежно** — підпис
-окремим комітом, кейс і міграцію наступним.
+The second thing it bought: `displayName` is deliberately **not** derived from `rawValue` ("the raw
+values are persisted keys"), so the UI name and the stored value could be changed
+**independently** — the label in one commit, the case and migration in the next.
 
-### Міграція: один запис у таблиці замість нового коду
+### Migration: one table entry instead of new code
 
-Перейменований `rawValue` **тихо скидає** налаштування — обидва геттери резолвлять невідомий raw у
-дефолт пресету без помилки. Правило `releasing.md` («перейменування raw-значення — це дві правки, а
-не одна») виконано записом:
+A renamed `rawValue` **silently resets** the setting — both getters resolve an unrecognized raw
+value to the preset default without an error. The rule from `releasing.md` ("renaming a raw value
+is two edits, not one") is satisfied by this entry:
 
 ```swift
 public static let legacyRawValues: [String: BarStyle] = [
@@ -89,89 +93,93 @@ public static let legacyRawValues: [String: BarStyle] = [
 ]
 ```
 
-Цього досить, щоб значення **читалося** правильно: всі шляхи, що бачать збережений raw,
-консультують ту саму таблицю — `init(from:)`, `legacySurfaceStyles(for:)` і декод експортованого
-конфігу.
+That is enough for the value to **read** correctly: every path that sees a stored raw value
+consults the same table — `init(from:)`, `legacySurfaceStyles(for:)`, and decoding an exported
+config.
 
-Але читати правильно — замало. `migrateRawKey` спрацьовує лише поки **ключ переїжджає** зі старого
-імені в нове (#381), тож інсталяція, що цей переїзд уже зробила, лишає на диску старе *значення*
-назавжди: `defaults read` показує raw, який не відповідає жодній назві кейса, експортований конфіг
-несе його далі, а в день, коли legacy-запис приберуть, налаштування скинеться по-справжньому. Тому
-додано **парний прохід над значеннями** — `PersistedConfig.refreshRawValue`, який переписує raw
-**на місці** в тому самому ключі:
+But reading correctly is not enough. `migrateRawKey` only fires while **the key itself** is moving
+from the old name to the new one (#381), so an installation that has already made that move leaves
+the old *value* on disk forever: `defaults read` shows a raw value that matches no case name, an
+exported config carries it forward, and on the day the legacy entry is removed, the setting resets
+for real. So a **matching value pass** was added — `PersistedConfig.refreshRawValue`, which rewrites
+the raw value **in place**, under the same key:
 
 ```swift
 refreshRawValue(Key.menuBarStyle, label: "menu-bar-style") { BarStyle.legacyRawValues[$0]?.rawValue }
 ```
 
-Застосований до всіх шести Appearance-ключів, не лише до стилів: **не тримати легасі там, де вже є
-робочий механізм міграції**. Marker-ключа не треба — ідемпотентність структурна, як і в сусідніх
-проходів (#381: «Idempotent by construction, no marker key»): таблиця відповідає лише на raw, що
-**не є** поточними, тож один перезапис прибирає власну умову спрацювання.
+Applied to all six Appearance keys, not just the styles: **don't keep a legacy path around where a
+working migration mechanism already exists.** No marker key is needed — the idempotence is
+structural, as in the neighboring passes (#381: "Idempotent by construction, no marker key"): the
+table only answers for raw values that are **not** current, so a single rewrite removes its own
+trigger condition.
 
-**Виняток, який довелося полагодити:** геттери `PersistedConfig.menuBarStyle` / `.dropdownStyle`
-консультували лише `rawValue`, тобто були єдиним шляхом повз таблицю. Тепер вони читають її, як
-решта — що заразом закрило ту саму дірку для `"pacing"`/`"simple"`, яку доккоментар визнавав
-відкритою від #307.
+**One exception that needed fixing:** the `PersistedConfig.menuBarStyle` / `.dropdownStyle` getters
+only consulted `rawValue`, meaning they were the one path that bypassed the table. They now read it
+like everything else — which incidentally closed the same gap for `"pacing"`/`"simple"` that the
+doc comment had acknowledged as open since #307.
 
-### Що зі словом `gauge` лишається в коді — і чому
+### What of the word `gauge` remains in the code — and why
 
-Прецедент `Pace → Pressure` (#307) той самий: `"pacing"` і `"simple"` лишилися назавжди. Тут
-лишаються:
+The `Pace → Pressure` precedent (#307) is the same one: `"pacing"` and `"simple"` stayed forever.
+Here, what remains:
 
-| Що | Чому |
+| What | Why |
 |---|---|
-| `"gauge"` у `legacyRawValues` | серце міграції; прибрати = скинути налаштування всім, хто не перевибирав стиль |
-| `\| "gauge" / "balance" \|` у таблицях міграції | ліва колонка описує, **що лежить у чужих `UserDefaults`** |
-| JSON-фікстури з `"gauge"` | регресійний тест: старий експортований дамп мусить імпортуватися |
-| «Raw value was `"gauge"` before #388» | історичний маркер за зразком `"pacing"`/#307 |
-| «Until the centred scale arrived…» | твердження **про момент у часі** — заміна зробила б його хибним |
-| Слаги `0079-…-gauge-scale.md` тощо | імена файлів ADR не перейменовуються (52 посилання) |
+| `"gauge"` in `legacyRawValues` | the heart of the migration; removing it would reset the setting for anyone who never re-picked a style |
+| `\| "gauge" / "balance" \|` in migration tables | the left column describes **what's actually sitting in other people's `UserDefaults`** |
+| JSON fixtures with `"gauge"` | a regression test: an old exported dump must still import |
+| "Raw value was `"gauge"` before #388" | a historical marker, following the `"pacing"`/#307 pattern |
+| "Until the centered scale arrived…" | a claim **about a moment in time** — replacing it would make it false |
+| Slugs like `0079-…-gauge-scale.md` | ADR filenames are never renamed (52 references) |
 
-Тобто `grep -i gauge` **не має бути порожнім** — 12 навмисних згадок замість 132.
+So `grep -i gauge` **should not come back empty** — 12 deliberate mentions instead of 132.
 
-### Що НЕ перейменовано
+### What was NOT renamed
 
-**`BarScale.centred`** описує геометрію, а не стиль. [ADR-0079](0079-centred-zero-gauge-scale.md)
-свідомо ввів `BarScale`, щоб відв'язати шкалу від назви стилю, і рендерери гілкуються саме на ній
-(`barStyle.scale == .centred`), а не на кейсі — тому перейменування взагалі не торкнулося коду
-малювання.
+**`BarScale.centred`** describes geometry, not style. [ADR-0079](0079-centred-zero-gauge-scale.md)
+deliberately introduced `BarScale` to decouple the scale from the style's name, and the renderers
+branch on it directly (`barStyle.scale == .centred`), not on the case — so the rename never touched
+the drawing code at all.
 
-## Наслідки
+## Consequences
 
-- **Збережений вибір не губиться.** Користувач, який обрав цей стиль, бачить після оновлення те
-  саме, лише під новою назвою. Це має піти рядком у release notes.
-- **`gaugeOffset` був публічним API `TokenPaceKit`**, тож формально це source-breaking зміна.
-  Зовнішніх споживачів немає; шим `@available(*, deprecated, renamed:)` не заводимо.
-- **`grep -i balance` став шумнішим** — змішує стиль із кредитним API. Це прийнята ціна; `gauge`
-  був чистим унікальним токеном.
-- **Три ADR зі слагом `gauge` тепер описують стиль під іменем, якого немає.** Тіла незмінні, тож
-  кожен отримав короткий post-scriptum-вказівник. Зокрема
-  [ADR-0079](0079-centred-zero-gauge-scale.md) містить пункт «`"gauge"` — новий raw, **не
-  перейменування**, тож `legacyRawValues` не чіпаємо» — саме він цим рішенням і скасований.
-- **Перевірка «нуль згадок» не годиться.** Замість неї — три точкові grep-и на **биті посилання**:
-  `BarLayout/gaugeOffset`, `BarStyle/gauge` і markdown-лінки на ADR (їх має лишитися 52, і падіння
-  цього числа означає, що sed зламав посилання).
+- **The stored choice is not lost.** A user who picked this style sees the same thing after the
+  update, just under a new name. This should get a line in the release notes.
+- **`gaugeOffset` was public `TokenPaceKit` API**, so this is formally a source-breaking change.
+  There are no external consumers, so no `@available(*, deprecated, renamed:)` shim was added.
+- **`grep -i balance` got noisier** — it now mixes the style with the credit API. This is an
+  accepted cost; `gauge` was a clean, unique token.
+- **Three ADRs with a `gauge` slug now describe a style under a name that no longer exists.** Their
+  bodies are unchanged, so each got a short postscript pointer. In particular,
+  [ADR-0079](0079-centred-zero-gauge-scale.md) contains the note "`"gauge"` is a new raw value,
+  **not a rename**, so `legacyRawValues` is left untouched" — which this very decision now
+  overrides.
+- **A "zero mentions" check doesn't work here.** Instead, three targeted greps for **broken
+  references**: `BarLayout/gaugeOffset`, `BarStyle/gauge`, and markdown links to the ADR (there
+  should be 52 of them left, and a drop in that count means a `sed` broke a link).
 
-## Альтернативи
+## Alternatives considered
 
-- **Лишити `Gauge`.** Найдешевше, і [ADR-0093](0093-bar-style-picked-by-picture.md) дає сильний
-  аргумент: підпис зведено до ярлика, бо стиль обирають **картинкою**, тож слово не несе сенсу.
-  Відкинуто: ярлик усе одно читають — у навігаторському рядку Settings (`Style: Balance`), у
-  підписі попапа під ⌥ і в release notes. Родове ім'я, що є гіперонімом сусіда, там шкодить.
-- **Перейменувати лише підпис, лишивши `rawValue = "gauge"`.** Нуль ризику міграції. Відкинуто:
-  це та сама розбіжність «кейс у коді vs назва в UI», яку
-  [ADR-0076](0076-pressure-scale-for-marker-less-bar.md) назвав «постійним податком на читання коду
-  й логів» і свідомо усунув.
-- **Перейменувати й `BarScale.centred`.** Зробило б зв'язок стиль↔шкала буквальним. Відкинуто:
-  геометрична нейтральність `BarScale` — і є те, заради чого його вводили.
+- **Keep `Gauge`.** The cheapest option, and [ADR-0093](0093-bar-style-picked-by-picture.md) makes
+  a strong case: the label was reduced to a tag because the style is picked **by picture**, so the
+  word doesn't carry meaning. Rejected: the tag still gets read anyway — in the Settings navigator
+  row (`Style: Balance`), in the popup caption under ⌥, and in release notes. A generic name that is
+  a hypernym of its neighbor hurts in all three places.
+- **Rename only the label, keeping `rawValue = "gauge"`.** Zero migration risk. Rejected: this is
+  the same "case in code vs. name in UI" mismatch that
+  [ADR-0076](0076-pressure-scale-for-marker-less-bar.md) called "a permanent tax on reading code
+  and logs" and deliberately eliminated.
+- **Rename `BarScale.centred` too.** Would make the style↔scale link literal. Rejected: the
+  geometric neutrality of `BarScale` is precisely what it was introduced for.
 
-## Пов'язане
+## Related
 
-- [ADR-0079](0079-centred-zero-gauge-scale.md) — сам стиль і його шкала.
-- [ADR-0101](0101-pressure-is-the-gauge-ahead-half.md) — Pressure як половина цієї шкали.
+- [ADR-0079](0079-centred-zero-gauge-scale.md) — the style itself and its scale.
+- [ADR-0101](0101-pressure-is-the-gauge-ahead-half.md) — Pressure as half of this scale.
 - [ADR-0108](0108-extra-usage-one-anatomy-and-per-bar-style-caption.md) §3 — `displayName`/`caption`,
-  що зробили перейменування однорядковим.
-- [ADR-0016](0016-rename-to-tokenpace.md) — межа «історія не переписується, живі доки
-  перейменовуються».
-- [ADR-0037](0037-extra-usage-credits-model.md) — інше значення слова `balance` у цьому продукті.
+  which made the rename a one-line change.
+- [ADR-0016](0016-rename-to-tokenpace.md) — the "history isn't rewritten, live docs get renamed"
+  boundary.
+- [ADR-0037](0037-extra-usage-credits-model.md) — the other meaning of the word `balance` in this
+  product.

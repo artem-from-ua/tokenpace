@@ -3,101 +3,110 @@ status: accepted
 date: 2026-07-30
 ---
 
-# ADR-0047: Живий селектор стубів — перебудова polling-engine у рантаймі
+# ADR-0047: A live stub selector — rebuilding the polling engine at runtime
 
-## Контекст
+## Context
 
-Стуб-сценарії (`TOKENPACE_STUB=…`) — головний спосіб верифікації UI-станів: ~24 канонічні кадри
-(`climbing`, `both-red`, `credits-active`, `reset-grace`, …). Активний сценарій читався з середовища
-**один раз при старті** (`AppDelegate.stubName`) і «запікався» у транспорт: великий `switch` у
-`startPolling` (~24 кейси) конструював `StubUsageTransport(mode:)`, а вибір token-provider/refresher
-теж робився з `stubName`. Побачити інший сценарій означало **вбити застосунок і перезапустити** з
-іншою env-змінною. Це болісно за наявності color-tuner (#185), який хочеться ганяти по різних рівнях
-pacing без рестарту.
+Stub scenarios (`TOKENPACE_STUB=…`) are the main way to verify UI states: ~24 canonical frames
+(`climbing`, `both-red`, `credits-active`, `reset-grace`, …). The active scenario was read from the
+environment **once at launch** (`AppDelegate.stubName`) and "baked into" the transport: a large
+`switch` in `startPolling` (~24 cases) constructed a `StubUsageTransport(mode:)`, and the choice of
+token provider/refresher was also made from `stubName`. Seeing a different scenario meant **killing
+the app and relaunching** with a different env var. This was painful once the color tuner (#185)
+came along — it's natural to want to sweep it across different pacing levels without a restart.
 
-Мета (#187): додати в те саме dev-only вікно **Development tools…** (з #185) випадайку, що перемикає
-джерело даних наживо — menu-bar іконка й popup оновлюються протягом одного циклу полінгу.
+The goal (#187): add a dropdown to the same dev-only **Development tools…** window (from #185) that
+switches the data source live — the menu-bar icon and popup update within one polling cycle.
 
-Це не суто UI: активний сценарій вплетений у побудову `PollingEngine`, а engine недоступний для правки
-after-the-fact.
+This isn't purely a UI concern: the active scenario is woven into how `PollingEngine` gets built,
+and the engine isn't reachable for after-the-fact edits.
 
-## Розглянуті варіанти
+## Alternatives considered
 
-1. **Обгортка `SwitchableUsageTransport`.** Незмінний зовні транспорт із мутабельним «внутрішнім»
-   стубом; swap міняє внутрішній і шле `.manualRefresh`. Але перемикання сценарію змінює **не лише
-   транспорт**: token provider (`StubTokenProvider` vs `KeychainTokenProvider`/`ExpiredStubTokenProvider`)
-   і refresher (`nil` vs `ClaudeCLIRefresher`) теж. Вони — незмінні `let` на `PollingEngine`, поза
-   тим самим seam'ом. Обгортка накрила б лише транспорт → на кожному переході stub↔реальна-мережа
-   все одно потрібен повний teardown. Додає тип і складність, не усуваючи teardown.
-2. **Перебудова engine (обране).** `pollTask?.cancel()` + повторна побудова блоку engine із новим
-   сценарієм, тоді `.manualRefresh` для негайного полу.
+1. **A `SwitchableUsageTransport` wrapper.** An externally stable transport with a mutable "inner"
+   stub; a swap changes the inner one and sends `.manualRefresh`. But switching a scenario changes
+   **more than the transport**: the token provider (`StubTokenProvider` vs
+   `KeychainTokenProvider`/`ExpiredStubTokenProvider`) and the refresher (`nil` vs
+   `ClaudeCLIRefresher`) change too. These are immutable `let`s on `PollingEngine`, outside that same
+   seam. A wrapper would only cover the transport → every stub↔real-network transition would still
+   need a full teardown. It adds a type and complexity without removing the teardown.
+2. **Rebuild the engine (chosen).** `pollTask?.cancel()` plus rebuilding the engine block with the
+   new scenario, then `.manualRefresh` for an immediate poll.
 
-## Рішення
+## Decision
 
-**Перебудовувати весь `PollingEngine` при перемиканні** — виділено `buildAndRunEngine(for:)`, спільний
-для старту й live-swap. Він тягне транспорт/провайдер/refresher зі **`StubScenario`** і запускає новий
-`pollTask`. `switchScenario(_:)` (кличе випадайка) робить teardown+rebuild і форсить `.manualRefresh`.
+**Rebuild the whole `PollingEngine` on every switch** — factored into `buildAndRunEngine(for:)`,
+shared by both startup and a live swap. It pulls the transport/provider/refresher from a
+**`StubScenario`** and starts a new `pollTask`. `switchScenario(_:)` (called by the dropdown) does a
+teardown+rebuild and forces a `.manualRefresh`.
 
-**`StubScenario` — єдине джерело істини.** Новий `CaseIterable`-реєстр (за зразком `ColorRole`, 0046):
-`rawValue` кожного кейса — точний `TOKENPACE_STUB`-id (`"1"`, `"both-red"`, …), тож
-`StubScenario(rawValue:)` дає env-сумісність безкоштовно; `displayName`/`summary` — підписи для
-випадайки; `makeTransport()` згортає колишній ~24-кейсовий `switch`. І launch-шлях
-(`launchScenario = StubScenario(rawValue: env ?? "") ?? .realNetwork`), і випадайка читають один реєстр
-— **немає дубльованого списку кейсів** (критерій приймання). Описи (вимога мейнтейнера) живуть на
-`summary`, поряд із маппінгом на `Mode`, тож не розсинхронізуються.
+**`StubScenario` is the single source of truth.** A new `CaseIterable` registry (modeled on
+`ColorRole`, 0046): each case's `rawValue` is the exact `TOKENPACE_STUB` id (`"1"`, `"both-red"`,
+…), so `StubScenario(rawValue:)` gets env compatibility for free; `displayName`/`summary` supply the
+dropdown's labels; `makeTransport()` folds in the former ~24-case `switch`. Both the launch path
+(`launchScenario = StubScenario(rawValue: env ?? "") ?? .realNetwork`) and the dropdown read one
+registry — **no duplicated list of cases** (an acceptance criterion). The descriptions (a maintainer
+requirement) live on `summary`, right next to the mapping to `Mode`, so they never drift out of
+sync.
 
-**`SignalHub` видає свіжий стрім на кожен engine.** `AsyncStream` — **single-consumer**: після того як
-перший engine почав споживати `signals.stream`, новий scheduler на тому самому стрімі сигналів не
-отримає. `SignalHub.newStream()` створює новий `AsyncStream`+continuation, завершує попередній і
-перемикає `send(_:)` на актуальний continuation (під `NSLock`). Спостерігачі (`WorkspaceSleepWake`,
-`ScreenLockObserver`, `NetworkMonitor`) шлють у `send` не переймаючись, який engine активний — завжди
-дістають чинний continuation. Це найтонша деталь: без неї live-swap мовчки перестав би реагувати на
-sleep/wake/network.
+**`SignalHub` hands out a fresh stream to every engine.** An `AsyncStream` is **single-consumer**:
+once the first engine has started consuming `signals.stream`, a new scheduler on the same signal
+stream gets nothing. `SignalHub.newStream()` creates a new `AsyncStream`+continuation, finishes the
+previous one, and switches `send(_:)` over to the current continuation (under an `NSLock`).
+Observers (`WorkspaceSleepWake`, `ScreenLockObserver`, `NetworkMonitor`) send into `send` without
+caring which engine is active — they always reach the current continuation. This is the subtlest
+detail: without it, a live swap would silently stop reacting to sleep/wake/network.
 
-**Гейт — той самий `TOKENPACE_DEVTOOLS`, що й у 0046.** Випадайка живе у вже-гейтованому вікні; поза
-dev-tools реєстр інертний (launch-шлях далі читає env для мейнтейнерських прогонів). Bridge
-window→app — closure `onStubChange` (дзеркалить `ColorStore.onChange`); app→window —
-`setCurrentScenario(_:)` для передвибору активного сценарію (в т.ч. заданого через env).
+**The gate is the same `TOKENPACE_DEVTOOLS` as in 0046.** The dropdown lives inside the
+already-gated window; outside dev tools the registry is inert (the launch path still reads env for
+the maintainer's own runs). The window→app bridge is a closure, `onStubChange` (mirroring
+`ColorStore.onChange`); app→window is `setCurrentScenario(_:)`, for preselecting the active scenario
+(including one set via env).
 
-## Наслідки
+## Consequences
 
-- **+** Перемикання ~25 станів у місці, без рестарту — швидша візуальна верифікація, зручний прогін
-  color-tuner по рівнях pacing.
-- **+** Один реєстр `StubScenario` замість inline-switch + розкиданих коментарів; описи й маппінг —
-  поряд.
-- **+** Свіжий `StubUsageTransport` на кожен вибір природно скидає лічильник `calls`, тож
-  послідовнісні сценарії (`stale-error`, `reset-grace`, `optimistic-reset`, `just-unblocked`)
-  відтворюються з полу №1 при повторному виборі.
-- **−** Кожен swap рве й перебудовує engine + `pollTask` (не найлегша операція), але трапляється лише
-  при dev-виборі; на нормальному запуску шлях незмінний (один `buildAndRunEngine` на старті).
-- **−** `SignalHub` став `@unchecked Sendable` з `NSLock` навколо continuation (був `let stream`);
-  плата за коректну повторну підписку.
-- Правило: додаючи стуб-сценарій — додай кейс у `StubScenario` (rawValue = env-id, `displayName`,
-  `summary`, `makeTransport`) і онови перелік у `docs/guides/ui-verification.md`. Inline-switch більше
-  немає — все проходить через реєстр.
+- **+** Switching between ~25 states in place, with no restart — faster visual verification, and a
+  convenient way to sweep the color tuner across pacing levels.
+- **+** One `StubScenario` registry instead of an inline switch plus scattered comments; the
+  descriptions and the mapping sit side by side.
+- **+** A fresh `StubUsageTransport` on every selection naturally resets the `calls` counter, so
+  sequenced scenarios (`stale-error`, `reset-grace`, `optimistic-reset`, `just-unblocked`) replay
+  from poll 1 whenever reselected.
+- **−** Every swap tears down and rebuilds the engine plus `pollTask` (not the cheapest operation),
+  but that only happens on a dev selection; the normal launch path is unchanged (one
+  `buildAndRunEngine` at startup).
+- **−** `SignalHub` became `@unchecked Sendable` with an `NSLock` around the continuation (it used to
+  be `let stream`) — the price of correct resubscription.
+- Rule: when adding a stub scenario — add a case to `StubScenario` (rawValue = the env id,
+  `displayName`, `summary`, `makeTransport`) and update the list in
+  `docs/guides/ui-verification.md`. There's no more inline switch — everything goes through the
+  registry.
 
-## Постскриптум: env-резолюція більше не веде в живу мережу (#267)
+## Postscript: env resolution no longer falls through to the live network (#267)
 
-Рішення чинне — реєстр і випадайка й далі читають одне джерело, — але сам однорядковий маппінг,
-процитований вище (`launchScenario = StubScenario(rawValue: env ?? "") ?? .realNetwork`), виявився
-небезпечним і замінений.
+The decision still stands — the registry and the dropdown still read from one source — but the
+one-line mapping quoted above
+(`launchScenario = StubScenario(rawValue: env ?? "") ?? .realNetwork`) turned out to be dangerous
+and was replaced.
 
-`init?(rawValue:)` дає `nil` на будь-якому рядку поза реєстром, а `?? .realNetwork` цей `nil` мовчки
-схлопував у «нема стуба». Оскільки `case realNetwork = ""` і був id живої мережі, **«нічого не
-задано» і «задано нісенітницю» ставали нерозрізненними**: помилка в одну літеру (`TOKENPACE_STUB=healthy`
-замість `all-green`) перемикала застосунок у повністю живий режим — справжній Keychain, реальні
-запити, живі `~/.claude`-дерева, — і при цьому виглядала як звичайний стубовий прогін.
+`init?(rawValue:)` returns `nil` for any string outside the registry, and `?? .realNetwork` silently
+collapsed that `nil` into "no stub set." Since `case realNetwork = ""` was also the live network's
+id, **"nothing was set" and "something nonsensical was set" became indistinguishable**: a
+one-letter typo (`TOKENPACE_STUB=healthy` instead of `all-green`) switched the app into fully live
+mode — a real Keychain, real requests, live `~/.claude` trees — while still looking like an ordinary
+stub run.
 
-Що змінилось:
+What changed:
 
-- `realNetwork` дістав непорожній id — **`"real"`**. Живу мережу тепер треба просити на імʼя;
-  порожній рядок перестав бути валідним id.
-- Резолюція винесена в `StubResolution` (`TokenPaceKit`, чисте ядро за ADR-0009) і покрита тестами;
-  `StubScenario.resolve(env:isAppBundle:)` — тонка обгортка над нею.
-- Невідоме значення (і порожнє) деградує в **`screenshot`**, а не в live, і пише `.notice` зі списком
-  валідних id. Дефолт у dev-збірці — теж `screenshot`; встановлений `.app` без env лишається живим.
-- Резолюція повертає ще й ознаку «вибір був явний», яку читає гейт awaiting-input watcher'а
-  (див. постскриптум в ADR-0066).
+- `realNetwork` got a non-empty id — **`"real"`**. The live network now has to be requested by name;
+  an empty string is no longer a valid id.
+- Resolution was factored out into `StubResolution` (`TokenPaceKit`, a pure core per ADR-0009) and
+  covered by tests; `StubScenario.resolve(env:isAppBundle:)` is a thin wrapper around it.
+- An unknown value (including empty) degrades into **`screenshot`**, not into live, and logs a
+  `.notice` listing the valid ids. The default in a dev build is also `screenshot`; an installed
+  `.app` with no env stays live.
+- Resolution also returns a flag for "the choice was explicit," which the awaiting-input watcher's
+  gate reads (see the postscript in ADR-0066).
 
-Правило з «Наслідків» доповнюється: id нового кейса має бути **непорожнім і унікальним** —
-`StubResolution.idsAreResolvable` перевіряє це `assert`-ом на `validIDs`.
+The rule from "Consequences" gets one addition: a new case's id must be **non-empty and unique** —
+`StubResolution.idsAreResolvable` checks this with an `assert` over `validIDs`.

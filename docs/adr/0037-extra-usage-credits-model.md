@@ -3,145 +3,159 @@ status: accepted
 date: 2026-07-26
 ---
 
-# ADR-0037: Модель грошових кредитів (extra usage) — `spend` як primary, тригер і pacing як у токенів
+# ADR-0037: Money credits model (extra usage) — `spend` as primary, trigger and pacing like the token bars
 
-> Рішення ухвалені під час спайку [#142](https://github.com/artem-from-ua/tokenpace/issues/142)
-> (жива структура API) і продуктового інтерв'ю; decode-модель + pacing реалізовано в
+> Decisions made during spike [#142](https://github.com/artem-from-ua/tokenpace/issues/142) (the live
+> API shape) and a product interview; the decode model + pacing were implemented in
 > [#143](https://github.com/artem-from-ua/tokenpace/issues/143). UI — menu bar
 > [#144](https://github.com/artem-from-ua/tokenpace/issues/144) / dropdown
 > [#145](https://github.com/artem-from-ua/tokenpace/issues/145). Epic — [#141](https://github.com/artem-from-ua/tokenpace/issues/141).
 
-## Контекст
+## Context
 
-Підписка Claude Code має **платні кредити доплати** («usage credits» / extra usage): коли користувач
-упирається в ліміт плану, витрати можуть іти з грошового балансу (у валюті акаунта), опційно обмежені
-місячним лімітом (`Monthly spend limit`). TokenPace має показувати це:
+The Claude Code subscription has **paid top-up credits** ("usage credits" / extra usage): once a user
+hits a plan limit, further spend can draw from a money balance (in the account's currency), optionally
+capped by a monthly limit (`Monthly spend limit`). TokenPace needs to show this:
 
-- у **menu bar** — міжнародна іконка валюти, що з'являється лише коли користувач **зараз реально
-  витрачає кредити**; колір відповідає pacing і керується `calmMenuBarColors`;
-- у **dropdown** — окрема секція «Extra usage» з витраченою сумою, лімітом і pacing-статусом.
+- in the **menu bar** — an international currency glyph that appears only when the user is **currently
+  actually spending credits**; its color follows pacing and is gated by `calmMenuBarColors`;
+- in the **dropdown** — a separate "Extra usage" section with amount spent, the limit, and pacing
+  status.
 
-Досі декодер (`UsageSnapshot`, [ADR-0014](0014-usage-decode-resilience-on-reset-boundary.md)) свідомо
-**ігнорував** блоки `spend` / `extra_usage` — вони тихо толерувалися як невідомі ключі.
+Until now the decoder (`UsageSnapshot`, [ADR-0014](0014-usage-decode-resilience-on-reset-boundary.md))
+deliberately **ignored** the `spend` / `extra_usage` blocks — they were silently tolerated as unknown
+keys.
 
-Спайк #142 зняв **5 живих станів** `GET /api/oauth/usage` (акаунт мейнтейнера, валюта EUR), варіюючи
-`Monthly spend limit`: out-of-credits, enabled-within-limit, near-cap, limit-below-spent (перевищення),
-unlimited. Verbatim-body збережено як regression-фікстури в `UsageClientTests.swift`. Ці дані виявили
-кілька нетривіальних фактів, що й вимагають зафіксованого рішення.
+Spike #142 captured **5 live states** of `GET /api/oauth/usage` (the maintainer's account, EUR
+currency), varying `Monthly spend limit`: out-of-credits, enabled-within-limit, near-cap,
+limit-below-spent (an overshoot), unlimited. The verbatim bodies are saved as regression fixtures in
+`UsageClientTests.swift`. This data surfaced several non-obvious facts that call for a pinned decision.
 
-### Що показав API
+### What the API showed
 
-Два паралельні блоки; **`spend` — новіший і чистіший**, `extra_usage` — старіший з додатковими полями:
+Two parallel blocks; **`spend` is newer and cleaner**, `extra_usage` is older with extra fields:
 
 ```jsonc
 "spend": {
-  "used":  {"amount_minor": 1077, "currency": "EUR", "exponent": 2},   // money-ОБ'ЄКТ
-  "limit": {"amount_minor": 1500, "currency": "EUR", "exponent": 2},   // money-об'єкт АБО null (unlimited)
+  "used":  {"amount_minor": 1077, "currency": "EUR", "exponent": 2},   // a money OBJECT
+  "limit": {"amount_minor": 1500, "currency": "EUR", "exponent": 2},   // a money object OR null (unlimited)
   "percent": 72, "severity": "normal", "enabled": true,
-  "cap": {"money": {…}, "credits": null},                              // або null
-  "balance": null, "auto_reload": null                                 // ЗАВЖДИ null у цьому ендпоінті
+  "cap": {"money": {…}, "credits": null},                              // or null
+  "balance": null, "auto_reload": null                                 // ALWAYS null on this endpoint
 },
 "extra_usage": {
-  "is_enabled": true, "monthly_limit": 1500,       // скаляр (мінорні одиниці), або null
-  "used_credits": 1077.0,                           // = spend.used; джерело істини по витраченому
-  "utilization": 71.8,                              // float %, або null коли ліміту нема
+  "is_enabled": true, "monthly_limit": 1500,       // a scalar (minor units), or null
+  "used_credits": 1077.0,                           // = spend.used; the source of truth for what was spent
+  "utilization": 71.8,                              // a float %, or null when there's no limit
   "currency": "EUR", "decimal_places": 2,
   "spend_limit_reached": false, "credits_ever_enabled": true, …
 }
 ```
 
-Ключові спостереження зі спайку:
+Key observations from the spike:
 
-1. **Гроші — це об'єкти `{amount_minor, currency, exponent}`** (`spend.used`, `spend.limit`,
-   `spend.cap.money`), а не скаляри. `extra_usage.monthly_limit` — навпаки, голе число в мінорних.
-2. **Валюта не USD** — у мейнтейнера EUR. Хардкодити `$` не можна.
-3. **Сервер капить `percent` / `utilization` на 100** — при spent 10.77 / limit 5.00 віддає `percent: 100`,
-   не 215. Реальне перевищення видно лише через `spend_limit_reached` + порівняння `used_credits` vs `limit`.
-4. **При перевищенні грошового ліміту сервер робить `spend.enabled: false`** (+ `spend_limit_reached: true`,
-   `disabled_reason: "org_level_disabled_until"`) — кредити авто-вимикаються.
-5. **`balance` / `auto_reload` — завжди `null`** у всіх станах. Current balance, який показує веб-UI
-   Claude (€10.00), **не приходить** у `/api/oauth/usage` — обхід усього дерева payload не знайшов його.
-   Він живе в іншому (billing / member-dashboard) ендпоінті, недоступному TokenPace. **Перевірено на
-   обох станах auto-reload** (2026-07-26): увімкнення Auto-reload у Settings (UI «On») **не змінює
-   payload** — `balance`/`auto_reload`/`cap.credits` лишаються `null`; наявність поля в схемі ≠
-   наявність даних.
+1. **Money is `{amount_minor, currency, exponent}` objects** (`spend.used`, `spend.limit`,
+   `spend.cap.money`), not scalars. `extra_usage.monthly_limit` is the opposite — a bare number in
+   minor units.
+2. **The currency is not USD** — the maintainer's account is in EUR. Hardcoding `$` is not an option.
+3. **The server caps `percent` / `utilization` at 100** — at spent 10.77 / limit 5.00 it returns
+   `percent: 100`, not 215. The real overshoot is only visible through `spend_limit_reached` plus
+   comparing `used_credits` against `limit`.
+4. **When the money limit is exceeded, the server sets `spend.enabled: false`** (plus
+   `spend_limit_reached: true`, `disabled_reason: "org_level_disabled_until"`) — credits auto-disable.
+5. **`balance` / `auto_reload` are always `null`** across every state. The current balance shown by
+   Claude's web UI (€10.00) **does not arrive** via `/api/oauth/usage` — walking the whole payload tree
+   found nothing. It lives on a different (billing / member-dashboard) endpoint, unreachable from
+   TokenPace. **Verified in both auto-reload states** (2026-07-26): turning Auto-reload on in Settings
+   (UI "On") **does not change the payload** — `balance`/`auto_reload`/`cap.credits` stay `null`; a
+   field existing in the schema does not mean the data exists.
 
-5-bis. **`cap` дублює `limit`, `cap.credits` завжди `null`.** У всіх станах `spend.cap.money`
-   **дорівнює** `spend.limit` (та сама стеля витрат — місячний ліміт у грошах), а `cap.credits` (стеля
-   в *кредитах*, а не грошах) завжди `null`. Тому **тригеритись на `cap` немає сенсу** — він не несе
-   сигналу понад `limit`, яким ми вже користуємось (`used/limit`). `cap.credits != null` — гіпотетичний
-   майбутній кейс «стеля в кредитах», якого ми не спостерігали; поза обсягом.
+5-bis. **`cap` duplicates `limit`; `cap.credits` is always `null`.** In every state `spend.cap.money`
+   **equals** `spend.limit` (the same spend ceiling — the monthly money limit), while `cap.credits`
+   (a ceiling in *credits*, not money) is always `null`. So **there is no point triggering on `cap`** —
+   it carries no signal beyond `limit`, which we already use (`used/limit`). `cap.credits != null` is a
+   hypothetical future case — a "ceiling in credits" — that we have not observed; out of scope.
 
-## Рішення
+## Decision
 
-1. **`spend` — primary-джерело; `extra_usage` — доповнення.** Моделюємо `spend` (чистіша, structured
-   money). З `extra_usage` беремо лише те, чого нема в `spend`: `used_credits` (джерело істини по
-   витраченому — дублює `spend.used`), `decimal_places`, `spend_limit_reached`, `currency` як резерв.
+1. **`spend` is the primary source; `extra_usage` supplements it.** We model `spend` (the cleaner,
+   structured-money block). From `extra_usage` we take only what `spend` lacks: `used_credits` (the
+   source of truth for what was spent — it duplicates `spend.used`), `decimal_places`,
+   `spend_limit_reached`, `currency` as a fallback.
 
-2. **Гроші — окремий Kit-тип `{amount_minor: Int, currency: String, exponent: Int}`**, не `Double`.
-   Точність грошей важлива; float дав би помилки округлення. Форматування суми (з урахуванням
-   `exponent` / `decimal_places` і валюти) — у view (shell), тип лишається AppKit-free.
+2. **Money is a separate Kit type, `{amount_minor: Int, currency: String, exponent: Int}`**, not a
+   `Double`. Money precision matters; a float would introduce rounding errors. Formatting the amount
+   (accounting for `exponent` / `decimal_places` and currency) happens in the view (shell); the type
+   itself stays AppKit-free.
 
-3. **Толерантний decode** у стилі [ADR-0014](0014-usage-decode-resilience-on-reset-boundary.md):
-   `decodeIfPresent` + forward-compat дефолти, нове поле в memberwise-init з default `nil`. Відсутність
-   чи невідома форма `spend`/`extra_usage` **не валить** snapshot (як і раніше). Наявні фікстури не ламаються.
+3. **Tolerant decode** in the style of [ADR-0014](0014-usage-decode-resilience-on-reset-boundary.md):
+   `decodeIfPresent` plus forward-compat defaults, the new field in the memberwise init with a default
+   of `nil`. A missing or unrecognized shape of `spend`/`extra_usage` **does not break** the snapshot
+   (as before). Existing fixtures keep passing unchanged.
 
-4. **Тригер іконки = `spend.enabled == true` OR `spend_limit_reached == true`** (а не лише `enabled`).
-   Обґрунтування: сервер вимикає `enabled` саме в момент перевершення ліміту (факт 4) — тобто тоді,
-   коли сигнал «вперся в грошову стелю» найпотрібніший. Правило лише за `enabled` ховало б іконку в цей
-   момент. Показ додатково гейтиться реальним використанням кредитів (хоча б один базовий ліміт
-   5h/7d/scoped вичерпаний — саме тоді витрати йдуть з кредитів).
+4. **The icon trigger is `spend.enabled == true` OR `spend_limit_reached == true`** (not just
+   `enabled`). Rationale: the server flips `enabled` off at exactly the moment the money ceiling is
+   exceeded (fact 4) — i.e., exactly when the "you've hit the money ceiling" signal matters most. A
+   rule keyed on `enabled` alone would hide the icon at that very moment. Display is additionally
+   gated by real credit usage (at least one baseline limit — 5h/7d/scoped — exhausted, which is when
+   spend actually draws from credits).
 
-5. **Колір іконки рахується ТАК САМО, як бари токенів — `usage` vs `time`, серверний `spend.severity`
-   ІГНОРУЄМО.** `CreditsPacing.barLayout(...)` віддає той самий `BarLayout`, що й 5h/7d-бари, тож view
-   фарбує іконку тим самим `PopupBarView.aheadColor(usage:time:)`: зелений (у нормі) → жовтий (трохи
-   випереджаєш) → оранжевий (сильно) → **червоний лише при досягнутому ліміті**. Осі:
+5. **The icon color is computed the SAME WAY as the token bars — `usage` vs `time`, the server's
+   `spend.severity` is IGNORED.** `CreditsPacing.barLayout(...)` returns the same `BarLayout` as the
+   5h/7d bars, so the view paints the icon with the same `PopupBarView.aheadColor(usage:time:)`: green
+   (on pace) → yellow (slightly ahead) → orange (well ahead) → **red only once the limit is actually
+   hit**. The axes:
    - `usageFraction = used_credits / limit`;
-   - **`timeFraction` = частка календарного місяця, що минула, від 00:00 UTC 1-го числа.** Грошове
-     вікно = календарний місяць у UTC — підтверджено офіційними [Anthropic Spend Limits API
-     docs](https://platform.claude.com/docs/en/manage-claude/spend-limits-api) («monthly spend resets
-     at 00 UTC on the first of each calendar month»). API **не дає** reset-часу грошей (факт 5-bis:
-     `spend`/`extra_usage` без часових полів), тож `timeFraction` рахуємо локально (`monthElapsedFraction`,
-     TZ інжектована, дефолт UTC — на відміну від токенних вікон, чий reset-час `ResetClock` показує в
-     **локальній** TZ). `spend_limit_reached` (або `used >= limit`) форсує `usageFraction = 1` → `aheadColor`
-     дає червоний. Це навмисно НЕ окрема severity-формула з порогом «% від стелі» — колір узгоджений із
-     рештою pacing 1:1. Гасіння calm-кольорів під `calmMenuBarColors` — як у барів (#105).
+   - **`timeFraction` = the fraction of the calendar month elapsed, from 00:00 UTC on the 1st.** The
+     money window is the calendar month in UTC — confirmed by the official [Anthropic Spend Limits API
+     docs](https://platform.claude.com/docs/en/manage-claude/spend-limits-api) ("monthly spend resets
+     at 00 UTC on the first of each calendar month"). The API **gives no** reset time for money
+     (fact 5-bis: `spend`/`extra_usage` carry no time fields), so `timeFraction` is computed locally
+     (`monthElapsedFraction`, TZ injected, defaulting to UTC — unlike the token windows, whose reset
+     time `ResetClock` shows in the **local** TZ). `spend_limit_reached` (or `used >= limit`) forces
+     `usageFraction = 1` → `aheadColor` returns red. This is deliberately NOT a separate severity
+     formula with a "% of ceiling" threshold — the color stays consistent with the rest of pacing 1:1.
+     Calm-color suppression under `calmMenuBarColors` applies as it does for the bars (#105).
 
-6. **База pacing — тільки ЛІМІТ. Balance-логіку прибрано з обсягу.** Оскільки `balance` недоступний
-   (факт 5), будь-який розрахунок «відносно балансу» неможливий:
-   - **ліміт встановлений** → pacing відносно ліміту (`used / limit` × час місяця), як звичайні бари;
-   - **ліміт не встановлений** (unlimited, `limit == null`) → **без pacing / без бару**, лише витрачена
-     сума (немає стелі → немає `usageFraction` → `barLayout` віддає `nil`).
-   Balance / auto-reload / поповнення — **окрема майбутня фіча**, коли (і якщо) з'ясуємо джерело даних.
+6. **The pacing baseline is the LIMIT only. Balance-based logic is out of scope.** Since `balance` is
+   unavailable (fact 5), any "relative to balance" computation is impossible:
+   - **a limit is set** → pacing relative to the limit (`used / limit` × month elapsed), just like the
+     ordinary bars;
+   - **no limit is set** (unlimited, `limit == null`) → **no pacing / no bar**, just the amount spent
+     (no ceiling → no `usageFraction` → `barLayout` returns `nil`).
+   Balance / auto-reload / top-ups — **a separate future feature**, once (and if) we find a data source.
 
-7. **Розкол pure/shell — як усюди** ([ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md)):
-   decode-модель і чиста `CreditsPacing` (тригер + `barLayout` usage-vs-time + `monthElapsedFraction`)
-   живуть у `TokenPaceKit` (AppKit-free, юнітяться); мапінг `BarLayout` → колір (спільний `aheadColor`),
-   SF-Symbol валюти й форматування сум — у shell (`StatusItemView` / `PopupViewController`).
+7. **The pure/shell split — as everywhere** ([ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md)):
+   the decode model and pure `CreditsPacing` (trigger + `barLayout` usage-vs-time +
+   `monthElapsedFraction`) live in `TokenPaceKit` (AppKit-free, unit-tested); mapping `BarLayout` →
+   color (the shared `aheadColor`), the currency SF Symbol, and amount formatting live in the shell
+   (`StatusItemView` / `PopupViewController`).
 
-## Наслідки
+## Consequences
 
-- **Decode стає багатшим, але сумісним назад.** Старі payload без `spend`/`extra_usage` (і всі наявні
-  тестові фікстури) декодуються без змін — нове поле опційне.
-- **Іконка чесно сигналить перевищення ліміту** (red/exhausted навіть коли сервер вимкнув `enabled`),
-  а не зникає в найважливіший момент.
-- **Немає залежності від серверної severity** — менша поверхня для регресій, якщо сервер змінить
-  внутрішні пороги; ціна — власні пороги треба тримати узгодженими з барами (одне джерело — `PacingSeverity`).
-- **Валюто-агностичність**: сума завжди з `currency`+`exponent`, іконка — generic-символ валюти
-  (напр. `coloncurrencysign` ¤), не `$`. Працює для EUR і будь-якої іншої валюти акаунта.
-- **Свідома прогалина: no-balance.** Поки TokenPace не показує current balance / auto-reload — навіть
-  коли веб-UI Claude їх показує. Це задокументоване обмеження ендпоінта, не недогляд. Коли з'явиться
-  доступ до джерела балансу — розширюємо окремим ADR.
-- **`resets_at` грошового вікна** окремим полем у payload не спостерігався (веб-UI показує «Resets Aug 1»);
-  джерело reset-часу для рядка «time to reset limit» у dropdown уточнюється в #145 — якщо джерела нема,
-  рядок опускається. Це не блокує decode-модель.
+- **Decode becomes richer but stays backward compatible.** Old payloads without `spend`/`extra_usage`
+  (and every existing test fixture) decode unchanged — the new field is optional.
+- **The icon honestly signals a limit overshoot** (red/exhausted even when the server has turned
+  `enabled` off), instead of disappearing at the moment it matters most.
+- **No dependency on server-side severity** — a smaller surface for regressions if the server changes
+  its internal thresholds; the cost is that our own thresholds must be kept consistent with the bars
+  (one source — `PacingSeverity`).
+- **Currency-agnostic**: the amount always carries `currency`+`exponent`, the icon is a generic
+  currency glyph (e.g. `coloncurrencysign` ¤), not `$`. Works for EUR and any other account currency.
+- **A deliberate gap: no balance.** For now TokenPace does not show the current balance / auto-reload —
+  even when Claude's web UI does. This is a documented endpoint limitation, not an oversight. Once
+  access to a balance source appears, it gets its own ADR.
+- **The money window's `resets_at`** was not observed as a separate payload field (the web UI shows
+  "Resets Aug 1"); the source for the reset time behind the "time to reset limit" line in the dropdown
+  is worked out in #145 — if no source exists, the line is omitted. This does not block the decode
+  model.
 
-## Альтернативи (відкинуті)
+## Alternatives considered
 
-- **Довіритись серверному `spend.severity`** — відкинуто: непрозорі пороги, неузгодженість із рештою
-  pacing-кольорів, залежність від змін на боці сервера (спостережене 72%→normal, 98%→critical —
-  довідково, не використовуємо).
-- **Тримати гроші як `Double` (у мажорних одиницях)** — відкинуто через похибки округлення; structured
-  money точний і збігається з формою API.
-- **Реалізувати balance-based розрахунок за оцінкою** — відкинуто: даних про balance нема, будь-яка
-  оцінка була б вигадкою, що вводить в оману саме на грошах.
+- **Trust the server's `spend.severity`** — rejected: opaque thresholds, inconsistency with the rest of
+  the pacing colors, and a dependency on server-side changes (72%→normal, 98%→critical observed — noted
+  for reference, not used).
+- **Keep money as a `Double` (in major units)** — rejected due to rounding errors; structured money is
+  exact and matches the API's own shape.
+- **Implement balance-based computation from an estimate** — rejected: no balance data exists, and any
+  estimate would be a fabrication that misleads on exactly the topic of money.

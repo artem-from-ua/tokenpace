@@ -5,221 +5,228 @@ supersedes: []
 superseded_by: []
 ---
 
-# ADR-0107: Тижневий ресет реконструюється з останнього відомого, а не оцінюється від годинника
+# ADR-0107: The weekly reset is reconstructed from the last known one, not estimated from the clock
 
-> Витісняє рішення **D5** з [ADR-0027](0027-session-idle-no-phantom-reset.md) — його обґрунтування
-> («тижневе вікно завжди існує») спростоване вимірами. Решта ADR-0027 чинна.
+> Supersedes decision **D5** from [ADR-0027](0027-session-idle-no-phantom-reset.md) — its
+> justification ("the weekly window always exists") is disproven by measurement. The rest of
+> ADR-0027 still stands.
 
-> Заміряні властивості самого API — у
-> [docs/reference/usage-api-quirks.md](../reference/usage-api-quirks.md), розділ про щотижневе
-> затемнення. Цей ADR фіксує **рішення й чому**.
+> The measured properties of the API itself live in
+> [docs/reference/usage-api-quirks.md](../reference/usage-api-quirks.md), in the section on the
+> weekly blackout. This ADR records **the decision and why**.
 
-## Контекст
+## Context
 
-Щотижня в момент тижневого ресету usage API перестає віддавати `seven_day.resets_at`: сам обʼєкт
-приходить `null`, і запис `weekly_all` у `limits[]` теж **без власної дати** — обидва джерела
-зникають одночасно. Стан тримається, доки перша витрата токенів не матеріалізує нову 5-годинну
-сесію.
+Every week, at the moment of the weekly reset, the usage API stops returning
+`seven_day.resets_at`: the object itself arrives `null`, and the `weekly_all` entry in `limits[]`
+also comes back **with no date of its own** — both sources disappear at the same moment. The state
+holds until the first token spend materializes a new 5-hour session.
 
-Вимір на двох незалежних журналах (серпень 2026):
+Measured on two independent journals (August 2026):
 
-| Ряд | Записів `d7` | Епізодів | Тривалість |
+| Series | `d7` entries | Episodes | Duration |
 |---|---:|---:|---|
-| Max 5x | 5 029 | 3 | 264, 253, 306 хв |
-| Pro | 862 | 2 | 611, 54 хв |
+| Max 5x | 5,029 | 3 | 264, 253, 306 min |
+| Pro | 862 | 2 | 611, 54 min |
 
-Тобто **4–6 годин щотижня**, ~4 % усіх записів.
+That's **4–6 hours every week**, ~4% of all entries.
 
-Увесь цей час `UsageSnapshot.window(...)` падав на локальну оцінку `ResetClock.nextReset` =
-`now + 7d`, округлену вгору до 10 хвилин. Оцінка перераховувалась **на кожному полінгу**, тож повзла
-вперед разом із годинником:
+For all of that time, `UsageSnapshot.window(...)` fell back to a local estimate,
+`ResetClock.nextReset` = `now + 7d`, rounded up to 10 minutes. The estimate was recomputed **on
+every poll**, so it crept forward with the clock:
 
 ```
 11:32  reset = 2026-08-25T11:40:00   timePct = 0
 11:41  reset = 2026-08-25T11:50:00   timePct = 0
 11:50  reset = 2026-08-25T12:00:00   timePct = 0
-12:17  reset = 2026-08-25T06:59:59.764448+00:00   timePct = 0.0315   ← прийшло справжнє
+12:17  reset = 2026-08-25T06:59:59.764448+00:00   timePct = 0.0315   ← the real one arrived
 ```
 
-Наслідок: `remaining >= duration` виконувалось завжди, `PacingModel.elapsedFraction` повертав рівно
-`0.0`, і маркер часу стояв прибитим до лівого краю годинами. Потім приходило справжнє значення — і
-маркер стрибав.
+Consequence: `remaining >= duration` always held, `PacingModel.elapsedFraction` returned exactly
+`0.0`, and the time marker sat pinned to the left edge for hours. Then the real value arrived — and
+the marker jumped.
 
-**Правильна відповідь була відома весь цей час.** О 06:59:54 застосунок тримав у руках справжній
-ресет `2026-08-18T07:00:00.306761+00:00`; о 07:00 він його викинув заради оцінки.
+**The correct answer was known the whole time.** At 06:59:54 the app was holding the real reset,
+`2026-08-18T07:00:00.306761+00:00`, in its hands; at 07:00 it threw it away for an estimate.
 
-### Чому попереднє рішення не спрацювало
+### Why the earlier decision didn't work
 
-[#100](https://github.com/artem-from-ua/tokenpace/issues/100) описує **точно цей самий** дефект —
-синтезований час, що «повзе», і фальшивий «on pace» при 0 %. Але виправили його лише для
-`five_hour`; для `seven_day` гілку залишили свідомо, рішенням **D5** ADR-0027, з обґрунтуванням
-«weekly-вікно завжди існує».
+[#100](https://github.com/artem-from-ua/tokenpace/issues/100) describes **exactly this same**
+defect — a synthesized time that "creeps," and a false "on pace" at 0%. But the fix only covered
+`five_hour`; the `seven_day` branch was left deliberately, by decision **D5** of ADR-0027, on the
+grounds that "the weekly window always exists."
 
-Дані це спростовують: у сенсі API-відповіді воно **не завжди існує** — рівно як і 5-годинне. Але
-навіть якби існувало, висновок був би протилежний: якщо вікно існує завжди, його межу треба
-**памʼятати**, а не переоцінювати щоразу.
+The data disprove this: in terms of the API response, it does **not** always exist — exactly like
+the 5-hour one. But even if it did exist, the conclusion should have been the opposite: if a window
+always exists, its boundary should be **remembered**, not re-estimated every time.
 
-### Сітка ресетів регулярна
+### The reset grid is regular
 
-| Ряд | День тижня | Час UTC | Інтервали |
+| Series | Day of week | Time UTC | Intervals |
 |---|---|---|---|
-| Max 5x | вівторок | 07:00:00 (джитер ±1 с) | рівно 7 днів |
-| Pro | середа | 21:00:00 (джитер ±1 с) | рівно 7 днів |
+| Max 5x | Tuesday | 07:00:00 (jitter ±1 s) | exactly 7 days |
+| Pro | Wednesday | 21:00:00 (jitter ±1 s) | exactly 7 days |
 
-Різні тарифи мають **різні** сітки, але кожна стабільна. Тож «останній справжній ресет + N тижнів» —
-не здогад, а відтворення тієї самої сітки.
+Different plan tiers have **different** grids, but each is stable. So "the last real reset + N
+weeks" isn't a guess — it's reproducing that same grid.
 
-## Рішення
+## Decision
 
-### 1. Реконструювати від якоря, а не оцінювати від годинника
+### 1. Reconstruct from an anchor, not estimate from the clock
 
-`ResetClock.rollForward(anchor:by:until:)` котить останній **серверний** ресет уперед на ціле число
-періодів, доки той не стане майбутнім. Похибка на живих даних — **±0.25 с** (проти хвилин у старої
-оцінки).
+`ResetClock.rollForward(anchor:by:until:)` rolls the last **server** reset forward by a whole number
+of periods until it lands in the future. The error on live data is **±0.25 s** (versus minutes for
+the old estimate).
 
-Замір прогоном на обох журналах:
+Measured by replaying both journals:
 
-| Ряд | Відновлюваних | Макс. похибка |
+| Series | Reconstructible | Max error |
 |---|---:|---:|
-| Max 5x | 199 із 199 | 0.249 с |
-| Pro | 56 із 56 | 0.246 с |
+| Max 5x | 199 of 199 | 0.249 s |
+| Pro | 56 of 56 | 0.246 s |
 
-### 2. Арифметика на `TimeInterval`, ніколи `Calendar`
+### 2. Arithmetic on `TimeInterval`, never `Calendar`
 
-`Date` — абсолютний момент без поясу, а UTC не має переходів, тож `+604 800 с` до
-`вівторок 07:00:00 UTC` дає `вівторок 07:00:00 UTC` завжди.
+A `Date` is an absolute instant with no time zone, and UTC has no transitions, so `+604,800 s` added
+to `Tuesday 07:00:00 UTC` always gives `Tuesday 07:00:00 UTC`.
 
-`Calendar.date(byAdding:)` поважає `timeZone` (за замовчуванням `.current`), а в ніч переходу на
-зимовий/літній час доба триває 23 або 25 годин — це дало б зсув на годину. Тест
-`wholeWeeksAreUnaffectedByADaylightSavingTransition` тримає це рішення явно, бо на око різниця
-непомітна.
+`Calendar.date(byAdding:)` respects `timeZone` (defaulting to `.current`), and on the night of a
+DST transition a day lasts 23 or 25 hours — which would introduce an hour's shift. The test
+`wholeWeeksAreUnaffectedByADaylightSavingTransition` pins this decision explicitly, because the
+difference isn't visible at a glance.
 
-Крок рахується **закритою формулою**, не циклом: місячна відпустка і дворічна коштують одного
-множення, а зіпсований якір не може зациклити.
+The step is computed with a **closed-form formula**, not a loop: a month-long vacation and a
+two-year one cost the same single multiplication, and a broken anchor can't cause an infinite loop.
 
-### 3. Допуск `resetGrace` = 60 с — не косметика
+### 3. A 60 s `resetGrace` tolerance — not cosmetic
 
-Сервер повідомляє ресет із мікросекундами, і перший пол після нього регулярно потрапляє **в ту саму
-секунду**. Тоді якір формально ще в майбутньому (на 0.31 с), гілка «ще не настав» повертає його як є,
-і бар показує «ресет через 0.3 с» — маркер прибитий до **одиниці**, гірше за нинішній нуль.
+The server reports the reset with microsecond precision, and the first poll after it regularly lands
+**within the same second**. At that point the anchor is formally still in the future (by 0.31 s),
+the "hasn't happened yet" branch returns it as is, and the bar shows "reset in 0.3 s" — the marker
+pinned to **one**, worse than today's zero.
 
-| Допуск | Макс. похибка |
+| Tolerance | Max error |
 |---|---:|
-| `0` | **604 800 с** (рівно тиждень) |
-| `1 с` | 0.249 с |
-| `60 с` | 0.249 с |
+| `0` | **604,800 s** (exactly a week) |
+| `1 s` | 0.249 s |
+| `60 s` | 0.249 s |
 
-Пастка спрацювала у **двох епізодах із трьох** на Max і в обох на Pro — це закономірність, не збіг.
+The trap fired in **two of three episodes** on Max, and in both on Pro — a pattern, not a
+coincidence.
 
-### 4. Якір ніколи не береться з власного виходу
+### 4. The anchor is never taken from its own output
 
-Пишеться лише зі знімка, чий `sevenDayResetSource.isUnrolledServerFact` — тобто `server` або
-`limits`. Реконструйоване чи локально перекочене значення якорем **не стає**: інакше кожен пол
-затемнення будувався б на оцінці попереднього, і похибка накопичувалася б годинами.
+It's written only from a snapshot whose `sevenDayResetSource.isUnrolledServerFact` — that is,
+`server` or `limits`. A reconstructed or locally rolled-forward value never **becomes** an anchor:
+otherwise every poll during a blackout would build on an estimate of the previous one, and the error
+would accumulate over hours.
 
-Саме тому якір живе в `PollState`, а не читається з `lastSnapshot` — той може містити нашу ж
-реконструкцію.
+This is exactly why the anchor lives in `PollState` rather than being read from `lastSnapshot` —
+which may contain our own reconstruction.
 
-### 5. Персистується окремим ключем
+### 5. Persisted under its own key
 
-`PersistedConfig.lastSevenDayReset`, ISO-8601 рядком. Затемнення триває 4–6 годин, і застосунок
-всередині нього перезапускається: у журналі за 4 серпня — **пʼять пауз полінгу**, найдовша 104 хв.
-Якір лише в памʼяті зник би саме тоді, коли потрібен.
+`PersistedConfig.lastSevenDayReset`, as an ISO-8601 string. A blackout lasts 4–6 hours, and the app
+restarts during it: the August 4th journal shows **five polling pauses**, the longest 104 minutes.
+An in-memory-only anchor would vanish exactly when it's needed.
 
-Рядок, а не epoch чи блоб: один формат дати на весь застосунок (`ResetClock.parse` / `isoString`), і
-значення лишається читабельним у `defaults read` — що важливо для того, що дивляться під час живого
-епізоду.
+A string, not an epoch or a blob: one date format for the whole app (`ResetClock.parse` /
+`isoString`), and the value stays readable in `defaults read` — which matters for what gets
+inspected during a live episode.
 
-### 6. Без якоря — нічого не вигадуємо
+### 6. With no anchor — nothing is invented
 
-Холодний старт (нова інсталяція, жодної витрати) дає `resets_at: ""` і `ResetSource.unknown`. Обидві
-поверхні показують це прямо: menu bar — символ «немає даних», попап — **жодного ліміту** плюс два
-рядки пояснення.
+A cold start (a fresh install, no spend yet) gives `resets_at: ""` and `ResetSource.unknown`. Both
+surfaces show this directly: the menu bar shows a "no data" symbol, the popup shows **no limit** at
+all plus two lines of explanation.
 
-Рядки ховаються, а не малюються частково, бо порожнеча **каскадує**: per-model вікна (Fable, Opus,
-Sonnet) успадковують тижневий ресет, а `elapsedFraction` при непарсибельній даті повертає `1.0` —
-кожен рядок намалював би маркер, притиснутий до правого краю. Чотири впевнені твердження «тиждень
-витрачено» зі знімка, який каже, що не витрачено нічого.
+The rows are hidden rather than drawn partially, because emptiness **cascades**: per-model windows
+(Fable, Opus, Sonnet) inherit the weekly reset, and `elapsedFraction` on an unparseable date returns
+`1.0` — every row would draw a marker pinned to the right edge. Four confident "the week is spent"
+claims from a snapshot that says nothing has been spent.
 
-**Не `FailureReason`.** Той enum — таксономія збоїв полінгу, а тут полінг успішний: `200` і коректне
-тіло. Ярлик `.serverProblem` показав би «Usage API unavailable» і відправив користувача перевіряти
-мережу, тоді як виправлення — почати працювати.
+**Not `FailureReason`.** That enum is a taxonomy of polling failures, and here polling succeeded:
+`200` and a well-formed body. The `.serverProblem` label would show "Usage API unavailable" and send
+the user off to check their network, when the actual fix is to start working.
 
-**Не ⚠️.** За [ADR-0091](0091-countdown-only-where-work-is-not-running.md) вона означає рівно «дані
-суперечать самі собі». Тут суперечності немає: сервер послідовно каже, що тижневого вікна ще нема, і
-це правда до першої витрати.
+**Not ⚠️.** Per [ADR-0091](0091-countdown-only-where-work-is-not-running.md) that symbol means
+exactly "the data contradicts itself." There's no contradiction here: the server consistently says
+the weekly window doesn't exist yet, and that's true until the first spend.
 
-### 7. Дві осі джерела в журналі, не одна
+### 7. Two source axes in the journal, not one
 
-`src` перейменовано на `utilSrc`; поруч зʼявилось `resetSrc`. Назва «джерело» перестала бути
-відповіддю, щойно реконструюватись почала й **дата**.
+`src` is renamed to `utilSrc`; `resetSrc` appears alongside it. "Source" stopped being a single
+answer the moment the **date** started being reconstructed too.
 
-Осі ортогональні — доведено даними, не міркуванням. У 5 029 записів заповнено **шість із восьми**
-перетинів:
+The axes are orthogonal — proven by the data, not by reasoning. Across 5,029 entries, **six of
+eight** intersections are populated:
 
-| `utilSrc` \ `resetSrc` | серверний | оцінка → `reconstructed` |
+| `utilSrc` \ `resetSrc` | server | estimate → `reconstructed` |
 |---|---:|---:|
-| `interpolated` | 4 510 | **193** |
+| `interpolated` | 4,510 | **193** |
 | `clipped` | 220 | 0 |
 | `degraded` | 84 | **6** |
 | `inherited` | 16 | 0 |
 
-Найпоказовіший — `degraded × reconstructed` (6 записів, 4 серпня): відсоток деградував через
-104-хвилинну дірку в полінгу, а дата вигадана через мовчання API. **Дві різні причини на одному
-рядку** — одне поле мусило б обрати, яку історію розповісти.
+The most telling one is `degraded × reconstructed` (6 entries, August 4th): the percentage degraded
+because of a 104-minute gap in polling, while the date was invented because the API stayed silent.
+**Two different causes on the same row** — one field would have had to choose which story to tell.
 
-Значення `resetSrc` складене: база + необовʼязковий суфікс `-rolled`
-(`reconstructed-rolled` = дату вивели ми, і вона вже спливла). `rolled` — завжди остання ланка
-конвеєра, тож комбінаторного вибуху немає.
+The `resetSrc` value is composite: a base plus an optional `-rolled` suffix
+(`reconstructed-rolled` = we derived the date, and it has already elapsed). `rolled` is always the
+last link in the pipeline, so there's no combinatorial explosion.
 
-### 8. `optimisticReset` переведено на ту саму арифметику
+### 8. `optimisticReset` moved onto the same arithmetic
 
-`ResetClock.optimisticReset` підставляв `nextReset` і для 7d — той самий дефект іншим шляхом.
-Тижнева гілка тепер котить сам щойно спливлий інстант (він і є останнім відомим фактом).
+`ResetClock.optimisticReset` was substituting `nextReset` for 7d too — the same defect through a
+different path. The weekly branch now rolls forward the instant that just elapsed (which is itself
+the last known fact).
 
-**Пʼятигодинна гілка лишається на `nextReset`** — це свідоме розходження
-[ADR-0030](0030-optimistic-reset-and-exact-timer.md): 5-годинне вікно починається першою витратою, а
-не стоїть на сітці, тож котити нема чого.
+**The five-hour branch stays on `nextReset`** — this is a deliberate divergence noted in
+[ADR-0030](0030-optimistic-reset-and-exact-timer.md): the 5-hour window starts on the first spend
+rather than sitting on a grid, so there's nothing to roll forward.
 
-### 9. Міграція журналу v2 → v3
+### 9. Journal migration v2 → v3
 
-Архівні рядки, писані під час затемнень, несуть оцінку й `timePct = 0` — тобто будь-який аналіз тих
-годин читав пласку лінію, якої не було. Міграція котить їх на справжню сітку від попереднього
-якоря й **перераховує** `timePct`.
+Archival rows written during a blackout carry an estimate and `timePct = 0` — meaning any analysis
+of those hours read a flat line that never actually happened. The migration rolls them onto the real
+grid from the preceding anchor and **recomputes** `timePct`.
 
-Оцінки відрізняються від справжніх ресетів за точним підписом: оцінка округлена до 10-хвилинної
-межі, справжній ресет **завжди має дробові секунди**. Перевірка йде по **сирому рядку**, не по
-розпарсеній даті — `ResetClock.parse` дробову частину відкидає, тож після парсингу вони
-нерозрізненні. (Перша версія міграції на цьому й спіткнулася: вважала синтезованими **всі** ресети.)
+Estimates differ from real resets by an exact signature: an estimate is rounded to a 10-minute
+boundary, a real reset **always has fractional seconds**. The check runs on the **raw string**, not
+on the parsed date — `ResetClock.parse` drops the fractional part, so after parsing they're
+indistinguishable. (The migration's first version tripped on exactly this: it treated **every**
+reset as synthesized.)
 
-Прогін на живих журналах: 199 і 56 відновлених, похибка 0.000 с, жодного втраченого рядка,
-ідемпотентно. Після відновлення в кожному епізоді лишається щонайбільше **один** нульовий `timePct` —
-перший пол, зроблений у саму секунду ресету, де нуль просто істинний.
+A run against the live journals: 199 and 56 entries reconstructed, 0.000 s error, no row lost,
+idempotent. After reconstruction, each episode has at most **one** zero `timePct` left — the first
+poll made in the exact second of the reset, where zero is simply true.
 
-## Наслідки
+## Consequences
 
-- **Маркер часу на 7d рухається з першої хвилини вікна** замість того, щоб стояти нулем 4–6 годин і
-  стрибати наприкінці.
-- **[#389](https://github.com/artem-from-ua/tokenpace/issues/389) суттєво спрощується.** Той тікет
-  вважає 10-хвилинний «дрейф» поведінкою сервера і називає його головною пасткою детектора — 35 із 37
-  змін `resets_at` на Max. Насправді `ceilTo10Minutes` — **наш** код, і кличеться лише з `nextReset`.
-  Ця зміна прибирає ~95 % шуму, який той детектор мусив би фільтрувати.
-- **Зсув сітки сервером** (у #389 задокументовано −10.33 год на Pro) зробить реконструкцію в
-  *наступне* затемнення хибною на цю величину. Помилка **обмежена й самовиправна**: перший же
-  справжній ресет перезаписує якір. Новий персистентний якір — саме той вхід, якого потребує детектор
-  #389.
-- **Розбіжність локального годинника** зсуває реконструкцію. Далі `maxRollForwardSteps` (10 років
-  тижнів) не захищаємось: застосунок і так довіряє локальному годиннику скрізь.
-- **Порожній 7d-ресет — новий стан**, якого раніше не існувало (порожнім міг бути лише 5-годинний).
-  Аудит споживачів зроблено; `weeklyHasHeadroom` при ньому закриває блакитний гейт — поведінка
-  узгоджена з його докблоком («без надійного тижневого годинника пораду радше відкликають, ніж
-  вгадують»), і в холодному старті рядки все одно не малюються.
-- **Стан із порожньою датою, але реальним використанням** свідомо **не** захоплюється новим станом:
-  числа відомі, навіть коли годинник ні, і ховати їх було б втратою. Такий знімок і далі малює бари,
-  просто без відліку.
+- **The time marker on 7d moves from the first minute of the window** instead of sitting at zero for
+  4–6 hours and then jumping.
+- **[#389](https://github.com/artem-from-ua/tokenpace/issues/389) simplifies substantially.** That
+  ticket treats the 10-minute "drift" as server behavior and names it the main trap for the
+  detector — 35 of 37 `resets_at` changes on Max. In fact `ceilTo10Minutes` is **our** code, and it's
+  only ever called from `nextReset`. This change removes ~95% of the noise that detector would
+  otherwise have had to filter.
+- **A grid shift by the server** (documented in #389 as −10.33 h on Pro) will make the
+  reconstruction wrong by that amount during the *next* blackout. The error is **bounded and
+  self-correcting**: the very next real reset overwrites the anchor. The new persistent anchor is
+  exactly the input the #389 detector needs.
+- **Local clock drift** shifts the reconstruction. Beyond that we don't guard against
+  `maxRollForwardSteps` (10 years of weeks): the app already trusts the local clock everywhere else.
+- **An empty 7d reset is a new state** that didn't exist before (previously only the 5-hour one could
+  be empty). Consumers have been audited; `weeklyHasHeadroom` closes the blue gate in this state —
+  consistent with its doc comment ("without a reliable weekly clock, the advice is withdrawn rather
+  than guessed at"), and rows simply don't draw at all on a cold start anyway.
+- **A state with an empty date but real usage** is deliberately **not** captured by the new state:
+  the numbers are known even when the clock isn't, and hiding them would be a loss. Such a snapshot
+  still draws the bars — just without a countdown.
 
-## Перевірено
+## Verification
 
-- `swift test` — 1 410 тестів, зокрема реплей усіх трьох затемнень Max і DST-перехід.
-- Прогін міграції на обох живих журналах (opt-in `LiveJournalMigrationCheck`, read-only).
-- Живі стуби `weekly-reset-blackout` і `weekly-reset-unknown`, підтверджені мейнтейнером.
+- `swift test` — 1,410 tests, including a replay of all three Max blackouts and the DST transition.
+- A migration run against both live journals (opt-in `LiveJournalMigrationCheck`, read-only).
+- Live stubs `weekly-reset-blackout` and `weekly-reset-unknown`, confirmed by the maintainer.
