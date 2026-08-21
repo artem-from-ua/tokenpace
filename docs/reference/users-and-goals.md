@@ -1,302 +1,307 @@
-# Користувачі, їхні болі та цілі
+# Users, their pain, and their goals
 
-Для кого TokenPace, з чим вони стикаються в Claude Code і що для них означає «застосунок
-допоміг». Це довідник для тих, хто пропонує зміни UI — щоб мотивація спиралася на реальну
-поведінку, а не на здогад.
+Who TokenPace is for, what they run into in Claude Code, and what "the app helped" means to them.
+This is the reference for anyone proposing a UI change — so that the motivation rests on real
+behavior rather than on a guess.
 
-> Пов'язане: [SPEC.md](../../SPEC.md) — продуктовий спек; [ADR-0005](../adr/0005-pacing-fractions-not-blocks.md)
-> — чому pacing, а не блоки; [ADR-0027](../adr/0027-session-idle-no-phantom-reset.md) — idle-стан;
-> [ADR-0044](../adr/0044-dynamic-pacing-threshold.md) — динамічний поріг;
-> [personas.md](personas.md) — персони цільової аудиторії та enrichment-фічі.
+> Related: [SPEC.md](../../SPEC.md) — the product spec; [ADR-0005](../adr/0005-pacing-fractions-not-blocks.md)
+> — why pacing rather than blocks; [ADR-0027](../adr/0027-session-idle-no-phantom-reset.md) — the idle state;
+> [ADR-0044](../adr/0044-dynamic-pacing-threshold.md) — the dynamic threshold;
+> [personas.md](personas.md) — the personas of the target audience and the enrichment features.
 
-## Хто це
+## Who this is
 
-**Розробник, що працює з Claude Code щодня, кілька годин поспіль.** Не адміністратор
-білінгу, не аналітик витрат — людина, яка пише код і час від часу впирається в ліміт
-посеред задачі.
+**A developer who works with Claude Code every day, for hours at a stretch.** Not a billing
+administrator, not a cost analyst — someone who writes code and now and then hits the limit
+in the middle of a task.
 
-Ключова властивість: **робота йде сплесками**. Одна важка сесія (великий рефакторинг,
-довге дослідження кодової бази) з'їдає 10–15% тижневої квоти за годину. Спокійний день
-не з'їдає нічого.
+The defining property: **work comes in bursts**. One heavy session (a large refactor, a long
+exploration of the codebase) eats 10–15% of the weekly quota in an hour. A calm day
+eats nothing.
 
-Варіації цього ядра — за апетитом до квоти, структурою дня й мотивацією — описані як чотири
-персони в [personas.md](personas.md); планка корисності сигналу (нижче) там застосовується
-по-персонно.
+The variations on that core — by appetite for quota, shape of the day, and motivation — are
+described as four personas in [personas.md](personas.md); the bar for a useful signal (below) is
+applied there persona by persona.
 
-## Основний біль
+## The core pain
 
-**Ліміт приходить несподівано й посеред роботи.** Claude Code повідомляє про вичерпання
-постфактум — коли вже не можна продовжити. Наслідки:
+**The limit arrives without warning, in the middle of the work.** Claude Code reports the
+exhaustion after the fact — once there is no way to continue. The consequences:
 
-1. **Втрачений контекст.** Довга сесія обривається на середині; повертатися до неї через
-   3 години означає відновлювати стан у голові.
-2. **Неможливо планувати.** «Чи встигну закінчити цю задачу до ресету?» — питання, на яке
-   до TokenPace не було відповіді без відкривання браузера.
-3. **Неможливо коригувати.** Дізнавшись про 100% постфактум, нічого вже не зміниш.
-   Дізнавшись про «палиш удвічі швидше за годинник» на 30% — можна перерозподілити роботу.
+1. **Lost context.** A long session breaks off halfway; coming back to it 3 hours later
+   means rebuilding the state in your head.
+2. **No way to plan.** "Will I finish this task before the reset?" — a question that had no
+   answer before TokenPace without opening a browser.
+3. **No way to correct course.** Learning about 100% after the fact changes nothing.
+   Learning at 30% that you are "burning twice as fast as the clock" lets you redistribute the work.
 
-Звідси головна вимога: **сигнал має приходити тоді, коли на нього ще можна відреагувати**,
-і мати форму, з якої зрозуміло, що робити.
+Hence the central requirement: **the signal has to arrive while there is still something to do
+about it**, and it has to take a shape that makes clear what to do.
 
-## Що означає «корисний сигнал»
+## What makes a signal useful
 
-Сигнал корисний, якщо він **змінює рішення**. Перевірка перед тим, як щось додавати на
-екран:
+A signal is useful if it **changes a decision**. The test to apply before putting anything on
+screen:
 
-> Чи існує дія, яку користувач виконає інакше, побачивши це — і яку виконав би неправильно,
-> не побачивши?
+> Is there an action the user would take differently having seen this — and would have taken
+> wrongly without seeing it?
 
-Якщо ні — сигнал не корисний, скільки б правди в ньому не було.
+If not, the signal is not useful, however true it may be.
 
-### Приклади, що проходять перевірку
+### Examples that pass the test
 
-| Сигнал | Дія |
+| Signal | Action |
 |---|---|
-| Помаранчевий бар | Пригальмувати або перенести важку задачу |
-| «stand by 3h for green» на 7d | Оцінити паузу як варіант: перечекати чи прийняти помаранчевий і працювати далі |
-| Синій бар | Можна палити вільніше, є запас |
-| Червоний + pause-гліф | Робота стоїть; планувати паузу |
-| Символ валюти | Далі йдуть гроші, не квота |
-| Відлік до ресету | Чи встигну закінчити зараз, чи чекати |
+| An orange bar | Ease off, or move the heavy task |
+| "stand by 3h for green" on 7d | Weigh a pause as an option: wait it out, or accept orange and keep working |
+| A blue bar | You can burn more freely, there is room |
+| Red + the pause glyph | Work has stopped; plan the break |
+| The currency symbol | From here on it is money, not quota |
+| The countdown to the reset | Finish now, or wait |
 
-### Приклади, що не проходять
+### Examples that fail
 
-| Сигнал | Чому ні |
+| Signal | Why not |
 |---|---|
-| «Спожито 27%» саме по собі | Не каже, добре це чи погано, поки не знаєш, скільки часу минуло — а це вже враховано в кольорі |
-| «Лишилось 12% квоти» при спокійному темпі | 12% на 12 годин — це надлишок (стійкий темп 1.71× рівномірного), а не дефіцит |
-| «7-денне вікно майже повне» при `usage ≤ time` | Спокійна гілка означає `rate ≤ 1`, отже вичерпання до ресету арифметично неможливе |
-| Сума витрачених грошей у меню-барі | Дублює символ валюти, який уже кодує стан кольором |
+| "27% used" on its own | Says nothing about whether that is good or bad until you know how much time has passed — and that is already folded into the color |
+| "12% of quota left" at a calm pace | 12% across 12 hours is a surplus (a sustained pace of 1.71× the linear rate), not a shortage |
+| "the 7-day window is nearly full" when `usage ≤ time` | The calm branch means `rate ≤ 1`, so running out before the reset is arithmetically impossible |
+| The total money spent, in the menu bar | Duplicates the currency symbol, which already encodes the state in its color |
 
-**Правило, що з цього випливає:** значення (`usageFraction`, залишок, сума) — це **вхід**
-моделі. Колір, вердикт і маркер — її **вихід**. Показувати вхід поруч із виходом означає
-просити користувача повторити обчислення, яке застосунок уже зробив.
+**The rule that follows:** a value (`usageFraction`, the remainder, an amount of money) is the
+model's **input**. The color, the verdict, and the marker are its **output**. Showing the input
+next to the output asks the user to redo a computation the app has already done.
 
-## Чому тиша — валідний стан
+## Why silence is a valid state
 
-Показ коштує уваги. Віджет живе в меню-барі поруч із системними іконками, попап
-відкривається поверх роботи. Тому **відсутність сигналу не є дефектом за замовчуванням** —
-вона потребує такого самого обґрунтування, як і присутність, і часто виграє.
+Showing something costs attention. The widget lives in the menu bar next to the system icons; the
+popup opens on top of the work. So **the absence of a signal is not a defect by default** —
+it needs the same justification as a presence does, and it often wins.
 
-Спокійний стан, у якому нічого робити, має мовчати. Це не «застосунок недопрацював», це
-результат.
+A calm state, in which there is nothing to do, ought to say nothing. That is not "the app fell
+short", that is the result.
 
-## Рядок «stand by … for green»: що він додає й чому майже завжди мовчить
+## The "stand by … for green" line: what it adds, and why it is almost always silent
 
-> Рішення й альтернативи — [ADR-0102](../adr/0102-stand-by-line-for-the-seven-day-bar.md).
+> The decision and the alternatives — [ADR-0102](../adr/0102-stand-by-line-for-the-seven-day-bar.md).
 
-Помаранчевий бар каже **що** не так — витрачено більше, ніж належить на цю точку тижня. Він не
-каже **скільки це коштує виправити**. Користувач бачить проблему, але не має ціни рішення, тож
-або вгадує паузу навмання, або ігнорує сигнал.
+An orange bar says **what** is wrong — more has been spent than this point in the week allows. It
+does not say **what it costs to fix**. The user sees the problem but has no price for the solution,
+so they either guess at a pause or ignore the signal.
 
-Під ⌥ на 7-денному рядку зʼявляється третій рядок — `stand by 3h for green`: скільки не
-витрачати, щоб бар повернувся в зелену зону. Це переводить вердикт у **величину, з якою можна
-щось зробити**:
+Under ⌥, the 7-day row grows a third line — `stand by 3h for green`: how long to spend nothing so
+that the bar returns to the green zone. That turns a verdict into **a quantity you can act on**:
 
-| Що показує рядок | Рішення, яке він змінює |
+| What the line shows | The decision it changes |
 |---|---|
-| `stand by 40m for green` | Пауза дешева — зробити перерву, повернутись у зелене |
-| `stand by 2d for green` | Пауза нереальна — прийняти помаранчевий свідомо й планувати тиждень навколо нього |
+| `stand by 40m for green` | The pause is cheap — take a break, come back to green |
+| `stand by 2d for green` | The pause is unrealistic — accept orange deliberately and plan the week around it |
 
-Обидва варіанти корисні, і другий не менше за перший: «перечекати не вийде» — теж відповідь, і
-вона зупиняє марні спроби «трохи пригальмувати».
+Both outcomes are useful, and the second no less than the first: "waiting it out won't work" is an
+answer too, and it stops the futile attempts to "ease off a bit".
 
-**Чому саме 7d, і чому не 5h.** Пʼятигодинне вікно ресетиться щонайменше двічі за робочу добу —
-воно виправляється саме, без жодного рішення користувача, тож ціна паузи там нікого не цікавить.
-Тиждень так не робить: помаранчевий на 7d живе днями, і саме там пауза є реальною стратегією.
+**Why 7d, and why not 5h.** The five-hour window resets at least twice in a working day — it fixes
+itself, without any decision from the user, so the price of a pause there interests nobody. The week
+does not work that way: orange on 7d lives for days, and that is exactly where a pause is a real
+strategy.
 
-### Три шари тиші
+### Three layers of silence
 
-Рядок дорогий за увагою — він третій у секції й зсуває бар. Тому він мовчить скрізь, де не
-змінює рішення:
+The line is expensive in attention — it is the third in the section and it shifts the bar. So it
+stays silent everywhere it does not change a decision:
 
-1. **Лише під ⌥.** У спокої секція виглядає як раніше. Рядок — деталь на вимогу, а не постійний
-   мешканець попапа.
-2. **Лише коли бар помаранчевий.** На зеленому/синьому чекати нічого; на жовтому лід ще в межах
-   норми; на червоному пауза не працює взагалі — вичерпане вікно лікує тільки ресет.
-3. **Лише коли очікування варте розмови** — не менше 20 хвилин
-   (`PacingModel.standByFloorSeconds`). Коротша пауза мине, доки користувач читає попап, і
-   породжує рядок, що блимає без причини.
+1. **Only under ⌥.** At rest, the section looks as it did before. The line is a detail on demand,
+   not a permanent resident of the popup.
+2. **Only when the bar is orange.** On green or blue there is nothing to wait for; on yellow the
+   lead is still within normal; on red a pause does not work at all — an exhausted window is cured
+   only by a reset.
+3. **Only when the wait is worth discussing** — no less than 20 minutes
+   (`PacingModel.standByFloorSeconds`). A shorter pause elapses while the user is reading the popup,
+   and it produces a line that blinks for no reason.
 
-**Порогів насправді досить одного.** Природно хотіти ще правило «не показувати, коли ресет
-настане приблизно тоді ж» — рядок про ресет уже несе той самий сигнал. Але воно вже виконане, і
-строгіше: розрахунок відмовляє, якщо зелений настав би в останні 20 хв вікна, бо там
-`pacingOrangeOverrideSeconds` усе одно тримає бар помаранчевим. Будь-яка ближча до ресету пауза
-відсіюється раніше, тож окреме 10-хвилинне правило не відкинуло б **жодного** випадку — воно було
-б мертвим кодом. Це типова пастка: два пороги, що виглядають незалежними, а насправді один
-вкладений в інший.
+**One threshold is in fact enough.** It is natural to want another rule — "don't show it when the
+reset lands at roughly the same time", since the reset line already carries that signal. But that
+rule is already in force, and in a stricter form: the computation refuses if green would arrive in
+the last 20 minutes of the window, because `pacingOrangeOverrideSeconds` holds the bar orange there
+anyway. Any pause closer to the reset is filtered out earlier, so a separate 10-minute rule would
+not reject a **single** case — it would be dead code. This is a classic trap: two thresholds that
+look independent while one is actually nested inside the other.
 
-### Скільки це шуму насправді
+### How much noise this really is
 
-Помаранчевий на 7d вимагає ліду понад `0.16·(1 − t)` — на середині тижня це десятки годин
-очікування. Тому:
+Orange on 7d requires a lead above `0.16·(1 − t)` — mid-week that is tens of hours of waiting. So:
 
-- у **типовому** помаранчевому стані рядок показує години або дні, і 20-хвилинний поріг його не
-  чіпає;
-- поріг **не спрацьовує ніколи** на реальних даних — і це висновок із заміру джерела, а не оцінка
-  ймовірності.
+- in the **typical** orange state the line shows hours or days, and the 20-minute threshold never
+  touches it;
+- the threshold **never fires at all** on real data — and that is a conclusion drawn from measuring
+  the source, not an estimate of probability.
 
-Причина в самому API. `utilization` токенних вікон приходить **округленим до цілого відсотка**
-([usage-api-quirks](usage-api-quirks.md): 6204 записи журналу, жодного нецілого). На семиденному
-вікні один відсотковий пункт — це **1 год 40 хв** роботи, і це ж є **мінімальний ненульовий лід**
-над часом. Отже очікування на 7d може бути або нулем, або ≥ 101 хв — значень між ними в природі
-немає, і 20-хвилинний поріг ловить порожню множину.
+The reason lies in the API itself. The `utilization` of the token windows arrives **rounded to a
+whole percent** ([usage-api-quirks](usage-api-quirks.md): 6204 journal records, not one fractional).
+On the seven-day window one percentage point is **1 hour 40 minutes** of work, and that is also the
+**minimum non-zero lead** over time. So a wait on 7d can be either zero or ≥ 101 minutes — values
+in between do not occur in nature, and the 20-minute threshold catches an empty set.
 
-Арифметично стан «помаранчевий із паузою під 20 хв» існує (потрібен залишок вікна менше 125 хв і
-лід у соті частки пункту), але **сервер таких значень не віддає**. Саме тому стуб `standby-floor`
-довелося будувати на дробовому відсотку, якого в реальній відповіді не буває.
+Arithmetically the state "orange with a pause under 20 minutes" exists (it needs less than 125
+minutes left in the window and a lead of hundredths of a point), but **the server does not serve
+such values**. That is precisely why the `standby-floor` stub had to be built on a fractional
+percent, which a real response never carries.
 
-Практичний висновок: **поріг — це запобіжник, а не фільтр**. Він гарантує, що рядок ніколи не
-скаже «stand by 3m» (порада, яку не встигнеш прочитати), якщо гранулярність API колись зміниться.
-Сьогодні ж він не ховає нічого, і тиша рядка тримається на інших двох умовах — ⌥ і помаранчевому.
+The practical conclusion: **the threshold is a safety catch, not a filter**. It guarantees the line
+will never say "stand by 3m" (advice you cannot finish reading) should the API's granularity ever
+change. Today it hides nothing, and the line's silence rests on the other two conditions — ⌥ and
+orange.
 
-**Урок ширший за цю фічу:** перш ніж ставити поріг на величині, похідній від `util`, звір його з
-**кроком квантування** того вікна (3 хв на 5h, 101 хв на 7d). Поріг, менший за крок, — мертвий.
+**The lesson is wider than this feature:** before putting a threshold on a quantity derived from
+`util`, check it against the **quantization step** of that window (3 minutes on 5h, 101 minutes on
+7d). A threshold smaller than the step is dead.
 
-## Ієрархія уваги
+## The hierarchy of attention
 
-Що має бути гучнішим — визначається **терміновістю корекції**, не величиною числа:
+What should be louder is determined by **how urgent the correction is**, not by the size of the
+number:
 
-1. **Червоний** — робота стоїть, або йдуть гроші
-2. **Помаранчевий** — треба міняти поведінку зараз
-3. **Жовтий / зелений** — нічого не роби
-4. **Синій** — можна прискоритись
+1. **Red** — work has stopped, or money is going out
+2. **Orange** — behavior has to change now
+3. **Yellow / green** — do nothing
+4. **Blue** — you can speed up
 
-Абсолютний залишок у цю шкалу **не входить свідомо**: він не мапиться на дію без
-співвіднесення з часом, а це співвіднесення і є pacing-моделлю.
+The absolute remainder is **deliberately absent** from this scale: it does not map onto an action
+without being related to time, and that relation is the pacing model.
 
-## Дефіцитні ресурси
+## Scarce resources
 
-Дві поверхні з жорсткими обмеженнями — будь-яка пропозиція має рахуватися з ними.
+Two surfaces with hard constraints — any proposal has to reckon with them.
 
-### Ширина меню-бару
+### Menu bar width
 
-Місце горизонтальне й спільне з чужими віджетами. Зміна ширини **зсуває сусідів**, тож
-дрижання ширини — не косметика.
+The space is horizontal and shared with other people's widgets. A change in width **shifts the
+neighbors**, so jitter in the width is not cosmetic.
 
-Виміряні орієнтири (`monospacedDigitSystemFont(ofSize: 11)`):
+Measured reference points (`monospacedDigitSystemFont(ofSize: 11)`):
 
-| Елемент | Ширина |
+| Element | Width |
 |---|---|
-| Блок барів | 34 pt |
-| `1h` · `9h` · `4d` | 13.5–13.8 pt — найвужчий лейбл |
+| The bar block | 34 pt |
+| `1h` · `9h` · `4d` | 13.5–13.8 pt — the narrowest label |
 | `10h` · `22h` · `15d` | 20.5–20.8 pt |
-| `10m` · `45m` | 23.6 pt — **сьогоднішній максимум лейбла** |
-| `20:40` | 31.3 pt — **лише в попапі**; у меню-барі годинника немає ([ADR-0074](../adr/0074-one-reset-format-on-both-surfaces.md)) |
-| `4h41m` | 37.2 pt — колишній максимум; комбінованого формату більше немає |
+| `10m` · `45m` | 23.6 pt — **today's widest label** |
+| `20:40` | 31.3 pt — **in the popup only**; there is no clock time in the menu bar ([ADR-0074](../adr/0074-one-reset-format-on-both-surfaces.md)) |
+| `4h41m` | 37.2 pt — the former maximum; the combined format is gone |
 | `€13.32` | 38.3 pt |
 | `$54,321.00` | 62.6 pt |
 
-Максимум лейбла впав 37.2 → 23.6 pt разом із прибиранням порога 90 хв
-([#284](https://github.com/artem-from-ua/tokenpace/issues/284)), а
+The widest label dropped from 37.2 to 23.6 pt along with the removal of the 90-minute threshold
+([#284](https://github.com/artem-from-ua/tokenpace/issues/284)), and
 [#303](https://github.com/artem-from-ua/tokenpace/issues/303)
-([ADR-0075](../adr/0075-reset-label-reserved-slot.md)) зробив її **сталою**: лейбл малюється в
-слоті фіксованої ширини (24 pt — найширші `10m`/`45m`/`<1m`) із центрованим текстом, тож зміна
-кількості цифр (`10h` → `9h`) чи одиниці (`49m` → `1h`) віджет більше не зсуває. Ціна — до 10 pt
-порожнечі навколо коротких лейблів, поділені навпіл обабіч тексту.
+([ADR-0075](../adr/0075-reset-label-reserved-slot.md)) made it **constant**: the label is drawn in a
+fixed-width slot (24 pt — the widest of `10m`/`45m`/`<1m`) with the text centered, so a change in
+the number of digits (`10h` → `9h`) or in the unit (`49m` → `1h`) no longer shifts the widget. The
+price is up to 10 pt of emptiness around short labels, split evenly on either side of the text.
 
-Слот резервується **лише коли лейбл на екрані**: у дефолтному `smart` відлік більшість часу
-відсутній, і тримати під нього місце означало б платити спокійним станом за аварійний. Тож поява й
-зникнення самого лейбла віджет усе ще зсуває — свідомо, бо цей перехід збігається з подією, на яку
-користувач і так дивиться.
+The slot is reserved **only while the label is on screen**: under the default `smart` the countdown
+is absent most of the time, and holding space for it would mean making the calm state pay for the
+emergency one. So the appearance and disappearance of the label itself does still shift the widget —
+deliberately, because that transition coincides with an event the user is already looking at.
 
-Грошові суми небезпечні окремо: ширина залежить від валюти (JPY має нуль дробових знаків,
-CLP теж), позиції символу (`13,32 ₴` ставить його позаду) і роздільника розрядів. Розкид
-21–62.6 pt — майже втричі.
+Money amounts are dangerous in their own right: the width depends on the currency (JPY has no
+decimal places, and neither does CLP), on where the symbol sits (`13,32 ₴` puts it after the
+number), and on the thousands separator. The spread of 21–62.6 pt is nearly threefold.
 
-### Висота попапа
+### Popup height
 
-Росте вниз і **множиться на кількість вендорів** (див. [#60](https://github.com/artem-from-ua/tokenpace/issues/60)).
-Кожен зайвий рядок у шаблоні ліміту коштує N рядків при N провайдерах. Саме тому
-idle-рядок навмисно компактний — це економія висоти, а не семантична делікатність.
+It grows downward and is **multiplied by the number of vendors** (see [#60](https://github.com/artem-from-ua/tokenpace/issues/60)).
+Every extra line in a limit's template costs N lines across N providers. That is exactly why the
+idle line is deliberately compact — it is a saving in height, not semantic delicacy.
 
-## Що користувач контролює сам
+## What the user already controls
 
-Не все, що виглядає як рішення застосунку, ним є.
+Not everything that looks like the app's decision is one.
 
-| Величина | Хто задає | Наслідок |
+| Quantity | Who sets it | Consequence |
 |---|---|---|
-| Місячний cap на витрати | Користувач у білінгу Anthropic | `spend.limit: null` → рядок кредитів згортається в чистий лічильник без бару й вердикту |
-| Чи ховається 5-годинна смужка, доки спокійна | Рядок **«Hide the top 5h bar»** — [`TopBarHiding`](../../Sources/TokenPaceKit/TopBarHiding.swift): `Until it needs attention` / `Never`, дефолт **`Until it needs attention`** ([ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md), звузив трипозиційний вибір [ADR-0086](../adr/0086-tri-state-calm-bar-hiding.md); назви типу й сегментів — [#381](https://github.com/artem-from-ua/cc-timer/issues/381)) | Верхня 5-годинна смужка зникає, доки спокійна, і повертається на orange/red; 7-денна лишається завжди |
-| Стиль бару — **окремо для menu bar і для дропдауна** | `menuBarStyle` / `dropdownStyle`, кожен — progress / pressure / balance ([ADR-0080](../adr/0080-per-surface-bar-style.md)) | Маркер часу є або немає — і разом із ним змінюється шкала: Progress міряє в частках вікна; Pressure — проти часу, що лишився, тож **ширина несе терміновість** ([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md)); Balance міряє те саме **зі знаком від центру**, тож **напрямок несе бік від плану**, а ліва половина показує запас, який не встигнути витратити ([ADR-0079](../adr/0079-centred-zero-gauge-scale.md)). Поверхні незалежні — щільніший стиль у просторому попапі й тихіший у тісному барі задаються окремо |
-| Що саме має повідомляти колір смужок | Рядок **«Colors tell me»** — [`ColorAdvice`](../../Sources/TokenPaceKit/ColorAdvice.swift): `Slow down` / `Slow down or speed up` (дефолт) / `How it's going` ([ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md), [#381](https://github.com/artem-from-ua/cc-timer/issues/381)) | Приглушення спокійних тонів у білий — і **лише пейсинг-барів** ([ADR-0105 §1](../adr/0105-color-advice-governs-pacing-bars-only.md): service-крапка, гліф валюти й idle-пігулка це налаштування не читають — крапка й після [ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md), який змінив її тон, а не те, хто його вирішує). Рядок під стилем **Pressure — неактивний і показує `Slow down`**: там спокійний бік гаситься безумовно, тож вибір нічого не змінив би, а `Slow down` — правдивий опис того, що малюється. Збережене значення не переписується й повертається на Balance/Progress |
-| Секції попапа | [`PopupSectionVisibility`](../../Sources/TokenPaceKit/PopupSectionVisibility.swift) — `When it needs attention` / `Once used` / `Always` (порядок тихіше→гучніше, [ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md) — витіснив [ADR-0087](../adr/0087-above-zero-section-visibility.md) і §5–§6 [ADR-0100](../adr/0100-dropdown-style-tiles-and-retired-option-segment.md), [#381](https://github.com/artem-from-ua/cc-timer/issues/381)) | Per-model і кредити, кожне своїм ключем. Кредитний рядок `whenItNeedsAttention` **не пропонує** (`creditsOffered`): без стелі витрат немає бару, а отже й severity. Кейс `optionOnly` **видалено з enum** — ⌥ і так розкриває групу за будь-якого вибору; старий raw читається через `legacyRawValues` |
+| The monthly spending cap | The user, in Anthropic billing | `spend.limit: null` → the credits row collapses into a plain counter with no bar and no verdict |
+| Whether the 5-hour bar hides while calm | The row **"Hide the top 5h bar"** — [`TopBarHiding`](../../Sources/TokenPaceKit/TopBarHiding.swift): `Until it needs attention` / `Never`, default **`Until it needs attention`** ([ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md), which narrowed the three-way choice of [ADR-0086](../adr/0086-tri-state-calm-bar-hiding.md); the type and segment names — [#381](https://github.com/artem-from-ua/cc-timer/issues/381)) | The top 5-hour bar disappears while it is calm and comes back on orange/red; the 7-day one always stays |
+| The bar style — **separately for the menu bar and for the dropdown** | `menuBarStyle` / `dropdownStyle`, each of them progress / pressure / balance ([ADR-0080](../adr/0080-per-surface-bar-style.md)) | The time marker is there or it is not — and the scale changes with it: Progress measures in fractions of the window; Pressure measures against the time remaining, so **width carries urgency** ([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md)); Balance measures the same thing **with a sign, from the center**, so **direction carries which side of plan you are on**, and the left half shows the surplus you will not manage to spend ([ADR-0079](../adr/0079-centred-zero-gauge-scale.md)). The surfaces are independent — a denser style in the roomy popup and a quieter one in the cramped bar are set separately |
+| What exactly the bar colors should be telling you | The row **"Colors tell me"** — [`ColorAdvice`](../../Sources/TokenPaceKit/ColorAdvice.swift): `Slow down` / `Slow down or speed up` (the default) / `How it's going` ([ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md), [#381](https://github.com/artem-from-ua/cc-timer/issues/381)) | Muting the calm tones toward white — and **only for the pacing bars** ([ADR-0105 §1](../adr/0105-color-advice-governs-pacing-bars-only.md): the service dot, the currency glyph, and the idle pill do not read this setting — the dot still does not, even after [ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md), which changed its tone but not who decides it). Under the **Pressure** style the row is **disabled and shows `Slow down`**: there the calm side is muted unconditionally, so the choice would change nothing, and `Slow down` is a truthful description of what is drawn. The stored value is not overwritten and returns on Balance/Progress |
+| The popup sections | [`PopupSectionVisibility`](../../Sources/TokenPaceKit/PopupSectionVisibility.swift) — `When it needs attention` / `Once used` / `Always` (ordered quieter→louder, [ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md) — which superseded [ADR-0087](../adr/0087-above-zero-section-visibility.md) and §5–§6 of [ADR-0100](../adr/0100-dropdown-style-tiles-and-retired-option-segment.md), [#381](https://github.com/artem-from-ua/cc-timer/issues/381)) | Per-model and credits, each under its own key. The credits row **does not offer** `whenItNeedsAttention` (`creditsOffered`): with no spending ceiling there is no bar, and therefore no severity. The `optionOnly` case has been **removed from the enum** — ⌥ reveals the group under any choice anyway; the old raw value is read through `legacyRawValues` |
 
-**Перед тим, як пропонувати «прибрати X, бо він не завжди доречний», перевір, чи користувач
-уже не може прибрати його сам.** Часто перемикач стоїть там само, де задається сама
-величина — і це правильніше місце, ніж наше налаштування.
+**Before proposing "remove X, it isn't always appropriate", check whether the user cannot already
+remove it themselves.** Often the switch sits in the very place the quantity itself is set — and
+that is a better place for it than a setting of ours.
 
-## Співвідношення квот між вікнами (N) — рахується, не хардкодиться
+## The ratio between the windows' quotas (N) — computed, not hardcoded
 
-**N ≈ 9.8** пункти 5-годинної шкали на 1 пункт тижневої — тобто тижневий ліміт вміщає
-приблизно **десять повністю витрачених 5-годинних вікон**, а одне вичерпане до 100 %
-вікно з'їдає ~10.2 пп тижневого.
+**N ≈ 9.8** points of the five-hour scale per one point of the weekly scale — that is, the weekly
+limit holds roughly **ten fully spent 5-hour windows**, and one window exhausted to 100 %
+eats ~10.2 pp of the weekly one.
 
-Виміряно на добовому ряді (`ratio-d7-h5`, 2026-08-06): нахил **накопичених сум** за МНК
-по 17 тиках тижневого лічильника. 95 % ДІ середнього локального N — 8.9–10.8.
+Measured on a day-long series (`ratio-d7-h5`, 2026-08-06): the slope of the **cumulative sums** by
+least squares over 17 ticks of the weekly counter. The 95 % CI of the mean local N is 8.9–10.8.
 
-> Миттєве відношення похідних рахувати не можна: `d7_util` цілочисельний і за добу
-> зрушив лише 17 разів по +1 пп, тоді як `h5_util` зробив 130 кроків. Ділити одну
-> ступінчасту функцію на іншу семпл-у-семпл дає нулі й нескінченності. Приріст береться
-> лише всередині одного сегмента й лише додатний, тож обнулення на ресеті не рахується
-> за витрату.
+> The instantaneous ratio of the derivatives cannot be computed: `d7_util` is integer-valued and
+> over a day moved only 17 times by +1 pp, while `h5_util` took 130 steps. Dividing one step
+> function by another sample by sample yields zeros and infinities. The increment is taken
+> only within a single segment and only when positive, so the zeroing at a reset does not count
+> as spending.
 
-### Що це дає для розуміння продукту
+### What this tells us about the product
 
-Астрономічно за 7 днів вміщається **33.6** п'ятигодинних вікон, а ліміту вистачає на
-~10 — тобто тижнева квота покриває **29 % календаря**. Це і є справжня рамка для
-пейсингу: понад ~30 % середнього наповнення 5-годинних вікон зв'язує **тижневий** ліміт,
-а не сесійний.
+Astronomically, seven days hold **33.6** five-hour windows, while the limit is enough for
+~10 — meaning the weekly quota covers **29 % of the calendar**. That is the real frame for
+pacing: past ~30 % average fill of the 5-hour windows it is the **weekly** limit that binds,
+not the session one.
 
-### N — властивість тарифу, не константа
+### N is a property of the plan, not a constant
 
-**Не хардкодити.** N залежить від тарифного плану й міксу моделей: на іншому tier або при
-активному Opus він поїде. Anthropic до того ж змінює ліміти оголошено й тимчасово
-(спостережено: *«weekly Claude Code limit is 50 % higher through August 19»*) — це той
-самий механізм, що описаний як відкрите питання в
+**Do not hardcode it.** N depends on the subscription tier and the model mix: on another tier, or
+with Opus in play, it will move. Anthropic also changes the limits announced and temporarily
+(observed: *"weekly Claude Code limit is 50 % higher through August 19"*) — the same mechanism
+described as an open question in
 [#278](https://github.com/artem-from-ua/tokenpace/issues/278).
 
-**Але рахувати з даних користувача — можна й варто.** Оскільки N виводиться з власного
-ряду, він автоматично відображає і тариф, і мікс, і чинні акції. Перспектива, що з цього
-випливає: **моніторити N у часі й помічати його зміну** — тобто застосунок міг би
-повідомити «твій тижневий ліміт став ширшим» замість того, щоб мовчки показувати стрибок
-відсотків.
+**But computing it from the user's own data is possible, and worth doing.** Since N is derived from
+one's own series, it automatically reflects the tier, the mix, and whatever promotions are in
+force. The prospect that follows: **watch N over time and notice it change** — that is, the app
+could report "your weekly limit just got wider" instead of silently showing a jump in the
+percentages.
 
-### Умови, за яких показувати
+### The conditions for showing it
 
-Якщо N колись стане частиною UI (природний вхід — Insights, [#241](https://github.com/artem-from-ua/tokenpace/issues/241)):
+If N ever becomes part of the UI (the natural home is Insights, [#241](https://github.com/artem-from-ua/tokenpace/issues/241)):
 
-- **Потрібно ≥ 10–15 тиків `d7_util`.** У перші дві доби холодного старту їх буде 2–3, ДІ
-  безглуздий — доти показувати «ще рахуємо», а не число.
-- **Розриви в даних занижують абсолютні оцінки.** Якщо діра припала на активну сесію,
-  обидва лічильники доїдуть за нею разом і **відношення виживе**, але «скільки вікон я
-  спалив» буде заниженим — це треба підписувати.
-- **Кілька scoped-моделей ламають єдиний N.** Один загальний коефіцієнт приховає, що
-  тижневий ліміт з'їдає не те вікно, на яке дивиться користувач.
-- **Сама крива відношення марна** — це горизонтальна лінія, що нічого не додає після
-  того, як побачив число. Вартує **число**, не графік: «залишок тижневого = 8.3 вікна» —
-  єдина фраза, яка робить дві шкали сумірними.
+- **It needs ≥ 10–15 ticks of `d7_util`.** In the first two days of a cold start there will be 2–3
+  and the CI is meaningless — until then, show "still computing", not a number.
+- **Gaps in the data understate the absolute estimates.** If a gap fell during an active session,
+  both counters will catch up together and **the ratio survives**, but "how many windows I burned"
+  will come out low — that has to be labeled.
+- **Several scoped models break a single N.** One overall coefficient would hide the fact that the
+  weekly limit is being eaten by a window other than the one the user is looking at.
+- **The ratio curve itself is useless** — it is a horizontal line that adds nothing once you have
+  seen the number. What is worth showing is **the number**, not a chart: "weekly remaining = 8.3
+  windows" is the one phrase that makes the two scales commensurable.
 
-### Що не залежить від N узагалі
+### What does not depend on N at all
 
-**Асиметрія ціни помилки** виводиться з *тривалості* вікон, а не з квот:
+**The asymmetry in the cost of a mistake** follows from the *duration* of the windows, not from the
+quotas:
 
-| | 5-годинне | 7-денне |
+| | 5-hour | 7-day |
 |---|---|---|
-| Ціна вичерпання | 1–5 год очікування | до кінця тижня |
-| Ресетів на тиждень | ~33 | 1 |
-| Можна перечекати | так | ні |
+| Cost of exhaustion | 1–5 hours of waiting | until the end of the week |
+| Resets per week | ~33 | 1 |
+| Can be waited out | yes | no |
 
-Це стабільно за будь-якого N, і саме на цьому стоїть
-[#287](https://github.com/artem-from-ua/tokenpace/issues/287) (який бар ховати, коли
-обидва спокійні).
+That holds for any N, and it is what
+[#287](https://github.com/artem-from-ua/tokenpace/issues/287) rests on (which bar to hide when
+both are calm).
 
-## Чого користувач не бачить, і чому
+## What the user does not see, and why
 
-`spend.balance` і `spend.auto_reload` приходять `null` на `/api/oauth/usage` (spike
-[#142](https://github.com/artem-from-ua/tokenpace/issues/142)) — свідомо не декодуються.
-Наслідок: застосунок не розрізняє «мої гроші» від «промо-кредит, що згорає».
+`spend.balance` and `spend.auto_reload` arrive as `null` from `/api/oauth/usage` (spike
+[#142](https://github.com/artem-from-ua/tokenpace/issues/142)) — deliberately not decoded.
+The consequence: the app does not distinguish "my money" from "a promo credit that expires".
 
-Це **не наш дефект** і не лікується нашою складністю. Ендпоїнт неофіційний; розширювати
-його схему заради стороннього клієнта ніхто не зобов'язаний. Пропозиції компенсувати це
-ручним введенням балансу платять нашою складністю за чужий порожній JSON.
+This is **not our defect** and it is not cured by complexity on our side. The endpoint is
+unofficial; nobody is obliged to extend its schema for a third-party client. Proposals to make up
+for it by entering the balance by hand pay with our complexity for someone else's empty JSON.
