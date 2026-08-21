@@ -12,7 +12,7 @@ superseded_by: []
 > Поширює прецедент [ADR-0097](0097-bar-style-preview-rendered-at-runtime.md) («прев'ю стилів
 > малюється в рантаймі справжнім кодом, не картинками») з **порівняння стилів** на **пояснення
 > позначок**, і користується швом `PopupBarView.render(in:)`, який для цього й виділяли
-> ([ADR-0093](0093-settings-tiles-reuse-the-popup-renderer.md)).
+> ([ADR-0093](0093-bar-style-picked-by-picture.md)).
 > Не змінює жодного правила з [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md)
 > (лінійка під ⌥) — але вводить єдине місце, де тіки видно **без** ⌥, і §3 пояснює, чому це не виняток
 > із того правила, а його прямий наслідок.
@@ -20,7 +20,7 @@ superseded_by: []
 ## Контекст
 
 TokenPace кодує багато сенсу в дуже малій площі: п'ять кольорів темпу, три стилі барів
-([ADR-0080](0080-bar-style-is-per-surface.md), [ADR-0101](0101-pressure-is-the-gauge-ahead-half.md),
+([ADR-0080](0080-per-surface-bar-style.md), [ADR-0101](0101-pressure-is-the-gauge-ahead-half.md),
 [ADR-0109](0109-centred-style-renamed-to-balance.md)), десяток SF Symbols, бейджі, лінійка.
 **Ніде в застосунку це не пояснено** ([#261](https://github.com/artem-from-ua/tokenpace/issues/261)).
 Користувач, що бачить синю смужку, підняту долоню чи символ валюти, не має жодного способу дізнатися,
