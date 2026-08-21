@@ -325,7 +325,7 @@ actor StubUsageTransport: UsageTransport {
     ///    with quota (48 %) while `seven_day` is exhausted (100 %, `weekly_all` critical) and there is
     ///    **no** `spend` block, so the weekly cap blocks despite 5h quota. Not idle → the 5h row is a
     ///    normal (non-grey) "on pace" row, but the popup's 7-day reset gets the **red** blocking-reset
-    ///    badge. This is Артем's real bug: before the fix `isBlocked` was false and no badge showed.
+    ///    badge. This is Artem's real bug: before the fix `isBlocked` was false and no badge showed.
     ///  • `.optimisticReset` (`=optimistic-reset`) — the reset-boundary frame (#36): the first poll's 5h
     ///    window resets in ~20 s at 60 % util, so the coordinator's one-shot timer fires shortly after
     ///    launch — the 5h bar flips 60 % → 0 % with a fresh ~5 h countdown (no ⏰) and a forced refresh
@@ -1177,7 +1177,7 @@ actor StubUsageTransport: UsageTransport {
 
         // Active-blocked frame (#177): a live 5h window (48 %) while `seven_day` is exhausted (100 %) and
         // there is no `spend` block, so the weekly cap blocks despite 5h quota. The `limits[]` carries the
-        // server's real shape — a `weekly_all` entry at 100 % / critical / is_active — mirroring Артем's
+        // server's real shape — a `weekly_all` entry at 100 % / critical / is_active — mirroring Artem's
         // captured payload. Not idle → the 5h row stays a normal "on pace" row, but the popup's 7-day
         // reset (the sole exhausted candidate, ~4 days out) is drawn **red** as the blocking reset. Before
         // the fix `isBlocked` returned false (it required 5h exhausted too) → no badge.

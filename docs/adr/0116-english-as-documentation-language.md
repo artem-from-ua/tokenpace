@@ -46,16 +46,7 @@ That means: `README`, `SPEC.md`, `docs/` (guides, reference, design, ADRs), `CLA
 other agent-instruction file, skills, code, identifiers, comments, commit messages, PR titles and
 bodies, issue titles and bodies, comments, release notes, and label descriptions.
 
-**Ukrainian remains only where the artifact is not part of the repository:**
-
-- agent conversation with the maintainer;
-- plan files (`~/.claude/plans/*.md`);
-- private `memory/` under `~/.claude/projects/`.
-
-None of these are committed, published, or read by anyone other than the maintainer, and all three
-are things the maintainer reads as a *reader* rather than as a repository artifact. This is exactly
-the split the global rule already draws; this ADR stops carving an exception out of it for this
-project.
+Artifacts outside the repository are out of scope for this decision.
 
 Identifiers keep their original form, as before: API fields (`five_hour`, `resets_at`,
 `client_id`), UI strings, and file names are quoted verbatim and are never translated.
@@ -96,10 +87,6 @@ Identifiers keep their original form, as before: API fields (`five_hour`, `reset
   A hook that embeds a Ukrainian section title (as `.claude/hooks/release-notes-guard.sh` did)
   breaks the moment that title is translated — the more general lesson being that a hook should
   cite a section by what it *is*, not by its literal name.
-
-- **The maintainer keeps reading Ukrainian where it matters to them.** Conversation, plans, and
-  progress updates are unaffected. This changes what the project *writes down*, not how it is
-  discussed.
 
 ## Alternatives considered
 
