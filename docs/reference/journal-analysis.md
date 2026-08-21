@@ -1237,7 +1237,7 @@ combine". The corner where they meet stays empty: the intersection of two margin
 > marginal column**. Measured on a real render: `td.zero` = 82 px + spacer 12 px = 94 px of
 > emptiness against 10 px between rows.
 >
-> Narrowing the spacer does nothing here — it was already 10-12 px. **The cure is absorbing the
+> Narrowing the spacer does nothing here — it was already 10–12 px. **The cure is absorbing the
 > corner**: the marginal row's header gets `colspan="2"` and covers the empty cell, after which the
 > "total" band starts exactly where the intersection block starts, and the only visible break left
 > is the spacer.
@@ -1384,10 +1384,10 @@ computing" rather than showing a premature number:
 
 | Metric | Matures at | Why there |
 |---|---|---|
-| Coefficient N | 10-15 `d7` ticks | the weekly counter moves rarely |
-| Weekly projection | ≥ 1 completed `d7` cycle | over 1 day the cone was 4.0-8.7 days — **wider than the window itself** |
+| Coefficient N | 10–15 `d7` ticks | the weekly counter moves rarely |
+| Weekly projection | ≥ 1 completed `d7` cycle | over 1 day the cone was 4.0–8.7 days — **wider than the window itself** |
 | Distribution of "how far into the window I take it" | ~a week | 3 cycles do not make a distribution |
-| Day profile | ≥ 5-7 days | 1 day = 1 observation per hour |
+| Day profile | ≥ 5–7 days | 1 day = 1 observation per hour |
 | Day × hour heatmap | ≥ 14 days | 2 rows of a grid are not a grid |
 | The "1.4× your usual" baseline | ≥ 14 days | there is no distribution for "usual" yet |
 
@@ -1399,12 +1399,12 @@ computing" rather than showing a premature number:
 As data accumulates, the form has to change — otherwise the chart degrades:
 
 - **event → distribution**: show 32 resets as a histogram, not a list of lollipops;
-- **day → facet**: 12 daily bands of 0-24 h instead of one continuous time axis;
+- **day → facet**: 12 daily bands of 0–24 h instead of one continuous time axis;
 - **window → object**: weeks overlaid in "day since reset" coordinates — the axis stays 7-day long
   no matter how long the journal is.
 
 The last trick is especially valuable: **overlaid cycles in normalized coordinates** ("fraction of
-the window" × `util`) are not a time series, so they scale without caveats up to ~40-50 cycles on one
+the window" × `util`) are not a time series, so they scale without caveats up to ~40–50 cycles on one
 canvas.
 
 ## Checklist before showing a result
@@ -1453,7 +1453,7 @@ not make it into Insights.
 
 All the numbers in this file come from two series: `usage-journal-2026-08.jsonl` (Max, ~5,760
 `usage` records as of August 20, 2026) and a Pro series supplied by a second user (862 records,
-August 4-15, 2026 — a school-holiday period, so the shape of the week in it is atypical).
+August 4–15, 2026 — a school-holiday period, so the shape of the week in it is atypical).
 
 **Absolute counters grow** with every poll, so a discrepancy of a few hundred records on a repeat
 run is expected. Shares, medians and distribution statistics are stable; if *those* diverge, it is a
