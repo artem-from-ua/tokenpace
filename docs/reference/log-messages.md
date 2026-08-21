@@ -287,7 +287,8 @@ UI affordance ran, which is what `ui` is for.
 ## `Sources/TokenPace/BackToWorkNotifier.swift`
 
 Thin `UserNotifications` glue for the local notifications — "Back to work!" (#160, ADR-0039) and
-"Now using Extra Usage Credit". No token/limit values and no money amounts are ever logged (the amount
+the "Extra usage" onset banner ([ADR-0114](../adr/0114-extra-usage-is-one-name.md) settled that name
+across every surface). No token/limit values and no money amounts are ever logged (the amount
 lives only in the delivered banner body). The `<kind>` in the shared post path is `back-to-work` or
 `extra-usage`.
 

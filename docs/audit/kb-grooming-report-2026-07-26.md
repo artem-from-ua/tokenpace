@@ -1,4 +1,4 @@
-# KB Grooming Report
+# KB grooming report
 
 **Project:** TokenPace (`/Users/artem/devel/cc-timer`)
 **Date:** 2026-07-26
