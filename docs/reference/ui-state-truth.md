@@ -87,14 +87,14 @@ drawn from it is false.
 Render them from the system, with the same parameters the code uses:
 
 ```swift
-// mock-symbols.swift — запустити `swift mock-symbols.swift`
+// mock-symbols.swift — run with `swift mock-symbols.swift`
 import AppKit
 
 func png(_ name: String, _ colour: NSColor,
          pt: CGFloat = 11, scale: CGFloat = 4) -> String? {
     let cfg = NSImage.SymbolConfiguration(pointSize: pt, weight: .semibold)
     guard let base = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-        .withSymbolConfiguration(cfg) else { return nil }          // ← nil = символу НЕМАЄ
+        .withSymbolConfiguration(cfg) else { return nil }          // ← nil = the symbol does NOT exist
     let w = base.size.width * scale, h = base.size.height * scale
     guard let rep = NSBitmapImageRep(
         bitmapDataPlanes: nil, pixelsWide: Int(w), pixelsHigh: Int(h),
@@ -105,7 +105,7 @@ func png(_ name: String, _ colour: NSColor,
     let r = NSRect(x: 0, y: 0, width: w, height: h)
     base.draw(in: r)
     colour.set()
-    r.fill(using: .sourceAtop)                                     // тонування
+    r.fill(using: .sourceAtop)                                     // tinting
     NSGraphicsContext.restoreGraphicsState()
     return rep.representation(using: .png, properties: [:])
         .map { "data:image/png;base64," + $0.base64EncodedString() }
@@ -263,7 +263,7 @@ same numerator and denominator as in Pressure; what changes is where you measure
 
 ```
 r      = (u − t) / (1 − t)
-offset = clamp(r, −1, +1)           // симетрично: обидві половини беруть сирий r (ADR-0101)
+offset = clamp(r, −1, +1)           // symmetric: both halves take the raw r (ADR-0101)
 ```
 
 1. A gray full-width track — as everywhere else.
@@ -453,12 +453,12 @@ credit strip does not occur at all.
 ```swift
 // PacingModel.severity
 if pacing == .onPaceOrBehind {                    // usage <= time
-    if !blueAllowed { return .calm }              // синій тут не пропонується — три причини: ADR-0115
-    if elapsed <= 1200 { return .calm }           // 20-хв старт-override
+    if !blueAllowed { return .calm }              // blue is not offered here — three reasons: ADR-0115
+    if elapsed <= 1200 { return .calm }           // 20-min start override
     return (time - usage) > behindThreshold ? .farBehind : .calm
 }
-if usageFraction >= 1 { return .exhausted }       // ЧЕРВОНИЙ
-if remainingSeconds <= 1200 { return .ahead }     // 20-хв кінець-override
+if usageFraction >= 1 { return .exhausted }       // RED
+if remainingSeconds <= 1200 { return .ahead }     // 20-min end override
 return (usage - time) < 0.16 * (1 - time) ? .calm : .ahead
 ```
 
@@ -599,7 +599,7 @@ def severity(u, t):
     if t >= u: return "green/blue"
     return "yellow" if (u - t) < 0.16 * (1 - t) else "ORANGE"
 
-print(severity(0.78, 0.72))   # ORANGE — не зелений
+print(severity(0.78, 0.72))   # ORANGE — not green
 print(severity(0.88, 0.93))   # green/blue
 ```
 
@@ -641,9 +641,9 @@ under the rule above: that rule is about the readability of mentions, while this
 directive for GitHub that the reader does not click anyway.
 
 ```markdown
-Closes #337                                    ← голий, інакше не спрацює
+Closes #337                                    ← bare, otherwise it will not fire
 
-Реалізовано як у [#337](…/issues/337): …       ← посилання, як і скрізь
+Implemented as in [#337](…/issues/337): …      ← a link, as everywhere else
 ```
 
 (Found out after [PR #338](https://github.com/artem-from-ua/tokenpace/pull/338): "Закриває [#337](…)"
@@ -657,11 +657,11 @@ because they do not turn up in a naive search for "space + hash".
 ```python
 import re
 s = open("artifact.html").read()
-body = s.split("</style>", 1)[1]                     # CSS-кольори не рахуємо
+body = s.split("</style>", 1)[1]                     # do not count CSS colors
 parts = re.split(r"(<a\b[^>]*>.*?</a>)", body, flags=re.S)
 bare = [m.group() for i, p in enumerate(parts) if i % 2 == 0
         for m in re.finditer(r"#\d{2,4}(?![\da-fA-F])", p)]
-print(bare or "усі згадки клікабельні")
+print(bare or "every mention is clickable")
 ```
 
 And check that the number in the `href` matches the visible text — a regex replacement desynchronizes

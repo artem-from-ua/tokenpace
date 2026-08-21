@@ -38,9 +38,9 @@ iPhone та комплікейшен Apple Watch.
 ## Команди
 
 ```sh
-swift build        # збірка
-swift test         # unit-тести (PacingModel, парсинг/формат часу, backoff)
-swift run          # запуск
+swift build        # build
+swift test         # unit tests (PacingModel, time parsing/formatting, backoff)
+swift run          # run
 ```
 
 ## Логи — читати ПРАВИЛЬНО (не гатити не в ті логи)
