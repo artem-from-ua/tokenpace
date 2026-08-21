@@ -1831,13 +1831,20 @@ final class PopupViewController: NSViewController {
 
     /// The gap under the card when the card owns the popup's bottom edge.
     ///
-    /// The trimmed ``Metrics/cardBottomInset`` assumes a neighbour below — a native menu item, with
-    /// `NSMenu`'s own padding above it. In the menu with the caption off and ⌥ up there is no such
-    /// neighbour (#475), so the full ``Metrics/cardBottomInsetAlone`` applies and the plate is framed
-    /// evenly on the three free sides. The preview keeps the trimmed value: its window tops that up to
-    /// the same even margin, and doing it twice would double the gap.
+    /// The trimmed ``Metrics/cardBottomInset`` is trimmed **because something follows** — a native menu
+    /// item, with `NSMenu`'s own padding above it. So the full margin applies in exactly one case: the
+    /// menu, with the caption off *and* ⌥ up, where the action items are hidden too (#475) and the plate
+    /// genuinely has no neighbour.
+    ///
+    /// Getting this wrong is visible in both directions. Keeping the trim when nothing follows leaves the
+    /// card almost flush with the popup's edge; taking the full margin while the items are showing adds
+    /// it to `NSMenu`'s own padding and opens a gap between the widget and "Settings…".
+    ///
+    /// The preview always keeps the trimmed value: its window tops that up to an even margin itself
+    /// (`SettingsPreviewWindowController.Metrics.belowCard`), and doing it twice would double the gap.
     private var cardBottomConstant: CGFloat {
-        hostedInMenu ? Metrics.cardBottomInsetAlone : Metrics.cardBottomInset
+        guard hostedInMenu, !optionHeld else { return Metrics.cardBottomInset }
+        return Metrics.cardBottomInsetAlone
     }
 
     /// The bold header of the popup's first section — "Claude" covers the update-cadence line and the
@@ -2059,14 +2066,16 @@ final class PopupViewController: NSViewController {
         guard let hint = optionHintLabel, let cardBottom = cardBottomConstraint else { return }
         let shows = showsOptionHint
         hint.isHidden = !shows
+        // Re-read rather than set once at build time: it depends on `optionHeld` (whether the action
+        // items are showing) and on `hostedInMenu`, which the preview assigns after `loadView`. Written
+        // before the branch, so it is right whichever constraint ends up holding — an inactive
+        // constraint keeps its constant, and this one is reactivated the moment ⌥ goes back down.
+        cardBottom.constant = cardBottomConstant
         if shows {
             cardBottom.isActive = false
             NSLayoutConstraint.activate(hintBottomConstraints)
         } else {
             NSLayoutConstraint.deactivate(hintBottomConstraints)
-            // Re-read rather than set once at build time: `hostedInMenu` is assigned after `loadView`
-            // by the preview, and this is the path both it and every ⌥ change already run through.
-            cardBottom.constant = cardBottomConstant
             cardBottom.isActive = true
         }
         view.needsLayout = true
