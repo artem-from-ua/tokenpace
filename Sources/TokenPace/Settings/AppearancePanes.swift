@@ -441,6 +441,24 @@ struct DropdownPane: View {
                         onSelect: { model.setExtraUsageVisibility($0) })
                 }
             }
+
+            // The ⌥ caption's switch is on General, not here (#475/#476) — it must not travel in a
+            // preset or an exported config, and membership in `AppearancePresetValues` is what decides
+            // that. This pane is where someone looks for it, so this is where it has to be named; the
+            // link makes the pointer worth following rather than a note about somewhere else.
+            //
+            // In the `footer:` slot, so it renders outside the grouped card: it is a statement about the
+            // page, not another control on it. That also keeps it clear of the two segmented rows above,
+            // which are dense enough already.
+            Section {
+                EmptyView()
+            } footer: {
+                SettingsCrossPaneHint(
+                    prefix: "The *hold ⌥ Option* hint is set in",
+                    destination: .general,
+                    suffix: " — it is not part of an appearance preset.",
+                    model: model)
+            }
         }
         .formStyle(.grouped)
     }

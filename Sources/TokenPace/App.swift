@@ -35,11 +35,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// created and kept alive; while open it re-renders on every poll (see `apply(_:)`).
     private var troubleshootWC: TroubleshootWindowController?
 
-    /// The optional "Troubleshoot…" item (ADR-0020), hidden by default and revealed **below** the
-    /// always-visible "Settings…" while ⌥ Option is held. `NSMenuItem.isHidden` is flipped live by
-    /// `updateTroubleshootVisibility(_:)`, driven by `optionPollTimer` — the native `isAlternate`
-    /// swap does not work in a status-item menu. "Settings…" is a plain, always-shown item beside it.
+    /// The "Troubleshoot…" item (ADR-0020), revealed **below** "Settings…" while ⌥ Option is held.
+    /// `NSMenuItem.isHidden` is flipped live by `updateTroubleshootVisibility(_:)`, driven by
+    /// `optionPollTimer` — the native `isAlternate` swap does not work in a status-item menu.
+    ///
+    /// It used to be the *only* ⌥-gated item, beside an always-visible "Settings…". Since #475 every
+    /// action item is gated the same way and this one is no longer special — what remains particular to
+    /// it is only that it was first.
     private var troubleshootItem: NSMenuItem?
+
+    /// The "Settings…" item. ⌥-gated since #475 (ADR-0020 §3 had it always visible); hidden and revealed
+    /// in lockstep with the other action items by `updateTroubleshootVisibility(_:)`.
+    private var settingsItem: NSMenuItem?
+
+    /// The separator above "Quit TokenPace". Hidden with the action items (#475) — a divider with
+    /// nothing on one side of it reads as a rendering fault, and with ⌥ up there is nothing below it.
+    private var quitSeparatorItem: NSMenuItem?
 
     /// The dev-only Development tools window (#187, #279). Lazily created and kept alive.
     private var devToolsWC: DevToolsWindowController?
@@ -474,15 +485,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // glyph off the right edge — none is wanted, and there is no main menu to host a default ⌘Q.
         // No separator before "Settings…": the Claude section now sits on its own inset card (#188
         // follow-up), which already visually detaches it from the native items below.
-        // "Settings…" is always visible. Directly below it sits the optional "Troubleshoot…" item
-        // (ADR-0020), hidden by default and revealed only while ⌥ Option is held. The native
+        //
+        // **Every item below is ⌥-gated (#475).** With ⌥ up the menu is the widget and nothing else;
+        // the popup draws a dim "hold ⌥ Option for more" caption where this column would be. The native
         // `isAlternate` mechanism does NOT work in a status-item menu, so the reveal is driven by a
         // modifier-polling timer set in `menuWillOpen` — see `updateTroubleshootVisibility(_:)`. Each
         // item carries its own fixed selector; empty keyEquivalent keeps the menu glyph-free.
+        //
+        // They are built **hidden**, matching the ⌥-up state the menu opens into. `menuWillOpen` seeds
+        // the real state before the menu is drawn, so a user opening with ⌥ already down still gets the
+        // full column — but the built-in state has to be the common one, or the first frame flickers.
         let settingsItem = NSMenuItem(title: "", action: #selector(openSettings as () -> Void), keyEquivalent: "")
         settingsItem.attributedTitle = Self.dropdownMenuItemText("Settings…")
         settingsItem.target = self
+        settingsItem.isHidden = true
         menu.addItem(settingsItem)
+        self.settingsItem = settingsItem
 
         let troubleshootItem = NSMenuItem(title: "", action: #selector(openTroubleshoot), keyEquivalent: "")
         troubleshootItem.attributedTitle = Self.dropdownMenuItemText("Troubleshoot…")
@@ -533,11 +551,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A plain `.app` on the real network shows no tag. The tag is noise on an ordinary open, so it
         // is revealed only while ⌥ Option is held (swapped in `updateTroubleshootVisibility`): the item
         // reads a plain "Quit TokenPace" by default and grows the suffix under Option.
-        menu.addItem(.separator())
+        let quitSeparator = NSMenuItem.separator()
+        quitSeparator.isHidden = true
+        menu.addItem(quitSeparator)
+        self.quitSeparatorItem = quitSeparator
         updateQuitDevTitle()
         let quitItem = NSMenuItem(title: "", action: #selector(quit), keyEquivalent: "")
         quitItem.attributedTitle = Self.dropdownMenuItemText("Quit TokenPace")
         quitItem.target = self
+        quitItem.isHidden = true
         menu.addItem(quitItem)
         self.quitItem = quitItem
 
@@ -865,14 +887,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reRenderForCurrentTime()           // clear the stale rows/dot right away
     }
 
-    /// Show or hide the optional "Troubleshoot…" item — and flip the popup's service-status
-    /// visibility — for the current ⌥ Option state (ADR-0020). Called on menu open and by
-    /// `optionPollTimer` while it is open — the status-item-menu replacement for the inert native
-    /// `isAlternate` swap. Skips the work when the state is unchanged, so the poll is cheap.
+    /// Show or hide **every action item** — and flip the popup's ⌥-driven content — for the current
+    /// ⌥ Option state (ADR-0020, widened by #475). Called on menu open and by `optionPollTimer` while it
+    /// is open — the status-item-menu replacement for the inert native `isAlternate` swap. Skips the
+    /// work when the state is unchanged, so the poll is cheap.
+    ///
+    /// The name is historical: it gated only "Troubleshoot…" when ADR-0020 introduced it. Renaming it
+    /// would touch every call site for no behavioural gain, so the doc carries the correction instead.
     private func updateTroubleshootVisibility(_ optionHeld: Bool) {
-        guard let troubleshootItem, optionHeld != lastOptionHeld else { return }
+        guard optionHeld != lastOptionHeld else { return }
         lastOptionHeld = optionHeld
-        troubleshootItem.isHidden = !optionHeld
+        // The guard above no longer binds `troubleshootItem` (#475): it used to double as "the menu has
+        // been built", but the popup's caption now has to follow ⌥ even in the moments that optional was
+        // nil, and every item below is optional-chained anyway.
+        troubleshootItem?.isHidden = !optionHeld
+        // ⌥-gated since #475 — see the menu-build comment. The separator goes with them: a divider above
+        // a hidden Quit would be a line under nothing.
+        settingsItem?.isHidden = !optionHeld
+        quitSeparatorItem?.isHidden = !optionHeld
+        quitItem?.isHidden = !optionHeld
         // "Development tools…" needs both gates: ⌥ Option AND the `devToolsEnabled` defaults key. The
         // item always exists now, so the flag gate is applied here (re-checked each open, so toggling
         // the defaults key takes effect on the next menu open).
@@ -2324,6 +2357,10 @@ extension AppDelegate: NSMenuDelegate {
     /// by menu tracking (verified), so a modifier-polling timer drives the reveal instead. Seed
     /// visibility from the modifiers already held at open time (the user may open the menu with ⌥ down).
     func menuWillOpen(_ menu: NSMenu) {
+        // Re-read the ⌥-caption switch on every open (#475), the way the `devToolsEnabled` gate is
+        // re-read below: the menu is built once at launch and never rebuilt, so a Settings change would
+        // otherwise not land until a restart. Set before the visibility seed, which draws the caption.
+        popupVC.optionHintEnabled = PersistedConfig.showOptionHint
         // Seed visibility from the modifiers held at open time. Force the first sync by desyncing
         // `lastOptionHeld`.
         lastOptionHeld = !NSEvent.modifierFlags.contains(.option)

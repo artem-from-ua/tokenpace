@@ -131,6 +131,16 @@ final class SettingsModel {
         popToRoot()
     }
 
+    /// Move to another **section** from inside a pane — the cross-pane link's entry point (#476).
+    ///
+    /// A thin wrapper over `selection`, whose `didSet` already pops any open child page and records the
+    /// visit, so ‹ returns to where the reader came from. It exists so a pane states an intent rather
+    /// than assigning to a property, matching ``drill(into:)`` one level down; the sidebar keeps writing
+    /// `selection` directly, because there the assignment *is* the intent.
+    func select(_ section: SettingsSection) {
+        selection = section
+    }
+
     /// Open a child page of the current section, recording it as its own history stop (#341).
     func drill(into page: SettingsChildPage) {
         guard childPage != page else { return }
@@ -342,6 +352,12 @@ final class SettingsModel {
 
     /// Whether the usage journal records each poll to an append-only JSONL file. Default-off (opt-in).
     var journalEnabled = false
+
+    // MARK: Dropdown — the ⌥ caption (#475)
+
+    /// Whether the dropdown draws "hold ⌥ Option for more" where the action items sit while ⌥ is up.
+    /// Default-**on**: it is the only thing announcing that the menu has actions at all.
+    var showOptionHint = true
 
     // MARK: Awaiting-input indicator (#233, ADR-0066)
 
@@ -656,6 +672,7 @@ final class SettingsModel {
         awaitingInputEnabled = PersistedConfig.awaitingInputEnabled
 
         journalEnabled = PersistedConfig.journalEnabled
+        showOptionHint = PersistedConfig.showOptionHint
     }
 
     // MARK: Setters (persist first, then fire the callback — the ordering invariant)
@@ -679,6 +696,15 @@ final class SettingsModel {
         journalEnabled = on
         PersistedConfig.journalEnabled = on
         AppLogger.lifecycle.notice("journal: enabled set \(on, privacy: .public)")
+    }
+
+    /// Toggle the dropdown's ⌥ caption (#475). No callback: `menuWillOpen` re-reads
+    /// `PersistedConfig.showOptionHint` on every open, so the change lands on the next open without a
+    /// restart or a wiring hop — the same seam `devToolsEnabled` uses.
+    func setShowOptionHint(_ on: Bool) {
+        showOptionHint = on
+        PersistedConfig.showOptionHint = on
+        AppLogger.lifecycle.notice("dropdown: option hint set \(on, privacy: .public)")
     }
 
     func setColorAdvice(_ mode: ColorAdvice) {

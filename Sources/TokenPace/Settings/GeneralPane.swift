@@ -3,7 +3,8 @@ import TokenPaceKit
 
 // MARK: - GeneralPane (#168, ADR-0042)
 
-/// Settings → General: how the app lives on this Mac — launch-at-login and the usage journal.
+/// Settings → General: how the app lives on this Mac — launch-at-login and the usage journal — plus the
+/// one dropdown switch that is not an appearance choice (the ⌥ caption, #475; see its section below).
 ///
 /// The screen-lock polling pause used to sit here; it moved to `Providers`, where the polling it
 /// suspends is configured.
@@ -70,6 +71,31 @@ struct GeneralPane: View {
                         }
                     }
                     .transition(SettingsRowReveal.transition)
+                }
+            }
+
+            // MARK: Dropdown — the ⌥ caption (#475)
+            //
+            // On *this* pane, not on Appearance › Dropdown where it would seem to belong, because it must
+            // not travel in an appearance preset or in an exported config: it records that this person
+            // already knows the shortcut, which is not a look worth carrying to another Mac. Membership
+            // in `AppearancePresetValues` is what decides that, and this setting stays out of it.
+            //
+            // Its own `Section` rather than a row among the app-lifetime switches above: the pane's other
+            // controls answer "how does TokenPace live on this Mac", and this one answers "what does the
+            // dropdown say" — a different question deserves its own card. Appearance › Dropdown points
+            // here so it is findable from where it is missed (#476).
+            Section("Dropdown") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Show «hold ⌥ Option» hint in dropdown", isOn: Binding(
+                        get: { model.showOptionHint },
+                        set: { model.setShowOptionHint($0) }))
+                    // States the consequence rather than repeating the label. Turning this off leaves the
+                    // menu with no on-screen sign that ⌥ does anything — which is exactly what someone who
+                    // knows the shortcut wants, and a dead end for anyone else, so it is worth saying
+                    // plainly before they choose.
+                    SettingsHint(text: "The dropdown's actions — *Settings*, *Quit* — are always available "
+                        + "by holding ⌥ Option. Without this hint, nothing on screen says so.")
                 }
             }
         }

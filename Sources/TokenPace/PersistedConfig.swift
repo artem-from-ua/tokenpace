@@ -194,6 +194,9 @@ enum PersistedConfig {
         /// Whether the usage journal records each poll to an append-only JSONL file (#242). Default-off
         /// (opt-in) — writing to disk without asking is a habit we don't start. See the property.
         static let journalEnabled = "journalEnabled"
+        /// Whether the dropdown shows the "hold ⌥ Option for more" caption (#475). Default-**on** — it
+        /// is the only thing announcing the hidden action items. See the property.
+        static let showOptionHint = "showOptionHint"
         /// Whether raw status-page payloads are logged to a dev-only JSONL (#279, ADR-0071 §10).
         /// Default-off, dev-tools only — see the property.
         static let statusPayloadLogEnabled = "statusPayloadLogEnabled"
@@ -1001,6 +1004,24 @@ enum PersistedConfig {
     static var journalEnabled: Bool {
         get { defaults.object(forKey: Key.journalEnabled) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.journalEnabled) }
+    }
+
+    /// Whether the dropdown draws the "hold ⌥ Option for more" caption where the action items sit while
+    /// ⌥ is up (#475). **Default-on** (opt-out): `object(forKey:) as? Bool ?? true` reads an absent key
+    /// as `true` and keeps an explicit `false` the user chose, the same shape as
+    /// ``pausePollingWhenScreenLocked``.
+    ///
+    /// On by default because it is the **only** thing announcing that the menu has actions at all. With
+    /// it off, `Settings…` and `Quit` are reachable solely by holding ⌥ — which is a fine trade for
+    /// someone who already knows the shortcut and a dead end for someone who does not. Hence an opt-out
+    /// that person takes deliberately, never a default.
+    ///
+    /// Deliberately **not** an ``AppearancePresetValues`` member, so it travels in no preset and in no
+    /// exported config: it records what its owner has learned, not what the dropdown should look like.
+    /// Read live on each menu open, so a change needs no restart.
+    static var showOptionHint: Bool {
+        get { defaults.object(forKey: Key.showOptionHint) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.showOptionHint) }
     }
 
     /// The user's subscription to the current status-page episode (#279), or the empty state when

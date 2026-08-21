@@ -369,6 +369,11 @@ final class SettingsPreviewWindowController {
     private func makeWindow() -> NSWindow {
         previewVC.loadView()   // every knob's didSet is gated on isViewLoaded
         previewVC.colorAnimator = colorAnimator
+        // No ⌥ caption here (#475), whatever the Settings switch says. It stands in for the action items
+        // of the real dropdown, and this window has none — a line offering "more" that ⌥ cannot deliver
+        // is worse than no line. ⌥ still works in the preview: it reveals the same on-demand *content*
+        // the popup shows, which is what this window mirrors.
+        previewVC.optionHintEnabled = false
         // `onToggleSubscription` is deliberately left nil: the preview is a mirror, not a second set of
         // controls. The subscribe row still draws (it is part of the layout); clicking it does nothing.
         syncPresentation()

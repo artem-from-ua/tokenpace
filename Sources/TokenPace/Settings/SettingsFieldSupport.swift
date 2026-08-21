@@ -140,6 +140,56 @@ struct SettingsHint: View {
     }
 }
 
+// MARK: - SettingsCrossPaneHint (#476)
+
+/// A hint line that names **another pane** and lets the reader jump to it.
+///
+/// The case it exists for: a setting whose natural home is one pane but which has to live on another —
+/// the ⌥-caption switch belongs to the dropdown yet sits on General, because it must stay out of the
+/// appearance presets (#475). Someone hunting for it looks on Appearance › Dropdown, does not find it,
+/// and concludes it does not exist. This line is what closes that gap, so it must both *say* where the
+/// setting went and *take them there* — a mention alone reads as an inconsistency rather than a
+/// decision.
+///
+/// **The first cross-*section* link in Settings.** Everything that came before moves within one section
+/// (`SettingsNavigationRow` → `SettingsModel.drill(into:)`) or leaves the app entirely (`AboutPane`'s
+/// `.link` buttons open URLs). Neither could do this: `drill(into:)` cannot change `selection`, and a
+/// markdown `[General](…)` inside a `SettingsHint` would render a *web* link. So the jump is a plain
+/// `Button` reporting the destination, exactly as `SettingsNavigationRow` reports a tap — the model
+/// decides, the view never navigates.
+///
+/// Writing `selection` (rather than seating the route) is deliberate: it records the visit in
+/// `NavigationHistory`, so the toolbar's ‹ steps back to the pane the reader came from. Being sent
+/// somewhere and not being able to get back is the failure this line would otherwise introduce.
+struct SettingsCrossPaneHint: View {
+    /// The text before the link, e.g. "Set in".
+    let prefix: String
+    /// Where the link goes. Its ``SettingsSection/title`` is the link's label, so the wording cannot
+    /// drift from the sidebar's.
+    let destination: SettingsSection
+    /// The text after the link, e.g. "— it is not an appearance preset." Empty draws nothing.
+    var suffix: String = ""
+    /// Plain reference, not `@Bindable`: this view only *calls* the model, never binds to it, and the
+    /// wrapper would turn a method call into a key-path lookup.
+    let model: SettingsModel
+
+    var body: some View {
+        // One `HStack` of three pieces rather than one attributed string: the middle piece has to be a
+        // real control (focusable, keyboard-activatable), and inline markdown cannot produce one.
+        // `spacing: 0` with explicit spaces in the text keeps the gaps typographic rather than layout —
+        // a `Text` and a `Button` given a stack spacing sit visibly further apart than two words do.
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            Text(.init(prefix + " "))
+            Button(destination.title) { model.select(destination) }
+                .buttonStyle(.link)
+            if !suffix.isEmpty { Text(.init(suffix)) }
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 /// A section header — the plain title, plus an optional hint line directly beneath it. Because it
 /// lives in the `header:` slot it renders **outside** the grouped card, so a caveat that covers the
 /// whole section reads as part of the heading rather than as one more row among the controls.
