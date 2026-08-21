@@ -14,7 +14,7 @@ import Foundation
 /// transport description) — the bearer token is never part of an error.
 public enum UsageError: Error, Equatable {
     /// The `User-Agent` would be empty — the request is **not** sent (issue #9
-    /// acceptance: "Без `User-Agent` — НЕ ходити"). Without it the API drops the client
+    /// acceptance: "no `User-Agent` — do not send"). Without it the API drops the client
     /// into an aggressively rate-limited bucket and returns constant 429s.
     case missingUserAgent
     /// Transport-level failure (no connectivity, DNS, TLS, cancellation). `message` is a
@@ -44,7 +44,7 @@ public enum UsageError: Error, Equatable {
 
 /// Pure, value-type hold for the 429 rate-limit response.
 ///
-/// SPEC "Частота оновлення" (revised, ADR-0032): poll every **180 s** by default; on a 429 wait
+/// SPEC "Refresh cadence" (revised, ADR-0032): poll every **180 s** by default; on a 429 wait
 /// exactly the server's `Retry-After` (or 180 s when it is absent), then **hold** at that one
 /// interval — a repeat 429 just re-sets the same hold, it does **not** escalate. The first 200
 /// clears the hold and returns to the 180 s base.

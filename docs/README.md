@@ -1,71 +1,74 @@
-# Документація TokenPace
+# TokenPace documentation
 
-Карта всієї документації проєкту. Почни звідси, якщо шукаєш, де що лежить.
+The map of all the project's documentation. Start here if you're looking for where something lives.
 
 The documentation language is English, as are code, identifiers, and commit messages (see
 [ADR-0116](adr/0116-english-as-documentation-language.md)). Files not yet migrated are still in
 Ukrainian.
 
-## Джерела істини
+## Sources of truth
 
-Чотири головні документи, з яких варто починати:
+The four main documents worth starting from:
 
-- [SPEC.md](../SPEC.md) — продуктовий спек: проблема, архітектура, UI, фази, монетизація.
-- [architecture.md](architecture.md) — стисла архітектурна картина та потік даних.
-- [../CLAUDE.md](../CLAUDE.md) — інструкції для AI-агента: критичні правила й вказівники.
-- [adr/](adr/) — записи архітектурних рішень (незмінні; див. [adr/README.md](adr/README.md)).
+- [SPEC.md](../SPEC.md) — the product spec: problem, architecture, UI, phases, monetization.
+- [architecture.md](architecture.md) — a condensed architectural picture and the data flow.
+- [../CLAUDE.md](../CLAUDE.md) — instructions for the AI agent: critical rules and pointers.
+- [adr/](adr/) — architecture decision records (immutable; see [adr/README.md](adr/README.md)).
 
-## Як зробити X (процес)
+## How to do X (process)
 
-- [building.md](guides/building.md) — збірка з джерел (для контриб'юторів).
-- [releasing.md](guides/releasing.md) — зібрати, нотаризувати й опублікувати реліз; стиль release notes.
-- [ui-verification.md](guides/ui-verification.md) — жива перевірка menu-bar / Settings змін перед PR:
-  перелік стубів (`TOKENPACE_STUB=…`), сценарії без стубу, фічі, що потребують підпису.
-- [guides/agent-workflow.md](guides/agent-workflow.md) — операційні правила для AI-агента:
-  worktrees, гілки/PR, запуск для перевірки UI, зупинка застосунку та логи, GitHub Project.
+- [building.md](guides/building.md) — building from source (for contributors).
+- [releasing.md](guides/releasing.md) — build, notarize, and publish a release; release-notes style.
+- [ui-verification.md](guides/ui-verification.md) — live verification of menu-bar / Settings changes
+  before a PR: the list of stubs (`TOKENPACE_STUB=…`), scenarios without a stub, features that need
+  signing.
+- [guides/agent-workflow.md](guides/agent-workflow.md) — operational rules for the AI agent:
+  worktrees, branches/PRs, launching the app for UI checks, stopping the app and reading logs, the
+  GitHub Project.
 
-## Довідник (що це)
+## Reference (what it is)
 
-- [conventions.md](reference/conventions.md) — конвенції розробки: мова, стиль, логування, версіонування.
-- [glossary.md](reference/glossary.md) — термінологічний контракт: англійське слово на кожне поняття,
-  українське, яке воно замінило, і канонічні заголовки розділів ADR. Читати перед перекладом
-  будь-якого документа.
-- [users-and-goals.md](reference/users-and-goals.md) — для кого застосунок, який біль розв'язує,
-  перевірка «чи сигнал корисний», дефіцитні ресурси, що користувач контролює сам.
-- [personas.md](reference/personas.md) — чотири персони цільової аудиторії («Віктор», «Оскар»,
-  «Артур», «Ігор»), сегментаційна рамка, каталог enrichment-ідей із вердиктами, пресети
-  першого налаштування.
-- [menu-bar-signals.md](reference/menu-bar-signals.md) — як читати menu bar **із боку користувача**:
-  чи є число, що означає гліф поруч, як читаються смужки, і чого віджет не каже.
-- [ui-state-truth.md](reference/ui-state-truth.md) — джерело істини для рендерів поза застосунком:
-  метрики, анатомія бару, як обчислюється колір, таблиця неможливих комбінацій.
-- [bar-status-conditions.md](reference/bar-status-conditions.md) — вичерпний довідник: за яких саме
-  умов кожен тип бару набуває кожного статусу/кольору, з посиланням на рядок коду.
-- [usage-api-quirks.md](reference/usage-api-quirks.md) — виміряні особливості Claude usage API:
-  `utilization` токенних вікон приходить **округленим до цілого відсотка** (крок — 3 хв на 5h і
-  1 год 40 хв на 7d), тож дрібні стани на тижневому вікні недосяжні за побудовою.
-- [log-messages.md](reference/log-messages.md) — повний перелік кожного лог-повідомлення, згрупований за файлом.
-- [performance.md](reference/performance.md) — гейти пʼяти періодичних завдань в одній таблиці: що
-  зупиняє screen lock, sleep, батарея, metered-мережа; які гейти відсутні.
-- [architecture.md](architecture.md) — архітектура (індекс), розбита на під-сторінки:
-  - [reference/architecture/overview.md](reference/architecture/overview.md) — принципи, розгортання, каденції, SPM.
-  - [reference/architecture/data-flow.md](reference/architecture/data-flow.md) — полінг, токен, pacing, рендер, діаграми потоку.
-  - [reference/architecture/update-system.md](reference/architecture/update-system.md) — перевірка й авто-встановлення оновлень.
-  - [reference/architecture/services-and-config.md](reference/architecture/services-and-config.md) — статус сервісів, конфіг, Settings, архіватор.
+- [conventions.md](reference/conventions.md) — development conventions: language, style, logging, versioning.
+- [glossary.md](reference/glossary.md) — the terminology contract: the English word for every concept,
+  the Ukrainian one it replaced, and the canonical ADR section headings. Read it before translating
+  any document.
+- [users-and-goals.md](reference/users-and-goals.md) — who the app is for, which pain it solves, the
+  "is this signal useful" test, the scarce resources, what the user already controls.
+- [personas.md](reference/personas.md) — the four personas of the target audience ("Viktor", "Oskar",
+  "Artur", "Ihor"), the segmentation frame, the catalog of enrichment ideas with verdicts, the
+  first-run presets.
+- [menu-bar-signals.md](reference/menu-bar-signals.md) — how to read the menu bar **from the user's
+  side**: whether there is a number, what the glyph next to it means, how the bars read, and what the
+  widget does not say.
+- [ui-state-truth.md](reference/ui-state-truth.md) — the source of truth for renders outside the app:
+  metrics, the anatomy of the bar, how the color is computed, the table of impossible combinations.
+- [bar-status-conditions.md](reference/bar-status-conditions.md) — the exhaustive reference: under
+  exactly which conditions each type of bar takes on each status/color, with a link to the line of code.
+- [usage-api-quirks.md](reference/usage-api-quirks.md) — measured quirks of the Claude usage API: the
+  `utilization` of the token windows arrives **rounded to a whole percent** (a step of 3 min on 5h and
+  1 h 40 min on 7d), so fine-grained states on the weekly window are unreachable by construction.
+- [log-messages.md](reference/log-messages.md) — the full list of every log message, grouped by file.
+- [performance.md](reference/performance.md) — the gates of the five periodic tasks in one table: what
+  screen lock, sleep, battery, and a metered network stop; which gates are missing.
+- [architecture.md](architecture.md) — architecture (index), split into sub-pages:
+  - [reference/architecture/overview.md](reference/architecture/overview.md) — principles, deployment, cadences, SPM.
+  - [reference/architecture/data-flow.md](reference/architecture/data-flow.md) — polling, the token, pacing, rendering, flow diagrams.
+  - [reference/architecture/update-system.md](reference/architecture/update-system.md) — checking for and auto-installing updates.
+  - [reference/architecture/services-and-config.md](reference/architecture/services-and-config.md) — service status, config, Settings, the archiver.
 
-## Дизайн UI
+## UI design
 
-- [design/menu-bar-pixel-alignment.md](design/menu-bar-pixel-alignment.md) — піксельне вирівнювання
-  в menu bar: чому `NSStatusBarButton` стоїть на пів-пойнті, як через це розмиваються краї, і чому
-  скріншот цю проблему не показує.
+- [design/menu-bar-pixel-alignment.md](design/menu-bar-pixel-alignment.md) — pixel alignment in the
+  menu bar: why `NSStatusBarButton` sits on a half-point, how that blurs the edges, and why a
+  screenshot does not show the problem.
 
-## Рішення (чому саме так)
+## Decisions (why it is the way it is)
 
-- [adr/](adr/) — 36 ADR (0001–0036). Індекс і конвенція повного/часткового витіснення —
-  в [adr/README.md](adr/README.md).
+- [adr/](adr/) — the index and the full/partial supersession convention live in
+  [adr/README.md](adr/README.md).
 
 ---
 
-> **Групування вище — за наміром читача** (як зробити / що це / чому), а не за темою. Тематичні
-> підпапки — `guides/` та `reference/` (з `reference/architecture/`) — уже на місці; цей індекс
-> оновлюється разом зі змінами в структурі доків.
+> **The grouping above is by the reader's intent** (how to do / what it is / why), not by topic. The
+> thematic subfolders — `guides/` and `reference/` (with `reference/architecture/`) — are already in
+> place; this index is updated together with changes to the docs structure.

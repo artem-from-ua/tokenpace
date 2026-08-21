@@ -100,7 +100,7 @@ public enum FailureReason: Sendable, Equatable {
 /// poll results; #12 only defines it, the thresholds, and the rendering. `AppDelegate` builds a
 /// mock to exercise the states under `swift run`.
 ///
-/// ## Menu-bar phases (SPEC "Стан помилок"; two phases since ADR-0091)
+/// ## Menu-bar phases (SPEC "Error states"; two phases since ADR-0091)
 /// The widget reacts to the **duration** of an unbroken failure run, `now - failingSince`:
 /// | Phase | Condition | Menu bar |
 /// |---|---|---|
@@ -198,7 +198,7 @@ public struct UsageHealth: Sendable, Equatable {
     // MARK: derived state
 
     /// Whether a failure is currently in progress — the popup warns the moment this is true,
-    /// regardless of the menu-bar thresholds (SPEC: "за будь-якої непрацюючої авторизації … одразу").
+    /// regardless of the menu-bar thresholds (SPEC: "on any non-working authorization … immediately").
     ///
     /// Never true while ``notPolling``: not asking is not failing.
     public var isFailing: Bool { failingSince != nil }

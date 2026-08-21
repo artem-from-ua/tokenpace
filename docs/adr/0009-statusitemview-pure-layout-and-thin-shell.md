@@ -65,7 +65,7 @@ bar (дві pacing-смужки + час до ресету) з компактн�
    кастомного `NSView` як subview кнопки `NSStatusItem` ненадійне (системна кнопка володіє своїм
    лейаутом і малює поверх доданих subview). Надійний шлях для повністю кастомної графіки — віддати
    кнопці готове зображення, відрендерене жадібно (`lockFocusFlipped`). `image.isTemplate = false`
-   зупиняє перефарбовування pacing-кольорів під Dark/Light tinting (SPEC «Технічні зауваги»).
+   зупиняє перефарбовування pacing-кольорів під Dark/Light tinting (SPEC «Technical notes»).
 
 6. **Кольори — точна `statusline` 256-color палітра (фіксований sRGB), не системні семантичні.**
    Зони мапляться 1:1 на xterm-256 RGB кодів зі statusline (ADR-0005): used `dark_gray` 236 =

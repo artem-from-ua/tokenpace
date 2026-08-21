@@ -479,8 +479,8 @@ public struct PopupLayout: Sendable, Equatable {
     /// Build the popup from the last known snapshot **and** the polling health.
     ///
     /// The entry point the live loop (#13) calls. Unlike the menu bar's staged thresholds, the popup
-    /// warns the moment a failure is in progress (SPEC: "за будь-якої непрацюючої авторизації …
-    /// одразу"):
+    /// warns the moment a failure is in progress (SPEC: "on any non-working authorization …
+    /// immediately"):
     /// - ``warning`` = `health.reason` whenever `health.isFailing`, else `nil`.
     /// - ``lastUpdateAge`` is measured from `health.lastSuccess` so the service line shows how stale
     ///   the data is (clamped `≥ 0`; `0` on a cold start where there is no last success).
