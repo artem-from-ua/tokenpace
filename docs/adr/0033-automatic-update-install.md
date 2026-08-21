@@ -4,162 +4,171 @@ date: 2026-07-25
 superseded_by: [0036]
 ---
 
-# ADR-0033: Авто-встановлення оновлень — власний мінімальний інсталятор, не Sparkle
+# ADR-0033: Automatic update install — a custom minimal installer, not Sparkle
 
-> **Частково superseded [ADR-0036](0036-update-signals-single-dropdown-item.md).** Механізм
-> встановлення (інсталятор, verify, атомарна заміна, defer-гейти) лишається чинним, але **дефолт
-> опції змінено з OFF на ON** (тихий фоновий апдейт — найменш нав'язливий канал після видалення
-> банера), а сигнальний UX (банер / пункт меню / «Download») зведено в **один** пункт дропдауна з
-> машиною станів (`pendingWhatsNewVersion`/`lastFailedInstallVersion`). Читати про сигнали й дефолт
-> слід у 0036; згадки «default-off» і «банер» нижче — історичні.
+> **Partially superseded by [ADR-0036](0036-update-signals-single-dropdown-item.md).** The install
+> mechanism (installer, verify, atomic replace, defer gates) still stands, but **the option's default
+> changed from OFF to ON** (a quiet background update is the least intrusive channel once the banner
+> is removed), and the signal UX (banner / menu item / "Download") is consolidated into a **single**
+> dropdown item with a state machine (`pendingWhatsNewVersion`/`lastFailedInstallVersion`). Read about
+> the signals and the default in 0036; mentions of "default-off" and "banner" below are historical.
 >
-> Доповнює [ADR-0025](0025-check-for-updates.md) (перевірка оновлень), **не заміщає** його fetch-шлях.
+> Complements [ADR-0025](0025-check-for-updates.md) (checking for updates), **not a replacement** for
+> its fetch path.
 
-## Контекст
+## Context
 
-ADR-0025 додав **перевірку** оновлень, але не встановлення: коли знайдено новіший тег, TokenPace
-показує банер, пункт меню з синьою крапкою і рядок «Update available: vX.Y.Z — Download», а по кліку
-відкриває сторінку релізу. Заміну `.app` користувач робить **вручну** — качає нотаризований `.zip`,
-розпаковує, перетягує в `/Applications`.
+ADR-0025 added a **check** for updates, but not installation: when a newer tag is found, TokenPace
+shows a banner, a menu item with a blue dot, and a row "Update available: vX.Y.Z — Download" in
+Settings, and a click opens the release page. Replacing the `.app` is done **manually** by the user —
+downloading the notarized `.zip`, unpacking it, dragging it into `/Applications`.
 
-Остап (@kintecus) запропонував додати опційне **авто-встановлення** — чекбокс «Install updates
-automatically», за яким TokenPace сам доводить оновлення до кінця. Епік —
-[#125](https://github.com/artem-from-ua/tokenpace/issues/125), фази —
+Ostap (@kintecus) suggested adding an optional **auto-install** — an "Install updates automatically"
+checkbox, behind which TokenPace carries the update through to completion itself. The epic is
+[#125](https://github.com/artem-from-ua/tokenpace/issues/125), the phases are
 [#122](https://github.com/artem-from-ua/tokenpace/issues/122),
 [#123](https://github.com/artem-from-ua/tokenpace/issues/123),
 [#124](https://github.com/artem-from-ua/tokenpace/issues/124).
 
-Ключове рішення — **як** встановлювати. Заміна виконуваного bundle — привілейована операція зі
-значною поверхнею атаки, тож постають питання: писати власний інсталятор чи взяти Sparkle
-(де-факто стандарт non-App-Store auto-update); як гарантувати, що завантажений bundle справді наш;
-як зробити заміну атомарною; як не зламати наявний pure-core / thin-shell розкол і політику нульових
-залежностей.
+The key decision is **how** to install. Replacing the running executable bundle is a privileged
+operation with a significant attack surface, so this raises questions: write a custom installer or
+adopt Sparkle (the de-facto standard for non-App-Store auto-update); how to guarantee the downloaded
+bundle is really ours; how to make the replacement atomic; how to avoid breaking the existing
+pure-core / thin-shell split and the zero-dependency policy.
 
-## Рішення
+## Decision
 
-### 1. Власний мінімальний інсталятор, а не Sparkle
+### 1. A custom minimal installer, not Sparkle
 
-Обрано **власний** інсталятор. Порівняння:
+We chose a **custom** installer. Comparison:
 
-| Критерій | Власний | Sparkle |
+| Criterion | Custom | Sparkle |
 |---|---|---|
-| Runtime-залежність | немає (лише системні `codesign`/`spctl`/`ditto` + `URLSession`) | перша third-party залежність у `Package.swift` |
-| Appcast | не потрібен — джерело вже є (GitHub Releases API через `GitHubReleaseClient`, включно з приватним-репо шляхом `gh`) | потрібен `appcast.xml` + його хостинг |
-| Підпис оновлення | наявний ланцюг Apple (нотаризація + Developer ID), яким уже підписаний release-артефакт | окремі EdDSA-ключі паралельно до нотаризації |
-| Відповідність ADR | тримає pure-core/thin-shell (ADR-0009/0023), закритий агент (ADR-0003) | тягне зовнішній UI/логіку, обходить decision-seam підхід |
-| UI | наш нативний банер/Settings-рядок | власний UI Sparkle (конфлікт із наявним) |
+| Runtime dependency | none (only the system `codesign`/`spctl`/`ditto` + `URLSession`) | the first third-party dependency in `Package.swift` |
+| Appcast | not needed — the source already exists (GitHub Releases API through `GitHubReleaseClient`, including the private-repo `gh` path) | needs an `appcast.xml` + its hosting |
+| Update signing | uses the existing Apple chain (notarization + Developer ID) that already signs the release artifact | separate EdDSA keys, parallel to notarization |
+| ADR compliance | keeps pure-core/thin-shell (ADR-0009/0023), the closed-agent boundary (ADR-0003) | pulls in external UI/logic, bypasses the decision-seam approach |
+| UI | our own native banner/Settings row | Sparkle's own UI (conflicts with the existing one) |
 
-Sparkle вирішив би atomic replace / relaunch / delta «з коробки», але ціна — перша зовнішня
-залежність, окремий appcast-hosting, друга система ключів і чужий UI — надмірна для одного menu-bar
-застосунку, що вже має половину інфраструктури (`UpdateFetcher`, `GitHubReleaseClient`,
-`SemanticVersion`, cadence, Settings-секцію). Власний інсталятор переюзовує **ланцюг довіри Apple**
-замість власної PKI і не додає залежностей — це вирішальна перевага.
+Sparkle would deliver atomic replace / relaunch / delta updates "out of the box," but the price — the
+first external dependency, separate appcast hosting, a second key system, and someone else's UI — is
+excessive for a single menu-bar app that already has half the infrastructure in place
+(`UpdateFetcher`, `GitHubReleaseClient`, `SemanticVersion`, cadence, a Settings section). A custom
+installer reuses **Apple's chain of trust** instead of a custom PKI and adds no dependencies — that's
+the deciding advantage.
 
-### 2. Розкол pure-core / thin-shell
+### 2. The pure-core / thin-shell split
 
-Уся розгалуженість рішень — у `TokenPaceKit` (чисте, тестоване), увесь I/O — у тонкому shell:
+All branching logic lives in `TokenPaceKit` (pure, tested); all I/O lives in the thin shell:
 
-- **Kit (чисте):** `GitHubRelease.assets[]` (розширений декодер, `browser_download_url`);
-  `UpdateAssetSelector.selectZIP(from:)` — вибір version-named `.zip` asset із HTTPS-guard;
-  `UpdateInstallPlan.decide(release:currentVersion:isAppBundle:autoInstallEnabled:)` — зведення всіх
-  умов «ставити зараз?» в один вердикт (`.install` / `.skipNotNewer` / `.skipNoAsset` /
-  `.skipNotAppBundle`).
-- **Shell (I/O):** `UpdateInstaller` за протокольним seam-ом + stub — `download` (двошляховий:
-  `gh release download` за `TOKENPACE_GH_AUTH` для приватного репо, інакше анонімний `URLSession`),
-  `verify` (`codesign`/`spctl`/Team ID сабпроцеси, як `GHReleaseFetcher`), `unzip` (`ditto -x -k`),
-  `replaceInstalled` (`FileManager.replaceItemAt`), `relaunch` (`NSWorkspace.openApplication` +
-  `NSApp.terminate`).
+- **Kit (pure):** `GitHubRelease.assets[]` (an extended decoder, `browser_download_url`);
+  `UpdateAssetSelector.selectZIP(from:)` — selecting the version-named `.zip` asset with an
+  HTTPS guard; `UpdateInstallPlan.decide(release:currentVersion:isAppBundle:autoInstallEnabled:)` —
+  reducing all the "install now?" conditions to a single verdict (`.install` / `.skipNotNewer` /
+  `.skipNoAsset` / `.skipNotAppBundle`).
+- **Shell (I/O):** `UpdateInstaller` behind a protocol seam + a stub — `download` (two paths:
+  `gh release download` under `TOKENPACE_GH_AUTH` for the private repo, otherwise an anonymous
+  `URLSession`), `verify` (`codesign`/`spctl`/Team ID subprocesses, like `GHReleaseFetcher`), `unzip`
+  (`ditto -x -k`), `replaceInstalled` (`FileManager.replaceItemAt`), `relaunch`
+  (`NSWorkspace.openApplication` + `NSApp.terminate`).
 
-Це той самий поділ, що `ArchiveSyncPlan` (чисте) / `LogArchiver` (I/O) в ADR-0031.
+This is the same split as `ArchiveSyncPlan` (pure) / `LogArchiver` (I/O) in ADR-0031.
 
-### 3. Безпекові інваріанти (обов'язкові)
+### 3. Security invariants (mandatory)
 
-1. **HTTPS-only** — не-`https` `browser_download_url` відкидається ще на pure-стадії вибору asset.
-2. **Верифікація перед заміною** — `codesign --verify --deep --strict` + звірка **Team ID
-   `S5A4U9798Y`** (головний захист від підміни: навіть валідно підписаний, але чужий bundle
-   відхиляється) + Gatekeeper `spctl --assess --type execute` (нотаризація/stapling).
-3. **Downgrade/replay-guard** — ставити лише коли `UpdateComparison.isNewer` == true; рівна/старіша
-   версія → no-op (уже контракт `checkForUpdate`, авто-install гілка його не обходить).
-4. **Атомарність** — новий bundle повністю розпакований і верифікований у tmp *до* єдиної атомарної
-   `replaceItemAt` з backup-іменем. Перерваний download/unzip не торкається `/Applications`;
-   перерваний swap лишає або цілий старий, або цілий новий `.app`, ніколи побитий.
-5. **Права на `/Applications`** — якщо запис неможливий (bundle/тека належать root) → error +
-   fallback на ручний Download. Привілейований хелпер (SMJobBless) — **свідомо поза обсягом MVP**,
-   окремий майбутній тікет.
-6. **Relaunch безпечно** — лише після успішної заміни; якщо запуск нового bundle не вдався, поточний
-   процес **не** термінується (новий уже на диску, наступний launch його підхопить).
-7. **Приватний репо → download через `gh`** — репо наразі приватний, тож анонімний
-   `browser_download_url` віддає 404. Коли встановлено `TOKENPACE_GH_AUTH`, asset качається
-   `gh release download` (локальні креденшали мейнтейнера), як і читання release-JSON у
-   `GHReleaseFetcher`. Публічний репо → анонімний `URLSession`.
+1. **HTTPS-only** — a non-`https` `browser_download_url` is rejected already at the pure asset
+   selection stage.
+2. **Verification before replacement** — `codesign --verify --deep --strict` + checking the **Team ID
+   `S5A4U9798Y`** (the main defense against tampering: even a validly signed but foreign bundle is
+   rejected) + Gatekeeper `spctl --assess --type execute` (notarization/stapling).
+3. **Downgrade/replay guard** — install only when `UpdateComparison.isNewer` == true; an equal/older
+   version → a no-op (already the `checkForUpdate` contract, and the auto-install branch doesn't
+   bypass it).
+4. **Atomicity** — the new bundle is fully unpacked and verified in a tmp location *before* a single
+   atomic `replaceItemAt` with a backup name. An interrupted download/unzip never touches
+   `/Applications`; an interrupted swap leaves either the whole old or the whole new `.app`, never a
+   broken one.
+5. **Permissions on `/Applications`** — if writing isn't possible (bundle/folder owned by root) →
+   error + fallback to a manual Download. A privileged helper (SMJobBless) is **deliberately out of
+   scope for MVP**, a separate future ticket.
+6. **Relaunch safely** — only after a successful replace; if launching the new bundle fails, the
+   current process is **not** terminated (the new one is already on disk, the next launch will pick
+   it up).
+7. **Private repo → download via `gh`** — the repo is currently private, so an anonymous
+   `browser_download_url` returns 404. When `TOKENPACE_GH_AUTH` is set, the asset is downloaded via
+   `gh release download` (the maintainer's local credentials), the same as reading the release JSON
+   in `GHReleaseFetcher`. A public repo → an anonymous `URLSession`.
 
-### 3a. Environment defer-гейти (лише для встановлення)
+### 3a. Environment defer gates (install only)
 
-Три умови середовища відкладають **встановлення** (не перевірку — check їде за 12-год каденцією
-незалежно): **вільне місце** (після завантаження має лишитись ≥ 5 GB, `minFreeBytesAfterDownload`),
-**AC power** (не качати/замінювати на батареї — ризик розряду посеред заміни), **unmetered network**
-(не витрачати ~МБ на capped-з'єднанні). Це `defer…`-вердикти (не `skip`): оновлення валідне, просто
-чекає кращих умов, і **наступний heartbeat переоцінює** — стану персистити не треба. Факти
-(`DiskSpace`, `PowerSource`, `NetworkMonitor.isMetered`) читаються в shell і інжектяться в чистий
-`UpdateInstallPlan.decide`. **Forced-запуск** (dry-run) оминає AC/metered — мейнтейнер попросив явно —
-але **не** free-space (жоден намір не робить безпечним заповнення диска).
+Three environment conditions defer **installation** (not the check — that runs on its own 12-hour
+cadence regardless): **free space** (after download there must be ≥ 5 GB left,
+`minFreeBytesAfterDownload`), **AC power** (don't download/replace on battery — risk of running out
+of power mid-replace), **unmetered network** (don't spend ~MB on a capped connection). These are
+`defer…` verdicts (not `skip`): the update is valid, it's just waiting for better conditions, and the
+**next heartbeat re-evaluates it** — there's no state to persist. The facts (`DiskSpace`,
+`PowerSource`, `NetworkMonitor.isMetered`) are read in the shell and injected into the pure
+`UpdateInstallPlan.decide`. A **forced run** (dry-run) bypasses AC/metered — the maintainer explicitly
+requested this — but **not** free-space (no intent makes filling up the disk safe).
 
-### 4. Гейт на реальний `.app` + opt-in default-OFF
+### 4. Gate on a real `.app` + opt-in default-OFF
 
-Усі шляхи інсталятора гейтяться `LaunchAtLoginController.isAppBundle` — той самий дискримінатор
-реального `.app`, що вже використовують `UpdateNotifier` і launch-at-login. `swift run` → повний
-no-op. Опція `PersistedConfig.installUpdatesAutomatically` — **opt-in, default-OFF** (ідіома
-`object(forKey:) as? Bool ?? false`, як `archiveEnabled`); Settings-чекбокс «Install updates
-automatically» **вкладений** під «Check for updates automatically» (немає сенсу авто-ставити без
-перевірки) й enabled лише коли батько увімкнений **і** ми реальний `.app` у `/Applications`.
+Every installer path is gated on `LaunchAtLoginController.isAppBundle` — the same real-`.app`
+discriminator already used by `UpdateNotifier` and launch-at-login. `swift run` → a full no-op. The
+`PersistedConfig.installUpdatesAutomatically` option is **opt-in, default-OFF** (the
+`object(forKey:) as? Bool ?? false` idiom, like `archiveEnabled`); the Settings checkbox "Install
+updates automatically" is **nested** under "Check for updates automatically" (auto-installing without
+checking makes no sense) and enabled only when the parent is on **and** we're a real `.app` in
+`/Applications`.
 
-### 5. Контракт імені asset
+### 5. The asset name contract
 
-Інсталятор шукає version-named нотаризований `.zip` — `TokenPace-<X.Y.Z>.zip` (реальний патерн
-release-артефакту; `build-app.sh` пакує `TokenPace.zip`, а version-named ім'я надається в release-
-процесі, див. `docs/releasing.md`). Цей контракт зафіксовано в `docs/releasing.md`, бо на нього
-спирається чистий `UpdateAssetSelector`.
+The installer looks for a version-named notarized `.zip` — `TokenPace-<X.Y.Z>.zip` (the real release
+artifact pattern; `build-app.sh` packages `TokenPace.zip`, and the version-named name is added in the
+release process, see `docs/releasing.md`). This contract is pinned in `docs/releasing.md`, because the
+pure `UpdateAssetSelector` relies on it.
 
-### 6. Фазування (жорсткий порядок)
+### 6. Phasing (a strict order)
 
-Поверхня довіри зростає поступово, кожна фаза — окремий PR після живої верифікації:
+The trust surface grows gradually, each phase a separate PR after live verification:
 
-- **Фаза 1** (#122): декодер `assets[]` + `UpdateAssetSelector` + `UpdateInstallPlan` + opt-in ключ і
-  вкладений чекбокс — **нічого не замінюється**, лише логується вердикт.
-- **Фаза 2** (#123): `download`/`verify`/`unzip` під **dry-run** гейтом (`TOKENPACE_UPDATE_DRYRUN`) —
-  качає й верифікує без заміни.
-- **Фаза 3** (#124): `replaceInstalled` + `relaunch` + авто-тригер у `handleUpdateFound`.
+- **Phase 1** (#122): the `assets[]` decoder + `UpdateAssetSelector` + `UpdateInstallPlan` + the
+  opt-in key and the nested checkbox — **nothing is replaced**, only the verdict is logged.
+- **Phase 2** (#123): `download`/`verify`/`unzip` under a **dry-run** gate
+  (`TOKENPACE_UPDATE_DRYRUN`) — downloads and verifies without replacing.
+- **Phase 3** (#124): `replaceInstalled` + `relaunch` + the auto-trigger in `handleUpdateFound`.
 
-## Наслідки
+## Consequences
 
-- **Fallback завжди є**: будь-який фейл (download / verify / unzip / replace / права) логується й
-  падає у наявний сигнальний банер + рядок «Download». Фіча ніколи не гірша за поточну сигнальну
-  поведінку ADR-0025.
-- **Верифікаційні env-стуби**: додаються `TOKENPACE_UPDATE_DRYRUN` (Фаза 2) і `TOKENPACE_UPDATE_TARGET`
-  (Фаза 3, націлити на тестову копію поза `/Applications`) — до сімейства `TOKENPACE_STUB`/
-  `TOKENPACE_FAKE_LATEST`. Занесені в `CLAUDE.md`.
-- **Обмеження середовища**: повний флоу працює лише на **нотаризованому `.app` із `/Applications`**;
-  `swift run` — no-op. Тест руйнівний (замінює й перезапускає застосунок), тож верифікується
-  багаторівнево — dry-run → тестова копія поза `/Applications` → реальна пара релізів (див. issues).
-- **Тестова межа** (ADR-0009): чисте ядро (`UpdateAssetSelector`, `UpdateInstallPlan` з усіма
-  гейтами, розширений декодер) покрите unit-тестами; shell (`UpdateInstaller`) — вручну на живому
-  `.app`. Повний ланцюг **верифіковано наживо end-to-end**: нотаризований білд vN, реальний реліз
-  vN+1 → gh-download → verify (Team ID + Gatekeeper) → **атомарна заміна** тестової копії (через
-  `TOKENPACE_UPDATE_TARGET`, поза `/Applications`) → **relaunch** на нову версію; замінений bundle
-  лишився валідним (`codesign`/`spctl` accepted).
-- **Не-`/Applications` розміщення** та привілейована заміна — свідомо поза MVP; за потреби —
-  майбутній ADR про SMJobBless-хелпер.
+- **A fallback always exists**: any failure (download / verify / unzip / replace / permissions) is
+  logged and falls back to the existing signal banner + "Download" row. The feature is never worse
+  than the existing signal behavior from ADR-0025.
+- **Verification env stubs**: `TOKENPACE_UPDATE_DRYRUN` (Phase 2) and `TOKENPACE_UPDATE_TARGET`
+  (Phase 3, to target a test copy outside `/Applications`) are added — joining the
+  `TOKENPACE_STUB`/`TOKENPACE_FAKE_LATEST` family. Recorded in `CLAUDE.md`.
+- **Environment limitations**: the full flow only works on a **notarized `.app` from
+  `/Applications`**; `swift run` is a no-op. The test is destructive (it replaces and relaunches the
+  app), so it's verified at multiple levels — dry-run → a test copy outside `/Applications` → a real
+  pair of releases (see the issues).
+- **Test boundary** (ADR-0009): the pure core (`UpdateAssetSelector`, `UpdateInstallPlan` with all its
+  gates, the extended decoder) is covered by unit tests; the shell (`UpdateInstaller`) is verified by
+  hand on a live `.app`. The full chain has been **verified live end to end**: a notarized build vN,
+  a real release vN+1 → gh-download → verify (Team ID + Gatekeeper) → **atomic replace** of a test
+  copy (via `TOKENPACE_UPDATE_TARGET`, outside `/Applications`) → **relaunch** into the new version;
+  the replaced bundle stayed valid (`codesign`/`spctl` accepted).
+- **Non-`/Applications` placement** and privileged replacement are deliberately out of MVP scope — a
+  future ADR about an SMJobBless helper, if needed.
 
-## Пов'язані
+## Related
 
-- [ADR-0025](0025-check-for-updates.md) — перевірка оновлень, яку цей ADR доповнює (сигнальна частина
-  лишається fallback-ом); переюзовуються `UpdateFetcher`/`GitHubRelease`/`SemanticVersion`/
+- [ADR-0025](0025-check-for-updates.md) — checking for updates, which this ADR complements (its
+  signal part remains as a fallback); reuses `UpdateFetcher`/`GitHubRelease`/`SemanticVersion`/
   `UpdateComparison`/`GitHubReleaseClient`.
-- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — чисте ядро / тонкий shell, за яким
-  розділено `UpdateInstallPlan`/`UpdateAssetSelector` (kit) і `UpdateInstaller` (shell).
-- [ADR-0031](0031-session-log-archiver.md) — той самий pure/shell розкол
-  (`ArchiveSyncPlan`/`LogArchiver`) і opt-in default-OFF ідіома в `PersistedConfig`.
-- [ADR-0023](0023-persisted-config-version-marker.md) — `PersistedConfig`, розширений ключем
-  `installUpdatesAutomatically`.
-- [ADR-0004](0004-build-system.md) — `build-app.sh` (нотаризований version-named `.zip`), джерело
-  довіри, на яке спирається `verify`.
+- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — pure core / thin shell, along which
+  `UpdateInstallPlan`/`UpdateAssetSelector` (kit) and `UpdateInstaller` (shell) are split.
+- [ADR-0031](0031-session-log-archiver.md) — the same pure/shell split
+  (`ArchiveSyncPlan`/`LogArchiver`) and the opt-in default-OFF idiom in `PersistedConfig`.
+- [ADR-0023](0023-persisted-config-version-marker.md) — `PersistedConfig`, extended with the
+  `installUpdatesAutomatically` key.
+- [ADR-0004](0004-build-system.md) — `build-app.sh` (the notarized version-named `.zip`), the source
+  of trust that `verify` relies on.

@@ -4,51 +4,54 @@ date: 2026-07-26
 superseded_by: [0105]
 ---
 
-# ADR-0038: Idle «заблоковано» — сірий бар, «waiting for limit reset» і єдиний червоний блокуючий ресет
+# ADR-0038: Idle "blocked" — a gray bar, "waiting for limit reset", and one blocking red reset
 
-> Частково заміщає [ADR-0027](0027-session-idle-no-phantom-reset.md) (idle як завжди-синій «ready to
-> start»). Реалізовано в [#158](https://github.com/artem-from-ua/tokenpace/issues/158).
+> Partially replaces [ADR-0027](0027-session-idle-no-phantom-reset.md) (idle as an always-blue
+> "ready to start"). Implemented in [#158](https://github.com/artem-from-ua/tokenpace/issues/158).
 >
-> **Уточнення:** [ADR-0048](0048-red-reset-badge-while-credits-cover.md) розширює §D3 — червоний бейдж
-> ресету з'являється тепер не лише коли `isBlocked`, а й коли підписковий ліміт вичерпано, а кредити
-> його покривають (#193).
+> **Clarification:** [ADR-0048](0048-red-reset-badge-while-credits-cover.md) extends §D3 — the red
+> reset badge now appears not only when `isBlocked`, but also when the subscription limit is
+> exhausted and credits are covering it (#193).
 >
-> **Частково superseded [ADR-0078](0078-idle-drawn-as-zero-in-both-styles.md):** «суцільний сірий
-> бар» у §D2 більше не форма, а колір. Idle малює нуль в обох `BarStyle` — сірий трек + пігулка на
-> нулі, — тож заблокований idle читається як **порожній трек** (пігулка того самого тону, що трек),
-> під Progress плюс сірий маркер на нулі. Вибір кольору (blocked → базовий сірий, ready → синій) і
-> вся решта рішення чинні.
+> **Partially superseded by [ADR-0078](0078-idle-drawn-as-zero-in-both-styles.md):** "a solid gray
+> bar" in §D2 is no longer a shape but a color. Idle now draws zero in both `BarStyle`s — a gray
+> track with the pill at zero — so a blocked idle reads as an **empty track** (the pill the same
+> tone as the track), under Progress plus a gray marker at zero. The color choice (blocked → base
+> gray, ready → blue) and the rest of the decision still stand.
 >
-> **Постскриптум ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)).** Протиставлення
-> лишається двозначним, але другий колір змінився: **blocked → сірий, ready → зелений**, синього
-> немає взагалі ([ADR-0105](0105-color-advice-governs-pacing-bars-only.md); проміжний тризначний стан
-> [ADR-0081 §4](0081-weekly-capacity-gate-for-blue.md) витіснено ним же). Сіра пігулка, як і раніше,
-> не гаситься в жодному режимі `Colors tell me`; зелена гаситься разом із рештою спокійних станів і
-> **безумовно** під Pressure. Слова («waiting for limit reset» / «ready to start») і решта рішення
-> чинні.
+> **Postscript ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)).** The contrast stays
+> two-way, but the second color changed: **blocked → gray, ready → green**, with no blue at all
+> ([ADR-0105](0105-color-advice-governs-pacing-bars-only.md); the intermediate three-way state from
+> [ADR-0081 §4](0081-weekly-capacity-gate-for-blue.md) was itself superseded by it). The gray pill,
+> as before, is not suppressed in any `Colors tell me` mode; the green one is suppressed along with
+> the rest of the calm states and **unconditionally** under Pressure. The wording ("waiting for
+> limit reset" / "ready to start") and the rest of the decision still stand.
 
-## Контекст
+## Context
 
-[ADR-0027](0027-session-idle-no-phantom-reset.md) увів чесний **idle**-стан (`UsageSnapshot.sessionIdle`):
-попереднє 5h-вікно закінчилось, нової сесії ще нема → 5h-бар малюється **суцільним синім** без
-індикатора, а в попапі статус — «ready to start» (D1/D4 того ADR). Сенс — «квота вільна, можна
-починати».
+[ADR-0027](0027-session-idle-no-phantom-reset.md) introduced an honest **idle** state
+(`UsageSnapshot.sessionIdle`): the previous 5h window has ended, no new session yet → the 5h bar
+draws **solid blue** with no indicator, and the popup status reads "ready to start" (D1/D4 of that
+ADR). The intent: "quota is free, you can start."
 
-Але idle **не завжди** означає «можна працювати». Якщо саме в idle-момент **немає жодного шляху почати
-сесію**, синій «ready to start» бреше — насправді треба чекати на ресет. Заблокувати може:
+But idle **does not always** mean "you can work." If at the exact idle moment **there is no path
+at all to start a session**, the blue "ready to start" lies — the truth is you have to wait for a
+reset. What can block you:
 
-- **7-денний ліміт** (`seven_day.utilization >= 100`) — основний бар'єр, коли 5h-вікна нема; **або**
-- **вичерпані extra-usage credits** — грошовий cap досягнутий (`spend_limit_reached`) чи credits
-  вимкнені: платний «останній рубіж» більше нічого не покриває (див. [ADR-0037](0037-extra-usage-credits-model.md)).
+- the **7-day limit** (`seven_day.utilization >= 100`) — the main barrier when there's no 5h window;
+  **or**
+- **exhausted extra-usage credits** — the money cap reached (`spend_limit_reached`) or credits
+  disabled: the paid "last line of defense" no longer covers anything (see
+  [ADR-0037](0037-extra-usage-credits-model.md)).
 
-Треба чесно показати «чекай на ресет» і підказати, **коли саме** розблокує.
+We need to honestly show "wait for reset" and hint **exactly when** it unblocks.
 
-## Рішення
+## Decision
 
-### D1. Модель «заблоковано» (чиста логіка в Kit)
+### D1. The "blocked" model (pure logic in Kit)
 
-«Заблоковано» = немає жодного шляху працювати зараз — незалежно від того, idle ти чи мав активну
-сесію:
+"Blocked" = there is no path to work right now — regardless of whether you're idle or had an
+active session:
 
 ```
 isBlocked = noFiveHourQuota  AND  seven_day >= 100  AND NOT creditsCanCover(spend)
@@ -56,60 +59,65 @@ noFiveHourQuota = sessionIdle  OR  five_hour >= 100
 creditsCanCover(spend) = spend != nil AND spend.enabled AND NOT spend.spend_limit_reached
 ```
 
-5h-вікно — близький бар'єр: працювати можна, якщо в нього є квота (idle-5h, який дозволено стартувати,
-або активний 5h < 100). Тому `noFiveHourQuota` = idle **або** 5h вичерпаний. Плюс 7d має бути вичерпаний
-**і** credits не покривати. Per-model вікна з запасом (напр. модель на 60 %) **не** розблоковують —
-головні 5h/7d гейтують усю роботу. Обчислення — у `make(...)` обох layout-ів.
+The 5h window is the near barrier: you can work if it has quota (an idle 5h you're allowed to
+start, or an active 5h < 100). So `noFiveHourQuota` = idle **or** 5h exhausted. Plus 7d must be
+exhausted **and** credits must not cover it. Per-model windows with headroom (e.g. a model at 60%)
+do **not** unblock — the main 5h/7d gate all work. The computation lives in `make(...)` on both
+layouts.
 
-### D2. Сірий бар + «waiting for limit reset» (лише idle)
+### D2. Gray bar + "waiting for limit reset" (idle only)
 
-Це — **idle-специфіка** (при активній сесії 5h-рядок показує звичайне «limit reached», а не «waiting»):
+This is **idle-specific** (during an active session the 5h row shows the normal "limit reached",
+not "waiting"):
 
-- **Заблокований idle**-бар малюється **базовим сірим пейсинг-стрічки** (`PopupBarView.monochromeGrey` —
-  той самий тон, що `used`/future-зони бару), не «готовим» синім. На menu bar — у **обох** colour-режимах
-  (blocked не залежить від «Calm colours» #105). Прапорці `BarView.blocked` / `LimitRow.sessionBlocked`.
-- **Ready** idle-бар лишається синім (`idleBlue`); під «Calm colours» він тепер мутиться в **м'який
-  світло-сірий** (`idleCalmGrey`), а не в чистий білий — білий читався надто яскраво для idle-стрічки.
-  Тобто menu-bar idle: ready = синій / calm→світло-сірий; blocked = базовий сірий (обидва режими).
-- **Попап**, статус-слово: `ready to start` → **`waiting for limit reset`**. Формулювання нейтральне
-  (не «7d»), бо блокувати може і credits-cap. Idle-рядок лишається **компактним** (без detail-рядка) —
-  час розблокування несе червоний бейдж (D3).
+- A **blocked idle** bar draws in the pacing strip's **base gray** (`PopupBarView.monochromeGrey` —
+  the same tone as the bar's `used`/future zones), not the "ready" blue. In the menu bar — in
+  **both** color modes (blocked does not depend on "Calm colours" #105). Flags: `BarView.blocked` /
+  `LimitRow.sessionBlocked`.
+- A **ready** idle bar stays blue (`idleBlue`); under "Calm colours" it now mutes to a **soft
+  light gray** (`idleCalmGrey`) instead of pure white — white read as too bright for an idle strip.
+  So menu-bar idle: ready = blue / calm→light gray; blocked = base gray (both modes).
+- **Popup**, status word: `ready to start` → **`waiting for limit reset`**. The wording is neutral
+  (not "7d"), since the blocker can also be the credits cap. The idle row stays **compact** (no
+  detail row) — the unblock time is carried by the red badge (D3).
 
-### D3. Єдиний червоний блокуючий ресет — правило «останнього рубежу»
+### D3. One blocking red reset — the "last line of defense" rule
 
-На попапі рівно **один** ресет-час показується як **червоний бейдж** (пігулка `PillView` в
-exhausted-червоному, як «active»-бейдж кредитів, лише червоний, із hover-тултипом **«Effective
-blocker»**) — той, що реально розблокує роботу. З'являється **щоразу, коли `isBlocked`** — і в idle, і
-при активній сесії з усіма вичерпаними базовими лімітами (кадр `both-red`: 5h+7d+per-model на 100 % →
-бейдж на 7d, бо його ресет пізніший за 5h). Menu bar показує **той самий** обраний ресет як countdown.
+In the popup exactly **one** reset time is shown as a **red badge** (a `PillView` pill in
+exhausted-red, like the credits "active" badge, only red, with a **"Effective blocker"** hover
+tooltip) — the one that actually unblocks work. It appears **whenever `isBlocked`** — both idle and
+during an active session with every baseline limit exhausted (the `both-red` case: 5h+7d+per-model
+at 100% → the badge lands on 7d, since its reset is later than 5h's). The menu bar shows the
+**same** selected reset as a countdown.
 
-Правило (`BlockingReset`, спільне для попапу й menu bar) над вичерпаними ресетами `5` (5h≥100),
-`7` (7d≥100), `e` (credits `monthEnd`, коли `CreditsPacing.isActive`):
+The rule (`BlockingReset`, shared by the popup and menu bar) over the exhausted resets `5` (5h≥100),
+`7` (7d≥100), `e` (credits `monthEnd`, when `CreditsPacing.isActive`):
 
 ```
-e присутній:  e не найпізніший → e ;  e найпізніший → max(5,7)
-e відсутній:  max(5,7)
+e present:  e is not the latest → e ;  e is the latest → max(5,7)
+e absent:   max(5,7)
 ```
 
-Ментально: **credits — «останній рубіж»**; коли доступні й скидаються не останніми, вони розблоковують
-найшвидше (після ресету знову є покриття). Але якщо credits скидаються аж наприкінці місяця, токенні
-ліміти повертають раніше — тоді показуємо пізніший **із токенних**.
+Mentally: **credits are the "last line of defense"**; when they're available and don't reset last,
+they unblock fastest (coverage resumes right after their reset). But if credits reset all the way
+at the end of the month, the token limits come back sooner — in that case we show the later
+**of the token limits**.
 
-| Порядок | Червоним |
+| Order | Shown in red |
 |---|---|
 | e<5<7, e<7<5, 5<e<7, 7<e<5 | **e** |
 | 5<7<e | **7** (= max(5,7)) |
 | 7<5<e | **5** (= max(5,7)) |
 
-## Наслідки
+## Consequences
 
-- idle більше не «завжди синій/ready»: він набуває двох варіантів — **ready** (синій) і **blocked**
-  (сірий + «waiting…»). Це **частково заміщає** D1/D4 [ADR-0027](0027-session-idle-no-phantom-reset.md);
-  решта того ADR (чесний детект idle, відсутність фантомного `now+5h` ресету, `is_active` не
-  використовується) лишається чинною.
-- Один семантичний вибір «блокуючого ресету» живе в Kit і живить обидві поверхні — попап-бейдж і
-  menu-bar-countdown ніколи не розходяться.
-- Правило «останнього рубежу» узгоджене з `MenuBarLayout.selectReset` (both-exhausted → пізніший
-  ресет), лише з додатковим credits-пріоритетом.
-- Верифікація: стуб `TOKENPACE_STUB=idle-blocked` (idle 5h + 7d@100 без credits) — сірий бар в обох
-  colour-режимах, «waiting for limit reset», червоний 7d-ресет.
+- Idle is no longer "always blue/ready": it now has two variants — **ready** (blue) and **blocked**
+  (gray + "waiting…"). This **partially replaces** D1/D4 of
+  [ADR-0027](0027-session-idle-no-phantom-reset.md); the rest of that ADR (honest idle detection, no
+  phantom `now+5h` reset, `is_active` unused) still stands.
+- One semantic choice of "blocking reset" lives in Kit and feeds both surfaces — the popup badge and
+  the menu-bar countdown never diverge.
+- The "last line of defense" rule is consistent with `MenuBarLayout.selectReset` (both-exhausted →
+  the later reset), just with an added credits priority.
+- Verification: stub `TOKENPACE_STUB=idle-blocked` (idle 5h + 7d@100 with no credits) — a gray bar in
+  both color modes, "waiting for limit reset", a red 7d reset.

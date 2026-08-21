@@ -4,168 +4,183 @@ date: 2026-08-04
 superseded_by: [0114]
 ---
 
-# ADR-0068: Анатомія маркера «кредити задіяні» — плашка з вирізаним гліфом валюти
+# ADR-0068: Anatomy of the "credits in use" marker — a pill with a knocked-out currency glyph
 
-> **Постскриптум (#416).** Клаузу «Написання `Extra Usage Credit` узгоджено з наявною нотифікацією»
-> (нижче, в «Супутніх рішеннях») витіснено [ADR-0114](0114-extra-usage-is-one-name.md): усі поверхні
-> тепер пишуть **`Extra usage`**, а `credits` — з малої й у множині. Мотив не змінився — той самий,
-> що й тут: застосунок не має називати одну річ двома способами. Змінився бік, обраний за канон:
-> 0068 узгоджував хінт із нотифікацією й не бачив третього учасника — назви секції попапа
-> (`PopupViewController.extraUsageTitle`), яка вже була sentence case. Решта цього ADR чинна.
+> **Postscript (#416).** The clause "The wording `Extra Usage Credit` is aligned with the existing
+> notification" (below, in "Related decisions") is superseded by
+> [ADR-0114](0114-extra-usage-is-one-name.md): every surface now writes **`Extra usage`**, and
+> `credits` is lowercase and plural. The motive hasn't changed — it's the same as here: the app
+> shouldn't name one thing two ways. What changed is which side got picked as the canon: 0068
+> aligned the hint with the notification and didn't see the third participant — the popup
+> section's title (`PopupViewController.extraUsageTitle`), which was already sentence case. The
+> rest of this ADR still stands.
 >
-> **Постскриптум (#396).** Анатомію витіснено
-> [ADR-0108](0108-extra-usage-one-anatomy-and-per-bar-style-caption.md). Маркер лишається `PillView`,
-> але: переїхав із провідної половини в **праву**, де кваліфікує статус-слово; заливка стала
-> нейтральним `barTrack` замість кольору мітки (у мітчиному кольорі він звучав так само гучно, як
-> бейдж блокуючого ресету поруч); і разом із цим **зник knockout** — на світлому сірому виріз показує
-> картку майже того самого тону, тож гліф блякне замість читатися, і чорнилом стало звичайне `label`.
-> Продуктове рішення — «нейтральна плашка, без статусного кольору» — не змінилося; змінилося, чим саме
-> досягається нейтральність.
+> **Postscript (#396).** The anatomy is superseded by
+> [ADR-0108](0108-extra-usage-one-anatomy-and-per-bar-style-caption.md). The marker is still a
+> `PillView`, but: it moved from the leading half to the **trailing** one, where it qualifies the
+> status word; its fill became the neutral `barTrack` instead of the label color (in the label's
+> own color it read just as loud as the blocking-reset badge next to it); and along with that, the
+> **knockout is gone** — on light gray, the cutout showed a card in almost the same tone, so the
+> glyph faded instead of reading, and the ink became plain `label`. The product decision — "a
+> neutral pill, with no status color" — hasn't changed; what changed is how neutrality is
+> achieved.
 >
-> **Постскриптум (0.85.0).** Продуктове рішення цього ADR лишається чинним: маркер — нейтральна
-> плашка з валютним знаком, без статусного кольору. Змінилася **реалізація**. Гліф більше не
-> прорізається маскою: `KnockoutGlyphBadge` видалено, маркер малює та сама `PillView`, що й
-> blocking-reset бейдж, а знак іде в неї **текстовим вкладенням** і фарбується кольором картки без
-> альфи (`cardPlateFillOpaque`) — візуально те саме «вирізано», але звичайним текстом, який сам
-> перемикається light/dark. Причини: три бейджі мали три різні висоти (18.0 / 17.5–20.5 / 14.0 pt),
-> причому валютний змінював висоту разом із валютою акаунта.
+> **Postscript (0.85.0).** This ADR's product decision still stands: the marker is a neutral pill
+> with a currency sign, carrying no status color. What changed is the **implementation**. The
+> glyph is no longer cut by a mask: `KnockoutGlyphBadge` is removed, the marker is drawn by the
+> same `PillView` as the blocking-reset badge, and the sign goes into it as a **text attachment**,
+> painted in the card's fill color with no alpha (`cardPlateFillOpaque`) — visually the same
+> "cutout" look, but via plain text that switches light/dark on its own. The reasons: the three
+> badges had three different heights (18.0 / 17.5–20.5 / 14.0 pt), and the currency one changed
+> height along with the account's currency.
 >
-> Разом із цим спростовано твердження «оптичне центрування гліфа не розв'язується розрахунком»
-> (нижче, у «Наслідках»). Воно розв'язується — треба міряти **чорнило** символу, а не його бокс:
-> бокси валют не збігаються (12×12 у `€` проти 12×15 у `¤`), і саме тому підібрана на око константа
-> `opticalNudge = −0.4` була правильна лише для євро. Заміри — `scripts/check-badge-heights.swift`.
+> Along with this, the claim "optical centering of the glyph isn't solved by calculation" (below,
+> in "Consequences") is disproven. It is solvable — you have to measure the symbol's **ink**, not
+> its box: currency boxes don't match (12×12 for `€` vs. 12×15 for `¤`), and that's exactly why the
+> eyeballed constant `opticalNudge = −0.4` was only correct for the euro. Measurements are in
+> `scripts/check-badge-heights.swift`.
 >
-> **Постскриптум ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)) — рішення
-> підтверджено, і воно ж стало аргументом.** Гліф у menu bar більше **не читає** налаштування кольорів
-> барів ([ADR-0105 §4](0105-color-advice-governs-pacing-bars-only.md)): власна шкала маркера —
-> **білий → помаранчевий → червоний**, зеленої чи жовтої сходинки, яку можна було б погасити, тут
-> немає за самою побудовою цього ADR. Знята гілка збігалася з рештою `creditsIconColor` усюди, крім
-> **безлімітного** капу, де вона перебивала нейтральний foreground — тобто приглушувала «гроші
-> пішли», що не є пейсинг-вердиктом.
+> **Postscript ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)) — the decision is
+> reaffirmed, and it became the argument for itself.** The glyph in the menu bar no longer **reads**
+> the bar-color settings ([ADR-0105 §4](0105-color-advice-governs-pacing-bars-only.md)): the
+> marker's own scale is **white → orange → red**; there is no green or yellow rung to mute in the
+> first place, by this ADR's own construction. The removed branch matched the rest of
+> `creditsIconColor` everywhere except the **unlimited** cap, where it overrode the neutral
+> foreground — that is, it muted "money is moving," which isn't a pacing verdict.
 
-## Контекст
+## Context
 
-У попапі поряд із заголовком **Extra usage** показується маркер, коли платні кредити реально
-покривають вичерпаний ліміт (`CreditsRow.inUse`). Від #146 це був бейдж зі словом `active`: спершу
-синій (`controlAccentColor`), а з #224 — залитий **червоним** (`PopupBarView.gapRed`), «щоб читалося
-як попередження, що ліміт витрачається на платний кредит».
+In the popup, next to the **Extra usage** heading, a marker shows when paid credits are actually
+covering an exhausted limit (`CreditsRow.inUse`). Since #146 this was a badge with the word
+`active`: blue at first (`controlAccentColor`), and from #224 filled **red**
+(`PopupBarView.gapRed`), "to read as a warning that the limit is being spent on paid credit."
 
-Зовнішній аудит (#254) показав, що ця подача суперечить власному правилу проєкту. У
-`CreditsPacing.swift` записано явно:
+An external audit (#254) showed that this presentation contradicts the project's own rule.
+`CreditsPacing.swift` states explicitly:
 
-> Red appears **only** at the cap (`used >= limit` або `spend_limit_reached`) — being "ahead of
+> Red appears **only** at the cap (`used >= limit` or `spend_limit_reached`) — being "ahead of
 > pace" is yellow/orange, not red.
 
-Але залитий червоний бейдж `active` з'являвся **незалежно від суми**. У стані «5h вичерпано,
-€0.00 / €50.00» рядок Extra usage казав чотири речі одночасно: червоний бейдж (критично), «on pace»,
-зелений бар і нульові витрати.
+But the filled red `active` badge appeared **regardless of the amount**. In the state "5h
+exhausted, €0.00 / €50.00," the Extra usage row said four things at once: a red badge
+(critical), "on pace," a green bar, and zero spending.
 
-Два наслідки, важливіші за формальну неузгодженість:
+Two consequences that matter more than the formal inconsistency:
 
-1. **Сигнал не міг ескалювати.** Якщо €0.00 уже намальовано найгучнішим кольором в інтерфейсі, то
-   €49.00 нічим не гучніший. На капі не лишалося нічого сильнішого.
-2. **Дві несумісні речі виглядали однаково.** `makeInUsePill` і `makeResetBadge` викликали ту саму
-   фабрику `makePill` з тим самим `gapRed`: «кредити задіяні» і «саме цей ресет тебе розблокує» були
-   візуально нерозрізненні й могли з'явитися в одному попапі.
+1. **The signal had nowhere to escalate to.** If €0.00 is already painted in the loudest color in
+   the interface, €49.00 is no louder. Nothing stronger was left for the cap.
+2. **Two incompatible things looked identical.** `makeInUsePill` and `makeResetBadge` both called
+   the same `makePill` factory with the same `gapRed`: "credits are in use" and "this specific
+   reset will unblock you" were visually indistinguishable and could appear in the same popup.
 
-Ключове уточнення від мейнтейнера, яке визначило рішення: **сам факт переходу на платні кредити —
-критичний сигнал незалежно від витраченої суми**. Тобто пропозиція аудиту «прибрати колір і зробити
-нейтральний чип» відкидала вимогу, а не задовольняла її.
+A key clarification from the maintainer that settled the decision: **the fact of switching to
+paid credits is itself a critical signal, independent of the amount spent.** So the audit's
+suggestion of "remove the color and make it a neutral chip" would have discarded the requirement,
+not satisfied it.
 
-Розв'язка — розділити дві **ортогональні осі**, які досі кодувалися одним каналом (заливкою):
+The resolution is to split two **orthogonal axes** that were so far encoded through one channel
+(the fill):
 
-- **вісь величини** (скільки витрачено) — градієнт, її вже обслуговує `aheadColor`;
-- **вісь режиму** (перетнуто межу з передплати в платне) — бінарна подія, її критичність не в сумі.
+- the **magnitude axis** (how much has been spent) — a gradient, already served by `aheadColor`;
+- the **mode axis** (crossed from subscription into paid) — a binary event, whose criticality
+  doesn't depend on the amount.
 
-Додатковий факт: сигнал про **момент** переходу вже існує окремо — `BackToWorkNotifier`
-`postExtraUsage` шле системну нотифікацію «Now using Extra Usage Credit» на edge
-not-spending → spending. Отже маркер у попапі несе **тривалий стан**, а не подію, і не мусить кричати
-постійно.
+An additional fact: a signal for the **moment** of the switch already exists separately —
+`BackToWorkNotifier`'s `postExtraUsage` sends a system notification, "Now using Extra Usage
+Credit," on the not-spending → spending edge. So the marker in the popup carries an **ongoing
+state**, not an event, and doesn't have to shout continuously.
 
-## Розглянуті варіанти
+## Alternatives considered
 
-Усі три були реалізовані й перевірені живцем на стубі `credits-active` (macOS 15, dark).
+All three were built and verified live on the `credits-active` stub (macOS 15, dark).
 
-### 1. Контурний бейдж `active`
+### 1. An outlined `active` badge
 
-Червона рамка в один пункт, червоний текст, без заливки.
+A one-point red border, red text, no fill.
 
-- **+** Розводить дві пілюлі анатомічно (контур vs заливка), лишає слово самоописовим.
-- **+** Мінімальний відрив від того, що вже було.
-- **−** Червоний усе одно присутній як статусний колір, тобто вісь режиму досі позичає токен осі
-  величини.
-- **−** Не вирішує пункт про ескалацію: контур на €0.00 такий самий, як на капі.
+- **+** Separates the two pills anatomically (outline vs. fill), keeps the word self-describing.
+- **+** A minimal departure from what already existed.
+- **−** Red is still present as a status color, i.e. the mode axis still borrows a token from the
+  magnitude axis.
+- **−** Doesn't solve the escalation point: an outline at €0.00 looks the same as at the cap.
 
-### 2. Голий гліф валюти, тонований червоним
+### 2. A bare currency glyph, tinted red
 
-Слово прибрано, лишається `€`/`$` після лейбла, у червоному.
+The word is removed, leaving `€`/`$` after the label, in red.
 
-- **+** Плашки немає взагалі — колізія з залитим reset-бейджем зникає, а не пом'якшується.
-- **+** **Консистентність із menu bar**: це той самий SF Symbol, який бар уже малює для кредитів
-  (`StatusItemView.creditsSymbolName(for:)`), тож обидві поверхні позначають фічу одним знаком.
-- **−** Гліф стоїть безпосередньо над «€10.8 of €15» і може прочитатися як префікс суми, а не як
-  індикатор стану.
-- **−** Статичний червоний розходиться з барним гліфом, який тонується через `aheadColor`.
+- **+** No pill at all — the collision with the filled reset badge disappears instead of being
+  softened.
+- **+** **Consistency with the menu bar**: it's the same SF Symbol the bar already draws for
+  credits (`StatusItemView.creditsSymbolName(for:)`), so both surfaces mark the feature with one
+  sign.
+- **−** The glyph sits directly above "€10.8 of €15" and could read as a prefix to the amount
+  rather than a state indicator.
+- **−** A static red diverges from the bar's glyph, which is tinted via `aheadColor`.
 
-### 3. Плашка кольору `label` із **вирізаним** гліфом (обрано)
+### 3. A `label`-colored pill with a **knocked-out** glyph (chosen)
 
-Суцільна плашка звичайного текстового кольору, символ валюти пробитий крізь неї наскрізь — видно фон
-попапу.
+A solid pill in the ordinary text color, with the currency symbol punched all the way through it —
+the popup's background shows through.
 
-- **+** Жодного статусного кольору: маркер заявляє **режим**, не претендуючи на severity. Червоний
-  лишається виключно за «ти заблокований».
-- **+** Анатомія відрізняється від залитого reset-бейджа радикально, при цьому маркер лишається
-  щільним, навмисним об'єктом, а не ледь помітним натяком — що відповідає вимозі «це критичний
-  сигнал».
-- **+** Той самий валютний гліф, що й у барі (перевага варіанту 2 зберігається).
-- **−** Потребує власного view з layer-маскою — складніше за `NSImageView`.
-- **−** Оптичне центрування гліфа в плашці не розв'язується розрахунком (див. «Наслідки»).
+- **+** No status color at all: the marker states the **mode**, without claiming a severity. Red
+  stays reserved exclusively for "you're blocked."
+- **+** The anatomy differs radically from the filled reset badge, while the marker still reads as
+  a dense, deliberate object rather than a barely-visible hint — matching the requirement that
+  "this is a critical signal."
+- **+** The same currency glyph as in the bar (option 2's advantage is preserved).
+- **−** Needs its own view with a layer mask — more complex than an `NSImageView`.
+- **−** Optical centering of the glyph in the pill isn't solved by calculation (see "Consequences").
 
-## Рішення
+## Decision
 
-Обрано **варіант 3**. Маркер малює `KnockoutGlyphBadge` — layer-backed view, який заливає плашку
-`ColorRole.label` і застосовує маску з **інвертованим** гліфом, тож символ прозорий.
+**Option 3** was chosen. The marker is drawn by `KnockoutGlyphBadge` — a layer-backed view that
+fills the pill with `ColorRole.label` and applies a mask with an **inverted** glyph, so the symbol
+is transparent.
 
-Супутні рішення, ухвалені разом із цим:
+Related decisions, made alongside this one:
 
-- **`PillView` лишається лише для blocking-reset бейджа.** Заливка в попапі тепер означає рівно одне:
-  ресет, який розблоковує роботу. Параметри `stroke`/`textColor`, додані під варіант 1, видалено.
-- **Хінт наголошує теперішній час**: `Currently spending Extra Usage Credit — your plan limit is
-  exhausted`. Написання `Extra Usage Credit` узгоджено з наявною нотифікацією, щоб застосунок не
-  називав ту саму річ двома способами.
-- **Гліф валюти в menu bar обмежено трьома кольорами** — білий → помаранчевий → червоний. Зелений
-  (`Palette.dotGreen`) і жовтий прибрано: бари грейдяться зеленим/жовтим, бо показують *темп*, а
-  валютний гліф відповідає на інше питання — «чи рухаються реальні гроші і як близько до капу», де
-  зелене «все добре» ввело б в оману. Пороги взято ті самі, що в `aheadColor`, щоб гліф і бари не
-  розходилися.
+- **`PillView` is now reserved solely for the blocking-reset badge.** A fill in the popup now means
+  exactly one thing: the reset that unblocks work. The `stroke`/`textColor` parameters added for
+  option 1 are removed.
+- **The hint emphasizes the present tense**: `Currently spending Extra Usage Credit — your plan
+  limit is exhausted`. The wording `Extra Usage Credit` is aligned with the existing notification,
+  so the app doesn't name the same thing two different ways.
+- **The currency glyph in the menu bar is limited to three colors** — white → orange → red. Green
+  (`Palette.dotGreen`) and yellow are removed: bars grade through green/yellow because they show
+  *pace*, while the currency glyph answers a different question — "is real money moving, and how
+  close is the cap" — where a green "all good" would be misleading. The thresholds are the same
+  ones used in `aheadColor`, so the glyph and the bars don't diverge.
 
-## Наслідки
+## Consequences
 
-**Позитивні.** Червоний у попапі знову означає одну річ. Маркер присутній із першої секунди, але не
-займає найгучніший регістр, тож на капі є куди ескалювати. Menu bar і попап позначають кредити одним
-символом.
+**Positive.** Red in the popup means one thing again. The marker is present from the first second,
+but doesn't occupy the loudest register, so there's room to escalate at the cap. The menu bar and
+the popup mark credits with the same symbol.
 
-**Ціна — субпіксельне вирівнювання.** Гліф у плашці не центрується розрахунком: чорнило SF Symbol
-сидить зі зсувом усередині власного bounding box, і поправка в частку пункта відновлюється на
-кожному кроці округлення (на 2× це цілий піксель). Спроби виміряти межі чорнила растеризацією,
-підігнати парність і квантувати зсув у пікселі — **не дали результату, який збігався б із тим, що
-читає око**: заміри показували «рівно» там, де мейнтейнер бачив перекіс.
+**The cost — subpixel alignment.** The glyph in the pill isn't centered by calculation: an SF
+Symbol's ink sits offset within its own bounding box, and the correction, a fraction of a point, has
+to be re-derived at every rounding step (a whole pixel at 2×). Attempts to measure the ink's
+bounds by rasterizing, force parity, and quantize the offset into pixels **produced no result that
+matched what the eye reads**: the measurements showed "even" exactly where the maintainer saw a
+skew.
 
-Тому вирівнювання зведено до двох констант, підібраних **на око**: `opticalNudge` (зсув гліфа) і
-`hInset` (горизонтальне поле плашки). Це свідомий вибір на користь простоти — оптичне вирівнювання в
-типографіці так і робиться. Урок ширший за цей ADR: **для субпіксельної геометрії піксельні заміри
-рендера не є джерелом істини** — рівно як для кольорів ним не є скріншот (див. CLAUDE.md про Digital
-Color Meter).
+So the alignment comes down to two constants, chosen **by eye**: `opticalNudge` (the glyph's
+offset) and `hInset` (the pill's horizontal margin). This is a deliberate choice in favor of
+simplicity — optical alignment in typography is done exactly this way. The lesson is broader than
+this ADR: **for subpixel geometry, pixel measurements of the render are not a source of truth** —
+exactly as a screenshot is not one for colors (see CLAUDE.md on the Digital Color Meter).
 
-**Що лишилося відкритим.** Маркер зараз не ескалює з витратами — він однаковий на €0.00 і на капі.
-Ескалацію тінту через `aheadColor` (спокійний → помаранчевий → червоний) обговорено в #254 як
-можливий наступний крок, але не реалізовано: спершу треба живий відгук на нейтральну подачу.
+**What's still open.** The marker currently doesn't escalate with spending — it looks the same at
+€0.00 and at the cap. Escalating the tint via `aheadColor` (calm → orange → red) was discussed
+in #254 as a possible next step, but not implemented: live feedback on the neutral presentation is
+needed first.
 
-## Пов'язане
+## Related
 
-- #254 — аудит колірної семантики попапу (походження цієї зміни).
-- #146 — походження бейджа `active` (синій `controlAccentColor`).
-- #224 / PR #225 — бейдж став залитим червоним як частина «popup polish», без окремого обговорення.
-- #158, ADR-0038, ADR-0048 — blocking-reset бейдж, який тепер єдиний залитий.
-- ADR-0037 — модель грошових кредитів; `aheadColor` як спільна шкала.
-- ADR-0059 / ADR-0060 — семантичні кольори menu bar і попапу.
+- #254 — the audit of the popup's color semantics (the origin of this change).
+- #146 — the origin of the `active` badge (blue `controlAccentColor`).
+- #224 / PR #225 — the badge became filled red as part of "popup polish," with no separate
+  discussion.
+- #158, ADR-0038, ADR-0048 — the blocking-reset badge, now the only filled one.
+- ADR-0037 — the paid-credits model; `aheadColor` as the shared scale.
+- ADR-0059 / ADR-0060 — the menu bar's and popup's semantic colors.

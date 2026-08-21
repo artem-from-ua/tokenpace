@@ -5,169 +5,186 @@ supersedes: []
 superseded_by: [0076, 0080, 0081, 0098, 0112]
 ---
 
-# ADR-0062: Конфігурована подача пейсинг-барів — Bar style, Calm-режим, поріг far-behind
+# ADR-0062: Configurable pacing-bar presentation — bar style, Calm mode, far-behind threshold
 
-> **Постскриптум ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)).** §2 чинний по суті,
-> але не за назвами. `CalmColorMode` зветься
-> [`ColorAdvice`](../../Sources/TokenPaceKit/ColorAdvice.swift), його рядок — `Colors tell me`, ключ —
-> `menuBar.colorsTell`, а кейси `off` / `yellowGreen` / `yellowGreenBlue` стали
+> **Postscript ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)).** §2 still stands in
+> substance, but not by name. `CalmColorMode` is now called
+> [`ColorAdvice`](../../Sources/TokenPaceKit/ColorAdvice.swift), its label is `Colors tell me`, its
+> key is `menuBar.colorsTell`, and the cases `off` / `yellowGreen` / `yellowGreenBlue` became
 > `howItsGoing` / `slowDownOrSpeedUp` / `slowDown`
-> ([ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md)). Похідні `mutesCalm` /
-> `mutesBlue` лишились як були, тож рендер незмінний. **Обсяг опції звужено**
-> ([ADR-0105](0105-color-advice-governs-pacing-bars-only.md)): вона керує лише пейсинг-барами — не
-> крапкою сервісу, не гліфом валюти, не idle-пігулкою — і під Pressure не діє взагалі, бо там
-> спокійний бік гаситься безумовно. `showTicks`, `FarBehindInterval` і `barStyle` з цього ADR у
-> сховищі більше немає; решта ключів перейменована з префіксом поверхні (`menuBar.` / `dropdown.`).
+> ([ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md)). The derived `mutesCalm` /
+> `mutesBlue` are unchanged, so rendering stays the same. **The option's scope was narrowed**
+> ([ADR-0105](0105-color-advice-governs-pacing-bars-only.md)): it now governs only pacing bars — not
+> the service dot, not the currency glyph, not the idle pill — and does nothing at all under
+> Pressure, since the calm side is muted unconditionally there. `showTicks`, `FarBehindInterval`, and
+> `barStyle` from this ADR are no longer in storage; the remaining keys were renamed with a surface
+> prefix (`menuBar.` / `dropdown.`).
 
-> **§«Пресети (розширені)» витіснено
-> [ADR-0112](0112-appearance-presets-preview-apply-commits.md)**: сегментованого контрола там уже
-> немає (радіо з [ADR-0099](0099-appearance-nests-its-two-surfaces.md)), а `Custom` як некликабельний
-> індикатор замінено рядком `My setup` — самим збереженим конфігом, клікабельним завжди. Клік по
-> пресету тепер **прев'ю**, а пише лише кнопка `Apply`. §«Єдине джерело дефолтів — пресет
-> `.workHarder`» лишається чинним.
+> **§"Presets (expanded)" superseded by
+> [ADR-0112](0112-appearance-presets-preview-apply-commits.md)**: the segmented control is gone
+> (radio buttons from [ADR-0099](0099-appearance-nests-its-two-surfaces.md)), and `Custom` as a
+> non-clickable indicator is replaced by a `My setup` row — the saved config itself, always
+> clickable. Clicking a preset is now a **preview**, and only the `Apply` button writes it. §"Single
+> source of defaults — the `.workHarder` preset" still stands.
 
-> **Частково витіснений [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md)**: §4
-> більше не чинний — `showTicks` видалено з Settings, пресетів і експорту. Лінійка поділена за
-> роботою кожної позначки: риска нуля видима завжди, решта — під ⌥ Option. Чинними лишаються §2
-> `CalmColorMode` і пресети як єдине джерело дефолтів.
+> **Partially superseded by [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md)**: §4
+> no longer stands — `showTicks` is removed from Settings, the presets, and the export. The ruler is
+> now split by what each mark does: the zero tick is always visible, the rest sit behind ⌥ Option.
+> What still stands: §2 `CalmColorMode` and the presets as the single source of defaults.
 >
-> **Частково витіснений [ADR-0081](0081-weekly-capacity-gate-for-blue.md)**: §3 більше не чинний —
-> `FarBehindInterval` прибрано з Settings, множник зафіксовано на ×2, а `BarLayout.behindMultiplier`
-> замінено на `blueAllowed`, що несе weekly-capacity gate. Решта (§2 `CalmColorMode`, §4 `showTicks`,
-> пресети) — чинна.
+> **Partially superseded by [ADR-0081](0081-weekly-capacity-gate-for-blue.md)**: §3 no longer
+> stands — `FarBehindInterval` is removed from Settings, the multiplier is fixed at ×2, and
+> `BarLayout.behindMultiplier` is replaced by `blueAllowed`, which carries the weekly-capacity gate.
+> The rest (§2 `CalmColorMode`, §4 `showTicks`, the presets) still stands.
 >
-> **Частково витіснений [ADR-0080](0080-per-surface-bar-style.md)** (#329): §1 більше не чинний у
-> частині «один enum на дві поверхні». Кейс `.mixed` видалено, а `BarStyle` тепер описує подачу
-> **однієї** поверхні — меню-бар і попап зберігають свій стиль кожен у своєму ключі
-> (`menuBarStyle` / `dropdownStyle`), тож доступні всі дев'ять пар, а не чотири. Похідні
-> `menuBarScale` / `popupScale` / `menuBarShowsTimeMarker` / `popupShowsTimeMarker` замінені на одну
-> `scale` і один `showsTimeMarker`. Пресет `.workHarder` тепер ставить **Gauge** на обидві поверхні
-> замість Mixed. Решта — `CalmColorMode`, `FarBehindInterval`, `showTicks`, пресет як єдине джерело
-> дефолтів — чинна.
+> **Partially superseded by [ADR-0080](0080-per-surface-bar-style.md)** (#329): §1 no longer stands
+> for the part about "one enum for two surfaces." The `.mixed` case is removed, and `BarStyle` now
+> describes the presentation of **one** surface — the menu bar and the popup each store their own
+> style under its own key (`menuBarStyle` / `dropdownStyle`), so all nine pairs are available,
+> not four. The derived `menuBarScale` / `popupScale` / `menuBarShowsTimeMarker` /
+> `popupShowsTimeMarker` are replaced by a single `scale` and a single `showsTimeMarker`. The
+> `.workHarder` preset now sets **Gauge** on both surfaces instead of Mixed. The rest — `CalmColorMode`,
+> `FarBehindInterval`, `showTicks`, the preset as the single source of defaults — still stands.
 
-> **Частково витіснений [ADR-0076](0076-pressure-scale-for-marker-less-bar.md)** (#307): стрічка без
-> маркера більше **не** дорівнює ширині пейсинг-gap (`gapEnd − gapStart`) — вона рахується в
-> перенормованій шкалі `[now .. reset]` (`BarLayout.pressureLength`), а тіки під нею мітять чверті
-> часу, що лишився, а не частки вікна. UI-назви теж змінились: «Pace & Time» → **Progress**,
-> «Pace» → **Pressure**; перейменовано й enum-кейси з `rawValue` (`.pacing` → `.progress`, `.simple` →
-> `.pressure`), старі значення мігруються на старті. Решта цього запису — per-surface
-> вибір, `CalmColorMode`, `FarBehindInterval`, `showTicks`, пресети — чинна.
+> **Partially superseded by [ADR-0076](0076-pressure-scale-for-marker-less-bar.md)** (#307): a strip
+> with no marker no longer equals the width of the pacing gap (`gapEnd − gapStart`) — it is now
+> computed on a renormalized `[now .. reset]` scale (`BarLayout.pressureLength`), and the ticks
+> beneath it mark quarters of remaining time rather than fractions of the window. UI names changed
+> too: "Pace & Time" → **Progress**, "Pace" → **Pressure**; the enum cases and their `rawValue` were
+> renamed too (`.pacing` → `.progress`, `.simple` → `.pressure`), with old values migrated on
+> launch. The rest of this entry — the per-surface choice, `CalmColorMode`, `FarBehindInterval`,
+> `showTicks`, the presets — still stands.
 
-> Частково витісняє [ADR-0061](0061-far-behind-blue-pacing-zone.md): behind-поріг більше не
-> **фіксованої** ширини (тепер конфігурований через `FarBehindInterval`), а bool-опція «Work harder»
-> замінена триставним `CalmColorMode`. Синій severity-case, 20-хв start-override, обсяг 5h/7d і
-> `ColorRole.paceBlue` з 0061 лишаються чинними.
+> Partially supersedes [ADR-0061](0061-far-behind-blue-pacing-zone.md): the behind threshold is no
+> longer a **fixed** width (now configurable via `FarBehindInterval`), and the boolean "Work harder"
+> option is replaced by the three-state `CalmColorMode`. The blue severity case, the 20-minute start
+> override, the 5h/7d scope, and `ColorRole.paceBlue` from 0061 still stand.
 
-## Контекст
+## Context
 
-[ADR-0061](0061-far-behind-blue-pacing-zone.md) додав синю far-behind зону з **фіксованим** порогом
-(60 хв / 5h, 24 год / 7d) і bool-toggle «Work harder» (тримати синій кольоровим під calm). #224
-розширює подачу барів на кілька осей, які раніше були жорстко закодовані або відсутні:
+[ADR-0061](0061-far-behind-blue-pacing-zone.md) added the blue far-behind zone with a **fixed**
+threshold (60 min / 5h, 24 h / 7d) and a boolean "Work harder" toggle (keep blue colored under
+calm). #224 expands bar presentation across several axes that were previously hardcoded or absent:
 
-- **Спосіб подачі бару.** Досі бар завжди мав кольоровий `gap` + маркер поточного часу («ти тут»).
-  Не всім потрібна щільна пейсинг-графіка — декому досить кольору стану без маркера.
-- **Скільки кольору приглушувати** було двома окремими bool-ами (`calmMenuBarColors` + `workHarderColors`),
-  чия комбінація («calm on + work harder off» = мутити й синій) неочевидна.
-- **Поріг green→blue** був фіксований — не було способу зробити синій рідшим/частішим або зовсім вимкнути.
-- **Засічки під баром** у попапі завжди малювались.
+- **How the bar is presented.** Until now a bar always had a colored `gap` plus a current-time
+  marker ("you are here"). Not everyone needs dense pacing graphics — for some, the state color
+  alone, with no marker, is enough.
+- **How much color to mute** was two separate booleans (`calmMenuBarColors` +
+  `workHarderColors`), whose combination ("calm on + work harder off" = mute blue too) was
+  unintuitive.
+- **The green→blue threshold** was fixed — there was no way to make blue rarer/more frequent or
+  turn it off entirely.
+- **The ticks under the bar** in the popup were always drawn.
 
-## Рішення
+## Decision
 
-**Винести подачу барів у чотири render-only опції, кожна — kit-enum з forward-compatible decode,
-з єдиним джерелом дефолтів (пресет `.workHarder`).**
+**Pull bar presentation out into four render-only options, each a kit enum with forward-compatible
+decoding, with a single source of defaults (the `.workHarder` preset).**
 
-### 1. `BarStyle` — спосіб подачі (per-surface)
+### 1. `BarStyle` — how it's presented (per surface)
 
-Триставний enum, що вибирає, чи малювати **маркер часу** окремо для menu bar і попапа:
+A three-state enum that chooses whether to draw a **time marker** separately for the menu bar and
+the popup:
 
-- `.pacing` — gap + маркер на **обох** поверхнях (дореформена подача).
-- `.mixed` — стрічка (pace-only) у **menu bar**, gap + маркер у **попапі** (маркер лише там, де є місце).
-- `.simple` — стрічка (pace-only) на **обох**: без маркера.
+- `.pacing` — gap + marker on **both** surfaces (the pre-reform presentation).
+- `.mixed` — a strip (pace-only) in the **menu bar**, gap + marker in the **popup** (a marker only
+  where there's room).
+- `.simple` — a strip (pace-only) on **both**: no marker.
 
-**Стрічка (pace-only)** — кольорова смуга **від лівого краю**, довжина = ширина пейсинг-gap
-(`gapEnd − gapStart`), тим самим семантичним кольором стану. Тобто стільки ж кольору, як у Pace & Time,
-але без часової позначки. Розгалуження в малювачах — через `BarStyle.menuBarShowsTimeMarker` /
-`popupShowsTimeMarker`, щоб `StatusItemView` і `PopupBarView` не розсинхронились.
+**Strip (pace-only)** — a colored band **from the left edge**, whose length equals the width of the
+pacing gap (`gapEnd − gapStart`), in the same semantic state color. That is, exactly as much color
+as in Pace & Time, but without the time mark. The branching in the drawing code goes through
+`BarStyle.menuBarShowsTimeMarker` / `popupShowsTimeMarker`, so `StatusItemView` and `PopupBarView`
+don't drift out of sync.
 
-> ⚠️ **Витіснено [ADR-0076](0076-pressure-scale-for-marker-less-bar.md).** Довжина стрічки більше не
-> дорівнює `gapEnd − gapStart` — це `BarLayout.pressureLength` = `(r + k − 1)/k`, тож кольору в
-> ній **не** стільки ж, скільки в Progress: вона ширша саме там, де стан гостріший.
+> ⚠️ **Superseded by [ADR-0076](0076-pressure-scale-for-marker-less-bar.md).** The strip's length no
+> longer equals `gapEnd − gapStart` — it is `BarLayout.pressureLength` = `(r + k − 1)/k`, so it no
+> longer carries the **same** amount of color as Progress: it is wider precisely where the state is
+> more acute.
 
-### 2. `CalmColorMode` — що приглушено (замість двох bool)
+### 2. `CalmColorMode` — what gets muted (replacing two booleans)
 
-Триставний enum, що **замінює** пару `calmMenuBarColors` + `workHarderColors`. Назва описує, які
-**calm**-кольори мутяться в білий (orange/red-попередження завжди кольорові):
+A three-state enum that **replaces** the pair `calmMenuBarColors` + `workHarderColors`. The name
+describes which **calm** colors mute to white (orange/red warnings are always colored):
 
-- `.off` — нічого не мутиться.
-- `.yellowGreen` — мутяться зелений/жовтий; far-behind **синій лишається** (= старе «calm on + work harder on»).
-- `.yellowGreenBlue` — мутяться зелений/жовтий **і** синій (= старе «calm on + work harder off», найтихіше).
+- `.off` — nothing mutes.
+- `.yellowGreen` — green/yellow mute; far-behind **blue stays** (= the old "calm on + work harder
+  on").
+- `.yellowGreenBlue` — green/yellow **and** blue mute (= the old "calm on + work harder off", the
+  quietest).
 
-Render-шар читає два derived-прапорці — `mutesCalm` і `mutesBlue` — тож логіка `calmedGapColor`
-незмінна, лише джерело прапорців стало одне enum замість двох ключів.
+The render layer reads two derived flags — `mutesCalm` and `mutesBlue` — so `calmedGapColor`'s
+logic is unchanged; only the source of the flags becomes one enum instead of two keys.
 
-### 3. `FarBehindInterval` — конфігурований поріг green→blue
+### 3. `FarBehindInterval` — a configurable green→blue threshold
 
-Чотириставний enum, що масштабує behind-ширину з ADR-0061 (база 1h / 5h, 1d / 7d) множником:
+A four-state enum that scales the behind width from ADR-0061 (base 1h / 5h, 1d / 7d) by a
+multiplier:
 
-- `.off` — синього немає взагалі (поріг → +∞).
-- `.short` (×1) — 1h / 1d (= старий фіксований поріг ADR-0061).
-- `.medium` (×2, **дефолт**) — 2h / 2d.
+- `.off` — no blue at all (threshold → +∞).
+- `.short` (×1) — 1h / 1d (= the old fixed threshold from ADR-0061).
+- `.medium` (×2, **default**) — 2h / 2d.
 - `.long` (×3) — 3h / 3d.
 
-`behindThreshold(windowDurationSeconds:multiplier:)` домножає базову ширину на множник (`.off` →
-`.greatestFiniteMagnitude`, тож `surplus > threshold` ніколи не істинний). Множник несе нове поле
-`BarLayout.behindMultiplier` (дзеркалить `windowDurationSeconds`), тож **Kit-severity й
-AppKit-колір читають те саме** — не розходяться. `AppKit` передає
-`PersistedConfig.farBehindInterval.multiplier ?? 0` у `barLayout(...)` через `MenuBarLayout.make` /
+`behindThreshold(windowDurationSeconds:multiplier:)` multiplies the base width by the multiplier
+(`.off` → `.greatestFiniteMagnitude`, so `surplus > threshold` is never true). The multiplier is
+carried by a new field, `BarLayout.behindMultiplier` (mirroring `windowDurationSeconds`), so **Kit
+severity and AppKit color read the same value** — they never diverge. `AppKit` passes
+`PersistedConfig.farBehindInterval.multiplier ?? 0` into `barLayout(...)` via `MenuBarLayout.make` /
 `PopupLayout.make`.
 
-### 4. ~~`showTicks` — засічки під баром у попапі (opt-out)~~
+### 4. ~~`showTicks` — ticks under the bar in the popup (opt-out)~~
 
-> **Витіснено [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md).** Опції більше
-> немає: лінійка поділена за роботою кожної позначки — риска нуля (впізнати стиль) видима завжди,
-> решта (пояснити шкалу) — під ⌥ Option.
+> **Superseded by [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md).** The option is
+> gone: the ruler is now split by what each mark does — the zero tick (identify the style) is
+> always visible, the rest (explain the scale) sit behind ⌥ Option.
 
-Bool-гейт на `PopupBarView.drawTicks`. Menu bar засічок не має, тож опція popup-only.
+A boolean gate on `PopupBarView.drawTicks`. The menu bar has no ticks, so this option is popup-only.
 
-### Єдине джерело дефолтів — пресет `.workHarder`
+### Single source of defaults — the `.workHarder` preset
 
-`AppearancePreset.default = .workHarder` (#224). Кожен Appearance-getter у `PersistedConfig` при
-відсутньому ключі бере значення з `AppearancePreset.defaultValues.<field>` замість власної літерали.
-Наслідок: **нова Appearance-опція автоматично дефолтиться до свого `.workHarder`-значення** — дефолт
-живе в одному місці (пресет), не дублюється в getter'ах. Fresh install / Reset → Work harder!.
+`AppearancePreset.default = .workHarder` (#224). Every Appearance getter in `PersistedConfig`, when
+its key is absent, reads the value from `AppearancePreset.defaultValues.<field>` instead of its own
+literal. Consequence: **a new Appearance option automatically defaults to its `.workHarder`
+value** — the default lives in one place (the preset), not duplicated across getters. Fresh
+install / Reset → Work harder!.
 
-### Пресети (розширені)
+### Presets (expanded)
 
-> ~~Три пресети керуються сегментованим контролом (`Chill | Work harder! | Control freak | Custom`),
-> де **Custom** — некликабельний індикатор.~~ Витіснено
-> [ADR-0112](0112-appearance-presets-preview-apply-commits.md) (контрол — радіо з
-> [ADR-0099](0099-appearance-nests-its-two-surfaces.md); четвертий рядок — `My setup`, клік по
-> пресету — прев'ю). Таблиця нижче — історична: `showTicks` і `FarBehindInterval` зі сховища прибрано,
-> а імена стилів змінилися ([ADR-0109](0109-centred-style-renamed-to-balance.md)).
+> ~~Three presets are governed by a segmented control (`Chill | Work harder! | Control freak |
+> Custom`), where **Custom** is a non-clickable indicator.~~ Superseded by
+> [ADR-0112](0112-appearance-presets-preview-apply-commits.md) (the control is radio buttons from
+> [ADR-0099](0099-appearance-nests-its-two-surfaces.md); the fourth row is `My setup`, clicking a
+> preset previews it). The table below is historical: `showTicks` and `FarBehindInterval` are
+> removed from storage, and the style names changed
+> ([ADR-0109](0109-centred-style-renamed-to-balance.md)).
 
-Значення пресетів на момент цього ADR:
+Preset values as of this ADR:
 
-| Пресет | CalmColorMode | BarStyle | showTicks | FarBehindInterval |
+| Preset | CalmColorMode | BarStyle | showTicks | FarBehindInterval |
 |---|---|---|---|---|
 | Chill | `.yellowGreenBlue` | `.simple` | off | `.off` |
 | Work harder! (**default**) | `.yellowGreen` | `.mixed` | on | `.medium` |
 | Control freak | `.off` | `.pacing` | on | `.medium` |
 
-> ⚠️ Колонка `BarStyle` витіснена [ADR-0080](0080-per-surface-bar-style.md): пресет задає **два**
-> значення (menu bar / dropdown), і `.workHarder` тепер `.gauge` на обидві. Актуальна таблиця — там.
+> ⚠️ The `BarStyle` column is superseded by [ADR-0080](0080-per-surface-bar-style.md): a preset now
+> sets **two** values (menu bar / dropdown), and `.workHarder` is now `.gauge` on both. The current
+> table lives there.
 
-## Наслідки
+## Consequences
 
-- **Bar style, Calm-режим і far-behind поріг тепер конфігуровані** через Settings → Appearance, кожен —
-  один enum-ключ у `PersistedConfig`.
-- **Конфлікт-стан UI.** Коли `FarBehindInterval == .off`, пункт «Yellow + Green + Blue» у Calm-контролі
-  disabled (синього немає, що мутити) — popover пояснює причину, як «Custom»-індикатор пресетів.
-- **`workHarderColors` ключ видалено** — злитий у `calmColorMode`. Старі логи
-  `calm-colors: menu-bar set` / `work-harder-colors: menu-bar set` замінені на `calm-color-mode: set`.
-- **Дефолти зсунулись** відносно ADR-0061: дефолтний far-behind поріг тепер 2h/2d (×2), не 1h/1d;
-  дефолтний пресет — Work harder! (mixed бари, ticks on). Наявний користувач без збережених ключів
-  побачить нову подачу.
-- **Два дубльовані малювачі** (`StatusItemView.drawBar`, `PopupBarView.draw`) додають гілку Simple
-  кожен — крос-референс-коментарі й спільні per-surface helper-и стережуть від дрейфу.
-- **ADR-0061 лишається чинним** для синього severity-case, start-override, обсягу 5h/7d і
-  `paceBlue` — цей запис лише робить ширину/muting конфігурованими.
+- **Bar style, Calm mode, and the far-behind threshold are now configurable** through Settings →
+  Appearance, each a single enum key in `PersistedConfig`.
+- **A conflict state in the UI.** When `FarBehindInterval == .off`, the "Yellow + Green + Blue" item
+  in the Calm control is disabled (there's no blue to mute) — a popover explains why, the same way
+  the presets' "Custom" indicator does.
+- **The `workHarderColors` key is gone** — merged into `calmColorMode`. The old logs
+  `calm-colors: menu-bar set` / `work-harder-colors: menu-bar set` are replaced by
+  `calm-color-mode: set`.
+- **Defaults shifted** relative to ADR-0061: the default far-behind threshold is now 2h/2d (×2), not
+  1h/1d; the default preset is Work harder! (mixed bars, ticks on). An existing user with no saved
+  keys will see the new presentation.
+- **Two duplicated drawing paths** (`StatusItemView.drawBar`, `PopupBarView.draw`) each add a Simple
+  branch — cross-reference comments and shared per-surface helpers guard against drift.
+- **ADR-0061 still stands** for the blue severity case, the start override, the 5h/7d scope, and
+  `paceBlue` — this entry only makes the width/muting configurable.

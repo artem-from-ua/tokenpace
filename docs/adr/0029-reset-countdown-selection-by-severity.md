@@ -5,113 +5,120 @@ supersedes: [0028]
 superseded_by: [0042, 0043, 0044, 0091]
 ---
 
-# ADR-0029: Вибір reset-часу в menu bar за станами 5h × 7d + режим-радіогрупа
+# ADR-0029: Selecting the reset time in the menu bar by 5h × 7d states + a radio-group mode
 
-> **Витіснено [ADR-0091](0091-countdown-only-where-work-is-not-running.md).** Відлік живе лише в
-> безсмужкових станах, тож таблиці вибору 5h × 7d немає чого обирати: `MenuBarLayout.selectReset`,
-> `ResetSelection`, `ResetToShow`, поле `MenuBarMode.expanded.resetToShow` і сам режим
-> `ResetCountdownMode` (разом з опцією Settings «Show reset countdown») видалено.
+> **Superseded by [ADR-0091](0091-countdown-only-where-work-is-not-running.md).** The countdown now
+> lives only in barless states, so there's nothing left for the 5h × 7d selection table to choose
+> from: `MenuBarLayout.selectReset`, `ResetSelection`, `ResetToShow`, the
+> `MenuBarMode.expanded.resetToShow` field, and the mode itself, `ResetCountdownMode` (along with the
+> Settings option "Show reset countdown"), are removed.
 
-> **Поріг yellow→orange частково суперсіднуто [ADR-0044](0044-dynamic-pacing-threshold.md).** Легенда
-> severity нижче («ahead `< 15` пт» / «ahead `>= 15` пт») описувала статичний поріг `0.15`; тепер це
-> **динамічний** `0.16·(1−timeFraction)` + override «≤ 20 хв до ресету → orange». Таблиця вибору
-> reset-часу за severity лишається чинною — змінилося лише, за яким відривом бар стає orange.
+> **The yellow→orange threshold is partially superseded by
+> [ADR-0044](0044-dynamic-pacing-threshold.md).** The severity legend below (ahead `< 15` pts / ahead
+> `>= 15` pts) described a static threshold of `0.15`; it's now a **dynamic**
+> `0.16·(1−timeFraction)` + an override of "≤ 20 min to reset → orange." The reset-time selection
+> table by severity still stands — only the *gap* at which a bar becomes orange has changed.
 
-> **Частково переглянуто [ADR-0042](0042-settings-swiftui-form.md) (#168):** режим `hideDistant7d`
-> прибрано разом із чекбоксом «Include distant 7-day limit reset». `ResetCountdownMode` тепер має три
-> варіанти — `always` / `smart` (колишній `showDistant7d`, у Settings «When pacing well ahead or limit
-> reached») / `never`; days-away ahead-of-pace 7d-countdown показується завжди, коли countdown
-> показується взагалі (`showsSevenDayAheadWhenFar`). Таблиця вибору за severity (нижче) лишається
-> чинною; згадки `showDistant7d`/`hideDistant7d`/`showsDistantAhead7d` в тілі — історичні.
+> **Partially revised by [ADR-0042](0042-settings-swiftui-form.md) (#168):** the `hideDistant7d` mode
+> is removed, along with the "Include distant 7-day limit reset" checkbox. `ResetCountdownMode` now
+> has three variants — `always` / `smart` (formerly `showDistant7d`, in Settings "When pacing well
+> ahead or limit reached") / `never`; the days-away ahead-of-pace 7d countdown is shown whenever the
+> countdown is shown at all (`showsSevenDayAheadWhenFar`). The severity-based selection table (below)
+> still stands; mentions of `showDistant7d`/`hideDistant7d`/`showsDistantAhead7d` in the body are
+> historical.
 
-> **Постскрипт (2026-07-27, [ADR-0043](0043-unified-reset-line-and-remove-resetnow.md), #167):**
-> `selectReset` тепер повертає `ResetSelection` (`.hide`/`.show`/`.dataError`), не `ResetToShow?`.
-> Реалізації-пункт «битий/nil `resets_at` обраного шумного бару → ⏰ (`.resetNow`)» замінено:
-> такий випадок → `.dataError`, і menu bar промотується в ⚠️ error-стан (як інша помилка API), а не
-> показує фейковий countdown. «Обидва calm без валідних дат → нічого» лишається (`.hide`). Таблиця
-> вибору 5h×7d незмінна.
+> **Postscript (2026-07-27, [ADR-0043](0043-unified-reset-line-and-remove-resetnow.md), #167):**
+> `selectReset` now returns a `ResetSelection` (`.hide`/`.show`/`.dataError`), not a `ResetToShow?`.
+> The implementation item "a broken/nil `resets_at` on the selected noisy bar → ⏰ (`.resetNow`)" is
+> replaced: that case now becomes `.dataError`, and the menu bar is promoted to the ⚠️ error state
+> (like any other API error), rather than showing a fake countdown. "Both calm with no valid dates →
+> nothing" still stands (`.hide`). The 5h×7d selection table is unchanged.
 
-Суперсідить [ADR-0028](0028-hide-reset-label-when-pacing-is-calm.md), який робив лише бінарне
-рішення «ховати, коли обидва бари спокійні».
+Supersedes [ADR-0028](0028-hide-reset-label-when-pacing-is-calm.md), which only made the binary
+decision "hide when both bars are calm."
 
-## Контекст
+## Context
 
-ADR-0028 приховував countdown, коли обидва бари спокійні, і показував **найближчий** (nearest) ресет,
-щойно бодай один ставав помаранчевим/червоним. Це відповідало на питання «чи показувати», але не на
-«**який саме** час показувати». Найближчий ресет не завжди корисний: якщо 5h вичерпано (red) і
-ресетнеться за годину, але 7d теж вичерпано й ресетнеться за дві — показ «1 год» вводить в оману, бо
-до 2-ї сервіс усе одно заблокований.
+ADR-0028 hid the countdown when both bars were calm, and showed the **nearest** reset as soon as at
+least one turned orange/red. This answered "whether to show," but not "**which** time exactly to
+show." The nearest reset isn't always useful: if 5h is exhausted (red) and resets in an hour, but 7d
+is also exhausted and resets in two hours, showing "1h" is misleading, because the service stays
+blocked until the second one anyway.
 
-Потрібно обирати час, що відповідає **наступному реальному полегшенню блокування**, і дати
-користувачу режим, щоб керувати показом далекого 7d-часу та повернути класичну «завжди показувати».
+We need to choose the time that corresponds to the **next real relief from being blocked**, and give
+the user a mode to control showing the distant 7d time and to restore the classic "always show."
 
-### Семантика severity бару (джерело істини)
+### Bar severity semantics (source of truth)
 
-Успадковано з ADR-0028; тепер кодифіковано в `BarLayout.severity` (Kit, AppKit-free), дзеркалить
+Inherited from ADR-0028; now codified in `BarLayout.severity` (Kit, AppKit-free), mirroring
 `PopupBarView.aheadColor`:
 
-| severity | Колір | Умова | заблоковано? |
+| severity | Color | Condition | blocked? |
 |---|---|---|---|
-| `.calm` | green / yellow | `usage <= time`, або ahead `< 15` пт (`usage < 1`) | ні |
-| `.ahead` | orange | ahead `>= 15` пт, `usage < 1` | ні (попереду плану) |
-| `.exhausted` | red | `usage >= 1` | так (ліміт вичерпано) |
+| `.calm` | green / yellow | `usage <= time`, or ahead `< 15` pts (`usage < 1`) | no |
+| `.ahead` | orange | ahead `>= 15` pts, `usage < 1` | no (ahead of plan) |
+| `.exhausted` | red | `usage >= 1` | yes (limit exhausted) |
 
-## Рішення
+## Decision
 
-**Обирати, час якого вікна (5h чи 7d) показати — або сховати — за таблицею станів 5h × 7d, керованою
-режимом `ResetCountdownMode`.** Принцип: показувати час *наступного реального полегшення блокування*.
+**Choose which window's time (5h or 7d) to show — or hide it — via a 5h × 7d state table, controlled
+by the `ResetCountdownMode` mode.** Principle: show the time of the *next real relief from being
+blocked*.
 
-### Таблиця (режими Show/Hide)
+### The table (Show/Hide modes)
 
 | 5h \ 7d | 7d calm | 7d orange | 7d red |
 |---|---|---|---|
-| **5h calm/idle** | нічого | час 7d ⃰ | час 7d (завжди) |
-| **5h orange** | час 5h | ранній (обидва orange) | час 7d (red блокує) |
-| **5h red** | час 5h | час 5h (red блокує) | пізніший (обидва red) |
+| **5h calm/idle** | nothing | 7d time ⃰ | 7d time (always) |
+| **5h orange** | 5h time | earlier one (both orange) | 7d time (red blocks) |
+| **5h red** | 5h time | 5h time (red blocks) | later one (both red) |
 
-⃰ gate лише для **orange-7d**: режим `showDistant7d` показує; `hideDistant7d` — лише якщо 7d-ресет
-`< 24 год`. 7d **red** показується завжди. (На практиці orange-7d із ресетом `< 24 год` майже
-недосяжний — при близькому 7d-ресеті вікно майже минуло, тож `usage > elapsed + 0.15` вимагало б
-`usage ≈ 1` → red. Тож `hideDistant7d` фактично ховає весь orange-7d.)
+⃰ the gate applies only to **orange-7d**: mode `showDistant7d` shows it; `hideDistant7d` only shows
+it if the 7d reset is `< 24 h` away. 7d **red** is always shown. (In practice, orange-7d with a reset
+`< 24 h` away is nearly unreachable — with the 7d reset close, the window has almost elapsed, so
+`usage > elapsed + 0.15` would require `usage ≈ 1` → red. So `hideDistant7d` effectively hides all
+orange-7d.)
 
-### Режими (`ResetCountdownMode`, радіогрупа в Settings → «Menu bar widget»)
+### Modes (`ResetCountdownMode`, a radio group under Settings → "Menu bar widget")
 
-| Режим | «обидва calm» | «orange-7d далеко, 5h calm» | решта таблиці |
+| Mode | "both calm" | "orange-7d distant, 5h calm" | rest of the table |
 |---|---|---|---|
-| `always` | **найближчий** | показувати | як таблиця |
-| `showDistant7d` *(default)* | нічого | показувати | як таблиця |
-| `hideDistant7d` | нічого | ховати | як таблиця |
-| `never` | нічого | нічого | **скрізь нічого** |
+| `always` | **nearest** | shown | as the table |
+| `showDistant7d` *(default)* | nothing | shown | as the table |
+| `hideDistant7d` | nothing | hidden | as the table |
+| `never` | nothing | nothing | **nothing everywhere** |
 
-`always` = default + «обидва calm» показує найближчий (⇒ ніколи не порожньо); `never` = завжди порожньо.
-Параметризовано двома прапорцями режиму (`showsWhenBothCalm`, `showsDistantAhead7d`).
+`always` = default + "both calm" shows the nearest (⇒ never empty); `never` = always empty.
+Parameterized by two mode flags (`showsWhenBothCalm`, `showsDistantAhead7d`).
 
-### Реалізація
+### Implementation
 
-1. **`BarLayout.severity`** (`PacingModel.swift`, Kit) — три-стан calm/ahead/exhausted; `isCalm`
-   похідний. `BarView.severity` пробрасує через idle (idle → `.calm`).
-2. **`ResetCountdownMode`** (Kit, raw-`String`, forward-compat як `WebDesktopMode`).
-3. **`ResetClock.latestReset`** — дзеркало `nearestReset` для «обидва red → пізніший».
-4. **`MenuBarLayout.selectReset`** — чиста функція-джерело таблиці; формат: 5h → `timeToReset`,
-   7d → `timeToResetCompactDays` (компактні дні). Битий/nil `resets_at` обраного шумного бару → ⏰
-   (`.resetNow`); обидва calm без валідних дат → нічого.
-5. **`MenuBarMode.expanded`** несе `resetToShow: ResetToShow?` (nil = ховати), замість
-   `reset`/`which`/`showReset`. `make(…:resetMode:)` кличе `selectReset` (active + idle).
-6. **Shell.** `PersistedConfig.resetCountdownModeMenuBar` (default `.showDistant7d`) + 4-way радіогрупа;
-   `StatusItemView` малює `resetToShow` (nil → без label/ширини).
-7. **Error-режим** (30–60 хв stale) — countdown завжди **найближчий** (діагностика), режим не діє.
+1. **`BarLayout.severity`** (`PacingModel.swift`, Kit) — a three-state calm/ahead/exhausted;
+   `isCalm` is derived. `BarView.severity` threads through idle (idle → `.calm`).
+2. **`ResetCountdownMode`** (Kit, raw-`String`, forward-compatible like `WebDesktopMode`).
+3. **`ResetClock.latestReset`** — the mirror of `nearestReset` for "both red → the later one."
+4. **`MenuBarLayout.selectReset`** — the pure function that is the source of the table; format: 5h →
+   `timeToReset`, 7d → `timeToResetCompactDays` (compact days). A broken/nil `resets_at` on the
+   selected noisy bar → ⏰ (`.resetNow`); both calm with no valid dates → nothing.
+5. **`MenuBarMode.expanded`** carries `resetToShow: ResetToShow?` (nil = hide), instead of
+   `reset`/`which`/`showReset`. `make(…:resetMode:)` calls `selectReset` (active + idle).
+6. **Shell.** `PersistedConfig.resetCountdownModeMenuBar` (default `.showDistant7d`) + a 4-way radio
+   group; `StatusItemView` draws `resetToShow` (nil → no label/width).
+7. **Error mode** (30–60 min stale) — the countdown is always the **nearest** (diagnostics); the mode
+   has no effect.
 
-## Наслідки
+## Consequences
 
-- Countdown відповідає на «коли наступного разу попустить», а не просто «найближчий ресет».
-- Користувач керує показом далекого 7d-часу й може повернути «завжди»/вимкнути повністю.
-- `MenuBarMode.expanded` спростилася (одне опційне поле замість трьох).
-- Дублювання порогів aheadColor ↔ severity лишається (та сама причина, що в ADR-0028) — тепер в
-  одному місці (`BarLayout.severity`), звідки `isCalm` похідний.
+- The countdown answers "when will it ease up next," not just "the nearest reset."
+- The user controls showing the distant 7d time and can restore "always"/turn it off entirely.
+- `MenuBarMode.expanded` gets simpler (one optional field instead of three).
+- The `aheadColor` ↔ `severity` threshold duplication remains (the same reason as in ADR-0028) — now
+  in one place (`BarLayout.severity`), from which `isCalm` is derived.
 
-## Верифікація
+## Verification
 
-`swift build && swift test` (`BarLayout.severity`, `MenuBarLayout.selectReset` по всіх клітинках ×
-4 режими). Наживо (`TOKENPACE_STUB`): нові фрейми `both-red` (→ пізніший = 7d «4d»),
-`red-orange` (→ час red-бару = 5h), `5h-orange`, `both-orange`; існуючі `screenshot`/`idle` (обидва
-calm → порожньо в default, найближчий у `always`); перемикання 4 режимів у Settings.
+`swift build && swift test` (`BarLayout.severity`, `MenuBarLayout.selectReset` across every cell ×
+4 modes). Live (`TOKENPACE_STUB`): new frames `both-red` (→ the later one = 7d "4d"),
+`red-orange` (→ the red bar's time = 5h), `5h-orange`, `both-orange`; the existing
+`screenshot`/`idle` (both calm → empty in default, nearest in `always`); toggling all 4 modes in
+Settings.

@@ -3,87 +3,90 @@ status: accepted
 date: 2026-08-05
 ---
 
-# ADR-0071: Інциденти status.claude.com у попапі та підписка на їхні оновлення
+# ADR-0071: status.claude.com incidents in the popup, and subscribing to their updates
 
-> Зафіксовано за підсумками продуктового інтерв'ю 2026-08-05, писалося як draft із шістьма свідомо
-> відкритими питаннями. Усі шість закрито під час реалізації
-> ([#279](https://github.com/artem-from-ua/tokenpace/issues/279)) — див.
-> [Закриті питання](#закриті-питання); лишилося тюнінгове **значення** дебаунсу, що є параметром
-> коду, а не рішенням цього ADR. Повний контекст, емпіричні таблиці й тестові дані — у
-> [docs/design/incident-subscriptions.md](../design/incident-subscriptions.md).
+> Recorded from the 2026-08-05 product interview; written as a draft with six deliberately open
+> questions. All six were closed during implementation
+> ([#279](https://github.com/artem-from-ua/tokenpace/issues/279)) — see
+> [Open questions](#open-questions); the only thing left tuning is the debounce **value**, which
+> is a code parameter, not a decision of this ADR. Full context, empirical tables, and test data
+> are in [docs/design/incident-subscriptions.md](../design/incident-subscriptions.md).
 >
-> **Переглянуто під час реалізації ([#279](https://github.com/artem-from-ua/tokenpace/issues/279)).**
-> Модель підписки змінилася з «на інцидент» на **«на
-> епізод»** — див. [Перегляд рішень 5 і 6](#перегляд-рішень-5-і-6-підписка-на-епізод). Це закрило
-> відкриті питання №1 і №6, не відкривши нових. Решта рішень лишається чинною.
+> **Revised during implementation ([#279](https://github.com/artem-from-ua/tokenpace/issues/279)).**
+> The subscription model changed from per-incident to **per-episode** — see
+> [Revising decisions 5 and 6](#revising-decisions-5-and-6-subscribing-to-an-episode). This closed
+> open questions 1 and 6 without opening new ones. The rest of the decisions still stand.
 >
-> **Мокапи узгодженого UI:** [чотири стани попапу](https://claude.ai/code/artifact/c6697546-aad0-43c5-a1e7-cf2ed5f401eb) — з ⌥ і без, підписаний і ні, плюс стан
-> після `monitoring` і розбіжності мокапа з реалізацією. Іконки там — справжні SF Symbols,
-> відрендерені з системи, тож ширина й вага ті самі, що малює застосунок.
+> **Mockups of the agreed UI:** [four popup states](https://claude.ai/code/artifact/c6697546-aad0-43c5-a1e7-cf2ed5f401eb) — with and without ⌥, subscribed and not, plus the state
+> after `monitoring`, and the mockup's divergences from the implementation. The icons there are
+> real SF Symbols rendered from the system, so the width and weight match what the app draws.
 
-## Контекст
+## Context
 
-[ADR-0013](0013-claude-status-line.md) §2 свідомо вирішив **не декодувати `incidents[]` взагалі**:
-стан сервісів визначається виключно `components[].status`. Причина була слушна — компонент і інцидент
-розходяться (реальний кейс: інцидент `major` про призупинення Mythos/Fable, тоді як обидва компоненти
-`operational`), і рядок статусу мав відповідати кольору на самій сторінці Statuspage.
+[ADR-0013](0013-claude-status-line.md) §2 deliberately decided **not to decode `incidents[]` at
+all**: service state is determined exclusively by `components[].status`. The reasoning was sound —
+a component and an incident can diverge (a real case: a `major` incident about the Mythos/Fable
+outage while both components stayed `operational`), and the status line had to match the color on
+the Statuspage page itself.
 
-Це рішення **лишається чинним для визначення стану**. Але воно лишає користувача без другої половини
-відповіді: жовта крапка біля `Code` не пояснює, **що саме** зламано, **наскільки надовго** і **коли
-можна повертатися до роботи**. Людина читає «degraded» як «буде повільніше», хоча насправді частина
-функціональності не працює зовсім (кейс, з якого почалася розмова: не працював Claude Science при
-`degraded_performance` на всіх компонентах).
+That decision **still stands for determining state**. But it leaves the user without the other
+half of the answer: a yellow dot next to `Code` doesn't explain **what exactly** is broken, **how
+long** it will last, or **when** work can resume. People read "degraded" as "it'll be slower,"
+when in reality part of the functionality doesn't work at all (the case that started this
+conversation: Claude Science was down under `degraded_performance` across all components).
 
-Потрібен окремий шар: інциденти як **контекст** і як **об'єкт підписки** — не як джерело стану.
+A separate layer is needed: incidents as **context** and as a **subscription object** — not as a
+source of state.
 
-### Емпірична база
+### Empirical base
 
-Рішення нижче спираються на виміряні дані, а не на припущення про поведінку Statuspage: 50 інцидентів
-з `GET /api/v2/incidents.json` (2026-07-08 … 2026-08-05) плюс два інциденти, відстежені наживо від
-початку до `resolved` (`f6gkkq6txl7z`, `mgp99sn4ynd4`). Ключові факти:
+The decisions below rest on measured data, not assumptions about Statuspage's behavior: 50
+incidents from `GET /api/v2/incidents.json` (2026-07-08 … 2026-08-05), plus two incidents tracked
+live from start to `resolved` (`f6gkkq6txl7z`, `mgp99sn4ynd4`). Key facts:
 
-- **`resolved_at` запізнюється на 6 хв (медіана) … 480 хв (максимум)** відносно моменту, коли
-  компоненти реально повернулись в `operational`. Живий вимір: **66 хвилин**.
-- **Відновлення буває тихим** — компоненти зеленіють **без жодного `incident_update`**
+- **`resolved_at` lags by 6 min (median) … 480 min (max)** behind the moment components actually
+  returned to `operational`. Live measurement: **66 minutes**.
+- **Recovery can be silent** — components turn green **with no `incident_update` at all**
   (`mgp99sn4ynd4`).
-- **`monitoring_at`** заповнене лише в 28 із 49 інцидентів; **`deliver_notifications`**
-  непослідовний (буває `false` саме на `resolved`); **`impact`** слабо корелює з реальним болем
-  (обидва інциденти 2026-08-05 — `minor`, при 6-годинній деградації).
-- **Апдейтів мало**: у середньому 3.3 на інцидент, максимум 8.
-- **Апдейти редагують заднім числом** (`updated_at` ≠ `created_at`).
-- **Стан компонента не належить інциденту**: при двох одночасних інцидентах обидва показують ті самі
-  уражені компоненти.
+- **`monitoring_at`** is populated in only 28 of 49 incidents; **`deliver_notifications`** is
+  inconsistent (it's sometimes `false` on exactly the `resolved` update); **`impact`** correlates
+  poorly with real pain (both 2026-08-05 incidents were `minor`, despite a 6-hour degradation).
+- **Updates are sparse**: 3.3 per incident on average, 8 at most.
+- **Updates are edited after the fact** (`updated_at` ≠ `created_at`).
+- **Component state doesn't belong to an incident**: with two simultaneous incidents, both show
+  the same affected components.
 
-## Рішення
+## Decision
 
-### 1. Інциденти декодуються — але лише як контекст і об'єкт підписки
+### 1. Incidents are decoded — but only as context and a subscription object
 
-Звужується заборона ADR-0013 §2: `incidents[]` тепер декодується. **Джерелом стану сервісів
-лишається виключно `components[].status`** — жодне поле інциденту (`status`, `impact`,
-`resolved_at`) на стан не впливає.
+This narrows the ADR-0013 §2 ban: `incidents[]` is now decoded. **The source of service state
+remains exclusively `components[].status`** — no incident field (`status`, `impact`,
+`resolved_at`) influences state.
 
-### 2. ⌥ у попапі перемикає вимір: сервіси ↔ інциденти
+### 2. ⌥ in the popup toggles the dimension: services ↔ incidents
 
-За замовчуванням — рядки **компонентів** із проблемним статусом (як зараз). Під ⌥ перелік сервісів
-**замінюється** переліком інцидентів із кольоровими крапочками. Зелені статуси сервісів під ⌥ більше
-не показуються. Якщо активних інцидентів немає — секція під ⌥ зникає повністю.
+By default, rows show **components** with a problem status (as today). Under ⌥, the list of
+services is **replaced** by a list of incidents with colored dots. Green service statuses are no
+longer shown under ⌥. If there are no active incidents, the section under ⌥ disappears entirely.
 
-### 3. Рядок інциденту: назва + вік + статус-посилання
+### 3. Incident row: name + age + status link
 
-Уражені сервіси **не** показуються — це і є наявний фільтр Monitored Services. Слово-статус
-(`identified`, `monitoring`, …) — посилання на **конкретний** інцидент (`shortlink`).
+Affected services are **not** shown — that's already the Monitored Services filter's job. The
+status word (`identified`, `monitoring`, …) is a link to the **specific** incident (`shortlink`).
 
-Побічно розв'язує наявну ваду: сьогодні слово-статус у рядку компонента веде на загальну сторінку, і
-при кількох уражених сервісах виходить кілька однакових посилань у нікуди.
+This incidentally fixes an existing flaw: today the status word in a component's row links to the
+general status page, and with several affected services you get several identical links to
+nowhere.
 
-### 4. Компоненти зелені → інцидент ховається
+### 4. Components green → incident hidden
 
-Попап відповідає на «чи можу я зараз працювати». Зелені компоненти = «так»; формально відкритий
-інцидент цього не заперечує.
+The popup answers "can I work right now." Green components mean "yes"; a formally open incident
+doesn't contradict that.
 
 ```plantuml
 @startuml
-title Видимість інциденту в попапі (стан = комбінація «інцидент» × «компоненти»)
+title Incident visibility in the popup (state = combination of "incident" × "components")
 
 skinparam state {
   BackgroundColor<<hidden>> #F5F5F5
@@ -93,51 +96,51 @@ skinparam state {
 
 [*] --> NoIncident
 
-state "Інцидентів немає" as NoIncident <<hidden>>
-state "Активний, компоненти НЕ operational" as Active <<shown>>
-state "Активний, компоненти operational" as GreenOpen <<green>>
+state "No incidents" as NoIncident <<hidden>>
+state "Active, components NOT operational" as Active <<shown>>
+state "Active, components operational" as GreenOpen <<green>>
 
-NoIncident --> Active : новий інцидент\n(components[] → degraded/outage)
+NoIncident --> Active : new incident\n(components[] → degraded/outage)
 
-Active --> GreenOpen : components[] → operational\n(апдейт АБО тихо)
-GreenOpen --> Active : рецидив або\nінший інцидент уразив ті самі компоненти
+Active --> GreenOpen : components[] → operational\n(update OR silent)
+GreenOpen --> Active : recurrence or\nanother incident hit the same components
 
-Active --> NoIncident : resolved, поки компоненти\nще не позеленіли (рідко)
-GreenOpen --> NoIncident : resolved\n(запізнення 6…480 хв)
+Active --> NoIncident : resolved, while components\nhaven't turned green yet (rare)
+GreenOpen --> NoIncident : resolved\n(6…480 min lag)
 
 note right of Active
-  ЄДИНИЙ стан, у якому рядок
-  інциденту видно (під ⌥).
-  Рядок: назва + вік + статус-лінк
+  The ONLY state in which the
+  incident row is visible (under ⌥).
+  Row: name + age + status link
 end note
 
 note right of GreenOpen
-  РІШЕННЯ 4: інцидент **ховається**.
-  Попап відповідає на «чи можу я
-  працювати» — зелені компоненти = «так».
-  Живий кейс: 66 хв у цьому стані
+  DECISION 4: the incident is **hidden**.
+  The popup answers "can I
+  work" — green components mean "yes."
+  Live case: 66 min in this state
 end note
 
 note bottom of NoIncident
-  Секція під ⌥ зникає повністю —
-  попап не росте дарма
+  The section under ⌥ disappears entirely —
+  the popup doesn't grow for nothing
 end note
 @enduml
 ```
 
-![Видимість інциденту в попапі](https://www.plantuml.com/plantuml/svg/bLNRJXDX4BxVfvZW3LJma0Z11WXggF567m2uMBjhsT3ktsmNl30cBMZLX50bKF423nSQ4oyiJP6oBIMfBp3_A_H9d9djYR8tfjdqt_upttpppQ6BET_q_8rCsl0TFsq3xc4TQ_GqTLaNz9RU0Lt6SrsKdq_ejAMt0Qk05zYYfu8NkWpZR4hdSvW73EYYYSViXXLT99mIj7-DehGRyFSZ_TurPxJpy0RhxSQ4OUJM7JThUcO6YA9lmmi3uBwPN4zvQiEr7gYqykRcrXpBijs51RYMcEPFb4rkJJqFJHA9sQNRKIOfpmvHbcOJqqjtZPU6iHnRXQcf1NYi7hb9XuBuH4c8Z65nH90owy7icvJm_XYOkI4t6B3i0xp7WFF4AddLyMmIebG0FC83K5dRCtr7kMPQWEybVMVJXdvQ_uav2lUGCt-IjLtegs0OG-HPWcx8EEVO8dn2lz8KA-vuKcMooYMdtF8gT8fxODafpxHiwwRQyCsKJJNj8Z7e870ShdWEiIHWRZA9SwQtWFByW9-1az6liJLX380kSTLvFEaIh7DvAdYChHLNUB-DJ07qDZbLy5GSkAoW2_HEan2fvQLqXYIBWsVdL7hJjYR3AGcubX40nEOTdaZdX8QdTDEGsp9zrsciydIgiUzedf7nMAlJS2JfM-8GLWbcElaVTsPl0GbMfIguYXh6Sr9hFgXdNSLeAl0LxkCXDTqXVeBUG4-IAg1B8Nq-vkcbnacHH-Hca5Tg51WN7ZNex7oVkC7uNtkkqaaiT1KhS9ryo2wWGnYKSNHX2XkoGGB3TYrWogF4-u88DWtbJpmWzaVu6-x4hrOt5kD-uP1wd_SQ1Il5OaBiIs-LXLHgKepmHCP2bZVO6wvZawx-Y2RiUS4TGpjkLt1bTK4dJov3fOmUn7b6P8c3TaD8b6LskJ79ddkz48UP6QcPrA2eTterwDP6bqUrUQfyNsLOdA6rHTZV233ehk91LK2Qf4xX94j9cb5bx-zo7fBYG1nkL4gu9GIePrcUF2-z0Oz5Ej6_oJy0)
+![Incident visibility in the popup](https://www.plantuml.com/plantuml/svg/VPJFQjj04CRlUef1FTHs4xU5nBWcDMbJEnY23Mak9SvXevr8YwLTiRkoCAMGKqyzbKAVe7sHlecVfBEIB2ckAGPZizzyyvi_k-V6Ccsp9FQii372J0Q2exIm5aRSYrZO3GW9Da98LPgbqA40Y_0M0fNS2yciK1BK0_YYYlJXpq_mwJHLaluQl-jvPYLaoZHBe8p-x06yPy4gr2gJ_4B5If-THO9J_7WCpwQdxdD8OoALbvBfT3XvVKWIQYnT9iFfwUIDzyNpRdjtS7myXhdQbKT81OW_Lx03Dpumqz90WxHJlmkiMECHDDN1V743AaLTD8B5XKSfWnhtF-7xePUEVf6YXBeIpsinkJ8g-n58p6lwfUmqjhTtiFtw7JY6cd7aBrLcMOWqY2hKkJIPHl1FP0kBZBEKE_x5DHWHawhhDS5FW3G6cTOe0mIbbv99HOkZQqQ8X2rMoR04MqcVSBMATOP6nMlaHv17bBeLivGHMwDyJeQPbiYXw1Piq497CutxZ0TjgRR1zl7toV0L9BJbCGkfHmIDe4KOMRVN9HajsWrnB-PNdweL9ZaX1P6hXqxh4hMYcPZo-X1mXnQJEh3zzglR9zcrocbihleNG1EXR-UM6OY5N7aeERZi-mnr9UJmON8n-pXRpE5aLBIoJan9UxroONkzVWLStbacJOxQqAra4cPqb2kzyc7x-AFgMciX4oIDlq7JzqbuvQOIC8CZ60oA7XMF0UKgkh1FVA-iLOb3RbsraiHWK3mLTJ-02yFI51c1aKneZ3SEYVJDQyCL6ZVZqBNrGMcNB18oR1AVqozwllu2)
 
-### 5. Підписка — виключно opt-in по кліку
+### 5. Subscription — exclusively opt-in by click
 
-Нічого не приходить, доки користувач сам не натиснув. Жодного дефолтного стану, жодного глобального
-тумблера.
+Nothing arrives until the user has clicked. No default state, no global toggle.
 
-Це рішення знімає цілий пласт складності: відпадає задача «вгадати, чи цей інцидент стосується
-користувача». Коли будити просить людина — гадати не треба.
+This decision removes an entire layer of complexity: it eliminates the task of "guessing whether
+this incident is relevant to the user." When the person asks to be woken up, there's nothing to
+guess.
 
 ```plantuml
 @startuml
-title Життєвий цикл підписки на інцидент
+title Incident subscription lifecycle
 
 skinparam state {
   BackgroundColor<<none>> #F5F5F5
@@ -145,44 +148,44 @@ skinparam state {
   BackgroundColor<<done>> #E8F5E9
 }
 
-[*] --> NotSubscribed : інцидент з'явився\nв unresolved.json
+[*] --> NotSubscribed : incident appeared\nin unresolved.json
 
-state "Не підписаний" as NotSubscribed <<none>>
-state "Підписаний" as Subscribed <<live>>
-state "Підписка завершена" as Ended <<done>>
+state "Not subscribed" as NotSubscribed <<none>>
+state "Subscribed" as Subscribed <<live>>
+state "Subscription ended" as Ended <<done>>
 
-NotSubscribed --> Subscribed : клік на іконці\n(єдиний вхід — opt-in)
-Subscribed --> NotSubscribed : Unfollow\n(попап або дія банера)
+NotSubscribed --> Subscribed : click on the icon\n(the only entry point — opt-in)
+Subscribed --> NotSubscribed : Unfollow\n(popup or banner action)
 
-Subscribed --> Ended : компоненти → operational\n**або** інцидент resolved
-NotSubscribed --> [*] : інцидент закрито\n(жодного банера)
+Subscribed --> Ended : components → operational\n**or** incident resolved
+NotSubscribed --> [*] : incident closed\n(no banner)
 Ended --> [*]
 
 note right of Subscribed
-  Живе, доки інцидент активний.
-  Має пережити рестарт — інциденти
-  бувають 6+ годин (виміряно 429 хв).
+  Lives as long as the incident is active.
+  Must survive a restart — incidents
+  run 6+ hours (429 min measured).
 end note
 
 note bottom of Ended
-  ВІДКРИТЕ ПИТАННЯ #3:
-  який саме перехід завершує підписку
-  і чи лишається «хвіст» після resolved
+  OPEN QUESTION 3:
+  which exact transition ends the subscription
+  and whether a "tail" remains after resolved
 end note
 @enduml
 ```
 
-![Життєвий цикл підписки на інцидент](https://www.plantuml.com/plantuml/svg/TLJ1JXDH5Ds_hxY1XL25XO8HGXgYmjADSIKkfdJ0aU4zCftYmfYK4WeB8uRKnXW9ngqBXzfABL0Ilk2-N-1BFFTDQMYfcRHzdNVlUUUSU--RByHU51VNGnK7SUWJrxXbotYgNESM_oLRmK-RJualR8qRV87zBRne4PzpGdXtxa8QtCIgh5HXBT0RNkIj4w1ZdzufeiVUyjfgP8ew_yI49fgRqqRxsIoDBaxBComY33PTnCAZnQd5fyCYybqCH4mlpAZtIhtClAA9YImzC_7pOgwm70KvFq-pjqWIdzon-qvWtMxP_INDTIhgo2-OSDFFJxuf60qXZlu87tApNtm2vR1cXBp2m57NmdgvH_z9wyj9fGxDQSDYFa5gdPksPFU4FoSEOa7dNNPgWrBzJCI6FW-aXW1kzyhMvewuOcjBUWpLRe2RuqVmP4Seq5MfIcOZdWZqk1g07dJuXLunOMZU0WlCE_WaV47uEkOESSFMx3vXBHP01oVZQX0nbUDuTlZCWPodrKAhNLKEmCIFl3WmsWkNT2QJOcSojujxNSOXZaY336q7eBN12wtF7T7m1yStGA33lqL07_EKQHTEAMrGjIXOVHsJMRdXELfMXaagTmyM04g6vlRPSdBPnJdx9oNl6oUsYgPpHpR1fkLia3_erp9sIqYL-WpYSKloZ-qsy1Bx4OFyWHxU9P6HbfZ6ND-VeIGbp00aqjJz6R8xN1-VLBxEamZgoigPE3Rheik95kW3hd2Ll_9t_i8_-3FnaLjymfWSyYyQVJ2BA02tqzj3slxC3L2gfTjQDtlQRZkjDxlURWj8ZUokt3EdUBadZeWQcLUw_2by8G5cNAPN4z9EiTChVa_9F5Qut_u1)
+![Incident subscription lifecycle](https://www.plantuml.com/plantuml/svg/RPFFZjCm4CRlVefHkRH1xG5s4RjQLIiWbLQ2BgZiYN9m7RSnTMOYsscf418d7W3nXFiaZFDdQQCgXpZ9Dvz_yurpwuDqeIgi22PO3NUeJAOnWAzMNZbJ1aC8rgorEYYhXV1RWwLqiW2k31f-280tKcqtZYhCtf8bTtE3X7ewXMUpotYTKrYpgnNfwzd5xDqvHTPwiE8olH8_XVYIV8NnU0fp2ek6RgKpk0RJCSkorDBfR8a6eKAdFTcTpYRVF26Jrxm3hkwQu_81IDypxF2xWiMf-4JPjD5JDfbfpDgADAwWwqY8q-rYHoVjA6lK5jWXv1gC8bpYC2u9xO5TWpj0IORRVVpr5wWCOuCZqJFiH_I0QxAMzcnLKbcLG0vM4b4xa2hYZaJVeg5c72fA1iVWuV7t7zvGEnahf5rYaf1Baly3w18_qs8Stj6eb2KV1pL4Qa56ejcn5Gk1n9awiya3qFee8Zuixpbs7wErX9juhwFgl8slczhf2Ki_L3xEs-tu6MGaZ0U-pguhy2np5SAhvv1JvJmCBrvSGS5dgD2IItKscWWU9qIYbcj58L0HmMfgThZ_cCxXqqEw-7ntFuUNr_ngdnkLW_xED12SH6-waz4G7_zZB9UynJxN_8Md0eCWZHqmS24DSaVhmA-V0dx2kUKL_xx_0000)
 
-### 6. Сигнал відновлення — `components[].status`, не поля інциденту
+### 6. Recovery signal — `components[].status`, not incident fields
 
-Не `resolved_at`, не `monitoring_at`, не `affected_components` в апдейтах. Це єдине джерело, що
-покриває всі п'ять спостережених форм відновлення. Апдейти лишаються джерелом **тексту**, не
-тригером.
+Not `resolved_at`, not `monitoring_at`, not `affected_components` in updates. This is the single
+source that covers all five observed forms of recovery. Updates remain a source of **text**, not
+a trigger.
 
 ```plantuml
 @startuml
-title П'ять спостережених форм відновлення — чому сигнал беремо з components[]
+title Five observed forms of recovery — why we take the signal from components[]
 
 skinparam state {
   BackgroundColor<<broken>> #FDE8E8
@@ -190,38 +193,38 @@ skinparam state {
   BackgroundColor<<admin>> #F3E8FD
 }
 
-state "Компоненти degraded/outage" as Broken <<broken>>
-state "Компоненти operational" as Green <<ok>>
-state "Інцидент resolved" as Closed <<admin>>
+state "Components degraded/outage" as Broken <<broken>>
+state "Components operational" as Green <<ok>>
+state "Incident resolved" as Closed <<admin>>
 
 [*] --> Broken
 
-Broken --> Green : (1) апдейт `monitoring`\nз переходом → operational
-Broken --> Green : (2) **тихо** — без жодного апдейту
-Broken --> Green : (3) апдейт `investigating`\nз переходом → operational
-Broken --> Closed : (4) resolved-апдейт,\nщо ДУБЛЮЄ перехід → operational
-Green --> Closed : (5) resolved-апдейт із порожнім\nпереходом (operational → operational)
+Broken --> Green : (1) `monitoring` update\nwith a transition → operational
+Broken --> Green : (2) **silent** — with no update at all
+Broken --> Green : (3) `investigating` update\nwith a transition → operational
+Broken --> Closed : (4) resolved update\nthat DUPLICATES the → operational transition
+Green --> Closed : (5) resolved update with an empty\ntransition (operational → operational)
 
 Closed --> [*]
-Green --> [*] : інцидент лишається\nвідкритим (до 480 хв)
+Green --> [*] : incident stays\nopen (up to 480 min)
 
 note right of Green
-  **ТРИГЕР БАНЕРА** — цей стан,
-  а не перехід в Closed.
-  Джерело: components[].status
-  із summary.json
+  **BANNER TRIGGER** — this state,
+  not the transition to Closed.
+  Source: components[].status
+  from summary.json
 end note
 
 note bottom of Closed
-  НЕ тригер: resolved_at запізнюється
-  на 6 хв (медіана) … 480 хв (макс),
-  живий вимір — 66 хв
+  NOT a trigger: resolved_at lags
+  by 6 min (median) … 480 min (max),
+  66 min in the live measurement
 end note
 
 legend right
-  |= форма |= приклад |
+  |= form |= example |
   | (1) | f6gkkq6txl7z 13:08 |
-  | (2) | mgp99sn4ynd4 (тихе) |
+  | (2) | mgp99sn4ynd4 (silent) |
   | (3) | bdr3fq2rkchr |
   | (4) | f6gkkq6txl7z 14:14 |
   | (5) | mgp99sn4ynd4 14:34 |
@@ -229,210 +232,227 @@ endlegend
 @enduml
 ```
 
-![П'ять спостережених форм відновлення](https://www.plantuml.com/plantuml/svg/dLNTJXDH4BxVfvZWXRG115fgQP0G_dm88BAmoxAskwViReae9kLNJOoW8Z4Q8z74IrFBZmNQyWfpNe4dSURijXIeNdXHe6Tclk-RRyuSHln0zuA2azC2EyYPW5_loXsvBb-3NCCBhCirkOx7ieZ7U4AV6bRa5iXD2XIn2bYM-tX4ftKiuxcAr-GEN1RtGBwWmwhSO9mA7bAaXEU0loAmAjO1VyEySFB2DTt0dvhHD3zhktdTqnqWLO49ppI0KNq-QtcYu1fZ8YUyeQ4vJsHDTtWOxaoEJwGdqkroH9RZ4-d9WOd1Td7TSEmG8a59uzfpubQC7VY9PNFdf9ZweUuhO9YMfnkcSKyK0jqoEq3tOLJ9W2iz_qGGUTFJ0rkuUavLF_HCLSn2cuNRbBnDPXs5PU2PliWjcuQg6Ci9tpIWgLtJfk8pqDqz72dHj4WH7uNm6UZiYm7vVg4WJmborX6k7GZFTgtPQPS6G34r4Bb5UezOELnklslLsnQtFmRnE7V6TV6ucZZFbX5F51BVYKCUSWkzt6WBbhWfqdQNJJ-mBLBmVpeZimWx6MlQsDrAqZNjobSiRm-_urlyZ3zniuM4h_KjWb3mTVo1l-038IZLl2XrygH61rLgvNOVdIqSDpbZcXPnCIrDl4K4pp_3FDTl3UrXHRx4ajpZDQRztI7MS4_FYBd2KsDMPeTakXT8IfbuN46NqBEjnG34GZWSMfru7B_X0Nx4z_W13u2isiKl_2VkHcCdSkeOr4DHmbeN5M49-ExVz1FBaN4zdBF73ufw2ywndhds4lJmHXHyob8k-WN7qRsLdiU-S3NJDO2bHeBdH108XnM7q8nC-e1wBwftXoWopH4zqWDwTNXE34nslRboYIlfaOAKCeJygPAq8yehyN6CUltHj4j5I-JdMaprUq9KPVgSWlfLbVkogCn9XMWjgdEcnL-KqLIw-g3vcX8tVIDfBFoCN2cHPwkSe_Pu5HPILZQxb0gUvEu_XRv4fZVT2FTpsB7oWuE-crnnZIHqHijv76la93Xdpl0I2qlzNdP-qMi4ahUnavc-P2CyS0kRmWaEKnzXDze8_Q3_8Ny0)
+![Five observed forms of recovery](https://www.plantuml.com/plantuml/svg/dPJFJjj04CRlVefHUucjGe6OD4GK0I4Wf8fMG4-0oYQUs5jxTytkEk2MIZtr0Qe-Gn-C9-ci_uG0ELMA77bdvlj-E-FTNMEPjeN8FCjjXd38PmXgR53FC8AfqiA0ceB6YPgXBk7Xvn-uJKguHR0ifKU2O7WiMGPJhGHCbCYLH6dDnPNdcPJBd6acW6mimdSFO9zDqbYhGaP3bIczlJtMAaMvimEl3mz6_L5_MOvANNpKFzmSRIsBiqZmMg9BIGVU3_Ak75yDvq0GOQnPXD5RLLWMuojW1lOhStYaM5AdSjJCSaMRh6gED5Ob3gfDFvOJ7b4sTSgeZ7fNPGupPQYDSpxFkmYkO6Lbf_7rlCRVBTMo0-Yi-t0jbEHMQIxZQoZoY3mkvIst2J2mcad37Gyy_FgzIBTKRSE7830y8xWWgEVdTAHgT85PODdosYwHS3b3OtbC7lyDq_I154D_tg6vb4q8uU3pfm_7mxtpqLdrJJqJM_3nQhgdifilPEjTCWaeSbkIoIDePr7ucP7lUOsgCw1fBTYvsGs0jvEcoPVcKb8nIHOvM0LXVmreq2GY5I5e7YVM7PzAWxxR8DZVEpaPdSBvwV7HqUYq6OXDkAbFo1jAejAg1Gl495rJhLByJ1LwWeCdHstLLHU6ejKfD8KGJ9UhNmtr2sNaDB616YjhAOMeQacgEVbuNesInp7gmRoJNsWi6OkTwhY4djiPT0H6d4cVkF-sswL5TkSxz5wTH3-tWSpT9GAPAJGAubmWoJ1sBrM3gEx-VNNLk7-yOoAdY-ZUBLTduHwclJXDRthsBdlt3TQxWxL-6zvmOH7dMrj6XgMCGkZKdxhVPdHTnZZItUdDXaudYMu3uKlbSB0Ujk7D5yeKxhemWTVutYuzwEhy1m00)
 
-### 7. Дедуплікація — по `incident_updates[].id`
+### 7. Deduplication — by `incident_updates[].id`
 
-Не по факту переходу компонентів (форма непослідовна: `resolved` дублює вже показаний перехід) і не
-по `updated_at` (редагування заднім числом дало б повторний банер зі старим змістом).
+Not by the fact of a component transition (the form is inconsistent: `resolved` duplicates a
+transition already shown), and not by `updated_at` (retroactive edits would produce a repeat
+banner with old content).
 
-### 8. Нотифікації: кольорова крапочка, клік на інцидент, «Unfollow», quiet hours
+### 8. Notifications: colored status dot, click into the incident, "Unfollow," quiet hours
 
-Перед текстом — кольорова крапочка статусу (та сама візуальна мова, що й попап). Клік відкриває
-сторінку інциденту; окрема дія «Unfollow». Quiet hours — ті самі, що для
+Before the text, a colored status dot (the same visual language as the popup). Clicking opens the
+incident's page; there's a separate "Unfollow" action. Quiet hours are the same as
 [ADR-0039](0039-back-to-work-notification.md) / [ADR-0050](0050-extra-usage-notification.md).
 
-### 9. Фільтри в Settings: за ураженими сервісами і за віком
+### 9. Filters in Settings: by affected services and by age
 
-### 10. Dev-лог payload-ів у JSONL, запис лише на суттєву зміну
+### 10. Dev log of payloads in JSONL, written only on a meaningful change
 
-Відбиток = статуси компонентів + набір `incident_updates[].id` + статус інциденту. Вмикається
-чекбоксом у Development tools ([#185](https://github.com/artem-from-ua/tokenpace/issues/185)).
+Fingerprint = component statuses + the set of `incident_updates[].id` + incident status. Enabled
+by a checkbox in Development tools ([#185](https://github.com/artem-from-ua/tokenpace/issues/185)).
 
-## Перегляд рішень 5 і 6: підписка на епізод
+## Revising decisions 5 and 6: subscribing to an episode
 
-Під час реалізації мейнтейнер уточнив, **як фічу насправді досягають**, і це зняло основу під
-per-incident моделлю:
+During implementation, the maintainer clarified **how the feature is actually used**, and that
+pulled the rug out from under the per-incident model:
 
-- користувач підписується лише тоді, коли в нього щось не працює **і** він бачить незелені сервіси;
-- він **не знає**, який із кількох одночасних інцидентів зачіпає саме його роботу.
+- the user subscribes only when something isn't working for them **and** they can see non-green
+  services;
+- they **don't know** which of several simultaneous incidents is the one affecting their work.
 
-Отже підписка — на стан «у мене зараз зламано» (**епізод**), а не на тікет Statuspage.
+So the subscription is to the state "something's broken for me right now" (an **episode**), not to
+a Statuspage ticket.
 
-**Що змінилося.**
+**What changed.**
 
-1. **Одна кнопка на всі поточні інциденти**, а не іконка в кожному рядку. Нові інциденти, заведені
-   поки епізод триває, вливаються в ту саму підписку — інакше довелось би перепідписуватись посеред
-   аварії.
-2. **Рядок підписки видно і без ⌥**, на тому самому місці в обох вимірах. Він потрібен саме тоді,
-   коли видно червоні рядки сервісів, — а це дефолтний вигляд попапа.
-3. **Епізод завершується двома шляхами**: усі моніторені компоненти зелені **або** всі активні
-   інциденти перейшли в `monitoring`. Друге — свідоме розширення рішення 6: сигнал і далі не береться
-   з `resolved_at`/`monitoring_at`, але сам перехід у `monitoring` означає «фікс викочено» і приходить
-   раніше за позеленіння. Банери для цих двох випадків **сформульовані по-різному**: «Claude is back»
-   проти «Fix deployed — monitoring», бо це різні твердження, і переоцінити друге означало б дати
-   хибний відбій.
-4. **Іконка = стан, текст = дія** (`bell.slash` + «Notify me when it's fixed» → `bell.fill` +
-   «Following the incidents»). Гола іконка-перемикач дає двозначність Play/Pause: перекреслений
-   дзвіночок однаково читається і як «зараз вимкнено», і як «натисни, щоб вимкнути».
+1. **One button for all current incidents**, instead of an icon on each row. New incidents opened
+   while the episode is ongoing flow into the same subscription — otherwise the user would have to
+   resubscribe in the middle of an outage.
+2. **The subscription row is visible even without ⌥**, in the same place in both dimensions. It's
+   needed exactly when red service rows are visible — which is the popup's default view.
+3. **An episode ends via two paths**: all monitored components turn green, **or** all active
+   incidents transition to `monitoring`. The second path is a deliberate extension of decision 6:
+   the signal still isn't taken from `resolved_at`/`monitoring_at`, but the transition into
+   `monitoring` itself means "the fix has shipped," and it arrives before components turn green.
+   The banners for these two cases are **worded differently** — "Claude is back" versus "Fix
+   deployed — monitoring" — because they're different claims, and overstating the second would
+   give a false all-clear.
+4. **Icon = state, text = action** (`bell.slash` + "Notify me when it's fixed" → `bell.fill` +
+   "Following the incidents"). A bare toggle icon creates Play/Pause ambiguity: a crossed-out bell
+   reads equally as "currently off" and as "tap to turn off."
 
-**Наслідок для відкритих питань.** №1 (кілька одночасних інцидентів) і №6 (де живе іконка) **зникли
-разом із per-incident моделлю** — одна кнопка в фіксованому місці не лишає жодного з цих виборів.
+**Consequence for the open questions.** Open questions 1 (several simultaneous incidents) and 6
+(where the icon lives) **disappeared along with the per-incident model** — one button in a fixed
+location leaves neither of those choices to make.
 
-### Знахідки реалізації, що уточнюють емпіричну базу
+### Implementation findings that refine the empirical base
 
-- **`summary.json` уже несе `incidents[]` цілком** — разом із їхніми `components[]` та
-  `incident_updates[]`. Другий ендпоінт не потрібен. Твердження design-нотатки, що `components[]`
-  заповнений лише в `unresolved.json`, вірне для `incidents.json`, але **не** для `summary.json`.
-- **`incidents[].components[]` — живе дзеркало** поточного стану, а не знімок на момент інциденту.
-  Тому гейт «зелені → ховаємо» локальний до інциденту; і тому це поле **не можна** читати як
-  історичне свідчення серйозності.
-- **`components[].updated_at` дає вік стану безкоштовно** — зсувається рівно на зміні статусу й стоїть
-  на місці, поки статус той самий. Персистувати «коли ми вперше побачили червоне» не треба, і вік
-  переживає рестарт посеред 6-годинної аварії.
-- **`resolved_at` не годиться навіть як ключ вікна «щойно відновлено»**: у всіх трьох знімках, де
-  компоненти вже зелені, він `null` — інцидент формально відкритий.
-- **В інциденту немає окремого поля опису** — лише `name`. Заміряно на 50 інцидентах: медіана 34
-  символи (один рядок), максимум 107 (три).
+- **`summary.json` already carries `incidents[]` in full** — together with their `components[]`
+  and `incident_updates[]`. A second endpoint isn't needed. The design note's claim that
+  `components[]` is populated only in `unresolved.json` holds for `incidents.json`, but **not**
+  for `summary.json`.
+- **`incidents[].components[]` is a live mirror** of current state, not a snapshot taken at
+  incident time. That's why the "green → hide" gate is local to the incident, and why this field
+  **cannot** be read as historical evidence of severity.
+- **`components[].updated_at` gives you the state's age for free** — it shifts exactly when the
+  status changes and stays put while the status is unchanged. There's no need to persist "when we
+  first saw red," and the age survives a restart in the middle of a 6-hour outage.
+- **`resolved_at` doesn't even work as a key for a "just recovered" window**: in all three
+  snapshots where components were already green, it was `null` — the incident was still formally
+  open.
+- **An incident has no separate description field** — only `name`. Measured across 50 incidents:
+  median 34 characters (one line), max 107 (three lines).
 
-## Розглянуті й відкинуті альтернативи
+## Alternatives considered
 
-Зафіксовано, щоб не переглядати ці розвилки повторно.
+Recorded so these forks don't get revisited.
 
-### A. Глобальний тумблер «нотифікувати про інциденти» замість opt-in по кліку
+### A. A global "notify about incidents" toggle instead of opt-in by click
 
-**Відкинуто.** Аргумент за нього був: підписка на конкретний інцидент вимагає, щоб користувач спершу
-його **помітив**, а головна цінність — дізнатися, коли ти *не* дивишся в попап; плюс «на що
-підписуватись» уже сконфігуровано в Monitored Services.
+**Rejected.** The argument for it was: subscribing to a specific incident requires the user to
+first **notice** it, and the main value is finding out when you're *not* looking at the popup;
+plus "what to subscribe to" is already configured in Monitored Services.
 
-Причина відмови: тумблер означає нотифікації **без явної згоди на конкретну подію**. Він також тягне
-за собою задачу «вгадати релевантність» — гейт по компонентах, обробку кейсу «інцидент `major`, а
-компоненти зелені», кейсу «інцидент розрісся й тепер зачіпає Claude Code». Явний клік прибирає всю цю
-машинерію разом із класом хибних спрацювань.
+Reason for rejection: a toggle means notifications **without explicit consent to a specific
+event**. It also drags in the task of "guessing relevance" — a gate on components, handling the
+"incident is `major` but components are green" case, and the "incident grew and now affects Claude
+Code" case. An explicit click removes all of that machinery along with an entire class of false
+positives.
 
-### B. Три градації шуму («start & end» / «+ status changes» / «all updates»)
+### B. Three noise tiers ("start & end" / "+ status changes" / "all updates")
 
-**Відкинуто.** Спершу пропонувалися три рівні як шкала. Виміряно, що це не шкала, а **два різні стани
-голови**, між якими людина перемикається посеред одного інциденту. Крім того, на реальних даних
-різниця між «всі оновлення» і «тільки відновлення» — приблизно **один банер на інцидент** (3.3
-апдейти в середньому; `f6gkkq6txl7z` за 429 хв дав лише один суто текстовий апдейт).
+**Rejected.** Three levels were initially proposed as a scale. Measured evidence shows this isn't
+a scale but **two different states of mind** a person switches between during a single incident.
+Also, on real data the difference between "all updates" and "recovery only" is roughly **one
+banner per incident** (3.3 updates on average; `f6gkkq6txl7z`, over 429 minutes, produced only one
+purely textual update).
 
-Залишок цієї ідеї — відкрите питання про набір подій (див. нижче), яке вирішується живими
-спостереженнями, а не наперед заданою шкалою.
+What's left of this idea is an open question about the event set (see below), which gets resolved
+by live observation rather than a scale set in advance.
 
-### C. Перший банер завжди, режим обирається в ньому
+### C. Always show a first banner, pick the mode inside it
 
-**Відкинуто.** Пропонувалося: дефолт — один банер «ось інцидент, він тебе зачіпає», а в ньому дві дії
-(«Follow all updates» / «Only when fixed»). Це все одно нотифікація без згоди — суперечить рішенню 5.
+**Rejected.** The proposal: default to one banner, "here's an incident, it affects you," with two
+actions inside it ("Follow all updates" / "Only when fixed"). That's still a notification without
+consent — it contradicts decision 5.
 
-### D. Сигнал відновлення з `resolved_at`
+### D. Recovery signal from `resolved_at`
 
-**Відкинуто емпірично.** Медіана запізнення 6 хв, але у 19 із 45 випадків ≥10 хв, у 5 — >60 хв,
-максимум 480 хв. Живий вимір `f6gkkq6txl7z` — 66 хв простою після реального відновлення.
+**Rejected empirically.** Median lag is 6 min, but 19 of 45 cases were ≥10 min, 5 were >60 min, and
+the max was 480 min. The `f6gkkq6txl7z` live measurement was 66 minutes of downtime after real
+recovery.
 
-### E. Сигнал відновлення з `monitoring` / `monitoring_at`
+### E. Recovery signal from `monitoring` / `monitoring_at`
 
-**Відкинуто емпірично.** Поле заповнене лише в 28 із 49 інцидентів (у `mgp99sn4ynd4` — `null`), і не
-корелює з позеленінням: у `bdr3fq2rkchr` компоненти зеленіли під статусом `investigating`.
+**Rejected empirically.** The field is populated in only 28 of 49 incidents (`null` in
+`mgp99sn4ynd4`), and it doesn't correlate with turning green: in `bdr3fq2rkchr`, components turned
+green while the status was still `investigating`.
 
-### F. Сигнал відновлення з `affected_components` в апдейтах
+### F. Recovery signal from `affected_components` in updates
 
-**Відкинуто емпірично** — і це скасування проміжного висновку, зробленого після першого інциденту.
-`mgp99sn4ynd4` відновився **тихо**: компоненти позеленіли без жодного апдейту, тож слухач апдейтів
-мовчав би 43 хвилини.
+**Rejected empirically** — and this reverses an intermediate conclusion drawn after the first
+incident. `mgp99sn4ynd4` recovered **silently**: components turned green with no update at all, so
+a listener on updates would have stayed silent for 43 minutes.
 
-### G. `deliver_notifications` як готовий фільтр шуму
+### G. `deliver_notifications` as a ready-made noise filter
 
-**Відкинуто.** Гіпотеза була, що Anthropic сама маркує варті сповіщення апдейти. Прапорець
-непослідовний: у `bdr3fq2rkchr` він `false` саме на `resolved` — тобто відсіяв би найцінніше; у наших
-двох інцидентів — `true` на всіх шести апдейтах, включно з чисто текстовим.
+**Rejected.** The hypothesis was that Anthropic itself flags updates worth notifying about. The
+flag is inconsistent: in `bdr3fq2rkchr` it was `false` on exactly the `resolved` update — meaning
+it would have filtered out the most valuable one; in our two incidents it was `true` on all six
+updates, including a purely textual one.
 
-### H. Інцидент як окремий блок над рядками сервісів
+### H. Incident as a separate block above the service rows
 
-**Відкинуто** на користь ⌥-заміни. Блок над рядками нічого не втрачає, але постійно збільшує попап на
-2–3 рядки; ⌥-заміна лишає дефолтний вигляд недоторканим.
+**Rejected** in favor of the ⌥ swap. A block above the rows loses nothing, but it permanently grows
+the popup by 2–3 rows; the ⌥ swap leaves the default view untouched.
 
-### I. Інцидент замість рядків сервісів **без** ⌥ (постійно)
+### I. Incident replacing the service rows **without** ⌥ (permanently)
 
-**Відкинуто.** Під час аутейджа одна людська фраза цінніша за per-component крапки — але грануляція,
-за яку боролися в [#89](https://github.com/artem-from-ua/tokenpace/issues/89) /
-[ADR-0024](0024-configurable-logical-services.md), зникає для тих, хто саме її й хоче.
+**Rejected.** During an outage, one human sentence is worth more than per-component dots — but the
+granularity fought for in [#89](https://github.com/artem-from-ua/tokenpace/issues/89) /
+[ADR-0024](0024-configurable-logical-services.md) disappears for exactly the people who want it.
 
-### J. Інцидент у рядку компонента (`degraded: models erroring`)
+### J. Incident inside the component row (`degraded: models erroring`)
 
-**Відкинуто.** Найкомпактніше, але текст апдейту нікуди не влазить, і при кількох уражених сервісах
-той самий інцидент дублюється в кожному рядку.
+**Rejected.** The most compact option, but the update text doesn't fit, and with several affected
+services the same incident gets duplicated in every row.
 
-### K. Показувати інцидент, коли компоненти вже зелені (як «recovering»)
+### K. Show the incident while components are already green (as "recovering")
 
-**Відкинуто** на користь повного приховування (рішення 4). Варіант «recovering · fix deployed 12m ago»
-давав більше контексту, але суперечить головному питанню попапа — «чи можу я працювати».
+**Rejected** in favor of hiding it completely (decision 4). The "recovering · fix deployed 12m ago"
+variant gave more context, but it contradicts the popup's central question — "can I work."
 
-### L. Показ уражених сервісів у рядку інциденту
+### L. Showing affected services in the incident row
 
-**Відкинуто.** Дублює наявний фільтр Monitored Services: якщо інцидент показано, він уже пройшов
-цей фільтр.
+**Rejected.** It duplicates the existing Monitored Services filter: if an incident is shown, it
+already passed that filter.
 
-### M. Автоматичне стишення після N банерів
+### M. Automatically quieting down after N banners
 
-**Відкинуто як передчасне.** Ідея: після кількох банерів підряд пропонувати в самому банері «Only tell
-me when it's fixed». На реальних даних потік не є шумним (3.3 апдейти на інцидент), тож проблема, яку
-це розв'язує, поки не спостерігалася.
+**Rejected as premature.** The idea: after several banners in a row, offer "Only tell me when it's
+fixed" right inside the banner. On real data the stream isn't noisy (3.3 updates per incident), so
+the problem this would solve hasn't been observed yet.
 
-### N. Кнопка «Retry» / власна детекція «вже працює»
+### N. A "Retry" button / homegrown "it's working again" detection
 
-**Відкинуто свідомо.** TokenPace не знає стану сесії Claude Code користувача; фальшиве «вже можна»
-гірше за мовчання.
+**Rejected deliberately.** TokenPace doesn't know the state of the user's Claude Code session; a
+false "you're good now" is worse than silence.
 
-## Наслідки
+## Consequences
 
-**Позитивні.**
+**Upsides.**
 
-- Попап відповідає не лише «чи це Anthropic», а й «що саме та наскільки надовго».
-- Сигнал «вже можна працювати» приходить **у момент реального відновлення**, а не через 6–480 хв.
-- Opt-in-модель знімає задачу вгадування релевантності разом із класом хибних спрацювань.
-- Посилання зі статусу веде на конкретний інцидент, а не на загальну сторінку.
+- The popup answers not just "is this Anthropic," but also "what exactly, and for how long."
+- The "you can work again" signal arrives **at the moment of real recovery**, not 6–480 minutes
+  later.
+- The opt-in model removes the relevance-guessing task along with an entire class of false
+  positives.
+- The link from the status leads to the specific incident, not to the general page.
 
-**Ціна.**
+**Cost.**
 
-- `StatusSummary` перестає бути вузьким одним полем — додається `incidents[]` (ADR-0013 §2 частково
-  переглядається).
-- З'являється **персистований стан підписок**, який має пережити рестарт (інциденти бувають 6+ годин).
-- ⌥ у попапі отримує четверту роль; поведінка секції статусу змінюється для наявних користувачів.
-- Потрібен дебаунс проти блимання компонентів — інакше банери стрибатимуть.
+- `StatusSummary` stops being a single narrow field — `incidents[]` is added (ADR-0013 §2 is
+  partially revisited).
+- **Persisted subscription state** appears, and it must survive a restart (incidents run 6+
+  hours).
+- ⌥ in the popup gains a fourth role; the status section's behavior changes for existing users.
+- A debounce against component flapping is needed — otherwise banners would flicker.
 
-**Ризик, прийнятий свідомо.** ADR-0013 §2 ігнорував інциденти саме тому, що інцидент ≠ поломка
-сценарію користувача (кейс Mythos/Fable). Оскільки підписка тепер явна, цей клас хибних спрацювань
-переноситься на рішення людини: користувач сам бачить інцидент і сам вирішує, чи він його стосується.
+**Risk accepted deliberately.** ADR-0013 §2 ignored incidents precisely because an incident ≠ a
+break in the user's workflow (the Mythos/Fable case). Since subscription is now explicit, that
+class of false positives is shifted onto human judgment: the user sees the incident themselves and
+decides whether it's relevant to them.
 
-## Закриті питання
+## Open questions
 
-Усі шість питань, з якими цей ADR писався як draft, **закриті** — п'ять рішеннями, ухваленими під час
-реалізації ([#279](https://github.com/artem-from-ua/tokenpace/issues/279)), одне свідомим переносом у
-код як налаштовуваного параметра. Тому ADR переведено в `accepted`.
+All six questions this ADR was drafted with are **closed** — five by decisions made during
+implementation ([#279](https://github.com/artem-from-ua/tokenpace/issues/279)), one by a
+deliberate move into code as a tunable parameter. So the ADR is moved to `accepted`.
 
-| # | Питання | Як закрито |
+| # | Question | How it was closed |
 |---|---|---|
-| ~~1~~ | ~~Кілька одночасних інцидентів: одна кнопка на всі, кожен окремо, чи «лише наявні на момент кліку»~~ | Переходом на підписку-на-**епізод**: одна кнопка на всі поточні |
-| ~~2~~ | ~~Фінальний набір подій для банерів~~ | `EpisodeEvent` має рівно два випадки: `.update` (новий запис `incident_updates[]`, із severity) і `.ended`. Погіршення та формальне закриття окремими подіями **не** стали |
-| ~~3~~ | ~~Скільки живе підписка після закриття інциденту; чи переживає рестарт~~ | Персистується (`PersistedConfig.episodeSubscription`, JSON у `UserDefaults`). Причина в коді цитує наш власний вимір: інцидент тривав 429 хв, тож підписка, що не переживає релонч, губилася б регулярно |
-| 4 | Значення дебаунсу перед банером «відновлено» | **Механізм закрито, значення — ні.** `EpisodeSubscription.defaultDebounce` = 90 с, і це **параметр** `EpisodeEvaluator.evaluate`, а не константа — саме щоб відкалібрувати з даних однією правкою, без нового ADR. Калібрування веде [#297](https://github.com/artem-from-ua/tokenpace/issues/297) |
-| ~~5~~ | ~~Що робити з `impact` і maintenance~~ | `impact` декодується, але **свідомо не використовується**: виміряно, що він погано корелює з реальним болем (обидва інциденти 2026-08-05 — `minor`, поки частина моделей не працювала шість годин). `scheduled_maintenances[]` лишається не декодованим — це окрема фіча, не питання цього ADR |
-| ~~6~~ | ~~Де живе іконка підписки~~ | Окремий рядок під сервісами, видимий і без ⌥ — питання існувало лише за per-incident моделі |
+| ~~1~~ | ~~Several simultaneous incidents: one button for all, one per incident, or "only those active at click time"~~ | By moving to a per-**episode** subscription: one button for all current incidents |
+| ~~2~~ | ~~Final set of events for banners~~ | `EpisodeEvent` has exactly two cases: `.update` (a new `incident_updates[]` entry, with severity) and `.ended`. Degradation and formal closure did **not** become separate events |
+| ~~3~~ | ~~How long a subscription lives after an incident closes; whether it survives a restart~~ | Persisted (`PersistedConfig.episodeSubscription`, JSON in `UserDefaults`). The reason cited in the code is our own measurement: an incident ran for 429 minutes, so a subscription that didn't survive a relaunch would be lost routinely |
+| 4 | The debounce value before the "recovered" banner | **The mechanism is closed, the value isn't.** `EpisodeSubscription.defaultDebounce` = 90 s, and it is a **parameter** of `EpisodeEvaluator.evaluate`, not a constant — precisely so it can be calibrated from data with a single edit, without a new ADR. Calibration is tracked in [#297](https://github.com/artem-from-ua/tokenpace/issues/297) |
+| ~~5~~ | ~~What to do with `impact` and maintenance~~ | `impact` is decoded, but **deliberately unused**: measured to correlate poorly with real pain (both 2026-08-05 incidents were `minor`, while part of the models were down for six hours). `scheduled_maintenances[]` remains undecoded — that's a separate feature, not a question of this ADR |
+| ~~6~~ | ~~Where the subscription icon lives~~ | A separate row under the services, visible even without ⌥ — the question only existed under the per-incident model |
 
-> **Чому 4 не тримає ADR у draft.** Рішення тут — «дебаунс потрібен, і його величина налаштовується»,
-> а не конкретні 90 секунд. `accepted` ADR у цьому проєкті незмінний, тож прив'язувати його статус до
-> значення параметра означало б вимагати новий ADR заради однієї константи. Підбір значення — звичайна
-> зміна коду.
+> **Why question 4 doesn't keep the ADR in draft.** The decision here is "a debounce is needed, and
+> its value is tunable," not the specific 90 seconds. An `accepted` ADR in this project is
+> immutable, so tying its status to a parameter's value would mean requiring a new ADR just for one
+> constant. Tuning the value is an ordinary code change.
 
-## Посилання
+## References
 
-- [docs/design/incident-subscriptions.md](../design/incident-subscriptions.md) — повний підсумок
-  інтерв'ю, емпіричні таблиці, опис тестових даних
-- [ADR-0013](0013-claude-status-line.md) — рядок статусу сервісів; частково переглядається (§2)
-- [ADR-0024](0024-configurable-logical-services.md) — конфігуровані логічні сервіси
+- [docs/design/incident-subscriptions.md](../design/incident-subscriptions.md) — full interview
+  summary, empirical tables, test data description
+- [ADR-0013](0013-claude-status-line.md) — the service status line; partially revisited (§2)
+- [ADR-0024](0024-configurable-logical-services.md) — configurable logical services
 - [ADR-0039](0039-back-to-work-notification.md), [ADR-0050](0050-extra-usage-notification.md) —
-  наявні нотифікації, quiet hours
-- [#297](https://github.com/artem-from-ua/tokenpace/issues/297) — калібрування дебаунсу (90 с
-  провізорні) із захоплених даних; не блокує цей ADR
-- [Інцидент f6gkkq6txl7z](https://stspg.io/s2ysk4zxbyy3) — основний кейс
+  existing notifications, quiet hours
+- [#297](https://github.com/artem-from-ua/tokenpace/issues/297) — debounce calibration (90 s is
+  provisional) from captured data; does not block this ADR
+- [Incident f6gkkq6txl7z](https://stspg.io/s2ysk4zxbyy3) — the primary case

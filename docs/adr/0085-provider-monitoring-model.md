@@ -3,43 +3,45 @@ status: accepted
 date: 2026-08-13
 ---
 
-# ADR-0085: Збір usage і моніторинг сервісів — дві різні речі
+# ADR-0085: Usage collection and service monitoring are two different things
 
-> Уточнює [ADR-0024](0024-configurable-logical-services.md) і [ADR-0013](0013-claude-status-line.md):
-> `Claude API` більше не «завжди моніториться безумовно» — він моніториться, **поки ввімкнено хоч
-> що-небудь**, і його стан похідний, а не збережений. Решта обох ADR (worst-of-N, семантика
-> компонентів, ідентичність за іменем) чинна.
+> Refines [ADR-0024](0024-configurable-logical-services.md) and
+> [ADR-0013](0013-claude-status-line.md): `Claude API` is no longer "always monitored
+> unconditionally" — it is monitored **as long as anything at all is enabled**, and its state is
+> derived, not stored. The rest of both ADRs (worst-of-N, component semantics, identity by name)
+> still stands.
 
-## Контекст
+## Context
 
-Рядок у Settings казав `Claude API — always monitored`, а докблок `MonitoredServices` пояснював,
-чому:
+The row in Settings said `Claude API — always monitored`, and the `MonitoredServices` doc comment
+explained why:
 
 > `Claude API (api.anthropic.com)` is deliberately **not** represented here: it is always monitored
 > and not user-configurable (TokenPace's own ability to call the usage API depends on it).
 
-У цьому одному реченні злиплися **дві різні речі**:
+That single sentence conflated **two different things**:
 
-1. **моніторинг інцидентів** `api.anthropic.com` на status-сторінці — те саме, що ми робимо для
-   Claude Code і claude.ai;
-2. **залежність нашого власного збору даних** від того, що цей ендпоїнт живий.
+1. **incident monitoring** of `api.anthropic.com` on the status page — the same thing we do for
+   Claude Code and claude.ai;
+2. **our own data collection's dependency** on that endpoint being alive.
 
-Наслідок був не косметичний. Користувач не мав способу сказати «не опитуй usage API» — а це
-законне бажання: хтось не хоче, щоб застосунок ходив по його токен кожні три хвилини, комусь
-потрібні лише інциденти. Єдиний доступний жест — вимкнути все й закрити застосунок.
+The consequence was not cosmetic. The user had no way to say "don't poll the usage API" — and that
+is a legitimate wish: someone might not want the app hitting their token every three minutes,
+someone might only want incidents. The only available gesture was to turn everything off and quit
+the app.
 
-[#341](https://github.com/artem-from-ua/tokenpace/issues/341) розчіплює ці дві речі.
+[#341](https://github.com/artem-from-ua/tokenpace/issues/341) splits these two things apart.
 
-## Рішення
+## Decision
 
-### 1. Композит, а не злиття
+### 1. A composite, not a merge
 
-Новий Kit-тип `ProviderMonitoring` тримає **дві половини поруч**:
+A new Kit type, `ProviderMonitoring`, holds **the two halves side by side**:
 
 ```swift
 public struct ProviderMonitoring: Sendable, Equatable, Codable {
-    public var usageApiEnabled: Bool         // збір usage — те, що живить бари
-    public var services: MonitoredServices   // status page — БЕЗ ЗМІН
+    public var usageApiEnabled: Bool         // usage collection — what feeds the bars
+    public var services: MonitoredServices   // status page — UNCHANGED
 
     public var claudeApiLocked: Bool {
         usageApiEnabled || services.claudeCodeEnabled || services.webDesktopEnabled
@@ -47,151 +49,165 @@ public struct ProviderMonitoring: Sendable, Equatable, Codable {
 }
 ```
 
-`MonitoredServices` **не змінено взагалі**. Це не акуратність заради акуратності: його докблок каже
-«which Claude **status-page services** to monitor», і покласти туди прапорець збору usage означало б
-відтворити рівно те змішування, заради розчеплення якого існує цей тікет, лише рівнем нижче. Тип, що
-бреше про власну назву, — це та сама проблема, тільки в коді замість UI.
+`MonitoredServices` is **not changed at all**. This is not tidiness for its own sake: its doc
+comment says "which Claude **status-page services** to monitor," and putting the usage-collection
+flag there would recreate exactly the conflation this ticket exists to untangle, just one level
+down. A type that lies about its own name is the same problem, just in code instead of the UI.
 
-### 2. `claudeApiLocked` — обчислюваний, ніколи не збережений
+### 2. `claudeApiLocked` — computed, never stored
 
-`Claude API` не має власного перемикача. Він увімкнений, **поки ввімкнено хоч що-небудь**: usage-полл
-ходить саме на нього, а інциденти Claude Code чи claude.ai нечитабельні без відповіді на питання «а
-чи живий сам API». Єдина конфігурація без нього — та, де вимкнено все, і в ній він і не потрібен.
+`Claude API` has no switch of its own. It is enabled **as long as anything at all is enabled**: the
+usage poll hits it directly, and Claude Code or claude.ai incidents are unreadable without an answer
+to "is the API itself alive." The only configuration without it is the one where everything is off,
+and there it is not needed either.
 
-Похідність усуває неможливий стан **у корені**: нема другої копії, яку можна розсинхронізувати, не
-потрібна нормалізація в `init(from:)`, і memberwise-`init` не може сконструювати заборонену
-комбінацію. Альтернатива — збережене поле `claudeApiEnabled`, яке довелося б нормалізувати в кожній
-точці входу, — лишила б клас багів, що тут просто не існує.
+Derivation removes the impossible state **at the root**: there is no second copy that can drift out
+of sync, no normalization is needed in `init(from:)`, and the memberwise `init` cannot construct the
+forbidden combination. The alternative — a stored `claudeApiEnabled` field that would have to be
+normalized at every entry point — would leave a whole class of bugs that simply does not exist here.
 
-### 3. Два ключі в `UserDefaults`, а не один блоб
+### 3. Two keys in `UserDefaults`, not one blob
 
-`usageApiEnabled` — окремий скалярний ключ поряд із JSON-блобом `monitoredServices`, а не поле
-всередині нього.
+`usageApiEnabled` is a separate scalar key next to the `monitoredServices` JSON blob, not a field
+inside it.
 
-Причина — даунгрейд. Якби прапорець жив у блобі, старіший білд, який про нього не знає, перезаписав
-би блоб при першій же зміні налаштувань і **тихо стер** вибір користувача. Два ключі переживають
-даунгрейд; один блоб — ні.
+The reason is downgrade safety. If the flag lived in the blob, an older build that doesn't know
+about it would overwrite the blob on the very next settings change and **silently erase** the
+user's choice. Two keys survive a downgrade; one blob does not.
 
-### 4. «Нічого не моніториться» — легальний стан, а не помилка
+### 4. "Nothing is monitored" is a legal state, not an error
 
-Порожній набір тепер представимий: `StatusHealth.checks` повертає порожній масив, `worstProblem` —
-`nil`, `monitoredComponentNames` — порожню множину (тож жоден інцидент не «мій»).
+An empty set is now representable: `StatusHealth.checks` returns an empty array, `worstProblem` is
+`nil`, `monitoredComponentNames` is an empty set (so no incident is ever "mine").
 
-Це змінює давній інваріант «`Claude API` присутній завжди». Нове формулювання: **`Claude API`
-присутній завжди, коли ввімкнено хоч щось**. Тести не видалено — переписано під нове формулювання, з
-доданим виміром `usageApiEnabled` у пермутаціях.
+This changes a long-standing invariant that "`Claude API` is always present." The new formulation:
+**`Claude API` is present whenever anything at all is enabled.** The tests were not deleted —
+they were rewritten for the new formulation, with a `usageApiEnabled` dimension added to the
+permutations.
 
-### 5. Третій стан `UsageHealth`
+### 5. A third state for `UsageHealth`
 
-`UsageHealth` мав рівно два стани: healthy (`failingSince == nil`) і failing. «Навмисно не опитуємо»
-не лягало в жоден, і **обидва** обхідні шляхи ламаються:
+`UsageHealth` used to have exactly two states: healthy (`failingSince == nil`) and failing.
+"Deliberately not polling" fit neither, and **both** workarounds break:
 
-| Обхід | Що ламається |
+| Workaround | What breaks |
 |---|---|
-| повернути **failing** | попап показує червоний банер помилки **негайно** (він не має 30-хвилинного порогу — це поріг бару), а бар через 30 хв дає ⚠️, через 60 — голе ⚠️. Свідомий вибір користувача **сам** деградує в повідомлення про поломку |
-| повернути **healthy** | `lastSuccess` бреше: попап каже «Updated just now» без жодних даних за цим, а `wakeRearmInterval` подавлює негайний полл після пробудження |
+| return **failing** | the popup shows a red error banner **immediately** (it has no 30-minute threshold — that threshold belongs to the bar), and the bar gives ⚠️ after 30 minutes, then a bare ⚠️ after 60. The user's deliberate choice **itself** degrades into a broken-app message |
+| return **healthy** | `lastSuccess` lies: the popup says "Updated just now" with no data behind it, and `wakeRearmInterval` suppresses the immediate poll after wake |
 
-Тому — **поле** `notPolling: Bool`, а не enum-кейс. `UsageHealth` — це `struct` із трьох `let`, і
-жодного `switch` по ньому в коді немає: усі споживачі читають булеві предикати. Enum-кейс дав би
-перевірку компілятором, але вимагав би перетворити `let` на computed properties — source-breaking
-для memberwise-`init` і автосинтезованого `Equatable`, тобто **не** адитивна зміна.
+Hence a **field**, `notPolling: Bool`, rather than an enum case. `UsageHealth` is a `struct` of
+three `let`s, and there is no `switch` over it anywhere in the code: every consumer reads boolean
+predicates. An enum case would give compiler checking, but would require turning the `let`s into
+computed properties — source-breaking for the memberwise `init` and the auto-synthesized
+`Equatable`, i.e. **not** an additive change.
 
-Ціна поля відома і сплачена явно: компілятор не покаже **жодного** місця, тож кожен споживач знайдено
-й виправлено руками. Щоб наступний споживач не проґавився мовчки, тип дає два **іменовані** предикати
-замість голого прапорця:
+The cost of the field is known and paid explicitly: the compiler will show **zero** call sites, so
+every consumer was found and fixed by hand. So the next consumer doesn't miss it silently, the type
+gives two **named** predicates instead of a bare flag:
 
-- `isCollectingUsage` — «чи збираються дані взагалі»;
-- `hasLiveUsageData` — «дані свіжі: полимо **і** не падаємо».
+- `isCollectingUsage` — "is data being collected at all";
+- `hasLiveUsageData` — "the data is fresh: we're polling **and** not failing."
 
-Місце, яке питає `!isFailing`, коли насправді має на увазі друге, тепер читається як помилка.
+A call site that asks `!isFailing` when it really means the second one now reads as a bug.
 
-### 6. Вхід у режим чистить `lastSnapshot`
+### 6. Entering the mode clears `lastSnapshot`
 
-Спільний корінь двох найгостріших дефектів: якщо застарілий снапшот лишити, виникає пара, якої
-**раніше не існувало** — «не падаємо, і снапшот у руках», причому ніхто його не оновлює. Саме ця пара
-ламає наївних споживачів:
+The shared root of the two sharpest defects: leaving a stale snapshot in place creates a pair that
+**did not exist before** — "not failing, and a snapshot in hand," with nothing ever refreshing it.
+That pair is exactly what breaks naive consumers:
 
-- `brokenData` (`!isFailing && snapshot?.hasBrokenActiveReset`) підняв би червоний
-  `.serverProblem`-банер із замороженого читання;
-- `detectBackToWorkEdge` / `detectExtraUsageEdge` (`failingSince == nil` + `let snapshot`) стріляли б
-  нотифікацією «Back to work!» **на кожному тіку**, а не на переході.
+- `brokenData` (`!isFailing && snapshot?.hasBrokenActiveReset`) would raise a red
+  `.serverProblem` banner from a frozen read;
+- `detectBackToWorkEdge` / `detectExtraUsageEdge` (`failingSince == nil` + `let snapshot`) would
+  fire a "Back to work!" notification **on every tick**, instead of on a transition.
 
-Прибрати пальне чесніше, ніж латати кожного споживача окремо. `lastSuccess` при цьому **виживає** —
-це чесна історія («ось коли дані були востаннє»), і попап нею пояснює вік.
+Removing the fuel is more honest than patching every consumer individually. `lastSuccess`
+**survives** this — it is honest history ("here is when the data was last fresh"), and the popup uses it to
+explain the age.
 
-### 7. Поллінг: той самий heartbeat, інший запит
+### 7. Polling: the same heartbeat, a different request
 
-`apply()` не розрізано. Коли `usageApiEnabled == false`, engine тикає тим самим heartbeat, але
-`pollOnce` не викликається взагалі — отже **Keychain не читається**, і мережа до usage-ендпоїнта не
-йде. Status-полл, який і так їхав на цьому ж heartbeat, лишається єдиним джерелом даних.
+`apply()` is not split. When `usageApiEnabled == false`, the engine still ticks on the same
+heartbeat, but `pollOnce` is not called at all — so **the Keychain is never read**, and no network
+traffic goes to the usage endpoint. The status poll, which already rode the same heartbeat, remains
+the only data source.
 
-Прапорець інжектується seam'ом `@Sendable () -> Bool`, який читає `PersistedConfig` **живо на кожній
-ітерації**. Перемикач у Settings тому діє з наступного тіку — а `.manualRefresh`, який шле
-`providerMonitoringChanged`, робить цей «наступний тік» негайним замість «до 15 хвилин».
+The flag is injected through a `@Sendable () -> Bool` seam that reads `PersistedConfig` **live on
+every iteration**. So the Settings toggle takes effect from the next tick — and `.manualRefresh`,
+which sends `providerMonitoringChanged`, makes that "next tick" immediate instead of "up to 15
+minutes."
 
-### 8. Попап показує вік **того, що опитували**
+### 8. The popup shows the age of **what was actually polled**
 
-`PopupLayout.lastUpdateAge` рахувався виключно з `health.lastSuccess`, тобто з usage-полла — у режимі
-`servicesOnly` він показав би «0 s ago» для даних, яких ніхто не брав.
+`PopupLayout.lastUpdateAge` was computed solely from `health.lastSuccess`, i.e. from the usage
+poll — in `servicesOnly` mode it would show "0 s ago" for data that nobody ever fetched.
 
-Окреме джерело правди вже існує: `App.lastStatusSuccess`. Воно прокидається graft-методом
-`withStatusAge(_:)`, за наявним патерном `withIncidents` / `withSubscription` / `withPlanLabel` —
-докблок якого прямо каже «instead of threading them through `make`». Ці значення їдуть на **власному**
-кадансі status-полла, і `lastStatusSuccess` — рівно того ж класу. Ціна нуль: жоден із ~30 викликів
-`PopupLayout.make` у тестах не змінено.
+A separate source of truth already exists: `App.lastStatusSuccess`. It is threaded through with the
+graft method `withStatusAge(_:)`, following the existing `withIncidents` / `withSubscription` /
+`withPlanLabel` pattern — whose doc comment says outright "instead of threading them through
+`make`." These values ride the status poll's **own** cadence, and `lastStatusSuccess` is exactly
+that same class. The cost is zero: none of the ~30 calls to `PopupLayout.make` in the tests changed.
 
-Заразом `lastStatusSuccess` переведено з `Date()` на `currentDate()`: воно тепер потрапляє в
-детермінований шар, а під стубом із мокованим часом wall-clock-штамп дав би від'ємний або стрибучий
-вік.
+At the same time, `lastStatusSuccess` was switched from `Date()` to `currentDate()`: it now lands in
+the deterministic layer, whereas under a stub with mocked time a wall-clock timestamp would produce
+a negative or jumpy age.
 
-### 9. Два нові стани віджета
+### 9. Two new widget states
 
-| Стан | Меню-бар | Попап |
+| State | Menu bar | Popup |
 |---|---|---|
-| Usage API off, сервіси on | **`zzz`**, без барів і часу | плашка «All services» + вік status-полла |
-| Не ввімкнено нічого | **⚠️**, без барів і часу | сірий блок «Monitoring is off» + рядок у Settings |
+| Usage API off, services on | **`zzz`**, no bars or time | "All services" tile + status poll's age |
+| Nothing enabled | **⚠️**, no bars or time | gray "Monitoring is off" block + a line in Settings |
 
-Обидва — **окремі кейси** `MenuBarMode`, а не `.error` із `nil`-ами. `.error` уже перевантажений
-(cold start **і** «падає понад 60 хв») і за побудовою деградує в ⚠️; переиспользувати його означало б
-дати свідомому вибору користувача постаріти у звіт про поломку.
+Both are **separate cases** of `MenuBarMode`, not `.error` with `nil`s. `.error` is already
+overloaded (cold start **and** "failing for over 60 minutes") and degrades to ⚠️ by construction;
+reusing it would mean letting the user's deliberate choice age into a broken-app report.
 
-`zzz` перевірено на живій системі через `NSImage(systemSymbolName:)` — заразом з'ясувалося, що
-`zzz.circle` **не існує**. Це тимчасова іконка; згодом — іконка застосунка.
+`zzz` was checked on a live system through `NSImage(systemSymbolName:)` — which also revealed that
+`zzz.circle` **does not exist**. This is a temporary icon; the app's own icon comes later.
 
-**Крапка статусу в режимі `zzz` лишається.** Вона малюється поза switch'ем, і в цьому режимі вона —
-**єдиний** носій інформації на елементі; прибрати її означало б лишити віджет, що не каже нічого.
+**The status dot stays in `zzz` mode.** It is drawn outside the switch, and in this mode it is the
+**only** piece of information the item carries; removing it would leave a widget that says nothing
+at all.
 
-> ⚠️ Не плутати з *сесійним* idle ([ADR-0027](0027-session-idle-no-phantom-reset.md), «немає активної
-> 5h-сесії»), який малюється **нулем на барі** ([ADR-0078](0078-idle-drawn-as-zero-in-both-styles.md)).
-> Той — про дані, цей — про те, що користувач вимкнув моніторинг.
+> ⚠️ Not to be confused with *session* idle ([ADR-0027](0027-session-idle-no-phantom-reset.md), "no
+> active 5h session"), which is drawn as **zero on the bar**
+> ([ADR-0078](0078-idle-drawn-as-zero-in-both-styles.md)). That one is about data; this one is about
+> the user having turned monitoring off.
 
-## Наслідки
+## Consequences
 
-- **Журнал додаткової роботи не потребував.** `UsageJournal` уже має два методи запису:
-  `append(_:at:expectedInterval:)` ганяє gap-детекцію, а `appendStatus(_:at:)` пише повз неї й
-  usage-годинник **не чіпає**. Status-полли вже йшли другим. Тож у режимі «usage off» журнал далі
-  наповнюється status-рядками, usage-годинник стоїть, і `ResumeMarker` при поверненні стає
-  **семантично правильним**: діра в usage-семплах була справжня. Лишилося тільки не писати
-  `error`-рядки щотіку.
-- **Зникає plan label.** Мітка «Max 5×» береться з `diagnostics.token`; без полла лишиться просто
-  «Claude». Прийнято свідомо — це не порушення «не читати Keychain», а втрата мітки.
-- **Troubleshoot скаже «Token: unavailable (no poll yet)»**, хоча полли йдуть. Технічно правда про
-  usage-полл, читається двозначно. Прийнято.
-- **`StatusCadence` втрачає problem-floor-прискорення.** Її floor рахується як
-  `max(floor, usageInterval)`, а heartbeat у цьому режимі більше не прискорюється під інцидент.
-  Відкритий борг: у режимі без usage status-сторінка — єдине джерело, тож власний floor тут доречний.
-- **Дефолти не змінено.** Усе лишається ввімкненим, включно з чистим встановленням. Вимога «усе off
-  на першому запуску» знята з цього PR: getter `PersistedConfig.monitoredServices` структурно **не
-  розрізняє** перший запуск і наявного користувача без ключа, а `MigrationPlan` класифікує «дуже
-  старого користувача» теж як `.firstRun`. Це окрема робота про онбординг.
+- **The journal needed no extra work.** `UsageJournal` already has two write methods:
+  `append(_:at:expectedInterval:)` runs gap detection, while `appendStatus(_:at:)` writes past it
+  and does **not** touch the usage clock. Status polls already went through the second one. So in
+  "usage off" mode the journal keeps filling with status lines, the usage clock stands still, and
+  `ResumeMarker` becomes **semantically correct** on return: the gap in usage samples was real. All
+  that was left was to stop writing `error` lines on every tick.
+- **The plan label disappears.** The "Max 5×" label comes from `diagnostics.token`; without a poll,
+  it's left as plain "Claude." Accepted deliberately — this is not a violation of "don't read the
+  Keychain," it's a lost label.
+- **Troubleshoot will say "Token: unavailable (no poll yet)"** even though polls are running.
+  Technically true about the usage poll, reads ambiguously. Accepted.
+- **`StatusCadence` loses problem-floor acceleration.** Its floor is computed as
+  `max(floor, usageInterval)`, and the heartbeat no longer accelerates for an incident in this mode.
+  Open debt: in usage-off mode the status page is the only source, so its own floor would make sense
+  here.
+- **Defaults are unchanged.** Everything stays enabled, including on a clean install. The
+  requirement "everything off on first launch" was dropped from this PR: the
+  `PersistedConfig.monitoredServices` getter structurally **cannot distinguish** a first launch from
+  an existing user with no key, and `MigrationPlan` classifies a "very old user" as `.firstRun` too.
+  That's separate work, about onboarding.
 
-## Альтернативи, які розглянуто й відхилено
+## Alternatives considered
 
-- **`usageApiEnabled` полем `MonitoredServices`** — дешевше механічно (сигнатури й ланцюг колбека не
-  чіпаються), але робить докблок структури неправдивим і відтворює вихідне змішування рівнем нижче.
-- **Збережений `claudeApiEnabled` з нормалізацією** — потребує нормалізації в кожній точці входу й
-  лишає можливість розсинхрону, якої в обчислюваного варіанта немає за побудовою.
-- **Enum-кейс замість поля в `UsageHealth`** — дав би перевірку компілятором, але source-breaking для
-  memberwise-`init` і `Equatable`; обсяг і ризик більші за виграш, коли споживачів вісім і всі відомі.
-- **Тумблер провайдера як єдиний вмикач** (як пропонувало тіло тікета) — довелося б означати одну з
-  двох речей, і хоч що б він означав, друга ставала б сюрпризом. Саме цю двозначність тікет і прибирає.
+- **`usageApiEnabled` as a field of `MonitoredServices`** — mechanically cheaper (signatures and the
+  callback chain stay untouched), but makes the struct's doc comment false and recreates the
+  original conflation one level down.
+- **A stored `claudeApiEnabled` with normalization** — needs normalization at every entry point and
+  leaves room for the drift that the computed variant rules out by construction.
+- **An enum case instead of a field on `UsageHealth`** — would give compiler checking, but is
+  source-breaking for the memberwise `init` and `Equatable`; the scope and risk outweigh the payoff
+  when there are eight consumers and all are known.
+- **A single provider toggle** (as the ticket body proposed) — it would have to mean one of the two
+  things, and whichever it meant, the other would become a surprise. That ambiguity is exactly what
+  this ticket removes.

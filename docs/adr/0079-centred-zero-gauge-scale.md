@@ -5,231 +5,245 @@ supersedes: []
 superseded_by: [0080, 0101]
 ---
 
-# ADR-0079: Gauge — четвертий стиль із нулем посередині, що показує невитрачений запас
+# ADR-0079: Gauge — a fourth style with zero in the middle, showing unspent budget
 
-> **Стиль перейменовано: `Gauge` → `Balance`** ([ADR-0109](0109-centred-style-renamed-to-balance.md),
-> #388). Змінилися лише **назва** й `rawValue` (`"gauge"` → `"balance"`); шкала, центральна риска,
-> роль `centreTick` і `BarScale.centred` — точно такі, як описано нижче. Читаючи «Gauge» у цьому
-> тілі, мати на увазі теперішній **Balance**; `BarLayout.gaugeOffset` тепер зветься `balanceOffset`.
+> **The style was renamed: `Gauge` → `Balance`** ([ADR-0109](0109-centred-style-renamed-to-balance.md),
+> #388). Only the **name** and the `rawValue` changed (`"gauge"` → `"balance"`); the scale, the center
+> tick, the role of `centreTick`, and `BarScale.centred` are exactly as described below. When reading
+> "Gauge" in this document, take it to mean today's **Balance**; `BarLayout.gaugeOffset` is now called
+> `balanceOffset`.
 >
-> ⚠️ **Один пункт нижче скасовано.** §«Що лишилось незмінним» каже: «`"gauge"` — новий raw, **не
-> перейменування**, тож `legacyRawValues` не чіпаємо». Після #388 це вже не так — `"gauge"` **є** в
-> `BarStyle.legacyRawValues` і мапиться в `.balance`, інакше перейменування скинуло б налаштування
-> всім, хто ніколи не чіпав стиль (це був дефолт поставки).
+> ⚠️ **One point below is retracted.** The "What stayed unchanged" section says: "`"gauge"` is a new
+> raw value, **not a rename**, so `legacyRawValues` is left alone." After #388 that is no longer true —
+> `"gauge"` **is** in `BarStyle.legacyRawValues` and maps to `.balance`; otherwise the rename would have
+> reset the setting for everyone who never touched the style (it was the shipped default).
 
-> **Частково витіснено** [ADR-0101](0101-pressure-is-the-gauge-ahead-half.md): коефіцієнта `k`
-> більше немає в жодній шкалі, тож §«Чому `k` лише праворуч» відпадає цілком, а разом із ним —
-> теза, що орієнтири Pressure лягають «рівно на половині своєї відстані», і тотожність
-> `pressureLength − gaugeOffset ≡ 0.20` (тепер різниця нульова: Pressure **є** `max(0, gaugeOffset)`).
-> Половини стали симетричними — обидві беруть `r` сирим, — тож **ahead-половина Gauge розтягнулася
-> на 25 %** проти редакції цього ADR. Чинними лишаються сам стиль, `BarScale`, центральна риска,
-> роль `centreTick`, ліва половина без змін і аргумент проти абсолютної величини.
+> **Partially superseded by [ADR-0101](0101-pressure-is-the-gauge-ahead-half.md):** the coefficient `k`
+> no longer exists on either scale, so the section "Why `k` only on the right" falls away entirely,
+> and with it the claim that Pressure's landmarks land "exactly halfway along their distance," and the
+> identity `pressureLength − gaugeOffset ≡ 0.20` (the difference is now zero: Pressure **is**
+> `max(0, gaugeOffset)`). The two halves became symmetric — both take `r` raw — so **Gauge's ahead-half
+> stretched by 25%** relative to this ADR's original edit. Still standing: the style itself, `BarScale`,
+> the center tick, the role of `centreTick`, the left half unchanged, and the argument against an
+> absolute-value quantity.
 
-> **Частково витіснений [ADR-0080](0080-per-surface-bar-style.md)** (#329): §«Що лишилось незмінним»,
-> пункт **Пресети** більше не чинний — `.workHarder` тепер **Gauge** на обидві поверхні, а не Mixed,
-> і Gauge більше не «доступний лише вручну». Кейса `.mixed` немає взагалі: стиль обирається окремо
-> для меню-бару й попапа, тож «чотири сегменти в Settings» стали двома рядами по три. Шкала
-> `gaugeOffset`, `BarScale`, центральна риска й роль `centreTick` — чинні без змін.
+> **Partially superseded by [ADR-0080](0080-per-surface-bar-style.md)** (#329): in the "What stayed
+> unchanged" section, the **Presets** point no longer stands — `.workHarder` is now **Gauge** on both
+> surfaces rather than Mixed, and Gauge is no longer "manual-selection only." There is no `.mixed` case
+> at all anymore: the style is now chosen separately for the menu bar and the popup, so "four segments
+> in Settings" became two rows of three. The `gaugeOffset` scale, `BarScale`, the center tick, and the
+> role of `centreTick` still stand unchanged.
 
-> **Уточнений [ADR-0089](0089-gauge-centre-tick-calm-tone.md)**: дефолт ролі `centreTick` більше не
-> `secondaryLabelColor`, а тон **calm-заливки** (`labelColor` через `bright()` — біле на темному барі,
-> чорне на світлому), і висота риски відв'язана від маркера власною метрикою `centreTickHeight` = **10**
-> (було позичене `tickHeight` = 9). Тож рядок «ширина × висота» таблиці нижче читати як **1 × 10**, а
-> рядок «колір» — як «нейтральний `centreTick` (тон calm-заливки)». Решта — власна роль, лише меню-бар,
-> малювання під треком, присутність у кожному стані — чинна.
+> **Refined by [ADR-0089](0089-gauge-centre-tick-calm-tone.md)**: the default role for `centreTick` is
+> no longer `secondaryLabelColor`, but the tone of the **calm fill** (`labelColor` through `bright()` —
+> white on a dark bar, black on a light one), and the tick's height is decoupled from the marker's own
+> metric, via its own `centreTickHeight` = **10** (it used to borrow `tickHeight` = 9). So read the
+> "width × height" row of the table below as **1 × 10**, and the "color" row as "neutral `centreTick`
+> (tone of the calm fill)." Everything else — a dedicated role, menu bar only, drawn under the track,
+> present in every state — still stands.
 
-> **Уточнений [ADR-0096](0096-zero-tick-on-pressure.md)**: центральна риска більше **не** належить
-> самому лише Gauge — ту саму позначку малює й Pressure, на своєму нулі (центр нульової пігулки), а
-> `drawCentreTick` став `drawZeroTick` і гілкується за `BarScale`. Заперечення «у меню-барі під
-> Pressure тіка немає» (`tickFractions`) знято: воно стосувалося зуба, схожого на маркер Progress, а
-> ця риска не схожа на нього за побудовою — тими самими 1 pt, нейтральним тоном і малюванням під
-> треком, які 0079 і задав. Обидві риски додатково притлумлені множником `zeroTickAlpha` = 0.55.
-> Геометрія, позиція центру Gauge й роль `centreTick` — без змін.
+> **Refined by [ADR-0096](0096-zero-tick-on-pressure.md)**: the center tick **no longer** belongs to Gauge
+> alone — Pressure draws the same mark at its own zero (the center of the zero pill), and
+> `drawCentreTick` became `drawZeroTick`, branching on `BarScale`. The objection "the menu bar has no
+> tick under Pressure" (`tickFractions`) is withdrawn: it was about a tooth resembling Progress's
+> marker, and this tick does not resemble it by construction — the same 1 pt, neutral tone, and
+> under-the-track drawing that 0079 set in the first place. Both ticks are additionally dimmed by the
+> `zeroTickAlpha` = 0.55 multiplier. Gauge's geometry, its center position, and the role of
+> `centreTick` are unchanged.
 
-> Частково витісняє [ADR-0076](0076-pressure-scale-for-marker-less-bar.md) (§«Альтернативи», пункт
-> «Окремий, четвертий стиль замість заміни `Pace`»): той пункт відхиляв четвертий стиль на підставі,
-> яка стосувалася конкретно `Pace`, і до Gauge не застосовна. Решта 0076 — шкала `pressureLength`,
-> тік на 20 %, перейменування, міграція `rawValue` — лишається чинною; **Pressure зберігає свою
-> шкалу без змін**.
+> Partially supersedes [ADR-0076](0076-pressure-scale-for-marker-less-bar.md) (§"Alternatives
+> considered," the item "A separate, fourth style instead of replacing `Pace`"): that item rejected a
+> fourth style on grounds that applied specifically to `Pace`, and it does not apply to Gauge. The
+> rest of 0076 — the `pressureLength` scale, the tick at 20%, the rename, the `rawValue` migration —
+> still stands; **Pressure keeps its scale unchanged**.
 
-## Контекст
+## Context
 
-[ADR-0076](0076-pressure-scale-for-marker-less-bar.md) зробив ширину стрічки носієм терміновості —
-і зробив це добре, але **лише з одного боку**. Довжина Pressure-стрічки:
+[ADR-0076](0076-pressure-scale-for-marker-less-bar.md) made the strip's width carry urgency — and did
+it well, but **only on one side**. The length of the Pressure strip:
 
 ```
-r      = (u − t) / (1 − t)          // лід зі знаком, в одиницях решти часу
+r      = (u − t) / (1 − t)          // signed lead, in units of time remaining
 length = min(1, max(0, (r + k − 1) / k))        // k = 1.25
 ```
 
-Цей `max(0, …)` не «стискає» недовитратну половину — він її **знищує до рендеру**. Сам 0076 це
-фіксує: ~40 % досяжного простору станів, або 79 % спокійних станів, лягають на `0` і малюються
-однаковою мінімальною пігулкою. Користувач із великим невитраченим запасом бачить рівно те саме, що
-й користувач рівно за планом. Ширший бар тут не зарадить — величини вже немає в числі.
+This `max(0, …)` does not "compress" the under-spending half — it **destroys it before rendering**.
+0076 itself records this: ~40% of the reachable state space, or 79% of the calm states, land on `0`
+and render as the same minimum pill. A user with a large unspent budget sees exactly the same thing as
+a user exactly on plan. A wider bar cannot help here — the quantity is already gone from the number.
 
-0076 назвав це усвідомленим компромісом: «на спокійному боці дію несе колір (зелений „нічого не
-роби“ проти синього „можеш пушити“), а градація *всередині* „нічого не роби“ мапиться в ту саму
-дію». Аргумент чинний для **Pressure** і лишається чинним — але він припускає, що всередині
-спокійної зони справді немає дії. [#278](https://github.com/artem-from-ua/tokenpace/issues/278)
-показує, що є: «„спокійно“ — відносне судження без поняття абсолютного залишку», і високий-але-
-позаду бар не відрізнити від низького-і-позаду. Величина «стільки квоти я не встигну витратити до
-ресету» проходить перевірку з
-[users-and-goals.md](../reference/users-and-goals.md) — вона змінює дію: саме вона підштовхує почати
-той рефакторинг, який відкладався.
+0076 called this a deliberate trade-off: "on the calm side, the action is already carried by color
+(green 'do nothing' versus blue 'you can push'), and grading *within* 'do nothing' maps to that same
+action." The argument holds for **Pressure** and still stands — but it assumes there really is no
+action to be had inside the calm zone. [#278](https://github.com/artem-from-ua/tokenpace/issues/278)
+shows there is one: "'calm' is a relative judgment with no notion of an absolute remainder," and a
+high-but-behind bar cannot be told apart from a low-but-behind one. The quantity "how much quota I
+won't manage to spend before the reset" passes the check from
+[users-and-goals.md](../reference/users-and-goals.md) — it changes an action: it's exactly what
+nudges someone to start that refactor they've been putting off.
 
-Чому це не суперечить відмові 0076 від четвертого стилю. Той пункт відхиляв `Pace` — «строгий
-підмножинний випадок `Progress` (та сама довжина, лише без міток), тож він не ніс інформації, якої
-немає в інших двох». Аргумент був про **надлишковість**, і для `Pace` він правильний. Gauge —
-протилежний випадок: його ліва половина показує величину, якої **не малює жоден** зі шпилених
-стилів. Progress має ліву сторону геометрично, але міряє її проти вікна, а не проти часу, що
-лишився: при `t = 90 %, u = 70 %` він дає 20 % бару, і «позаду» читається лише з позиції маркера,
-без жодного відчуття, чи цей запас ще реально витратити.
+Why this doesn't contradict 0076's rejection of a fourth style. That item rejected `Pace` as "a strict
+subset case of `Progress` (the same length, just without labels), so it carried no information the
+other two didn't have." The argument was about **redundancy**, and it's correct for `Pace`. Gauge is
+the opposite case: its left half shows a quantity that **neither pinned style draws**. Progress does
+have a left side geometrically, but it measures it against the window, not against time remaining: at
+`t = 90%, u = 70%` it gives 20% of the bar, and "behind" only reads from the marker's position, with
+no sense of whether that slack is still realistically spendable.
 
-## Рішення
+## Decision
 
-**Додаємо четвертий `BarStyle` — `gauge` — з нулем посередині бару. Той самий чисельник і той самий
-знаменник, що в `pressureLength`; змінюється лише те, звідки міряти:**
+**Add a fourth `BarStyle` — `gauge` — with zero in the middle of the bar. The same numerator and the
+same denominator as `pressureLength`; only what it's measured from changes:**
 
 ```
 r      = (u − t) / (1 − t)
-offset = clamp(r / k, −1, +1)       // k = 1.25 лише на правій половині; ліва бере сирий r
+offset = clamp(r / k, −1, +1)       // k = 1.25 only on the right half; the left half takes r raw
 ```
 
-Стрічка йде від центру до `centre + offset · (width/2)`: **праворуч** при випередженні, **ліворуч**
-при відставанні. Живе в Kit як `BarLayout.gaugeOffset`, поряд із `pressureLength`.
+The strip runs from the center to `centre + offset · (width/2)`: **rightward** when ahead,
+**leftward** when behind. Lives in Kit as `BarLayout.gaugeOffset`, alongside `pressureLength`.
 
-### Чому `k` лише праворуч
+### Why `k` only on the right
 
-`k` існує з однією метою — тримати *ahead*-смуги достатньо широкими, щоб їх розрізняти на 34 pt
-треку (0076: при `k = 2` жовта смуга — 2.4 pt, під мінімальною пігулкою в 3.75 pt). Ділення правої
-половини на той самий `k` відтворює **кожен** орієнтир Pressure рівно на половині його відстані:
-20 %, 32.8 % і 100 % Pressure-бару стають 0 %, 10 % і 80 % правої половини. Тож перемикання
-Pressure ↔ Gauge не змінює нічого з того, що каже бік випередження — це закріплено тестом
-`aheadHalfMatchesPressureOrdering` (різниця `pressureLength − gaugeOffset` стала й дорівнює 0.20).
+`k` exists for one purpose — keeping the *ahead* bands wide enough to distinguish on a 34 pt track
+(0076: at `k = 2`, the yellow band is 2.4 pt, under the 3.75 pt minimum pill). Dividing the right half
+by that same `k` reproduces **every** Pressure landmark at exactly half of its original distance:
+20%, 32.8%, and 100% of the Pressure bar become 0%, 10%, and 80% of the right half. So switching
+Pressure ↔ Gauge changes nothing about what the ahead side says — locked in by the test
+`aheadHalfMatchesPressureOrdering` (the difference `pressureLength − gaugeOffset` is constant and
+equals 0.20).
 
-Ліва половина таких смуг не має — це один зелено-синій діапазон, у якому колір уже несе вердикт.
-Застосувати `k` і там означало б витратити роздільність на розсування меж, яких немає, замість
-величини, що там справді змінюється: розміру запасу. Тому ліва половина бере `r` сирим.
+The left half has no such bands — it's one continuous green-to-blue range in which color already
+carries the verdict. Applying `k` there too would spend resolution pushing apart boundaries that don't
+exist, instead of the quantity that actually varies there: the size of the slack. So the left half
+takes `r` raw.
 
-### Обидві половини міряються проти одного — часу, що лишився
+### Both halves are measured against the same thing — time remaining
 
-`offset = −1` означає «запас дорівнює всьому часу, що лишився»: його не витратити, навіть якщо
-старатися. При `t = 90 %, u = 70 %` запас (20 pp) удвічі більший за час, що лишився (10 pp) — ліва
-половина **повна**. Алгебраїчно ліва половина насичується при `u ≤ 2t − 1`.
+`offset = −1` means "the slack equals the entire time remaining": it cannot be spent even if you try.
+At `t = 90%, u = 70%`, the slack (20 pp) is twice the time remaining (10 pp) — the left half is
+**full**. Algebraically the left half saturates at `u ≤ 2t − 1`.
 
-### Насичення лівої половини — усвідомлений компроміс
+### The left half's saturation — a deliberate trade-off
 
-`u ≤ 2t − 1` неможливе до `t = 50 %`, далі зростає: при `t = 70 %` покриває 57 % тодішніх
-недовитратних станів, при `t = 90 %` — 89 %. Тобто наприкінці вікна ліва половина пласка. Це
-дзеркало (з іншого боку) тієї пласкості, яку Pressure має **на початку** вікна, і воно каже правду:
-пізно у вікні більшість запасів справді більші за час, що лишився, а «ти це вже не витратиш» — чесна
-відповідь. Тест `deepSurplusFillsTheLeftHalf` фіксує межу з обох боків.
+`u ≤ 2t − 1` is impossible before `t = 50%`, and grows past that: at `t = 70%` it covers 57% of the
+then-current under-spending states, at `t = 90%` it covers 89%. So late in the window, the left half
+is flat. This mirrors — from the other side — the flatness Pressure has **early** in the window, and
+it tells the truth: late in the window, most surpluses really are larger than the time remaining, and
+"you're not going to spend this" is an honest answer. The test `deepSurplusFillsTheLeftHalf` pins the
+boundary from both sides.
 
-### `u == t` — це нуль, а не 20 %
+### `u == t` is zero, not 20%
 
-Pressure дає нічиї фіксовані 20 %, бо його нуль зсунутий ліворуч від `t`. На центрованій шкалі `t`
-**і є** нуль, тож нічия — рівно центр. Суперечності немає: це різні шкали, і кожна називає свій
-нуль. Вироджена стрічка floor-иться до **центрованої пігулки** (`floorEmptyToPill` у меню-барі,
-`pillRect` у попапі) — за тим самим правилом, що й у Pressure, і з тієї самої причини: порожній
-трек читався б як «немає даних», а не як «рівно за планом».
+Pressure gives an on-plan state 20% flat, because its zero is offset left of `t`. On the centered
+scale, `t` **is** zero, so on-plan sits at exactly the center. No contradiction: these are different
+scales, and each names its own zero. A degenerate strip floors to a **centered pill**
+(`floorEmptyToPill` in the menu bar, `pillRect` in the popup) — under the same rule as Pressure, and
+for the same reason: an empty track would read as "no data," not as "exactly on plan."
 
-### Центральна риска — на обох поверхнях, і чому вона не маркер
+### The center tick — on both surfaces, and why it isn't a marker
 
-Нуль треба зробити знаходжуваним, інакше напрямок не має від чого відлічуватись. Тому риска
-малюється в **кожному** стані, включно з idle.
+Zero has to be findable, or direction has nothing to be measured from. So the tick is drawn in
+**every** state, idle included.
 
-0076 залишив меню-бар без тіків із конкретним запереченням: «одинока вертикальна риска на 34 pt барі
-виглядає точно як маркер часу Progress, тож два стилі перестануть відрізнятися». Заперечення чинне —
-але воно про *конкретну* риску, а не про будь-яку. Ризик знімається конструкцією:
+0076 left the menu bar without ticks, with a specific objection: "a lone vertical tick on a 34 pt bar
+looks exactly like Progress's time marker, so the two styles would stop being distinguishable." The
+objection still holds — but it's about *that specific* tick, not about ticks in general. The risk is
+resolved by construction:
 
-| | Маркер Progress | Центральна риска Gauge |
+| | Progress marker | Gauge center tick |
 |---|---|---|
-| ширина × висота | 5 × 9 pt | **1** × 9 pt |
-| колір | колір pacing (зелений/жовтий/…) | нейтральний `centreTick` (`secondaryLabelColor`) |
-| порядок малювання | **поверх** треку, з обводкою | **під** треком, без обводки |
-| позиція | `timeFraction` — рухається | центр — нерухома |
+| width × height | 5 × 9 pt | **1** × 9 pt |
+| color | pacing color (green/yellow/…) | neutral `centreTick` (`secondaryLabelColor`) |
+| draw order | **over** the track, with a stroke | **under** the track, no stroke |
+| position | `timeFraction` — moves | center — fixed |
 
-П'ята ширини, нейтральний тон, і з-під треку видно лише кінчики. У попапі окремої риски не треба —
-лінійка тіків уже стоїть під баром, тож `tickFractions` просто віддає `[0.5]` замість `[0.20]`.
+A fifth of the width, a neutral tone, and only the tips peek out from under the track. The popup needs
+no separate tick — the tick ruler already sits under the bar, so `tickFractions` simply returns
+`[0.5]` instead of `[0.20]`.
 
-**Колір — власна роль `centreTick`, дефолт `secondaryLabelColor`, і лише для меню-бару.** Спершу
-риска брала `indicatorRing` (обводка маркера, `quaternaryLabelColor`) — найтьмянішу з наявних
-нейтральних ролей; на живому барі нуль виявився погано знаходжуваним. Роль `tick` попапа
-(`tertiaryLabelColor`) теж тьмяна, та й семантика інша: та лінійка **анотує** бар, який і без неї
-читається, а тут риска — єдиний орієнтир, відносно якого існує все повідомлення стилю. Тому окрема
-роль, на щабель яскравіша, налаштовувана в color-tuner; тік попапа лишається на своєму `tick`.
-Тіки на ±50 % кожної половини розглядались і відкинуті: вони позначали б те, чого шкала не визначає,
-а читається тут **напрямок** виходу з центру, не відстань уздовж лінійки.
+**Color is its own role, `centreTick`, defaulting to `secondaryLabelColor`, menu bar only.** The tick
+originally took `indicatorRing` (the marker's stroke color, `quaternaryLabelColor`) — the dimmest of
+the available neutral roles; on a live bar, zero turned out to be hard to find. The popup's `tick`
+role (`tertiaryLabelColor`) is also dim, and its semantics differ anyway: that ruler **annotates** a
+bar that already reads fine without it, whereas here the tick is the sole landmark the entire style's
+message is relative to. Hence a dedicated role, one notch brighter, tunable in the color tuner; the
+popup's tick stays on its own `tick` role. Ticks at ±50% of each half were considered and rejected:
+they would mark something the scale doesn't define — what reads here is the **direction** away from
+center, not a distance along a ruler.
 
-### Пара булів стала `BarScale`
+### The pair of booleans became `BarScale`
 
-До Gauge шкал було дві, і їх розрізняв рівно один біт: 0076 назвав це одним рішенням —
-`menuBarUsesPressureScale == !menuBarShowsTimeMarker`, «"немає маркера" і "шкала залишку" — це одне
-рішення, не два, що можуть розійтися». Третя шкала без маркера ламає **зворотний** напрямок цієї
-еквівалентності: Gauge теж без маркера, але це не Pressure.
+Before Gauge there were two scales, distinguished by exactly one bit: 0076 called this one decision —
+`menuBarUsesPressureScale == !menuBarShowsTimeMarker`, "'no marker' and 'the remaining-time scale' are
+one decision, not two that could drift apart." A third marker-less scale breaks the **reverse**
+direction of that equivalence: Gauge is also marker-less, but it isn't Pressure.
 
-Додати третій заперечний прапорець означало б кодувати три стани двома булями з недосяжною
-комбінацією. Натомість вводимо `BarScale { window, remaining, centred }`, а маркерні прапорці
-**виводимо** зі шкали: `showsTimeMarker == (scale == .window)`. Так зберігається імплікація, що
-пережила зміну — маркер має позицію лише на шкалі вікна — але вже як однобічне правило, а не
-тотожність. Рендерери гілкуються на самій шкалі.
+Adding a third negation flag would mean encoding three states in two booleans, with one unreachable
+combination. Instead, `BarScale { window, remaining, centred }` is introduced, and the marker flags
+are **derived** from the scale: `showsTimeMarker == (scale == .window)`. This keeps the implication
+that survived the change — a marker only has a position on the window scale — but now as a one-way
+rule rather than an identity. Renderers branch on the scale itself.
 
-### Що лишилось незмінним
+### What stayed unchanged
 
-- **Колір.** Ті самі `(u, t)` дають ту саму `PacingSeverity` в усіх чотирьох стилях. Gauge —
-  render-only, як і вся лінійка `BarStyle` ([ADR-0062](0062-configurable-bar-presentation.md),
-  [ADR-0078](0078-idle-drawn-as-zero-in-both-styles.md)).
-- **Idle.** За [ADR-0078](0078-idle-drawn-as-zero-in-both-styles.md): сірий трек + пігулка на нулі.
-  Нуль Gauge — центр, тож пігулка там; маркера немає.
-- **Pressure.** Лишається окремим стилем зі своєю шкалою. Він тихіший у спокійних станах за
-  конструкцією, і частина користувачів обере саме це.
-- **Пресети.** `.chill` → Pressure, `.workHarder` → Mixed, `.controlFreak` → Progress — без змін.
-  Gauge доступний лише вручну.
-- **Міграція.** `"gauge"` — новий raw, не перейменування, тож `legacyRawValues` не чіпаємо. Старіший
-  білд, що прочитає `"gauge"`, впаде на `.progress` наявним forward-compatible декодом.
+- **Color.** The same `(u, t)` produce the same `PacingSeverity` in all four styles. Gauge is
+  render-only, like the entire `BarStyle` line
+  ([ADR-0062](0062-configurable-bar-presentation.md), [ADR-0078](0078-idle-drawn-as-zero-in-both-styles.md)).
+- **Idle.** Per [ADR-0078](0078-idle-drawn-as-zero-in-both-styles.md): a gray track + a pill at zero.
+  Gauge's zero is the center, so the pill sits there; there is no marker.
+- **Pressure.** Stays a separate style with its own scale. It is quieter in calm states by
+  construction, and some users will prefer exactly that.
+- **Presets.** `.chill` → Pressure, `.workHarder` → Mixed, `.controlFreak` → Progress — unchanged.
+  Gauge is available only by manual selection.
+- **Migration.** `"gauge"` is a new raw value, not a rename, so `legacyRawValues` is left alone. An
+  older build reading `"gauge"` falls back to `.progress` through the existing forward-compatible
+  decode.
 
-## Наслідки
+## Consequences
 
-- **Спокійний бік нарешті має роздільність.** Із шести обстежених спокійних станів п'ять стають
-  розрізнюваними (3.2 / 4.3 / 5.1 pt для різних запасів) там, де Pressure малює одну пігулку на всіх.
-  Колапсує лише «рівно за планом» — і саме він **має** бути нулем.
-- **Бік випередження не змінився ніде.** Це закріплено тестом, а не наміром: перемикання
-  Pressure ↔ Gauge не рухає праву половину.
-- **Бік треба читати окремо від довжини.** У Pressure довжина означає рівно одне. У Gauge та сама
-  довжина означає протилежні стани залежно від боку. Розрізняють двома шляхами: **напрямок** від
-  центральної риски (доступний завжди — риска є в кожному стані) і **колір**. Під **calm colours**
-  колірний шлях зникає: `CalmColorMode.mutesCalm` зводить зелений і жовтий у `calmWhite`, а дефолтний
-  `.yellowGreenBlue` приглушує ще й синій — увесь спокійний діапазон з обох боків стає одним тоном.
-  Напрямок лишається і його достатньо, але це один зайвий рух ока. Саме цей випадок перевіряється
-  живцем на стубі `gauge-sweep`.
-- **Половина бару на напрямок — це вдвічі менша роздільність на бік.** 34 pt меню-барного бару → 17 pt
-  на половину → приблизно 4–5 розрізнюваних кроків у кожен бік. У попапі, де бар значно ширший, це
-  не проблема.
-- **Успадковано від Pressure:** бар не прочитати без лейбла ресету — 100 % означає «до ресету», а не
-  «все вікно». Та сама стрічка о 10:00 і о 14:00 описує різні абсолютні величини.
-- **Чотири сегменти в Settings.** Порядок `Pressure · Mixed · Gauge · Progress` читається як градієнт
-  того, скільки позиційної інформації несе бар: лише довжина → довжина в барі, позиції в попапі →
-  довжина плюс напрямок → дві позиції на вікні.
-- **`BarScale` тепер публічний тип Kit.** Рендерери гілкуються на ньому; п'ята шкала (якщо колись
-  буде) додається кейсом, а не ще одним булем.
+- **The calm side finally has resolution.** Of six surveyed calm states, five become distinguishable
+  (3.2 / 4.3 / 5.1 pt for different slack amounts) where Pressure draws one pill for all of them. Only
+  "exactly on plan" collapses — and that is exactly the one that **should** be zero.
+- **The ahead side did not change anywhere.** Locked in by a test, not by intent: switching
+  Pressure ↔ Gauge does not move the right half.
+- **The side has to be read separately from the length.** In Pressure, length means exactly one thing.
+  In Gauge, the same length means opposite states depending on the side. Two ways to tell them apart:
+  **direction** from the center tick (always available — the tick is present in every state) and
+  **color**. Under **calm colours**, the color cue disappears: `CalmColorMode.mutesCalm` collapses
+  green and yellow into `calmWhite`, and the default `.yellowGreenBlue` mutes blue too — the entire
+  calm range on both sides becomes one tone. Direction remains and is sufficient, but it's one extra
+  eye movement. This exact case is checked live on the `gauge-sweep` stub.
+- **Half the bar per direction means half the resolution per side.** A 34 pt menu-bar bar → 17 pt per
+  half → roughly 4–5 distinguishable steps in each direction. In the popup, where the bar is much
+  wider, this isn't a problem.
+- **Inherited from Pressure:** the bar can't be read without the reset label — 100% means "until the
+  reset," not "the whole window." The same strip at 10:00 and at 14:00 describes different absolute
+  quantities.
+- **Four segments in Settings.** The order `Pressure · Mixed · Gauge · Progress` reads as a gradient of
+  how much positional information the bar carries: length only → length in the bar, positions in the
+  popup → length plus direction → two positions on the window.
+- **`BarScale` is now a public Kit type.** Renderers branch on it; a fifth scale (if one ever comes)
+  gets added as a case, not one more boolean.
 
-## Альтернативи
+## Alternatives considered
 
-- **Gauge замість Pressure, а не поряд.** Gauge — строгий надмножинний випадок на боці випередження й
-  додає бік відставання, тож заміна виглядає природною. Відкинуто: Pressure за конструкцією тихіший у
-  спокійних станах (усе спокійне — одна пігулка), і це справжня відмінність, а не дефект. Заміна
-  також коштувала б міграції `"pressure" → "gauge"` заради вибору, який частина користувачів зробила
-  свідомо.
-- **Абсолютна величина замість знакової.** Та сама пастка, яку 0076 уже розібрав для `pressureLength`:
-  `|u − t|` не відрізняє «попереду» від «позаду», сягає дна на нічиї й лізе вгору. На центрованій
-  шкалі знак — це і є половина повідомлення, тож абсолютна форма руйнує стиль повністю.
-- **Заливка лівої половини рівнем невитраченого (`t − u` проти вікна).** Регулярна пропозиція, що
-  регулярно падає з тієї самої причини: рівень — це **вхід** моделі, а бар показує її **вихід**
-  (вердикт). Проти вікна «20 pp запасу» о 10:00 і о 14:00 — те саме число з протилежним сенсом; проти
-  часу, що лишився, воно означає одне.
-- **Тіки на ±50 % кожної половини.** Позначали б те, чого шкала не визначає. Читання тут — напрямок
-  виходу з центру, а не відстань уздовж лінійки; друга пара зубців за 4 pt від центру читалася б як
-  шум (той самий аргумент, яким 0076 обмежився одним тіком).
-- **Риска в меню-барі поверх треку, а не під ним.** Простіше, але риска розрізала б стрічку навпіл,
-  коли та проходить через центр, і виглядала б як маркер. Під треком видно лише кінчики — цього
-  досить, щоб знайти нуль, і замало, щоб сплутати з даними.
+- **Gauge instead of Pressure, rather than alongside it.** Gauge is a strict superset case on the
+  ahead side and adds a behind side, so replacing Pressure looks natural. Rejected: Pressure is
+  quieter in calm states by construction (everything calm is one pill), and that is a genuine
+  difference, not a defect. Replacing it would also cost a `"pressure" → "gauge"` migration for a
+  choice some users made deliberately.
+- **An absolute-value quantity instead of a signed one.** The same trap 0076 already worked through
+  for `pressureLength`: `|u − t|` cannot tell "ahead" from "behind" apart, bottoms out at on-plan, and
+  climbs back up. On a centered scale, the sign *is* half the message, so an absolute-value form would
+  destroy the style completely.
+- **Fill the left half with the unspent level (`t − u` against the window).** A recurring proposal
+  that fails for the same recurring reason: the level is the model's **input**, and the bar shows its
+  **output** (the verdict). Against the window, "20 pp of slack" at 10:00 and at 14:00 is the same
+  number with opposite meaning; against time remaining, it means one thing.
+- **Ticks at ±50% of each half.** Would mark something the scale doesn't define. What reads here is
+  the direction out from the center, not a distance along a ruler; a second pair of teeth 4 pt from
+  the center would read as noise (the same argument 0076 used to stop at one tick).
+- **A menu-bar tick drawn over the track rather than under it.** Simpler, but the tick would slice the
+  strip in half when it passes through the center, and would look like a marker. Under the track, only
+  the tips show — enough to find zero, and not enough to be confused with data.

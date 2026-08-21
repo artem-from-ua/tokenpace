@@ -3,147 +3,157 @@ status: accepted
 date: 2026-07-25
 ---
 
-# ADR-0031: Архіватор сирих логів сесій Claude Code (accumulate-only)
+# ADR-0031: Raw Claude Code session log archiver (accumulate-only)
 
-## Контекст
+## Context
 
-Claude Code за замовчуванням **автоматично видаляє** свої дані старші за `cleanupPeriodDays`
-(дефолт **30 днів**), і робить це **на кожному старті** CLI
-([дока](https://code.claude.com/docs/en/claude-directory.md)). Тобто повний транскрипт кожної сесії
-(`~/.claude/projects/<proj>/<session-id>.jsonl`), транскрипти сабагентів, винесені tool-виводи,
-знімки файлів для checkpoint-restore і плани зникають безслідно через місяць. Це не баг, а
-задокументована retention-політика — але користувачі, що хочуть тримати повну історію своїх сесій
-(ретроспективи, пошук по старих діалогах, аналітика), її втрачають.
+Claude Code by default **automatically deletes** its data older than `cleanupPeriodDays` (default
+**30 days**), and does so **on every CLI startup**
+([docs](https://code.claude.com/docs/en/claude-directory.md)). That means the full transcript of
+every session (`~/.claude/projects/<proj>/<session-id>.jsonl`), subagent transcripts, exported tool
+outputs, file snapshots for checkpoint-restore, and plans vanish without a trace after a month. This
+isn't a bug, it's documented retention policy — but users who want to keep the full history of their
+sessions (retrospectives, searching old conversations, analytics) lose it.
 
-Issue [#110](https://github.com/artem-from-ua/tokenpace/issues/110): TokenPace має вміти періодично
-копіювати ці логи в теку, яку вказує користувач, і — ключове — **ніколи не видаляти в архіві те, що
-Claude Code уже прибрав у джерелі**, щоб архів переживав 30-денний cleanup.
+Issue [#110](https://github.com/artem-from-ua/tokenpace/issues/110): TokenPace should be able to
+periodically copy these logs into a folder the user specifies, and — crucially — **never delete from
+the archive what Claude Code has already cleaned up at the source**, so the archive outlives the
+30-day cleanup.
 
-Розвилки: (1) де живе фіча — окремий launchd-скрипт чи всередині app; (2) чим копіювати — зовнішній
-`rsync` чи нативний Swift.
+Forks in the road: (1) where the feature lives — a separate launchd script or inside the app; (2)
+what does the copying — external `rsync` or native Swift.
 
-## Рішення
+## Decision
 
-**Вбудований у TokenPace, accumulate-only, нативний Swift.**
+**Built into TokenPace, accumulate-only, native Swift.**
 
-### 1. Форма — всередині app, не окремий launchd-агент
+### 1. Shape — inside the app, not a separate launchd agent
 
-TokenPace — довгоживучий menu bar процес із heartbeat живого polling-циклу. Синк — просто ще один
-«due на heartbeat» обов'язок поряд із перевіркою оновлень (`UpdateCheckCadence`) і статусу
-(`StatusCadence`). Окремий launchd-агент дублював би планувальник, конфіг і UI, які в app уже є.
-Ціна — синк не працює, коли app вимкнено; для утиліти, що й так живе в menu bar цілодобово, це
-прийнятно (при дефолтному 30-денному вікні добовий синк має величезний запас).
+TokenPace is a long-lived menu-bar process with the heartbeat of a live polling loop. Sync is just
+another "due on heartbeat" duty alongside checking for updates (`UpdateCheckCadence`) and status
+(`StatusCadence`). A separate launchd agent would duplicate the scheduler, config, and UI that
+already exist in the app. The cost — sync doesn't run when the app is off — is acceptable for a
+utility that already lives in the menu bar around the clock (with a default 30-day window, a
+once-a-day sync has a huge margin).
 
-### 2. Каденція — раз на добу, маркер лише на успіх
+### 2. Cadence — once a day, marker advances only on success
 
-`ArchiveCadence` (Kit) дзеркалить `UpdateCheckCadence`: 24-годинне вікно, `isDue(lastSync:now:)`,
-`nil` → due. На відміну від update-check, маркер `lastArchiveSync` рухається **лише на успішному**
-синку (не на кожній спробі), бо тут нема стороннього API, до якого треба бути ввічливим — невдалий
-синк (незаписувана тека) лишається due й ретраїться наступним heartbeat, як `StatusCadence`.
+`ArchiveCadence` (Kit) mirrors `UpdateCheckCadence`: a 24-hour window, `isDue(lastSync:now:)`, `nil` →
+due. Unlike the update check, the `lastArchiveSync` marker only advances on a **successful** sync
+(not on every attempt), because there's no third-party API here to be polite to — a failed sync
+(an unwritable folder) stays due and retries on the next heartbeat, like `StatusCadence`.
 
-### 3. Механізм — нативний Swift `FileManager`, не `rsync`
+### 3. Mechanism — native Swift `FileManager`, not `rsync`
 
-Серцевина фічі — рішення «які файли копіювати» — живе як **чиста тестовна функція**
-`ArchiveSyncPlan.filesToCopy` у kit, поряд з усією іншою логікою проєкту (`PacingModel`,
-`UpdateCheckCadence`, `MigrationPlan`). Це відповідає pure-core / thin-shell конвенції
-([ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md),
-[ADR-0023](0023-persisted-config-version-marker.md)). `rsync` інвертував би це: сховав би саме
-рішення в неспостережуваний зовнішній процес, який не юнітиться, залежить від бінарника
-(Apple's rsync — форк openrsync, прапорці різняться між версіями macOS) і додає точку тертя з
-hardened runtime підписаного `.app`. Shell (`LogArchiver`) робить лише I/O: обхід дерева, виклик
-плану, копіювання.
+The heart of the feature — the decision of "which files to copy" — lives as a **pure, testable
+function** `ArchiveSyncPlan.filesToCopy` in the kit, alongside all the other project logic
+(`PacingModel`, `UpdateCheckCadence`, `MigrationPlan`). This follows the pure-core / thin-shell
+convention ([ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md),
+[ADR-0023](0023-persisted-config-version-marker.md)). `rsync` would invert this: it would hide the
+actual decision inside an unobservable external process that can't be unit-tested, depends on a
+binary (Apple's rsync is a fork of openrsync, and flags vary between macOS versions), and adds
+friction with the hardened runtime of a signed `.app`. The shell (`LogArchiver`) does I/O only: tree
+traversal, calling the plan, copying.
 
-### 4. Accumulate-only — за побудовою, без `--delete`
+### 4. Accumulate-only — by construction, no `--delete`
 
-`ArchiveSyncPlan` **ніколи не повертає видалень**. Файл, який Claude Code прибрав, просто відсутній у
-знімку джерела, тож не потрапляє в список копіювання, а його копія в архіві лишається недоторканою.
-Архів росте монотонно. (Rsync-еквівалент — просто **без** `--delete`.)
+`ArchiveSyncPlan` **never returns deletions**. A file Claude Code has cleaned up is simply absent from
+the source snapshot, so it never makes the copy list, and its copy in the archive is left untouched.
+The archive grows monotonically. (The rsync equivalent is simply **without** `--delete`.)
 
-Файл (пере)копіюється, коли він **новий** або **змінений** — джерело новіше за mtime **або**
-відрізняється розміром. Порівняння за розміром обов'язкове, бо сесійні `.jsonl` *дописуються* по ходу
-сесії: файл, що виріс без зміни (грубого) mtime, все одно має перекопіюватись.
+A file is (re-)copied when it is **new** or **changed** — the source is newer by mtime **or** differs
+in size. The size comparison is mandatory, because session `.jsonl` files are *appended to* as the
+session goes on: a file that grew without its (coarse) mtime changing still needs to be recopied.
 
-### 5. Джерела — явний allow-list, не «все мінус exclude»
+### 5. Sources — an explicit allow-list, not "everything minus an exclude"
 
-Копіюються лише per-session історичні теки, що потрапляють під cleanup: `projects/` (транскрипти +
-`subagents/` + `tool-results/`), `file-history/` (знімки файлів), `plans/`. Allow-list, а не «все
-`~/.claude` крім секретів», гарантує, що `.credentials.json` та будь-які токени **фізично не можуть**
-потрапити в архів — критичне правило проєкту (не логувати, не копіювати креденшали). Ефемерне
-(`session-env/`, `shell-snapshots/`, `tasks/`, кеші, `sessions/`) і те, що cleanup не чіпає
-(`history.jsonl`, `stats-cache.json`), не архівується — воно або regeneratable, або не втрачається.
+Only per-session history folders subject to cleanup are copied: `projects/` (transcripts +
+`subagents/` + `tool-results/`), `file-history/` (file snapshots), `plans/`. An allow-list, rather
+than "all of `~/.claude` except secrets," guarantees that `.credentials.json` and any tokens
+**physically cannot** end up in the archive — a critical project rule (never log, never copy
+credentials). Ephemeral data (`session-env/`, `shell-snapshots/`, `tasks/`, caches, `sessions/`) and
+whatever cleanup doesn't touch (`history.jsonl`, `stats-cache.json`) are not archived — they're either
+regeneratable or never lost.
 
-### 5a. Гейти середовища — тихий defer на батареї, блок при нестачі місця
+### 5a. Environment gates — a silent defer on battery, a block on low space
 
-*Додано в [#306](https://github.com/artem-from-ua/tokenpace/issues/306).* Спочатку архіватор не мав
-жодного гейта — єдине з пʼяти періодичних завдань, яке пише на диск помітні обсяги. Симетрично до
-§3a [ADR-0033](0033-automatic-update-install.md) додано два, але з **різною** семантикою, і ця
-різниця — суть рішення.
+*Added in [#306](https://github.com/artem-from-ua/tokenpace/issues/306).* Originally the archiver had
+no gate at all — the one out of five periodic tasks that writes noticeable amounts of data to disk.
+Symmetric to §3a of [ADR-0033](0033-automatic-update-install.md), two were added, but with
+**different** semantics, and that difference is the substance of the decision.
 
-**Батарея — defer**, як в оновленнях: умова минуща й виправляється сама, тож стану не персистимо,
-маркер не рухаємо, наступний heartbeat переоцінить. Гейт стоїть у `pollArchiveIfDue` **після**
-каденції (інакше відʼєднаний Mac логував би щополу) і **не** в `performArchiveSync` — через останній
-ідуть ручний «Archive Now» і вибір теки, а це явний намір користувача.
+**Battery — defer**, as with updates: the condition is transient and self-corrects, so no state is
+persisted, the marker isn't moved, and the next heartbeat re-evaluates. The gate sits in
+`pollArchiveIfDue` **after** the cadence check (otherwise a disconnected Mac would log every poll) and
+**not** in `performArchiveSync` — a manual "Archive Now" and folder selection go through the latter,
+and that's an explicit user intent.
 
-**Вільне місце — блок**, не defer: повний диск сам не розсмокчеться, тож наступний heartbeat нічого
-не змінить. Рішення — чистий `ArchiveSpacePlan.verdict`; поріг **той самий 5 ГБ**, що й
-`UpdateInstallPlan.minFreeBytesAfterDownload` (одну обіцянку «TokenPace не доводить диск до краю»
-пояснити простіше, ніж два різні числа), і міряється він на **томі призначення**, бо архів зазвичай
-на зовнішньому диску.
+**Free space — block**, not defer: a full disk doesn't resolve itself, so the next heartbeat changes
+nothing. The decision is a pure `ArchiveSpacePlan.verdict`; the threshold is the **same 5 GB** as
+`UpdateInstallPlan.minFreeBytesAfterDownload` (one promise, "TokenPace never runs the disk to the
+edge," is simpler to explain than two different numbers), and it's measured on the **destination
+volume**, since the archive is usually on an external disk.
 
-**Обидва стани видимі в UI ⚠-рядком.** Мовчазне відкладення лишило б користувача з застиглою датою
-«Last archived» без пояснення — байдуже, чи причина мине сама. Різниця між станами лежить у **тексті**
-(«free up space» проти «will resume when you plug in»), а не в оформленні: рядок про умову, що не
-пускає фічу, — це попередження. Без трикутника в проєкті малюються лише хінти, що *описують* дію
-контрола. Коли закриті обидва гейти, показується **лише** рядок місця: два рядки натякали б, що шнур
-допоможе, а він не допоможе.
+**Both states are visible in the UI as a ⚠ row.** Silently deferring would leave the user with a
+frozen "Last archived" date and no explanation — regardless of whether the cause resolves on its own.
+The difference between the states lives in the **text** ("free up space" versus "will resume when you
+plug in"), not in the styling: a row about a condition blocking the feature is a warning. Without the
+triangle, the project only draws hints that *describe* a control's action. When both gates are closed,
+**only** the space row is shown — two rows would suggest that plugging in would help, and it wouldn't.
 
-Батарейний гейт свідомо **не** заведено в чистий тип: два гейти живуть у різний час і мають різні
-правила обходу, тож спільна `decide` змусила б кожен call-site передавати фальшиве значення для
-гейта, який він не оцінює. Батарейний — це один `guard` без арифметики, тестувати в ньому нічого.
+The battery gate is deliberately **not** wrapped into a pure type: the two gates live at different
+times and have different bypass rules, so a shared `decide` would force every call site to pass a
+fake value for the gate it isn't evaluating. The battery one is a single `guard` with no arithmetic —
+nothing to test in it.
 
-Через гейт місця `sync` став **двофазним**: спершу скан усіх коренів у сукупний план, тоді перевірка,
-і лише тоді копіювання. Гейт мусить судити прогін цілком — інакше він скопіював би два корені й
-відмовив на третьому, лишивши архів напівоновленим.
+Because of the space gate, `sync` became **two-phase**: first, scanning all roots into an aggregate
+plan, then the check, and only then copying. The gate has to judge the whole run — otherwise it would
+copy two roots and refuse on the third, leaving the archive half-updated.
 
-### 5b. Атомарна заміна — виправлення інваріанту §4
+### 5b. Atomic replace — a fix to the §4 invariant
 
-*Виправлено в [#306](https://github.com/artem-from-ua/tokenpace/issues/306).* `copyReplacing` робив
-remove-then-copy попри docstring «atomically replacing». Це **суперечило accumulate-only-обіцянці
-§4**: при `ENOSPC` копія в архіві вже видалена, нова не записана — і архів втрачав файл, для якого
-часто був останнім носієм. Тобто найгірший режим відмови саме тоді, коли архів — єдине джерело даних.
+*Fixed in [#306](https://github.com/artem-from-ua/tokenpace/issues/306).* `copyReplacing` did a
+remove-then-copy despite its docstring saying "atomically replacing." That **contradicted the
+accumulate-only promise of §4**: on `ENOSPC` the archive's copy was already deleted, and the new one
+wasn't written — so the archive lost a file for which it was often the last remaining copy. In other
+words, the worst failure mode occurred exactly when the archive was the only source of the data.
 
-Тепер — `replaceItemAt` через staging-копію **поруч із ціллю**. Два обмеження, що визначають форму:
-`replaceItemAt` **переміщує** й споживає другий аргумент (віддати йому файл із `~/.claude` означало б
-видалити оригінальний лог), і swap має бути same-volume, інакше вироджується в копію. Staging-імʼя
-починається з крапки, бо `scan` іде зі `.skipsHiddenFiles` — осиротілий після краху файл не
-порахується архівним. mtime джерела при цьому зберігається, що критично: саме його порівнює
-`ArchiveSyncPlan`, і втрата означала б тихе перекопіювання всього архіву щодня.
+Now it's `replaceItemAt` via a staging copy **next to the target**. Two constraints shape this:
+`replaceItemAt` **moves** and consumes its second argument (handing it a file from `~/.claude` would
+mean deleting the original log), and the swap must be same-volume, otherwise it degenerates into a
+copy. The staging name starts with a dot, because `scan` runs with `.skipsHiddenFiles` — a file
+orphaned by a crash doesn't count as archived. The source's mtime is preserved in the process, which
+is critical: it's exactly what `ArchiveSyncPlan` compares, and losing it would mean silently
+recopying the entire archive every day.
 
-### 6. Доступ до теки — без sandbox, без bookmark
+### 6. Folder access — no sandbox, no bookmark
 
-App не сендбоксований (нема entitlements), тож доступ до довільної теки не потребує
-security-scoped bookmark. `NSOpenPanel` у Settings — лише зручний вибір шляху; зберігається як
-звичайний рядок у `PersistedConfig`.
+The app isn't sandboxed (no entitlements), so accessing an arbitrary folder doesn't need a
+security-scoped bookmark. `NSOpenPanel` in Settings is just a convenient way to pick a path; it's
+stored as a plain string in `PersistedConfig`.
 
-## Наслідки
+## Consequences
 
-- Повна історія сесій переживає 30-денний cleanup Claude Code, у теці користувача.
-- Логіка «що копіювати / що зберегти» юнітиться (`ArchiveSyncPlanTests`, `ArchiveCadenceTests`).
-- Синк працює лише поки TokenPace запущено — компроміс проти дублювання планувальника в launchd.
-- Нова категорія логування `archive`; шляхи файлів лише на `.debug` (містять назви проєктів).
-- Фіча opt-in (default-off) і інертна, доки не обрано теку.
-- Синк не йде на батареї — на ноуті без розетки архів «застигає» до підключення (#306). Свідомий
-  компроміс: добова каденція має великий запас проти 30-денного вікна cleanup.
-- Заповнений диск призначення зупиняє бекап **із видимою причиною**, а не тихо (#306).
+- The full session history outlives Claude Code's 30-day cleanup, in the user's own folder.
+- The "what to copy / what to keep" logic is unit-tested (`ArchiveSyncPlanTests`,
+  `ArchiveCadenceTests`).
+- Sync only runs while TokenPace is running — a trade-off against duplicating the scheduler in
+  launchd.
+- A new `archive` logging category; file paths only at `.debug` (they contain project names).
+- The feature is opt-in (default-off) and inert until a folder is chosen.
+- Sync doesn't run on battery — on an unplugged laptop, the archive "freezes" until reconnected
+  (#306). A deliberate trade-off: the daily cadence has a large margin against the 30-day cleanup
+  window.
+- A full destination disk stops the backup **with a visible reason**, rather than silently (#306).
 
-## Верифікація
+## Verification
 
 `swift build && swift test` (`ArchiveSyncPlan`: new/unchanged/grew/pruned/mixed; `ArchiveCadence`:
-nil/boundary/before/after; `ArchiveSpacePlan`: межа з обох боків, порожній план, fail-open, парність
-порогу з `UpdateInstallPlan`). Наживо: Settings → увімкнути, обрати теку, «Archive now» → перевірити
-дзеркало `projects/`/`file-history/`/`plans/`; видалити `.jsonl` у джерелі → синк → файл лишився в
-архіві (accumulate); дописати рядок у джерело → синк → архівна копія виросла.
+nil/boundary/before/after; `ArchiveSpacePlan`: the boundary from both sides, an empty plan, fail-open,
+threshold parity with `UpdateInstallPlan`). Live: Settings → enable, pick a folder, "Archive now" →
+check the mirror of `projects/`/`file-history/`/`plans/`; delete a `.jsonl` at the source → sync → the
+file remains in the archive (accumulate); append a line to the source → sync → the archive copy grew.
 
-Для гейтів (#306) — стуб `TOKENPACE_FAKE_ARCHIVE_GATE=battery,space` і перелік перевірок у
-[ui-verification.md](../guides/ui-verification.md). Найдешевша перевірка §5b: «Archive Now» двічі
-поспіль — другий прогін має скопіювати **0** файлів; ненульове число означає, що swap загубив mtime.
+For the gates (#306) — stub `TOKENPACE_FAKE_ARCHIVE_GATE=battery,space` and the checklist in
+[ui-verification.md](../guides/ui-verification.md). The cheapest check for §5b: run "Archive Now"
+twice in a row — the second run should copy **0** files; a nonzero count means the swap lost mtime.

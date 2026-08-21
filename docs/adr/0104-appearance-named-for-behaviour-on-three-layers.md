@@ -5,91 +5,95 @@ supersedes: [0087, 0100]
 superseded_by: []
 ---
 
-# ADR-0104: Appearance іменується за поведінкою — на всіх трьох шарах одразу
+# ADR-0104: Appearance is named for behavior — on all three layers at once
 
-> Витісняє [ADR-0087](0087-above-zero-section-visibility.md) повністю (склад сегментів, кейс
-> `.optionOnly` і його маркерна міграція) і §5–§6
-> [ADR-0100](0100-dropdown-style-tiles-and-retired-option-segment.md) (там кейс іще лишався в enum, а
-> перейменування торкнулося одного сегмента). Реалізовано в
+> Fully supersedes [ADR-0087](0087-above-zero-section-visibility.md) (segment composition, the
+> `.optionOnly` case and its marker-based migration) and §5–§6 of
+> [ADR-0100](0100-dropdown-style-tiles-and-retired-option-segment.md) (there the case still lived in
+> the enum, and the rename only touched one segment). Implemented in
 > [#381](https://github.com/artem-from-ua/cc-timer/issues/381).
 
-## Контекст
+## Context
 
-Панель Appearance накопичила словник, яким розмовляє **код**, а не користувач. Три приклади з одного
-екрана:
+The Appearance pane had accumulated a vocabulary spoken by **the code**, not the user. Three
+examples from a single screen:
 
-- рядок **`Calm non-critical colors`** із сегментами `Off | Yellow + Green | + Blue` — «calm» це
-  назва кейса `PacingSeverity.calm`, а сегменти перелічують **гами**, які гаснуть, тоді як читач
-  обирає, **що йому мають сказати**;
-- рядок **`Hide 5h (top) bar`** із сегментом `When it's calm` — той самий термін-артефакт, до того ж
-  у підказці під рядком дублювався сам сегмент;
-- рядок дропдауна з сегментом **`Non-calm only`** — подвійне заперечення, збудоване на терміні, якого
-  в UI ніде не пояснено.
+- the **`Calm non-critical colors`** row with segments `Off | Yellow + Green | + Blue` — "calm" is
+  the name of the `PacingSeverity.calm` case, and the segments list the **hues** that get muted,
+  while the reader is choosing **what they want to be told**;
+- the **`Hide 5h (top) bar`** row with a `When it's calm` segment — the same term-as-artifact, and
+  the caption under the row duplicated the segment itself;
+- the dropdown row with a **`Non-calm only`** segment — a double negative built on a term the UI
+  never explains anywhere.
 
-Під тими самими іменами лежали й **ключі** `UserDefaults` (`calmColorMode`, `calmBarHiding`,
+The same names sat underneath as `UserDefaults` **keys** (`calmColorMode`, `calmBarHiding`,
 `modelLimitsVisibility`, `menuBarStyle`, `dropdownStyle`, `showServiceStatusDot`,
-`extraUsageVisibility`) — пласкі, без ознаки поверхні, хоча сама панель уже два релізи як поділена
-на **Menu bar** і **Dropdown** ([ADR-0099](0099-appearance-nests-its-two-surfaces.md)). Той самий
-плаский список видавав і експорт конфіга ([#257](https://github.com/artem-from-ua/cc-timer/issues/257)):
-щоб зрозуміти, до якої поверхні належить `showServiceStatusDot`, доводилося знати код.
+`extraUsageVisibility`) — flat, with no surface marker, even though the pane itself had already been
+split into **Menu bar** and **Dropdown** for two releases
+([ADR-0099](0099-appearance-nests-its-two-surfaces.md)). Config export
+([#257](https://github.com/artem-from-ua/cc-timer/issues/257)) surfaced the same flat list: knowing
+which surface `showServiceStatusDot` belonged to required knowing the code.
 
-Ще один спадок: `PopupSectionVisibility.optionOnly` жив у enum тільки заради декодування
-([ADR-0100 §5](0100-dropdown-style-tiles-and-retired-option-segment.md)), а переписував його окремий
-крок міграції з власним маркер-ключем. Маркерів таких набралося два — другий для
-`nonCalm → aboveZero` на кредитному рядку ([ADR-0087](0087-above-zero-section-visibility.md)).
+One more legacy artifact: `PopupSectionVisibility.optionOnly` lived in the enum purely for decoding
+([ADR-0100 §5](0100-dropdown-style-tiles-and-retired-option-segment.md)), rewritten by a separate
+migration step with its own marker key. Two such markers had piled up — the second one for
+`nonCalm → aboveZero` on the credit row ([ADR-0087](0087-above-zero-section-visibility.md)).
 
-І остання дрібниця, яка на екрані читається як недбалість: сегментовані контроли панелі дивилися **в
-різні боки**. `Hide the top 5h bar` йшов «тихіше → гучніше», обидва рядки дропдауна — навпаки,
-`Always` ліворуч.
+And one last detail that reads as sloppiness on screen: the pane's segmented controls faced **in
+different directions**. `Hide the top 5h bar` went "quieter → louder," both dropdown rows went the
+opposite way, `Always` on the left.
 
-## Рішення
+## Decision
 
-### 1. Ім'я обирається за поведінкою — і однаково на трьох шарах
+### 1. The name is chosen for behavior — and consistently across three layers
 
-Рядок панелі, ключ сховища й raw-значення перейменовуються **разом**, за одним критерієм: назва
-описує те, що користувач отримає, а не механізм, яким це зроблено.
+The pane's row label, the storage key, and the raw value are renamed **together**, by one criterion:
+the name describes what the user gets, not the mechanism that produces it.
 
-| Було (рядок) | Стало (рядок) | Ключ | Значення |
+| Before (row) | After (row) | Key | Values |
 |---|---|---|---|
 | `Calm non-critical colors` | **`Colors tell me`** | `menuBar.colorsTell` | `slowDown` / `slowDownOrSpeedUp` / `howItsGoing` |
 | `Hide 5h (top) bar` | **`Hide the top 5h bar`** | `menuBar.hideTop5hBar` | `untilItNeedsAttention` / `never` |
 | `Show service status dot on issues` | **`Show service status dot`** | `menuBar.showServiceStatusDot` | — |
 | `Show per-model & per-service limits` | **`Show per-model and per-service limits`** | `dropdown.showPerModelLimits` | `whenItNeedsAttention` / `onceUsed` / `always` |
-| `Show *Extra usage*` | без змін | `dropdown.showExtraUsage` | `onceUsed` / `always` |
-| `Style` (обидві поверхні) | без змін | `menuBar.style`, `dropdown.style` | — |
+| `Show *Extra usage*` | unchanged | `dropdown.showExtraUsage` | `onceUsed` / `always` |
+| `Style` (both surfaces) | unchanged | `menuBar.style`, `dropdown.style` | — |
 
-Типи їдуть за рядками: `CalmColorMode` → [`ColorAdvice`](../../Sources/TokenPaceKit/ColorAdvice.swift),
-`CalmBarHiding` → [`TopBarHiding`](../../Sources/TokenPaceKit/TopBarHiding.swift), параметр
-`MenuBarLayout.make(hideCalmBar:)` → `hideTopBar:`.
+The types follow the row labels: `CalmColorMode` →
+[`ColorAdvice`](../../Sources/TokenPaceKit/ColorAdvice.swift), `CalmBarHiding` →
+[`TopBarHiding`](../../Sources/TokenPaceKit/TopBarHiding.swift), the `MenuBarLayout.make(hideCalmBar:)`
+parameter → `hideTopBar:`.
 
-Сегменти самі несуть пояснення, тож рядок `Colors tell me` читається одним реченням разом із вибраним
-сегментом — «Colors tell me — slow down». З рядка `Hide the top 5h bar` підказка про сам механізм
-ховання зникла (її повторював сегмент); лишилося те, чого не каже ніщо інше: «Either way, once a
-limit is actually reached both bars give way to the countdown to it» — поведінка, якою цей рядок
-**не** керує ([ADR-0091](0091-countdown-only-where-work-is-not-running.md)), і водночас найтривожніший
-перехід застосунку.
+The segments carry their own explanation, so the `Colors tell me` row reads as one sentence together
+with the chosen segment — "Colors tell me — slow down." The caption about the hiding mechanism itself
+disappeared from `Hide the top 5h bar` (the segment already repeated it); what remains is what
+nothing else says: "Either way, once a limit is actually reached both bars give way to the countdown
+to it" — a behavior this row does **not** control
+([ADR-0091](0091-countdown-only-where-work-is-not-running.md)), and at the same time the app's most
+alarming transition.
 
-Слово `calm` лишається **в моделі**: `PacingSeverity.calm`, `BarLayout.isCalm`,
-`PacingSeverity.isNonCalm`. Це терміни про дані, і властивість описує модель, а не підпис контрола.
+The word `calm` stays **in the model**: `PacingSeverity.calm`, `BarLayout.isCalm`,
+`PacingSeverity.isNonCalm`. These are terms about data, and the property describes the model, not a
+control's caption.
 
-### 2. Пресети — свідомий виняток
+### 2. Presets — a deliberate exception
 
-`Chill` / `Work harder!` / `Control freak` названі **не** за поведінкою, і лишаються такими. Пресет
-не описує одну поведінку — він задає сім значень одразу; будь-яка «поведінкова» назва або збрехала б
-про частину з них, або виродилася б у перелік. Ці три — назви **настрою**, під яким читач себе
-впізнає, з рядком-поясненням під кожною
-([ADR-0099](0099-appearance-nests-its-two-surfaces.md)). Правило §1 стосується контролів, що
-задають **одну** величину.
+`Chill` / `Work harder!` / `Control freak` are **not** named for behavior, and they stay that way. A
+preset doesn't describe one behavior — it sets seven values at once; any "behavioral" name would
+either lie about part of them or degenerate into a list. These three are **mood** names the reader
+recognizes themselves in, each with an explanatory line underneath
+([ADR-0099](0099-appearance-nests-its-two-surfaces.md)). The rule in §1 applies to controls that set
+**one** value.
 
-### 3. Ключі отримують префікс поверхні, JSON — вкладені групи
+### 3. Keys get a surface prefix, JSON gets nested groups
 
-Сховище перейменовується **разом** із рядком, а не лишається на старій назві. Мотив прямий: ключ —
-це те, що читає мейнтейнер у `defaults read` і в дампі конфіга, і розбіжність «на екрані одне, у
-ключі інше» коштує рівно того самого часу, що й початкова погана назва. Префікс `menuBar.` /
-`dropdown.` робить поверхню видимою без знання коду.
+Storage is renamed **together with** the row, not left on its old name. The reasoning is direct: the
+key is what the maintainer reads in `defaults read` and in a config dump, and a mismatch between "one
+thing on screen, another in the key" costs exactly the same time the original bad name did. The
+`menuBar.` / `dropdown.` prefix makes the surface visible without knowing the code.
 
-[`AppearanceConfigExport`](../../Sources/TokenPaceKit/AppearanceConfigExport.swift) відповідно видає
-**вкладений** JSON:
+[`AppearanceConfigExport`](../../Sources/TokenPaceKit/AppearanceConfigExport.swift) now emits
+**nested** JSON accordingly:
 
 ```json
 {
@@ -100,88 +104,90 @@ limit is actually reached both bars give way to the countdown to it» — пов
 }
 ```
 
-Порядок усередині групи — **порядок рядків на сторінці**, як і був; групування додає до цього
-поверхню. Декодер читає спершу вкладений ключ, тоді плаский пре-#381, тоді пресетний дефолт — тож
-конфіг, скопійований зі старої версії, імпортується без утрат.
+The order within a group is **the order of the rows on the page**, as before; grouping adds the
+surface on top of that. The decoder reads the nested key first, then the pre-#381 flat one, then the
+preset default — so a config copied from an older version imports without loss.
 
-### 4. Одна міграція ключів замість двох міграцій значень
+### 4. One key migration instead of two value migrations
 
 [`PersistedConfig.migrateAppearanceKeysIfNeeded()`](../../Sources/TokenPace/PersistedConfig.swift)
-переносить усі сім ключів на нові імена, **дорогою** проводячи значення через
-`legacyRawValues` відповідного типу. Кожен enum тепер тримає таку таблицю в собі — поруч із кейсами,
-юніт-тестовану з Kit і спільну для обох читачів старого значення (міграція `UserDefaults` і декод
-імпортованого конфіга), тим самим поділом, що вже мав `BarStyle.legacySurfaceStyles(for:)`.
+moves all seven keys to their new names, running values through the corresponding type's
+`legacyRawValues` **along the way**. Each enum now carries this table itself — next to its cases,
+unit-tested from Kit, and shared by both readers of an old value (the `UserDefaults` migration and
+decoding an imported config), the same split `BarStyle.legacySurfaceStyles(for:)` already had.
 
-Це **прибирає обидва маркерні ключі**: `extraUsageVisibilityMigratedFromNonCalm` і
-`sectionVisibilityMigratedFromOptionOnly` ретировані (лишились константами, щоб їх підмітав скид
-Appearance). Ідемпотентність тепер властивість конструкції, а не окремого прапорця: крок для кожного
-ключа гейтиться на «нового ключа немає» і **зʼїдає** старий, тож завершеність очевидна з того, що
-старого ключа більше нема. Raw, який тип не впізнав, **не копіюється** — геттер віддасть дефолт
-пресета, що завжди й означало нечитане значення.
+This **removes both marker keys**: `extraUsageVisibilityMigratedFromNonCalm` and
+`sectionVisibilityMigratedFromOptionOnly` are retired (kept as constants only so an Appearance reset
+sweeps them up). Idempotency is now a property of the construction rather than a separate flag: each
+key's step is gated on "the new key doesn't exist yet" and **consumes** the old one, so completeness
+is evident from the old key simply being gone. A raw value the type doesn't recognize is **not
+copied over** — the getter returns the preset default, which is what an unread value always meant
+anyway.
 
-### 5. `.optionOnly` видалено з enum
+### 5. `.optionOnly` is removed from the enum
 
-Кейс, який жоден контрол не пропонує від #374, більше не існує як кейс. Старий raw `optionOnly`
-розвʼязується через `PopupSectionVisibility.legacyRawValues` у `.onceUsed` — той самий уцілілий намір
-(«лишайся згорнутим, поки там нічого немає»), який давала знята міграція. Різниця в тому, що тепер
-нема куди повернутися: raw не відповідає жодному кейсу, тож імпорт старого конфіга його теж не
-відродить.
+The case no control has offered since #374 no longer exists as a case at all. The old raw value
+`optionOnly` is resolved through `PopupSectionVisibility.legacyRawValues` into `.onceUsed` — the same
+surviving intent ("stay collapsed while there's nothing there") the retired migration used to give.
+The difference is that now there's nowhere to fall back to: the raw value matches no case, so
+importing an old config won't revive it either.
 
-Так само вичищено `aboveZero` → `onceUsed` і `nonCalm` → `whenItNeedsAttention` — і окремо
-`foldedForCredits`: кредитний рядок пропонує лише `.onceUsed` / `.always`
-([ADR-0087](0087-above-zero-section-visibility.md)), тож значення, якого контрол не має, згортається
-**перед** тим, як потрапити в рядок. Список `creditsOffered` живе біля enum і його читають усі
-чотири шляхи, які можуть покласти значення в цей ключ, — інакше контрол відкривається **без жодного
-підсвіченого сегмента**.
+`aboveZero` → `onceUsed` and `nonCalm` → `whenItNeedsAttention` are cleaned up the same way — and
+separately, `foldedForCredits`: the credit row only offers `.onceUsed` / `.always`
+([ADR-0087](0087-above-zero-section-visibility.md)), so a value the control doesn't have is folded
+**before** it reaches the row. The `creditsOffered` list lives next to the enum and is read by all
+four paths that can place a value into this key — otherwise the control would open with **no segment
+highlighted at all**.
 
-### 6. Єдина вісь сегментів: тихіше ліворуч
+### 6. One shared axis for segments: quieter on the left
 
-Усі сегментовані контроли Appearance впорядковані так, що **найлівіший варіант лишає на екрані
-найменше**, а найправіший — найбільше. Обидва рядки дропдауна розвернуто
-(`When it needs attention | Once used | Always`; для Extra usage `Once used | Always`), менюбарні вже
-такими були.
+Every segmented control in Appearance is ordered so that **the leftmost option leaves the least on
+screen**, and the rightmost leaves the most. Both dropdown rows are reversed
+(`When it needs attention | Once used | Always`; for Extra usage, `Once used | Always`); the menu bar
+ones were already ordered this way.
 
-Наслідок для коду: списки сегментів **виписані явно**, а не мапляться з `allCases`. Порядок на екрані
-— рішення **подачі**; виводити його з порядку оголошення enum означало б, що переверстка контрола
-читається як зміна збереженого типу.
+Consequence for the code: segment lists are **spelled out explicitly**, not mapped from `allCases`.
+On-screen order is a **presentation** decision; deriving it from the enum's declaration order would
+mean a control reflow reads as a change to the persisted type.
 
-### 7. Спільний поріг — спільне формулювання
+### 7. A shared threshold — shared wording
 
-`When it needs attention` (дропдаун) і `Until it needs attention` (menu bar) навмисно перегукуються:
-це **той самий поріг**, з якого дивляться з різних боків — один вирішує, коли **показати** секцію,
-другий — коли **перестати ховати** смужку. Предикати при цьому різні й лишаються різними
-(`PacingSeverity.isNonCalm` проти `BarView.isCalm`, який рахує синій `farBehind` спокійним), і це не
-суперечність: обидва відповідають на питання «чи є тут що робити».
+`When it needs attention` (dropdown) and `Until it needs attention` (menu bar) deliberately echo each
+other: it's **the same threshold**, viewed from two different sides — one decides when to **show**
+the section, the other when to **stop hiding** the bar. The underlying predicates differ, and stay
+different (`PacingSeverity.isNonCalm` versus `BarView.isCalm`, which counts blue `farBehind` as
+calm), and that's not a contradiction: both answer the question "is there anything to do here."
 
-## Наслідки
+## Consequences
 
-**Дамп конфіга змінив форму.** Скрипт чи звичка, що читала пласкі ключі верхнього рівня, побачить
-дві групи. Імпорт старих дампів працює (§3), зворотного — ні: конфіг із вкладеними групами старша
-версія прочитає як «нічого не задано» й візьме дефолти пресета.
+**The config dump changed shape.** A script or habit that read flat top-level keys will now see two
+groups. Importing old dumps still works (§3); the reverse doesn't: an older version reading a config
+with nested groups will see "nothing set" and fall back to preset defaults.
 
-**Перейменування ключа тепер має ціну, і вона зафіксована.** Будь-яке наступне перейменування вимагає
-кроку `migrateRawKey` **і** запису в `legacyRawValues` типу — інакше збережений вибір користувача
-тихо падає в дефолт. Це записано в [releasing.md](../guides/releasing.md) як пункт передрелізної
-перевірки.
+**Renaming a key now has a cost, and it's recorded.** Any future rename requires a `migrateRawKey`
+step **and** an entry in the type's `legacyRawValues` — otherwise a user's saved choice silently falls
+back to the default. This is recorded in [releasing.md](../guides/releasing.md) as a pre-release
+checklist item.
 
-**Старі рецепти верифікації протухли.** `defaults write com.artem-n.tokenpace calmBarHiding …`
-більше нічого не робить після першого запуску нової збірки — ключ буде спожито міграцією. Актуальні
-рецепти — в [ui-verification.md](../guides/ui-verification.md).
+**Old verification recipes have gone stale.** `defaults write com.artem-n.tokenpace calmBarHiding …`
+does nothing after the first launch of a new build — the key will already have been consumed by the
+migration. Current recipes are in [ui-verification.md](../guides/ui-verification.md).
 
-**Перевірити треба саме міграцію.** Найдорожча помилка тут не в назві, а в тому, що користувач
-відкриває Settings і бачить не свій вибір. Сценарій «засіяти старі ключі → запустити → звірити лог і
-нові ключі» доданий у [ui-verification.md](../guides/ui-verification.md).
+**What actually needs verifying is the migration.** The most expensive mistake here isn't in a name —
+it's a user opening Settings and not seeing their own choice. A scenario ("seed old keys → launch →
+check the log and the new keys") was added to
+[ui-verification.md](../guides/ui-verification.md).
 
-## Альтернативи
+## Alternatives considered
 
-**Перейменувати лише рядки, ключі лишити.** Найдешевше й найгірше: розбіжність між екраном і
-`defaults read` — це рівно та вартість, заради усунення якої й затіяно перейменування, просто
-перекладена з користувача на мейнтейнера.
+**Rename only the rows, leave the keys.** Cheapest and worst: the mismatch between the screen and
+`defaults read` is exactly the cost this rename was meant to remove — just shifted from the user onto
+the maintainer.
 
-**Лишити пласкі ключі, але з префіксом.** Проміжний варіант — префікс без вкладеності в JSON. Дає
-половину виграшу (поверхня видима в `defaults`), але дамп лишається пласким списком із сімнадцяти
-рядків, у якому групи доводиться вгадувати за префіксом.
+**Keep flat keys, but with a prefix.** A middle ground — a prefix with no JSON nesting. Gives half
+the benefit (the surface is visible in `defaults`), but the dump stays a flat list of seventeen rows
+where groups have to be guessed from the prefix.
 
-**Лишити `.optionOnly` в enum «про всяк випадок».** Так було від #374, і саме цей «всяк випадок»
-тримав окрему міграцію з маркером. Кейс, якого не пропонує жоден контрол і не породжує жоден дефолт,
-— це шлях виконання, який ніхто не перевіряє.
+**Keep `.optionOnly` in the enum "just in case."** That's how it stood since #374, and that exact
+"just in case" was what kept the separate marker-based migration alive. A case no control offers and
+no default ever produces is an execution path nobody checks.

@@ -3,78 +3,84 @@ status: accepted
 date: 2026-07-06
 ---
 
-# ADR-0017: Делегований refresh токена через claude CLI
+# ADR-0017: Delegated token refresh via the claude CLI
 
-> **Уточнено в #183 (2026-07-29):** ізоляцію заспавненого `claude` від користувацьких хуків дає
-> прапорець `--safe-mode`, а не порожня робоча тека. Порожня cwd відрізає лише *project-local*
-> контекст; глобальні хуки/plugins/MCP з `~/.claude` спрацьовували попри неї — і піднімали TCC-промпт
-> під відповідальністю GUI-застосунку (див. Наслідки). Тіло ADR лишається як історичний запис.
+> **Clarified in #183 (2026-07-29):** isolating the spawned `claude` from the user's own hooks is
+> provided by the `--safe-mode` flag, not by an empty working directory. An empty cwd only cuts off
+> *project-local* context; global hooks/plugins/MCP from `~/.claude` still fired despite it — and
+> raised a TCC prompt under the GUI app's identity (see Consequences). The body of this ADR remains
+> as a historical record.
 
-## Контекст
+## Context
 
-ADR-0007 розбив issue #8 на 8a (читання Keychain, у `main`) і 8b (fallback-refresh протухлого
-токена) і явно відклав механіку 8b: «якщо `refreshToken` виявиться одноразовим або
-endpoint/client_id зафіксуються — це нове рішення → окремий ADR». Початковий план 8b —
-самостійний `refresh_token` grant + перезапис Keychain через `SecItemUpdate` — був заблокований
-головним ризиком: невідомо, чи ротується refresh-токен, а перевірка без тестового Max-акаунта
-могла розлогінити робочий Claude Code.
+ADR-0007 split issue #8 into 8a (reading the Keychain, in `main`) and 8b (fallback refresh of a
+stale token), and explicitly deferred 8b's mechanics: "if `refreshToken` turns out to be single-use,
+or the endpoint/client_id get pinned down — that's a new decision → a separate ADR." The initial
+plan for 8b — a standalone `refresh_token` grant plus overwriting the Keychain via `SecItemUpdate` —
+was blocked by the main risk: it was unknown whether the refresh token rotates, and testing without
+a spare Max account could have logged the working Claude Code session out.
 
-Дослідження 11 проєктів-аналогів (зафіксовано коментарями в issue #8, 2026-07-06) зняло
-невизначеність:
+Researching 11 comparable projects (recorded in comments on issue #8, 2026-07-06) resolved the
+uncertainty:
 
-- **Ротація refresh-токенів — факт.** Обидва аналоги з self-refresh (victor-shammas,
-  akitaonrails) обов'язково пишуть ротовану пару назад у сховище Claude Code; два інші
-  (steipete/CodexBar, hunaczech) явно документують відмову від self-refresh саме через ризик
-  розсинхронізувати CLI.
-- **Робоча альтернатива — делегування:** CodexBar на протухлому токені запускає `claude` у PTY
-  і чекає на зміну Keychain-айтема; victor-shammas запускає голий `claude` як fallback. Ротацію
-  виконує сам Claude Code у власному Keychain — сторонньому застосунку write-back не потрібен.
-- **Спайк TokenPace** підтвердив команду `claude --model haiku -p '/usage'`: `/usage`
-  обробляється локальним обробником CLI (у транскрипті сесії нуль звернень до моделі; ізольований
-  замір utilization до/після — без змін), exit 0 за ~1.5 с. `--bare` непридатний — у ньому CLI
-  взагалі не читає OAuth/Keychain. Голий `claude` без TTY одразу падає (авто-`--print` режим).
+- **Refresh-token rotation is a fact.** Both comparable projects doing self-refresh
+  (victor-shammas, akitaonrails) write the rotated pair back into Claude Code's own storage as a
+  hard requirement; two others (steipete/CodexBar, hunaczech) explicitly document avoiding
+  self-refresh precisely because of the risk of desyncing the CLI.
+- **A working alternative — delegation:** CodexBar, on a stale token, spawns `claude` in a PTY and
+  waits for the Keychain item to change; victor-shammas spawns a bare `claude` as a fallback. The
+  rotation itself is performed by Claude Code in its own Keychain — a third-party app doesn't need
+  write-back.
+- **A TokenPace spike** confirmed the `claude --model haiku -p '/usage'` command: `/usage` is
+  handled by the CLI's local handler (zero calls to the model in the session transcript; an isolated
+  utilization measurement before/after showed no change), exiting 0 in ~1.5 s. `--bare` doesn't
+  work — with it the CLI never reads OAuth/Keychain at all. A bare `claude` without a TTY fails
+  immediately (the auto-`--print` mode).
 
-## Рішення
+## Decision
 
-1. **Refresh делегується Claude Code.** На `TokenError.expired` полінг-цикл спавнить
-   `claude --model haiku -p '/usage'` (stdin/stdout/stderr → `/dev/null`, порожня tmp-тека,
-   таймаут 30 с із SIGTERM→SIGKILL-ескалацією), CC сам ротує пару у своєму Keychain; критерій
-   успіху — `expiresAt` посунувся вперед. Після успіху токен перечитується і запит usage
-   виконується **у тому самому циклі** опитування.
-2. **TokenPace лишається строго read-only щодо креденшалів:** жодного `refresh_token` grant,
-   жодного запису в Keychain, `refreshToken` не використовується. Заготовку 8b
-   (`refreshAndStore`/`buildRefreshRequest`/`writeBack`) видалено.
-3. **Сім і чистота:** kit отримує протокол `DelegatedRefresher` (fail-safe, не кидає) і чистий
-   `RefreshGate` — anti-flap гейт з ескалацією cooldown `1→5→30→60 хв` після невдач (стиль
-   `PollingBackoff`, таблично тестований). Виробнича реалізація `ClaudeCLIRefresher` — у shell
-   (перший і єдиний спавн сабпроцесу в кодовій базі), пошук бінарника по фіксованих шляхах
-   (launchd має мінімальний PATH).
-4. **UI:** `.expired` більше не маскується під синтетичний HTTP 401 — окремий
-   `FailureReason.tokenExpired` із чесним текстом («Refreshing via the claude CLI — open Claude
-   Code if this persists»).
+1. **Refresh is delegated to Claude Code.** On `TokenError.expired` the polling loop spawns
+   `claude --model haiku -p '/usage'` (stdin/stdout/stderr → `/dev/null`, an empty tmp directory, a
+   30 s timeout with SIGTERM→SIGKILL escalation); CC itself rotates the pair in its own Keychain;
+   success is measured by `expiresAt` having moved forward. After success, the token is re-read and
+   the usage request runs **within the same** polling cycle.
+2. **TokenPace stays strictly read-only with respect to credentials:** no `refresh_token` grant, no
+   Keychain write, `refreshToken` is unused. The 8b scaffolding (`refreshAndStore`/
+   `buildRefreshRequest`/`writeBack`) was removed.
+3. **Seam and purity:** the kit gets a `DelegatedRefresher` protocol (fail-safe, never throws) and a
+   pure `RefreshGate` — an anti-flap gate with cooldown escalation `1→5→30→60 min` after failures
+   (in the style of `PollingBackoff`, table-tested). The production implementation,
+   `ClaudeCLIRefresher`, lives in the shell (the first and only subprocess spawn in the codebase),
+   locating the binary via fixed paths (launchd has a minimal PATH).
+4. **UI:** `.expired` is no longer disguised as a synthetic HTTP 401 — it gets its own
+   `FailureReason.tokenExpired` with an honest message ("Refreshing via the claude CLI — open Claude
+   Code if this persists").
 
-## Наслідки
+## Consequences
 
-- Тестовий Max-акаунт для 8b **не потрібен** — головний блокер тікета знято; відкрите питання
-  SPEC «чи `refreshToken` одноразовий» закрито (так, ротується).
-- Зникає ризик write-back (гонитва з CC за Keychain-айтем, ACL-діалог на запис із підписаного
-  bundle — частина обсягу #21 стає неактуальною для refresh).
-- Нова залежність: наявність бінарника `claude` на відомих шляхах. Немає бінарника →
-  `.cliNotFound`, ворнінг у попапі, гейт стримує повторні спроби; користувачу лишається відкрити
-  Claude Code.
-- Заспавнений `claude` на секунди видимий для `ProcessClaudeActivityProbe` (точний збіг імені) —
-  прийнятний blip: probe опитується на початку ітерації, сабпроцес завершується всередині неї.
-- Поведінка `-p '/usage'` — контракт із CLI, не з API: якщо майбутня версія CLI змінить
-  обробку (наприклад, перестане рефрешити на старті), зламається лише fallback-шлях, і
-  `expiresAt`-критерій чесно поверне `.unchanged`; діагностика — у логах категорії `keychain`.
-- E2E-підтвердження рефрешу саме *протухлого* токена — на природній експірації (ніч із закритим
-  CC); спайк на свіжому токені його підтвердити не може (CC рефрешить ліниво).
-- **Спаун ізольований прапорцем `--safe-mode`** (додано в #183): він вимикає користувацькі hooks,
-  plugins, MCP-сервери та CLAUDE.md, лишаючи auth, Keychain, built-in tools і permissions — тобто
-  refresh працює. Без нього заспавнений `claude` виконує **глобальні SessionStart-хуки користувача**;
-  якщо хук читає файл із File Provider domain (iCloud/Dropbox/GDrive), TCC піднімає промпт ланцюгом
-  відповідальності до GUI-застосунку і показує його **від імені TokenPace** — виглядає як шпигунство
-  лічильника токенів. Порожня cwd тут не рятує (відрізає лише project-local контекст). `--bare`
-  непридатний (пропускає Keychain reads). Мінімальна рекомендована версія CLI — з наявним
-  `--safe-mode` (перевірено на v2.1.212, 2026-07-16); на старішій CLI прапорець → ненульовий exit →
-  `.failed`, і refresh самолікується наступним оновленням `claude` (без окремого version-фолбеку).
+- A test Max account for 8b is **no longer needed** — the ticket's main blocker is lifted; the
+  SPEC's open question, "is `refreshToken` single-use," is closed (no, it rotates).
+- The write-back risk disappears (racing CC for the Keychain item, an ACL write-consent dialog from
+  a signed bundle — part of #21's scope becomes moot for refresh).
+- A new dependency: the `claude` binary being present at known paths. No binary → `.cliNotFound`, a
+  warning in the popup, the gate throttles retries; the user is left to open Claude Code themselves.
+- The spawned `claude` is visible to `ProcessClaudeActivityProbe` for a few seconds (an exact name
+  match) — an acceptable blip: the probe is polled at the start of an iteration, and the subprocess
+  finishes within it.
+- `-p '/usage'`'s behavior is a contract with the CLI, not with the API: if a future CLI version
+  changes the handling (say, stops refreshing on startup), only the fallback path breaks, and the
+  `expiresAt` check honestly returns `.unchanged`; diagnosis happens via logs in the `keychain`
+  category.
+- End-to-end confirmation of refreshing a genuinely *stale* token happened on a natural expiration
+  (overnight with CC closed); a spike against a fresh token can't confirm this (CC refreshes
+  lazily).
+- **The spawn is isolated by the `--safe-mode` flag** (added in #183): it disables the user's own
+  hooks, plugins, MCP servers, and CLAUDE.md, while leaving auth, Keychain, built-in tools, and
+  permissions intact — so refresh still works. Without it, the spawned `claude` runs the **user's
+  global SessionStart hooks**; if a hook reads a file from a File Provider domain (iCloud/Dropbox/
+  GDrive), TCC raises a prompt whose chain of responsibility points to the GUI app and displays it
+  **under TokenPace's name** — which looks like the token counter spying on the user. An empty cwd
+  doesn't save this (it only cuts off project-local context). `--bare` doesn't work (it skips
+  Keychain reads). The minimum recommended CLI version is one that has `--safe-mode` (verified on
+  v2.1.212, 2026-07-16); on an older CLI, the flag produces a non-zero exit → `.failed`, and refresh
+  self-heals with the next `claude` update (no separate version fallback).

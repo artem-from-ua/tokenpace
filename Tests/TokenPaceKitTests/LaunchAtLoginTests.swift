@@ -5,7 +5,7 @@ import Testing
 
 /// Covers the pure decision core of the launch-at-login feature (#14). The `SMAppService`-facing
 /// glue (`LaunchAtLoginController`) is a system singleton and is verified manually, per the
-/// project's pure-core / thin-shell convention (ADR-0009 §"Наслідки").
+/// project's pure-core / thin-shell convention (ADR-0009 §"Consequences").
 @Suite("LaunchAtLogin decisions")
 struct LaunchAtLoginTests {
 

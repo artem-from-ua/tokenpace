@@ -5,87 +5,96 @@ supersedes: []
 superseded_by: []
 ---
 
-# ADR-0114: «Extra usage» — одна назва на всіх поверхнях
+# ADR-0114: "Extra usage" — one name across every surface
 
-> Витісняє пункт «**Хінт наголошує теперішній час**» секції «Супутні рішення»
-> [ADR-0068](0068-credits-in-use-marker-anatomy.md) — конкретно клаузу «Написання `Extra Usage
-> Credit` узгоджено з наявною нотифікацією». Решта 0068 чинна: анатомія маркера, `KnockoutGlyphBadge`,
-> звуження `PillView` до blocking-reset бейджа, три кольори валютного гліфа.
-> Не змінює нічого в [ADR-0050](0050-extra-usage-notification.md) (коли нотифікація фіритися)
-> — лише **як** вона називає річ, про яку повідомляє.
+> Supersedes the "**The hint emphasizes present tense**" item in the "Related decisions" section of
+> [ADR-0068](0068-credits-in-use-marker-anatomy.md) — specifically the clause "The wording `Extra
+> Usage Credit` is aligned with the existing notification." The rest of 0068 still stands: the
+> marker's anatomy, `KnockoutGlyphBadge`, narrowing `PillView` to the blocking-reset badge, the
+> currency glyph's three colors.
+> Changes nothing in [ADR-0050](0050-extra-usage-notification.md) (when the notification fires) —
+> only **how** it names the thing it's notifying about.
 
-## Контекст
+## Context
 
-Застосунок називав одну фічу двома іменами, і обидва були «правильні» за власним ADR.
+The app called one feature by two names, and both were "correct" per their own ADR.
 
-Секція дропдауна зветься **`Extra usage`** — sentence case, джерело
-`PopupViewController.extraUsageTitle`, позначене там як localisation seam ([ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md)).
-Нотифікація і tooltip'и маркера писали **`Extra Usage Credit`** — Title Case, і це теж було
-ухвалене рішення: 0068 явно узгодив хінт із заголовком банера, «щоб застосунок не називав ту саму
-річ двома способами».
+The dropdown section is called **`Extra usage`** — sentence case, sourced from
+`PopupViewController.extraUsageTitle`, marked there as a localization seam
+([ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md)). The notification and the marker's
+tooltips wrote **`Extra Usage Credit`** — Title Case, and that too was a deliberate decision: 0068
+explicitly aligned the hint with the banner's title, "so the app doesn't call the same thing two
+different things."
 
-Кожне рішення локально послідовне, разом — суперечність. Найгірше вона проступила в Settings, який
-успадкував **обидва** написання одночасно: `AppearancePanes` посилається на секцію як `*Extra usage*`
-(з коментарем-правилом «це ім'я секції, тому курсивом»), а `NotificationsPane` в сусідній панелі
-писав `Switching to Extra Usage`. Користувач бачить два імені й не має способу дізнатися, що це одне.
+Each decision was locally consistent; together, they contradict each other. It showed up worst in
+Settings, which inherited **both** spellings at once: `AppearancePanes` refers to the section as
+`*Extra usage*` (with a rule comment "this is the section's name, hence the italics"), while
+`NotificationsPane`, on the neighboring pane, wrote "Switching to Extra Usage." The user sees two
+names with no way to tell they're the same thing.
 
-Розбіжність трималася й тому, що заголовок банера існував **двічі**: `ExtraUsageOnset.bannerTitle`
-(Kit) і літерал у `BackToWorkNotifier.postExtraUsage`. Вони збігалися випадково — будь-яка правка
-формулювання на одному боці розійшлася б мовчки, бо тестів на ці рядки немає.
+The divergence also survived because the banner's title existed **twice**: `ExtraUsageOnset.bannerTitle`
+(Kit) and a literal in `BackToWorkNotifier.postExtraUsage`. They matched by coincidence — any wording
+edit on one side would have drifted silently, since there are no tests on these strings.
 
-## Рішення
+## Decision
 
-**Одна назва — `Extra usage`** — на кожній поверхні: попап, Settings, нотифікація, tooltip'и,
-accessibility-лейбли.
+**One name — `Extra usage`** — on every surface: the popup, Settings, the notification, tooltips,
+accessibility labels.
 
-1. **Регістр — sentence case.** Обрано бік секції, а не бік біллінгового терміна. Секція — те, що
-   користувач бачить постійно й на що він клікає; заголовок нотифікації він бачить кілька разів на
-   місяць. Ім'я в інтерфейсі має вести, а не термін із рахунку.
-2. **Слово `credits` — з малої й у множині**, коли йдеться про гроші: `Now using Extra usage
-   credits`, `Currently spending Extra usage credits`. Воно лишається, бо в тексті про витрачання
-   зникнення слова «кредити» зробило б фразу двозначною; але воно вже не частина імені, тож не
-   капіталізується. Множина вимагає узгодження дієслова: `Extra usage credits **are** spent`.
-3. **Курсив — лише коли рядок називає секцію**, не коли описує витрати. `Switching to *Extra usage*`
-   — курсив; `on paid Extra usage credits` — ні.
-4. **Джерело імені — `PopupViewController.extraUsageTitle`.** Заголовок нотифікації читається з
-   `ExtraUsageOnset.bannerTitle`, а не дублюється літералом у `BackToWorkNotifier`.
+1. **Case — sentence case.** The section's side won, not the billing term's side. The section is
+   what the user sees constantly and clicks on; the notification title is seen a few times a month.
+   The name in the interface should lead, not the term from the receipt.
+2. **The word `credits` — lowercase and plural**, when referring to money: `Now using Extra usage
+   credits`, `Currently spending Extra usage credits`. It stays, because dropping the word
+   "credits" from spending-related text would make the phrase ambiguous; but it's no longer part of
+   the name, so it's no longer capitalized. The plural requires matching the verb: `Extra usage
+   credits **are** spent`.
+3. **Italics — only when the string names the section**, not when it describes spending.
+   `Switching to *Extra usage*` — italic; `on paid Extra usage credits` — not.
+4. **The name's source — `PopupViewController.extraUsageTitle`.** The notification title is read
+   from `ExtraUsageOnset.bannerTitle`, rather than duplicated as a literal in
+   `BackToWorkNotifier`.
 
-Чому це не суперечить 0068, а продовжує його: мотив там і тут **той самий** — застосунок не має
-називати одну річ двома способами. 0068 не міг його доти́гнути, бо дивився лише на пару
-«нотифікація ↔ хінт маркера» і не бачив секції попапа як третього учасника. Змінюється не принцип,
-а те, який бік обрано за канон.
+Why this doesn't contradict 0068 but continues it: the motive there and here is **the same** — the
+app shouldn't call one thing two different things. 0068 couldn't see it through, because it only
+looked at the "notification ↔ marker hint" pair and didn't see the popup section as a third
+participant. What changes isn't the principle — it's which side got picked as canon.
 
-## Наслідки
+## Consequences
 
-- **Текст нотифікації змінюється для наявних користувачів.** Банер тепер `Now using Extra usage
-  credits`. Ціна свідома: одна назва вартує разової зміни звичного рядка.
-- **`SettingsDisabledLabel` рендерить через `Text(.init(_:))`** — інакше зірочки курсиву друкуються
-  буквально. Схована мітка `Toggle` навпаки лишається плейн-рядком: її промовляє VoiceOver, і
-  розмітку він прочитає вголос.
-- **Шов нотифікації став одностороннім** — `BackToWorkNotifier` читає константу Kit. Один рядок
-  замість двох, які тільки виглядали синхронними.
-- **Регресію ловити нічим.** Тестів на ці рядки не було й немає: `Tests/` покриває лише
-  `TokenPaceKit`, а Settings і попап живуть у виконуваному таргеті без тестів. Захист поки що —
-  правило в [conventions.md](../reference/conventions.md#case-of-user-facing-strings--sentence-case-and-one-name-per-thing)
-  і те, що ім'я тепер має одне джерело. Підняти `extraUsageTitle` в Kit і закрити тестом —
-  очевидний наступний крок, свідомо не зроблений тут, щоб не тягнути рефактор у текстову зміну.
-- **`Extra Usage Credit` лишається в коментарях і докстрінгах** там, де йдеться про біллінговий
-  продукт Anthropic як зовнішню сутність. Це не UI, і уніфікація його не стосується.
+- **The notification text changes for existing users.** The banner now reads `Now using Extra usage
+  credits`. The cost is accepted deliberately: one name is worth a one-time change to a familiar
+  string.
+- **`SettingsDisabledLabel` renders through `Text(.init(_:))`** — otherwise the italics asterisks
+  print literally. The `Toggle`'s hidden label stays a plain string, on the other hand: VoiceOver
+  speaks it aloud, and it would read the markup out loud too.
+- **The notification seam became one-directional** — `BackToWorkNotifier` reads the Kit constant.
+  One line instead of two that only looked synchronized.
+- **There's nothing to catch a regression with.** There were no tests on these strings before, and
+  there still aren't: `Tests/` covers only `TokenPaceKit`, while Settings and the popup live in the
+  executable target with no tests. The current protection is the rule in
+  [conventions.md](../reference/conventions.md#case-of-user-facing-strings--sentence-case-and-one-name-per-thing)
+  and the fact that the name now has a single source. Lifting `extraUsageTitle` into the Kit and
+  closing it with a test is the obvious next step, deliberately not done here so as not to drag a
+  refactor into a text change.
+- **`Extra Usage Credit` remains in comments and doc comments** wherever it refers to Anthropic's
+  billing product as an external entity. That's not UI, and the unification doesn't touch it.
 
-## Альтернативи
+## Alternatives considered
 
-- **Уніфікувати в інший бік** — перейменувати секцію попапа на `Extra Usage Credit`. Відкинуто:
-  назва секції довша за колонку, дублює слово «credit» поруч із сумою в євро, і зробила б
-  інтерфейс схожим на виписку з рахунку замість орієнтира.
-- **Лишити два імені й задокументувати обидва** як легітимні (секція ≠ продукт). Формально захищає
-  0068, але користувач не читає ADR — він бачить два рядки й не знає, чи це одне.
-- **Прибрати слово `credits` зовсім** (`Now using Extra usage`). Найкоротше й точно збігається з
-  іменем секції, але в реченні про витрачання грошей губиться те, що саме витрачається.
+- **Unify the other way** — rename the popup section to `Extra Usage Credit`. Rejected: the section
+  name is longer than the column, duplicates the word "credit" right next to a euro amount, and
+  would make the interface look like a billing statement instead of a landmark.
+- **Keep both names and document both** as legitimate (section ≠ product). Formally defends 0068,
+  but the user doesn't read ADRs — they see two strings and have no way to know it's one thing.
+- **Drop the word `credits` entirely** (`Now using Extra usage`). The shortest option and matches
+  the section name exactly, but in a sentence about spending money, it loses track of what's
+  actually being spent.
 
-## Посилання
+## References
 
-- [#416](https://github.com/artem-from-ua/tokenpace/issues/416) — тікет, з якого виросло рішення.
-- [#156](https://github.com/artem-from-ua/tokenpace/issues/156) — паритет Settings, де розбіжність помітили.
-- [ADR-0068](0068-credits-in-use-marker-anatomy.md) — частково витіснений цим ADR.
-- [ADR-0050](0050-extra-usage-notification.md) — сама нотифікація.
-- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — localisation seam попапа.
+- [#416](https://github.com/artem-from-ua/tokenpace/issues/416) — the ticket this decision grew out of.
+- [#156](https://github.com/artem-from-ua/tokenpace/issues/156) — Settings parity, where the divergence was spotted.
+- [ADR-0068](0068-credits-in-use-marker-anatomy.md) — partially superseded by this ADR.
+- [ADR-0050](0050-extra-usage-notification.md) — the notification itself.
+- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — the popup's localization seam.

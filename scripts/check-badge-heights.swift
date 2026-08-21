@@ -15,7 +15,7 @@
 // reset badge (the tallest anatomy, so nothing has to grow past it).
 //
 // This also pins the claim in ADR-0068's postscript — that centring a currency glyph *is* solvable by
-// calculation, against that ADR's original "не розв'язується розрахунком". Measuring the glyph's ink
+// calculation, against that ADR's original "isn't solved by calculation". Measuring the glyph's ink
 // rather than its box is what makes it work, and a text attachment gets it for free: the text system
 // positions the symbol from the font's cap height, with no per-currency constant.
 //

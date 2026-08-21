@@ -5,126 +5,135 @@ supersedes: [0039]
 superseded_by: []
 ---
 
-# ADR-0113: «Back to work!» стежить за підписочною квотою, а не за можливістю працювати
+# ADR-0113: "Back to work!" tracks the subscription quota, not the ability to work
 
-> **Постскриптум (#416).** Рядки, які цей ADR цитує, змінили написання: усі поверхні тепер пишуть
-> **`Extra usage`**, а `credits` — з малої й у множині ([ADR-0114](0114-extra-usage-is-one-name.md)).
-> Тобто хінт нижче читається «…get back to work. Extra usage credits don't count.», а банер —
-> «Now using Extra usage credits». Рішення цього ADR — який предикат живить фронт — не зачеплене.
+> **Postscript (#416).** The strings this ADR quotes changed spelling: every surface now writes
+> **`Extra usage`**, and `credits` is lowercase and plural
+> ([ADR-0114](0114-extra-usage-is-one-name.md)). So the hint below reads "…get back to work. Extra
+> usage credits don't count.", and the banner reads "Now using Extra usage credits." This ADR's
+> decision — which predicate drives the front — is unaffected.
 >
-> Витісняє **вибір сигналу** з [ADR-0039](0039-back-to-work-notification.md): фронт тепер
-> `subscriptionAvailable`, а не `canWork`. Решта того ADR чинна й не змінюється — персистований
-> edge-state із розколом «трекінг щополу / постинг за тумблером», quiet-hours (`NotificationSchedule`,
-> Правило A), ленива `.app`-only авторизація, розкол pure/shell. Нічого не змінює в
-> [ADR-0050](0050-extra-usage-notification.md): нотифікація «Now using Extra Usage Credit» лишається
-> окремим фронтом з окремим ключем.
+> Supersedes **the choice of signal** from [ADR-0039](0039-back-to-work-notification.md): the front
+> is now `subscriptionAvailable`, not `canWork`. The rest of that ADR still stands and is
+> unchanged: the persisted edge state with its "track per poll / post per toggle" split,
+> quiet hours (`NotificationSchedule`, Rule A), lazy `.app`-only authorization, the pure/shell
+> split. Nothing changes in [ADR-0050](0050-extra-usage-notification.md): the "Now using Extra
+> Usage Credit" notification remains a separate front with a separate key.
 
-## Контекст
+## Context
 
-[ADR-0039](0039-back-to-work-notification.md) обрав сигналом `WorkAvailability.canWork` — предикат
-«чи можлива робота **прямо зараз**», який зараховує активні money-credits як шлях до роботи. Це
-відповідає на питання *«чи я заблокований?»*.
+[ADR-0039](0039-back-to-work-notification.md) chose `WorkAvailability.canWork` as the signal — a
+predicate for "can I work **right now**," which counts active money credits as a path to working.
+That answers the question *"am I blocked?"*
 
-Але тумблер обіцяє інше. Мейнтейнер сформулював намір прямо ([#161](https://github.com/artem-from-ua/tokenpace/issues/161)):
-нотифікація має бути **саме про ресет ліміту підписочних токенів**, і **не** реагувати на ліміт Extra
-usage. Це питання *«чи відновилася моя квота?»* — інше.
+But the toggle promises something else. The maintainer stated the intent directly
+([#161](https://github.com/artem-from-ua/tokenpace/issues/161)): the notification should be
+**specifically about the subscription token limit resetting**, and should **not** react to the
+Extra usage limit. That's the question *"has my quota come back?"* — a different one.
 
-Поки Extra usage вимкнено, обидва питання дають однакову відповідь. Щойно кредити ввімкнено, вони
-розходяться — і в обидва боки хибно:
+While Extra usage is off, both questions give the same answer. As soon as credits are enabled, they
+diverge — and wrongly in both directions:
 
-| Сценарій | `canWork` | Очікування користувача |
+| Scenario | `canWork` | User's expectation |
 |---|---|---|
-| 5h/7d на 100 %, кредити покривають роботу, потім 5h ресетиться | стан **ніколи не був** blocked → банера немає | банер **має бути**: квота відновилася |
-| Кредити вперлися в стелю (`spend_limit_reached`), потім ресет кредитів | фронт `false → true` → банер **є** | банера **не має бути**: підписка досі вичерпана |
+| 5h/7d at 100%, credits cover the work, then the 5h resets | state was **never** blocked → no banner | banner **should** fire: the quota came back |
+| Credits hit their ceiling (`spend_limit_reached`), then the credits reset | front `false → true` → banner **fires** | banner **should not** fire: the subscription is still exhausted |
 
-Перший рядок — це мовчання рівно тоді, коли нотифікація найкорисніша: користувач платить за кожен
-токен і хоче знати момент, коли можна перестати. Другий — банер «Back to work!» у стані, де працювати
-за підписку якраз **не** можна.
+The first row is silence exactly when the notification is most useful: the user is paying per
+token and wants to know the moment they can stop. The second is a "Back to work!" banner in a
+state where working on the subscription is exactly what you **can't** do.
 
-Причина обох — не помилка в `canWork`, а те, що його питання не збігається з обіцянкою тумблера.
+The cause in both cases isn't a bug in `canWork` — it's that its question doesn't match the
+toggle's promise.
 
-## Рішення
+## Decision
 
-### Окремий предикат, а не правка `canWork`
+### A separate predicate, not a `canWork` edit
 
-Новий чистий `WorkAvailability.subscriptionAvailable(_:)` (`TokenPaceKit`):
+A new pure `WorkAvailability.subscriptionAvailable(_:)` (`TokenPaceKit`):
 
 ```
 subscriptionAvailable = !CreditsPacing.mainWindowExhausted(snapshot)
 ```
 
-`canWork` **лишається недоторканим** — його питання правильне для свого споживача (popup-badge
-блокування, `CreditsPacing.isBlocked`). Два різні питання отримують два різні предикати замість
-одного, перевантаженого обома значеннями.
+`canWork` **stays untouched** — its question is the right one for its own consumer (the popup-badge
+block, `CreditsPacing.isBlocked`). Two different questions get two different predicates, instead of
+one overloaded with both meanings.
 
-Реюз `CreditsPacing.mainWindowExhausted(in:)` — той самий предикат вичерпаності, що вже стоїть за
-`isBlocked` і за самим `canWork`, а не свіжа перевірка. Тому червоний badge блокування й ця
-нотифікація не можуть розійтися в тому, що вважається «вичерпаним»: розходиться лише те, що кожен із
-них робить далі з кредитами.
+It reuses `CreditsPacing.mainWindowExhausted(in:)` — the same exhaustion predicate already behind
+`isBlocked` and `canWork` itself, not a fresh check. So the red block badge and this notification
+can never disagree about what counts as "exhausted": the only thing that differs is what each of
+them does next with credits.
 
-Крайові випадки випливають із реюзу без спецкоду — і всі покриті юнітами
+The edge cases fall out of the reuse with no special-casing — and all are covered by unit tests
 (`SubscriptionAvailabilityTests`):
 
-- **per-model / `weekly_scoped` на 100 %** при головних вікнах нижче 100 % → доступно: під-вікна не
-  гейтять роботу ([#177](https://github.com/artem-from-ua/tokenpace/issues/177)), тож і хибного фронту
-  вони не дають;
-- **`sessionIdle`** (5h із `utilization: 0`) → доступно, idle-вікно це «ready to start», не вичерпано;
-- **`spend` не читається взагалі** — ні `nil`, ні `enabled`, ні `spend_limit_reached` не впливають.
+- **per-model / `weekly_scoped` at 100%** while the main windows are below 100% → available:
+  sub-windows don't gate work ([#177](https://github.com/artem-from-ua/tokenpace/issues/177)), so
+  they don't produce a false front either;
+- **`sessionIdle`** (5h with `utilization: 0`) → available, an idle window means "ready to start,"
+  not exhausted;
+- **`spend` is never read at all** — neither `nil`, nor `enabled`, nor `spend_limit_reached`
+  influence it.
 
-### Кредити поза сигналом в обидва боки
+### Credits stay off the signal in both directions
 
-Це наслідок, який варто назвати окремо, бо він симетричний і навмисний:
+This consequence deserves its own mention because it's symmetric and deliberate:
 
-- 5h/7d на 100 % читається як **недоступно навіть коли кредити активно покривають роботу**. Робота при
-  цьому не спиняється — але квота витрачена, тож наступний ресет є справжнім фронтом.
-- Стеля кредитів і їхній ресет **не рухають сигнал**, тож ресет кредитів сам по собі нічого не
-  оголошує, поки підписка вичерпана.
+- 5h/7d at 100% reads as **unavailable even while credits are actively covering the work**. Work
+  doesn't actually stop — but the quota is spent, so the next reset is a genuine front.
+- The credit ceiling and the credit reset **don't move the signal**, so a credit reset by itself
+  announces nothing while the subscription is exhausted.
 
-Момент переходу на платний кредит має власний банер ([ADR-0050](0050-extra-usage-notification.md)),
-з окремим предикатом `ExtraUsageOnset.isOnCredits` і окремим ключем `extraUsageWasOnCredits`. Два
-фронти й далі не колізують — вони просто більше не ділять поняття «розблоковано».
+The moment of switching to paid credit has its own banner
+([ADR-0050](0050-extra-usage-notification.md)), with a separate predicate
+`ExtraUsageOnset.isOnCredits` and a separate key `extraUsageWasOnCredits`. The two fronts still
+don't collide — they just no longer share the concept of "unblocked."
 
-### Ключ `backToWorkWasBlocked` перевикористано без міграції
+### The `backToWorkWasBlocked` key is reused without migration
 
-Персистований `Bool` із дефолтом `false`; перший же успішний пол після оновлення перезаписує його
-значенням нового сигналу. Найгірше, що може статися на межі апгрейду — **один** пропущений або
-**один** зайвий банер. Другий ключ і код міграції коштували б більше, ніж усуває.
+A persisted `Bool` defaulting to `false`; the very first successful poll after the update
+overwrites it with the new signal's value. The worst that can happen at the upgrade boundary is
+**one** missed or **one** extra banner. A second key plus migration code would cost more than it
+prevents.
 
-Назва ключа лишається історичною (`wasBlocked`, хоча сигнал уже не про блокування) — перейменування
-persisted-ключа вимагало б саме тієї міграції, якої ми уникаємо. Доккоментар у `detectBackToWorkEdge`
-називає розбіжність явно.
+The key name stays historical (`wasBlocked`, even though the signal is no longer about blocking) —
+renaming a persisted key would require exactly the migration we're avoiding. The doc comment on
+`detectBackToWorkEdge` names the mismatch explicitly.
 
-### Текст у Settings
+### The Settings text
 
-Опис тумблера мусив змінитися разом із семантикою: старе «If you hit a Claude usage limit…» надто
-загальне — Extra usage теж «usage limit», тож текст описував і те, чого нотифікація тепер не робить.
+The toggle's description had to change along with the semantics: the old "If you hit a Claude
+usage limit…" was too general — Extra usage is also a "usage limit," so the text was describing
+something the notification no longer does.
 
-Нове: **«If you hit your 5-hour or weekly subscription limit, notifies you when it resets so you can
-get back to work. Extra Usage Credit doesn't count.»** Назва `Back to work` лишається — вона точна й
-для нової семантики.
+New wording: **"If you hit your 5-hour or weekly subscription limit, notifies you when it resets so
+you can get back to work. Extra Usage Credit doesn't count."** The name `Back to work` stays — it's
+accurate for the new semantics too.
 
-Заразом прибрано другий рядок-підказку («It best suits the *Work harder!* and *Control freak*
-presets…»): порада про пресети Appearance не пояснює, що робить перемикач, а секція з трьох описів
-через неї читалася незбалансовано.
+Along with this, the second hint line ("It best suits the *Work harder!* and *Control freak*
+presets…") was removed: advice about Appearance presets doesn't explain what the toggle does, and
+the three-description section read unbalanced because of it.
 
-## Наслідки
+## Consequences
 
-- Ресет підписки оголошується **завжди**, незалежно від того, чи кредити покривали проміжок.
-- Ресет кредитів більше **ніколи** не оголошується як «Back to work!».
-- Для користувачів без Extra usage поведінка не змінюється взагалі — обидва предикати там збігаються.
-- Новий стуб `subscription-reset-on-credits` (7d 100 % з активними кредитами → 40 %) — це рівно той
-  фронт, якого старий сигнал не бачив, тож він і є доказом зміни. `just-unblocked` лишається
-  регресійним для базового випадку без кредитів.
+- A subscription reset is announced **always**, regardless of whether credits covered the gap.
+- A credit reset is **never again** announced as "Back to work!"
+- For users without Extra usage, behavior doesn't change at all — both predicates agree there.
+- A new stub, `subscription-reset-on-credits` (7d at 100% with active credits → 40%), is exactly the
+  front the old signal couldn't see, so it's the proof of the change. `just-unblocked` remains the
+  regression stub for the base case without credits.
 
-## Альтернативи
+## Alternatives considered
 
-- **Правити `canWork` замість нового предиката** — відхилено: його питання правильне для popup-badge
-  блокування; зміна там зламала б `isBlocked` і зробила б badge неузгодженим із реальністю.
-- **Другий тумблер поряд із наявним** — відхилено: два майже однакові перемикачі в одній секції
-  вимагали б від користувача розрізняти «чи можу працювати» і «чи відновилася квота» — розрізнення,
-  яке має робити застосунок, а не людина.
-- **Новий persisted-ключ із міграцією** — відхилено як невиправдана ціна за один можливий зайвий
-  банер на межі оновлення.
-- **Реалізувати [#161](https://github.com/artem-from-ua/tokenpace/issues/161) як разову кнопку в
-  дропдауні** (як issue було сформульовано) — відхилено мейнтейнером у сесії: потрібен був не новий
-  контрол, а правильна семантика наявного тумблера.
+- **Edit `canWork` instead of adding a new predicate** — rejected: its question is the right one for
+  the popup-badge block; changing it there would break `isBlocked` and make the badge disagree with
+  reality.
+- **A second toggle next to the existing one** — rejected: two nearly identical switches in one
+  section would force the user to tell "can I work" apart from "has my quota come back" — a
+  distinction the app should make, not the person.
+- **A new persisted key with migration** — rejected as an unjustified cost for preventing one
+  possible extra banner at an upgrade boundary.
+- **Implement [#161](https://github.com/artem-from-ua/tokenpace/issues/161) as a one-shot button in
+  the dropdown** (as the issue originally phrased it) — rejected by the maintainer in session: what
+  was needed wasn't a new control, but the correct semantics for the existing toggle.

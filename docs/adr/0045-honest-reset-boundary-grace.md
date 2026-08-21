@@ -3,87 +3,93 @@ status: accepted
 date: 2026-07-28
 ---
 
-# ADR-0045: Чесний reset-boundary — rolled-forward grace + тригер за активністю
+# ADR-0045: An honest reset boundary — a rolled-forward grace plus an activity-based trigger
 
-> Уточнює [ADR-0041](0041-idle-grace-on-reset-boundary.md): змінює **D3** (як придушувати) і
-> **D5** (коли озброювати) та додає захист від переозброєння. Механізм грейсу з 0041 лишається;
-> цей ADR виправляє два його дефекти. Спирається на
-> [ADR-0030](0030-optimistic-reset-and-exact-timer.md) (rolled-forward `resets_at`) і
-> [ADR-0027](0027-session-idle-no-phantom-reset.md) (чесний idle).
+> Refines [ADR-0041](0041-idle-grace-on-reset-boundary.md): changes **D3** (how to suppress) and
+> **D5** (when to arm) and adds a guard against re-arming. The grace mechanism from 0041 stays; this
+> ADR fixes two of its defects. Builds on
+> [ADR-0030](0030-optimistic-reset-and-exact-timer.md) (a rolled-forward `resets_at`) and
+> [ADR-0027](0027-session-idle-no-phantom-reset.md) (honest idle).
 
-## Контекст
+## Context
 
-ADR-0041 додав грейс, щоб після ресету 5h-бар не блимав у «немає активної сесії». Реалізація
-(D3) придушувала idle через `suppress()`, що ставив `sessionIdle: false`, **лишаючи
-`resets_at: ""`**. Припущення D3 — «порожній `resets_at` → calm-«готовий» бар, каунтдаун падає на
-7-денний» — виявилось **хибним** для поточного рендеру:
+ADR-0041 added a grace period so the 5h bar wouldn't flicker into "no active session" right after a
+reset. The implementation (D3) suppressed idle via `suppress()`, which set `sessionIdle: false`
+while **leaving `resets_at: ""`**. D3's assumption — "an empty `resets_at` → a calm 'ready' bar, the
+countdown falls back to the 7-day one" — turned out to be **wrong** for the current renderer:
 
-- порожній `resets_at` у pacing-гілці → `PacingModel.elapsedFraction == 1.0` → **зелений бар на всю
-  ширину + «on pace»**;
-- reset-лінія 5h-рядка форматиться окремо (не падає на 7d) → `resetLine == nil` → текст
-  **«resetting…»** (`PopupViewController.resetText`).
+- an empty `resets_at` in the pacing branch → `PacingModel.elapsedFraction == 1.0` → a **full-width
+  green bar + "on pace"**;
+- the 5h row's reset line is formatted separately (it does not fall back to 7d) → `resetLine ==
+  nil` → the text reads **"resetting…"** (`PopupViewController.resetText`).
 
-Тобто грейс міняв один візуальний артефакт («немає сесії») на інший («resetting…» + фальшивий
-100%-бар). Спостережено вживу: стан тримався **довше** за 5 хв, бо на реальному мерехтінні API
-`active↔idle` навколо ресету грейс **переозброювався** — умова озброєння (0041, D5) спиралась на
-`previous.lastSnapshot.sessionIdle`, а `advance` кладе туди вже придушений (`sessionIdle:false`)
-снапшот, тож кожен короткий active-блимок скидав дедлайн і стартував новий 5-хвилинний грейс.
+So the grace traded one visual artifact ("no session") for another ("resetting…" plus a false
+100% bar). Observed live: the state persisted **longer** than 5 minutes, because on real API
+`active↔idle` flicker around the reset the grace kept **re-arming** — the arming condition (0041,
+D5) relied on `previous.lastSnapshot.sessionIdle`, and `advance` writes the already-suppressed
+(`sessionIdle:false`) snapshot into it, so every short active blip reset the deadline and started a
+fresh 5-minute grace.
 
-Додатково: грейс озброювався **завжди** після активного вікна — навіть коли пауза була справжня
-(користувач справді пішов). Це затримувало чесний «ready to start» на 5 хв без потреби.
+Additionally: the grace armed **every time** after an active window — even when the pause was
+genuine (the user had actually stepped away). This delayed the honest "ready to start" by 5 minutes
+for no reason.
 
-## Рішення
+## Decision
 
-### D3′ (замінює D3). `suppress()` синтезує rolled-forward `resets_at`, а не порожній
+### D3′ (replaces D3). `suppress()` synthesizes a rolled-forward `resets_at`, not an empty one
 
-`suppress(_:now:)` перебудовує 5h-вікно з
-`resetsAt = ResetClock.isoString(from: ResetClock.nextReset(now:window:.fiveHour))` — **той самий**
-rolled-forward `now + 5h`, що `ResetClock.optimisticReset` синтезує для shell-overlay (ADR-0030).
-Наслідок: під час грейсу 5h показує спокійний «готовий» бар 0% із **чесним відліком** до наступного
-ресету і природним статусом «on pace» (0% util при малому elapsed — наявна pacing-логіка). «resetting…»
-неможливе, бо `resets_at` завжди валідний і в майбутньому. `ResetClock.isoString` піднято до
-`internal`: optimistic-path і grace тепер серіалізують синтезований `resets_at` однаково.
+`suppress(_:now:)` rebuilds the 5h window with
+`resetsAt = ResetClock.isoString(from: ResetClock.nextReset(now:window:.fiveHour))` — the **same**
+rolled-forward `now + 5h` that `ResetClock.optimisticReset` synthesizes for the shell overlay
+(ADR-0030). Consequence: during the grace, 5h shows a calm "ready" bar at 0% with an **honest
+countdown** to the next reset and a natural "on pace" status (0% util at low elapsed time — the
+existing pacing logic). "resetting…" is impossible, since `resets_at` is always valid and in the
+future. `ResetClock.isoString` is raised to `internal`: the optimistic path and the grace now
+serialize the synthesized `resets_at` the same way.
 
-Це також знешкоджує конфлікт двох шарів: раніше optimistic-overlay (t0) малював правильний
-rolled-forward кадр, який негайно перетирався результатом форсованого полінгу (t1) з порожнім
-`resets_at` (`App.apply` → `lastOutput = output`). Тепер обидва кадри несуть той самий rolled-forward
-`resets_at`, тож перетирання безшовне.
+This also defuses a conflict between two layers: previously the optimistic overlay (t0) drew the
+correct rolled-forward frame, which was immediately overwritten by the forced poll's result (t1)
+with an empty `resets_at` (`App.apply` → `lastOutput = output`). Now both frames carry the same
+rolled-forward `resets_at`, so the overwrite is seamless.
 
-### D5′ (замінює D5). Грейс озброюється лише за ознакою недавньої роботи
+### D5′ (replaces D5). The grace arms only on a sign of recent work
 
-Критерій озброєння: `prevActive && claudeActive && utilFresh`, де
+The arming criterion: `prevActive && claudeActive && utilFresh`, where
 
-- `prevActive` — попереднє вікно було справді активним (як у 0041);
-- `claudeActive` — процес `claude` CLI живий (уже в `PollState`, ADR-0011/0032);
-- `utilFresh` — 5h `utilization` **зросла** за останні `utilFreshnessWindow` (15 хв).
+- `prevActive` — the previous window was genuinely active (as in 0041);
+- `claudeActive` — the `claude` CLI process is alive (already in `PollState`, ADR-0011/0032);
+- `utilFresh` — the 5h `utilization` **increased** within the last `utilFreshnessWindow` (15 min).
 
-Свіжість util відстежується новим **in-memory** полем `PollState.lastUtilizationChange: Date?`:
-`advance` `.success` стемпить його на `now`, коли util зросла проти попереднього полу (перша
-ненульова util від холодного стану рахується як ріст; ресет обнуляє util — це не ріст, тож мітка
-переживає межу). Не persistent: після рестарту грейс і так без контексту.
+Freshness of util is tracked by a new **in-memory** field, `PollState.lastUtilizationChange: Date?`:
+`advance` stamps it to `now` on `.success` whenever util increased versus the previous poll (the
+first nonzero util from a cold state counts as an increase; a reset zeroes util — that's not an
+increase, so the mark survives the boundary). Not persistent: after a restart the grace has no
+context anyway.
 
-Обидві умови (кон'юнкція): відкритий, але непрацюючий `claude` (немає spend > 15 хв) **не** тримає
-бар — справжня пауза дає чесний «ready to start» одразу. Це свідома **реінтродукція** «прив'язки до
-даних», яку 0041 D5 відкидав як зайву складність: практика показала, що простий булевий `prevActive`
-тримає грейс і на справжніх паузах, а «resetting…»-регресія зробила ціну помилкового грейсу видимою.
+Both conditions (a conjunction): an open but idle `claude` process (no spend for > 15 min) does
+**not** hold the bar — a genuine pause gets an honest "ready to start" right away. This is a
+deliberate **reintroduction** of the "data-anchored" check that 0041's D5 rejected as unnecessary
+complexity: practice showed that a simple boolean `prevActive` held the grace through genuine pauses
+too, and the "resetting…" regression made the cost of a false grace visible.
 
-### D-rearm (нове). Active-блимок у межах дедлайну не переозброює грейс
+### D-rearm (new). An active blip within the deadline does not re-arm the grace
 
-`applyIdleGrace` при active decoded, якщо грейс ще в межах дедлайну (`now < deadline`), **несе той
-самий дедлайн далі** замість чистити його (`(decoded, deadline)`). Тож мерехтіння `active↔idle` не
-може подовжити вікно: щойно оригінальний дедлайн спливає, наступний idle показує чесний стан. Рендер
-у блимку — active-снапшот як є (вікно ж повернулось), змінюється лише те, що дедлайн зберігається.
+In `applyIdleGrace`, when `decoded` is active and the grace is still within its deadline
+(`now < deadline`), it now **carries the same deadline forward** instead of clearing it
+(`(decoded, deadline)`). So `active↔idle` flicker can never extend the window: once the original
+deadline expires, the next idle shows the honest state. The render during the blip is the active
+snapshot as-is (the window really did come back) — only the deadline's persistence changes.
 
-## Наслідки
+## Consequences
 
-- Одразу після ресету 5h ніколи не показує «resetting…» / фальшивий 100%-бар: активна робота →
-  спокійний «готовий» бар 0% із rolled-forward відліком; справжня пауза → синій «ready to start»
-  одразу.
-- Грейс не застрягає довше `idleGraceWindow` навіть на мерехтінні.
-- Нове in-memory поле `PollState.lastUtilizationChange` + ширша сигнатура `applyIdleGrace`
-  (`claudeActive`, `lastUtilizationChange`); `suppress` приймає `now`. Уся логіка лишається чистою
-  функцією, покритою unit-тестами (`ApplyIdleGraceTests`).
+- Right after a reset, 5h never shows "resetting…" / a false 100% bar: active work → a calm
+  "ready" bar at 0% with a rolled-forward countdown; a genuine pause → a blue "ready to start"
+  right away.
+- The grace never sticks around longer than `idleGraceWindow`, even through flicker.
+- A new in-memory field, `PollState.lastUtilizationChange`, plus a wider `applyIdleGrace` signature
+  (`claudeActive`, `lastUtilizationChange`); `suppress` now takes `now`. All the logic stays a pure
+  function, covered by unit tests (`ApplyIdleGraceTests`).
 
-Див. також: [ADR-0041](0041-idle-grace-on-reset-boundary.md) (базовий грейс),
-[ADR-0030](0030-optimistic-reset-and-exact-timer.md) (rolled-forward overlay),
-[ADR-0027](0027-session-idle-no-phantom-reset.md) (чесний idle).
+See also: [ADR-0041](0041-idle-grace-on-reset-boundary.md) (the base grace),
+[ADR-0030](0030-optimistic-reset-and-exact-timer.md) (the rolled-forward overlay),
+[ADR-0027](0027-session-idle-no-phantom-reset.md) (honest idle).

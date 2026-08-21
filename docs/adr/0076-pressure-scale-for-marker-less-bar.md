@@ -5,78 +5,84 @@ supersedes: []
 superseded_by: [0078, 0079, 0101]
 ---
 
-# ADR-0076: Шкала бару без маркера — проти часу, що лишився (Pressure), а не проти вікна
+# ADR-0076: A scale for the marker-less bar — against time remaining (Pressure), not against the window
 
-> **Частково витіснено** [ADR-0101](0101-pressure-is-the-gauge-ahead-half.md): нуль стрічки більше
-> не зсунутий лівіше за `t` — доданок `(k − 1)` і константу `pressureScaleCoefficient` видалено, тож
-> `u == t` малює **нуль**, а не 20 %. Не чинні: §«Ширина сама кодує severity» разом із таблицею
-> ширин (`0.20`/`0.328`/`0.992`), §«Чому `k = 1.25`, а не більше» і §«Нуль — це "тиску немає", а не
-> "рівно на місці"». Зокрема, теза Наслідків «жоден стан `.ahead` не падає під мінімальну пігулку»
-> лишається формально правдивою (жовтий — це `.calm`), але **вводить в оману**: близько половини
-> жовтої смуги тепер floor-иться. Чинними лишаються знаковість замість `|u − t|`, крайні випадки
-> `u ≥ 1` і `t = 1`, та перейменування з міграцією `rawValue`.
+> **Partially superseded by [ADR-0101](0101-pressure-is-the-gauge-ahead-half.md):** the strip's zero
+> is no longer offset left of `t` — the `(k − 1)` term and the `pressureScaleCoefficient` constant were
+> removed, so `u == t` now draws **zero**, not 20%. No longer in force: the section "Width itself
+> encodes severity" together with the width table (`0.20`/`0.328`/`0.992`), the section "Why `k = 1.25`,
+> not more," and the section "Zero means 'no pressure,' not 'exactly on pace.'" In particular, the
+> Consequences claim "no `.ahead` state falls below the minimum pill" remains formally true (yellow is
+> `.calm`) but is now **misleading**: about half of the yellow strip now floors. Still standing: the
+> signed rendering in place of `|u − t|`, the edge cases for `u ≥ 1` and `t = 1`, and the rename with
+> its `rawValue` migration.
 
-> **Частково витіснено** [ADR-0078](0078-idle-drawn-as-zero-in-both-styles.md): розділ «Idle
-> розрізняє стилі» більше не чинний — idle малюється **однаково** в обох стилях (трек + пігулка на
-> нулі; Progress додає маркер), без суцільної заливки. Решта цього ADR — шкала `pressureLength`,
-> тіки, перейменування, міграція — лишається чинною.
+> **Partially superseded by [ADR-0078](0078-idle-drawn-as-zero-in-both-styles.md):** the section "Idle
+> distinguishes styles" no longer stands — idle now draws **identically** in both styles (track + a
+> pill at zero; Progress adds a marker), with no solid fill anywhere. The rest of this ADR — the
+> `pressureLength` scale, the ticks, the rename, the migration — still stands.
 
-> **Частково витіснено** [ADR-0079](0079-centred-zero-gauge-scale.md): у §«Альтернативи» пункт
-> «Окремий, четвертий стиль замість заміни `Pace`» більше не чинний — той аргумент був про
-> надлишковість `Pace`, і до **Gauge** не застосовний (його ліва половина показує величину, якої не
-> малює жоден зі шпилених стилів). Також більше не чинна теза «"немає маркера" ⇒ "шкала залишку" —
-> це одне рішення»: шкал тепер три, і пара булів замінена на `BarScale`. Шкала `pressureLength` і
-> сам стиль **Pressure** лишаються без змін.
+> **Partially superseded by [ADR-0079](0079-centred-zero-gauge-scale.md):** in the "Alternatives
+> considered" section, the item "A separate, fourth style instead of replacing `Pace`" no longer
+> stands — that argument was about `Pace`'s redundancy, and it does not apply to **Gauge** (its left
+> half shows a quantity that neither pinned style draws). Also no longer standing: the claim that "no
+> marker" ⇒ "the remaining-time scale is one decision" — there are now three scales, and the pair of
+> booleans was replaced by `BarScale`. The `pressureLength` scale and the **Pressure** style itself are
+> unchanged.
 
-> Частково витісняє [ADR-0062](0062-configurable-bar-presentation.md) (§1 `BarStyle`): стрічка
-> без маркера більше **не** дорівнює ширині пейсинг-gap (`gapEnd − gapStart`) — вона рахується в
-> перенормованій шкалі `[now .. reset]`. Решта 0062 (per-surface вибір, `CalmColorMode`,
-> `FarBehindInterval`, пресети) лишається чинною (§4 `showTicks` витіснено [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md)).
+> Partially supersedes [ADR-0062](0062-configurable-bar-presentation.md) (§1 `BarStyle`): a marker-less
+> strip no longer equals the width of the pacing gap (`gapEnd − gapStart`) — it is computed on a
+> renormalized `[now .. reset]` scale. The rest of 0062 (per-surface choice, `CalmColorMode`,
+> `FarBehindInterval`, presets) still stands (§4 `showTicks` was superseded by
+> [ADR-0098](0098-ruler-split-identify-always-explain-on-option.md)).
 
-## Контекст
+## Context
 
-[ADR-0062](0062-configurable-bar-presentation.md) увів стрічку без маркера з довжиною **у частках
-вікна**: `gapEnd − gapStart` = `|u − t|`. Колір тим часом градуюється проти **динамічного** порога,
-що стискається з плином вікна — `PacingModel.aheadThreshold` = `0.16 · (1 − t)`.
+[ADR-0062](0062-configurable-bar-presentation.md) introduced a marker-less strip whose length is
+measured **as a fraction of the window**: `gapEnd − gapStart` = `|u − t|`. Its color, meanwhile, is
+graded against a **dynamic** threshold that shrinks as the window elapses —
+`PacingModel.aheadThreshold` = `0.16 · (1 − t)`.
 
-Дві величини говорять різне, і розходяться найгірше там, де ціна помилки найвища. При `t = 93 %`,
-`u = 97 %` — три пункти до вичерпання, 7 % вікна попереду — модель подає рендереру **4 %** ширини
-бару. Це нижче за `minStripWidth` (3.75 pt ≈ 11 % від 34 pt), тож малювач роздуває капсулу до
-мінімальної пігулки: **найгостріший стан малює найменшу позначку, яку віджет здатен видати**.
+The two quantities say different things, and they diverge worst exactly where the cost of being wrong
+is highest. At `t = 93%`, `u = 97%` — three points from exhaustion, 7% of the window left — the model
+hands the renderer **4%** of the bar's width. That is below `minStripWidth` (3.75 pt ≈ 11% of 34 pt),
+so the painter inflates the capsule to the minimum pill: **the sharpest state draws the smallest mark
+the widget can produce at all**.
 
-Виміряно на сітці досяжних станів (#307):
+Measured across the grid of reachable states (#307):
 
-- **~21 %** станів падають під мінімальну пігулку й рендеряться однаково — «майже точно за темпом»
-  не відрізнити від «три пункти до вичерпання»;
-- ahead-група **немонотонна**: за зростанням гостроти ширина йде `8 % → 4 % → 20 % → 8 % → 4 %`,
-  тобто ширший бар не означає гірший стан.
+- **~21%** of states fall below the minimum pill and render identically — "almost exactly on pace"
+  cannot be told apart from "three points from exhaustion";
+- the ahead group is **non-monotonic**: as sharpness increases, width goes `8% → 4% → 20% → 8% → 4%`,
+  meaning a wider bar does not mean a worse state.
 
-Це той самий клас невідповідності, що [#255](https://github.com/artem-from-ua/tokenpace/issues/255)
-описав для кольору в попапі («найгучніший елемент ніс найменше інформації»), лише на осі ширини.
+This is the same class of mismatch [#255](https://github.com/artem-from-ua/tokenpace/issues/255)
+described for popup color ("the loudest element carried the least information"), only on the width
+axis.
 
-## Рішення
+## Decision
 
-**Стрічку без маркера міряти проти часу, що лишився, і зсунути її нуль лівіше за `t`**, щоб ширина
-кодувала severity напряму:
+**Measure the marker-less strip against the time remaining, and offset its zero to the left of `t`**,
+so that width itself encodes severity directly:
 
 ```
-r      = (u − t) / (1 − t)          // лід зі знаком, в одиницях решти часу
+r      = (u − t) / (1 − t)          // signed lead, in units of time remaining
 length = (r + k − 1) / k            // k = pressureScaleCoefficient = 1.25
 ```
 
-Нуль стрічки стоїть на `t − (1 − t)·(k − 1)`, стрічка тягнеться звідти до `u` — **зі знаком, без
-модуля**. Урізання в `[0, 1]`.
+The strip's zero sits at `t − (1 − t)·(k − 1)`, and the strip runs from there to `u` — **signed, with
+no absolute value**. Clamped to `[0, 1]`.
 
-Живе в Kit як `BarLayout.pressureLength` — одне джерело для обох малювачів (`StatusItemView.drawBar`
-і `PopupBarView.draw`), щоб вони не розсинхронились, як застерігає 0062.
+Lives in Kit as `BarLayout.pressureLength` — one source for both painters (`StatusItemView.drawBar`
+and `PopupBarView.draw`), so they cannot drift apart, as 0062 warns against.
 
-### Ширина сама кодує severity
+### Width itself encodes severity
 
-Вираз лінійний по `r`, а пороги кольору — це умови на той самий `r` (помаранчевий:
-`(u − t) < 0.16 · (1 − t)`, тобто `r < 0.16`). Тому зони стають **сталими позиціями на барі,
-однаковими в будь-який момент вікна**:
+The expression is linear in `r`, and the color thresholds are conditions on that same `r` (orange:
+`(u − t) < 0.16 · (1 − t)`, i.e. `r < 0.16`). So the zones become **fixed positions on the bar,
+identical at any point in the window**:
 
-| колір | ширина |
+| color | width |
 |---|---|
 | blue (far behind) | `0` |
 | green (on pace or behind) | `0 – 0.20` |
@@ -84,168 +90,177 @@ length = (r + k − 1) / k            // k = pressureScaleCoefficient = 1.25
 | orange (ahead) | `0.328 – 0.992` |
 | red (exhausted) | `1` |
 
-Тобто **20 % — це рівно `u == t`**, а **32.8 %** — де жовтий переходить у помаранчевий, і о 10:00, і
-о 14:00. Пояснюється одним реченням, без арифметики про час. Тест `severityThresholdsSitAtFixedWidths`
-звіряє це з живим `aheadThreshold`, а не з копією константи.
+That is, **20% is exactly `u == t`**, and **32.8%** is where yellow turns to orange, at 10:00 just as
+much as at 14:00. It explains in one sentence, with no arithmetic about time. The test
+`severityThresholdsSitAtFixedWidths` checks this against the live `aheadThreshold`, not a copy of the
+constant.
 
-### Чому знаковий, а не `|u − t|`
+### Why signed, not `|u − t|`
 
-Модуль не розрізняє «попереду» і «позаду»: він досягає дна на `u == t` і **повертає назад**.
-Трасування сесії з раннім сплеском і подальшою тишею (`u` заморожене на 40 %):
+An absolute value cannot tell "ahead" from "behind" apart: it bottoms out at `u == t` and **bounces
+back**. Tracing a session with an early burst followed by silence (`u` frozen at 40%):
 
-| t | u | `\|u−t\|/(1−t)` | цей ADR |
+| t | u | `\|u−t\|/(1−t)` | this ADR |
 |---|---|---|---|
-| 20 % | 40 % | 25 % | 40 % |
-| 40 % | 40 % | **0 %** | 20 % |
-| 60 % | 40 % | 50 % | **0 %** |
-| 70 % | 40 % | **100 %** | **0 %** |
+| 20% | 40% | 25% | 40% |
+| 40% | 40% | **0%** | 20% |
+| 60% | 40% | 50% | **0%** |
+| 70% | 40% | **100%** | **0%** |
 
-У модульній формі найспокійніший стан сесії малює найгучнішу геометрію — той самий дефект, що має
-дореформений `Pace`. Тут тиск спадає до нуля й лишається там. Закріплено тестом
+In the absolute-value form, the calmest session state draws the loudest geometry — the same defect the
+pre-reform `Pace` had. Here, pressure decays to zero and stays there. Locked in by the test
 `pressureDecaysAndDoesNotReboundWhenSpendingStops`.
 
-### Чому `k = 1.25`, а не більше
+### Why `k = 1.25`, not more
 
-Коефіцієнт задає, скільки бару дістається спокійному боку, а отже — ширину **жовтої смуги**. При
-`k = 1.25` вона займає `(0.16 … 0.328)` бару, тобто **3.9 pt** на 34-пунктовому menu-bar треку —
-трохи ширше за floor `minStripWidth` (3.75 pt), тож здатна тримати позицію, відмінну від
-помаранчевої. При `k = 2` та сама смуга — 2.4 pt, тобто **під floor'ом**: жовтий і помаранчевий
-рендерились би однаково, і колір лишався б єдиним, що їх розрізняє — рівно та вада, проти якої
-писався цей ADR.
+The coefficient sets how much of the bar goes to the calm side, and therefore the width of the
+**yellow strip**. At `k = 1.25` it occupies `(0.16 … 0.328)` of the bar — that is **3.9 pt** on a
+34-point menu-bar track — a bit wider than the `minStripWidth` floor (3.75 pt), so it can hold a
+position distinct from orange. At `k = 2`, that same strip is 2.4 pt, i.e. **under the floor**: yellow
+and orange would render identically, and color would remain the only thing telling them apart —
+exactly the flaw this ADR was written against.
 
-Константа, а не налаштування: це не смаковий регулятор, а те, що робить смуги розрізненними, і
-довільне значення від користувача могло б тихо злити дві з них.
+A constant, not a setting: this is not a matter of taste but what makes the strips distinguishable at
+all, and an arbitrary value from the user could silently merge two of them.
 
-### Крайні випадки
+### Edge cases
 
-- **`u ≥ 1` (вичерпано) — перевіряється ПЕРШИМ і завжди дає повний бар.** Червоний не стишується:
-  спадна смуга читалася б як «проблема легшає», хоча роботу так само заблоковано.
-- **`t = 1` (ресет настав/минув)** — ділення на нуль. Часу, проти якого міряти тиск, не лишилось,
-  тож бар повний за будь-якого `u`.
-- **`u == t`** — рівно `0.20`, **не нуль**. Це сталий орієнтир «рівно за планом», який попап мітить
-  тіком.
+- **`u ≥ 1` (exhausted) — checked FIRST and always draws a full bar.** Red never dims: a shrinking
+  strip would read as "the problem is easing" even though work is equally blocked.
+- **`t = 1` (the reset has arrived or passed)** — division by zero. There is no time left to measure
+  pressure against, so the bar is full regardless of `u`.
+- **`u == t`** — exactly `0.20`, **not zero**. This is the fixed "exactly on plan" landmark, which the
+  popup marks with a tick.
 
-### Нуль — це «тиску немає», а не «рівно на місці»
+### Zero means "no pressure," not "exactly on pace"
 
-Нуль дістається всьому, що спокійніше за `t − (1 − t)·(k − 1)`: **40 % усього простору станів,
-79 % спокійних**. Обидві поверхні floor-ять таку стрічку до мінімальної пігулки (у попапі це
-додано цим же ADR — раніше `stripRect` повертав `nil` і рядок лишався порожнім треком).
+Zero goes to everything calmer than `t − (1 − t)·(k − 1)`: **40% of the whole state space, 79% of the
+calm states**. Both surfaces floor such a strip to the minimum pill (in the popup this was added by
+this same ADR — previously `stripRect` returned `nil` and the row stayed an empty track).
 
-Це свідома ціна, і вона більша, ніж здавалася на вибірці з 13 станів. Виправдання: на спокійному
-боці дія одна — «нічого не роби» (зелений) або «можеш піднажати» (синій), — і її вже несе колір;
-градація *всередині* «нічого не роби» не веде до іншої дії. Що floor **не** ковтає — жодного стану
-`.ahead`; це закріплено тестом `theFloorOnlySwallowsCalmStates`.
+This is a deliberate cost, and it is larger than it looked on a 13-state sample. The justification: on
+the calm side there is only one action — "do nothing" (green) or "you can push a bit harder" (blue) —
+and color already carries that; grading *within* "do nothing" does not lead to a different action.
+What the floor does **not** swallow is any `.ahead` state; locked in by the test
+`theFloorOnlySwallowsCalmStates`.
 
-`usage == time == 0` — не артефакт округлення, а регулярний кадр: після кожного ресету 5-годинного
-вікна [ADR-0041](0041-idle-grace-on-reset-boundary.md)/[ADR-0045](0045-honest-reset-boundary-grace.md)
-тримають «ready»-кадр із `0 %` проти щойно перекоченого `resets_at`.
+`usage == time == 0` is not a rounding artifact but a regular frame: after every 5-hour window reset,
+[ADR-0041](0041-idle-grace-on-reset-boundary.md)/[ADR-0045](0045-honest-reset-boundary-grace.md) hold a
+"ready" frame with `0%` against a just-rolled-over `resets_at`.
 
-**Progress навмисно виключено** з цього floor'а: там порожній gap означає «точно за темпом», і
-позицію вже несе маркер.
+**Progress is deliberately excluded** from this floor: there, an empty gap means "exactly on pace," and
+position is already carried by the marker.
 
-### Idle розрізняє стилі
+### Idle distinguishes styles
 
-> **Витіснено [ADR-0078](0078-idle-drawn-as-zero-in-both-styles.md).** Форма idle більше не
-> залежить від стилю: обидва малюють трек + пігулку на нулі, Progress додає зверху маркер.
-> Суцільної заливки немає ніде. Нижче — рішення в редакції 0076, збережене як запис.
+> **Superseded by [ADR-0078](0078-idle-drawn-as-zero-in-both-styles.md).** Idle's shape no longer
+> depends on style: both draw a track + a pill at zero, and Progress adds a marker on top. There is no
+> solid fill anywhere. What follows is the decision as of the 0076 edit, kept as a record.
 
-Idle-гілка передувала всій пейсинг-логіці й малювала суцільну заливку **незалежно від стилю**. Під
-Progress це неврізненно від Pressure-бару, що показує «повний тиск», тож idle тепер теж стилезалежний:
+The idle branch preceded all pacing logic and drew a solid fill **regardless of style**. Under
+Progress this is indistinguishable from a Pressure bar showing "full pressure," so idle is now
+style-dependent too:
 
-- **Progress** — суцільна заливка (квота вільна) **плюс маркер часу на нулі**: вікно щойно
-  перекотилося, тож `timeFraction = 0`. Маркер і є тим, що ідентифікує стиль.
-- **Pressure** — **пігулка на сірому треку**, та сама форма, що й будь-яка нульова стрічка: idle і
-  є нульовий тиск, тож заливка на всю ширину була б найгучнішою позначкою найспокішнішого стану.
-- **Menu bar під Calm colours** — idle бере спільний `calmWhite`, а не власний тьмяніший тон
-  (`idleCalmGrey`, `secondaryLabelColor`). Idle, тихіший за сусідні calm-бари, читався як «з цим
-  баром щось не так». У попапі calm-муту для idle немає взагалі, там нічого не змінилось.
+- **Progress** — a solid fill (quota is free) **plus a time marker at zero**: the window has just
+  rolled over, so `timeFraction = 0`. The marker is exactly what identifies the style.
+- **Pressure** — **a pill on the gray track**, the same shape as any zero strip: idle simply **is**
+  zero pressure, so a full-width fill would be the loudest mark for the calmest state.
+- **Menu bar under Calm colours** — idle takes the shared `calmWhite` rather than its own dimmer tone
+  (`idleCalmGrey`, `secondaryLabelColor`). Idle, quieter than the neighboring calm bars, read as
+  "something's wrong with this bar." The popup has no calm-mute for idle at all, so nothing changes
+  there.
 
-### Тіки в попапі — за шкалою бару
+### Ticks in the popup — keyed to the bar's scale
 
-`PopupBarView.drawTicks` мітив рівні частки **вікна** (`k / subdivisions` — межі годин для 5h, днів
-для 7d). У перенормованій шкалі ці межі не мають позиції: година не стоїть на фіксованій частці
-часу, що лишився. Тож набір фракцій обирається за шкалою:
+`PopupBarView.drawTicks` marked equal fractions of the **window** (`k / subdivisions` — hour
+boundaries for 5h, day boundaries for 7d). On the renormalized scale, those boundaries have no fixed
+position: an hour does not sit at a fixed fraction of the time remaining. So the set of fractions is
+chosen per scale:
 
-- **Progress** — `k / subdivisions`, як раніше (маркер часу стоїть серед них осмислено);
-- **Pressure** — **один** тік на **20 %**, тобто рівно `u == t`. Стрічка коротша за тік означає
-  запас, довша — лід. Другий поріг (32.8 %, жовтий→помаранчевий) уже несе зміна кольору, а другий
-  зубець за 4 pt від першого читався б як шум.
+- **Progress** — `k / subdivisions`, as before (the time marker sits meaningfully among them);
+- **Pressure** — **one** tick, at **20%**, exactly `u == t`. A strip shorter than the tick means
+  slack, longer means a lead. The second threshold (32.8%, yellow→orange) is already carried by the
+  color change, and a second tick 4 pt from the first would read as noise.
 
-**На menu bar тіка немає взагалі.** Самотній вертикальний зубець на 34-пунктовому барі виглядає
-рівно як маркер часу Progress — два стилі перестали б розрізнятися саме там, де це найважче
-помітити.
+**The menu bar has no tick at all.** A lone vertical mark on a 34-point bar looks exactly like
+Progress's time marker — the two styles would stop being distinguishable exactly where that is hardest
+to notice.
 
-Вибір ключиться на `barStyle`, а **не** на даних: `drawTicks` малює й під idle-баром, де `BarLayout`
-відсутній.
+The choice is keyed on `barStyle`, **not** on the data: `drawTicks` also draws under the idle bar,
+where `BarLayout` is absent.
 
-### Маркер часу в Pressure неможливий
+### A time marker is impossible in Pressure
 
-На треку `[now .. reset]` маркер стояв би на нулі **завжди**. Тому «немає маркера» і «шкала
-залишку» — це одне рішення, а не два; воно назване в Kit як `menuBarUsesPressureScale` /
-`popupUsesPressureScale` (інверсія прапорців маркера), щоб малювачі не виводили його щоразу
-з заперечення.
+On the `[now .. reset]` track, a marker would sit at zero **always**. That is why "no marker" and "the
+remaining-time scale" are one decision, not two; it is named in Kit as `menuBarUsesPressureScale` /
+`popupUsesPressureScale` (an inversion of the marker flags), so the painters don't have to re-derive it
+from a negation every time.
 
-### Назви — змінені всюди, зі справжньою міграцією
+### Names — changed everywhere, with a real migration
 
-`Pace & Time` → **Progress**, `Pace` → **Pressure**; `Mixed` лишився. Перейменовано **і** UI-назви,
-**і** enum-кейси, **і** `rawValue`: `.pacing` → `.progress` (`"pacing"` → `"progress"`), `.simple` →
-`.pressure` (`"simple"` → `"pressure"`).
+`Pace & Time` → **Progress**, `Pace` → **Pressure**; `Mixed` stayed as is. **Both** the UI names,
+**and** the enum cases, **and** the `rawValue`s were renamed: `.pacing` → `.progress` (`"pacing"` →
+`"progress"`), `.simple` → `.pressure` (`"simple"` → `"pressure"`).
 
-Розбіжність «кейс у коді vs назва в UI» — постійний податок на читання коду й логів, тож її не
-лишаємо. Але сам по собі перейменований `rawValue` **тихо скидає** налаштування: і
-`PersistedConfig.barStyle`, і `BarStyle.init(from:)` резолвлять невідомий raw у дефолт без помилки.
-Тому рена́ме йде в парі з двома захистами:
+A mismatch between "case in code" and "name in the UI" is a permanent tax on reading code and logs, so
+it is not left in place. But a renamed `rawValue` on its own **silently resets** the setting: both
+`PersistedConfig.barStyle` and `BarStyle.init(from:)` resolve an unknown raw value to the default with
+no error. So the rename ships paired with two safeguards:
 
-- **`PersistedConfig.migrateBarStyleIfNeeded()`** — переписує збережене значення на старті, **до**
-  першого читання. Ідемпотентна, не чіпає відсутній ключ (щоб фолбек на пресет далі працював).
-- **`BarStyle.legacyRawValues`** + legacy-гілка в `init(from:)` — щоб конфіг, **експортований**
-  старішим білдом ([#257](https://github.com/artem-from-ua/tokenpace/issues/257)), імпортувався
-  правильно, а не з'їдався forward-compatible фолбеком.
+- **`PersistedConfig.migrateBarStyleIfNeeded()`** — rewrites the stored value at launch, **before**
+  the first read. Idempotent, and leaves a missing key alone (so the fallback to a preset keeps
+  working).
+- **`BarStyle.legacyRawValues`** + a legacy branch in `init(from:)` — so that a config
+  **exported** by an older build ([#257](https://github.com/artem-from-ua/tokenpace/issues/257))
+  imports correctly, rather than being silently swallowed by the forward-compatible fallback.
 
-Обидва читають **одну** таблицю, тож не можуть розійтися в тому, що означав `"simple"`.
+Both read from **one** table, so they cannot disagree about what `"simple"` used to mean.
 
-**Progress названо так, бо це збігається з тим, як бар уже читають.**
-[#254](https://github.com/artem-from-ua/tokenpace/issues/254) §3 задокументував, що горизонтальний
-бар поруч із «78 %» читається як прогрес-бар практично всіма — і це прочитання **не хибне**: дальній
-край капсули справді дорівнює `usageFraction`. Бракує лише того, що ближній край теж значущий. Тож
-назва перестає воювати з прочитанням і починає його підтверджувати, а hint дописує другу мітку.
+**Progress is named that way because it matches how the bar is already read.**
+[#254](https://github.com/artem-from-ua/tokenpace/issues/254) §3 documented that a horizontal bar next
+to "78%" reads as a progress bar to almost everyone — and that reading is **not wrong**: the capsule's
+far edge really does equal `usageFraction`. What was missing was that the near edge is meaningful too.
+So the name stops fighting that reading and starts confirming it, and the hint adds the second label.
 
-## Наслідки
+## Consequences
 
-- **Ahead-група стає строго монотонною**: `11 % → 22 % → 40 % → 44 % → 57 %`. Ширині можна
-  довіряти з погляду.
-- **Ширина сама впорядковує severity** — синій вужчий за зелений, зелений за жовтий, жовтий за
-  помаранчевий, помаранчевий за червоний, без перекриттів. Жоден стан `.ahead` не падає під
-  мінімальну пігулку (проти ~21 % раніше, де найгостріший стан малював найменшу позначку).
-- **Пороги читаються без арифметики**: 20 % — рівно за планом, 33 % — початок помаранчевого,
-  100 % — вичерпано; ті самі позиції в будь-який момент вікна.
-- **Червоний завжди повний.** Раніше він спадав (90 % рано, 30 % пізно) — і це була **вада, не
-  властивість**: спадна смуга читається як «проблема легшає», хоча робота заблокована однаково.
-  Час до ресету несуть відлік (`MenuBarLayout.selectReset` ключиться на `.ahead`/`.exhausted`),
-  pause-гліф і `pauseHidesBars`.
-- **79 % спокійних станів (40 % усього простору) схлопуються в одну пігулку.** Хто тримає темп
-  нижче лінійного, майже завжди бачитиме порожній бар, і «скільки в мене запасу» більше не читається
-  з геометрії — лише з кольору, синій проти зеленого. Це найбільша ціна рішення й головне, з чим
-  можна не погодитись.
-- **Трек більше не сталий у часі.** 100 % означає «до ресету», тож однакова капсула о 10:00 і о
-  14:00 описує різні абсолютні величини. Зчитати «скільки саме» без лейбла ресету неможливо.
-- **Наявні користувачі побачать помітно ширші стрічки** без жодної дії з їхнього боку — це
-  заслуговує рядка в release notes, а не тихого перемикання.
-- **Progress не зачеплено**: він і далі малює `gapStart..gapEnd` у шкалі вікна.
+- **The ahead group becomes strictly monotonic**: `11% → 22% → 40% → 44% → 57%`. Width can be trusted
+  at a glance.
+- **Width itself orders severity** — blue narrower than green, green than yellow, yellow than orange,
+  orange than red, with no overlaps. No `.ahead` state falls below the minimum pill (versus ~21%
+  before, where the sharpest state drew the smallest mark).
+- **Thresholds read without arithmetic**: 20% is exactly on plan, 33% is where orange begins, 100% is
+  exhausted — the same positions at any point in the window.
+- **Red is always full.** It used to shrink (90% early, 30% late) — and that was a **flaw, not a
+  feature**: a shrinking strip reads as "the problem is easing," even though work is equally blocked.
+  Time to reset is carried by the countdown (`MenuBarLayout.selectReset` keys on `.ahead`/`.exhausted`),
+  the pause glyph, and `pauseHidesBars`.
+- **79% of calm states (40% of the whole space) collapse into one pill.** Anyone pacing below the
+  linear rate will almost always see an empty bar, and "how much slack do I have" no longer reads from
+  geometry — only from color, blue versus green. This is the decision's biggest cost and the main thing
+  someone could reasonably disagree with.
+- **The track is no longer fixed in time.** 100% means "until the reset," so an identical capsule at
+  10:00 and at 14:00 describes different absolute quantities. Reading "exactly how much" without the
+  reset label is impossible.
+- **Existing users will see noticeably wider strips** with no action on their part — this deserves a
+  line in the release notes, not a silent switch.
+- **Progress is unaffected**: it still draws `gapStart..gapEnd` on the window scale.
 
-## Альтернативи
+## Alternatives considered
 
-- **Лишити шкалу вікна, підняти `minStripWidth`.** Не лікує причину: під поріг усе одно падає
-  ~21 % станів, а немонотонність ahead-групи — властивість самої `|u − t|`, не floor'а.
-- **Заливка від нуля рівнем `usage`.** Регулярно пропонується й регулярно падає: рівень — це вхід
-  моделі, а бар показує її **вихід** (вердикт). Див. наскрізний принцип у
-  [CLAUDE.md](../../CLAUDE.md) і [ui-state-truth.md](../reference/ui-state-truth.md).
-- **Окремий, четвертий стиль замість заміни `Pace`.** Відкинуто в #307: `Pace` — строгий підмножинний
-  випадок `Progress` (та сама довжина, лише без міток), тож він не ніс інформації, якої немає в
-  інших двох. Міграція `Pace → Pressure` природна: обидва лівоприв'язані й без маркера, змінюється
-  лише шкала.
+- **Keep the window scale, raise `minStripWidth`.** Does not treat the cause: ~21% of states would
+  still fall below the floor, and the ahead group's non-monotonicity is a property of `|u − t|` itself,
+  not of the floor.
+- **A fill from zero at the `usage` level.** Proposed regularly and rejected regularly: the level is
+  the model's input, and the bar shows its **output** (the verdict). See the cross-cutting principle in
+  [CLAUDE.md](../../CLAUDE.md) and [ui-state-truth.md](../reference/ui-state-truth.md).
+- **A separate, fourth style instead of replacing `Pace`.** Rejected in #307: `Pace` is a strict subset
+  case of `Progress` (the same length, just without labels), so it carried no information the other
+  two didn't have. The `Pace → Pressure` migration is natural: both are left-anchored and marker-less,
+  and only the scale changes.
 
-  > ⚠️ **Витіснено [ADR-0079](0079-centred-zero-gauge-scale.md)** (#326). Аргумент вище — про
-  > надлишковість **`Pace`**, і для нього лишається правильним. До **Gauge** він не застосовний:
-  > той не підмножина, бо його ліва половина малює величину (невитрачений запас проти часу, що
-  > лишився), якої немає в жодному зі шпилених стилів — саме її `max(0, …)` тут відкидає.
+  > ⚠️ **Superseded by [ADR-0079](0079-centred-zero-gauge-scale.md)** (#326). The argument above is
+  > about **`Pace`**'s redundancy, and it remains correct for that case. It does not apply to
+  > **Gauge**: that one is not a subset, because its left half draws a quantity (unspent budget against
+  > time remaining) that neither pinned style draws — exactly the quantity its `max(0, …)` discards
+  > here.

@@ -3,76 +3,80 @@ status: draft
 date: 2026-08-01
 ---
 
-# ADR-0058 (draft): Дистрибуція helper'а через Homebrew tap
+# ADR-0058 (draft): Distributing the helper via a Homebrew tap
 
-> **Чернетка (draft).** За гейтом #E0. Фіксує install-канал helper'а й «detect, never install» UX.
+> **Draft.** Gated on #E0. Records the helper's install channel and the "detect, never install"
+> UX.
 
-## Контекст
+## Context
 
-Helper ([ADR-0054](0054-mas-present-if-installed-helper.md)) — окремий opensource продукт, який
-ставить **сам користувач**; MAS-застосунок його лише детектить (2.4.5(iv) — не завантажує/встановлює
-сам). Треба обрати найпростіший канал встановлення **під нашу аудиторію**.
+The helper ([ADR-0054](0054-mas-present-if-installed-helper.md)) is a separate open-source product
+that **the user** installs themselves; the MAS app only detects it (2.4.5(iv) — it doesn't
+download/install it itself). We need to pick the simplest install channel **for our audience**.
 
-Аудиторія — **користувачі Claude Code**, тобто розробники, що вже живуть у терміналі й мають `gh`,
-Homebrew, npm. Для них `brew install` — рідне середовище, не бар'єр.
+The audience is **Claude Code users** — developers who already live in the terminal and have `gh`,
+Homebrew, npm. For them, `brew install` is native territory, not a barrier.
 
-## Рішення
+## Decision
 
-**Основний канал — Homebrew cask через власний tap:**
-`brew install --cask artem-n/tap/tokenpace-helper`. Одна команда, notarized, оновлення через
-`brew upgrade` безкоштовно. **Cask** (не formula), бо helper — підписаний бандл + LaunchAgent, не
-збірка з джерел. **Fallback** — пряме notarized-завантаження з GitHub Releases (для не-Homebrew
-користувачів); це ж — артефакт, на який вказує cask.
+**The primary channel is a Homebrew cask via our own tap:**
+`brew install --cask artem-n/tap/tokenpace-helper`. One command, notarized, updates via
+`brew upgrade` for free. **A cask** (not a formula), because the helper is a signed bundle +
+LaunchAgent, not a build from source. **Fallback** — a direct notarized download from GitHub
+Releases (for non-Homebrew users); this is the same artifact the cask points at.
 
-**npm/npx — відкинуто як основний**: попри те, що аудиторія має npm, це поганий носій для підписаного
-macOS LaunchAgent (пакет був би лише завантажувачем notarized-артефакту з GitHub) — зайва
-supply-chain поверхня без виграшу. Можливий тонкий convenience-wrapper пізніше, не зараз.
+**npm/npx — rejected as the primary channel**: despite the audience having npm, it's a poor carrier
+for a signed macOS LaunchAgent (the package would just be a downloader for the notarized artifact
+on GitHub) — extra supply-chain surface with no upside. A thin convenience wrapper later is
+possible, not now.
 
-**MAS-застосунок лише детектить + інструктує** (рівно як Spark: «run `spark` to verify»):
+**The MAS app only detects + instructs** (exactly like Spark: "run `spark` to verify"):
 
 ```plantuml
 @startuml
-title ADR-0058: Install-flow helper'а (detect, never install)
+title ADR-0058: The helper install flow (detect, never install)
 start
-:MAS-app стартує (standalone:\nстатус сервісів + таймери);
-if (bookmark виданий + свіжий status.json?) then (так)
-  :повний UI з персональним pacing;
+:MAS app starts (standalone:\nservice status + timers);
+if (bookmark granted + fresh status.json?) then (yes)
+  :full UI with personal pacing;
   stop
-else (ні)
-  :показати non-nagging affordance\n«Personal usage → Learn more»;
-  :користувач копіює команду\nbrew install --cask …/tokenpace-helper;
+else (no)
+  :show a non-nagging affordance\n"Personal usage → Learn more";
+  :user copies the command\nbrew install --cask …/tokenpace-helper;
   note right
-    App НЕ запускає brew.
-    Лише показує команду
-    + copy-кнопку (2.4.5-iv).
+    The app does NOT run brew.
+    It only shows the command
+    + a copy button (2.4.5-iv).
   end note
-  :користувач сам ставить helper;
-  :helper пише перший status.json;
-  :користувач клікає «Connect»;
-  :пояснювальна панель\n(«app читає лише числа, не токен»);
+  :user installs the helper themselves;
+  :helper writes the first status.json;
+  :user clicks "Connect";
+  :an explanatory panel\n("the app reads only numbers, not the token");
   :pre-navigated NSOpenPanel →\nfolder-scoped read-write bookmark;
-  :live-детект перемикає UI\nна «connected ✓»;
-  :повний UI з персональним pacing;
+  :live detection flips the UI\nto "connected ✓";
+  :full UI with personal pacing;
   stop
 endif
 @enduml
 ```
 
-![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/dLIxJXj15EttAswNjM0T50KfCaL0IOEK1mgYSpDuhyt6ovtLx62K3cCfK20YvK6Jf4tZPeLm03z0yXVC_09VaZkp9YIHaYALFVTnxZddNdivrqBfdUqqq8bE4LQUleeM5XOVrM2LE9McKJELkx25QORgdYaWZ55ZGyy3OGSL96LL9V0uGUtvodeaiWnir-wRmkxPVTkp7o7aDCKYbOIrEisIBjNbIZEmU-RKdd3un9p27BYikJHZdxYeB0L94y9DATlRGhN1d9eBSyOL4_wyTELTrss--oSFqZjvzNKkwN45z1OIX1vlM0a0QkRQN350sRgn2kOSECHp6EIAmuKPsIEV7aCc6WcrbhWjrp8BCCqHGZEn9tT8GsuuTrBC1P2aY4IhnJqWcasfOa4DhDEqluQAwOWKTdBHGhXv-nwUeL04srBXTBJauORcogbrtjWUKopi0RYWkMPdZjb3_nXxtMUsLwTDXRkt_aCKDKJUXfkzR_UrR2CnTupAhJbuaXf19QqjpG-05TwG-Me-WIFF0tWFJWeFSQ1LNsC-Cvb3Cu0xeNwLlzFmfNFGaDcRY3CJnzSCRG_21zM7rSKewLGS75BiEVnLAHCesFBoCjo6ENS4Tm9gvLT7vYShjxN3FvV-JpD7V2Qbpcd_YIJYGxwrdqNQTynYOezT_UmC2ZV7IHsuG9t2QTzVzu4Zw87CQ4R8nxhyBER1DRWhThuDp6GwglWXcKA-a4xI4XfZUB7-CaDQ4uIfEuawDMKQeufoDfFJ2aKSxQg45tTx-XuaJJeOyVqF67_0Lk_FhE37cCqevMsiridJd_ORfKv6lFdouHUr__ihe3Xf1ilymNyQFm00)
+![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/ZLCnRjmm4EprYeKg2RREHX03mRc83QSv8B6DsExKyAILn1or5CYLBjUboWEIDdKUTY_9af8Tfqj5KhCSpiokhZmhnsDl4jPi4Au_V2xEpo_UhU6nG-ZG3EX0arGP0usnUyXgPApu50YdlrYUHA9a_Udw0TGmG3nwo6IbMXbBk2x9evjqXG7aqSC9iExH-VmoqGraMsjtlN8xQ9qYnbhmng7lblBL5s_fVGxS8K5sG9yd0Ejc565F6zXhxa34IeqoCAXAKtif1PxjaA3n21dPUCDtua81MIf8jQtKWMeQwsf55PQKtZ-JZ5wr2CVlF-0ZAaVGMuTfu5oFOWGgEsZqGOvi-rvibhHrk7-9goWgvNTm_FRxZEqEIKHXCKSQMCWoWjDjntA0c7S8hhP2Udlt26ua27oh26yOB9a31FN_F1hH4p4aUWwm7PcjnFDczNPrKUWf3xUHwlZQY_H5uSopD5cslKSpeOyMbwzxftansMZd-NKlNaLXTBNpaDvO8fcDEIH5W5y7eqYnTGTf2Q4fAKjvCUfGrNusHME_bTHFWyhuLimhpIFFu50QDUbMXPcuVRWRaEu3MMXDIOqrDRh2Yts10saHHSFpE4KIeoU4UNArvDCOFSokdZObiOMqcgKBnV7Npzd0_uqMrRf9hcIHd-WF)
 
-Helper (не-sandboxed) **зберігає власний auto-updater** ([ADR-0033](0033-automatic-update-install.md)
-/ [ADR-0025](0025-check-for-updates.md)) для GitHub-download користувачів; для Homebrew-встановлених
-це belt-and-suspenders (оновлює `brew upgrade`).
+The helper (non-sandboxed) **keeps its own auto-updater**
+([ADR-0033](0033-automatic-update-install.md) / [ADR-0025](0025-check-for-updates.md)) for
+GitHub-download users; for Homebrew-installed ones this is belt-and-suspenders (`brew upgrade`
+handles it).
 
-## Наслідки
+## Consequences
 
-- **Одна `brew`-команда** — install-story вирішена для основної аудиторії; оновлення helper'а через
-  `brew upgrade`.
-- **App ніколи не запускає `brew`/не встановлює helper** (2.4.5(iv)) — лише показує команду з
-  copy-кнопкою + пасивно детектить наявність через IPC. «Learn more» відкриває GitHub у браузері.
-- **Пасивний детект** — застосунок не може тихо stat'нути теку до першого bookmark-гранту (sandbox),
-  тож flow обов'язково проходить через явний «Connect» + `NSOpenPanel`.
-- Потрібен окремий tap-репозиторій + CI, що бампить cask на кожен реліз helper'а.
-- Референси: [ADR-0031](0031-session-log-archiver.md) (log archiver → helper),
-  [ADR-0025](0025-check-for-updates.md)/[ADR-0033](0033-automatic-update-install.md) (updater →
-  helper), [ADR-0055](0055-ipc-file-darwin-bookmark.md) (bookmark-flow).
+- **One `brew` command** — the install story is solved for the primary audience; helper updates
+  via `brew upgrade`.
+- **The app never runs `brew`/never installs the helper** (2.4.5(iv)) — it only shows the command
+  with a copy button + passively detects presence via IPC. "Learn more" opens GitHub in the
+  browser.
+- **Passive detection** — the app cannot silently stat the folder before the first bookmark grant
+  (sandbox), so the flow must go through an explicit "Connect" + `NSOpenPanel`.
+- A separate tap repo + CI is needed, bumping the cask on every helper release.
+- References: [ADR-0031](0031-session-log-archiver.md) (log archiver → helper),
+  [ADR-0025](0025-check-for-updates.md)/[ADR-0033](0033-automatic-update-install.md)
+  (updater → helper), [ADR-0055](0055-ipc-file-darwin-bookmark.md) (the bookmark flow).

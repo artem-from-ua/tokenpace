@@ -4,71 +4,75 @@ date: 2026-07-24
 superseded_by: [0038, 0059, 0060, 0074, 0078, 0107]
 ---
 
-# ADR-0027: Чесний стан «немає активної 5h-сесії» замість фантомного ресету
+# ADR-0027: An honest "no active 5h session" state instead of a phantom reset
 
-> **Частково superseded [ADR-0107](0107-weekly-reset-reconstructed-from-the-last-known-one.md):**
-> **D5 скасовано в частині `seven_day`.** Його обґрунтування — «weekly-вікно завжди існує, тож
-> вичерпаний ланцюг лишається на local-estimate» — спростоване вимірами: щотижня API **не віддає**
-> `seven_day.resets_at` протягом 4–6 годин (три епізоди на журналі Max, два на Pro), тобто в сенсі
-> відповіді тижневе вікно існує не завжди — рівно як і 5-годинне. Local-estimate для `seven_day`
-> прибрано: замість `now + 7d` тепер котиться останній **серверний** ресет (похибка ±0.25 с проти
-> хвилин), а без якоря нічого не вигадується. Параметр `localEstimateAllowed` перейменовано на
-> `reconstructionAllowed`.
+> **Partially superseded by [ADR-0107](0107-weekly-reset-reconstructed-from-the-last-known-one.md):**
+> **D5 is canceled for the `seven_day` part.** Its rationale — "the weekly window always exists, so
+> an exhausted chain stays on a local estimate" — is disproven by measurement: every week, the API
+> **fails to return** `seven_day.resets_at` for 4–6 hours (three episodes in the Max journal, two in
+> the Pro one), meaning that, in terms of what the response says, the weekly window doesn't always
+> exist either — exactly like the 5-hour one. The local estimate for `seven_day` has been removed:
+> instead of `now + 7d`, the last **server** reset is now rolled forward (error ±0.25 s against
+> minutes), and with no anchor nothing is invented. The parameter `localEstimateAllowed` was renamed
+> to `reconstructionAllowed`.
 >
-> **Гілка `five_hour` цього ADR чинна повністю** — і саме вона виявилася правильною відповіддю, яку
-> тоді не поширили на тижневе вікно: дефект, описаний у
-> [#100](https://github.com/artem-from-ua/tokenpace/issues/100), був однаковий для обох.
+> **The `five_hour` branch of this ADR still fully stands** — and it turned out to be the right
+> answer that wasn't extended to the weekly window at the time: the defect described in
+> [#100](https://github.com/artem-from-ua/tokenpace/issues/100) was the same for both.
 
-> **Частково superseded [ADR-0078](0078-idle-drawn-as-zero-in-both-styles.md):** «суцільно синій бар»
-> у D1/D4 більше не чинне — idle малюється як **нуль** (сірий трек + синя пігулка на нулі) в обох
-> `BarStyle`; під Progress зверху додається маркер часу на нулі. Колір і статус «ready to start»
-> лишаються, змінилася лише форма.
+> **Partially superseded by [ADR-0078](0078-idle-drawn-as-zero-in-both-styles.md):** the "solid blue
+> bar" in D1/D4 no longer stands — idle is drawn as **zero** (gray track + blue pill at zero) in both
+> `BarStyle`; under Progress a time marker is added on top, at zero. The color and the "ready to
+> start" status remain, only the shape changed.
 
-> **Частково superseded [ADR-0074](0074-one-reset-format-on-both-surfaces.md)
-> ([#284](https://github.com/artem-from-ua/tokenpace/issues/284)):** **D3 скасовано повністю** —
-> `ResetClock.timeToResetCompactDays` більше не існує. Вона була потрібна лише тому, що `timeToReset`
-> за 90 хв перемикався на настінний годинник, а `20:40` для ресету через кілька днів читається
-> безглуздо; прибравши поріг, `timeToReset` **сам став** `relativeRounded`, тож окрема точка входу
-> втратила сенс і злилася з ним. Відповідно в **D2** «або «20:40» (< 24 h)» тепер читається як
-> «`20h` / `45m` — той самий односкладовий формат». Решта ADR (чесний детект idle, відсутність
-> фантомного `now+5h`, «4d» для далекого 7d-ресету) чинна.
+> **Partially superseded by [ADR-0074](0074-one-reset-format-on-both-surfaces.md)
+> ([#284](https://github.com/artem-from-ua/tokenpace/issues/284)):** **D3 is fully canceled** —
+> `ResetClock.timeToResetCompactDays` no longer exists. It was needed only because `timeToReset`
+> switched to a wall clock past 90 minutes, and `20:40` for a reset several days out reads as
+> nonsense; once the threshold was removed, `timeToReset` **itself became** `relativeRounded`, so the
+> separate entry point lost its purpose and merged into it. Accordingly, in **D2** "or "20:40" (< 24
+> h)" now reads as "`20h` / `45m` — the same one-piece format." The rest of the ADR (honest idle
+> detection, no phantom `now+5h`, "4d" for a distant 7d reset) still stands.
 >
-> **Частково superseded [ADR-0038](0038-idle-blocked-status.md):** рішення D1/D4 у частині «idle → завжди
-> суцільно синій + `ready to start`» скасовано — коли idle **заблоковано** (7d вичерпано і credits не
-> покривають), бар стає **сірим**, статус — «waiting for limit reset», а блокуючий ресет підсвічується
-> червоним. Решта цього ADR (чесний детект idle, відсутність фантомного `now+5h` ресету, `is_active` не
-> використовується) лишається чинною.
+> **Partially superseded by [ADR-0038](0038-idle-blocked-status.md):** the D1/D4 decision — "idle →
+> always solid blue + `ready to start`" — is canceled: when idle is **blocked** (7d exhausted and
+> credits don't cover it), the bar turns **gray**, the status becomes "waiting for limit reset," and
+> the blocking reset is highlighted in red. The rest of this ADR (honest idle detection, no phantom
+> `now+5h` reset, `is_active` unused) still stands.
 >
-> **Частково superseded [ADR-0059](0059-menu-bar-native-semantic-colours.md):** D7 у частині «menu-bar
-> idle-бар = фіксований sRGB `Palette.statusBlue` (70/140/230)» скасовано — menu-bar тепер малює
-> `.systemBlue` (як і попап), що фліпає тему й несе Increase-Contrast. Логіка idle-стану лишається чинною.
+> **Partially superseded by [ADR-0059](0059-menu-bar-native-semantic-colours.md):** the D7 decision
+> about "menu-bar idle bar = fixed sRGB `Palette.statusBlue` (70/140/230)" is canceled — the menu bar
+> now draws `.systemBlue` (like the popup), which flips with the theme and honors Increase Contrast.
+> The idle-state logic still stands.
 >
-> **Частково superseded [ADR-0060](0060-popup-native-semantic-colours.md):** popup idle-бар більше **не
-> десатурується** — раніше він брав `.systemBlue` приглушений ~15% до сірого (+~22% до білого на світлій
-> темі); тепер це **чистий** `.systemBlue`, той самий уніфікований `blue`, що й menu-bar. Логіка
-> idle-стану лишається чинною.
+> **Partially superseded by [ADR-0060](0060-popup-native-semantic-colours.md):** the popup's idle bar
+> is **no longer desaturated** — it used to take `.systemBlue` muted ~15% toward gray (+~22% toward
+> white in light mode); now it's a **pure** `.systemBlue`, the same unified `blue` as the menu bar.
+> The idle-state logic still stands.
 
-## Контекст
+## Context
 
-Після кількох годин без використання Claude popup показував «5-hour / 0% / on pace / 5h at 17:40»,
-а menu bar — «17:40», хоча активної 5-годинної сесії **не існувало**. «17:40» — синтезований час
-(`now + 5h`, округлений угору до 10-хв сітки), який «повзе» вперед із кожним полінгом; того дня
-реальний ресет виявився о 18:39. Тобто віджет показував впевнений, конкретний, але **вигаданий** час
-і фальшивий пейсинг-статус «on pace» на порожньому вікні.
+After a few hours of no Claude usage, the popup showed "5-hour / 0% / on pace / 5h at 17:40," and the
+menu bar showed "17:40," even though an active 5-hour session **did not exist**. "17:40" is a
+synthesized time (`now + 5h`, rounded up to a 10-minute grid) that "crawls" forward with every poll;
+that day, the real reset turned out to be at 18:39. So the widget showed a confident, specific, but
+**invented** time, and a false "on pace" pacing status on an empty window.
 
-### Верифікована серверна семантика (2026-07-24, живі тіла + сирі транскрипти сесій)
+### Verified server semantics (2026-07-24, live payloads + raw session transcripts)
 
-1. **`five_hour.resets_at: null` — нормальний стан «5h-вікна зараз не існує».** Вікно **створюється
-   першою витратою токенів**. Механіка (перевірено по токен-записах): старт = перша витрата токенів,
-   округлена **вниз** до 10-хв сітки; ресет = старт + рівно 5 год (перші токени 10:47:04Z → floor
-   10:40 → ресет 15:40:00Z, звітований `15:39:59.63Z`; пауза перед цим 8 год 14 хв — перевірено
-   порожньою). Усі історичні живі захоплення `resets_at` лежать у ±1 с від 10-хв межі.
-2. **`limits[].session.is_active` — ненадійний детектор.** Жива сесія на 2 % мала `is_active: false`
-   (Тіло B), а червнева фікстура — `true` при 26 %. **Не використовувати.**
-3. **Надійний детект idle:** немає `resets_at` ані у `five_hour`, ані в `limits[]`-записі відповідного
-   роду (`session`/`five_hour`) — рівно та гілка, що раніше синтезувала локальну оцінку для `five_hour`.
+1. **`five_hour.resets_at: null` is the normal state of "no 5h window exists right now."** The window
+   is **created by the first token spend**. The mechanics (verified against token records): start =
+   first token spend, rounded **down** to a 10-minute grid; reset = start + exactly 5 hours (first
+   tokens at 10:47:04Z → floor 10:40 → reset 15:40:00Z, reported as `15:39:59.63Z`; the preceding
+   pause was 8 h 14 min — verified empty).  Every historical live capture of `resets_at` lies within
+   ±1 s of a 10-minute boundary.
+2. **`limits[].session.is_active` is an unreliable detector.** A live session at 2% had
+   `is_active: false` (Payload B), while a June fixture had `true` at 26%. **Do not use it.**
+3. **A reliable idle detection:** no `resets_at` in either `five_hour` or the matching `limits[]`
+   entry (`session`/`five_hour` kind) — exactly the branch that previously synthesized a local
+   estimate for `five_hour`.
 
-### Тіло A (idle, дослівна форма живого захоплення)
+### Payload A (idle, verbatim from a live capture)
 
 ```
 {"five_hour":{"utilization":0.0,"resets_at":null,...},
@@ -78,73 +82,79 @@ superseded_by: [0038, 0059, 0060, 0074, 0078, 0107]
            {"kind":"weekly_scoped",...,"display_name":"Fable","percent":15,...}]}
 ```
 
-Немає запису `kind:"session"` взагалі → `five_hour.resets_at` нізвідки взяти → **вікна не існує**.
+There's no `kind:"session"` entry at all → there's nowhere to get `five_hour.resets_at` from → **the
+window doesn't exist**.
 
-### Тіло B (активна сесія з `is_active:false`)
+### Payload B (an active session with `is_active:false`)
 
 ```
 {"five_hour":{"utilization":2.0,"resets_at":"2026-07-24T18:39:00...+00:00",...},
  "limits":[{"kind":"session",...,"percent":2,...,"is_active":false},...]}
 ```
 
-Реальний `resets_at` є → вікно **активне**, попри `is_active:false`. Пінить ігнорування прапорця.
+A real `resets_at` is present → the window **is active**, despite `is_active:false`. This pins down
+why the flag is ignored.
 
-### Консенсус спільноти
+### Community consensus
 
-Endpoint `/api/oauth/usage` офіційно не задокументований (внутрішній endpoint Claude Code). Стан «no
-active window» — загальновідомий: OSS-монітори (ccusage, Maciek, quotio, ClaudeBar, ccseva) роблять
-«no active session» першокласним станом — рядок лишається, каунтдаун деградує, **час ніколи не
-вигадується**. Єдиний знайдений синтезатор фейкового `now+5h` (Claude-Usage-Tracker) вже породив баги
-— антипатерн, який ми повторювали.
+The `/api/oauth/usage` endpoint is not officially documented (an internal Claude Code endpoint). The
+"no active window" state is widely known: OSS monitors (ccusage, Maciek, quotio, ClaudeBar, ccseva)
+treat "no active session" as a first-class state — the label stays, the countdown degrades, **the
+time is never invented**. The only synthesizer of a fake `now+5h` we found (Claude-Usage-Tracker)
+already produced bugs of its own — an antipattern we had been repeating.
 
-## Рішення
+## Decision
 
-Ввести чесний стан «немає активної 5h-сесії», API-driven за відсутністю `resets_at`.
+Introduce an honest "no active 5h session" state, API-driven off the absence of `resets_at`.
 
-- **D1. Модель.** `UsageSnapshot.sessionIdle: Bool` (новий, останній у memberwise init із дефолтом
-  `false` → усі фікстури компілюються). `fiveHour` лишається non-optional з `resetsAt: ""`.
-- **D2. Menu bar.** Обидва бари лишаються (idle-колапс ADR-0015 **не** повертається). 5h-мінібар у
-  idle — **суцільно синій, без кружечка** (індикатора часу). Час праворуч — **7-денний ресет**: «4d»
-  (≥ 24 h, новий короткий формат) або «20:40» (< 24 h). `MenuBarMode` не змінюється; `BarView` дістає
-  `idle: Bool = false`.
-- **D3. Формат днів.** Нова `ResetClock.timeToResetCompactDays`: `≥ 24h` → `.relative("4d")` (та сама
-  арифметика, що в попапі — menu bar і попап завжди узгоджені); `< 24h` → делегує в незмінний
-  `timeToReset`. Нових кейсів enum немає.
-- **D4. Попап, рядок 5-hour.** Заголовок «5-hour» + статус «ready to start»; **суцільний синій бар без
-  кружечка**; **другого текстового рядка немає взагалі** (без «0%», без часу). Тіки-поділки лишаються.
-  `LimitRow.sessionIdle: Bool = false`; view пропускає другий рядок при `sessionIdle`.
-- **D5. Декод.** `UsageSnapshot.window(...)` дістає параметр `localEstimateAllowed` і повертає
-  `(window, sessionIdle)`. Гілки «власний resets_at» і «limits[]-фолбек» — байт-у-байт як раніше
-  (boundary-блипи не регресують). Вичерпаний ланцюг: для `five_hour` (`localEstimateAllowed: false`)
-  → `(UsageWindow(utilization: 0, resetsAt: ""), true)` без decode-логу; для `seven_day`
-  (`localEstimateAllowed: true`) → нинішній local-estimate (вікно завжди існує).
-- **D6. Лог.** Раз на перехід, не на кожен полінг: чиста `PollingEngine.sessionIdleTransition`.
+- **D1. Model.** `UsageSnapshot.sessionIdle: Bool` (new, last in the memberwise init with a default of
+  `false` → all fixtures still compile). `fiveHour` stays non-optional with `resetsAt: ""`.
+- **D2. Menu bar.** Both bars remain (the idle collapse from ADR-0015 does **not** return). The
+  5h mini-bar in idle is **solid blue, with no dot** (time indicator). The time on the right is the
+  **7-day reset**: "4d" (≥ 24 h, a new short format) or "20:40" (< 24 h). `MenuBarMode` is unchanged;
+  `BarView` gets `idle: Bool = false`.
+- **D3. Day format.** A new `ResetClock.timeToResetCompactDays`: `≥ 24h` → `.relative("4d")` (the
+  same arithmetic as the popup — menu bar and popup always agree); `< 24h` delegates to the unchanged
+  `timeToReset`. No new enum cases.
+- **D4. Popup, 5-hour row.** Title "5-hour" + status "ready to start"; **a solid blue bar with no
+  dot**; **there is no second text line at all** (no "0%", no time). Tick marks remain.
+  `LimitRow.sessionIdle: Bool = false`; the view skips the second line when `sessionIdle`.
+- **D5. Decode.** `UsageSnapshot.window(...)` gets a `localEstimateAllowed` parameter and returns
+  `(window, sessionIdle)`. The "own resets_at" and "limits[] fallback" branches are byte-for-byte as
+  before (boundary blips don't regress). An exhausted chain: for `five_hour`
+  (`localEstimateAllowed: false`) → `(UsageWindow(utilization: 0, resetsAt: ""), true)` with no
+  decode log; for `seven_day` (`localEstimateAllowed: true`) → the current local estimate (the window
+  always exists).
+- **D6. Log.** Once per transition, not per poll: a pure `PollingEngine.sessionIdleTransition`.
   `nil|active → idle` ⇒ `"five_hour idle — no active session (resets_at absent)"`; `idle → active` ⇒
   `"five_hour window active again"` (`AppLogger.network.notice`).
-- **D7. Колір.** Нейтральне синє «вікно не запущене, повний запас доступний» — зелений зарезервовано
-  за пейсинг-статусом активного вікна. Попап: `NSColor.systemBlue` (пара до `gapGreen = systemGreen`).
-  Menu bar: фіксований sRGB родини `Palette.statusBlue` (70/140/230), бо menu-bar-образ non-template.
+- **D7. Color.** A neutral blue for "window not running, full budget available" — green is reserved
+  for the pacing status of an active window. Popup: `NSColor.systemBlue` (paired with
+  `gapGreen = systemGreen`). Menu bar: a fixed sRGB from the `Palette.statusBlue` family
+  (70/140/230), because the menu-bar image is non-template.
 
-## Чому це не повернення idle-режиму (ADR-0015)
+## Why this is not a return of idle mode (ADR-0015)
 
-[ADR-0015](0015-no-idle-mode.md) прибрав **display-колапс за локальним порогом utilization** (обидва
-вікна < 5 % → згорнути до `*`) — він хибно спрацьовував, бо не мав зв'язку з активністю. Цей стан —
-**API-driven**: сервер каже «вікна не існує» (`resets_at` відсутній). Він **не може** хибно спрацювати
-на активному вікні (у того завжди є `resets_at`), і **бари не зникають** — 5h-бар лише
-перефарбовується, 7d-бар звичайний. Операційне рішення ADR-0015 («смужки завжди видно, поки є дані»)
-збережене, тому 0015 лишається `accepted`.
+[ADR-0015](0015-no-idle-mode.md) removed a **display collapse based on a local utilization
+threshold** (both windows < 5% → collapse to `*`) — it fired incorrectly because it had no tie to
+actual activity. This state is **API-driven**: the server says "the window doesn't exist"
+(`resets_at` absent). It **cannot** fire incorrectly on an active window (that always has a
+`resets_at`), and **the bars never disappear** — the 5h bar just recolors, the 7d bar stays normal.
+ADR-0015's operational decision ("the bars are always visible while there's data") is preserved,
+which is why 0015 remains `accepted`.
 
-## Наслідки
+## Consequences
 
-- Menu bar/попап більше ніколи не показують фантомний `now+5h` час і фальшивий «on pace» на порожньому
-  вікні. Час у idle — реальний 7-денний ресет, що не «повзе» між полінгами.
-- Дегенеративний weekly-кейс (обидва вікна без ресету) лишається на local-estimate для `seven_day` →
-  синій 5h-бар + оцінений «Nd» — чесно-достатньо.
-- Каденс полінгу не зачеплений: `AdaptiveCadence.changed` порівнює лише utilization, тож переходи
-  idle↔active каденс не смикають.
-- `is_active` навмисно проігноровано в детекті (Тіло B).
+- The menu bar/popup never again show a phantom `now+5h` time and a false "on pace" status on an
+  empty window. The idle-state time is a real 7-day reset that doesn't "crawl" between polls.
+- The degenerate weekly case (both windows with no reset) still relies on a local estimate for
+  `seven_day` → a blue 5h bar + an estimated "Nd" — honest enough.
+- Polling cadence is unaffected: `AdaptiveCadence.changed` only compares utilization, so
+  idle↔active transitions don't nudge the cadence.
+- `is_active` is deliberately ignored in the detection (Payload B).
 
-Див. також: #100 (цей баг), #36 (заміна ⏰ на `<1m` — ортогонально),
-[ADR-0014](0014-usage-decode-resilience-on-reset-boundary.md) (частково витіснено — див. його
-постскрипт), [ADR-0041](0041-idle-grace-on-reset-boundary.md) (грейс на межі ресету — придушує
-хибний idle одразу після того, як активне вікно зресетилось; детект idle цього ADR лишається чинним).
+See also: #100 (this bug), #36 (replacing ⏰ with `<1m` — orthogonal),
+[ADR-0014](0014-usage-decode-resilience-on-reset-boundary.md) (partially superseded — see its
+postscript), [ADR-0041](0041-idle-grace-on-reset-boundary.md) (a grace period at the reset boundary
+that suppresses a false idle right after an active window resets; this ADR's idle detection still
+stands).

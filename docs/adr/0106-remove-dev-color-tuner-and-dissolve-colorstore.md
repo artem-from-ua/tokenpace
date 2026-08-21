@@ -4,117 +4,125 @@ date: 2026-08-18
 supersedes: [0046]
 ---
 
-# ADR-0106: Видалення dev color-tuner і розчинення `ColorStore`
+# ADR-0106: Removing the dev color tuner and dissolving `ColorStore`
 
-## Контекст
+## Context
 
-[ADR-0046](0046-dev-color-tuner-override-layer.md) увів два типи заради одного інструмента:
-`ColorRole` — плоский каталог іменованих кольорових ролей, і `ColorStore` — `@MainActor`-синглтон,
-через який **обидві** `Palette` (menu bar і popup) читали кожен колір, щоб живий тюнер
-([#185](https://github.com/artem-from-ua/tokenpace/issues/185)) міг перевизначити будь-який із них
-у рантаймі й одразу побачити результат.
+[ADR-0046](0046-dev-color-tuner-override-layer.md) introduced two types for the sake of one tool:
+`ColorRole` — a flat catalog of named color roles — and `ColorStore`, an `@MainActor` singleton
+through which **both** `Palette`s (menu bar and popup) read every color, so the live tuner
+([#185](https://github.com/artem-from-ua/tokenpace/issues/185)) could override any of them at
+runtime and see the result immediately.
 
-Тюнер свою роботу зробив. Підібрані ним значення давно сидять у `ColorRole.defaultColor`, а після
-[ADR-0059](0059-menu-bar-native-semantic-colours.md) і
-[ADR-0060](0060-popup-native-semantic-colours.md) майже всі вони стали **системними семантичними
-кольорами** (`.systemGreen`, `labelColor` тощо) — тобто такими, які тюнер може лише **зіпсувати**:
-підібраний ним плаский колір втрачає адаптацію до світлої/темної теми й Increase Contrast. Це
-визнано ще в самому ADR-0060 (§«експеримент робиться редагуванням `defaultColor`, не тюнером»).
+The tuner did its job. The values it settled on have long since sat in `ColorRole.defaultColor`,
+and after [ADR-0059](0059-menu-bar-native-semantic-colours.md) and
+[ADR-0060](0060-popup-native-semantic-colours.md) almost all of them became **system semantic
+colors** (`.systemGreen`, `labelColor`, and so on) — the kind the tuner can now only **break**: a
+flat color it picks loses adaptation to light/dark mode and Increase Contrast. This was already
+acknowledged in ADR-0060 itself (§"experimentation is done by editing `defaultColor`, not the
+tuner").
 
-Натомість шар коштував щодня:
+Meanwhile the layer had a daily cost:
 
-- **Каталог доводилось редагувати в лок-степі з палітрою** — правило ADR-0046 «змінюючи
-  `Palette`-колір, оновлюй `ColorRole.defaultColor` у тому ж коміті» існувало саме тому, що
-  значення жило у **двох** місцях.
-- **Друге вікно прев'ю попапа.** Поряд із продакшновим прев'ю
-  ([ADR-0083](0083-live-dropdown-preview-in-settings.md)) стояло dev-only, і `data-flow.md` прямо
-  застерігав: «прев'ю тепер два, і їх легко сплутати».
-- **Опис у доках розійшовся з кодом**: `data-flow.md` казав «~38 ролей», `ui-verification.md` —
-  «~35», фактично їх лишилось **18** після консолідації синього
-  ([ADR-0081](0081-weekly-capacity-gate-for-blue.md)) та інших злиттів.
+- **The catalog had to be edited in lockstep with the palette** — ADR-0046's rule, "when changing a
+  `Palette` color, update `ColorRole.defaultColor` in the same commit," existed exactly because the
+  value lived in **two** places.
+- **A second popup preview window.** Next to the production preview
+  ([ADR-0083](0083-live-dropdown-preview-in-settings.md)) sat a dev-only one, and `data-flow.md`
+  warned outright: "there are now two previews, and they're easy to confuse."
+- **The docs' description drifted from the code**: `data-flow.md` said "~38 roles,"
+  `ui-verification.md` said "~35," and in fact only **18** remained after consolidating blue
+  ([ADR-0081](0081-weekly-capacity-gate-for-blue.md)) and other merges.
 
-Питання: чи лишати `ColorStore` як порожній шов (з порожнім словником override-ів), чи згорнути
-його до прямого читання дефолтів.
+The question: keep `ColorStore` as an empty seam (with an empty override dictionary), or collapse it
+down to a direct read of the defaults.
 
-## Рішення
+## Decision
 
-**Видалити тюнер разом із його вікном прев'ю й розчинити `ColorStore` повністю.**
+**Remove the tuner along with its preview window and dissolve `ColorStore` entirely.**
 
-- `ColorRole` **лишається** — але як **палітра застосунку**, а не каталог для UI інструмента:
-  кейси + `defaultColor`. Метадані, що існували лише щоб підписувати пікер (`displayName`, `group`,
-  `usageDescription`, `distortion`), видалено. Тип переїхав із `DevColorTuner/` у
+- `ColorRole` **stays** — but as the **app's palette**, not a catalog for a UI tool: cases plus
+  `defaultColor`. Metadata that existed only to label the picker (`displayName`, `group`,
+  `usageDescription`, `distortion`) is removed. The type moved from `DevColorTuner/` into
   `Sources/TokenPace/Palette.swift`.
-- Обидві `Palette` читають `ColorRole.x.defaultColor` **напряму**. `Settings` (крапки оновлень в
-  About, бренд-бейдж Claude) — так само.
-- Тека `DevColorTuner/` → `DevTools/`; у ній лишився один контролер вікна.
-- `PreviewChromeViews.swift` переїхав у `Settings/` **цілком** — після зняття dev-прев'ю його
-  єдиний споживач — прев'ю Settings.
-- Вікно **Development tools лишається** і несе два інструменти, що не мають стосунку до кольорів:
-  живий селектор стубів ([ADR-0047](0047-live-stub-selector.md),
-  [#187](https://github.com/artem-from-ua/tokenpace/issues/187)) і чекбокс логування
-  status-payload JSONL ([ADR-0071](0071-incident-subscriptions.md) §10). Гейт незмінний:
-  `devToolsEnabled` **І** ⌥ Option ([ADR-0053](0053-devtools-flag-via-defaults.md)); сам ключ тепер
-  читається як `PersistedConfig.devToolsEnabled`, без проміжного `ColorStore.devToolsEnabled`.
+- Both `Palette`s read `ColorRole.x.defaultColor` **directly**. `Settings` (update dots in About,
+  the Claude brand badge) does the same.
+- The `DevColorTuner/` folder → `DevTools/`; a single window controller remains in it.
+- `PreviewChromeViews.swift` moved into `Settings/` **entirely** — once the dev preview is gone, its
+  only remaining consumer is the Settings preview.
+- The **Development tools window stays**, carrying two tools unrelated to color: the live stub
+  selector ([ADR-0047](0047-live-stub-selector.md),
+  [#187](https://github.com/artem-from-ua/tokenpace/issues/187)) and the status-payload JSONL
+  logging checkbox ([ADR-0071](0071-incident-subscriptions.md) §10). The gate is unchanged:
+  `devToolsEnabled` **and** ⌥ Option ([ADR-0053](0053-devtools-flag-via-defaults.md)); the key
+  itself is now read as `PersistedConfig.devToolsEnabled`, with no intermediate
+  `ColorStore.devToolsEnabled`.
 
-### Чому ролі лишаються роздільними
+### Why the roles stay separate
 
-Це головне, що треба зафіксувати, бо обґрунтування кількох чинних ADR спиралося на тюнер.
+This is the main thing worth recording, because several still-standing ADRs justified themselves by
+citing the tuner.
 
-`ColorRole` роздільний тому, що **називає різні сигнали**, а не тому, що колись кожен мав власний
-повзунок. Формулювання на кшталт «окрема роль, щоб тюнер міг їх розвести»
+`ColorRole` stays split because each case **names a different signal**, not because each one used
+to have its own slider. Phrasing like "a separate role so the tuner could tell them apart"
 ([ADR-0079](0079-centred-zero-gauge-scale.md) §, [ADR-0089](0089-gauge-centre-tick-calm-tone.md) §,
-[ADR-0096](0096-zero-tick-on-pressure.md) §, [ADR-0051](0051-blocked-pause-glyph.md) §) читати
-тепер треба так: **ролі лишаються окремими, аргумент змінився з інструментального на семантичний.**
-Нуль шкали — не те саме, що спокійна заливка, навіть коли обидва резолвляться в `labelColor`;
-кредитний бар — не пейсинговий; pause-гліф — не service-крапка.
+[ADR-0096](0096-zero-tick-on-pressure.md) §, [ADR-0051](0051-blocked-pause-glyph.md) §) should now
+be read as: **the roles stay separate, but the argument shifted from tooling to semantics.** The
+scale's zero isn't the same thing as a calm fill, even when both resolve to `labelColor`; the credit
+bar isn't a pacing bar; the pause glyph isn't the service dot.
 
-Зворотний бік того самого принципу вже є в
-[ADR-0081](0081-weekly-capacity-gate-for-blue.md) §: `paceBlue` **злили** з `blue` саме тому, що
-розділення «лише дозволяло тюнеру розвести те, що концептуально одне». Ця ADR — прецедент, а не
-виняток: критерій завжди був семантичний, тюнер лише робив розділення дешевим.
+The flip side of the same principle already shows up in
+[ADR-0081](0081-weekly-capacity-gate-for-blue.md) §: `paceBlue` was **merged** into `blue` precisely
+because the split "only let the tuner tell apart what was conceptually one thing." This ADR is a
+precedent, not an exception: the criterion was always semantic, the tuner just made splitting cheap.
 
-### Що ще перестає бути правдою
+### What else stops being true
 
-- **Правило «оновлюй `defaultColor` у тому ж коміті» стає безпредметним.** Воно захищало від
-  розсинхрону двох копій значення; копія тепер одна. Це стосується і його повторів у
-  [ADR-0059](0059-menu-bar-native-semantic-colours.md) §, і в
+- **The rule "update `defaultColor` in the same commit" becomes moot.** It guarded against two
+  copies of a value drifting apart; there's only one copy now. This applies to its restatements in
+  both [ADR-0059](0059-menu-bar-native-semantic-colours.md) § and
   [ADR-0060](0060-popup-native-semantic-colours.md) §.
-- **`ColorStore.onChange` як тригер «миттєвого» перемальовування** зникає — а з ним і згадка тюнера
-  серед випадків, коли анімація переходу кольору обривається
-  ([ADR-0070](0070-smooth-bar-colour-transitions.md) §). Решта випадків (фліп теми, sleep/lock,
-  зміна стуба) працює як раніше; snap при зміні стуба йде власним шляхом —
-  `AppDelegate.switchScenario` викликає `colorAnimator.reset()`, а не через store.
-- **Аргумент «не кешувати плитки прев'ю, бо тюнер міняє кольори»**
-  ([ADR-0097](0097-bar-style-preview-rendered-at-runtime.md) §) втрачає одну з двох підстав. Рішення
-  не кешувати лишається чинним — друга підстава (перемальовування на фліп теми) достатня сама по собі.
-- **Пункт ADR-0064 «прев'ю тюнера форсує Vibrant-appearance»**
-  ([ADR-0064](0064-popup-translucent-card-and-glow-bars.md) §) стосується вікна, якого більше немає.
-  Сам механізм живий: його виконує прев'ю Settings через той самий `PreviewChrome.vibrantAppearance`.
+- **`ColorStore.onChange` as the trigger for "instant" redraw** disappears — and with it the
+  mention of the tuner among the cases where a color-transition animation gets cut short
+  ([ADR-0070](0070-smooth-bar-colour-transitions.md) §). The rest of the cases (a theme flip,
+  sleep/lock, a stub change) work as before; a snap on stub change follows its own path —
+  `AppDelegate.switchScenario` calls `colorAnimator.reset()` directly, not through the store.
+- **The argument "don't cache preview tiles, because the tuner changes colors"**
+  ([ADR-0097](0097-bar-style-preview-rendered-at-runtime.md) §) loses one of its two grounds. The
+  decision not to cache still stands — the second ground (redrawing on a theme flip) is sufficient
+  on its own.
+- **ADR-0064's point that "the tuner preview forces Vibrant appearance"**
+  ([ADR-0064](0064-popup-translucent-card-and-glow-bars.md) §) now refers to a window that no longer
+  exists. The mechanism itself is alive: the Settings preview carries it out through the same
+  `PreviewChrome.vibrantAppearance`.
 
-## Наслідки
+## Consequences
 
-- **+** Мінус ~1500 рядків і два типи; кожен колір має рівно одне місце зберігання.
-- **+** Прев'ю дропдауна лишилося **одне** — джерело плутанини, задокументоване в `data-flow.md`, зникло.
-- **+** Зміна палітри більше не вимагає синхронної правки каталогу.
-- **−** Живого підбору кольору немає. Заміна вже існує й задокументована
-  ([ui-verification.md](../guides/ui-verification.md), розділ про swatch-режим): правка
-  `ColorRole.defaultColor` → `TOKENPACE_SWATCHES=1` → замір **Digital Color Meter** у sRGB на
-  **реальному** барі. Для системних семантичних кольорів це не деградація, а єдиний коректний шлях:
-  тюнер їх усе одно «сплющував».
-- **−** Разом із `ColorSpaces.swift` зникли WCAG-хелпери `relativeLuminance`/`contrastRatio` — вони
-  не мали інших споживачів. Якщо колись знадобиться перевірка контрасту, їх доведеться відновити
-  (формули стандартні).
-- **−** Регресія кольорів **не** «нульова за побудовою»: гейт `devToolsEnabled` — рантаймне читання
-  `UserDefaults`, тож теоретично `color()` міг віддати не дефолт. Практично вона нульова **за
-  станом**: override-и ніколи не персистилися, тож на кожному свіжому старті словник був порожній.
-  Видалення шару фіксує саме цей стан назавжди.
-- Побічно: `openDevTools()` більше не створює другий `PopupViewController` і друге плаваюче вікно.
+- **+** Minus ~1500 lines and two types; every color now has exactly one place it lives.
+- **+** The dropdown preview is down to **one** — the source of confusion documented in
+  `data-flow.md` is gone.
+- **+** A palette change no longer requires a synchronized catalog edit.
+- **−** There is no more live color picking. A replacement already exists and is documented
+  ([ui-verification.md](../guides/ui-verification.md), the swatch-mode section): edit
+  `ColorRole.defaultColor` → `TOKENPACE_SWATCHES=1` → measure with **Digital Color Meter** in sRGB
+  on the **real** bar. For system semantic colors this isn't a regression but the only correct path
+  — the tuner was flattening them anyway.
+- **−** The WCAG helpers `relativeLuminance`/`contrastRatio` disappeared along with
+  `ColorSpaces.swift` — they had no other consumers. If a contrast check is ever needed again,
+  they'll have to be restored (the formulas are standard).
+- **−** The color regression is **not** "zero by construction": the `devToolsEnabled` gate is a
+  runtime `UserDefaults` read, so in theory `color()` could have returned something other than the
+  default. In practice it's zero **by state**: overrides were never persisted, so the dictionary was
+  empty on every fresh launch. Removing the layer pins that state permanently.
+- As a side effect: `openDevTools()` no longer creates a second `PopupViewController` and a second
+  floating window.
 
-## Пов'язане
+## Related
 
-- [ADR-0046](0046-dev-color-tuner-override-layer.md) — витіснене рішення (`ColorStore` + каталог для тюнера).
-- [ADR-0047](0047-live-stub-selector.md) — селектор стубів, який лишається у вікні.
-- [ADR-0053](0053-devtools-flag-via-defaults.md) — гейт `devToolsEnabled`, чинний без змін.
+- [ADR-0046](0046-dev-color-tuner-override-layer.md) — the superseded decision (`ColorStore` plus a
+  catalog for the tuner).
+- [ADR-0047](0047-live-stub-selector.md) — the stub selector, which stays in the window.
+- [ADR-0053](0053-devtools-flag-via-defaults.md) — the `devToolsEnabled` gate, unchanged.
 - [ADR-0059](0059-menu-bar-native-semantic-colours.md) / [ADR-0060](0060-popup-native-semantic-colours.md)
-  — семантичні кольори, через які тюнер і втратив сенс.
-- [ADR-0083](0083-live-dropdown-preview-in-settings.md) — прев'ю, що лишилося єдиним.
+  — the semantic colors that made the tuner pointless.
+- [ADR-0083](0083-live-dropdown-preview-in-settings.md) — the preview that's now the only one.

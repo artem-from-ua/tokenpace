@@ -4,115 +4,121 @@ date: 2026-06-22
 superseded_by: [0015, 0059]
 ---
 
-# ADR-0009: StatusItemView — чиста MenuBarLayout + тонкий AppKit-shell
+# ADR-0009: StatusItemView — a pure MenuBarLayout plus a thin AppKit shell
 
-> **Частково superseded [ADR-0015](0015-no-idle-mode.md):** рішення §2 (поріг idle 5 %) і §4
-> (idle-гліф `*`) скасовано — компактного/idle-режиму більше немає. Решта цього ADR (розкол
-> pure/shell, `MenuBarMode` як відкритий enum, малювання смужок, monochrome ⚠️) лишається чинною.
+> **Partially superseded by [ADR-0015](0015-no-idle-mode.md):** the decisions in §2 (the 5% idle
+> threshold) and §4 (the `*` idle glyph) are gone — there is no compact/idle mode any more. The rest
+> of this ADR (the pure/shell split, `MenuBarMode` as an open enum, drawing the bars, the monochrome
+> ⚠️) still stands.
 >
-> **Частково superseded [ADR-0059](0059-menu-bar-native-semantic-colours.md):** §5–§9 (показ через
-> non-template `NSImage` з фіксованим sRGB, точна statusline-256-палітра, теза «`labelColor` дає
-> неправильний RGB в off-screen образі») скасовано — кольори тепер системні semantic (`labelColor`-
-> родина + `.system*`), резолвлені eager проти `button.effectiveAppearance`; хибну передумову про
-> `labelColor` спростовано (артефакт лінивого малювання в неправильному appearance). Розкол pure/shell і
-> геометрія лишаються чинними.
+> **Partially superseded by [ADR-0059](0059-menu-bar-native-semantic-colours.md):** §5–§9 (display
+> through a non-template `NSImage` with fixed sRGB, the exact statusline 256-color palette, and the
+> claim that "`labelColor` yields the wrong RGB in an off-screen image") are gone — the colors are now
+> system semantic ones (the `labelColor` family plus `.system*`), resolved eagerly against
+> `button.effectiveAppearance`; the false premise about `labelColor` has been disproved (it was an
+> artifact of drawing lazily in the wrong appearance). The pure/shell split and the geometry still
+> stand.
 
-## Контекст
+## Context
 
-Issue #10 («StatusItemView — смужки + idle») вводить перший видимий UI: кастомне малювання menu
-bar (дві pacing-смужки + час до ресету) з компактним idle-режимом. На відміну від попередніх
-модулів (`PacingModel`, `ResetClock`, `TokenProvider`, `UsageClient`), тут уперше з'являється
-залежність від AppKit, яка під SPM без повного Xcode **не покривається unit-тестами**.
+Issue #10 ("StatusItemView — bars + idle") introduces the first visible UI: custom menu bar drawing
+(two pacing bars plus the time to reset) with a compact idle mode. Unlike the previous modules
+(`PacingModel`, `ResetClock`, `TokenProvider`, `UsageClient`), this is the first time an AppKit
+dependency appears — one that **is not covered by unit tests** under SPM without a full Xcode.
 
-Постають три рішення про межі модуля — той самий клас, що в
+Three module-boundary decisions follow — the same class as in
 [ADR-0005](0005-pacing-fractions-not-blocks.md),
-[ADR-0007](0007-token-provider-throws-and-scope-split.md),
+[ADR-0007](0007-token-provider-throws-and-scope-split.md) and
 [ADR-0008](0008-usageclient-pure-backoff-and-transport-seam.md):
 
-1. **Де живе обчислення «що малювати».** Якщо вся логіка (idle-vs-expanded, які смужки, який час)
-   сидить усередині `NSView`, вона некована тестами й заплутана з малюванням.
-2. **Який поріг idle і де його зафіксувати.** SPEC дає лише орієнтир («обидва ліміти < ~5% і нема
-   pacing-попередження»), точне число — на реалізацію.
-3. **Як показати повністю кастомну кольорову графіку в `NSStatusItem`** так, щоб система не
-   перефарбовувала кольори під Dark/Light tinting.
+1. **Where the "what to draw" computation lives.** If all of the logic (idle vs expanded, which bars,
+   which time) sits inside the `NSView`, it is beyond the reach of tests and tangled up with drawing.
+2. **What the idle threshold is and where to pin it.** The SPEC gives only a rough guide ("both limits
+   < ~5% and no pacing warning"); the exact number is left to the implementation.
+3. **How to show fully custom color graphics in an `NSStatusItem`** in a way that stops the system
+   from recoloring them under Dark/Light tinting.
 
-## Рішення
+## Decision
 
-1. **Розкол pure-core + thin-shell — `MenuBarLayout` (у `CCTimerKit`) окремо від `StatusItemView`
-   (у `cc-timer`).** `MenuBarLayout.make(from:now:)` — чиста, детермінована (інжектований `now`)
-   функція `UsageSnapshot → MenuBarMode`, що **не додає нової арифметики**: переюзує
-   `PacingModel.barLayout`/`limitIndicator` (геометрія смужок + severity) і `ResetClock.resetDisplay`
-   (найближчий ресет + формат). Єдине власне рішення — idle-vs-expanded. Це дзеркалить `BarLayout`
-   (ADR-0005) і `PollingBackoff` (ADR-0008): уся обчислювана логіка виду — у бібліотеці, юніт-тестована;
-   `StatusItemView` лишається тонким `NSView`, що лише малює готову модель. Дані виду тестуються в
-   `MenuBarLayoutTests` без AppKit; саме малювання перевіряється вручну (`swift run` / `.app`).
+1. **A pure-core plus thin-shell split — `MenuBarLayout` (in `CCTimerKit`) separate from
+   `StatusItemView` (in `cc-timer`).** `MenuBarLayout.make(from:now:)` is a pure, deterministic
+   (injected `now`) `UsageSnapshot → MenuBarMode` function that **adds no new arithmetic**: it reuses
+   `PacingModel.barLayout`/`limitIndicator` (bar geometry plus severity) and `ResetClock.resetDisplay`
+   (the nearest reset plus its format). Its only decision of its own is idle vs expanded. This mirrors
+   `BarLayout` (ADR-0005) and `PollingBackoff` (ADR-0008): all of the view's computable logic lives in
+   the library and is unit-tested, while `StatusItemView` stays a thin `NSView` that only draws a
+   finished model. The view's data is tested in `MenuBarLayoutTests` without AppKit; the drawing itself
+   is verified by hand (`swift run` / the `.app`).
 
-2. **Поріг idle — `5.0 %`, строге `<`.** `idle` ⇔ обидва вікна `utilization < 5`. Половина «нема
-   pacing-попередження» зі SPEC **автоматична**: обидва алерти `LimitIndicator` вимагають
-   `utilization > 90` (`.warning`) або `== 100` (`.critical`) — значно вище 5 %, тож будь-яке
-   попереджене вікно вже не-idle. Окремої умови на warning немає (це була б мертва гілка). Межа
-   строга (`<`), як `OAuthCredentials.isExpired`'s `<=` та `PacingModel`'s `> 90` — рівно 5 % уже
-   expanded.
+2. **The idle threshold is `5.0%`, with a strict `<`.** `idle` ⇔ both windows have `utilization < 5`.
+   The SPEC's "no pacing warning" half is **automatic**: both `LimitIndicator` alerts require
+   `utilization > 90` (`.warning`) or `== 100` (`.critical`) — far above 5%, so any warned window is
+   already non-idle. There is no separate condition on warnings (it would be a dead branch). The
+   boundary is strict (`<`), like `OAuthCredentials.isExpired`'s `<=` and `PacingModel`'s `> 90` —
+   exactly 5% is already expanded.
 
-3. **`MenuBarMode` лишається відкритим enum.** Дві гілки в #10 (`idle`, `expanded`); стани помилок
-   (`⚠️` / застарілі дані) — окрема гілка в #12, тож enum не перевантажується зараз.
+3. **`MenuBarMode` stays an open enum.** Two branches in #10 (`idle`, `expanded`); the error states
+   (`⚠️` / stale data) are a separate branch in #12, so the enum is not overloaded now.
 
-4. **Idle-гліф — жирний моноширинний `*`.** SPEC просить «малу іконку без повних смужок»; обрано
-   простий, читабельний за обох тем гліф. Колір (`NSColor.labelColor`) **не** адаптується
-   автоматично у non-template `NSImage` — резолвиться в appearance menu bar вручну, див. пункт 9.
+4. **The idle glyph is a bold monospaced `*`.** The SPEC asks for "a small icon without full bars"; a
+   simple glyph, readable in both themes, was chosen. Its color (`NSColor.labelColor`) does **not**
+   adapt automatically inside a non-template `NSImage` — it is resolved in the menu bar's appearance
+   by hand, see point 9.
 
-5. **Показ через готовий non-template `NSImage` (`button.image`), а не subview.** Вкладання
-   кастомного `NSView` як subview кнопки `NSStatusItem` ненадійне (системна кнопка володіє своїм
-   лейаутом і малює поверх доданих subview). Надійний шлях для повністю кастомної графіки — віддати
-   кнопці готове зображення, відрендерене жадібно (`lockFocusFlipped`). `image.isTemplate = false`
-   зупиняє перефарбовування pacing-кольорів під Dark/Light tinting (SPEC «Technical notes»).
+5. **Display through a finished non-template `NSImage` (`button.image`), not a subview.** Nesting a
+   custom `NSView` as a subview of the `NSStatusItem` button is unreliable (the system button owns its
+   layout and draws over anything you add). The reliable route for fully custom graphics is to hand
+   the button a finished image, rendered eagerly (`lockFocusFlipped`). `image.isTemplate = false` stops
+   the pacing colors from being recolored under Dark/Light tinting (SPEC "Technical notes").
 
-6. **Кольори — точна `statusline` 256-color палітра (фіксований sRGB), не системні семантичні.**
-   Зони мапляться 1:1 на xterm-256 RGB кодів зі statusline (ADR-0005): used `dark_gray` 236 =
-   `#303030`, gap-green `bright_green` 71 = `#5faf5f`, gap-red `bright_red` 167 = `#d75f5f`, future
-   `dark_blue` 23 = `#005f5f` (фактично **темний teal**, не синій — мапа коду 23), додатково
-   затемнений до `#004c4c`, щоб хвіст відступав як фон. Фіксований RGB, а не `systemGreen`/тощо:
-   мета — щоб menu bar точно повторював вигляд термінального statusline в будь-якій темі; зображення
-   non-template, тож macOS його не перефарбовує.
+6. **The colors are the exact `statusline` 256-color palette (fixed sRGB), not system semantic ones.**
+   The zones map 1:1 onto the xterm-256 RGB of the statusline's codes (ADR-0005): used `dark_gray` 236
+   = `#303030`, gap-green `bright_green` 71 = `#5faf5f`, gap-red `bright_red` 167 = `#d75f5f`, future
+   `dark_blue` 23 = `#005f5f` (in fact a **dark teal**, not blue — that is what code 23 maps to),
+   darkened further to `#004c4c` so the tail recedes like a background. Fixed RGB rather than
+   `systemGreen` and friends: the goal is for the menu bar to reproduce the terminal statusline's look
+   exactly in any theme; the image is non-template, so macOS does not recolor it.
 
-7. **Індикатор часу — кружечок у кольорі pacing із темною обводкою, не вертикальна риска.** Точка на
-   позиції `timeFraction` забарвлюється за **сирим** відношенням use vs time (тонший поділ, ніж
-   бінарний `PacingState`, де рівність складається в зелений): `usage < time` → green (відстаєш),
-   `usage > time` → red (випереджаєш), `usage == time` → teal (`future`). Темне кільце (`#181818`)
-   відділяє точку від будь-якої кольорової зони під нею.
+7. **The time indicator is a dot in the pacing color with a dark outline, not a vertical tick.** The
+   dot at position `timeFraction` is colored by the **raw** use-versus-time relationship (a finer
+   distinction than the binary `PacingState`, where equality folds into green): `usage < time` → green
+   (behind), `usage > time` → red (ahead), `usage == time` → teal (`future`). A dark ring (`#181818`)
+   separates the dot from whatever color zone is underneath it.
 
-8. **Перемальовування лише при зміні даних.** `StatusItemView.layout { didSet { … } }` оновлює
-   зображення лише коли модель справді змінилась (`layout != oldValue`) — жодного таймера
-   (architecture.md: енергоефективність). Polling-шар (#13) ставитиме `layout` після кожного
-   опитування; у #10 `AppDelegate` ставить його раз із mock-снапшота.
+8. **Redraw only when the data changes.** `StatusItemView.layout { didSet { … } }` updates the image
+   only when the model actually changed (`layout != oldValue`) — no timer at all (architecture.md:
+   energy efficiency). The polling layer (#13) will set `layout` after every poll; in #10 the
+   `AppDelegate` sets it once from a mock snapshot.
 
-9. **Семантичний колір тексту резолвиться в appearance menu bar вручну (виявлено й виправлено в
-   #11).** Оскільки зображення non-template (пункт 5), macOS **не** перефарбовує його під тему menu
-   bar — а `NSColor.labelColor` усередині off-screen `NSImage` резолвиться в RGB у *ambient*
-   appearance (за замовчуванням Aqua), даючи темний текст на темному menu bar. Рішення:
-   `snapshotImage(appearance:)` малює всередині `appearance.performAsCurrentDrawingAppearance { … }`,
-   а `AppDelegate` передає `button.effectiveAppearance` і **перерендерює образ при зміні теми** (KVO
-   на `effectiveAppearance` кнопки). Це стосується лише *тексту* (`labelColor` idle-гліфа й часу
-   ресету) — фіксовані sRGB pacing-кольори (пункт 6) свідомо не залежать від теми. Відступи
-   підтиснуто, щоб айтем не «роздувався» поряд із нативними: внутрішній горизонтальний відступ
-   `hPadding = 2` (menu bar додає власний проміжок між айтемами), вертикальний зазор смужок
-   `barGap = 4` (компактніший стек). Текст (idle-гліф, час ресету) лишається растеризованим у
-   тому ж `NSImage`, що й смужки — після цих доробок він читається в одному масштабі з нативними
-   айтемами (годинник/акумулятор), тож перехід на нативний `button.attributedTitle` визнано
-   непотрібним (#26 закрито як вирішене цими змінами).
+9. **The semantic text color is resolved in the menu bar's appearance by hand (found and fixed in
+   #11).** Because the image is non-template (point 5), macOS does **not** recolor it for the menu
+   bar's theme — and `NSColor.labelColor` inside an off-screen `NSImage` resolves to RGB in the
+   *ambient* appearance (Aqua by default), producing dark text on a dark menu bar. The fix:
+   `snapshotImage(appearance:)` draws inside `appearance.performAsCurrentDrawingAppearance { … }`,
+   and the `AppDelegate` passes `button.effectiveAppearance` and **re-renders the image when the theme
+   changes** (KVO on the button's `effectiveAppearance`). This applies only to *text* (the
+   `labelColor` of the idle glyph and of the reset time) — the fixed sRGB pacing colors (point 6) are
+   deliberately theme-independent. The insets were tightened so the item does not "bloat" next to
+   native ones: the inner horizontal inset is `hPadding = 2` (the menu bar adds its own gap between
+   items), and the vertical gap between bars is `barGap = 4` (a more compact stack). The text (the idle
+   glyph, the reset time) stays rasterized in the same `NSImage` as the bars — after these touch-ups it
+   reads at the same scale as native items (the clock, the battery), so switching to a native
+   `button.attributedTitle` was deemed unnecessary (#26 closed as resolved by these changes).
 
-## Наслідки
+## Consequences
 
-- Уся логіка виду (idle-поріг, вибір смужок/часу) покрита unit-тестами (`MenuBarLayoutTests`:
-  idle/expanded, межа 5 %, відповідність `PacingModel`/`ResetClock`, fallback `.resetNow`), не
-  чекаючи на AppKit. `StatusItemView` несе лише малювання, що перевіряється оком.
-- `CCTimerKit` лишається без AppKit — `MenuBarLayout`/`BarView`/`MenuBarMode` оперують лише
-  семантикою (`PacingState`/`LimitIndicator`/`TimeToReset`); мапа в `NSColor` живе в `cc-timer`.
-  Це зберігає бібліотеку реюзабельною для Фази 2 (iOS/watchOS, інший рендер).
-- `AppLogger` отримує 4-ту категорію `ui` (переходи режиму idle↔expanded). Малювання не логується
-  (високочастотне); секрети не торкаються цього шару.
-- `MenuBarMode` готовий до розширення `.error` у #12 без зміни наявних гілок.
-- Mock-снапшот у `AppDelegate` — тимчасовий; #13 замінює його живим `Keychain → UsageClient`-опитуванням,
-  лишаючи `StatusItemView`/`MenuBarLayout` незмінними (вони вже приймають готовий `UsageSnapshot`).
-- Якщо у Фазі 2 рендер піде через SwiftUI/інший фреймворк — `MenuBarLayout` переюзовується як є,
-  а новий тонкий shell замінює `StatusItemView`; це нове рішення → нова секція тут або окремий ADR.
+- All of the view's logic (the idle threshold, choosing bars and time) is covered by unit tests
+  (`MenuBarLayoutTests`: idle/expanded, the 5% boundary, agreement with `PacingModel`/`ResetClock`, the
+  `.resetNow` fallback) without waiting for AppKit. `StatusItemView` carries only the drawing, which is
+  verified by eye.
+- `CCTimerKit` stays free of AppKit — `MenuBarLayout`/`BarView`/`MenuBarMode` deal purely in semantics
+  (`PacingState`/`LimitIndicator`/`TimeToReset`); the mapping to `NSColor` lives in `cc-timer`. That
+  keeps the library reusable for Phase 2 (iOS/watchOS, a different renderer).
+- `AppLogger` gains a fourth category, `ui` (idle↔expanded mode transitions). Drawing is not logged
+  (too high-frequency); no secrets touch this layer.
+- `MenuBarMode` is ready to gain `.error` in #12 without changing the existing branches.
+- The mock snapshot in `AppDelegate` is temporary; #13 replaces it with live `Keychain → UsageClient`
+  polling, leaving `StatusItemView`/`MenuBarLayout` untouched (they already take a finished
+  `UsageSnapshot`).
+- If Phase 2 renders through SwiftUI or another framework — `MenuBarLayout` is reused as is, and a new
+  thin shell replaces `StatusItemView`; that is a new decision → a new section here or a separate ADR.

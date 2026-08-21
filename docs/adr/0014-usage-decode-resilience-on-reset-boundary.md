@@ -4,107 +4,112 @@ date: 2026-06-23
 superseded_by: [0027]
 ---
 
-> **Частково витіснено [ADR-0027](0027-session-idle-no-phantom-reset.md).** Гілка **local-estimate для
-> `five_hour`** (синтез `now + 5h` на межі ресету) замінена на чесний стан «немає активної сесії»
-> (`sessionIdle`), бо для 5h-вікна відсутність `resets_at` означає «вікна не існує», а не блип ресету.
-> Решта рішення чинна: толерантний decode, limits[]-фолбек, local-estimate для `seven_day` та borrow
-> для sub-вікон лишаються в силі.
+> **Partially superseded by [ADR-0027](0027-session-idle-no-phantom-reset.md).** The
+> **local-estimate branch for `five_hour`** (synthesizing `now + 5h` at the reset boundary) was
+> replaced by an honest "no active session" state (`sessionIdle`), because for the 5h window a
+> missing `resets_at` means "the window doesn't exist," not a reset blip. The rest of the decision
+> still stands: tolerant decode, the `limits[]` fallback, the local estimate for `seven_day`, and
+> borrowing for sub-windows remain in force.
 
-# ADR-0014: UsageSnapshot — синтез вікна на межі ресету замість падіння decode
+# ADR-0014: UsageSnapshot — synthesizing a window at the reset boundary instead of a decode failure
 
-## Контекст
+## Context
 
-У релізі v0.10.0 popup періодично показував **«Usage API unavailable — retrying…»**, хоча сервіси
-Claude були operational, а бари застигали на старих даних. Дебаг по логах
-(`log show --predicate 'process == "cc-timer"'`) показав, що це **не** збій API:
+In release v0.10.0 the popup periodically showed **"Usage API unavailable — retrying…"**, even
+though Claude's services were operational and the bars froze on stale data. Debugging via logs
+(`log show --predicate 'process == "cc-timer"'`) showed this was **not** an API failure:
 
-- HTTP-статус відповіді — **200** (CFNetwork: `response_status=200`, `cache_hit=true`).
-- Але `UsageClient.decode` тричі поспіль кидав `usage decode failed`.
-- Збій трапився **рівно на переході 5-годинного вікна через ресет** (`five_hour` 29% → 1%, новий
-  `resets_at`), тривав ~7 хв і відновився сам.
+- The response's HTTP status was **200** (CFNetwork: `response_status=200`, `cache_hit=true`).
+- But `UsageClient.decode` threw `usage decode failed` three times in a row.
+- The failure happened **exactly at the 5-hour window's reset transition** (`five_hour` 29% → 1%, a
+  new `resets_at`), lasted ~7 min, and recovered on its own.
 
-Корінь: модель `UsageSnapshot`/`UsageWindow`/`UsageLimit` декодувала core-вікна
-(`five_hour`/`seven_day`) як **обов'язкові** значення. На межі ресету API легально присилає в тілі
-200 `null` там, де модель вимагає значення. Перевірено пробами проти живого тіла — кожен із цих
-випадків валив **увесь** snapshot:
+Root cause: the `UsageSnapshot`/`UsageWindow`/`UsageLimit` model decoded the core windows
+(`five_hour`/`seven_day`) as **required** values. At the reset boundary the API legitimately sends
+`null` inside a 200 body where the model requires a value. Verified against a live body — each of
+these cases crashed the **entire** snapshot:
 
-| Тіло 200 | Старий decode |
+| 200 body | Old decode |
 |---|---|
-| `five_hour: null` / `seven_day: null` | падає (`valueNotFound`) |
-| `five_hour` відсутній | падає (`keyNotFound`) |
-| `utilization: null` усередині вікна | падає |
-| елемент `limits[]` без `severity` / з `percent: null` | падає |
+| `five_hour: null` / `seven_day: null` | fails (`valueNotFound`) |
+| `five_hour` missing | fails (`keyNotFound`) |
+| `utilization: null` inside a window | fails |
+| a `limits[]` element without `severity` / with `percent: null` | fails |
 
-Помилка `UsageError.decode` мапиться у `FailureReason.serverProblem`
-([ADR-0010](0010-usage-health-and-error-states.md)) → «Usage API unavailable». Повідомлення вводить
-в оману: API доступний, ми просто не змогли прочитати **перехідне** тіло. А ще бари ховалися/застигали
-саме тоді, коли вікно реально скинулось і мало б показати свіжі 0%.
+The `UsageError.decode` error maps to `FailureReason.serverProblem`
+([ADR-0010](0010-usage-health-and-error-states.md)) → "Usage API unavailable." The message is
+misleading: the API is available, we just failed to read a **transitional** body. And the bars
+would also hide/freeze exactly when the window actually reset and should have shown a fresh 0%.
 
-Постало рішення між трьома підходами до `null`-вікна:
+Three approaches to a `null` window came up:
 
-1. **Падати** (статус-кво) — найпростіше, але дає хибне «unavailable» на кожному ресеті.
-2. Зробити core-вікна **optional** (`nil` при `null`) — не валить snapshot, але ховає бар саме на
-   ресеті, коли користувач очікує побачити оновлення.
-3. **Синтезувати** свіже порожнє вікно — на межі ресету вікно реально порожнє (`utilization = 0`),
-   тож це семантично правдиве заповнення, а не маскування помилки.
+1. **Fail** (status quo) — simplest, but produces a false "unavailable" on every reset.
+2. Make the core windows **optional** (`nil` on `null`) — doesn't crash the snapshot, but hides the
+   bar exactly at reset, when the user expects to see an update.
+3. **Synthesize** a fresh empty window — at the reset boundary the window really is empty
+   (`utilization = 0`), so this is a semantically truthful fill-in, not a masked error.
 
-## Рішення
+## Decision
 
-**Синтезувати свіже вікно з `utilization = 0`, коли core-вікно приходить `null`/відсутнє/без
-`resets_at`** — варіант 3. Логіка живе в одному місці, `UsageSnapshot.init(from:)` (custom decoder),
-щоб увесь downstream (health, popup, menu bar) отримував уже нормалізований snapshot і не знав про
-крайній випадок.
+**Synthesize a fresh window with `utilization = 0` whenever a core window arrives `null`/missing/
+without `resets_at`** — option 3. The logic lives in one place, `UsageSnapshot.init(from:)` (a
+custom decoder), so every downstream consumer (health, popup, menu bar) gets an already-normalized
+snapshot and knows nothing about the edge case.
 
-1. **`utilization = 0`** — щойно скинуте вікно має нульове використання. Це правда, не заглушка.
+1. **`utilization = 0`** — a just-reset window has zero usage. This is true, not a placeholder.
 
-2. **`resets_at` за fallback-ланцюгом:**
-   1. власний `resets_at` об'єкта вікна, якщо він є (випадок `utilization: null`) — взяти як є;
-   2. інакше з `limits[]` за `kind` (`session`/`five_hour` → 5h; `weekly_all`/`seven_day` → 7d) —
-      ці записи дублюють той самий `resets_at` у тій самій відповіді (не розрахунок);
-   3. інакше локальна оцінка `ResetClock.nextReset(now:window:)` = `now + durationSeconds`,
-      **округлена вгору до 10 хв** (груба точність чесно відображена грубим округленням).
+2. **`resets_at` via a fallback chain:**
+   1. the window object's own `resets_at`, if present (the `utilization: null` case) — taken as is;
+   2. otherwise from `limits[]` by `kind` (`session`/`five_hour` → 5h; `weekly_all`/`seven_day` →
+      7d) — these entries duplicate the same `resets_at` in the same response (not a calculation);
+   3. otherwise a local estimate, `ResetClock.nextReset(now:window:)` = `now + durationSeconds`,
+      **rounded up to 10 min** (rough precision honestly reflected by rough rounding).
 
-3. **Кожен синтез логується** (`AppLogger.network.notice("synthesized … resets_at source=…")`), а
-   при справжньому decode-fail логується **обрізане тіло** (через наявний `responseText`, cap 500) —
-   щоб майбутня неанонсована зміна схеми API діагностувалася з логів, а не з здогадок (раніше
-   `decode` писав лише «usage decode failed» без тіла, а `os_log` обрізає довге success-тіло до
-   ~1 КБ).
+3. **Every synthesis is logged** (`AppLogger.network.notice("synthesized … resets_at source=…")`),
+   and on a real decode failure the **truncated body** is logged (via the existing `responseText`,
+   capped at 500 chars) — so a future, unannounced change to the API schema can be diagnosed from
+   logs instead of guesswork (previously `decode` logged only "usage decode failed" with no body,
+   and `os_log` truncates a long success body to ~1 KB anyway).
 
-4. **`limits[]` — усі поля стійкі** (`decodeIfPresent` + дефолти). Масив ніде не споживається
-   downstream (лише future-proofing), окрім як джерело fallback `resets_at`, тож `null` в одному
-   полі не сміє валити snapshot. Нові поля API (`scope`, `seven_day_oauth_apps`, `tangelo`, …)
-   ігноруються `Decodable`, як і раніше.
+4. **`limits[]` — every field is tolerant** (`decodeIfPresent` plus defaults). The array is never
+   consumed downstream (it's only future-proofing) except as the fallback source for `resets_at`,
+   so a `null` in one field must not crash the snapshot. New API fields (`scope`,
+   `seven_day_oauth_apps`, `tangelo`, …) are ignored by `Decodable`, as before.
 
-5. **`now` для оцінки — через `JSONDecoder.userInfo`** (`CodingUserInfoKey.usageNow`), щоб шар
-   decode лишався тестованим і не кликав `Date()` всередині (дух чистих шарів,
-   [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md)). `UsageClient.decode(from:now:)`
-   прокидає реальний `now`; default — `Date()` лише для call-site без годинника (тести).
+5. **`now` for the estimate — via `JSONDecoder.userInfo`** (`CodingUserInfoKey.usageNow`), so the
+   decode layer stays testable and doesn't call `Date()` internally (the spirit of the pure-layer
+   split, [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md)).
+   `UsageClient.decode(from:now:)` threads through the real `now`; the default is `Date()` only for
+   call sites with no clock (tests).
 
-6. **Per-model під-вікна (`seven_day_opus`/`seven_day_sonnet`) — окремий, простіший випадок.** Вони
-   **optional**: відсутній ключ або весь об'єкт `null` → `nil` (модель не використовувалась цього
-   вікна) — це лишається. Але **присутній** об'єкт із `resets_at: null` (жива відповідь шле
-   `seven_day_sonnet: {"utilization":0.0,"resets_at":null}`) — це той самий reset-boundary, і його
-   треба не плутати з «модель не використовувалась». Тут `utilization` зберігається як прийшов, а
-   `resets_at` **береться від `seven_day`** — під-вікно є частиною 7-денного вікна, тож вони
-   ресетяться разом (простіше й точніше за повний fallback-ланцюг core-вікон). Без цього popup малював
-   хибне «resetting…» при elapsed 100 % (бо `resets_at=""` → `ResetClock.parse=nil` → reset = now).
-   Реалізовано як `UsageSnapshot.subWindow(...)`; кожне заповнення логується.
+6. **Per-model sub-windows (`seven_day_opus`/`seven_day_sonnet`) — a separate, simpler case.** They
+   remain **optional**: a missing key or the whole object being `null` → `nil` (the model wasn't
+   used this window) — that stays. But a **present** object with `resets_at: null` (a live response
+   sends `seven_day_sonnet: {"utilization":0.0,"resets_at":null}`) is the same reset boundary, and
+   it must not be confused with "the model wasn't used." Here `utilization` is kept as received, and
+   `resets_at` **is borrowed from `seven_day`** — the sub-window is part of the 7-day window, so
+   they reset together (simpler and more accurate than the full core-window fallback chain).
+   Without this, the popup drew a false "resetting…" at 100% elapsed (because `resets_at=""` →
+   `ResetClock.parse=nil` → reset = now). Implemented as `UsageSnapshot.subWindow(...)`; every fill
+   is logged.
 
-Повідомлення «unavailable» **не** змінюється: після стійкого decode гілка `.decode` спрацьовуватиме
-лише на справді зламаному тілі (не-JSON, обрізане), де «server problem» доречне. Окрему причину
-`malformedResponse` свідомо не вводимо зараз — якщо гілка все ж з'явиться в логах, заведемо окремо.
+The "unavailable" message **does not** change: after this hardened decode, the `.decode` branch
+will only fire on a genuinely broken body (non-JSON, truncated), where "server problem" is the
+right call. We're deliberately not introducing a separate `malformedResponse` reason right now — if
+that branch does show up in the logs, we'll file it separately.
 
-## Наслідки
+## Consequences
 
-- **Звичайний ресет більше не дає хибного «Usage API unavailable».** Бар показує свіжі 0% з
-  коректним часом до наступного ресету.
-- **Стійкість до майбутніх змін схеми API.** Відсутнє/`null` поле деградує елегантно замість падіння;
-  лог тіла при decode-fail дає доказ замість здогадок.
-- **`utilization` тепер tolerant до `null`, але не до неправильного типу** — `utilization: "13"`
-  (рядок) усе ще падає (type-mismatch), що ловить тест `utilizationAsStringThrowsDecode`. Це навмисно:
-  ми пробачаємо лише `null` на межі ресету, не приховуємо реальні баги серіалізації.
-- **Старий контракт «падати на відсутньому вікні» змінено** — два тести (`missingFiveHourThrowsDecode`/
-  `missingSevenDayThrowsDecode`) переписані на тести синтезу; додано regression-тест на повне живе
-  тіло й unit-тести `ResetClock.nextReset`.
-- Пов'язано з [ADR-0008](0008-usageclient-pure-backoff-and-transport-seam.md) (decode-шар
-  `UsageClient`) і [ADR-0010](0010-usage-health-and-error-states.md) (мапінг помилок у стани UI).
+- **A normal reset no longer produces a false "Usage API unavailable."** The bar shows a fresh 0%
+  with the correct time to the next reset.
+- **Resilience to future API schema changes.** A missing/`null` field degrades gracefully instead
+  of crashing; logging the body on a decode failure gives evidence instead of guesswork.
+- **`utilization` is now tolerant of `null`, but not of the wrong type** — `utilization: "13"` (a
+  string) still fails (a type mismatch), caught by the `utilizationAsStringThrowsDecode` test. This
+  is deliberate: we forgive only `null` at the reset boundary, not real serialization bugs.
+- **The old "fail on a missing window" contract is changed** — two tests
+  (`missingFiveHourThrowsDecode`/`missingSevenDayThrowsDecode`) were rewritten as synthesis tests;
+  a regression test against a full live body was added, along with unit tests for
+  `ResetClock.nextReset`.
+- Related to [ADR-0008](0008-usageclient-pure-backoff-and-transport-seam.md) (the `UsageClient`
+  decode layer) and [ADR-0010](0010-usage-health-and-error-states.md) (mapping errors to UI states).

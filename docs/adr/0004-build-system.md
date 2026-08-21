@@ -3,36 +3,37 @@ status: accepted
 date: 2026-06-21
 ---
 
-# ADR-0004: Збірка Фази 1 — SPM + build-скрипт; Xcode у Фазі 2
+# ADR-0004: Phase 1 builds with SPM plus a build script; Xcode arrives in Phase 2
 
-## Контекст
+## Context
 
-Menu bar app — це GUI `.app` bundle, якому потрібні `Info.plist` (`LSUIElement = true`),
-code signing, notarization і (у Фазі 2) iOS/watchOS таргети. Розглядались Xcode project, чистий
-SPM, і гібрид.
+The menu bar app is a GUI `.app` bundle, and it needs an `Info.plist` (`LSUIElement = true`), code
+signing, notarization and (in Phase 2) iOS/watchOS targets. An Xcode project, plain SPM, and a
+hybrid were all considered.
 
-Трейдофи:
+Trade-offs:
 
-| Критерій | SPM | Xcode |
+| Criterion | SPM | Xcode |
 |---|---|---|
-| git/diff | чистий маніфест | шумний `.pbxproj` |
-| .app bundle | вручну (скрипт) | рідна підтримка |
-| signing/notarization | ручні CLI-кроки | вбудовано |
-| iOS/watchOS таргети | практично неможливо | нативно |
-| CI/headless | просто `swift build` | важче (`xcodebuild`) |
+| git/diff | clean manifest | noisy `.pbxproj` |
+| .app bundle | by hand (script) | native support |
+| signing/notarization | manual CLI steps | built in |
+| iOS/watchOS targets | practically impossible | native |
+| CI/headless | just `swift build` | harder (`xcodebuild`) |
 
-## Рішення
+## Decision
 
-- **Фаза 1:** Swift Package Manager + build-скрипт, що автоматизує:
-  складання `.app` bundle (структура `Contents/{MacOS,Resources}` + `Info.plist`),
-  `codesign --options runtime`, notarization (`xcrun notarytool submit --wait` + `xcrun stapler`).
-- **Фаза 2:** приєднати Xcode project для iOS/watchOS застосунків (SPM їх не тягне). Спільну
-  логіку (TokenProvider, UsageClient, PacingModel) тримати у SPM-пакеті, який підключається і до
-  agent, і до Xcode-таргетів.
+- **Phase 1:** Swift Package Manager plus a build script that automates assembling the `.app` bundle
+  (the `Contents/{MacOS,Resources}` layout plus `Info.plist`), `codesign --options runtime`, and
+  notarization (`xcrun notarytool submit --wait` + `xcrun stapler`).
+- **Phase 2:** attach an Xcode project for the iOS/watchOS apps (SPM cannot build them). Keep the
+  shared logic (TokenProvider, UsageClient, PacingModel) in an SPM package that both the agent and
+  the Xcode targets depend on.
 
-## Наслідки
+## Consequences
 
-- Чиста git-історія для логіки; bundle/sign/notarize — у версіонованому скрипті.
-- Доступ до Keychain-айтема Claude Code не залежить від системи збірки (це питання ACL айтема,
-  а не entitlements) — окремий ризик, перевіряється незалежно.
-- Перехід на Xcode у Фазі 2 потребує міграційної роботи, але логіка вже в пакеті — врапер тонкий.
+- A clean git history for the logic; bundle/sign/notarize live in a versioned script.
+- Access to Claude Code's Keychain item does not depend on the build system (it is a question of the
+  item's ACL, not of entitlements) — a separate risk, verified independently.
+- Moving to Xcode in Phase 2 takes migration work, but the logic already sits in the package, so the
+  wrapper is thin.

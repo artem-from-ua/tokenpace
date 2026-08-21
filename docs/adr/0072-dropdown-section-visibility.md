@@ -4,46 +4,49 @@ date: 2026-08-05
 superseded_by: [0087]
 ---
 
-# ADR-0072: Тристанова видимість секцій дропдауна замість булевих тумблерів
+# ADR-0072: Three-state dropdown section visibility instead of boolean toggles
 
-> **Частково superseded [ADR-0087](0087-above-zero-section-visibility.md):** набір режимів більше не
-> тристановий і не спільний для обох груп. Додано `aboveZero` (гейт по **значенню**, а не по severity),
-> а кредитний рядок **втратив** `nonCalm` — при безлімітному капі бару немає, тож той режим ховав
-> витрати назавжди. Разом із ним відпали відкинута тут альтернатива «четвертий режим» (сегменти більше
-> не спільні: 4 у рядку моделей, 3 у кредитів) і дефолт `extraUsageVisibility: nonCalm` для
-> `.chill`/`.workHarder` (тепер `aboveZero`). Передбачений нижче наслідок про розгортання групи при
-> 2–4 % — саме те, що `aboveZero` і лікує, але **не** через поріг у `PacingModel`, як тут радилось.
-> Решта цього ADR чинна: предикат «non-calm» = `.ahead`/`.exhausted` (а не `!isCalm`), незалежність
-> груп, гейт у в'юсі, ховання рядків пропуском заради індексів `BlockingReset`, і те, що меню-барний
-> `showExtraUsage` — окреме налаштування.
+> **Partially superseded by [ADR-0087](0087-above-zero-section-visibility.md):** the set of modes
+> is no longer three-state, and no longer shared between the two groups. `aboveZero` was added (a
+> gate on **value**, not on severity), and the credits row **lost** `nonCalm` — at the unlimited
+> cap there is no bar, so that mode hid spending forever. Along with it, the "fourth mode"
+> alternative rejected here dropped away too (the segments are no longer shared: 4 on the model
+> row, 3 on credits), as did the default `extraUsageVisibility: nonCalm` for
+> `.chill`/`.workHarder` (now `aboveZero`). The consequence predicted below, about the group
+> expanding at 2–4%, is exactly what `aboveZero` cures — but **not** via a threshold in
+> `PacingModel`, as advised here. The rest of this ADR still stands: the "non-calm" predicate
+> (`.ahead`/`.exhausted`, not `!isCalm`), the groups' independence, the gate living in the view,
+> hiding rows by skipping them for the sake of `BlockingReset` indices, and the fact that the menu
+> bar's `showExtraUsage` is a separate setting.
 
-## Контекст
+## Context
 
-Дропдаун має дві **необов'язкові** групи рядків поверх базових `5-hour`/`7-day`:
+The dropdown has two **optional** row groups on top of the base `5-hour`/`7-day`:
 
-- **per-model / per-service** рядки — `Opus`/`Sonnet` із legacy-полів плюс `weekly_scoped`-моделі з
-  `limits[]` (`Fable`, `Mythos`, #65/#211);
-- секція **Extra usage** — платні credits (#145).
+- **per-model / per-service** rows — `Opus`/`Sonnet` from legacy fields, plus `weekly_scoped`
+  models from `limits[]` (`Fable`, `Mythos`, #65/#211);
+- the **Extra usage** section — paid credits (#145).
 
-Керувалися вони непослідовно. Перша мала булевий opt-out `showModelSpecificLimits` («показувати чи
-ні»), друга — **жодного** налаштування в попапі: вона малювалась завжди, коли
-`CreditsPacing.isActive`. Наявний ключ `showExtraUsage` при цьому гейтить **іконку ¤ в меню-барі**, а
-не попап, — збіг назв, що легко переплутати.
+They were governed inconsistently. The first had a boolean opt-out, `showModelSpecificLimits`
+("show or not"); the second had **no** setting in the popup at all: it was always drawn whenever
+`CreditsPacing.isActive`. Meanwhile, the existing `showExtraUsage` key gates the **¤ icon in the
+menu bar**, not the popup — a name collision that's easy to confuse.
 
-Булевий вибір виявився надто грубим для обох. «Увімкнено» тримає на екрані рядки, які місяцями
-зелені й нічого не додають; «вимкнено» ховає їх і тоді, коли модель **вичерпана** — саме коли вони
-потрібні. Користувач змушений обирати між постійним шумом і сліпою зоною.
+A boolean choice turned out too coarse for both. "On" keeps rows on screen that stay green for
+months and add nothing; "off" hides them even when a model is **exhausted** — exactly when
+they're needed. The user is forced to choose between constant noise and a blind spot.
 
-Меню-бар цю проблему вже вирішує: `CalmBarHiding` ховає обрану смужку, **поки вона спокійна**, і
-повертає, щойно та стає помаранчевою. Попап такого не мав. (На час цього ADR то був булевий
-`hideCalmSevenDayBar`, що вмів ховати лише 7-денну смужку; трипозиційним — а отже теж «третім
-станом» у тому ж сенсі, що й тут — меню-бар став у [ADR-0086](0086-tri-state-calm-bar-hiding.md).)
+The menu bar already solves this problem: `CalmBarHiding` hides the chosen strip **while it's
+calm**, and brings it back the moment it turns orange. The popup had nothing like it. (At the time
+of this ADR that was a boolean `hideCalmSevenDayBar`, able to hide only the 7-day strip; the menu
+bar moved to a three-position version — and hence to a "third state" in the same sense as here —
+in [ADR-0086](0086-tri-state-calm-bar-hiding.md).)
 
-## Рішення
+## Decision
 
-Обидві групи керуються спільним тристановим типом `PopupSectionVisibility`
-(`always` / `nonCalm` / `optionOnly`), по одному ключу на групу:
-`modelLimitsVisibility` і `extraUsageVisibility`.
+Both groups are governed by a shared three-state type, `PopupSectionVisibility`
+(`always` / `nonCalm` / `optionOnly`), one key per group:
+`modelLimitsVisibility` and `extraUsageVisibility`.
 
 ```swift
 public func shows(isNonCalm: Bool, optionHeld: Bool) -> Bool {
@@ -55,80 +58,86 @@ public func shows(isNonCalm: Bool, optionHeld: Bool) -> Bool {
 }
 ```
 
-### «non-calm» = помаранчевий або червоний, а не `!isCalm`
+### "non-calm" = orange or red, not `!isCalm`
 
-Предикат — `PacingSeverity.isNonCalm` (`.ahead || .exhausted`), **не** заперечення
-`BarLayout.isCalm`. Різниця в синьому `.farBehind`: він означає **запас** (використання відстає від
-часу) і за шкалою *спокійніший* за зелений. `!isCalm` вважав би його тривожним і розгортав би групу
-саме тоді, коли все якнайкраще. Це та сама причина, з якої `MenuBarLayout.selectReset` перевіряє
-«шумність» через `.ahead`/`.exhausted` напряму (див. нотатку в `PacingModel.isCalm`).
+The predicate is `PacingSeverity.isNonCalm` (`.ahead || .exhausted`), **not** the negation of
+`BarLayout.isCalm`. The difference is blue `.farBehind`: it means **headroom** (usage is behind
+time) and, on the scale, is *calmer* than green. `!isCalm` would treat it as alarming and expand
+the group exactly when everything is at its best. This is the same reason
+`MenuBarLayout.selectReset` checks "noisiness" via `.ahead`/`.exhausted` directly (see the note in
+`PacingModel.isCalm`).
 
-Групи оцінюються **незалежно**: червоний `7-day` не розгортає per-model групу, бо базові рядки й так
-завжди видимі — розгортати треба те, що сховане й заболіло.
+The groups are evaluated **independently**: a red `7-day` does not expand the per-model group,
+because the base rows are always visible anyway — what needs expanding is whatever is hidden and
+has gone wrong.
 
-### ⌥ Option розкриває в обох сховних режимах
+### ⌥ Option reveals content in both hiding modes
 
-У `.nonCalm` утримання ⌥ показує спокійну групу; у `.optionOnly` ⌥ — єдиний спосіб її побачити. Це не
-нова механіка, а наявна ідіома попапа: `showStatusRows`, `showAge` і фільтр компонентів сервісу вже
-читаються як `optionHeld || <проблема>` (ADR-0020). Живий стан ⌥ дає 50 мс polling-таймер, бо
-`isAlternate` інертний у status-item меню, а event monitor голодує під час menu tracking.
+In `.nonCalm`, holding ⌥ shows the calm group; in `.optionOnly`, ⌥ is the only way to see it at
+all. This isn't a new mechanic but an existing popup idiom: `showStatusRows`, `showAge`, and the
+service-component filter already read as `optionHeld || <problem>` (ADR-0020). The live ⌥ state is
+provided by a 50 ms polling timer, because `isAlternate` is inert in a status-item menu and an
+event monitor starves during menu tracking.
 
-### Гейт живе у в'юсі, а рядки з моделі не зникають
+### The gate lives in the view; rows from the model never disappear
 
-`PopupLayout` **завжди** будує повний набір рядків і додає три обчислені поля:
-`perModelRowsStart`, `perModelRowsAreNonCalm`, `creditsIsNonCalm`. Рішення «малювати чи ні» ухвалює
-`PopupViewController`.
+`PopupLayout` **always** builds the full set of rows and adds three computed fields:
+`perModelRowsStart`, `perModelRowsAreNonCalm`, `creditsIsNonCalm`. The decision of whether to draw
+is made by `PopupViewController`.
 
-Дві причини, обидві обов'язкові:
+Two reasons, both required:
 
-1. **`optionHeld` змінюється без реполу.** Модель будується на кожен полл; ⌥ натискають і
-   відпускають при вже відкритому меню. Гейт у `make(...)` вимагав би перебудови моделі на кожен рух
-   пальця.
-2. **`BlockingReset` прив'язаний до індексів `rows`.** Його `.token(id:)` — це позиція рядка в
-   *повному* порядку (`0` = 5h, `1` = 7d, далі per-model), і в'юха звіряє її як `id == index`.
-   Викидання рядків із масиву перенумерувало б решту й намалювало б **червоний бейдж ресету на
-   чужому рядку**. Тому в'юха ховає рядки **пропуском** у циклі, зберігаючи оригінальні індекси.
+1. **`optionHeld` changes without a repoll.** The model is rebuilt on every poll; ⌥ is pressed and
+   released while the menu is already open. Gating in `make(...)` would require rebuilding the
+   model on every finger movement.
+2. **`BlockingReset` is tied to `rows` indices.** Its `.token(id:)` is a row's position in the
+   *full* order (`0` = 5h, `1` = 7d, then per-model), and the view checks it as `id == index`.
+   Dropping rows from the array would renumber the rest and would paint **the red reset badge on
+   the wrong row**. So the view hides rows by **skipping** them in the loop, preserving the
+   original indices.
 
-### Extra usage — нова опція, а не розширення `showExtraUsage`
+### Extra usage — a new option, not an extension of `showExtraUsage`
 
-Меню-барна іконка й секція попапа лишаються окремими налаштуваннями, бо відповідають на різні
-питання. Іконка — глянсовий бейдж, який має мовчати, доки платний тариф реально не задіяно
-(`shouldShowIcon`: credits активні **й** базовий ліміт вичерпано). Секція — деталь, яку користувач
-відкрив дропдаун подивитися, тож її гейт м'якший (`isActive`). Зшивання їх в один ключ зробило б
-неможливим «іконку не треба, суму хочу».
+The menu-bar icon and the popup section stay separate settings, because they answer different
+questions. The icon is a glossy badge that must stay silent until the paid tier is actually
+engaged (`shouldShowIcon`: credits active **and** the base limit exhausted). The section is a
+detail the user opened the dropdown to look at, so its gate is softer (`isActive`). Merging them
+into one key would make "I don't need the icon, but I want the amount" impossible.
 
-### Дефолти пресетів
+### Preset defaults
 
-| Пресет | `modelLimitsVisibility` | `extraUsageVisibility` |
+| Preset | `modelLimitsVisibility` | `extraUsageVisibility` |
 |---|---|---|
 | `.chill` | `nonCalm` | `nonCalm` |
-| `.workHarder` (фабричний) | `nonCalm` | `nonCalm` |
+| `.workHarder` (factory) | `nonCalm` | `nonCalm` |
 | `.controlFreak` | `always` | `always` |
 
-## Наслідки
+## Consequences
 
-- **Зміна поведінки за замовчуванням.** До цього всі три пресети мали
-  `showModelSpecificLimits: true`. Тепер `.chill`/`.workHarder` згортають обидві групи, доки ті
-  спокійні. Це навмисно: гучність цих пресетів — у меню-барі, а не в постійно розгорнутому попапі.
-- **Міграція одноразова й ідемпотентна** (`migrateModelLimitsVisibilityIfNeeded`, за зразком
-  `migratePauseKeysIfNeeded`): явний `true` → `.always`, явний `false` → `.optionOnly`, ключа не
-  було → дефолт пресета. `.optionOnly`, а не `.nonCalm`, бо той, хто рядки **сховав**, не просив
-  повертати їх при почервонінні; ⌥ лишається способом дістати їх на вимогу. Окремої міграції для
-  Extra usage немає — попапної опції раніше не існувало.
-- **`AppearancePresetValues` виріс з 11 до 12 полів**, тому оновлено експорт конфігурації
-  (`AppearanceConfigExport`, ключі на екранній позиції) і його тест-сторож порядку.
-- **На ранньому етапі 7-денного вікна `.nonCalm` розгортає групу частіше, ніж очікується**: при малому
-  використанні пейсинг читається як `.ahead` («ahead of pace»), і це помаранчевий статус. Формально
-  правильно (група дійсно не-calm), але як побічний ефект per-model рядки бувають видимі й при 2–4 %.
-  Якщо це виявиться надокучливим, поріг варто піднімати в `PacingModel`, а не вводити тут четвертий
-  режим.
+- **A change in default behavior.** Before this, all three presets had
+  `showModelSpecificLimits: true`. Now `.chill`/`.workHarder` collapse both groups while they're
+  calm. This is deliberate: the loudness of these presets lives in the menu bar, not in a
+  permanently expanded popup.
+- **The migration is one-shot and idempotent** (`migrateModelLimitsVisibilityIfNeeded`, modeled on
+  `migratePauseKeysIfNeeded`): explicit `true` → `.always`, explicit `false` → `.optionOnly`, no
+  key present → the preset default. `.optionOnly`, not `.nonCalm`, because whoever **hid** the
+  rows never asked to have them come back on a color change; ⌥ remains the way to pull them up on
+  demand. There's no separate migration for Extra usage — the popup option never existed before.
+- **`AppearancePresetValues` grew from 11 to 12 fields**, so the config export
+  (`AppearanceConfigExport`, keys in on-screen order) and its order-guard test were updated.
+- **Early in the 7-day window, `.nonCalm` expands the group more often than expected**: at low
+  usage, pacing reads as `.ahead` ("ahead of pace"), which is an orange status. That's formally
+  correct (the group really is non-calm), but as a side effect, per-model rows sometimes show at
+  just 2–4%. If this turns out to be annoying, the threshold should be raised in `PacingModel`,
+  not by introducing a fourth mode here.
 
-## Альтернативи
+## Alternatives considered
 
-- **Четвертий режим `never`** (сховати назавжди, навіть під ⌥) — щоб точно відтворити старе «off».
-  Відкинуто: чотири сегменти в один рядок Settings не вміщаються, а `.optionOnly` дає той самий
-  спокій, лишаючи спосіб подивитися дані, коли вони раптом потрібні.
-- **Один спільний ключ на обидві групи.** Відкинуто: per-model рядки й гроші — різні за характером
-  сигнали, і бажання бачити суму витрат не означає бажання бачити п'ять модельних барів.
-- **Гейт у `PopupLayout` (як було з булевим).** Відкинуто з двох причин вище — динамічний ⌥ і
-  перенумерація індексів `BlockingReset`.
+- **A fourth mode, `never`** (hide forever, even under ⌥) — to reproduce the old "off" exactly.
+  Rejected: four segments don't fit in one Settings row, and `.optionOnly` gives the same quiet
+  while leaving a way to look at the data when it's suddenly needed.
+- **One shared key for both groups.** Rejected: per-model rows and money are signals of a
+  different character, and wanting to see the spending amount doesn't mean wanting to see five
+  model bars.
+- **A gate in `PopupLayout` (as it was with the boolean).** Rejected for the two reasons above —
+  the dynamic ⌥ state and the renumbering of `BlockingReset` indices.

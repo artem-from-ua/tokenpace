@@ -5,131 +5,140 @@ supersedes: []
 superseded_by: []
 ---
 
-# ADR-0103: Тижневий `utilization` реконструюється з п'ятигодинного лічильника
+# ADR-0103: Weekly `utilization` is reconstructed from the five-hour counter
 
-> Уточнює [ADR-0102](0102-stand-by-line-for-the-seven-day-bar.md): `standByFloorSeconds` більше не
-> «навмисно недосяжний». Поріг оживає — але не так, як там передбачалося (не через дрібніший крок, а
-> через те, що реконструкція заводить значення у вузьку смугу, куди ціле число не потрапляє). Деталі
-> в §«Наслідки».
+> Refines [ADR-0102](0102-stand-by-line-for-the-seven-day-bar.md): `standByFloorSeconds` is no
+> longer "deliberately unreachable." The threshold does come into play — but not the way that ADR
+> predicted (not through a finer step, but because the reconstruction drives the value into a narrow
+> band a whole number never lands in). Details in §Consequences.
 
-> Формальний опис алгоритму — [docs/design/weekly-interpolation.md](../design/weekly-interpolation.md).
-> Цей ADR фіксує **рішення й чому**; там — **як саме рахується**, з інваріантами та вимірами.
+> The algorithm's formal description lives in
+> [docs/design/weekly-interpolation.md](../design/weekly-interpolation.md). This ADR records **the
+> decision and why**; that document covers **exactly how it's computed**, with invariants and
+> measurements.
 
-## Контекст
+## Context
 
-API округлює `seven_day.utilization` до цілого відсотка. На семиденному вікні один пункт — це
-**1 год 40 хв** роботи, тож показник годинами стоїть, а тоді стрибає.
+The API rounds `seven_day.utilization` to a whole percent. On the seven-day window, one point is
+**1 hour 40 minutes** of work, so the reading sits still for hours, then jumps.
 
-Вимір на живому журналі (4 327 записів, серпень 2026):
+Measured on a live journal (4,327 entries, August 2026):
 
-- **96.4 %** послідовних пар не змінюються взагалі;
-- 137 зі 140 зростань — рівно на 1 пп;
-- **~88 %** руху витрат тижнева шкала не показує: 747 кроків `h5` угору сталися, поки `d7` стояв.
+- **96.4%** of consecutive pairs don't change at all;
+- 137 of 140 increases are exactly 1 pp;
+- the weekly scale doesn't show **~88%** of spend movement: 747 upward `h5` steps occurred while
+  `d7` stood still.
 
-Це не косметична вада. Квант у 1 пп проходить через усю модель темпу: він визначає ширину
-пейсинг-зони, момент зміни кольору, спрацювання порогів. Найгірше — наприкінці вікна, де знаменник
-`(1 − t)` підсилює крок: та сама одиниця коштує 2 % ширини бару на середині тижня і **41.5 %** у
-зоні `t ≥ 90 %` (вимір на журналі Pro).
+This isn't a cosmetic flaw. The 1 pp quantum runs through the whole pacing model: it determines the
+width of the pacing zone, the moment the color changes, and when thresholds fire. It's worst at the
+end of the window, where the `(1 − t)` denominator amplifies the step: the same unit costs 2% of the
+bar's width at mid-week and **41.5%** in the `t ≥ 90%` zone (measured on the Pro journal).
 
-П'ятигодинний лічильник квантований так само, але його пункт — **3 хв**, тобто в 33.6 раза дрібніше.
-Обидва міряють ті самі витрати.
+The five-hour counter is quantized the same way, but its point is **3 minutes** — 33.6 times finer.
+Both measure the same spend.
 
-## Рішення
+## Decision
 
-**Читати тижневу шкалу через п'ятигодинну**, з перекладним коефіцієнтом `N`, який рахується з даних
-самого користувача.
+**Read the weekly scale through the five-hour one**, with a conversion coefficient `N` computed from
+the user's own data.
 
-Три чисті типи в Kit — `WeeklyRatio` (ковзна медіанна оцінка `N`), `WeeklyInterpolator` (сама
-реконструкція) і `WeeklyUtilization` (носій обох значень) — плюс одна накладка на снапшот у
-`App.render`, за зразком `ResetClock.optimisticReset`.
+Three pure types in Kit — `WeeklyRatio` (a rolling median estimate of `N`), `WeeklyInterpolator`
+(the reconstruction itself), and `WeeklyUtilization` (the carrier for both values) — plus one
+overlay on the snapshot in `App.render`, following the pattern of `ResetClock.optimisticReset`.
 
-### Реконструкція завжди увімкнена, без перемикача
+### The reconstruction is always on, with no toggle
 
-Це виправлення вади джерела, а не смак. Перемикач означав би дві гілки поведінки назавжди й
-запитання «а яка правильна?», на яке немає відповіді.
+This is a fix for a flaw in the source, not a matter of taste. A toggle would mean two behavior
+branches forever and the question "which one is correct" — which has no answer.
 
-Безпеку тримає **кліп на стелі кошика**: реконструкція не може обігнати реальність більше ніж на
-пів кванта, а межу вичерпання не перетинає взагалі. Ablation із дев'яти варіантів (обидва журнали)
-дала **0 порушень монотонності та 0 виходів за квант** у кожному — інваріанти тримає саме кліп, а не
-решта деталей.
+Safety is held by **a clip at the bucket's ceiling**: the reconstruction can never get more than half
+a quantum ahead of reality, and it never crosses the exhaustion boundary at all. An ablation across
+nine variants (both journals) produced **0 monotonicity violations and 0 out-of-quantum excursions**
+in every one — the invariants are held by the clip, not by any of the other details.
 
-### `N` оцінюється медіаною по ковзному вікну, а не хардкодиться
+### `N` is estimated by a median over a rolling window, not hardcoded
 
-`N` — властивість **тарифу**, не застосунку: він їде з планом, міксом моделей і акціями Anthropic.
-Критично: `GET /api/oauth/usage` **не має поля**, яке б це оголошувало — перевірено, `tier` не
-змінився жодного разу за 4 327 записів, поки діяла акція «+50 % weekly limit». Тобто зсув `N` — єдиний
-спостережуваний слід зміни курсу.
+`N` is a property of the **plan**, not of the app: it travels with the subscription tier, the model
+mix, and Anthropic promotions. Critically: `GET /api/oauth/usage` **has no field** that would declare
+this — verified, `tier` never changed once across 4,327 entries while a "+50% weekly limit" promotion
+was active. So a shift in `N` is the only observable trace of a rate change.
 
-Медіана, а не середнє чи МНК: обидва ряди квантовані, тож окремий сегмент має похибку ±50 %.
-Виміряно — окремі `localN` розкидані **3–24**, середнє гуляє 8.4–11.7, медіана стабільно тримає
-**10.0** на обох журналах.
+Median, not mean or least squares: both series are quantized, so any single segment carries ±50%
+error. Measured: individual `localN` values are scattered **3–24**, the mean wanders 8.4–11.7, the
+median holds steady at **10.0** on both journals.
 
-**Сід `N = 10` — виміряний, не вгаданий**: медіана вийшла рівно 10.0 і на Max 5x, і на Pro, тобто
-плани масштабують обидва вікна пропорційно. Але сід витісняється **першим же** сегментом: симуляція
-проти реального розкиду показала, що навіть один вимір б'є сід для будь-якого курсу, крім рівно 10
-(10 % похибки проти 43 % при `N = 7`).
+**The seed `N = 10` is measured, not guessed**: the median came out exactly 10.0 on both Max 5x and
+Pro, meaning plans scale both windows proportionally. But the seed is displaced by the **very first**
+segment: a simulation against the real spread showed even one measurement beats the seed for any rate
+other than exactly 10 (10% error versus 43% at `N = 7`).
 
-### Якір залежить від того, що ми знаємо
+### The anchor depends on what we actually know
 
-- **бамп засічено** → якір на **точній нижній межі** кошика (`k − 0.5`): ми бачили перехід, тож
-  значення щойно її перетнуло;
-- **якір успадкований** (перший запуск, довга перерва) → **центр** кошика: позиція всередині не
-  спостережувана, а на 4 295 семплах із відомим `t₀` вона розподілена рівномірно (медіана 0.500).
+- **a bump was observed** → anchor at the bucket's **exact lower bound** (`k − 0.5`): we saw the
+  transition, so the value just crossed it;
+- **the anchor was inherited** (first launch, a long gap) → **the bucket's center**: the position
+  inside it isn't observable, and across 4,295 samples with a known `t₀` it's uniformly distributed
+  (median 0.500).
 
-Це єдиний вибір, який справді важить: `k` замість `k − 0.5` зсуває результат на **0.37–0.42 пп** —
-на порядок більше за будь-який інший компонент.
+This is the one choice that actually matters: `k` instead of `k − 0.5` shifts the result by
+**0.37–0.42 pp** — an order of magnitude more than any other component.
 
-### Стан переживає перезапуск, але накопичення — ні
+### State survives a restart, but accumulation doesn't
 
-Вікно `N` наповнюється ~20 год активної роботи, тож in-memory-стан лишав би фічу переважно холодною.
-Персистується як Codable-блоб у `UserDefaults`, за зразком `episodeSubscription`.
+The `N` window fills over ~20 hours of active work, so in-memory state would leave the feature cold
+most of the time. It's persisted as a Codable blob in `UserDefaults`, following the pattern of
+`episodeSubscription`.
 
-Після довгої перерви **`N` зберігається** (курс не псується від простою), а **накопичення
-обнуляється** (воно прив'язане до кошика, який `h5` давно покинув).
+After a long gap, **`N` is kept** (the rate doesn't degrade from idle time), while **accumulation
+resets to zero** (it's tied to a bucket `h5` left long ago).
 
-## Альтернативи, які відхилено
+## Alternatives considered
 
-**Хардкод `N = 10`.** Промо й тарифи зсувають курс, а API про це мовчить — тоді реконструкція тихо
-брехала б саме тоді, коли ліміти змінились.
+**Hardcode `N = 10`.** Promotions and plan tiers shift the rate, and the API says nothing about it —
+the reconstruction would then silently lie exactly when the limits changed.
 
-**Поріг «увімкнути після N сегментів».** Виміряно: завжди-увімкнена схема дала *менше* кліпів
-(4.5 % проти 7.2 %) і не коштувала до 20 год холодного старту після кожного релончу.
+**A threshold: "turn on after N segments."** Measured: the always-on scheme produced *fewer* clips
+(4.5% versus 7.2%) and cost nothing beyond up to 20 hours of cold start after each app launch.
 
-**Ratchet (`max` із попереднім значенням).** Виявився **недосяжним за побудовою**: `N` ніколи не
-змінюється всередині сегмента, бо нова оцінка додається лише бампом, який сегмент і закриває. Тож
-вираз монотонний арифметично. Замість нього є `shownFloor`, що розв'язує іншу задачу — не дати
-деградації відкотити вже показане.
+**A ratchet (`max` against the previous value).** Turned out to be **unreachable by construction**:
+`N` never changes within a segment, because a new estimate is only added by the bump that closes the
+segment. So the expression is monotonic arithmetically. What exists instead is `shownFloor`, which
+solves a different problem — not letting a degradation roll back what's already been shown.
 
-**Зберігати `elapsed` у секундах замість частки.** Дало б точність 1 с без жодного правила
-округлення, але `timePct` безрозмірна: читач множить на 100 і не мусить знати довжину вікна — що
-критично для `scoped`-рядків, які позичають семиденну шкалу.
+**Store `elapsed` in seconds instead of a fraction.** Would give 1 s precision with no rounding rule
+at all, but `timePct` is dimensionless: a reader multiplies by 100 and doesn't need to know the
+window's length — which matters for `scoped` rows that borrow the seven-day scale.
 
-## Наслідки
+## Consequences
 
-**Більшість пунктів issue лагодяться самі.** `signedLead`, `pressureLength`, `gaugeOffset`,
-`severity`, `PacingBucket.of` — **нуль змін коду**: вони читають `usageFraction`, який тепер
-безперервний. Обіцянка докстрінга про безперервність (`PacingModel.swift`) починає бути правдою.
+**Most points of the issue fix themselves.** `signedLead`, `pressureLength`, `gaugeOffset`,
+`severity`, `PacingBucket.of` — **zero code changes**: they read `usageFraction`, which is now
+continuous. The doc comment's promise of continuity (`PacingModel.swift`) starts being true.
 
-**Жодна константа не рухається.** `aheadThreshold`, `behindThreshold`, три 20-хвилинні override,
-`standByFloorSeconds` — усі лишаються. Жовтий стан наприкінці вікна оживає сам.
+**No constant moves.** `aheadThreshold`, `behindThreshold`, the three 20-minute overrides,
+`standByFloorSeconds` — all stay. The yellow state near the end of the window comes back to life on
+its own.
 
-**`standByFloorSeconds` оживає — але не з тієї причини, що передбачав ADR-0102.** Там очікувалося, що
-крок стане ~10 хв і поріг почне ловити реальні значення. Насправді механізм інший: `standBy` і час до
-ресету ростуть **разом**, тож 20-хвилинний override кінця вікна з'їдає всі кадри з малим лідом.
-Сканування всього простору `(u, ресет)` знаходить придушений stand-by у **18 із 10 064** комбінацій —
-усі при `u` в межах **99.15–99.40 %**, тобто саме там, куди ціле число не потрапляє, а реконструкція
-всередині кошика — потрапляє. Стуб `standby-floor` перебудовано на цілий `utilization = 99`
-відповідно.
+**`standByFloorSeconds` does come into play — but not for the reason ADR-0102 anticipated.** That ADR
+expected the step to become ~10 minutes and the threshold to start catching real values. What
+actually happens is different: `standBy` and the time to reset grow **together**, so the 20-minute
+end-of-window override eats every frame with a small lead. Scanning the whole `(u, reset)` space
+finds a suppressed stand-by in **18 of 10,064** combinations — all at `u` within **99.15–99.40%**,
+exactly where a whole number never lands but the in-bucket reconstruction does. The `standby-floor`
+stub is rebuilt around a whole `utilization = 99` accordingly.
 
-**Текстові відсотки не змінюються.** Форматер попапа округлює до цілого, тож «80 %» лишається «80 %»
-— рухаються бар, колір і вердикт, а не число. Фальшивої точності в тексті немає.
+**Text percentages don't change.** The popup's formatter rounds to a whole number, so "80%" stays
+"80%" — the bar, the color, and the verdict move; the number doesn't. There's no false precision in
+the text.
 
-**Scoped-моделі лишаються сирими.** Opus / Sonnet / Fable мають власні тижневі вікна, але не мають
-власних п'ятигодинних, тож єдиний `N` для них некоректний за побудовою. Видимий наслідок: тижневий
-бар повзе, рядки моделей стрибають.
+**Scoped models stay raw.** Opus / Sonnet / Fable have their own weekly windows but no five-hour
+windows of their own, so a single `N` doesn't fit them by construction. The visible effect: the
+weekly bar crawls while the model rows jump.
 
-**Виграш пропорційний кадансу полінгу, не тарифу.** Медіанний приріст `h5` за пол: +1 пп при 193 с →
-тижневий крок ≈10 хв (~10 позицій на кошик); +5 пп при 900 с → ≈50 хв (**2** позиції). Тобто при
-рідкому полінгу це «вдвічі краще», а не «вдесятеро» — і саме так фічу слід описувати.
+**The gain is proportional to the polling cadence, not the plan.** The median `h5` gain per poll:
++1 pp at 193 s → a weekly step of ≈10 min (~10 positions per bucket); +5 pp at 900 s → ≈50 min
+(**2** positions). At a sparse polling cadence, that's "twice as good," not "ten times as good" — and
+that's how the feature should be described.
 
-**Журнал отримує обидва значення** (`raw`, `src`, `n`) — окремим кроком, разом із версією формату.
+**The journal will get both values** (`raw`, `src`, `n`) — as a separate step, together with a format
+version bump.

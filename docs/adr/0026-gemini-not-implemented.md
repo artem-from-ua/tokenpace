@@ -3,113 +3,123 @@ status: accepted
 date: 2026-07-24
 ---
 
-# ADR-0026: Gemini не імплементуємо — немає ToS-сумісного шляху до споживацької метрики
+# ADR-0026: Not implementing Gemini — no ToS-compliant path to the consumer metric
 
-## Контекст
+## Context
 
-Епік #60 досліджує розширення TokenPace за межі Anthropic на інших вендорів із **вікнами
-використання** (rolling N-годин / тиждень). Першою ціллю обрали **Gemini** (#93) — у нас є тестер із
-підпискою (@kintecus), тож розвідку робили на його маку з його креденшалами.
+Epic #60 investigates extending TokenPace beyond Anthropic to other vendors with **usage windows**
+(rolling N-hours / week). The first target chosen was **Gemini** (#93) — we have a tester with a
+subscription (@kintecus), so the investigation was done on his Mac with his credentials.
 
-Питання розвідки: чи можемо ми **локально, read-only, без скрейпінгу** читати ліміти Gemini так, як
-читаємо для Claude Code, і як безпечно рефрешити токен.
+The investigation question: can we read Gemini's limits **locally, read-only, without scraping**, the
+same way we read them for Claude Code, and how to safely refresh the token.
 
-Передумова фічі **підтвердилася**: споживацький Gemini з 2026-05-20 (Google I/O) має **5-годинне
-rolling + тижневе** вікно, змодельоване за ChatGPT/Claude
+The feature's premise **was confirmed**: consumer Gemini, as of 2026-05-20 (Google I/O), has a
+**5-hour rolling + weekly** window, modeled after ChatGPT/Claude
 ([support.google.com/gemini/answer/16275805](https://support.google.com/gemini/answer/16275805) —
-«Your limit refreshes every 5 hours until you reach your weekly limit»). Ліміти **compute-based** і
-динамічні: Google публікує лише множники за тарифами (AI Plus 2×, Pro 4×, Ultra 5×/20×), не
-абсолютні числа, і «may change without notice». Переглянути — лише в UI: `gemini.google.com` →
-Settings → Usage Limits. **Офіційного API для читання власного споживацького usage немає.**
+"Your limit refreshes every 5 hours until you reach your weekly limit"). The limits are
+**compute-based** and dynamic: Google only publishes multipliers per tier (AI Plus 2×, Pro 4×,
+Ultra 5×/20×), not absolute numbers, and they "may change without notice." Viewable only in the UI:
+`gemini.google.com` → Settings → Usage Limits. **There is no official API to read your own consumer
+usage.**
 
-Розвідка виявила **дві незалежні площини** доступу, і жодна не дає одночасно «правильна метрика +
-ToS-сумісно + надійно».
+The investigation found **two independent planes** of access, and neither delivers "correct metric +
+ToS-compliant + reliable" simultaneously.
 
-### Площина A — OAuth / Code Assist (`retrieveUserQuota`)
+### Plane A — OAuth / Code Assist (`retrieveUserQuota`)
 
-Санкціонований токеном шлях, який робить **сам gemini-cli**
-([google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli), перевірено по source):
+The token-authorized path that **gemini-cli itself** uses
+([google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli), verified against source):
 
 - `POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota`
-  (`packages/core/src/code_assist/server.ts`); відповідь — `buckets[]` з `remainingFraction`,
-  `resetTime`, `modelId` (`types.ts`) — формально ідеально для пейсингу.
-- Авторизація — `Bearer` OAuth `access_token` з `~/.gemini/oauth_creds.json` (0600 plaintext) або
-  новішого Keychain-item `gemini-cli-oauth`/`main-account`. `expiry_date` — epoch ms.
-- Команда `/stats` (alias `/usage`) показує remaining/limit/reset per-model.
-- **Важливо: `refresh_token` НЕ ротується** при рефреші (google-auth-library `oauth2client.ts:878`
-  безумовно перезаписує відповідь старим токеном; gemini-cli при збереженні теж лишає старий). Тобто
-  самостійний refresh із боку TokenPace **не зламав би** сесію gemini-cli — це знімає головне
-  занепокоєння плану (крок 5). Гонка можлива лише при **записі** назад, читання безпечне.
+  (`packages/core/src/code_assist/server.ts`); the response is `buckets[]` with `remainingFraction`,
+  `resetTime`, `modelId` (`types.ts`) — formally ideal for pacing.
+- Authorization is a `Bearer` OAuth `access_token` from `~/.gemini/oauth_creds.json` (0600 plaintext)
+  or the newer Keychain item `gemini-cli-oauth`/`main-account`. `expiry_date` is an epoch in ms.
+- The `/stats` command (alias `/usage`) shows remaining/limit/reset per model.
+- **Important: the `refresh_token` is NOT rotated** on refresh (google-auth-library's
+  `oauth2client.ts:878` unconditionally writes the response back with the old token; gemini-cli also
+  keeps the old one on save). That means an independent refresh from TokenPace's side **would not
+  break** the gemini-cli session — this removes the main concern from the plan (step 5). A race is
+  only possible on **write-back**; reading is safe.
 
-**Але площина A читає «не той» лічильник.** `retrieveUserQuota` віддає квоту **Code Assist / CLI-агента**
-(per-model buckets + Google One credits), а не споживацький лічильник додатку. gemini-cli **жодного
-разу** не торкається `gemini.google.com` (0 згадок у репо). Мейнтейнер gemini-cli прямо каже, що
-навіть у самому CLI «there's no way … to see your daily quota — at least, not yet». Ба більше,
-`v1internal` — **недокументований, непідтримуваний** ендпоінт (у практиці віддає 403/SERVICE_DISABLED),
-тож і сам по собі «documented means» не задовольняє.
+**But plane A reads the "wrong" counter.** `retrieveUserQuota` returns the **Code Assist / CLI agent**
+quota (per-model buckets + Google One credits), not the app's consumer counter. gemini-cli **never**
+touches `gemini.google.com` (0 mentions in the repo). gemini-cli's maintainer states outright that
+even inside the CLI itself "there's no way … to see your daily quota — at least, not yet." What's
+more, `v1internal` is an **undocumented, unsupported** endpoint (in practice it returns
+403/SERVICE_DISABLED), so even by itself "a documented means" isn't satisfied.
 
-### Площина B — споживацький cookie-replay (`jSf9Qc` batchexecute)
+### Plane B — consumer cookie replay (`jSf9Qc` batchexecute)
 
-Єдиний шлях до **правильної** метрики (web/app 5h + тиждень). Наскрізний експеримент (@kintecus,
-на його маку) підтвердив, що технічно **працює**: розшифрувати Chrome-кукі ключем `Chrome Safe Storage`
-з Keychain → дістати `__Secure-1PSID`/`__Secure-1PSIDTS` → зіскрейпити `SNlM0e`/`bl`/`f.sid` зі
-сторінки `gemini.google.com/usage` → зіграти внутрішній RPC `batchexecute?rpcids=jSf9Qc`. `fraction`
-збігся з UI до відсотка, `reset_epoch` — до хвилини, окремо для 5h і тижневого вікна.
+The only path to the **correct** metric (web/app 5h + weekly). An end-to-end experiment
+(@kintecus, on his Mac) confirmed it technically **works**: decrypt the Chrome cookie with the
+`Chrome Safe Storage` key from the Keychain → extract `__Secure-1PSID`/`__Secure-1PSIDTS` → scrape
+`SNlM0e`/`bl`/`f.sid` from the `gemini.google.com/usage` page → replay the internal RPC
+`batchexecute?rpcids=jSf9Qc`. `fraction` matched the UI to the percentage point, `reset_epoch`
+matched to the minute, separately for the 5h and weekly windows.
 
-**Проте цей шлях програє за кожною віссю:**
+**But this path loses on every axis:**
 
-- **ToS.** Gemini Apps Help прямо каже: «The Google Terms of Service and the Generative AI Prohibited
-  Use Policy apply to Gemini Apps». Google ToS «Don't abuse our services» забороняє «using automated
-  means to access content», «bypassing our systems or protective measures», «reverse engineering our
-  services». Google APIs ToS: «You will only access an API by the means described in the documentation
-  of that API». Cookie-replay внутрішнього RPC потрапляє під **усі** ці пункти одночасно.
-- **Ризик блокування акаунтів.** Мейнтейнери reverse-eng клієнтів (`dsdanielpark/Bard-API`,
-  `dsdanielpark/Gemini-API`) **самі** попереджають: «excessive or commercial usage may result in
-  restrictions on your Google account». Задокументованого першоджерельного *перманентного* бану суто
-  за read-only cookie-replay ми не знайшли (лише попередження + тимчасові rate-limit/CAPTCHA), але
-  відсутність доказу — не доказ безпечності.
-- **Крихкість.** `__Secure-1PSIDTS` ротується кожні ~10–20 хв (клієнти рефрешать примусово); RPC-id
-  (`jSf9Qc` тощо) Google ротує без попередження; запуск клієнта може **знеедити власну browser-сесію**
-  користувача в Gemini. Механіка розшифровки Chrome-кукі теж «inherently brittle across Chromium
-  changes» (коментар у `SweetCookieKit`).
-- **Немає prior-art.** Найближчий аналог TokenPace — **CodexBar** (steipete, ~18.9k⭐, MIT) — читає
-  Gemini через **площину A** (OAuth/Code Assist), Antigravity — через локальний `127.0.0.1`-пробінг;
-  cookie-механіку (`SweetCookieKit`) застосовує **лише до Claude і Cursor, ніколи до Gemini**. Усі, хто
-  читає споживацькі кукі, — **повноцінні чат-клієнти**, жоден не read-only usage-reader. Тобто
-  `jSf9Qc`-usage-шлях — це **net-new reverse engineering** внутрішнього RPC, без бази, на яку зіпертися.
+- **ToS.** The Gemini Apps Help says outright: "The Google Terms of Service and the Generative AI
+  Prohibited Use Policy apply to Gemini Apps." Google's ToS "Don't abuse our services" forbids
+  "using automated means to access content," "bypassing our systems or protective measures,"
+  "reverse engineering our services." The Google APIs ToS: "You will only access an API by the means
+  described in the documentation of that API." Cookie-replaying an internal RPC falls under **all**
+  of these clauses at once.
+- **Risk of account suspension.** The maintainers of reverse-engineered clients
+  (`dsdanielpark/Bard-API`, `dsdanielpark/Gemini-API`) **themselves** warn: "excessive or commercial
+  usage may result in restrictions on your Google account." We found no documented primary-source
+  case of a *permanent* ban purely for read-only cookie replay (only warnings + temporary
+  rate-limit/CAPTCHA), but the absence of evidence isn't evidence of safety.
+- **Fragility.** `__Secure-1PSIDTS` rotates every ~10–20 min (clients force-refresh it); Google
+  rotates the RPC id (`jSf9Qc` etc.) without notice; running the client can **invalidate the user's
+  own** browser session in Gemini. The Chrome cookie decryption mechanics are also "inherently
+  brittle across Chromium changes" (comment in `SweetCookieKit`).
+- **No prior art.** The closest analog to TokenPace, **CodexBar** (steipete, ~18.9k⭐, MIT), reads
+  Gemini through **plane A** (OAuth/Code Assist), Antigravity through local `127.0.0.1` probing;
+  its cookie mechanics (`SweetCookieKit`) apply **only to Claude and Cursor, never to Gemini**.
+  Everyone who reads consumer cookies is a **full chat client**, none is a read-only usage reader.
+  So the `jSf9Qc` usage path is **net-new reverse engineering** of an internal RPC, with no base to
+  lean on.
 
-## Рішення
+## Decision
 
-**Gemini наразі НЕ імплементуємо.** Головний аргумент — **ризик блокування Google-акаунтів наших
-користувачів**: єдиний шлях до правильної (споживацької) метрики — площина B — прямо порушує Google
-ToS, а мейнтейнери споріднених інструментів самі попереджають про можливі обмеження акаунта. Ризик
-неприйнятний для застосунку, що працює на реальних акаунтах користувачів, тим більше без офіційного
-API, стабільного контракту чи prior-art.
+**We are NOT implementing Gemini for now.** The main argument is the **risk of our users' Google
+accounts being suspended**: the only path to the correct (consumer) metric — plane B — directly
+violates Google's ToS, and the maintainers of related tools themselves warn about possible account
+restrictions. That risk is unacceptable for an app operating on real user accounts, all the more so
+without an official API, a stable contract, or prior art.
 
-Площину A (OAuth/Code Assist) теж не беремо: вона **читає інший лічильник** (квоту CLI-агента, не
-додатку), тож не дає обіцяної фічі, і сама спирається на недокументований `v1internal`.
+We're also not taking plane A (OAuth/Code Assist): it **reads a different counter** (the CLI agent's
+quota, not the app's), so it doesn't deliver the promised feature, and it itself relies on the
+undocumented `v1internal`.
 
-Це рішення **лише про Gemini**, не про multi-vendor загалом. Напрямок #60 лишається живим —
-**наступний кандидат — OpenAI Codex** (5h + тижневе вікно, локальний токен у `~/.codex/`), який треба
-дослідити окремим тікетом за тим самим лекалом розвідки.
+This decision is **about Gemini only**, not about multi-vendor support in general. Direction #60
+stays alive — **the next candidate is OpenAI Codex** (5h + weekly window, local token in
+`~/.codex/`), which needs to be investigated in a separate ticket following the same investigation
+playbook.
 
-## Наслідки
+## Consequences
 
-- #93 закривається як *not planned* із підсумковим вердиктом; #60 (епік multi-vendor) лишається
-  **відкритим** — Codex ще попереду.
-- Vendor-абстракцію (провайдер = endpoint + auth source + usage decode + window model), окреслену в
-  #60, **не будуємо зараз** — її вводитиме той вендор, який реально пройде розвідку (ймовірно Codex).
-- Якщо колись Google **офіційно** відкриє API для споживацького usage — рішення переглядається; до
-  того часу cookie-replay-канал закритий за дизайном.
-- Позитивний технічний висновок для *будь-якого* майбутнього OAuth-вендора: якщо його CLI не ротує
-  `refresh_token` (як gemini-cli), делегований refresh не обов'язковий — можливий і безпечний
-  самостійний refresh на читання (пор. делегований підхід для Claude, [ADR-0017](0017-delegated-token-refresh.md)).
+- #93 closes as *not planned* with a summary verdict; #60 (the multi-vendor epic) stays **open** —
+  Codex is still ahead.
+- The vendor abstraction (provider = endpoint + auth source + usage decode + window model) sketched
+  out in #60 is **not built now** — it will be introduced by whichever vendor actually clears the
+  investigation (likely Codex).
+- If Google ever **officially** opens an API for consumer usage, this decision gets revisited; until
+  then the cookie-replay channel is closed by design.
+- A positive technical takeaway for *any* future OAuth vendor: if its CLI doesn't rotate the
+  `refresh_token` (like gemini-cli), a delegated refresh isn't mandatory — an independent, read-only
+  refresh is possible and safe (compare the delegated approach for Claude,
+  [ADR-0017](0017-delegated-token-refresh.md)).
 
-## Пов'язані
+## Related
 
-- [ADR-0017](0017-delegated-token-refresh.md) — делегований refresh токена (Claude); тут зафіксовано,
-  що для gemini-cli самостійний refresh був би безпечним (refresh_token не ротується).
-- [ADR-0019](0019-token-read-via-security-cli.md) — читання секретів через `security` CLI; аналогічний
-  Keychain-доступ був би потрібен і для gemini-cli-креденшалів, якби ми йшли площиною A.
-- #60 — епік multi-vendor (лишається відкритим, наступний кандидат — Codex).
-- #93 — розвідка Gemini (закрита цим рішенням).
+- [ADR-0017](0017-delegated-token-refresh.md) — delegated token refresh (Claude); this ADR records
+  that for gemini-cli, an independent refresh would have been safe (`refresh_token` isn't rotated).
+- [ADR-0019](0019-token-read-via-security-cli.md) — reading secrets through the `security` CLI; a
+  similar Keychain access would have been needed for gemini-cli credentials too, had we gone with
+  plane A.
+- #60 — the multi-vendor epic (stays open, next candidate is Codex).
+- #93 — the Gemini investigation (closed by this decision).

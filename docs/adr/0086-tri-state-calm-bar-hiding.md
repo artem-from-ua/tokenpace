@@ -5,158 +5,168 @@ supersedes: [0034]
 superseded_by: [0090]
 ---
 
-> **Постскриптум ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)).** Тип, який тут
-> запроваджено, зветься [`TopBarHiding`](../../Sources/TokenPaceKit/TopBarHiding.swift) (був
-> `CalmBarHiding`), рядок Settings — **`Hide the top 5h bar`**, сегменти —
-> `Until it needs attention | Never` (був `When it's calm`), ключ — `menuBar.hideTop5hBar`, параметр
-> `MenuBarLayout.make(hideCalmBar:)` — `hideTopBar:`
-> ([ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md)). Старі raw `fiveHour` /
-> `sevenDay` розвʼязуються через `TopBarHiding.legacyRawValues`. **Поведінка не змінилася** —
-> предикат `BarView.isCalm`, інваріант «ховається щонайбільше одна смужка» й трактування idle як
-> спокійного стану чинні; з рядка зникла лише перша фраза підказки, яку дублював сам сегмент.
+> **Postscript ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)).** The type
+> introduced here is named [`TopBarHiding`](../../Sources/TokenPaceKit/TopBarHiding.swift) (was
+> `CalmBarHiding`), the Settings row is **`Hide the top 5h bar`**, the segments are
+> `Until it needs attention | Never` (was `When it's calm`), the key is `menuBar.hideTop5hBar`, the
+> `MenuBarLayout.make(hideCalmBar:)` parameter is `hideTopBar:`
+> ([ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md)). Legacy raw `fiveHour` /
+> `sevenDay` values are resolved through `TopBarHiding.legacyRawValues`. **The behavior has not
+> changed** — the `BarView.isCalm` predicate, the invariant "at most one bar is ever hidden," and
+> treating idle as calm still stand; the only thing dropped from the string was the first phrase of
+> the hint, which the segment itself already duplicated.
 
-> **Заміщено [ADR-0090](0090-menu-bar-answers-can-we-work.md).** Симетрію відкочено: сегмент
-> `7-day` прибрано, лишились `When it's calm` / `Never`, а рядок називає смужку («Hide 5h (top)
-> bar»). Чинними лишаються предикат `BarView.isCalm`, інваріант «ховається щонайбільше одна
-> смужка», трактування idle як спокійного стану й діагностичні смужки в error-стані.
+> **Superseded by [ADR-0090](0090-menu-bar-answers-can-we-work.md).** The symmetry was rolled back:
+> the `7-day` segment was removed, leaving `When it's calm` / `Never`, and the row names the bar
+> ("Hide 5h (top) bar"). Still standing: the `BarView.isCalm` predicate, the invariant "at most one
+> bar is ever hidden," treating idle as calm, and diagnostic bars in the error state.
 
-# ADR-0086: Ховати спокійну смужку — трипозиційний вибір замість булевого
+# ADR-0086: Hiding a calm bar — a three-way choice instead of a boolean
 
-> Замінює [ADR-0034](0034-hide-calm-seven-day-bar.md), який давав ту саму ідею «менше шуму», але
-> тільки для 7-денної смужки. Лінійка та сама, що [ADR-0028](0028-hide-reset-label-when-pacing-is-calm.md)
-> / [ADR-0029](0029-reset-countdown-selection-by-severity.md) і
-> [#105](https://github.com/artem-from-ua/tokenpace/issues/105): реюзує предикат `BarView.isCalm`.
+> Replaces [ADR-0034](0034-hide-calm-seven-day-bar.md), which offered the same "less noise" idea,
+> but only for the 7-day bar. The same lineage as
+> [ADR-0028](0028-hide-reset-label-when-pacing-is-calm.md) /
+> [ADR-0029](0029-reset-countdown-selection-by-severity.md) and
+> [#105](https://github.com/artem-from-ua/tokenpace/issues/105): it reuses the `BarView.isCalm`
+> predicate.
 
-## Контекст
+## Context
 
-[ADR-0034](0034-hide-calm-seven-day-bar.md) ввів опцію `hideCalmSevenDayBar` — «ховати 7-денну
-смужку, доки вона спокійна», щоб у типовому спокійному стані віджет був однією смужкою, а не двома.
-Опція виявилася **асиметричною**: сховати можна було лише 7d.
+[ADR-0034](0034-hide-calm-seven-day-bar.md) introduced the `hideCalmSevenDayBar` option — "hide the
+7-day bar while it's calm" — so that in the typical calm state the widget would be a single bar
+instead of two. The option turned out to be **asymmetric**: only the 7d bar could be hidden.
 
-Потреба ж симетрична. У кого 5-годинне вікно рідко буває тісним, а тижневий бюджет — справжнє
-обмеження, тому корисна смужка на барі саме 7-денна, а спокійна 5-годинна лише займає місце. Зробити
-це старою опцією було неможливо: вона вміла ховати тільки протилежну смужку.
+The need, though, is symmetric. For someone whose 5-hour window is rarely tight but whose weekly
+budget is the real constraint, the useful bar on the item is the 7-day one, and the calm 5-hour bar
+just takes up space. The old option couldn't do this — it could only hide the opposite bar.
 
-Додатково опція була **інвертованою**: у Settings стояло «Show 7-day bar when calm», а в
-`UserDefaults` — `hideCalmSevenDayBar` (протилежне значення). Кожен читач мусив тримати інверсію в
-голові, і в кількох доках лейбл був записаний хибно
-(«Hide 7-day bar when calm» — те, чого в UI не було).
+On top of that, the option was **inverted**: Settings showed "Show 7-day bar when calm," while
+`UserDefaults` stored `hideCalmSevenDayBar` (the opposite value). Every reader had to hold the
+inversion in their head, and several docs recorded the label wrong ("Hide 7-day bar when calm" —
+something the UI never actually said).
 
-## Рішення
+## Decision
 
-Опція стає трипозиційною: **«Hide the calm bar»** з сегментами `7-day` / `5-hour` / `Never`, де
-сегмент називає смужку, яка **ховається**, доки вона спокійна. Порядок сегментів — від довшого вікна
-до коротшого й далі до «нічого не ховати»; він заданий порядком кейсів у enum, бо контрол будується
-з `allCases`.
+The option becomes three-way: **"Hide the calm bar"** with segments `7-day` / `5-hour` / `Never`,
+where the segment names the bar that gets **hidden** while it's calm. The segment order goes from
+the longer window to the shorter one and then to "hide nothing"; it's set by the order of the enum
+cases, since the control is built from `allCases`.
 
-### Тип, а не прапорець
+### A type, not a flag
 
-Новий `CalmBarHiding` у `TokenPaceKit` (`String`-raw, `CaseIterable`, forward-compatible decode) —
-за каноном `PopupSectionVisibility` / `ResetCountdownMode` / `BarStyle`. Предикат живе **в самому
-enum**:
+A new `CalmBarHiding` in `TokenPaceKit` (`String`-raw, `CaseIterable`, forward-compatible decode) —
+following the canon of `PopupSectionVisibility` / `ResetCountdownMode` / `BarStyle`. The predicate
+lives **inside the enum itself**:
 
 ```swift
 public var hiddenWindow: LimitWindow? { … }
 public func hides(_ window: LimitWindow, isCalm: Bool) -> Bool { isCalm && hiddenWindow == window }
 ```
 
-### Інваріант: ховається щонайбільше одна смужка
+### Invariant: at most one bar is ever hidden
 
-`hides` звіряє аргумент із **єдиним** вікном, яке називає значення, тож множина вікон, для яких воно
-може повернути `true`, має потужність ≤ 1. Звідси: хай якими будуть severity обох смужок, друга
-завжди лишається — **віджет не може спорожніти**.
+`hides` compares its argument against the **single** window the value names, so the set of windows
+it can ever return `true` for has cardinality ≤ 1. From this: no matter what severity either bar
+has, the other one is always left standing — **the widget can never go empty**.
 
-Це властивість *типу*, а не перевірка в `MenuBarLayout`, тому вона не може розсинхронитися з місцем
-виклику. Закріплена тестом, що проходить матрицю «режим × calm/noisy × active/idle».
+This is a property of the *type*, not a check inside `MenuBarLayout`, so it cannot drift out of sync
+with the call site. Pinned by a test that runs the matrix "mode × calm/noisy × active/idle."
 
-### Модель: `expanded.fiveHour` теж optional
+### The model: `expanded.fiveHour` is optional too
 
-`MenuBarMode.expanded(fiveHour:sevenDay:resetToShow:)` мав `sevenDay: BarView?` і **непорожній**
-`fiveHour`. Тепер обидва optional — так само, як давно було в `.error`. Форма двох кейсів збіглася,
-що й обіцяв коментар «The split mirrors `expanded`».
+`MenuBarMode.expanded(fiveHour:sevenDay:resetToShow:)` had `sevenDay: BarView?` and a **non-optional**
+`fiveHour`. Both are now optional — the same as it long was in `.error`. The two cases' shapes now
+match, which is exactly what the comment "The split mirrors `expanded`" had promised.
 
-`nil` у `.expanded` і `.error` означає **різне**, і це зафіксовано в доці типу: в `.expanded` — «свідомо
-не намальовано», в `.error` — «даних немає».
+`nil` in `.expanded` and `.error` means **different things**, and this is pinned in the type's doc
+comment: in `.expanded` it means "deliberately not drawn," in `.error` it means "there is no data."
 
-### Idle — без винятку
+### Idle — no exception
 
-Інертна 5-годинна смужка в session-idle («ready to start») має `severity == .calm` завжди, тож у
-режимі `5-hour` вона ховається **теж**. Спеціального випадку немає навмисно: idle — це і є стан, коли
-5h-вікно нічого не міряє.
+An inert 5-hour bar in session-idle ("ready to start") always has `severity == .calm`, so in
+`5-hour` mode it gets hidden **too**. There is no special case, deliberately: idle *is* the state
+where the 5h window has nothing to measure.
 
-Наслідок видимий: у режимі `5-hour` між сесіями на барі лишається сама 7-денна смужка, а сигнал
-«сесія не йде» доступний у дропдауні. Це прийнято свідомо (див. Consequences).
+The consequence is visible: in `5-hour` mode, between sessions the item is left with just the
+7-day bar, and the "no session running" signal lives in the dropdown. This is accepted deliberately
+(see Consequences).
 
-### Error-стан лишається діагностичним
+### The error state stays diagnostic
 
-Гілка stale/error перебудовує layout викликом `make` **без** `hideCalmBar` (дефолт `.never`), тож
-обидві смужки біля ⚠️ цілі — хай яку з них користувач ховає у здоровому стані. Так само було в
-ADR-0034 для 7d.
+The stale/error branch rebuilds the layout by calling `make` **without** `hideCalmBar` (default
+`.never`), so both bars next to ⚠️ stay intact — whichever one the user hides in the healthy state.
+Same as in ADR-0034 for 7d.
 
-### Що НЕ змінилося
+### What did NOT change
 
-- **`selectReset` бачить справжні severity** — приховування чіпає лише *смужку*, не вибір
-  countdown. Схована спокійна смужка й раніше його не визначала.
-- **Ширина item** не залежить від кількості смужок (`barsMaxX` рахується від `Metrics.barWidth`).
-- **Геометрія одинака** — центр по `rect.midY`. Самотня 7-денна смужка стоїть рівно там, де раніше
-  стояла самотня 5-годинна: розкладка залежить від *кількості* смужок, не від того, яке вікно вціліло.
-- **`pauseHidesBars`** спрацьовує раніше й прибирає обидві смужки — перетину немає.
+- **`selectReset` sees the real severities** — hiding only touches the *bar*, not the countdown
+  selection. A hidden calm bar never drove that choice before either.
+- **Item width** does not depend on the number of bars (`barsMaxX` is computed from
+  `Metrics.barWidth`).
+- **The geometry stays the same** — centered on `rect.midY`. A lone 7-day bar sits exactly where a
+  lone 5-hour bar used to sit: the layout depends on the *count* of bars, not on which window
+  survived.
+- **`pauseHidesBars`** fires earlier and removes both bars — there is no overlap.
 
-### Інверсії більше немає
+### No more inversion
 
-`calmBarHiding` зберігається рівно так, як показує UI. `hideCalmSevenDayBar` був останнім
-інвертованим значенням у наборі Appearance.
+`calmBarHiding` is stored exactly as the UI shows it. `hideCalmSevenDayBar` was the last inverted
+value in the Appearance set.
 
-## Наслідки
+## Consequences
 
-### Зміна фабричного дефолту (найпомітніше)
+### The factory default changes (the most visible change)
 
-Пресети: `chill` і `workHarder` → `.fiveHour`, `controlFreak` → `.never`. Оскільки `workHarder` — це
-`AppearancePreset.default`, тобто джерело всіх фабричних дефолтів, **дефолтна поведінка
-інвертується**: раніше в спокої лишалася 5-годинна смужка, тепер — 7-денна.
+Presets: `chill` and `workHarder` → `.fiveHour`, `controlFreak` → `.never`. Since `workHarder` is
+`AppearancePreset.default`, i.e. the source of all factory defaults, **the default behavior
+inverts**: previously the 5-hour bar stayed during calm periods, now it's the 7-day one.
 
-Для кого це помітно: хто **ніколи не чіпав** стару опцію (ключа в `UserDefaults` немає). Після
-оновлення такий користувач побачить у спокої тижневу смужку замість 5-годинної, а в **idle** — саму
-тижневу, без синьої «ready to start».
+Who notices: anyone who has **never touched** the old option (no key in `UserDefaults`). After the
+update, such a user will see the weekly bar instead of the 5-hour one during calm periods, and in
+**idle** — just the weekly bar, with no blue "ready to start."
 
-Ми свідомо **не** фіксуємо стару поведінку записом `.sevenDay` тим, хто не вибирав. Причини:
+We deliberately do **not** pin the old behavior by writing `.sevenDay` for people who never chose.
+Reasons:
 
-- Прецедент [ADR-0080](0080-per-surface-bar-style.md): зсув фабричного дефолту `BarStyle` так само
-  зачепив лише тих, хто вибору не робив, і це прийнято як норма.
-- Запис значення «за людину» створив би **другий** дефолт, що суперечить пресету: `workHarder` каже
-  `.fiveHour`, а промігрований користувач сидів би на `.sevenDay` — і його конфіг більше не збігався
-  б із жодним пресетом, тож сегментований контрол одразу показав би **«Custom»**, хоча він нічого не
-  налаштовував.
-- Записане значення «залипає»: наступний зсув дефолту такого користувача вже не досягне ніколи.
+- Precedent from [ADR-0080](0080-per-surface-bar-style.md): the factory-default shift for
+  `BarStyle` similarly affected only people who never made a choice, and that was accepted as the
+  norm.
+- Writing a value "on someone's behalf" would create a **second** default that contradicts the
+  preset: `workHarder` says `.fiveHour`, while the migrated user would sit on `.sevenDay` — and
+  their config would no longer match any preset, so the segmented control would immediately show
+  **"Custom"**, even though they never configured anything.
+- A written value "sticks": any future shift of that user's default would never reach them again.
 
-Компенсуємо не міграцією, а комунікацією — окремим абзацом у release notes.
+We compensate not with a migration but with communication — a dedicated paragraph in the release
+notes.
 
-### Міграція явного вибору
+### Migrating an explicit choice
 
-`migrateCalmBarHidingIfNeeded()` (ідемпотентна, за взірцем `migrateModelLimitsVisibilityIfNeeded`)
-переносить лише **явно збережене** старе значення:
+`migrateCalmBarHidingIfNeeded()` (idempotent, following the pattern of
+`migrateModelLimitsVisibilityIfNeeded`) carries over only an **explicitly stored** old value:
 
-| Старе `hideCalmSevenDayBar` | Нове |
+| Old `hideCalmSevenDayBar` | New |
 |---|---|
-| `true` (явно) | `.sevenDay` |
-| `false` (явно) | `.never` |
-| ключа немає | нічого не пишемо → новий пресетний дефолт `.fiveHour` |
+| `true` (explicit) | `.sevenDay` |
+| `false` (explicit) | `.never` |
+| no key present | write nothing → the new preset default `.fiveHour` |
 
-Саме мапування живе в `CalmBarHiding.migrated(fromLegacyHide:)` — у Kit, щоб бути юніт-тестованим
-(`PersistedConfig` лежить у таргеті застосунку, а тестовий таргет один) і щоб ним користувалися
-**обидва** читачі старого значення: міграція `UserDefaults` і decode експортованого конфігу. Той
-самий розкол, що в `BarStyle.legacySurfaceStyles(for:)`.
+The mapping itself lives in `CalmBarHiding.migrated(fromLegacyHide:)` — in the Kit, so it's unit
+testable (`PersistedConfig` lives in the app target, and there's only one test target) and so **both**
+readers of the old value use it: the `UserDefaults` migration and decoding an exported config. The
+same split as in `BarStyle.legacySurfaceStyles(for:)`.
 
-### Експорт конфігу
+### Config export
 
-Ключ `hideCalmSevenDayBar` (bool) → `calmBarHiding` (raw-рядок) **на тій самій позиції** в пане-
-порядку. Старий ключ лишається read-only кейсом у `CodingKeys`, тож дамп зі старішого білда
-імпортується через те саме мапування. Дамп без обох ключів падає на `.sevenDay` — семантику, яку той
-білд і малював, а не на сьогоднішній дефолт.
+The key `hideCalmSevenDayBar` (bool) → `calmBarHiding` (raw string) **at the same position** in the
+pane's order. The old key stays around as a read-only case in `CodingKeys`, so a dump from an older
+build imports through the same mapping. A dump with neither key present falls back to `.sevenDay` —
+the semantics that build actually drew, not today's default.
 
-### Ціна
+### The cost
 
-- `MenuBarMode.expanded` тепер має два optional-поля, тож місця, які читають `five`, потребують
-  розгортання. Реальний обсяг виявився малим: більшість тестів ходять через хелпери.
-- Гілка `(nil, nil)` у `drawBars` недосяжна за інваріантом, але існує в коді як мовчазний no-op —
-  view лишається тонким shell'ом ([ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md)), а не місцем для assertion.
+- `MenuBarMode.expanded` now has two optional fields, so call sites that read `five` need to unwrap.
+  The real footprint turned out small: most tests go through helpers.
+- The `(nil, nil)` branch in `drawBars` is unreachable given the invariant, but exists in the code
+  as a silent no-op — the view stays a thin shell
+  ([ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md)), not a place for assertions.

@@ -3,120 +3,136 @@ status: accepted
 date: 2026-08-04
 ---
 
-# ADR-0069: Вікно Settings — resizable по висоті, вертикальний zoom, персистентний фрейм із валідацією
+# ADR-0069: The Settings window — height-resizable, vertical zoom, a validated persistent frame
 
-> **Постскриптум ([ADR-0088](0088-settings-hosting-safe-area-and-manual-separator.md), 2026-08-13).**
-> Два уточнення. (1) Твердження §2 «нижче за цю межу grouped-`Form` скролить сам (перевірено вживу
-> на висоті 300 pt)» описувало збірку **до** [#311](https://github.com/artem-from-ua/tokenpace/issues/311):
-> доданий там тулбар із `.fullSizeContentView` увімкнув баг пропагації safe area
-> (rdar://122947424), і скрол панелі зламався непомітно —
-> [#346](https://github.com/artem-from-ua/tokenpace/issues/346). (2) Мінімум висоти знижено
-> 480 → **470** — виміряний мінімум System Settings (window server, вікно стиснуте до упору);
-> «історична перша фіксована висота» виявилась вищою за системну. Механізм enforcement (§3,
-> `windowWillResize`) незмінний.
+> **Postscript ([ADR-0088](0088-settings-hosting-safe-area-and-manual-separator.md), 2026-08-13).**
+> Two clarifications. (1) §2's claim, "below this bound the grouped `Form` scrolls on its own
+> (verified live at a height of 300 pt)," described the build **before**
+> [#311](https://github.com/artem-from-ua/tokenpace/issues/311): the toolbar added there, with
+> `.fullSizeContentView`, triggered a safe-area propagation bug (rdar://122947424), and the pane's
+> scrolling broke silently —
+> [#346](https://github.com/artem-from-ua/tokenpace/issues/346). (2) The height minimum was
+> lowered 480 → **470** — the measured minimum of System Settings (via the window server, window
+> squeezed all the way down); the "historical first fixed height" turned out to be taller than the
+> system one. The enforcement mechanism (§3, `windowWillResize`) is unchanged.
 
-## Контекст
+## Context
 
-Висота вікна Settings була фіксованою і росла **вручну**: 480 → 520 (#199) → 560 (#211) → 600 (#215)
-→ 636 → 684 → 776 (#224) → 720 (#224) → 732 (#224). Кожна нова опція в Appearance означала новий бамп
-константи й новий раунд перевірки, що всі п'ять панелей ще влазять. Це той самий клас проблеми, який
-ADR-0040 §1 називає хардкодом, лише з ручним циклом супроводу замість одного числа.
+The Settings window's height was fixed and grew **by hand**: 480 → 520 (#199) → 560 (#211) → 600
+(#215) → 636 → 684 → 776 (#224) → 720 (#224) → 732 (#224). Every new option in Appearance meant
+another bump to the constant and another round of checking that all five panes still fit. This is
+the same class of problem ADR-0040 §1 calls hardcoding — just with a manual maintenance loop
+instead of a single number.
 
-HIG-аргумент, яким ADR-0035/0042 обґрунтували фіксований розмір («settings-вікно акомодує розмір
-поточної панелі»), добре працює для System Settings, де панель і так займає більшу частину екрана. У
-нас п'ять панелей дуже різної висоти: найвища (Appearance, 11 груп контролів) диктує розмір усім, і
-General із двома тумблерами відкривається з великим порожнім полем. На невеликому екрані вікно 732 pt
-вже незручне.
+The HIG argument that ADR-0035/0042 used to justify the fixed size ("a settings window
+accommodates the size of the current pane") works well for System Settings, where the pane
+already takes up most of the screen. We have five panes of very different heights: the tallest
+(Appearance, 11 control groups) dictates the size for everyone, and General, with two toggles,
+opens with a large empty field. On a small screen a 732 pt window is already awkward.
 
-Ширина — інша історія. 857 pt виміряно з живого System Settings (#156), і поділ sidebar 258 / detail
-599 налаштований саме під неї; горизонтальний ресайз попливе split-у. Тому ширина лишається
-паритетною константою.
+Width is a different story. 857 pt was measured from a live System Settings (#156), and the
+sidebar/detail split (258 / 599) is tuned specifically for it; a horizontal resize would drift the
+split. So width remains a matched constant.
 
-Персистентність фрейму було **свідомо прибрано** (постскриптуми ADR-0035 і ADR-0020) з двох причин:
-(1) `center()` рахувався при нульовій ширині **до** `setContentSize`, що виштовхувало вікно за екран;
-(2) збережений фрейм переживає зміну конфігурації дисплеїв, а AppKit не ревалідовує відновлений фрейм
-під поточний layout. Причину (1) виправлено ще тоді (порядок «розмір → позиція» зберігся дотепер);
-причина (2) чинна й нікуди не поділась.
+Frame persistence was **deliberately removed** (the postscripts of ADR-0035 and ADR-0020) for two
+reasons: (1) `center()` was computed at zero width **before** `setContentSize`, which pushed the
+window off-screen; (2) a saved frame survives a display-configuration change, and AppKit never
+revalidates a restored frame against the current layout. Reason (1) was fixed back then (the
+"size → position" ordering has held ever since); reason (2) still stands and hasn't gone anywhere.
 
-## Рішення
+## Decision
 
-**1. Resizable лише по висоті.** У `styleMask` додано `.resizable` і `.miniaturizable` (світлофор
-малюється групою — показана zoom-кнопка поруч зі схованою мінімізацією дала б дірку). Ширина
-пінується на 857, висота вільна від 480 pt угору.
+**1. Resizable by height only.** `.resizable` and `.miniaturizable` are added to `styleMask` (the
+traffic lights are drawn as a group — showing a zoom button next to a hidden minimize would leave
+a hole). Width is pinned at 857; height is free upward from 480 pt.
 
-**2. `480` як мінімум — не нове число:** це історична перша фіксована висота вікна й наявний
-`SettingsRootView.minHeight`. Контролер передає обидві межі у в'юху явно, тож вони не можуть розійтися.
-Нижче за цю межу grouped-`Form` скролить сам (перевірено вживу на висоті 300 pt: і detail-панель, і
-sidebar прокручуються, контент не обрізається).
+**2. `480` as the minimum — not a new number:** it's the historical first fixed window height, and
+the existing `SettingsRootView.minHeight`. The controller passes both bounds into the view
+explicitly, so they can't drift apart. Below that bound the grouped `Form` scrolls on its own
+(verified live at a height of 300 pt: both the detail pane and the sidebar scroll, and content is
+never clipped).
 
-**3. Пін ширини тримає `windowWillResize`, а не size-межі.** Це вимушено, і причина виміряна:
-`NSHostingController`, хостячи SwiftUI-дерево, під час **першого layout-проходу** (вже після показу
-вікна) затирає **всі** обмеження — і `contentMinSize`/`contentMaxSize`, і frame-рівневі
-`minSize`/`maxSize` — залишаючи `0×0 … ∞×∞`. Тому будь-який пін, виставлений в `init`, не виживає.
-`windowWillResize` авторитетний: AppKit питає перед кожним ресайзом, хоч би хто його ініціював
-(перетягування, Accessibility, віконний менеджер), — тоді як size-межі AppKit застосовує лише до
-перетягування користувачем. Межі все одно виставляються (декларують намір і відсікають частину
-програмних шляхів) і перевиставляються на `windowDidBecomeKey`, після того проходу.
+**3. The width pin is held by `windowWillResize`, not size limits.** This is forced, and the
+reason is measured: `NSHostingController`, while hosting the SwiftUI tree, wipes **all**
+constraints during its **first layout pass** (after the window is already shown) — both
+`contentMinSize`/`contentMaxSize` and the frame-level `minSize`/`maxSize`, leaving `0×0 …
+∞×∞`. So any pin set in `init` doesn't survive. `windowWillResize` is authoritative: AppKit asks
+it before every resize, no matter who initiated it (dragging, Accessibility, a window manager) —
+whereas AppKit applies size limits only to a user-initiated drag. The limits are still set anyway
+(they declare intent and cut off some programmatic paths) and re-set on
+`windowDidBecomeKey`, after that layout pass.
 
-**4. Зелена кнопка = вертикальний zoom, не full-screen.** `windowWillUseStandardFrame` повертає
-`(x: поточний, y: defaultFrame.y, width: поточна, height: defaultFrame.height)`. `defaultFrame`, який
-дає AppKit, — це вже `visibleFrame` цільового екрана, тож `NSScreen` вручну не потрібен. Тогл (другий
-клік → попередній розмір) `NSWindow.zoom(_:)` тримає сам. Full-screen вимкнено явно
-(`.fullScreenNone`): `.floating`-вікно accessory-застосунку (ADR-0012 §6) у власному Space воює з
-активним full-screen — той самий конфлікт, через який ADR-0020 зняв `.floating` з Troubleshoot; тут ми
-лишаємо рівень і знімаємо full-screen.
+**4. The green button means vertical zoom, not full screen.** `windowWillUseStandardFrame`
+returns `(x: current, y: defaultFrame.y, width: current, height: defaultFrame.height)`. The
+`defaultFrame` AppKit provides is already the target screen's `visibleFrame`, so no manual
+`NSScreen` lookup is needed. The toggle behavior (a second click → the previous size) is handled
+by `NSWindow.zoom(_:)` itself. Full screen is explicitly disabled (`.fullScreenNone`): a
+`.floating` window on an accessory app (ADR-0012 §6), in its own Space, conflicts with an active
+full-screen window — the same conflict that made ADR-0020 remove `.floating` from Troubleshoot;
+here we keep the window level and drop full screen instead.
 
-**5. Фрейм персистується власним ключем, не `setFrameAutosaveName`.**
-`PersistedConfig.settingsWindowFrame` зберігає `[x, y, width, height]` простими `Double` (файл
-лишається AppKit-free). Autosave відхилено не через ADR-0023 — він якраз каже, що autosave це
-системний стан і конфлікту з конфігом немає, — а тому, що autosave **відновлює фрейм до того**, як
-його можна перевірити: вставити валідацію можна було б лише переписуванням уже застосованого фрейму
-(видиме миготіння) або парсингом незадокументованого рядкового формату AppKit.
+**5. The frame is persisted under its own key, not via `setFrameAutosaveName`.**
+`PersistedConfig.settingsWindowFrame` stores `[x, y, width, height]` as plain `Double`s (the file
+stays AppKit-free). Autosave wasn't rejected on ADR-0023 grounds — that ADR actually says autosave
+is system state and doesn't conflict with the config — but because autosave **restores the frame
+before** it can be validated: inserting validation would mean either rewriting an already-applied
+frame (a visible flicker) or parsing AppKit's undocumented string format.
 
-**6. Валідація — чиста функція в Kit.** `WindowFrameValidator.resolve(stored:visibleFrames:
-defaultSize:minimumSize:)` над framework-free `WindowFrameBox` (`Double`, не `CGRect`: Kit не має ні
-CoreGraphics-, ні AppKit-залежності, ADR-0009). Відкидає (→ центрований дефолт): відсутній фрейм,
-порожній список екранів (реальний стан під час реконфігурації дисплеїв), не-скінченні значення, розмір
-менший за мінімум, фрейм без перетину з жодним екраном, фрейм, від якого видно менш ніж 120×44 pt
-смуги тайтлбара. Виправляє (→ restore): висоту, більшу за екран (клемп), вихід за краї (зсув на
-екран-господар — той, із яким найбільший перетин), збережену ширину (нормалізація до поточної
-константи). Межа свідома: «не дотягнутися мишею» невідновне, «завелике або трохи звисає» — відновне.
-Конвертація frame↔content робиться на межі, щоб валідатор порівнював однорідні величини.
+**6. Validation — a pure function in the Kit.** `WindowFrameValidator.resolve(stored:visibleFrames:
+defaultSize:minimumSize:)`, operating on the framework-free `WindowFrameBox` (`Double`, not
+`CGRect`: the Kit has neither a CoreGraphics nor an AppKit dependency, ADR-0009). It rejects (→ a
+centered default): a missing frame, an empty screen list (a real state during display
+reconfiguration), non-finite values, a size below the minimum, a frame that intersects no screen,
+and a frame that shows less than a 120×44 pt strip of titlebar. It repairs (→ restore): a height
+taller than the screen (clamped), an out-of-bounds position (shifted onto the host screen — the one
+with the largest intersection), and a saved width (normalized to the current constant). The line
+is deliberate: "can't be reached with the mouse" is unrecoverable, "too big or hanging off a bit"
+is recoverable. The frame↔content conversion happens at the boundary, so the validator compares
+like-for-like quantities.
 
-**7. `show()` більше не скидає геометрію.** Уся геометрія — під одноразовим `hasBeenPositioned`-гейтом,
-і всередині нього порядок незмінний: **розмір → позиція** (`setFrame` атомарно у restore-гілці;
-`setContentSize` → `center()` у default-гілці). Це те, що виправив ADR-0035 і що не можна зламати назад.
+**7. `show()` no longer resets geometry.** All the geometry lives behind a one-shot
+`hasBeenPositioned` gate, and inside it the order is unchanged: **size → position** (`setFrame`
+atomically in the restore branch; `setContentSize` → `center()` in the default branch). This is
+what ADR-0035 fixed, and it must not be broken again.
 
-## Наслідки
+## Consequences
 
-- `Metrics.contentHeight` → `defaultContentHeight` + `minContentHeight`. Ланцюжок ручних бампів
-  обривається: нова опція в Appearance більше **не вимагає** бампу; його роблять лише щоб дефолтне
-  відкриття лишалось зручним.
-- **Відоме косметичне обмеження: на бічних краях лишається ↔-курсор** — вікно пропонує горизонтальний
-  ресайз, який `windowWillResize` мовчки відхиляє. Штатного способу прибрати цей курсор для однієї осі
-  AppKit не має: `resizeIncrements`, обидві пари size-меж і styleMask перевірено окремо — жоден не
-  прибирає. Власне вікно Apple Settings пінить ширину так само (перевірено через Accessibility: запит
-  «+300 до ширини» повертає 857 незмінно, висота міняється), тож воно, найпевніше, використовує
-  приватний шлях. Відстежується окремим тікетом.
-- `SettingsWindowController` уперше приймає `NSWindowDelegate` (другий випадок у проєкті після
-  `DevToolsWindowController`), і в проєкті вперше з'являється робота з `NSScreen`.
-- `PersistedConfig` отримує перший ключ **геометрії** — свідомий виняток із межі «конфіг ≠ системний
-  стан» (ADR-0023), обґрунтований у Рішенні §5.
-- `TokenPaceKit` отримує перший тип із геометрією (`WindowFrameBox`) — навмисно на `Double`, щоб не
-  тягнути CoreGraphics і зберегти Kit придатним до Фази 2 (iOS/watchOS).
-- **Insights-вікно свідомо не чіпаємо.** `InsightsWindowController` має ту саму ваду (скидає розмір на
-  кожному показі), але воно ще placeholder (#242): його дефолтний розмір і мінімум зміняться разом із
-  чартами (#244/#245). `WindowFrameValidator` public і переюзабельний — тоді це буде один виклик.
-- Верифікація лишається візуальною (UI-тестів немає): чиста логіка валідатора покрита 19 юнітами в Kit,
-  решта — скриншотами в обох темах.
+- `Metrics.contentHeight` → `defaultContentHeight` + `minContentHeight`. The chain of manual bumps
+  is broken: a new Appearance option no longer **requires** a bump; one is made only to keep the
+  default opening size comfortable.
+- **A known cosmetic limitation: the ↔ cursor still shows on the side edges** — the window offers a
+  horizontal resize that `windowWillResize` silently rejects. AppKit has no built-in way to drop
+  that cursor for a single axis: `resizeIncrements`, both pairs of size limits, and the styleMask
+  were each checked separately, and none removes it. Apple's own Settings window pins its width the
+  same way (verified via Accessibility: a "+300 to width" request returns 857 unchanged, while
+  height changes), so it most likely uses a private path. Tracked as a separate ticket.
+- `SettingsWindowController` adopts `NSWindowDelegate` for the first time (the second case in the
+  project after `DevToolsWindowController`), and the project gets its first use of `NSScreen`.
+- `PersistedConfig` gets its first **geometry** key — a deliberate exception to the "config ≠
+  system state" boundary (ADR-0023), justified in Decision §5.
+- `TokenPaceKit` gets its first type with geometry (`WindowFrameBox`) — deliberately built on
+  `Double` so as not to pull in CoreGraphics and to keep the Kit suitable for Phase 2 (iOS/watchOS).
+- **The Insights window is deliberately left untouched.** `InsightsWindowController` has the same
+  flaw (resets its size on every show), but it's still a placeholder (#242): its default size and
+  minimum will change along with the charts (#244/#245). `WindowFrameValidator` is public and
+  reusable — at that point it'll be a single call.
+- Verification stays visual (there are no UI tests): the validator's pure logic is covered by 19
+  unit tests in the Kit, the rest is screenshots in both themes.
 
-## Пов'язане
+## Related
 
-- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — pure core / thin shell (чому валідатор у Kit).
-- [ADR-0012](0012-configure-window-and-launch-at-login.md) — `.floating` для accessory-вікна (збережено).
-- [ADR-0020](0020-troubleshoot-window-and-diagnostics-pipeline.md) — той самий постскриптум про autosave; конфлікт `.floating` ↔ full-screen.
-- [ADR-0023](0023-persisted-config-version-marker.md) — межа «конфіг ↔ системний стан».
-- [ADR-0035](0035-settings-window-sidebar-grouped-inset.md) — звідки взялося «завжди по центру» (частково переглянуто).
-- [ADR-0040](0040-native-system-metrics-no-hardcoded-ui.md) — «нуль хардкоду»; §1 про фіксоване вікно (частково уточнено).
-- [ADR-0042](0042-settings-swiftui-form.md) — SwiftUI-переписання; клауза про геометрію вікна (частково переглянуто).
-- [system-settings-parity.md](../reference/system-settings-parity.md) — таблиця системних механізмів.
+- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — the pure core / thin shell split
+  (why the validator lives in the Kit).
+- [ADR-0012](0012-configure-window-and-launch-at-login.md) — `.floating` for the accessory window
+  (kept).
+- [ADR-0020](0020-troubleshoot-window-and-diagnostics-pipeline.md) — the same postscript about
+  autosave; the `.floating` ↔ full-screen conflict.
+- [ADR-0023](0023-persisted-config-version-marker.md) — the "config ↔ system state" boundary.
+- [ADR-0035](0035-settings-window-sidebar-grouped-inset.md) — the origin of "always centered"
+  (partially revisited).
+- [ADR-0040](0040-native-system-metrics-no-hardcoded-ui.md) — "zero hardcoding"; §1 on the fixed
+  window (partially refined).
+- [ADR-0042](0042-settings-swiftui-form.md) — the SwiftUI rewrite; the clause on window geometry
+  (partially revisited).
+- [system-settings-parity.md](../reference/system-settings-parity.md) — the table of system
+  mechanisms.

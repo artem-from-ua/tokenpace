@@ -5,167 +5,181 @@ supersedes: []
 superseded_by: [0105, 0115]
 ---
 
-# ADR-0081: Синій гейтиться запасом тижня; ширина far-behind зони фіксована
+# ADR-0081: Blue is gated by the week's headroom; the far-behind zone's width is fixed
 
-> **§3 (у частині per-model) і §5 витіснено
+> **§3 (the per-model portion) and §5 were superseded by
 > [ADR-0115](0115-no-blue-on-per-model-windows.md)**
-> ([#426](https://github.com/artem-from-ua/tokenpace/issues/426)). Per-model рядки
-> (Opus / Sonnet / scoped) **не** несуть weekly gate — вони мають безумовне `blueAllowed: false`, бо
-> є зрізами того самого тижня, про який говорить синій ([ADR-0061 §4](0061-far-behind-blue-pacing-zone.md),
-> ніколи не скасоване, лише перенесене з рендера в модель). Твердження §5, що розбіжність зі
-> scoped-синім «закривається», **було хибним**: `PacingBucket` навчився читати `blueAllowed`, але
-> сам `blueAllowed` лишався `weeklyHasHeadroom`, тож при відкритому тижні синій проходив далі —
-> 2 214 таких записів у серпневому журналі. **Чинним лишається §3 для 5-годинного бару** (сам gate,
-> closed-by-default, деградація в зелений), а також §1, §2 і §6.
+> ([#426](https://github.com/artem-from-ua/tokenpace/issues/426)). Per-model rows
+> (Opus / Sonnet / scoped) **do not** carry the weekly gate — they have an unconditional
+> `blueAllowed: false`, because they are slices of the same week the blue is talking about
+> ([ADR-0061 §4](0061-far-behind-blue-pacing-zone.md), never retracted, only moved from render to
+> model). §5's claim that the discrepancy with scoped-blue "closes" **was wrong**: `PacingBucket`
+> learned to read `blueAllowed`, but `blueAllowed` itself remained `weeklyHasHeadroom`, so with an
+> open week, blue still passed through — 2,214 such records in the August journal. **Still standing:
+> §3 for the 5-hour bar** (the gate itself, closed-by-default, degradation to green), as well as §1,
+> §2, and §6.
 
-> **§4 «Idle-пігулка тризначна» витіснено
+> **§4 "The idle pill is three-valued" was superseded by
 > [ADR-0105](0105-color-advice-governs-pacing-bars-only.md)**
-> ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)): станів у пігулки **два** — сіра
-> `isBlocked` і **зелена** решта; синьої немає на жодній із поверхонь. Разом із нею видалено поля
-> `BarView.weeklyHeadroom` / `LimitRow.weeklyHeadroom`, які існували лише щоб протягти тижневий
-> вердикт крізь інертний idle-рядок. **Чинним лишається §3** — сам weekly-gate, що й далі гейтить
-> `blueAllowed` **активних** барів, а також §1, §2, §5 і §6. Опція, названа тут `CalmColorMode`,
-> зветься `ColorAdvice` ([ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md)).
+> ([#381](https://github.com/artem-from-ua/cc-timer/issues/381)): the pill now has **two** states —
+> gray `isBlocked` and **green** otherwise; blue no longer appears on either surface. Along with it,
+> the `BarView.weeklyHeadroom` / `LimitRow.weeklyHeadroom` fields were removed — they existed only to
+> thread the weekly verdict through an inert idle row. **§3 still stands** — the weekly gate itself,
+> which continues to gate `blueAllowed` on **active** bars, as do §1, §2, §5, and §6. The option named
+> `CalmColorMode` here is called `ColorAdvice`
+> ([ADR-0104](0104-appearance-named-for-behaviour-on-three-layers.md)).
 
-> Частково витісняє [ADR-0061](0061-far-behind-blue-pacing-zone.md) (§1 «Behind-поріг фіксованої
-> часової ширини» — поріг лишається фіксованим, але множник більше не конфігурований) і
-> [ADR-0062](0062-configurable-bar-presentation.md) (§3 `FarBehindInterval` — опцію прибрано).
-> Чинними лишаються: синій severity-case `farBehind`, 20-хв start-override, обсяг 5h/7d,
-> `CalmColorMode`, пресети як єдине джерело дефолтів.
+> Partially supersedes [ADR-0061](0061-far-behind-blue-pacing-zone.md) (§1 "A behind threshold of
+> fixed time width" — the threshold stays fixed, but the multiplier is no longer configurable) and
+> [ADR-0062](0062-configurable-bar-presentation.md) (§3 `FarBehindInterval` — the option is removed).
+> Still standing: the blue severity case `farBehind`, the 20-min start override, the 5h/7d scope,
+> `CalmColorMode`, presets as the single source of defaults.
 
-## Контекст
+## Context
 
-Синій (`.farBehind`) означає «ти суттєво нижче лінії витрат — є куди пушити». Це **порада**, а не
-просто градація кольору: користувач бачить синій і розганяється.
+Blue (`.farBehind`) means "you're substantially below the spending line — there's room to push." This
+is **advice**, not just a color grade: the user sees blue and speeds up.
 
-Порада рахувалася **суто в межах свого вікна**. Через це виникав стан, у якому вона брехала:
+The advice was computed **strictly within its own window**. This produced a state in which it lied:
 
-- 7-денний ліміт вичерпано (або близький до того), працювати нема з чого;
-- 5-годинне вікно щойно скинулося й порожнє;
-- за 20 хв (після start-override) 5h-бар синіє — «розганяйся!» — при заблокованому тижні.
+- the 7-day limit is exhausted (or close to it), there's nothing left to work with;
+- the 5-hour window has just reset and is empty;
+- 20 minutes in (after the start override), the 5h bar turns blue — "speed up!" — while the week is
+  blocked.
 
-Це не гіпотетичний стан. У репозиторії лежав стуб `bar-extremes` із фікстурою `(5h: 5 %, 7d: 31.25 %
-при t = 30 %)` — тобто 5h синій при тижні, що вже попереду темпу.
+This wasn't a hypothetical state. The repository had a `bar-extremes` stub with a fixture
+`(5h: 5%, 7d: 31.25% at t = 30%)` — that is, 5h blue while the week is already ahead of pace.
 
-Та сама брехня була в **idle**-пігулці, іншим кодом: вона малюється синьою зі словами «ready to
-start, full quota available» і сіріла **лише** при `CreditsPacing.isBlocked` (7d = 100 % *і*
-кредити не покривають). При 7d = 85 % пігулка обіцяла повну квоту тижня, який горить.
+The same lie was present in the **idle** pill, through different code: it drew blue with the words
+"ready to start, full quota available," and turned gray **only** when `CreditsPacing.isBlocked` (7d =
+100% *and* credits don't cover it). At 7d = 85%, the pill promised the full quota of a week that's
+already burning down.
 
-Паралельно ширину синьої зони задавала опція `FarBehindInterval` (×1/×2/×3/off, дефолт ×2). Вона:
+In parallel, the width of the blue zone was set by the `FarBehindInterval` option (×1/×2/×3/off,
+default ×2). It:
 
-- дублювала те, що вже пінив журнал (`PacingBucket` рахував завжди при ×2, ігноруючи налаштування);
-- мала фактично мертві значення: ×3 дає 5h-поріг 0.60, а `surplus ≤ timeFraction`, тож синій там
-  досяжний хіба в останні дві години вікна при майже нульовому usage;
-- створювала конфліктний стан в UI (сегмент «+ Blue» у Calm-контролі доводилось вимикати, коли
-  інтервал стояв на `off`).
+- duplicated what the journal already pinned (`PacingBucket` always computed at ×2, ignoring the
+  setting);
+- had effectively dead values: ×3 gives a 5h threshold of 0.60, and `surplus ≤ timeFraction`, so blue
+  there is reachable only in the window's last two hours at near-zero usage;
+- created a conflicting UI state (the "+ Blue" segment in the Calm control had to be disabled whenever
+  the interval was set to `off`).
 
-## Рішення
+## Decision
 
-**Ширина фіксована на ×2; чи взагалі малювати синій — вирішують дані, а не налаштування.**
+**The width is fixed at ×2; whether to draw blue at all is decided by the data, not a setting.**
 
-### 1. `FarBehindInterval` прибрано, множник = 2
+### 1. `FarBehindInterval` removed, multiplier = 2
 
-`PacingModel.farBehindWidthMultiplier = 2` → 5h: 2 год / 5 год = **0.40**, 7d: 2 доби / 7 діб ≈
-**0.2857**. Обрано ×2, бо це вже був шиплений дефолт і значення, при якому писався журнал; ×1
-свідомо не став дефолтом, коли опція з'явилась, а ×3 — мертва зона.
+`PacingModel.farBehindWidthMultiplier = 2` → 5h: 2 h / 5 h = **0.40**, 7d: 2 days / 7 days ≈
+**0.2857**. ×2 was chosen because it was already the shipped default and the value the journal was
+written against; ×1 was deliberately not made the default when the option was introduced, and ×3 is a
+dead zone.
 
-`behindThreshold(windowDurationSeconds:)` втратив параметр `multiplier` і більше **ніколи не
-повертає `+∞`**: він відповідає лише на «яка ширина зони», а не на «чи вона застосовується».
+`behindThreshold(windowDurationSeconds:)` lost its `multiplier` parameter and **never returns `+∞`
+anymore**: it now only answers "how wide is the zone," not "does it even apply."
 
-### 2. `BarLayout.blueAllowed: Bool` замість `behindMultiplier: Int`
+### 2. `BarLayout.blueAllowed: Bool` instead of `behindMultiplier: Int`
 
-Поле `behindMultiplier` (де `0` означало «синього немає») замінене на `blueAllowed`. Обидва
-механізми — колишній `off` і новий gate — відповідають на **те саме** питання «чи має цей бар право
-показати синій», тож зливаються в одне поле, а не додають друге.
+The `behindMultiplier` field (where `0` meant "no blue") was replaced by `blueAllowed`. Both
+mechanisms — the old `off` and the new gate — answer **the same** question, "does this bar have the
+right to show blue," so they merge into one field rather than adding a second.
 
-Побічна вигода: перейменування перетворило «тихо розійшлися» на «не збирається» — чотири з п'яти
-місць, де вирішується синій, читали старе поле явно, тож компілятор зловив кожне.
+A side benefit: the rename turned "silently diverged" into "won't compile" — four of the five places
+that decide blue read the old field explicitly, so the compiler caught every one of them.
 
-### 3. Weekly-capacity gate
+### 3. The weekly-capacity gate
 
 ```swift
 PacingModel.weeklyHasHeadroom(in: snapshot, now: now)
   = d7.pacing == .onPaceOrBehind && d7.usageFraction < 1
 ```
 
-Тобто d7-бакет ∈ {blue, green}. Розподіл `blueAllowed`:
+That is, the d7 bucket ∈ {blue, green}. `blueAllowed` distribution:
 
-| Бар | `blueAllowed` |
+| Bar | `blueAllowed` |
 |---|---|
-| d7 | `true` завжди — сам себе не гейтить |
+| d7 | `true` always — it doesn't gate itself |
 | h5 | `weeklyHasHeadroom` |
-| ~~Opus / Sonnet / scoped~~ | ~~`weeklyHasHeadroom` — 7d-paced, той самий тижневий бюджет~~ → **`false`** ([ADR-0115](0115-no-blue-on-per-model-windows.md)): вони **є** тим тижнем, тож порада адресована сама собі |
-| credits, idle-плейсхолдери | `false` — пейсингової поради не дають |
+| ~~Opus / Sonnet / scoped~~ | ~~`weeklyHasHeadroom` — 7d-paced, the same weekly budget~~ → **`false`** ([ADR-0115](0115-no-blue-on-per-model-windows.md)): they **are** that week, so the advice would be addressed to itself |
+| credits, idle placeholders | `false` — no pacing advice is given |
 
-**Деградація в зелений, не в жовтий.** Власний темп 5-годинного вікна справді спокійний; відкликається
-лише порада, а не оцінка стану.
+**Degrades to green, not yellow.** The 5-hour window's own pace really is calm; only the advice is
+withdrawn, not the state assessment.
 
-**Closed by default.** Якщо `resets_at` тижня не парситься — `false`. Інакше fallback `?? now` у
-білдерах барів дав би `timeFraction = 1.0`, тобто «максимально позаду», і хибно **відкрив** би gate.
-`hasBrokenActiveReset` для цього не годиться: він ігнорує вікно з нульовим usage і порожню дату —
-саме ті випадки, які мають gate закривати.
+**Closed by default.** If the week's `resets_at` fails to parse — `false`. Otherwise the `?? now`
+fallback in the bar builders would produce `timeFraction = 1.0`, i.e. "maximally behind," and would
+falsely **open** the gate. `hasBrokenActiveReset` isn't suitable for this: it ignores a window with
+zero usage and an empty date — exactly the cases the gate needs to close for.
 
-Gate обчислюється **всередині** кожного білдера зі снапшота, а не передається ззовні, щоб shell не
-міг подати неконсистентне значення.
+The gate is computed **inside** each builder from the snapshot, rather than passed in from outside, so
+the shell can't hand it an inconsistent value.
 
-### 4. Idle-пігулка тризначна
+### 4. The idle pill is three-valued
 
-| Стан | Заливка | Слово |
+| State | Fill | Label |
 |---|---|---|
-| `isBlocked` | сіра | «waiting for limit reset» |
-| є `weeklyHeadroom` | синя | «ready to start» |
-| немає headroom | **зелена** | «ready to start» |
+| `isBlocked` | gray | "waiting for limit reset" |
+| has `weeklyHeadroom` | blue | "ready to start" |
+| no headroom | **green** | "ready to start" |
 
-Слово між синьою й зеленою **не змінюється** — працювати справді можна, різниця лише в тому, чи є
-що розганяти. Прибрано тільки обіцянку «full quota available», яка при зеленому хибна.
+The label between blue and green **doesn't change** — work really can start, the only difference is
+whether there's anything to push. Only the "full quota available" promise is removed, which is false
+when green.
 
-Прапорець їде окремим полем (`LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom`): idle-бар не
-проходить через `severity` і не може прочитати `blueAllowed` зі свого інертного `BarLayout`.
+The flag travels as a separate field (`LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom`): the idle
+bar doesn't go through `severity` and can't read `blueAllowed` from its inert `BarLayout`.
 
-### 5. Журнал поважає gate
+### 5. The journal respects the gate
 
-`PacingBucket.of` читає `layout.blueAllowed` замість власної приватної константи. Його виняток
-«ігноруй налаштування користувача» **звужується до `CalmColorMode`**: те косметика, а `blueAllowed` —
-об'єктивний факт про дані, який журнал зобов'язаний записати.
+`PacingBucket.of` reads `layout.blueAllowed` instead of its own private constant. Its exception,
+"ignore the user's setting," **narrows to `CalmColorMode`**: that's cosmetic, while `blueAllowed` is
+an objective fact about the data that the journal is obligated to record.
 
-Наслідок: `sev` у jsonl тепер **дорівнює кольору, який бачив користувач**.
+Consequence: `sev` in the jsonl now **equals the color the user actually saw**.
 
-> ⚠️ **Другий абзац цього пункту був хибним і виправлений
-> [ADR-0115](0115-no-blue-on-per-model-windows.md).** Тут стверджувалося, що «закривається стара
-> розбіжність, де scoped-рядок міг отримати `sev: "blue"`, хоч попап гейтить його через
-> `isBaseLimit`». Насправді читання `blueAllowed` було необхідним, але недостатнім: §3 вище лишав
-> per-model рядкам `weeklyHasHeadroom`, а він відкритий щоразу, коли тиждень спокійний, — тож синій
-> проходив далі. Розбіжність не закрилася, а закріпилася: **2 214 scoped-синіх** у серпневому
-> журналі проти нуля на екрані. Закрито в #426 перенесенням правила з рендера в модель.
+> ⚠️ **This point's second paragraph was wrong and was corrected by
+> [ADR-0115](0115-no-blue-on-per-model-windows.md).** It claimed that "an old discrepancy closes,
+> where a scoped row could get `sev: 'blue'` even though the popup gates it via `isBaseLimit`." In
+> reality, reading `blueAllowed` was necessary but not sufficient: §3 above left per-model rows with
+> `weeklyHasHeadroom`, which is open whenever the week is calm — so blue kept passing through. The
+> discrepancy didn't close, it got locked in: **2,214 scoped-blue** records in the August journal
+> against zero on screen. Closed in #426 by moving the rule from render into the model.
 
-### 6. Ролі палітри злито
+### 6. Palette roles merged
 
-`ColorRole.paceBlue` видалено — усе синє бере `.blue`. Обидві ролі дефолтились у `.systemBlue`, тобто
-на екрані були нерозрізненні; розділення лише дозволяло тюнеру розвести те, що концептуально одне.
+`ColorRole.paceBlue` was removed — everything blue now takes `.blue`. Both roles defaulted to
+`.systemBlue`, meaning they were indistinguishable on screen anyway; the split only let the tuner pull
+apart something conceptually singular.
 
-## Наслідки
+## Consequences
 
-- **Синій став рідшим і чеснішим.** Він тепер означає «є запас *і на цю годину, і на цей тиждень*».
-- **Розрив у семантиці журналу.** Старі рядки могли мати `h5.sev = blue` при `d7.sev = red`; нові не
-  можуть. `util` / `timePct` / `gap` не змінилися, тож будь-який аналіз перераховується з рядка.
-- **Користувачі пресету Chill** (мали `FarBehindInterval.off`) знову побачать синій у попапі; у
-  menu bar його й далі глушить `CalmColorMode.yellowGreenBlue`.
-- **Користувачі `.workHarder`** побачать, що при закритому gate бар іде звичайним calm-шляхом і
-  приглушується в біле замість кольорового синього.
-- Ключ `farBehindInterval` тихо retired (`PersistedConfig.retireFarBehindIntervalIfNeeded`) —
-  успадкованого значення нема куди мапити.
-- Стуб `bar-extremes` довелося перефіксурити (d7 31.25 % → 20 %): його 5h-синій — те, заради чого
-  кадр існує (радіус кутів на повній заливці), і gate забрав би його.
+- **Blue became rarer and more honest.** It now means "there's headroom, *both this hour and this
+  week*."
+- **A gap opened in the journal's semantics.** Old rows could have `h5.sev = blue` while
+  `d7.sev = red`; new ones can't. `util` / `timePct` / `gap` are unchanged, so any analysis can be
+  recomputed from the row.
+- **Chill-preset users** (who had `FarBehindInterval.off`) will see blue in the popup again; in the
+  menu bar it's still muted by `CalmColorMode.yellowGreenBlue`.
+- **`.workHarder` users** will see that with the gate closed, the bar takes the ordinary calm path and
+  dims to white instead of colored blue.
+- The `farBehindInterval` key is silently retired (`PersistedConfig.retireFarBehindIntervalIfNeeded`)
+  — there's no legacy value to map it onto.
+- The `bar-extremes` stub had to be re-fixtured (d7 31.25% → 20%): its 5h-blue is the whole reason the
+  frame exists (corner radius on a full fill), and the gate would have taken it away.
 
-## Альтернативи, які відкинуто
+## Alternatives considered
 
-- **Динамічна ширина** (звужувати поріг із часом, як `aheadThreshold`) — відхилено ще в
-  [ADR-0061](0061-far-behind-blue-pacing-zone.md): рухома межа синього читається гірше, ніж
-  «відстаю більше ніж на дві години».
-- **Гейт від сирого рівня квоти** (напр. «7d > 80 %») — падає на наскрізному принципі проєкту:
-  значення — вхід моделі, вердикт — її вихід. Gate читає *пейсинговий стан* d7, тобто вихід моделі.
-- **Плавне масштабування ширини станом d7** замість бінарного gate — непояснюване користувачеві
-  («синій — це відставання більше ніж на… залежить»).
-- **Тільки `isBlocked` як умова** (гейтити лише при вичерпаному тижні) — прибирає найабсурдніший
-  стан, але лишає брехню при 7d = orange, тобто типовий ранок після інтенсивного тижня.
-- **Гістерезис на межі** — зайвий: green і blue обидва `isCalm`, фліп міняє лише колір, не поведінку.
+- **A dynamic width** (shrinking the threshold over time, like `aheadThreshold`) — already rejected in
+  [ADR-0061](0061-far-behind-blue-pacing-zone.md): a moving blue boundary reads worse than "more than
+  two hours behind."
+- **A gate on the raw quota level** (e.g., "7d > 80%") — fails on the project's cross-cutting
+  principle: the level is the model's input, the verdict is its output. The gate reads d7's *pacing
+  state*, i.e. the model's output.
+- **Smoothly scaling the width by d7's state** instead of a binary gate — unexplainable to the user
+  ("blue means more than… behind, depending").
+- **Only `isBlocked` as the condition** (gate only when the week is exhausted) — removes the most
+  absurd case but leaves the lie in place at 7d = orange, i.e. a typical morning after an intense
+  week.
+- **Hysteresis at the boundary** — unnecessary: green and blue are both `isCalm`, and a flip changes
+  only the color, not the behavior.

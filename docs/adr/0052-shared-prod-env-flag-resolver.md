@@ -4,84 +4,94 @@ date: 2026-07-31
 superseded_by: [0053]
 ---
 
-> **Скасовано [ADR-0053](0053-devtools-flag-via-defaults.md).** `ProdEnvFlag` видалено: гейт dev-tools
-> переїхав з env-var на `UserDefaults`-ключ `devToolsEnabled` (`defaults`), а `TOKENPACE_GH_AUTH`
-> повернувся до самостійного `resolveGHAuth` (ADR-0025). Текст нижче — історичний запис.
+> **Canceled by [ADR-0053](0053-devtools-flag-via-defaults.md).** `ProdEnvFlag` was removed: the
+> dev-tools gate moved from an env var to a `UserDefaults` key `devToolsEnabled` (`defaults`), and
+> `TOKENPACE_GH_AUTH` reverted to its standalone `resolveGHAuth` (ADR-0025). The text below is a
+> historical record.
 
-# ADR-0052: Спільний резолвер prod-visible env-прапорців (`ProdEnvFlag`)
+# ADR-0052: A shared resolver for prod-visible env flags (`ProdEnvFlag`)
 
-## Контекст
+## Context
 
-Кілька `TOKENPACE_*` env-прапорців мають бути видимі застосунку навіть при **login/GUI-запуску** —
-через `SMAppService`, Finder, Dock, Launchpad, — коли launchd стартує бінарник `.app` **без шелла**, тож
-`export TOKENPACE_FOO=1` у `~/.zshrc` **не** потрапляє в `ProcessInfo.processInfo.environment`.
+Several `TOKENPACE_*` env flags need to be visible to the app even on **login/GUI launch** — via
+`SMAppService`, Finder, Dock, Launchpad — when launchd starts the `.app` binary **without a
+shell**, so `export TOKENPACE_FOO=1` in `~/.zshrc` does **not** reach
+`ProcessInfo.processInfo.environment`.
 
-Перший такий прапорець — `TOKENPACE_GH_AUTH` (ADR-0025): резолвиться спершу з `ProcessInfo` (запуск із
-термінала / `launchctl setenv`), потім — fallback — із rc-файлів login-шелла через `ShellEnvironment`
-(`zsh -l -i -c`). Так мейнтейнеру достатньо `export` у `.zshrc`, без `launchctl setenv`/LaunchAgent.
+The first such flag was `TOKENPACE_GH_AUTH` (ADR-0025): resolved first from `ProcessInfo` (a
+launch from a terminal / `launchctl setenv`), then — as a fallback — from the login shell's rc
+files via `ShellEnvironment` (`zsh -l -i -c`). That way the maintainer only needs an `export` in
+`.zshrc`, with no `launchctl setenv`/LaunchAgent.
 
-Коли `TOKENPACE_DEVTOOLS` (#185, розблоковує ⌥-пункт «Development tools…» і колор-тюнер) мав отримати ту
-саму зручність, виявилося, що його гейт `ColorStore.devToolsEnabled` читав **лише `ProcessInfo`**. Тому
-`export TOKENPACE_DEVTOOLS=1` у `.zshrc` працював для `swift run` (термінал успадковує env), але **не** для
-встановленого `.app`, запущеного з Finder/при логіні — на відміну від `TOKENPACE_GH_AUTH`. Симптом:
-«меню Dev Tools не з'являється під ⌥ у нотаризованому застосунку».
+When `TOKENPACE_DEVTOOLS` (#185, unlocks the ⌥ "Development tools…" menu item and the color tuner)
+was meant to get the same convenience, it turned out that its gate `ColorStore.devToolsEnabled`
+read **only `ProcessInfo`**. So `export TOKENPACE_DEVTOOLS=1` in `.zshrc` worked for `swift run`
+(a terminal inherits env), but **not** for the installed `.app`, launched from Finder/at login —
+unlike `TOKENPACE_GH_AUTH`. Symptom: "the Dev Tools menu doesn't appear under ⌥ in the notarized
+app".
 
-Замість дублювати `resolveGHAuth`-логіку ще раз — робимо **один спільний резолвер** для всіх prod-visible
-прапорців, щоб майбутні випадки додавалися одним рядком.
+Instead of duplicating the `resolveGHAuth` logic once more, we build **one shared resolver** for
+all prod-visible flags, so future cases can be added with a single line.
 
-Два питання цього ADR: (1) **єдина точка** резолву, і (2) **як не заблокувати** запуск і hot draw-path,
-адже `ShellEnvironment` — це subprocess (типово <0.5 с, cap 5 с).
+Two questions for this ADR: (1) a **single** point of resolution, and (2) **how not to block**
+launch and the hot draw path, since `ShellEnvironment` is a subprocess (typically <0.5 s, capped at
+5 s).
 
-## Рішення
+## Decision
 
-### Єдиний резолвер — `ProdEnvFlag`
+### A single resolver — `ProdEnvFlag`
 
-`enum ProdEnvFlag: String, CaseIterable` — каталог prod-visible прапорців (`.ghAuth`, `.devTools`), де
-`rawValue` — ім'я env-змінної. Додати майбутній прапорець = **один case**; жодного нового резолвера чи
-плюмбінгу. І `ColorStore.devToolsEnabled`, і `AppDelegate.ghAuthEnabled` тепер — тонкі обгортки над
-`ProdEnvFlag.isEnabled(_:)`; окремий `resolveGHAuth` видалено.
+`enum ProdEnvFlag: String, CaseIterable` — a catalog of prod-visible flags (`.ghAuth`,
+`.devTools`), where `rawValue` is the env variable's name. Adding a future flag = **one case**; no
+new resolver or plumbing. Both `ColorStore.devToolsEnabled` and `AppDelegate.ghAuthEnabled` are now
+thin wrappers over `ProdEnvFlag.isEnabled(_:)`; the standalone `resolveGHAuth` was removed.
 
-### Резолв — `ProcessInfo` синхронно, shell-fallback прогрітий раз off-main
+### Resolution — `ProcessInfo` synchronously, a shell fallback warmed once off-main
 
-`isEnabled(_:)` — **не блокуючий**, безпечний з будь-якого потоку (draw-path, poll):
+`isEnabled(_:)` is **non-blocking**, safe from any thread (draw path, poll):
 
-1. **`ProcessInfo` спершу** — синхронно, на кожному читанні. Запуск із термінала / `launchctl setenv`
-   вшановується миттєво, з нульовою вартістю на старті.
-2. **Login-shell fallback** через `ShellEnvironment` — subprocess, тож **ніколи** на hot-path. Він
-   виконується **один раз, off-main, при старті** в `ProdEnvFlag.warmUp` і результат кешується (під
-   `NSLock`, `nonisolated(unsafe)`-словник). Синхронні читання **до** завершення прогріву бачать лише
-   `ProcessInfo`.
+1. **`ProcessInfo` first** — synchronously, on every read. A launch from a terminal /
+   `launchctl setenv` is honored instantly, at zero cost at startup.
+2. **A login-shell fallback** via `ShellEnvironment` — a subprocess, so **never** on the hot path.
+   It runs **once, off-main, at startup** in `ProdEnvFlag.warmUp`, and the result is cached (under
+   an `NSLock`, a `nonisolated(unsafe)` dictionary). Synchronous reads **before** the warm-up
+   completes only see `ProcessInfo`.
 
-### Прогрів (`warmUp`) — рано в `applicationDidFinishLaunching`, з ре-рендер-callback
+### Warm-up (`warmUp`) — early in `applicationDidFinishLaunching`, with a re-render callback
 
-`warmUp(then:)` пробує shell лише для прапорців, яких `ProcessInfo` не покрив, у `Task.detached(.utility)`,
-тоді викликає completion на `@MainActor`. Викликається раз, на самому початку launch — паралельно з рештою
-запуску. Completion робить `reRenderForCurrentTime()`, щоб override-залежне перемалювання лягло, щойно
-probe резолвить прапорець.
+`warmUp(then:)` tries the shell only for flags `ProcessInfo` didn't cover, in
+`Task.detached(.utility)`, then calls the completion on `@MainActor`. Called once, right at the
+start of launch — in parallel with the rest of startup. The completion calls
+`reRenderForCurrentTime()`, so any override-dependent redraw lands as soon as the probe resolves
+the flag.
 
-### Наслідок для меню «Development tools…»
+### The consequence for the "Development tools…" menu
 
-Раніше пункт створювався умовно (`if devToolsEnabled`) один раз на старті — з асинхронним прогрівом його б
-не існувало, якщо прапорець резолвиться пізніше. Тепер пункт створюється **завжди** (прихований), а гейт
-`TOKENPACE_DEVTOOLS` перевіряється в `updateTroubleshootVisibility` на **кожному** відкритті меню (разом з
-⌥). Тож він з'являється, щойно прогрів резолвить прапорець, без перебудови меню.
+Previously the item was created conditionally (`if devToolsEnabled`) once at startup — with an
+async warm-up it would not exist if the flag resolves later. Now the item is created **always**
+(hidden), and the `TOKENPACE_DEVTOOLS` gate is checked in `updateTroubleshootVisibility` on
+**every** menu opening (along with ⌥). So it appears as soon as the warm-up resolves the flag,
+without rebuilding the menu.
 
-### Чому не sync-резолв до першого рендеру
+### Why not a sync resolve before the first render
 
-Синхронний shell-probe до першого малювання дав би коректний стан із першого кадру, але додав би до ~5 с
-(типово <0.5 с) до **холодного GUI-старту для всіх** користувачів — бо probe запускається завжди, коли
-`ProcessInfo` порожній, навіть для тих, хто жодного `TOKENPACE_*` не має. Це регрес старту заради dev-фічі.
-Async-прогрів натомість ніколи не блокує старт; ціна — dev-меню/override-и стають активними за частку
-секунди після запуску (для звичайного користувача ефекту нема — прапорці завжди `false`).
+A synchronous shell probe before the first draw would give a correct state from the very first
+frame, but would add up to ~5 s (typically <0.5 s) to the **cold GUI startup for everyone** —
+because the probe always runs when `ProcessInfo` is empty, even for users who have no
+`TOKENPACE_*` at all. That's a startup regression for the sake of a dev feature. An async warm-up,
+by contrast, never blocks startup; the cost is that dev-menu/overrides become active a fraction of
+a second after launch (no effect for a regular user — the flags are always `false`).
 
-## Наслідки
+## Consequences
 
-- `export TOKENPACE_DEVTOOLS=1` у `~/.zshrc` тепер розблоковує dev-tools і у встановленому `.app`
-  (Finder/login-запуск), як і `TOKENPACE_GH_AUTH` — без `launchctl setenv`/LaunchAgent.
-- Один шлях резолву для всіх prod-visible прапорців; майбутній додається одним case у `ProdEnvFlag.all`.
-- `devToolsEnabled` став `var` (обгортка) замість `static let` (мемоізований probe) — вартість читання
-  лишається дешевою (env-read + lookup під локом), безпечна на draw-path.
-- Лог `env: <TOKENPACE_VAR> found in login shell env` (`.notice`, `lifecycle`) з `warmUp` заміняє
-  попередній `update: TOKENPACE_GH_AUTH found in login shell env` — тепер спільний для всіх прапорців.
-- `ShellEnvironment` (ADR-0025) лишається незмінним низькорівневим примітивом; `ProdEnvFlag` — політика
-  поверх нього (які прапорці, коли прогрівати, як кешувати).
+- `export TOKENPACE_DEVTOOLS=1` in `~/.zshrc` now unlocks dev-tools in the installed `.app` too
+  (Finder/login launch), just like `TOKENPACE_GH_AUTH` — with no `launchctl setenv`/LaunchAgent.
+- One resolution path for all prod-visible flags; a future one is added with a single case in
+  `ProdEnvFlag.all`.
+- `devToolsEnabled` became a `var` (a wrapper) instead of a `static let` (a memoized probe) — the
+  cost of a read stays cheap (an env read + a locked lookup), safe on the draw path.
+- The log `env: <TOKENPACE_VAR> found in login shell env` (`.notice`, `lifecycle`) from `warmUp`
+  replaces the previous `update: TOKENPACE_GH_AUTH found in login shell env` — now shared across
+  all flags.
+- `ShellEnvironment` (ADR-0025) stays unchanged as a low-level primitive; `ProdEnvFlag` is the
+  policy layer on top of it (which flags, when to warm up, how to cache).

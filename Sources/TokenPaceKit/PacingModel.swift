@@ -510,7 +510,7 @@ public enum PacingModel {
     /// band a whole percent cannot land in, but a value reconstructed inside the bucket can. The
     /// smallest wait shown anywhere else is 20.9 min.
     ///
-    /// See ADR-0103 (§Наслідки) and docs/reference/usage-api-quirks.md; the `standby-floor` stub
+    /// See ADR-0103 (§Consequences) and docs/reference/usage-api-quirks.md; the `standby-floor` stub
     /// reproduces the surviving sliver on a whole `utilization` of 99.
     public static let standByFloorSeconds: TimeInterval = 1200
 

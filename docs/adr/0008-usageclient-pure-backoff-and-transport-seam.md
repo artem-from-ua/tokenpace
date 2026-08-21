@@ -3,71 +3,77 @@ status: accepted
 date: 2026-06-22
 ---
 
-# ADR-0008: UsageClient — чистий backoff, інжекція токена і transport-seam
+# ADR-0008: UsageClient — pure backoff, an injected token, and a transport seam
 
-## Контекст
+## Context
 
-Issue #9 описує `UsageClient` як HTTP-клієнт для `GET /api/oauth/usage` з обов'язковим
-`User-Agent` і backoff при 429. Дві деталі обсягу неочевидні й вимагають свідомого рішення про
-межі модуля — той самий клас рішень, що й [ADR-0005](0005-pacing-fractions-not-blocks.md),
-[ADR-0006](0006-reset-time-absolute-vs-relative.md) і
-[ADR-0007](0007-token-provider-throws-and-scope-split.md).
+Issue #9 describes `UsageClient` as an HTTP client for `GET /api/oauth/usage` with a mandatory
+`User-Agent` and backoff on 429. Two scope details are non-obvious and call for a deliberate decision
+about the module's boundaries — the same class of decision as
+[ADR-0005](0005-pacing-fractions-not-blocks.md), [ADR-0006](0006-reset-time-absolute-vs-relative.md)
+and [ADR-0007](0007-token-provider-throws-and-scope-split.md).
 
-1. **Де живе backoff.** SPEC «Refresh cadence» віддає *таймер* опитування тікету #13
-   (sleep/wake + мережа): саме polling-шар планує наступне пробудження, реагує на сон/прокидання
-   й мережу. Але acceptance-критерій #9 явно вимагає «Backoff працює (unit-тест на логіку
-   інтервалів)». Якщо backoff жив би всередині асинхронного `fetch` (який спить і ретраїть),
-   протестувати інтервали без живого годинника й мережі було б важко.
+1. **Where backoff lives.** The SPEC's "Refresh cadence" hands the polling *timer* to ticket #13
+   (sleep/wake plus network): it is the polling layer that schedules the next wake-up and reacts to
+   sleep, wake and the network. But #9's acceptance criteria explicitly require "backoff works (a unit
+   test on the interval logic)". If backoff lived inside an asynchronous `fetch` (one that sleeps and
+   retries), testing the intervals without a live clock and a live network would be hard.
 
-2. **Звідки `UsageClient` бере токен і як тестувати мережу.** `UsageClient` залежить від
-   `TokenProvider` (#8), але за архітектурою *оркеструє* саме polling-шар. Якщо `fetch` сам читає
-   Keychain, мережевий шар зчіплюється з Keychain-I/O і `Security`, а unit-тести вимагають мокати
-   Keychain. Окремо постає питання, як проганяти `fetch` без походу на `api.anthropic.com`.
+2. **Where `UsageClient` gets its token, and how to test the network.** `UsageClient` depends on
+   `TokenProvider` (#8), but architecturally it is the polling layer that *orchestrates*. If `fetch`
+   read the Keychain itself, the network layer would be coupled to Keychain I/O and `Security`, and
+   unit tests would have to mock the Keychain. Separately, there is the question of how to exercise
+   `fetch` without going to `api.anthropic.com`.
 
-## Рішення
+## Decision
 
-1. **Backoff — чиста value-type стейт-машина `PollingBackoff`, без таймера й сну.** Модель стану
-   — один `level: Int?` (`nil` == healthy → 180 с; інакше індекс у `steps`). Переходи
-   детерміновані й без побічних ефектів: `escalated()` піднімає крок (`nil→0→1→2→3`, тримати 3),
-   `reset()` повертає на 180 с, `interval` — похідна. Кроки 429 зберігаються **в секундах**
-   (`[3, 6, 12, 15] × 60 = [180, 360, 720, 900]`) — кодування хвилини-vs-секунди load-bearing і
-   стережеться тестом `stepsAreInSeconds`. `fetch` **не спить і не ретраїть** — повертає снапшот
-   або кидає `UsageError`; просуває backoff і планує наступне пробудження polling-шар (#13). Так
-   уся логіка інтервалів юніт-тестована в ізоляції, як `PacingModel`.
+1. **Backoff is a pure value-type state machine, `PollingBackoff`, with no timer and no sleeping.**
+   The state model is a single `level: Int?` (`nil` == healthy → 180 s; otherwise an index into
+   `steps`). The transitions are deterministic and side-effect free: `escalated()` moves up a step
+   (`nil→0→1→2→3`, holding at 3), `reset()` returns to 180 s, and `interval` is derived. The 429 steps
+   are stored **in seconds** (`[3, 6, 12, 15] × 60 = [180, 360, 720, 900]`) — the minutes-versus-seconds
+   encoding is load-bearing and is guarded by the `stepsAreInSeconds` test. `fetch` **neither sleeps
+   nor retries** — it returns a snapshot or throws a `UsageError`; advancing the backoff and scheduling
+   the next wake-up belong to the polling layer (#13). That keeps all of the interval logic unit-tested
+   in isolation, like `PacingModel`.
 
-2. **Токен інжектиться ззовні як `String`.** `fetch(accessToken:now:transport:)` приймає готовий
-   bearer-токен; polling-шар (#13) сам викликає `TokenProvider.currentAccessToken(now:)`, обробляє
-   `.expired` (періодично перечитує Keychain, поки Claude Code не перезапише айтем) і передає
-   свіжий токен. `UsageClient` не імпортує `Security`/Keychain і тестується з літеральним токеном.
+2. **The token is injected from outside as a `String`.** `fetch(accessToken:now:transport:)` takes a
+   ready bearer token; the polling layer (#13) calls `TokenProvider.currentAccessToken(now:)` itself,
+   handles `.expired` (re-reading the Keychain periodically until Claude Code overwrites the item) and
+   passes a fresh token down. `UsageClient` imports neither `Security` nor the Keychain and is tested
+   with a literal token.
 
-3. **Чисті seam'и `buildRequest`/`decode` окремо від мережевого `fetch`** — той самий поділ
-   pure/I/O, що в `TokenProvider` (`decode` окремо від `readRawData`). `buildRequest` несе
-   конструкцію всіх чотирьох заголовків і guard «без `User-Agent` не ходити» (кидає
-   `.missingUserAgent` перед будь-якою мережею); `decode` — розбір JSON у `UsageSnapshot`. Обидва
-   тестуються без мережі. Internal-overload `buildRequest(…, userAgent:)` дає змогу негативного
-   тесту guard'а порожнім рядком — публічний шлях завжди передає непорожню константу версії.
+3. **Pure `buildRequest`/`decode` seams, separate from the networked `fetch`** — the same pure/I/O
+   split as in `TokenProvider` (`decode` separate from `readRawData`). `buildRequest` carries the
+   construction of all four headers and the "do not go out without a `User-Agent`" guard (it throws
+   `.missingUserAgent` before any network call); `decode` parses the JSON into a `UsageSnapshot`. Both
+   are testable without a network. An internal overload, `buildRequest(…, userAgent:)`, makes a
+   negative test of the guard possible with an empty string — the public path always passes a non-empty
+   version constant.
 
-4. **`URLSession` інжектиться через мінімальний протокол `UsageTransport`** (одна async-функція;
-   `URLSession` уже має цю сигнатуру), а не через сабкласинг `URLProtocol`. Дефолт —
-   `URLSession.shared` (ідіома проєкту «інжекція залежності з дефолтом»). Тести підставляють
-   `StubTransport`, що повертає канонізований `(Data, HTTPURLResponse)` — гермечно, без живого HTTP.
+4. **`URLSession` is injected through a minimal `UsageTransport` protocol** (one async function;
+   `URLSession` already has that signature) rather than by subclassing `URLProtocol`. The default is
+   `URLSession.shared` (the project's "inject the dependency, with a default" idiom). Tests substitute
+   a `StubTransport` returning a canned `(Data, HTTPURLResponse)` — hermetic, with no live HTTP.
 
-## Наслідки
+## Consequences
 
-- Уся логіка backoff покрита unit-тестами (`PollingBackoff`: прогресія, hold-стелі, reset,
-  кодування в секундах), не чекаючи на polling-шар #13. #13 лише читає `interval` і викликає
-  переходи.
-- `UsageClient` лишається без Keychain/`Security`; помилки токена обробляє оркестратор. Чітке
-  розділення: `UsageError` несе лише мережеві/декод-причини, `TokenError` — Keychain-причини.
-- `fetch` тестується через `UsageTransport`-stub на всіх гілках (200/429/401/5xx/transport/non-HTTP/
-  malformed) без походу в мережу; жоден тест не б'є по `api.anthropic.com`.
-- `resets_at` не парситься в `UsageClient` — зберігається сирим рядком і йде в `ResetClock.parse`
-  (#7), щоб нормалізація дат лишалась в одному місці.
-- Токен ніколи не логується: `AppLogger.network` несе лише `.public`-діагностику (HTTP-статус,
-  `retryAfter`, статичні рядки); заголовок `Authorization` будується, але в логер не передається.
-- `PollingBackoff.escalated(retryAfter:)` шанує серверний `Retry-After`, довший за розклад
-  (стрибок до першого кроку ≥ хінта або стеля) — стан лишається плоским `level`, тож `reset`
-  працює без змін.
-- Якщо в Фазі 2 зміниться політика опитування (інші інтервали для віджетів/комплікейшена) або
-  з'явиться кешування (`If-Modified-Since` — `now` уже прокинутий у `buildRequest` під це) — це
-  нове рішення → нова секція тут або окремий ADR.
+- All of the backoff logic is covered by unit tests (`PollingBackoff`: the progression, the hold
+  ceiling, reset, the encoding in seconds) without waiting for polling layer #13. #13 only reads
+  `interval` and invokes the transitions.
+- `UsageClient` stays free of the Keychain and `Security`; token errors are the orchestrator's
+  business. A clean separation: `UsageError` carries only network and decode reasons, `TokenError`
+  carries Keychain reasons.
+- `fetch` is tested through a `UsageTransport` stub on every branch
+  (200/429/401/5xx/transport/non-HTTP/malformed) without touching the network; no test hits
+  `api.anthropic.com`.
+- `resets_at` is not parsed in `UsageClient` — it is kept as a raw string and goes to `ResetClock.parse`
+  (#7), so that date normalization stays in one place.
+- The token is never logged: `AppLogger.network` carries only `.public` diagnostics (the HTTP status,
+  `retryAfter`, static strings); the `Authorization` header is built but never handed to the logger.
+- `PollingBackoff.escalated(retryAfter:)` honors a server `Retry-After` longer than the schedule
+  (jumping to the first step ≥ the hint, or to the ceiling) — the state stays a flat `level`, so
+  `reset` works unchanged.
+- If Phase 2 changes the polling policy (different intervals for widgets/the complication) or adds
+  caching (`If-Modified-Since` — `now` is already threaded into `buildRequest` for exactly that) —
+  that is a new decision → a new section here or a separate ADR.

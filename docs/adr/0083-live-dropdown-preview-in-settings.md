@@ -4,182 +4,187 @@ date: 2026-08-12
 superseded_by: [0099]
 ---
 
-# ADR-0083: Живе прев'ю дропдауна поруч із вікном Settings
+# ADR-0083: A live dropdown preview next to the Settings window
 
-> Розділ «Видиме на всіх секціях» витіснено [ADR-0099](0099-appearance-nests-its-two-surfaces.md):
-> прев'ю тепер прив'язане до пана (`Appearance` і дві її дитини), а не лише до відкритості вікна, і
-> `occupiedWidth` віддає **0**, поки воно сховане. Решта рішення — окреме borderless child-вікно,
-> спільний `PopupLayout`, ⌥-монітор, menu-матеріал, паркування — чинна повністю.
+> The "Visible in every section" section was superseded by
+> [ADR-0099](0099-appearance-nests-its-two-surfaces.md): the preview is now tied to the pane
+> (`Appearance` and its two children), not just to the window's openness, and `occupiedWidth` returns
+> **0** while it's hidden. The rest of the decision — a separate borderless child window, the shared
+> `PopupLayout`, the ⌥ monitor, the menu material, the parking — stands in full.
 
-## Контекст
+## Context
 
-Панелі `Appearance` / `Appearance › Menu bar` / `Appearance › Dropdown` ([#333](https://github.com/artem-from-ua/tokenpace/issues/333))
-налаштовують те, що малює дропдаун: `Bar style`, тіки, `Show model & service limits`, `Show extra
-usage`, пресети. Але **побачити результат під час крутіння перемикачів неможливо**: дропдаун живе в
-`NSMenu` статус-айтема, а меню не може лишатися відкритим, поки користувач працює у вікні Settings.
-Тобто єдина поверхня, яку тут налаштовують, — єдина, якої не видно.
+The `Appearance` / `Appearance › Menu bar` / `Appearance › Dropdown`
+([#333](https://github.com/artem-from-ua/tokenpace/issues/333)) panes configure what the dropdown
+draws: `Bar style`, ticks, `Show model & service limits`, `Show extra usage`, presets. But **seeing the
+result while flipping toggles is impossible**: the dropdown lives in the status item's `NSMenu`, and a
+menu can't stay open while the user is working in the Settings window. So the one surface being
+configured here is the one you can't see.
 
-Цикл перевірки виходив такий: змінив тумблер → закрив Settings → відкрив дропдаун → подивився →
-повернувся. На кожну ітерацію.
+The verification loop looked like this: flip a toggle → close Settings → open the dropdown → look →
+go back. On every iteration.
 
-Механіка «намалювати попап поза меню» в проєкті вже існує — прев'ю колор-тюнера
-([#185](https://github.com/artem-from-ua/tokenpace/issues/185), `DevToolsWindowController`), — але
-воно dev-only і навмисно неповне: не проксує `optionHeld` і обидві visibility-ручки.
+The mechanics of "draw the popup outside the menu" already exist in the project — the color tuner's
+preview ([#185](https://github.com/artem-from-ua/tokenpace/issues/185), `DevToolsWindowController`) —
+but it's dev-only and deliberately incomplete: it doesn't proxy `optionHeld` or either visibility
+handle.
 
-## Рішення
+## Decision
 
-**Окреме borderless child-вікно збоку від Settings**, із власним `PopupViewController`, якому
-дзеркалиться той самий `PopupLayout`, що й живому дропдауну.
+**A separate borderless child window next to Settings**, with its own `PopupViewController`, mirroring
+the same `PopupLayout` the live dropdown uses.
 
-### 1. Окреме вікно, а не блок усередині панелі
+### 1. A separate window, not a block inside the pane
 
-Ширина вікна Settings запінена ([ADR-0069](0069-settings-window-height-resizable.md), тримає
-`windowWillResize`), а попап — фіксовані 312 pt. Вбудований прев'ю або задавив би detail-колонку, або
-вимагав би розпінити ширину — відкат ADR-0069 заради прев'ю. Child-вікно не коштує компонуванню
-нічого і їздить за батьком безкоштовно.
+The Settings window's width is pinned ([ADR-0069](0069-settings-window-height-resizable.md), which
+holds `windowWillResize`), while the popup is a fixed 312 pt. An embedded preview would either crowd
+out the detail column or require unpinning the width — walking back ADR-0069 for the sake of a
+preview. A child window costs the layout nothing and rides along with its parent for free.
 
-### 2. Показується весь час, поки відкрите Settings — не за секціями
+### 2. Shown the entire time Settings is open — not per section
 
-Спершу планувалося вмикати прев'ю лише на трьох UI-панелях. Відкинуто: прив'язка до
-`model.selection` означала б реєстр «які секції показують прев'ю», який треба тримати синхронним із
-`SettingsSection`, і клас багів «додали панель — забули додати в реєстр».
+The plan was originally to enable the preview on only three UI panes. Rejected: tying it to
+`model.selection` would mean maintaining a registry of "which sections show the preview," kept in sync
+with `SettingsSection` — and a whole class of "added a pane, forgot to add it to the registry" bugs.
 
-Наслідок: майбутня сторінка Guide/Legend ([#261](https://github.com/artem-from-ua/tokenpace/issues/261))
-дістане прев'ю **без жодного рядка коду**.
+Consequence: a future Guide/Legend page ([#261](https://github.com/artem-from-ua/tokenpace/issues/261))
+gets the preview **with zero lines of code**.
 
-### 3. Дзеркалення в одній точці
+### 3. Mirroring from one point
 
-`AppDelegate.setPopupLayout` — єдине місце, крізь яке проходить кожна зміна попапа: полл,
-`reRenderForCurrentTime()`, кадр анімації, кожен appearance-колбек, застосування пресета
-(`fireAppearanceCallbacks`). Один рядок там покриває все — **жоден із ~22 колбеків `openSettings`
-чіпати не довелося**.
+`AppDelegate.setPopupLayout` is the single place every popup change flows through: polling,
+`reRenderForCurrentTime()`, the animation frame, every appearance callback, applying a preset
+(`fireAppearanceCallbacks`). One line there covers everything — **none of the ~22 `openSettings`
+callbacks had to be touched**.
 
-Латч `lastPopupLayout` засіває вікно, відкрите **між** рендерами: вони бувають за 30 с один від
-одного (`ageTimer`), і без латча картка стояла б порожня.
+The `lastPopupLayout` latch seeds a window opened **between** renders: those happen every 30 s
+(`ageTimer`), and without the latch the card would sit empty.
 
-Холодного старту як проблеми немає: `setPopupLayout` викликається з `PopupLayout.make(from: nil, …)`
-ще до збирання меню, тож `layout` ніколи не `nil` — прев'ю показує той самий idle-кадр, що показав би
-дропдаун у ту саму мить.
+Cold start isn't a problem: `setPopupLayout` is called with `PopupLayout.make(from: nil, …)` before the
+menu is even assembled, so `layout` is never `nil` — the preview shows the same idle frame the
+dropdown would show at that same instant.
 
-### 4. Спільний `ColorAnimator`, не власний
+### 4. A shared `ColorAnimator`, not its own
 
-Прев'ю дістає той самий екземпляр, що й обидві живі поверхні. Це безпечно за конструкцією:
-`ColorTweenSet.update` при незмінному target лише оновлює `touchedAt`, а `pruneStale` навмисно
-age-based — його докстрінг прямо каже, що set-based prune «дав би одній поверхні виселяти ключі
-іншої». Тобто кілька поверхонь на одному реєстрі — закладена архітектура
-([ADR-0070](0070-smooth-bar-colour-transitions.md)), а не хак.
+The preview gets the same instance the two live surfaces use. This is safe by construction:
+`ColorTweenSet.update` only updates `touchedAt` when the target is unchanged, and `pruneStale` is
+deliberately age-based — its doc comment states directly that a set-based prune "would let one surface
+evict another's keys." So multiple surfaces on one registry is a design built into the architecture
+([ADR-0070](0070-smooth-bar-colour-transitions.md)), not a hack.
 
-Власний аніматор означав би другий 30 fps таймер і візуально розсинхронізовані переходи у двох вікнах
-на одному екрані.
+A dedicated animator would mean a second 30 fps timer and visually desynchronized transitions across
+two windows on the same screen.
 
-### 5. ⌥ Option — локальний монітор, не таймер
+### 5. ⌥ Option — a local monitor, not a timer
 
-`PopupViewController.optionHeld` перебудовує секції. У `NSMenu` для цього стоїть таймер, бо трекінг
-меню крутить модальний `NSEventTrackingRunLoopMode`, що голодує монітори
-([ADR-0020 §3](0020-troubleshoot-window-and-diagnostics-pipeline.md)). У звичайному вікні такого
-режиму немає, тож монітор доречний.
+`PopupViewController.optionHeld` rebuilds sections. `NSMenu` uses a timer for this because menu
+tracking spins a modal `NSEventTrackingRunLoopMode`, which starves monitors
+([ADR-0020 §3](0020-troubleshoot-window-and-diagnostics-pipeline.md)). An ordinary window has no such
+mode, so a monitor works fine.
 
-Глобальний монітор **не** додаємо — він вимагає Accessibility-дозволу (системний промпт) заради
-реакції на ⌥ у момент, коли користувач дивиться в чуже вікно.
+A global monitor is **not** added — it requires Accessibility permission (a system prompt) just to
+react to ⌥ while the user is looking at someone else's window.
 
-`return event` у моніторі обов'язковий: `nil` проковтнув би `.flagsChanged` для всього процесу й тихо
-зламав ⌥ у самому дропдауні.
+`return event` in the monitor is mandatory: `nil` would swallow `.flagsChanged` for the entire process
+and silently break ⌥ in the dropdown itself.
 
-### 6. Фон: матеріал меню, що гасне разом із фокусом
+### 6. Background: the menu material, which fades along with focus
 
-Активне вікно — чистий `.menu` / `.behindWindow`, як у справжнього дропдауна (картка попапа малюється
-з частковою альфою й розраховує, що під нею є матеріал).
+Active window — a plain `.menu` / `.behindWindow`, just like a real dropdown (the popup card draws
+with partial alpha and expects material underneath it).
 
-Неактивне — матеріал вимикається (`state = .inactive`), і показується непрозора підкладка. Прозорість
-у macOS означає «ця поверхня жива»; прев'ю, крізь яке видно шпалери, поки ним ніхто не користується,
-конкурує з вікном, що має фокус.
+Inactive — the material turns off (`state = .inactive`), and an opaque backing shows instead.
+Transparency in macOS signals "this surface is alive"; a preview you can see the wallpaper through
+while no one is using it competes with the window that has focus.
 
-Дві пастки, обидві коштували ітерацій:
+Two traps, both of which cost iterations:
 
-- **Підкладка мусить бути окремою в'юхою під матеріалом.** Малювати `layer.backgroundColor` на самому
-  `NSVisualEffectView` — значить забрати в нього шар, яким він рендерить блюр: виходить прозорість
-  **без розмиття**.
-- **Кути скруглюються `maskImage`, не `cornerRadius`.** `NSVisualEffectView` композитить матеріал повз
-  звичайний шлях шару, тож `cornerRadius` + `masksToBounds` обрізає лише підв'ю — квадратний матеріал
-  зі скругленою рамкою всередині.
+- **The backing must be a separate view under the material.** Drawing `layer.backgroundColor` on the
+  `NSVisualEffectView` itself takes away the layer it renders its blur through — the result is
+  transparency **with no blur**.
+- **Corners are rounded with `maskImage`, not `cornerRadius`.** `NSVisualEffectView` composites its
+  material past the ordinary layer path, so `cornerRadius` + `masksToBounds` only clips the subview —
+  square material with a rounded frame inside it.
 
-Колір неактивного стану — `NSColor.previewInactiveBackground`: у темній це `underPageBackgroundColor`,
-що резолвиться рівно в `#282828`; у світлій та сама константа дає `#969696` при α 0.9 (задарк для
-картки), тож світла гілка бере `windowBackgroundColor`. Обидва значення **виміряні** резолвом під
-кожною appearance, не припущені.
+The inactive-state color is `NSColor.previewInactiveBackground`: in dark mode this is
+`underPageBackgroundColor`, which resolves to exactly `#282828`; in light mode the same constant gives
+`#969696` at α 0.9 (too dark for the card), so the light branch takes `windowBackgroundColor`. Both
+values are **measured** by resolving under each appearance, not assumed.
 
-### 7. Без футера з макетними рядками
+### 7. No footer with mock rows
 
-Dev-прев'ю має два mock-рядки оновлень із кольоровими крапками — вони існують, щоб виставляти ці два
-кольори тюнеру. Тут вони були б фейковим сповіщенням, яке користувач прочитає як справжнє.
+The dev preview has two mock update rows with colored dots — they exist to expose those two colors to
+the tuner. Here they would read as a fake notification the user would take for a real one.
 
-### 8. Сайдбар звужено, вікно — разом із ним
+### 8. The sidebar narrowed, and the window along with it
 
-Сайдбар 275 → **210** pt: сім коротких підписів не потребують місця, яке System Settings резервує під
-свій довший список. Ширина вікна зменшена рівно на ту саму різницю (857 → **792**), щоб
-**detail-колонка лишилася тією, під яку панелі компонувалися**. Змінити одне без іншого — мовчки
-змінити ширину всіх панелей.
+Sidebar 275 → **210** pt: seven short labels don't need the room System Settings reserves for its
+longer list. The window's width was reduced by exactly the same difference (857 → **792**), so that
+**the detail column stays the one the panes were laid out for**. Changing one without the other would
+silently change the width of every pane.
 
-### 9. Роздільник сайдбару: ширина констрейнтом, курсор — isa-swizzle делегата
+### 9. The sidebar divider: width by constraint, cursor by isa-swizzling the delegate
 
-Ширину тримає жорсткий Auto Layout констрейнт на в'ю сайдбару. Жоден легший важіль не спрацював, і це
-варто зафіксувати, щоб наступна сесія не ходила тим самим колом:
+Width is held by a hard Auto Layout constraint on the sidebar's view. No lighter lever worked, and
+that's worth recording so the next session doesn't walk the same loop:
 
-| Спроба | Результат |
+| Attempt | Result |
 |---|---|
-| `.navigationSplitViewColumnWidth` | ненадійний для `.sidebar` List (виміряно: 307 pt на запит 259) |
-| `.frame(width:)` сам по собі | не масштабує — стрибає між кількома станами (200→307, 240→243, 340→243) |
-| `NSSplitView.delegate = …` | **виняток**: *"A SplitView managed by a SplitViewController cannot have its delegate modified"* |
-| `NSSplitViewItem.min/max/canCollapse` | приймається, SwiftUI перезастосовує своє; на курсор не впливає |
+| `.navigationSplitViewColumnWidth` | unreliable for a `.sidebar` List (measured: 307 pt for a 259 request) |
+| `.frame(width:)` alone | doesn't scale — snaps between a handful of states (200→307, 240→243, 340→243) |
+| `NSSplitView.delegate = …` | **an exception**: *"A SplitView managed by a SplitViewController cannot have its delegate modified"* |
+| `NSSplitViewItem.min/max/canCollapse` | accepted, then SwiftUI reapplies its own; has no effect on the cursor |
 
-**Курсор ↔ — окрема механіка.** Встановлено інструментально (лог `addCursorRect` через swizzle):
-`-[NSSplitView resetCursorRects]` ставить cursor rect `(sidebarWidth, 0, 5, H)` з `resizeLeftRight`, і
-бере його з делегатського `splitView:effectiveRect:forDrawnRect:ofDividerAtIndex:`. Повернути там
-`.zero` — і зони немає зовсім (нуль викликів `addCursorRect`), разом із зоною драгу.
+**The ↔ cursor is a separate mechanism.** Established through instrumentation (logging
+`addCursorRect` via a swizzle): `-[NSSplitView resetCursorRects]` sets a cursor rect
+`(sidebarWidth, 0, 5, H)` with `resizeLeftRight`, taken from the delegate's
+`splitView:effectiveRect:forDrawnRect:ofDividerAtIndex:`. Returning `.zero` there removes the zone
+entirely (zero calls to `addCursorRect`), along with the drag zone.
 
-Cursor rects — геометрія, зареєстрована **у вікна**: вони не проходять через `hitTest` і не мають
-z-порядку. Тому накладка згори з власним cursor rect / `NSTrackingArea` не могла виграти в принципі —
-перевірено, не спрацювало.
+Cursor rects are geometry registered **with the window**: they don't go through `hitTest` and have no
+z-order. So an overlay on top with its own cursor rect / `NSTrackingArea` could never win in
+principle — checked, didn't work.
 
-Делегат — SwiftUI-івський `NavigationSplitViewController`, справжній сабклас `NSSplitViewController`.
-Замінити його не можна, але його метод можна перекрити, перевівши **один екземпляр** у згенерований
-підклас (`objc_allocateClassPair` + `object_setClass`).
+The delegate is SwiftUI's `NavigationSplitViewController`, a genuine `NSSplitViewController` subclass.
+It can't be replaced, but its method can be overridden by moving **one instance** into a generated
+subclass (`objc_allocateClassPair` + `object_setClass`).
 
-Свідомо **isa-swizzle одного об'єкта**, а не method swizzle на `NSSplitView`: поза цим вікном нічого
-не зачеплено. Сам спліт чіпати не можна — він уже `NSKVONotifying_NSSplitView`, і isa-swizzle зламав
-би його KVO. Ім'я приватного класу ніде не зашите (клас читається з живого делегата), тож перейменування
-в майбутній macOS деградує до косметичної вади, а не до поломки.
+Deliberately an **isa-swizzle of one object**, not a method swizzle on `NSSplitView`: nothing outside
+this window is touched. The split itself can't be touched — it's already
+`NSKVONotifying_NSSplitView`, and an isa-swizzle would break its KVO. The private class's name is
+nowhere hardcoded (the class is read off the live delegate), so a rename in a future macOS degrades to
+a cosmetic flaw rather than a break.
 
-## Наслідки
+## Consequences
 
-- **+** Налаштування дропдауна нарешті мають зворотний зв'язок: результат видно в ту мить, коли
-  крутиш тумблер.
-- **+** Guide/Legend отримає прев'ю задарма.
-- **+** Dev-прев'ю дістало фікс зміни теми: спільний `PreviewChrome` тепер тримає Vibrant-appearance і
-  радіус, а плашка-заголовок стала простим текстом в обох.
-- **−** Vibrant-appearance доводиться **перепризначати на кожен показ**, а не лише за подією. Вікно
-  переживає власну видимість (`isReleasedWhenClosed = false`), а KVO на `NSApp.effectiveAppearance`
-  живе тільки між `attach(to:)` і `detach()`. Тож зміна теми **при закритих Settings** не доходить ні
-  до кого, і вікно лишається у вібрантності, яку залатало минулого разу: прев'ю, збудоване вночі,
-  вранці все ще малюється темним. Те саме стосується прев'ю dev-тюнера, яке будується один раз, а
-  показується багато. Обидва тепер перепризначають appearance у момент показу.
-- **−** У коді з'явився isa-swizzle приватного SwiftUI-класу. Обмежений одним екземпляром, ідемпотентний,
-  ім'я класу не зашите — але це залежність від внутрішньої будови SwiftUI, і при оновленні macOS її
-  треба перевіряти вживу.
-- **−** Дві поверхні тепер малюють попап (жива + прев'ю). Через спільний аніматор і єдину точку
-  дзеркалення це не подвоює роботу, але кожна нова ручка `PopupViewController` мусить потрапити і в
-  `syncPresentation()`.
-- **−** Ширина сайдбару й ширина вікна тепер пов'язані вручну: зміна однієї без іншої мовчки
-  перекомпонує панелі.
+- **+** Dropdown settings finally have feedback: the result is visible the moment you flip a toggle.
+- **+** Guide/Legend gets a preview for free.
+- **+** The dev preview picked up a theme-change fix: a shared `PreviewChrome` now holds the
+  Vibrant appearance and the corner radius, and the title pill became plain text in both.
+- **−** The Vibrant appearance has to be **reassigned on every show**, not just on the event. The
+  window outlives its own visibility (`isReleasedWhenClosed = false`), while the KVO on
+  `NSApp.effectiveAppearance` only lives between `attach(to:)` and `detach()`. So a theme change
+  **while Settings is closed** never reaches anyone, and the window stays in whatever vibrancy it last
+  had patched in: a preview built at night still draws dark in the morning. The same applies to the
+  dev tuner's preview, which is built once and shown many times. Both now reassign the appearance at
+  the moment of showing.
+- **−** An isa-swizzle of a private SwiftUI class showed up in the code. Scoped to one instance,
+  idempotent, the class name isn't hardcoded — but it's a dependency on SwiftUI's internal structure,
+  and it needs a live check on every macOS update.
+- **−** Two surfaces now draw the popup (the live one + the preview). Thanks to the shared animator and
+  the single mirroring point this doesn't double the work, but every new `PopupViewController` handle
+  now has to land in `syncPresentation()` too.
+- **−** The sidebar's width and the window's width are now linked manually: changing one without the
+  other silently relays out the panes.
 
-## Що свідомо не зроблено
+## What was deliberately not done
 
-- **Тумблера «показувати прев'ю» немає.** Він потяг би ключ у `PersistedConfig`, рядок у
-  `AppearanceConfigExport` і колонку в `AppearancePreset` заради факту, що повністю виводиться з
-  «Settings відкрите».
-- **Стан не персистується** — вікно borderless, закрити його окремо неможливо, тож і запам'ятовувати
-  нічого.
-- **`onToggleSubscription` не підключений** — прев'ю дзеркало, а не другий орган керування. Рядок
-  підписки малюється (він у layout), але клік нічого не робить.
-- **Смужки menu bar у прев'ю немає** — вміст навмисно дорівнює дропдауну; menu bar видно на екрані й
-  так.
+- **No "show preview" toggle.** It would drag in a key in `PersistedConfig`, a field in
+  `AppearanceConfigExport`, and a column in `AppearancePreset` for a fact that's entirely derived from
+  "Settings is open."
+- **State is not persisted** — the window is borderless, can't be closed on its own, so there's
+  nothing to remember.
+- **`onToggleSubscription` isn't wired up** — the preview is a mirror, not a second control surface.
+  The subscription row draws (it's in the layout), but clicking it does nothing.
+- **No menu bar strip in the preview** — the content deliberately mirrors the dropdown; the menu bar
+  is already visible on screen anyway.

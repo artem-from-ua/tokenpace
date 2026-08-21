@@ -5,82 +5,89 @@ supersedes: []
 superseded_by: []
 ---
 
-# ADR-0096: Риска нуля і в Pressure — у центрі нульової пігулки, притлумлена
+# ADR-0096: A zero tick on Pressure too — centered on the zero pill, dimmed
 
-> **Постскриптум (0.96.1):** ширина риски — **1.5 pt**, не 1 pt, на обох шкалах. На живому барі
-> кінчики завтовшки в один пункт виявилися заважко вловити з першого погляду, надто після
-> притлумлення `zeroTickAlpha` = 0.55, яке цей ADR і ввів. Аргумент «не сплутати з маркером
-> Progress» чинний без змін: він спирається на всю конструкцію (тонка, нейтральна, під треком,
-> нерухома), а 1.5 pt — усе ще менш ніж **третина** від 5 pt маркера. Заразом лівий край риски
-> прив'язано до **півпіксельної сітки**: при дробовій ширині центрування на округленому `cx` клало
-> край посеред пікселя, і один фланг рендерився м'якшим за інший. Решта рішення — позиція (центр
-> нульової пігулки), тон, висота 10 pt, малювання під треком — без змін.
+> **Postscript (0.96.1):** the tick's width is **1.5 pt**, not 1 pt, on both scales. On a live bar,
+> tips one point thick turned out too hard to catch at a glance, especially after the
+> `zeroTickAlpha` = 0.55 dimming this ADR introduced. The "don't confuse it with the Progress
+> marker" argument still stands unchanged: it rests on the whole construction (thin, neutral,
+> under the track, fixed), and 1.5 pt is still less than a **third** of the marker's 5 pt. At the
+> same time, the tick's left edge was pinned to the **half-pixel grid**: at a fractional width,
+> centering on a rounded `cx` placed the edge mid-pixel, and one side rendered softer than the
+> other. The rest of the decision — position (center of the zero pill), tone, 10 pt height,
+> drawn under the track — is unchanged.
 
-## Контекст
+## Context
 
-[ADR-0079](0079-centred-zero-gauge-scale.md) дав Gauge постійну риску на 0.5 — нуль, з якого росте
-стрічка; [ADR-0089](0089-gauge-centre-tick-calm-tone.md) уточнив її тон і висоту. Pressure лишався
-без такої позначки свідомо: у `PopupBarView.tickFractions` записано заперечення — **самотній
-вертикальний зуб на 34 pt барі виглядає точно як маркер часу Progress**, тож два стилі перестали б
-розрізнятися. Тому меню-бар під Pressure не діставав тіка взагалі.
+[ADR-0079](0079-centred-zero-gauge-scale.md) gave Gauge a fixed tick at 0.5 — the zero the strip
+grows from; [ADR-0089](0089-gauge-centre-tick-calm-tone.md) refined its tone and height. Pressure
+deliberately had no such mark: `PopupBarView.tickFractions` recorded the objection — **a lone
+vertical tooth on a 34 pt bar looks exactly like the Progress time marker**, so the two styles
+would stop being distinguishable. So the menu bar under Pressure got no tick at all.
 
-На живому барі це має ціну. Стрічка Pressure росте від нуля, якого око не бачить: короткa стрічка й
-трохи коротша різняться лише парою пунктів кольору, і ніщо на треку не каже, звідки шкала починає
-рахувати. Нуль там ще й не там, де його очікують: `pressureLength` затискає **40 % простору станів**
-(79 % спокійних) на одну мінімальну пігулку, тож «нічого не горить» і «майже рівно за планом»
-малюються однаково — без орієнтира ця однаковість читається як «бар зламався».
+On a live bar this has a cost. The Pressure strip grows from a zero the eye can't see: a short
+strip and a slightly shorter one differ by only a couple points of color, and nothing on the track
+says where the scale starts counting. Zero also sits somewhere other than where it's expected:
+`pressureLength` clamps **40% of the state space** (79% of it calm) to one minimal pill, so
+"nothing is burning" and "almost exactly on plan" draw identically — with no reference point, that
+sameness reads as "the bar is broken."
 
-Заперечення 0079 при цьому нікуди не поділося — його треба було не обійти, а зняти.
+The 0079 objection hasn't gone anywhere, though — it needed to be resolved, not sidestepped.
 
-## Рішення
+## Decision
 
-**Pressure дістає ту саму риску, що й Gauge, на своєму нулі.** `drawCentreTick` став
-`drawZeroTick(in:)` і гілкується за `BarScale`: `.centred` → центр бару, `.remaining` → нуль стрічки.
-Progress (`.window`) не дістає нічого — там позицію вже несе маркер часу, і друга вертикальна
-позначка поруч читалася б як конкурентна.
+**Pressure gets the same tick as Gauge, at its own zero.** `drawCentreTick` became
+`drawZeroTick(in:)` and branches on `BarScale`: `.centred` → the bar's center, `.remaining` → the
+strip's zero. Progress (`.window`) gets nothing — the time marker already carries position there,
+and a second vertical mark next to it would read as competing.
 
-**Заперечення знімається конструкцією, а не відмовою.** Риска не схожа на маркер Progress рівно тим,
-чим вона не схожа на нього в Gauge: п'ята частина ширини маркера (1 pt проти 5), нейтральний тон
-замість кольору pacing, намальована **під** треком (видно лише кінчики), і вона **не рухається**.
-Саме це й дозволяє віддати її Pressure — умови ті самі, що Gauge виконує з 0079.
+**The objection is resolved by construction, not by refusal.** The tick doesn't resemble the
+Progress marker for exactly the same reasons it doesn't in Gauge: a fifth of the marker's width
+(1 pt vs. 5), a neutral tone instead of a pacing color, drawn **under** the track (only the tips
+visible), and it **doesn't move**. That's exactly what makes it safe to give to Pressure — the same
+conditions Gauge already satisfies from 0079.
 
-**Позиція — центр нульової пігулки, не 0.0 і не 0.20.** Вироджена стрічка floor-иться до мінімальної
-пігулки, чий лівий кінчик `PopupBarView.pillRect` притискає до `rect.minX`; отже намальований центр
-пігулки стоїть на півпігулки всередину від краю. Позиція **читається з `pillRect`**, а не
-відтворюється арифметикою на місці, — тоді риска тримається пігулки, хай як розв'яжеться цей
-притиск, і `minStripWidth` лишається єдиною ручкою всієї inset-геометрії.
+**Position — the center of the zero pill, not 0.0 and not 0.20.** A degenerate strip floors to the
+minimal pill, whose left tip `PopupBarView.pillRect` pins to `rect.minX`; so the pill's drawn
+center sits half a pill's width in from the edge. The position is **read from `pillRect`**, not
+recomputed with local arithmetic — that way the tick stays anchored to the pill however that
+pinning resolves, and `minStripWidth` remains the single knob for the whole inset geometry.
 
-20 % («рівно за планом»), яке позначає лінійка попапа, свідомо **не** взято: на 34 pt барі зуб там
-стоїть за пару пунктів від пігулки й читається як шум, а не як орієнтир. Тік на 20 % лишається
-прикметою попапа, де бар довший і місця вистачає.
+The 20% mark ("exactly on plan") the popup's ruler shows is deliberately **not** used: on a 34 pt
+bar, a tooth there sits a couple points from the pill and reads as noise rather than a reference
+point. A tick at 20% remains a feature of the popup, where the bar is longer and there's room to
+spare.
 
-**Риска притлумлена — на обох шкалах.** Множник `zeroTickAlpha` = **0.55** поверх `bright()`. Риска —
-фурнітура шкали, а не дані: вона каже, звідки міряти, і ніколи не змінюється, тож на непрозорості
-тексту ресету вона змагалася за увагу з єдиною міткою бару, що справді рухається. Множник, а не
-власна абсолютна альфа, і застосований у місці малювання, а не всередині `bright()`: та альфа
-відкалібрована піпеткою під системний годинник і **спільна** з текстом ресету та ⚠️ — вони не мають
-рухатися разом із рискою, а множник тримає риску прив'язаною до того калібрування. Колір із тюнера
-бере за базу власну альфу, тож і перенесена роль згасає в тій самій пропорції.
+**The tick is dimmed — on both scales.** A `zeroTickAlpha` multiplier of **0.55**, applied on top
+of `bright()`. The tick is scale fixture, not data: it says where to measure from and never
+changes, so at full text-alpha it would compete for attention with the bar's one mark that actually
+moves. It's a multiplier rather than its own absolute alpha, and it's applied at the point of
+drawing rather than inside `bright()`: that alpha is calibrated with a color picker against the
+system clock and is **shared** with the reset text and ⚠️ — they must not move together with the
+tick, and the multiplier keeps the tick anchored to that same calibration. Color from the tuner
+uses that alpha as its base, so the carried-over role fades in the same proportion.
 
-## Наслідки
+## Consequences
 
-- Меню-барний Pressure більше не має стану, у якому на треку немає жодної нерухомої позначки.
-- Риска нуля — **не** Gauge-специфічний елемент: у мокапах і розборах вона обов'язкова в обох
-  безмаркерних стилях меню-бару. Таблиця неможливих комбінацій у
-  [ui-state-truth.md](../reference/ui-state-truth.md) доповнена трьома рядками.
-- Обидві шкали стали трохи тихішими за попередню редакцію: Gauge теж змінює вигляд, хоч його
-  геометрія й позиція не рухалися.
-- `tickFractions` лишається **лінійкою попапа**; коментар там переписано — він більше не стверджує,
-  що меню-бар під Pressure тіка не має.
-- Render-only: `BarLayout`, `PacingSeverity`, пресети й міграція без змін.
+- The menu bar's Pressure no longer has a state with zero fixed marks on the track.
+- The zero tick is **not** a Gauge-specific element: in mockups and write-ups it's mandatory in
+  both marker-free menu bar styles. The impossible-combinations table in
+  [ui-state-truth.md](../reference/ui-state-truth.md) has three rows added.
+- Both scales became slightly quieter than the previous edition: Gauge also changes appearance,
+  even though its geometry and position never moved.
+- `tickFractions` remains **the popup's ruler**; its comment there was rewritten — it no longer
+  claims the menu bar has no tick under Pressure.
+- Render-only: `BarLayout`, `PacingSeverity`, presets, and migration are unchanged.
 
-## Альтернативи
+## Alternatives considered
 
-- **Тік на 20 %, як у попапі.** Відкинуто: на 34 pt барі це пара пунктів від пігулки — шум замість
-  орієнтира, і саме та щільність, через яку 0079 узагалі відмовився від тіків у меню-барі.
-- **Риска на `rect.minX` (лівий край треку).** Відкинуто: край — не нуль шкали, а точка насичення
-  «далеко позаду» (там синє). Позначка там маркує кінець стрічки, а не орієнтир.
-- **`scaleX(0)` замість `pillRect(at: 0).midX`.** Відкинуто: воно ігнорує притиск лівого кінчика до
-  `rect.minX`, тож риска стояла б поруч із пігулкою, а не під нею.
-- **Змінити `brightAlpha`.** Відкинуто: воно спільне з текстом ресету та ⚠️ і відкаліброване під
-  системний годинник — притлумлення риски посунуло б і їх.
+- **A tick at 20%, like the popup's.** Rejected: on a 34 pt bar that's a couple points from the
+  pill — noise instead of a reference point, and exactly the crowding that made 0079 drop ticks
+  from the menu bar in the first place.
+- **A tick at `rect.minX` (the track's left edge).** Rejected: the edge isn't the scale's zero,
+  it's the saturation point for "far behind" (blue lives there). A mark there would flag the end of
+  the strip, not a reference point.
+- **`scaleX(0)` instead of `pillRect(at: 0).midX`.** Rejected: it ignores the left tip's pinning to
+  `rect.minX`, so the tick would sit next to the pill instead of under it.
+- **Change `brightAlpha`.** Rejected: it's shared with the reset text and ⚠️ and calibrated against
+  the system clock — dimming the tick would shift them too.

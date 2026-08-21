@@ -3,192 +3,213 @@ status: accepted
 date: 2026-08-04
 ---
 
-# ADR-0067: Локальний журнал використання (append-only JSONL)
+# ADR-0067: Local usage journal (append-only JSONL)
 
-## Контекст
+## Context
 
-TokenPace опитує `GET /api/oauth/usage` кожні 3 хв (15 хв в idle, ADR-0032), рендерить результат і
-**викидає** його. На `main` (v0.64.0) нічого, крім `LogArchiver` (ADR-0031), не пише на диск, а всі
-ключі `PersistedConfig` — це конфіг або одно-значні edge-маркери (`backToWorkWasBlocked`,
-`extraUsageWasOnCredits`, `lastArchiveSync`) — достатньо, щоб зловити edge, ніколи — щоб тримати
-часовий ряд. Тож застосунок відповідає на «чи я в темпі *зараз*» і не відповідає на жодне питання з
-*учора* в ньому.
+TokenPace polls `GET /api/oauth/usage` every 3 min (15 min when idle, ADR-0032), renders the
+result, and **discards** it. On `main` (v0.64.0), nothing but `LogArchiver` (ADR-0031) writes to
+disk, and every `PersistedConfig` key is either config or a one-shot edge marker
+(`backToWorkWasBlocked`, `extraUsageWasOnCredits`, `lastArchiveSync`) — enough to catch an edge,
+never enough to hold a time series. So the app answers "am I on pace *right now*" and answers no
+question at all about *yesterday*.
 
-Issue [#238](https://github.com/artem-from-ua/tokenpace/issues/238) (Insights-епік) пропонує **один
-append-only журнал**, який consumer-фічі (#239/#240/#241) і сам пайплайн Insights (агрегатор #244 →
-вікно+пілотний чарт #245) читають, замість того, щоб кожна ростила своє сховище. Це ADR фіксує
-рішення для кроку 1 ([#242](https://github.com/artem-from-ua/tokenpace/issues/242)) — колектор і
-сховище.
+Issue [#238](https://github.com/artem-from-ua/tokenpace/issues/238) (the Insights epic) proposes
+**one append-only journal** that consumer features (#239/#240/#241) and the Insights pipeline
+itself (aggregator #244 → window+pilot chart #245) read, instead of each one growing its own
+storage. This ADR settles the decision for step 1
+([#242](https://github.com/artem-from-ua/tokenpace/issues/242)) — the collector and storage.
 
-Розвилки: (1) формат і механізм сховища; (2) що саме зберігати — сирі поля чи й похідні стани; (3)
-default-on чи off; (4) локація; (5) як пережити кілька інстансів застосунку, що пишуть одночасно.
+The forks: (1) format and storage mechanism; (2) exactly what to store — raw fields, or derived
+states too; (3) default-on or off; (4) location; (5) how to survive several app instances writing
+at once.
 
-## Рішення
+## Decision
 
-**Append-only JSONL під Application Support, default-off, гетерогенні `kind`-рядки з сирими полями +
-похідними станами, помісячна ротація за іменем файлу, flock між інстансами.**
+**Append-only JSONL under Application Support, default-off, heterogeneous `kind` rows with raw
+fields + derived states, monthly rotation by filename, `flock` across instances.**
 
-### 1. Формат — append-only JSONL, гетерогенні `kind`-рядки
+### 1. Format — append-only JSONL, heterogeneous `kind` rows
 
-Один об'єкт на рядок, тегований `kind`: `usage` (успішний usage-полл), `error` (неуспішний:
-429/timeout/network/auth/JSON-parse), `status` (окремий status-полл), `resume` (маркер розриву).
-Декод **толерантний** (як `MonitoredServices`/`StatusSummary`): невідомий `kind`/ключ →
-ігнорується, не throw; нові поля додаються як нові ключі. Читач (`JournalReader`) толерує
-зіпсований/недописаний хвостовий рядок (crash mid-append) — пропускає, не падає.
+One object per line, tagged by `kind`: `usage` (a successful usage poll), `error` (a failed one:
+429/timeout/network/auth/JSON-parse), `status` (a separate status poll), `resume` (a gap marker).
+Decoding is **tolerant** (like `MonitoredServices`/`StatusSummary`): an unknown `kind`/key is
+ignored, not thrown on; new fields are added as new keys. The reader (`JournalReader`) tolerates a
+corrupted/truncated trailing line (a crash mid-append) — it skips it rather than failing.
 
-**Не App Group.** ADR-0065 (WidgetKit, `draft`) планує писати снапшот у App Group container, але це
-не реалізовано і має відкрите питання (App Group без повного sandbox). Журнал — перший запис
-декодованого снапшоту на диск; він не чекає на віджет.
+**Not App Group.** ADR-0065 (WidgetKit, `draft`) plans to write a snapshot into an App Group
+container, but that isn't implemented and has an open question of its own (App Group without full
+sandboxing). The journal is the first write of a decoded snapshot to disk; it doesn't wait for the
+widget.
 
-### 2. Зміст — сирі поля **та** похідні стани, які застосунок показує на UI
+### 2. Content — raw fields **and** the derived states the app shows in the UI
 
-Downstream не має перераховувати те, що app уже обчислив. `usage`-рядок несе: усі 4 вікна
-(`utilization`+`resets_at`), per-model `weekly_scoped` ліміти, `sessionIdle`, повний `SpendInfo`
-(`Money` як `amount_minor`+`currency`+`exponent`, без втрати центів) — **плюс** похідні: `timePct`
-(elapsed-фракція), `sev` (об'єктивний колір-бакет), credits `spentFrac`/`monthPct`,
-`blocked`/`credits`-прапорці, `hasBrokenActiveReset`,
-`BlockingReset.Choice`. Плюс `ms` (latency відповіді API) і `plan`/`tier` — метадані плану з Keychain
-(`subscriptionType`/`rateLimitTier`, **не секрети**: ліміти й пейсинг різняться за планом, тож
-корисні для атрибуції ряду; плинуть через `TokenCredentials`→`TokenDiagnostics`, ніколи не токен).
+Downstream shouldn't have to recompute what the app already computed. A `usage` row carries: all 4
+windows (`utilization`+`resets_at`), per-model `weekly_scoped` limits, `sessionIdle`, the full
+`SpendInfo` (`Money` as `amount_minor`+`currency`+`exponent`, with no cent loss) — **plus**
+derived values: `timePct` (the elapsed fraction), `sev` (the objective color bucket), credits'
+`spentFrac`/`monthPct`, the `blocked`/`credits` flags, `hasBrokenActiveReset`,
+`BlockingReset.Choice`. Plus `ms` (the API response latency) and `plan`/`tier` — plan metadata
+from the Keychain (`subscriptionType`/`rateLimitTier`, **not secrets**: limits and pacing vary by
+plan, so they're useful for attributing the series; they flow through
+`TokenCredentials`→`TokenDiagnostics`, never the token itself).
 
-**`sev` — «режим контролфріка».** Колір-бакет (`blue`/`green`/`yellow`/`orange`/`red`,
-`PacingBucket`) обчислюється з сирих даних **незалежно від користувацьких косметичних налаштувань**:
-`CalmColorMode` не застосовується, тож серія лишається порівнянною між користувачами.
+**`sev` — "control-freak mode."** The color bucket (`blue`/`green`/`yellow`/`orange`/`red`,
+`PacingBucket`) is computed from raw data **independently of the user's cosmetic settings**:
+`CalmColorMode` is not applied, so the series stays comparable across users.
 
-> Оновлено [ADR-0081](0081-weekly-capacity-gate-for-blue.md): раніше тут був другий виняток — поріг
-> рахувався за фіксованою формулою, ігноруючи `FarBehindInterval`. Опцію прибрано, а її наступник
-> `BarLayout.blueAllowed` (weekly-capacity gate) журнал, навпаки, **поважає**: це не косметика, а
-> факт про дані, тож `sev` тепер дорівнює кольору, який бачив користувач.
+> Updated by [ADR-0081](0081-weekly-capacity-gate-for-blue.md): there used to be a second
+> exception here — the threshold was computed from a fixed formula, ignoring
+> `FarBehindInterval`. That option is gone, and the journal, in turn, **does respect** its
+> successor, `BarLayout.blueAllowed` (the weekly-capacity gate): that isn't cosmetics, it's a fact
+> about the data, so `sev` now equals the color the user actually saw.
 
-**Помилки — journal-таксономія, не UI.** `error.reason` розрізняє точніше за збіднений
-`FailureReason`: **4xx→`clientProblem`** (429 — rate-limit на боці клієнта), **5xx→`serverProblem`**,
-**decode→`decode`** (malformed 200), **401/403→`auth`**, transport → `timeout`/`dns`/`network`.
+**Errors — a journal-specific taxonomy, not the UI's.** `error.reason` distinguishes more
+precisely than the impoverished `FailureReason`: **4xx→`clientProblem`** (429 — a client-side rate
+limit), **5xx→`serverProblem`**, **decode→`decode`** (a malformed 200), **401/403→`auth`**,
+transport → `timeout`/`dns`/`network`.
 
-### 3. Default-off + Settings-тумблер
+### 3. Default-off + a Settings toggle
 
-Дзеркалить `archiveEnabled` (ADR-0031): opt-in, інертний доки не ввімкнено. Журнал пише відсотки/суми
-(не транскрипти), тож приватність слабша за архіватор — але «писати на диск без запиту» це звичка, яку
-не починаємо. **Settings лише конфігурує колектор** — тумблер «Record usage history» живе в
-**General**. Перегляд даних — окрема поверхня: **окреме вікно «Insights»** (стиль як Settings),
-відкривається з **першого пункту dropdown-меню «Insights…»** (з роздільником після нього). У #242 це
-вікно — каркас-placeholder; далі пайплайн наповнює його: агрегатор `[JournalRecord]`→days×hours
-(#244) і вікно з пілотним чартом (#245); окремі consumer-фічі (#239/#240/#241) читають той самий
-журнал.
+Mirrors `archiveEnabled` (ADR-0031): opt-in, inert until turned on. The journal writes
+percentages/amounts (not transcripts), so privacy exposure is weaker than the archiver's — but
+"writing to disk without asking" is a habit we don't start. **Settings only configures the
+collector** — the "Record usage history" toggle lives in **General**. Viewing the data is a
+separate surface: a **dedicated "Insights" window** (styled like Settings), opened from the
+**first item of the dropdown menu, "Insights…"** (with a separator after it). In #242 this window
+is a placeholder shell; the pipeline fills it in later: the aggregator turning
+`[JournalRecord]` into days×hours (#244), and the window with the pilot chart (#245); separate
+consumer features (#239/#240/#241) read the same journal.
 
-**Пишемо лише на живих реальних даних.** Запис лише коли тумблер увімкнено **І**
-`currentScenario == .realNetwork` — синтетичний `TOKENPACE_STUB` не має потрапляти в журнал.
+**We write only against live, real data.** A write happens only when the toggle is on **and**
+`currentScenario == .realNetwork` — synthetic `TOKENPACE_STUB` data must never land in the
+journal.
 
-### 4. Локація — Application Support, помісячна ротація, dev/release ізоляція
+### 4. Location — Application Support, monthly rotation, dev/release isolation
 
 `~/Library/Application Support/com.artem-n.tokenpace/usage-journal[-dev]-YYYY-MM.jsonl`:
-- **`-YYYY-MM`** з UTC-timestamp рядка — природна помісячна ротація для майбутнього логротейта й
-  обмежений розмір файлу.
-- **`-dev`** якщо бандл запущено **не** з `/Applications` (`swift run` / dev-бандл) — dev-збірка не
-  забруднює реальний журнал релізу, який мейнтейнер запускає з `/Applications`.
-- Фіксована теку (app-керований стейт), без folder-picker'а — на відміну від архіватора, це не
-  user-facing файл.
+- **`-YYYY-MM`** from the row's UTC timestamp — a natural monthly rotation for future log rotation
+  and a bounded file size.
+- **`-dev`** if the bundle is running **not** from `/Applications` (`swift run` / a dev build) —
+  so a dev build doesn't pollute the real release journal that the maintainer runs from
+  `/Applications`.
+- A fixed folder (app-managed state), with no folder picker — unlike the archiver, this is not a
+  user-facing file.
 
-**Dev override:** `TOKENPACE_JOURNAL_FILE=<шлях>` спрямовує всі записи в один файл; генератор
-`TOKENPACE_GENERATE_JOURNAL=<днів>` (`JournalFixture`) пише багатоденний журнал у нього для
-верифікації downstream-читачів.
+**Dev override:** `TOKENPACE_JOURNAL_FILE=<path>` routes every write to a single file; the
+generator `TOKENPACE_GENERATE_JOURNAL=<days>` (`JournalFixture`) writes a multi-day journal to it
+for verifying downstream readers.
 
-**Межа `-dev`-суфікса.** Він розводить *dev-збірку* й реліз, але **не** розводить «робота» й «тест»:
-копія з `/Applications`, запущена заради перевірки фічі, що потребує підпису, пише в **той самий**
-`usage-journal-YYYY-MM.jsonl`, що й у бойовій роботі. Гейт `.realNetwork` тримає лише синтетику
-стубів; повз нього проходять `TOKENPACE_GENERATE_JOURNAL` (навмисно обходить live-only гейти),
-`resume`-рядки від рестартів (`lastWriteInstant` — in-memory) і безумовна `migrateIfNeeded()`, що
-переписує наявний файл (із незнищуваним `.v<n>.bak`). Тому тестові запуски нотаризованої копії
-ведуть журнал через `TOKENPACE_JOURNAL_FILE` — див.
-[ui-verification.md § «Usage journal»](../guides/ui-verification.md#usage-journal-242-adr-0067).
+**The limit of the `-dev` suffix.** It separates a *dev build* from a release, but it does **not**
+separate "work" from "test": a copy from `/Applications`, run to verify a feature that needs
+signing, writes to the **same** `usage-journal-YYYY-MM.jsonl` as production use. Only the
+`.realNetwork` gate holds back stub synthetics; `TOKENPACE_GENERATE_JOURNAL` gets past it
+(deliberately bypassing live-only gates), as do `resume` rows from restarts (`lastWriteInstant` is
+in-memory) and the unconditional `migrateIfNeeded()`, which rewrites the existing file (leaving an
+indestructible `.v<n>.bak`). That's why test runs of the notarized copy point the journal through
+`TOKENPACE_JOURNAL_FILE` — see
+[ui-verification.md § "Usage journal"](../guides/ui-verification.md#usage-journal-242-adr-0067).
 
-### 5. Concurrency — flock advisory lock
+### 5. Concurrency — a `flock` advisory lock
 
-Штатно кілька інстансів TokenPace пишуть в один файл (нотаризований реліз + dev-копії). На macOS
-`O_APPEND` атомарний лише до ~256 B, а рядок 300–700 B → без локу рядки різних процесів
-перемішуються. Кожен append бере `flock(LOCK_EX)`; contention нульовий (запис раз на 3 хв).
+Several TokenPace instances writing to one file is the normal case (the notarized release + dev
+copies). On macOS, `O_APPEND` is only atomic up to ~256 B, and a row is 300–700 B → without a
+lock, lines from different processes interleave. Every append takes `flock(LOCK_EX)`; contention
+is essentially zero (one write every 3 min).
 
-### 6. Версія формату в кожному рядку + міграція на місці ([#386](https://github.com/artem-from-ua/tokenpace/issues/386))
+### 6. A format version in every row + in-place migration ([#386](https://github.com/artem-from-ua/tokenpace/issues/386))
 
-Кожен `usage`-рядок несе **`v`** — версію формату семпла, що монотонно зростає. Не заголовок файлу:
-журнал append-only і переживає оновлення застосунку, тож один файл законно містить рядки різних
-версій, і заголовок описував би лише найпершу з них.
+Every `usage` row carries **`v`** — the sample's format version, monotonically increasing. Not a
+file header: the journal is append-only and survives app updates, so a single file legitimately
+holds rows of different versions, and a header would only describe the very first of them.
 
-- **v1** — початкова форма (відсутнє `v` читається як 1). `util` — значення від API; `gap` — збережене
-  поле.
-- **v2** — `util` несе значення, **на якому застосунок діяв** (для `seven_day` — реконструйоване,
-  [ADR-0103](0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md)), `raw` — сире від
-  API, `src`/`n` описують реконструкцію.
-- **v3** — [ADR-0107](0107-weekly-reset-reconstructed-from-the-last-known-one.md): `src` перейменовано
-  на `utilSrc`, поруч зʼявилось `resetSrc` — реконструюватись почала й **дата** ресету, тож назва
-  «джерело» перестала бути відповіддю. Міграція заразом **переписує** `reset` і `timePct` у рядках,
-  писаних під час щотижневого затемнення API: там стояла оцінка `now + 7d`, що повзла вперед на
-  кожному полі, а `timePct` тримався нулем годинами — тобто аналіз тих годин читав пласку лінію,
-  якої не було. Відновлено 199 рядків на журналі Max і 56 на Pro, похибка 0.000 с.
+- **v1** — the initial shape (`v` absent reads as 1). `util` holds the value from the API; `gap`
+  is a stored field.
+- **v2** — `util` now carries the value **the app actually acted on** (for `seven_day` this is
+  reconstructed,
+  [ADR-0103](0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md)); `raw` holds
+  the value straight from the API; `src`/`n` describe the reconstruction.
+- **v3** — [ADR-0107](0107-weekly-reset-reconstructed-from-the-last-known-one.md): `src` was
+  renamed to `utilSrc`, and `resetSrc` appeared alongside it, because the reset **date** started
+  being reconstructed too, so "source" alone stopped answering the question. The migration also
+  **rewrites** `reset` and `timePct` in rows written during the weekly API blackout: those held an
+  estimate of `now + 7d`, which crept forward on every poll, while `timePct` stayed at zero for
+  hours — meaning analysis of those hours read a flat line that never existed. 199 rows were
+  restored on the Max journal and 56 on the Pro one, with an error of 0.000 s.
 
-**`gap` і `creditGap` більше не зберігаються** — вони обчислювані. Обидва писалися з 11–20 знаками,
-тоді як уся невизначеність сиділа в `util` із кроком 1 пп: **0.55 МБ із 4.6 МБ** місячного файлу на
-цифри, що нічого не означають. Жоден читач їх не споживав — лише писали й перевіряли в тестах.
+**`gap` and `creditGap` are no longer stored** — they're computable. Both were written with
+11–20 digits, while all the actual uncertainty sat in `util` with a 1-pp step: **0.55 MB out of a
+4.6 MB** monthly file spent on digits that meant nothing. No reader ever consumed them — they were
+only written and checked in tests.
 
-**Точність — одне правило, а не таблиця констант.** Для часток вікна крок має бути не грубішим за
-секунду на **своєму** вікні, тобто `decimals = ceil(log10(windowSeconds))`: 5 знаків для `h5.timePct`,
-6 для `d7`/`scoped`, 7 для `monthPct`. Поля лишаються **безрозмірними частками**, а не секундами:
-секунди дали б точність без правила, але читачеві довелося б знати довжину вікна — і для `scoped`
-рядків ще й **яке саме** вікно вони позичають.
+**Precision — one rule, not a table of constants.** For window fractions, the step must be no
+coarser than one second on that field's **own** window, i.e. `decimals = ceil(log10(windowSeconds))`:
+5 digits for `h5.timePct`, 6 for `d7`/`scoped`, 7 for `monthPct`. Fields stay **dimensionless
+fractions**, not seconds: seconds would give precision without a rule, but the reader would then
+need to know the window's length — and for `scoped` rows, **which** window it's borrowing, too.
 
-**Міграція — перезапис, не перейменування.** Кожен v1-рядок уже містить `h5.util`, `d7.util` і час
-(перевірено: **100 %** записів), тобто рівно те, що потрібно реконструкції. Тож `util` заповнюється
-**тим самим алгоритмом, що працює наживо**, прогнаним по історії в порядку: нічого не вигадується.
-Мігровані рядки несуть звичайні `src` — алгоритм і результат ті самі, тож окрема позначка
-натякала б на різницю, якої немає.
+**Migration — a rewrite, not a rename.** Every v1 row already contains `h5.util`, `d7.util`, and a
+timestamp (verified: **100%** of records), i.e. exactly what reconstruction needs. So `util` is
+filled in by **the same algorithm that runs live**, replayed over history in order: nothing is
+invented. Migrated rows carry an ordinary `src` — the algorithm and the result are the same, so a
+separate marker would imply a difference that doesn't exist.
 
-**Бекапи `.v<n>.bak` зберігаються назавжди.** Після міграції `util` уже не сире значення, тож бекап —
-єдиний запис того, що справді віддавав сервер; якщо в алгоритмі знайдеться вада, відтворити історію
-можна буде лише звідти. Застосунок їх ніколи не видаляє — це рішення мейнтейнера.
+**`.v<n>.bak` backups are kept forever.** After migration, `util` is no longer a raw value, so the
+backup is the only record of what the server actually returned; if a flaw ever turns up in the
+algorithm, history can only be reconstructed from there. The app never deletes them — that's the
+maintainer's call.
 
-**Суфікс називає версію, яку бекап містить** ([#401](https://github.com/artem-from-ua/tokenpace/issues/401)).
-Спершу він був хардкодом `.v1.bak` — точним описом, поки міграція була одна, і хибним, щойно їх стало
-дві: прохід v2 → v3 знаходив наявний `.v1.bak`, **правильно** відмовлявся його перезаписувати (то
-старіший доказ) і замість цього **видаляв сам v2-файл**. Архів стрибав v1 → v3 без проміжного стану —
-саме так і сталося на живому журналі мейнтейнера.
+**The suffix names the version the backup contains** ([#401](https://github.com/artem-from-ua/tokenpace/issues/401)).
+It started out as the hardcoded `.v1.bak` — an accurate description while there was only one
+migration, and a wrong one the moment there were two: the v2 → v3 pass found the existing
+`.v1.bak`, **correctly** refused to overwrite it (older evidence), and instead **deleted the v2
+file itself**. The archive jumped v1 → v3 with no intermediate state — which is exactly what
+happened on the maintainer's live journal.
 
-Тепер кожне покоління лишає власний бекап: файл, проведений v1 → v2 → v3, має і `.v1.bak`, і
-`.v2.bak`, тож будь-який крок можна перевірити окремо, не переграючи попередні. Версію віддає сама
-міграція (`Outcome.migratedFromVersion` — **найменша** з переписаних, бо append-only файл законно
-містить кілька поколінь, і мітка має відповідати найстарішому). Наявні `.v1.bak` перейменування не
-потребують: вони містять v1 і за новим правилом уже названі правильно.
+Now every generation leaves its own backup: a file taken through v1 → v2 → v3 gets both a
+`.v1.bak` and a `.v2.bak`, so any step can be checked independently, without replaying the earlier
+ones. The version comes from the migration itself (`Outcome.migratedFromVersion` — the
+**smallest** of the versions rewritten, since an append-only file legitimately holds several
+generations, and the label must match the oldest). Existing `.v1.bak` files need no renaming: they
+hold v1 and are already correctly named under the new rule.
 
-Три властивості, які міграція мусить витримувати, і кожна перевірена на живих журналах:
+Three properties the migration must uphold, each verified on live journals:
 
-- **рядок, що не парситься**, переноситься побайтово й рахується (обірваний хвіст після краху);
-- **непослідовні позначки часу** — знайдено реальний випадок (11:03 перед 10:37, два процеси писали
-  під `flock`). Такий рядок переписується зі своїх значень, але **не навчає** оцінювач, інакше він
-  зареєстрував би падіння витрат, якого не було;
-- **стан несеться між файлами** — журнал помісячний, і холодний старт кожного місяця лишив би всі
-  його рядки на успадкованому якорі без причини.
+- **an unparseable line** is carried across byte-for-byte and counted (a truncated tail after a
+  crash);
+- **out-of-order timestamps** — a real case was found (11:03 before 10:37, two processes writing
+  under `flock`). Such a row is rewritten from its own values, but it **does not teach** the
+  estimator, or it would register a drop in spending that never happened;
+- **state carries across files** — the journal is monthly, and a cold start every month would
+  otherwise leave every row of it anchored to an inherited value for no reason.
 
-**Файли обираються не за префіксом.** `usage-journal-` є префіксом і для `usage-journal-dev-…`, тож
-наївний `hasPrefix` дозволяє **релізній** збірці мігрувати dev-журнали, які їй не належать. Знайдено
-перед першою живою міграцією — на машині, де dev-файл випадково вже був поточним, тож шкода була б
-**невидимою**, а не відсутньою. Предикат винесено в `JournalMigration.belongsToBuild` саме щоб його
-можна було покрити тестом: shell-таргет тестів не має, і через це помилка й проскочила.
+**Files are not selected by prefix.** `usage-journal-` is also a prefix of `usage-journal-dev-…`,
+so a naive `hasPrefix` lets the **release** build migrate dev journals that aren't its own. This
+was caught before the first live migration — on a machine where the dev file happened to already
+be current, so the damage would have been **invisible**, not absent. The predicate was pulled out
+into `JournalMigration.belongsToBuild` specifically so it could be covered by a test: the shell
+target has no tests, and that's exactly how the bug slipped through.
 
-Атомарність дає пара `rename`: новий файл пишеться поруч і `fsync`-ається, оригінал відсувається в
-`.v<n>.bak`, і лише тоді новий стає на місце. Збій на будь-якому кроці лишає або старий файл, або
-новий — ніколи напівзаписаний. Гонки з дописуванням немає **за побудовою**: `UsageJournal` — actor,
-тож перезапис і `append` не можуть виконуватись одночасно.
+Atomicity comes from a `rename` pair: the new file is written alongside the old one and `fsync`'d,
+the original is moved aside to `.v<n>.bak`, and only then does the new one take its place. A
+failure at any step leaves either the old file or the new one — never a half-written one. There's
+no race with concurrent appends **by construction**: `UsageJournal` is an actor, so a rewrite and
+an `append` can never run at the same time.
 
-## Наслідки
+## Consequences
 
-- **Історія починається з дня релізу** — без backfill; це аргумент випустити колектор до фіч, що
-  його читають, а не після.
-- **Розриви — first-class.** Каденція 3/15 хв + `pausePollingWhenScreenLocked` роблять діри в ряді
-  за дизайном. `resume`-маркери відрізняють «нічого не сталося» від «ми не дивилися»; читач **ніколи
-  не інтерполює** через розрив (та сама чесність, що `ServiceStatus.unknown` / idle ADR-0027).
-- **Запис ніколи не валить полл.** `UsageJournal.append` не кидає й диспатчиться off-actor; на
-  будь-якій помилці — лог і drop.
-- **Без ротації-коду.** ~480 поллів/добу × ~70–300 B ≈ кілька MB/місяць; помісячні файли роблять
-  ротацію питанням `rm` старих файлів, не логіки в app.
-- **Чиста межа Kit/shell** (ADR-0009): типи рядка, фабрики, `PacingBucket`, gap, reader — pure й
-  тестовані в Kit; shell робить лише flock-I/O та іменування.
-- **`sev` ігнорує лише `CalmColorMode`** — косметику; `blueAllowed` (weekly gate) поважає, тож
-  бакет збігається з побаченим кольором ([ADR-0081](0081-weekly-capacity-gate-for-blue.md)).
+- **History starts on release day** — no backfill; that's the argument for shipping the collector
+  before the features that read it, not after.
+- **Gaps are first-class.** The 3/15-min cadence plus `pausePollingWhenScreenLocked` punch holes in
+  the series by design. `resume` markers distinguish "nothing happened" from "we weren't
+  watching"; the reader **never interpolates** across a gap (the same honesty as
+  `ServiceStatus.unknown` / idle, ADR-0027).
+- **A write never breaks a poll.** `UsageJournal.append` doesn't throw and dispatches off-actor; on
+  any error, it logs and drops.
+- **No rotation code.** ~480 polls/day × ~70–300 B ≈ a few MB/month; monthly files turn rotation
+  into a matter of `rm`-ing old files, not app logic.
+- **A clean Kit/shell boundary** (ADR-0009): the row types, factories, `PacingBucket`, gap, and
+  reader are pure and tested in the Kit; the shell does only `flock` I/O and naming.
+- **`sev` ignores only `CalmColorMode`** — the cosmetics; it respects `blueAllowed` (the weekly
+  gate), so the bucket matches the color actually seen
+  ([ADR-0081](0081-weekly-capacity-gate-for-blue.md)).

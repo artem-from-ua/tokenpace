@@ -5,117 +5,125 @@ supersedes: []
 superseded_by: [0113]
 ---
 
-# ADR-0039: Нотифікація «Back to work!» — фронт blocked→unblocked, quiet-hours, opt-in
+# ADR-0039: "Back to work!" notification — the blocked→unblocked edge, quiet hours, opt-in
 
-> Реалізовано в [#160](https://github.com/artem-from-ua/tokenpace/issues/160).
+> Implemented in [#160](https://github.com/artem-from-ua/tokenpace/issues/160).
 >
-> ⚠️ **Вибір сигналу витіснено [ADR-0113](0113-back-to-work-tracks-the-subscription-quota.md)**
-> ([#161](https://github.com/artem-from-ua/tokenpace/issues/161)): фронт тепер `subscriptionAvailable`
-> (лише 5h/7d, кредити поза сигналом в обидва боки), а не `canWork`. Усе решта нижче — персистований
-> edge-state і розкол «трекінг щополу / постинг за тумблером», quiet-hours із Правилом A, ленива
-> `.app`-only авторизація, розкол pure/shell — **чинне без змін**.
+> ⚠️ **The signal choice was superseded by
+> [ADR-0113](0113-back-to-work-tracks-the-subscription-quota.md)**
+> ([#161](https://github.com/artem-from-ua/tokenpace/issues/161)): the edge is now
+> `subscriptionAvailable` (5h/7d only, credits out of the signal in both directions), not
+> `canWork`. Everything else below — the persisted edge state and the "track on every poll / post
+> behind the toggle" split, quiet hours with Rule A, lazy `.app`-only authorization, the pure/shell
+> split — **still stands unchanged**.
 
-## Контекст
+## Context
 
-Коли ліміти Claude Code вичерпано, робота блокується — і немає жодного сигналу, що можна
-повертатися. Користувач мусить сам відкривати дропдаун і перевіряти, чи вже ресетнулося.
+When Claude Code limits are exhausted, work is blocked — and there is no signal that it is safe to
+come back. The user has to open the dropdown themselves and check whether it has reset yet.
 
-TokenPace має **сам** надіслати системну нотифікацію «Back to work!» рівно в момент, коли робота
-знову стала можливою — але без набридливості (у дусі [#130](https://github.com/artem-from-ua/tokenpace/issues/130)/#134,
-які **прибирали** нотифікації авто-апдейту).
+TokenPace should **itself** send a system notification, "Back to work!", at the exact moment work
+becomes possible again — without being annoying (in the spirit of
+[#130](https://github.com/artem-from-ua/tokenpace/issues/130)/#134, which **removed** the
+auto-update notifications).
 
-Ключова складність — визначити «коли робота знову можлива»: це **не** «якийсь таймер добіг нуля»,
-а перехід зі стану «заблоковано» у стан «можна працювати». Розблокування = обидва базові вікна
-(5h + 7d + per-model + weekly_scoped) більше не вичерпані, **АБО** вони вичерпані, але
-money-credits (extra usage, [ADR-0037](0037-extra-usage-credits-model.md)) активно покривають
-роботу / щойно ресетнулися.
+The key difficulty is defining "when work is possible again": it is **not** "some timer hit zero",
+but a transition from a "blocked" state into a "can work" state. Unblocking = both baseline windows
+(5h + 7d + per-model + weekly_scoped) are no longer exhausted, **OR** they are exhausted but
+money credits (extra usage, [ADR-0037](0037-extra-usage-credits-model.md)) are actively covering
+work / have just reset.
 
-Додатково користувач хоче гейт «тихих годин»: дозволене вікно годин (з урахуванням локалі 12h/24h
-і таймзони) і опційне глушіння на вихідних.
+Additionally, the user wants a "quiet hours" gate: an allowed hour window (respecting 12h/24h
+locale and time zone) plus optional weekend suppression.
 
-## Рішення
+## Decision
 
-### Фронт `blocked → unblocked`, а не «таймер»
+### The `blocked → unblocked` edge, not a "timer"
 
-Чистий предикат `WorkAvailability.canWork(_ snapshot:)` (`TokenPaceKit`):
+A pure predicate `WorkAvailability.canWork(_ snapshot:)` (`TokenPaceKit`):
 
 ```
 canWork = !anyBaseLimitExhausted(snapshot)
           || (spend != nil && isSpending(spend, baseLimitExhausted: true))
 ```
 
-Реюз наявних предикатів `CreditsPacing.anyBaseLimitExhausted` та `isSpending` — не винаходимо нову
-перевірку вичерпаності. Наслідки випливають із моделі без спецкоду: `spend == nil` + вичерпано →
-`false`; `sessionIdle` (5h util 0) → не вичерпано; `spend_limit_reached` (кредити на стелі,
-`enabled=false`) → `false`, а пізніший ресет кредитів → легітимний фронт розблокування, який
-`isSpending` ловить.
+Reuses the existing predicates `CreditsPacing.anyBaseLimitExhausted` and `isSpending` — we don't
+invent a new exhaustion check. The consequences follow from the model with no special-casing:
+`spend == nil` + exhausted → `false`; `sessionIdle` (5h util 0) → not exhausted;
+`spend_limit_reached` (credits at the ceiling, `enabled=false`) → `false`, and a later credits
+reset → a legitimate unblock edge that `isSpending` catches.
 
-Детекція фронту — у `AppDelegate.apply`, до перезапису `lastOutput`, порівнянням попереднього й
-поточного `canWork`.
+Edge detection lives in `AppDelegate.apply`, before `lastOutput` is overwritten, by comparing the
+previous and current `canWork`.
 
-### Персистований стан «заблоковано»
+### The persisted "blocked" state
 
-Стан «was blocked» **персистується** (`PersistedConfig.backToWorkWasBlocked`), а не тримається в
-пам'яті — щоб фронт пережив рестарт застосунку (або сон/ребут Mac) між блоком і ресетом, і toggle
-off→on. Трекінг і постинг у різних гардах:
+The "was blocked" state is **persisted** (`PersistedConfig.backToWorkWasBlocked`), not kept in
+memory — so the edge survives an app restart (or the Mac sleeping/rebooting) between the block and
+the reset, and a toggle off→on. Tracking and posting sit behind different guards:
 
-- **Трекінг — на кожному успішному полі, незалежно від тумблера.** Так стан завжди актуальний:
-  toggle off→on ніколи не забуває чекаючий фронт і не вистрелює хибним фронтом про ресет, що
-  стався, поки фіча була вимкнена.
-- **Постинг — лише коли фіча увімкнена**, і лише коли попереднє успішне читання було справді
-  заблокованим, а поточне — workable.
+- **Tracking happens on every successful poll, regardless of the toggle.** This keeps the state
+  always current: a toggle off→on never forgets a pending edge, and never fires a false edge for a
+  reset that happened while the feature was off.
+- **Posting only happens when the feature is enabled**, and only when the previous successful read
+  was truly blocked and the current one is workable.
 
-Тільки справжні успішні поли оновлюють стан: failing/stale-пол несе last-known снапшот
-(`health.failingSince != nil`), а optimistic-reset overlay обходить `apply` (кличе `render`), тож
-жоден не дає хибне «розблокування».
+Only genuine successful polls update the state: a failing/stale poll carries the last-known
+snapshot (`health.failingSince != nil`), and the optimistic-reset overlay bypasses `apply` (it
+calls `render`), so neither produces a false "unblocked."
 
-### Quiet-hours — AND двох гардів, Правило A для wrap
+### Quiet hours — an AND of two guards, Rule A for the wrap
 
-Чистий `NotificationSchedule.isAllowed(...)` (`TokenPaceKit`, Calendar/timeZone-інжектований).
-Нотифікація дозволена лише коли (час у вікні годин) **І** (день не в suppress-парі).
+A pure `NotificationSchedule.isAllowed(...)` (`TokenPaceKit`, with Calendar/timeZone injected). A
+notification is allowed only when (the time is inside the hour window) **AND** (the day is not in
+the suppress pair).
 
-- **Вікно годин** — `[startMinute, endMinute)` у хвилинах доби. Non-wrap (`start < end`): `start ≤
-  m < end`. **Wrap через опівніч** (`start > end`, напр. 17:00–08:00): `m ≥ start || m < end`.
-  `start == end` → **ціла доба дозволена** (mis-set пікер ніколи тихо не вбиває всі нотифікації).
-- **Suppress-дні прив'язані до дня, коли відкрилося поточне вікно (Правило A)**, а не до
-  календарного дня `now`. Приклад — вікно 13:00–01:00, suppress Sat-Sun: ніч Пт 13:00 → Сб 01:00
-  належить **п'ятниці**, тож Сб 00:30 **дозволено**; Сб 14:00 та Нд 00:30 (суботине вікно) —
-  заглушено; Пн 00:30 (ще неділине вікно) — заглушено. Це зберігає осмисленість AND для wrap-вікна:
-  наївний `weekday(now)` заглушив би Сб 00:30, суперечачи наміру. Anchor-логіка ізольована в одному
-  приватному хелпері.
+- **The hour window** is `[startMinute, endMinute)` in minutes-of-day. Non-wrap (`start < end`):
+  `start ≤ m < end`. **A midnight wrap** (`start > end`, e.g. 17:00–08:00): `m ≥ start || m < end`.
+  `start == end` → **the whole day is allowed** (a misconfigured picker never silently kills every
+  notification).
+- **Suppress days are anchored to the day the current window opened (Rule A)**, not the calendar
+  day of `now`. Example — a 13:00–01:00 window, Sat-Sun suppressed: the night of Fri 13:00 → Sat
+  01:00 belongs to **Friday**, so Sat 00:30 **is allowed**; Sat 14:00 and Sun 00:30 (Saturday's
+  window) are suppressed; Mon 00:30 (still Sunday's window) is suppressed. This keeps the AND
+  meaningful for a wrap window: a naive `weekday(now)` would suppress Sat 00:30, contradicting the
+  intent. The anchor logic is isolated in one private helper.
 
-Тривалість вікна (`windowLengthMinutes`) — жива підказка «Nh window» у Settings.
+The window's length (`windowLengthMinutes`) is a live "Nh window" hint in Settings.
 
-### Off-by-default opt-in, лениза авторизація
+### Off-by-default opt-in, lazy authorization
 
-`backToWorkEnabled` default-OFF. `UNUserNotificationCenter` — нова здатність (у проєкті не було
-жодного `UserNotifications` коду); локальні нотифікації **не** потребують entitlement чи
-Info.plist-ключа, лише валідний bundle id (наявний). Авторизація запитується **лениво при першому
-вмиканні** тумблера — не на старті, щоб не промптити тих, хто фічу не вмикає.
+`backToWorkEnabled` defaults to OFF. `UNUserNotificationCenter` is a new capability (the project
+had no `UserNotifications` code at all); local notifications do **not** need an entitlement or an
+Info.plist key, only a valid bundle id (already present). Authorization is requested **lazily, on
+first enabling** the toggle — not at launch, so users who never enable the feature are never
+prompted.
 
 ### Pure/impure split
 
-Уся тестовна логіка — в Kit (`WorkAvailability`, `NotificationSchedule`, `SuppressDays`); імпурна
-`UNUserNotificationCenter`-сторона тонка (`BackToWorkNotifier`) і верифікується вручну (ADR-0009/0023).
-Dev-білд (`swift run`, без реального бандла) не авторизується — усі виклики деградують без крешу,
-Settings показує підказку (як launch-at-login та авто-апдейт).
+All the testable logic lives in Kit (`WorkAvailability`, `NotificationSchedule`, `SuppressDays`);
+the impure `UNUserNotificationCenter` side is thin (`BackToWorkNotifier`) and is verified by hand
+(ADR-0009/0023). A dev build (`swift run`, no real bundle) does not authorize — every call degrades
+without crashing, and Settings shows a hint (as with launch-at-login and auto-update).
 
-## Наслідки
+## Consequences
 
-- Нотифікація приходить рівно на переході «можна працювати», один раз на цикл, переживає рестарт.
-- Нові UI-контроли: секція Settings → Notifications (master-switch, тайм-пікери, suppress-радіо).
-- Верифікація — лише в реальному `.app` через стуб `just-unblocked` (див.
+- The notification arrives exactly at the "can work" edge, once per cycle, and survives a restart.
+- New UI controls: a Settings → Notifications section (a master switch, time pickers, a suppress
+  radio group).
+- Verification happens only in a real `.app`, via the `just-unblocked` stub (see
   [guides/ui-verification.md](../guides/ui-verification.md)).
 
-## Відкрите: DND / Focus (needs-verification)
+## Open questions
 
-Не стверджуємо з пам'яті — перевірити по офіційній доці macOS 15 перед тим, як покладатися:
+**DND / Focus (needs verification).** Not claiming this from memory — verify against the official
+macOS 15 docs before relying on it:
 
-1. Чи macOS сам притримує доставку локального `UNNotificationRequest` під час Focus/Do-Not-Disturb
-   (очікувано — так, банер лягає в Notification Center). Якщо так — покладаємось на систему, нічого
-   не додаємо.
-2. Чи є на macOS 15 підтримуваний публічний API визначити активний Focus із застосунку (історично
-   надійного публічного не було). Якщо детекту немає — наше вікно годин лишається єдиним app-level
-   гардом, а DND обробляє система.
+1. Whether macOS itself holds back delivery of a local `UNNotificationRequest` during Focus/Do Not
+   Disturb (expected — yes, the banner lands in Notification Center). If so — we rely on the
+   system and add nothing.
+2. Whether macOS 15 has a supported public API to detect the active Focus from an app (historically
+   there has been no reliable public one). If there is no detection — our hour window remains the
+   only app-level guard, and DND is left to the system's delivery.
 
-Наразі реалізовано лише app-level quiet-hours; DND делегується системній доставці.
+For now, only app-level quiet hours are implemented; DND is delegated to system delivery.

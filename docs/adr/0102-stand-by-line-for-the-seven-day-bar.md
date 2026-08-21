@@ -5,124 +5,133 @@ supersedes: []
 superseded_by: []
 ---
 
-# ADR-0102: Рядок «stand by … for green» — ціна паузи на 7-денному барі
+# ADR-0102: A "stand by … for green" line — the cost of waiting out the 7-day bar
 
-> **Уточнено [ADR-0103](0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md).**
-> Рішення лишається чинним цілком; застаріло одне **передбачення** в §«Наслідки» — що
-> `standByFloorSeconds` оживе, коли крок квантування впаде до ~10 хв. Поріг справді ожив, але
-> механізм інший: `standBy` і час до ресету ростуть разом, тож 20-хвилинний override зʼїдає кадри з
-> малим лідом, і виживає сама смуга `u` 99.15–99.40 %. Вимір і стуб — там само.
+> **Refined by [ADR-0103](0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md).**
+> The decision still stands in full; one **prediction** in §Consequences is now outdated — that
+> `standByFloorSeconds` would come into play once the quantization step dropped to ~10 min. The
+> threshold did come into play, but through a different mechanism: `standBy` and the time to reset
+> grow together, so the 20-minute override eats frames with a small lead, and what survives is the
+> narrow band `u` 99.15–99.40%. The measurement and stub are unchanged.
 
-## Контекст
+## Context
 
-Помаранчевий бар відповідає на питання «що не так»: витрачено більше, ніж належить на цю точку
-вікна. Він не відповідає на наступне питання користувача — **скільки коштує це виправити**.
+The orange bar answers the question "what's wrong": more has been spent than is warranted at this
+point in the window. It doesn't answer the user's next question — **what does it cost to fix this**.
 
-Різниця істотна саме на тижневому вікні. Помаранчевий на 7d живе днями, і пауза там —
-реальна стратегія, а не абстракція. Але без числа користувач або вгадує тривалість навмання, або
-ігнорує сигнал: «пригальмувати» без міри не є дією.
+The difference matters most on the weekly window. Orange on 7d lives for days, and waiting there is
+a real strategy, not an abstraction. But without a number, the user either guesses the duration
+blindly or ignores the signal: "slow down" without a measure isn't an action.
 
-Перевірка з [users-and-goals](../reference/users-and-goals.md) («чи існує дія, яку користувач
-виконає інакше») проходить в **обидва** боки, і це важливо: `stand by 40m` каже «пауза дешева,
-зроби перерву», а `stand by 2d` каже «перечекати не вийде, приймай помаранчевий і плануй тиждень».
-Друге — теж відповідь, і вона зупиняє марні спроби «трохи пригальмувати».
+The check from [users-and-goals](../reference/users-and-goals.md) ("is there an action the user
+would take differently") passes in **both** directions, and that matters: `stand by 40m` says
+"waiting is cheap, take a break," while `stand by 2d` says "waiting it out won't work, accept orange
+and plan the week." The second is an answer too, and it stops futile attempts at "slowing down a
+little."
 
-## Рішення
+## Decision
 
-### 1. Зелений — це `u ≤ t`, і жодного порогового коефіцієнта в розрахунку немає
+### 1. Green is `u ≤ t`, and no threshold coefficient enters the computation
 
-Витрати тільки ростуть, а елапс росте сам собою, тож пауза дає часу наздогнати заморожене `u`:
+Spend only grows, and elapsed time grows on its own, so waiting gives time a chance to catch up to
+frozen `u`:
 
 ```
 standBy = windowDurationSeconds · (usageFraction − timeFraction)
 ```
 
-**`aheadThreshold` (`0.16·(1 − t)`) тут не бере участі — і це головне в цьому рішенні.** Він є
-межею **жовтий↔помаранчевий** і живе цілком усередині ahead-боку, де колір обирає
-`PopupBarView.aheadColor`. Зелений вирішує **інша** функція — `behindColor`, на гілці `u ≤ t`, — і
-про `0.16` вона не знає взагалі.
+**`aheadThreshold` (`0.16·(1 − t)`) plays no part here — and that's the crux of this decision.** It
+is the **yellow↔orange** boundary and lives entirely on the ahead side, where
+`PopupBarView.aheadColor` picks the color. Green is decided by a **different** function —
+`behindColor`, on the `u ≤ t` branch — which knows nothing about `0.16` at all.
 
-Спокуса розвʼязати рівняння «дочекатись `severity == .calm`» природна й **хибна**: `PacingSeverity.calm`
-покриває **два** кольори — зелений (гілка `.onPaceOrBehind`) і **жовтий** (гілка `.ahead` з лідом
-менше порога). Такий розрахунок приводив би в жовтий і **занижував** пораду — рядок обіцяв би
-зелений помітно раніше, ніж він настане.
+The temptation to solve the equation "wait for `severity == .calm`" is natural and **wrong**:
+`PacingSeverity.calm` covers **two** colors — green (the `.onPaceOrBehind` branch) and **yellow**
+(the `.ahead` branch with a lead below the threshold). That computation would land in yellow and
+**understate** the advice — the line would promise green noticeably earlier than it actually arrives.
 
-Тест `waitingExactlyThatLongReachesGreen` навмисно перевіряє `pacing == .onPaceOrBehind`, а не
-`severity == .calm`: друге пройшло б і на заниженому значенні.
+The `waitingExactlyThatLongReachesGreen` test deliberately checks `pacing == .onPaceOrBehind`, not
+`severity == .calm`: the latter would pass even on an understated value.
 
-### 2. Лише 7-денне вікно
+### 2. Only the 7-day window
 
-Пʼятигодинне ресетиться щонайменше двічі за робочу добу — воно виправляється саме, без жодного
-рішення користувача. Ціна паузи там не змінює нічого, тож рядок обмежений `index ==
-PopupViewController.sevenDayRowIndex`.
+The 5-hour window resets at least twice in a working day — it corrects itself with no user decision
+needed. The cost of waiting doesn't change anything there, so the line is limited to
+`index == PopupViewController.sevenDayRowIndex`.
 
-### 3. Лише під ⌥, лише на помаранчевому, і не коротше за 20 хвилин
+### 3. Only under ⌥, only on orange, and never shorter than 20 minutes
 
-Три шари тиші, бо рядок дорогий: він третій у секції й зсуває бар (§«Why silence is a valid state»).
+Three layers of silence, because the line is expensive: it's third in the section and shifts the
+bar (§"Why silence is a valid state").
 
-- **⌥** — деталь на вимогу; у спокої секція виглядає як раніше.
-- **Помаранчевий** — на зеленому/синьому чекати нічого, на жовтому лід у межах норми, а червоне
-  (`usage >= 1`) пауза не лікує взагалі: витрати вперлися в стелю, час їх не наздожене.
-- **≥ 20 хв** (`standByFloorSeconds`) — коротша пауза мине, доки користувач читає попап.
+- **⌥** — an on-demand detail; at rest the section looks the way it always did.
+- **Orange** — on green/blue there's nothing to wait for, on yellow the lead is within normal range,
+  and on red (`usage >= 1`) waiting doesn't help at all: spend has hit the ceiling, and time can't
+  catch up to it.
+- **≥ 20 min** (`standByFloorSeconds`) — a shorter wait would pass before the user finishes reading
+  the popup.
 
-### 4. Окремого правила «не показувати біля ресету» немає — воно вкладене в наявне
+### 4. There's no separate "don't show near a reset" rule — it's nested inside an existing one
 
-Вимога звучала природно: не дублювати рядок ресету, коли зелений настане приблизно тоді ж. Але
-розрахунок **уже** відмовляє, якщо зелений припав би на останні `pacingOrangeOverrideSeconds`
-(20 хв) вікна — там бар усе одно був би помаранчевим за override'ом, тож обіцянка була б хибною.
+The requirement sounded natural: don't duplicate the reset line when green would arrive at roughly
+the same time. But the computation **already** declines if green would fall within the last
+`pacingOrangeOverrideSeconds` (20 min) of the window — there, the bar would still be orange because
+of the override, so the promise would be false.
 
-Оскільки 20 хв **строго більше** за будь-який менший проміжок, додаткове 10-хвилинне правило не
-відкинуло б **жодного** випадку: воно сиділо б усередині вже наявного виключення. Реалізоване, воно
-було б мертвим кодом.
+Since 20 min is **strictly greater** than any shorter interval, an additional 10-minute rule near the
+reset wouldn't rule out **any** case: it would sit entirely inside the exclusion that already exists.
+If implemented, it would be dead code.
 
-Це загальна пастка, і вона варта запису: два пороги, що виглядають незалежними, а насправді один
-вкладений в інший. Тест `survivingWaitsAreAlwaysWellClearOfTheReset` фіксує саме цю властивість
-перебором станів, щоб правило не «повернули» пізніше як забуте.
+This is a general trap, and it's worth recording: two thresholds that look independent but are
+actually one nested inside the other. The `survivingWaitsAreAlwaysWellClearOfTheReset` test pins
+exactly this property by exhaustively checking states, so the rule doesn't get "brought back" later
+as forgotten.
 
-### 5. Формат тривалості — той самий, що й у ресету
+### 5. The duration format is the same one used for the reset
 
-`ResetClock.relativeRounded` розділено: банд-таблиця виїхала в `rounded(duration:)`, що приймає
-голу тривалість, а `relativeRounded` лишився однорядковою обгорткою. Так рядок отримує `45m` /
-`3h` / `2d` **тим самим** форматером, що й ресет поряд, і попап не заводить другого формату
-часу ([ADR-0074](0074-one-reset-format-on-both-surfaces.md)).
+`ResetClock.relativeRounded` was split: the band table moved into `rounded(duration:)`, which takes
+a bare duration, and `relativeRounded` became a one-line wrapper. This way the line gets `45m` /
+`3h` / `2d` from **the same** formatter as the reset line next to it, and the popup doesn't grow a
+second time format ([ADR-0074](0074-one-reset-format-on-both-surfaces.md)).
 
-Округлення лишається **до найближчого**, як і всюди: 36 год читаються як `2d`. Рішення свідоме —
-окреме правило округлення заради цього рядка створило б другу поведінку часу в тому самому попапі.
+Rounding stays **to the nearest**, as everywhere else: 36 hours reads as `2d`. This is deliberate —
+a separate rounding rule just for this line would introduce a second time behavior in the same
+popup.
 
-### 6. Рядок не має кольору
+### 6. The line carries no color
 
-Тон — `dimmedLabel`, той самий, що в рядку деталей. Вердикт несе бар; підфарбувати текст означало
-б поставити на той самий рядок другий, конкурентний носій вердикту — той самий «підняти вагу
-входу», проти якого стоять правила бару.
+The tone is `dimmedLabel`, the same one used in the details line. The bar carries the verdict;
+tinting the text would put a second, competing verdict carrier on the same line — exactly the
+"raise the weight of an input" pattern the bar's rules stand against.
 
-## Наслідки
+## Consequences
 
-- Помаранчевий 7d під ⌥ дає **число, з яким можна щось зробити**, а не лише вердикт.
-- Рядок мовчить у переважній більшості станів — за задумом, не через недопрацювання.
-- **Поріг 20 хв на практиці не спрацьовує майже ніколи** — і це нормально для страховки.
-  Мінімальне очікування, сумісне з помаранчевим, дорівнює самому порогу кольору `0.16·(1 − t)·D`,
-  тож воно падає під 20 хв лише коли до ресету лишається менше **125 хв**. Але й там стан вимагає,
-  щоб витрати влучили у смугу завширшки **соті частки відсоткового пункту** (при залишку 120 хв —
-  `u ∈ [99.0000 %, 99.0079 %]`, тобто 0.008 pp; при 60 хв — 0.10 pp). На середині тижня
-  (`t = 50 %`) навіть найслабший помаранчевий — це вже ≈13 год паузи. Тобто поріг є запобіжником
-  від абсурдного «stand by 3m», а не робочим фільтром: у типовому помаранчевому стані він не
-  впливає ні на що.
-- Через це стуб на «поріг ховає рядок» (`standby-floor`) тримає **дробовий** відсоток витрат:
-  цілий відсоток семиденного вікна — це **1 год 40 хв** паузи, тож станів із очікуванням під 20 хв
-  при круглих числах не існує взагалі. Це не примха фікстури, а властивість джерела: API віддає
-  `utilization` токенних вікон **округленим до цілого**
-  ([usage-api-quirks](../reference/usage-api-quirks.md)), тож крок квантування на 7d — 101 хв
-  реальної роботи. Поріг, менший за крок, ловить порожню множину.
-- `ResetClock.rounded(duration:)` тепер доступний будь-якому виклику з голими секундами — на майбутнє
-  це прибирає мотив «сфабрикувати `Date`, щоб дотягнутись до формату».
+- Orange 7d under ⌥ gives **a number you can act on**, not just a verdict.
+- The line stays silent in the vast majority of states — by design, not as an oversight.
+- **The 20-minute floor almost never fires in practice** — and that's fine for a safeguard. The
+  minimum wait consistent with orange equals the color threshold itself, `0.16·(1 − t)·D`, so it
+  drops below 20 min only when the reset is under **125 min** away. And even there, the state has to
+  land spend in a band **hundredths of a percentage point** wide (at 120 min remaining,
+  `u ∈ [99.0000%, 99.0079%]`, i.e. 0.008 pp; at 60 min, 0.10 pp). At mid-week (`t = 50%`), even the
+  faintest orange is already ≈13 hours of waiting. So the floor is a safeguard against an absurd
+  "stand by 3m," not a working filter: in a typical orange state it affects nothing.
+- Because of this, the stub for "the floor hides the line" (`standby-floor`) holds a **fractional**
+  spend percentage: a whole percentage point of the 7-day window is **1 hour 40 minutes** of
+  waiting, so states with a sub-20-minute wait simply don't exist at round numbers. This isn't a
+  quirk of the fixture but a property of the source: the API returns token-window `utilization`
+  **rounded to a whole number** ([usage-api-quirks](../reference/usage-api-quirks.md)), so the
+  quantization step on 7d is 101 minutes of real work. A floor smaller than the step catches an
+  empty set.
+- `ResetClock.rounded(duration:)` is now available to any caller with a bare number of seconds — for
+  future work this removes the motive to "fabricate a `Date`" just to reach the formatter.
 
-## Альтернативи, які відпали
+## Alternatives considered
 
-| Варіант | Чому ні |
+| Option | Why not |
 |---|---|
-| Розвʼязувати до `severity == .calm` | Приводить у **жовтий**: `.calm` — це зелений *і* жовтий. Порада була б заниженою |
-| Показувати й на 5h | Вікно ресетиться двічі за добу й лікується саме — ціна паузи не змінює рішення |
-| Показувати завжди (без ⌥) | Третій рядок у кожній секції коштує висоти попапа щохвилини, а корисний він у вузькому стані |
-| Окремий 10-хвилинний поріг біля ресету | Вкладений у наявну 20-хвилинну перевірку — мертвий код (§4) |
-| Своє округлення для паузи | Другий формат часу в тому самому попапі, проти [ADR-0074](0074-one-reset-format-on-both-surfaces.md) |
-| Фарбувати рядок у колір severity | Другий носій вердикту на тому самому рядку |
+| Solve for `severity == .calm` | Lands in **yellow**: `.calm` is green *and* yellow. The advice would understate the wait |
+| Show it on 5h too | The window resets twice a day and self-corrects — the cost of waiting doesn't change the decision |
+| Always show it (no ⌥) | A third line in every section costs popup height every minute, but is useful only in a narrow state |
+| A separate 10-minute threshold near the reset | Nested inside the existing 20-minute check — dead code (§4) |
+| A dedicated rounding rule for the wait line | A second time format in the same popup, against [ADR-0074](0074-one-reset-format-on-both-surfaces.md) |
+| Color the line by severity | A second verdict carrier on the same line |

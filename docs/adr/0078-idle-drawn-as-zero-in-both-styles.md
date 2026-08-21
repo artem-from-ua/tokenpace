@@ -4,65 +4,66 @@ date: 2026-08-11
 supersedes: []
 ---
 
-# ADR-0078: Idle малюється як нуль в обох стилях — трек + пігулка, маркер лише в Progress
+# ADR-0078: Idle draws as zero in both styles — track + pill, marker only in Progress
 
-> Частково витісняє [ADR-0076](0076-pressure-scale-for-marker-less-bar.md) (§«Idle розрізняє
-> стилі»): idle-бар більше **не** заливається на всю ширину під Progress. Решта 0076 (шкала
-> `pressureLength`, тіки, перейменування `Progress`/`Pressure`, міграція `rawValue`) лишається
-> чинною.
+> Partially supersedes [ADR-0076](0076-pressure-scale-for-marker-less-bar.md) (§"Idle distinguishes
+> styles"): the idle bar **no longer** fills to full width under Progress. The rest of 0076 (the
+> `pressureLength` scale, the ticks, the `Progress`/`Pressure` rename, the `rawValue` migration) still
+> stands.
 
-## Контекст
+## Context
 
-[ADR-0076](0076-pressure-scale-for-marker-less-bar.md) зробив idle стилезалежним: під **Pressure**
-— мінімальна пігулка на сірому треку (idle і є нульовий тиск), під **Progress** — суцільна заливка
-на всю ширину **плюс** маркер часу на нулі. Аргумент був у тому, що маркер ідентифікує стиль, тож
-заливка перестає бути неоднозначною.
+[ADR-0076](0076-pressure-scale-for-marker-less-bar.md) made idle style-dependent: under **Pressure**
+— a minimum pill on a gray track (idle simply is zero pressure); under **Progress** — a solid,
+full-width fill **plus** a time marker at zero. The argument was that the marker identifies the style,
+so the fill stops being ambiguous.
 
-На практиці вона нею лишилася. Progress-бар, залитий на всю ширину, візуально збігається з
-Pressure-баром на **повному тиску** — тобто найгучніша можлива позначка стоїть на
-найспокійнішому стані. Маркер на нулі цю плутанину не знімає: він 7 pt завширшки і сидить у
-самого лівого краю, тоді як вирішує сприйняття саме кольорова площа — 34 pt суцільного кольору в
-меню-барі. Читач бачить «бар повний» раніше, ніж помічає, що на ньому є маркер.
+In practice it stayed ambiguous. A Progress bar filled to full width visually coincides with a
+Pressure bar at **full pressure** — meaning the loudest possible mark sits on the calmest state. A
+marker at zero does not resolve this confusion: it is 7 pt wide and sits at the very left edge, while
+what actually drives perception is the colored area — 34 pt of solid color in the menu bar. A reader
+sees "the bar is full" before noticing that it has a marker at all.
 
-Глибша проблема — **консистентність між стилями**. `BarStyle` задумувався як render-only вибір
-подачі: обидва стилі несуть **той самий** стан, тож перемикання стилю не має міняти *що* бар
-каже — лише *як* він це показує. Idle був єдиним станом, де стилі розходилися не в мітці, а в
-кількості чорнила: порожньо в одному й повна заливка в іншому. Той самий стан читався
-протилежно залежно від налаштування, яке користувач ставив із геть інших міркувань.
+The deeper problem is **consistency between styles**. `BarStyle` was designed as a render-only choice
+of presentation: both styles carry the **same** state, so switching style should never change *what*
+the bar says — only *how* it shows it. Idle was the one state where the styles diverged not in a
+label but in the amount of ink: empty in one, a solid fill in the other. The same state read as
+opposite things depending on a setting the user set for entirely unrelated reasons.
 
-Це та сама помилка ваги входу, від якої застерігає CLAUDE.md («значення — це вхід моделі, колір і
-вердикт — її вихід»): idle не має жодного використання, а малював найбільше чорнила з усіх станів.
+This is the same input-weight mistake CLAUDE.md warns against ("the level is the model's input, color
+and the verdict are its output"): idle has zero usage, yet it drew the most ink of any state.
 
-## Рішення
+## Decision
 
-**Малювати idle однаково в обох стилях — як нуль.** Стилі відрізняються тим самим, чим вони
-відрізняються на кожному іншому барі — наявністю маркера, — а не кількістю кольору:
+**Draw idle identically in both styles — as zero.** The styles differ by the same thing they differ
+by on every other bar — the presence of a marker — not by the amount of color:
 
-- **Спільна основа (обидва стилі)** — сірий трек (`unusedGrey` / `monochromeGrey`), поверх нього
-  **мінімальна пігулка на нулі**: та сама форма, що її дає будь-яка нульова стрічка
+- **Shared base (both styles)** — a gray track (`unusedGrey` / `monochromeGrey`), with a **minimum
+  pill at zero** on top: the same shape any zero strip produces
   (`fillZone(floorEmptyToPill:)` / `pillRect(at: 0)`).
-- **Progress** додає **маркер часу на нулі** (`timeFraction = 0` — вікно щойно перекотилося). Він
-  накриває пігулку, тож фактично Progress-idle читається як «трек + маркер зліва».
-- **Pressure** лишає саму пігулку — без змін проти 0076.
+- **Progress** adds a **time marker at zero** (`timeFraction = 0` — the window has just rolled over).
+  It covers the pill, so in effect Progress-idle reads as "track + a marker on the left."
+- **Pressure** keeps just the pill — unchanged from 0076.
 
-Нуль однаковий в обох шкалах: `usage = 0` — це нуль і в частках вікна, і в перенормованому треку
-`[now .. reset]`. Тому спільна форма тут не компроміс, а те, що обидві шкали й так дають.
+Zero is the same on both scales: `usage = 0` is zero both as a fraction of the window and on the
+renormalized `[now .. reset]` track. So the shared shape here is not a compromise — it's what both
+scales already produce.
 
-Решта idle-поведінки не змінюється: вибір кольору (`blocked` → базовий сірий, calm → `calmWhite`,
-інакше — «ready to start» синій), анімація idle→active через `animated(…)`, ambient glow у попапі,
-тіки під баром.
+The rest of idle's behavior is unchanged: color choice (`blocked` → base gray, calm → `calmWhite`,
+otherwise the "ready to start" blue), the idle→active animation via `animated(…)`, the popup's ambient
+glow, the ticks under the bar.
 
-## Наслідки
+## Consequences
 
-- **Перемикання `BarStyle` більше не змінює, скільки кольору несе idle** — обидва стилі показують
-  однакову кількість, різняться лише маркером. Це те саме правило, за яким живуть усі інші бари.
-- Idle більше не сплутати з Pressure на максимумі — стан, який раніше найлегше було прочитати
-  задом наперед.
-- `blocked` idle у Progress тепер малює сіру пігулку на сірому треку, тобто читається як порожній
-  трек із сірим маркером — рівно так, як `blocked` уже поводився під Pressure. «Немає шляху
-  почати» лишається позначеним pause-гліфом і countdown'ом, а не кольором бару.
-- Дві гілки малювання (`StatusItemView.drawBar`, `PopupBarView.draw`) спростилися: галуження за
-  `popupUsesPressureScale` / `menuBarUsesPressureScale` зникло з idle-шляху, лишився один
-  прапорець маркера.
-- Kit не змінився взагалі — `MenuBarLayout`, `BarView.idle`, `BarStyle` ті самі. Це render-only
-  зміна, як і вся лінійка `BarStyle`.
+- **Switching `BarStyle` no longer changes how much color idle carries** — both styles show the same
+  amount, differing only by the marker. This is the same rule every other bar already lives by.
+- Idle can no longer be confused with Pressure at its maximum — a state that used to be the easiest
+  one to misread backwards.
+- `blocked` idle in Progress now draws a gray pill on a gray track, i.e. it reads as an empty track
+  with a gray marker — exactly how `blocked` already behaved under Pressure. "No way to start" stays
+  marked by the pause glyph and the countdown, not by the bar's color.
+- The two drawing branches (`StatusItemView.drawBar`, `PopupBarView.draw`) got simpler: the branching
+  on `popupUsesPressureScale` / `menuBarUsesPressureScale` is gone from the idle path, leaving a
+  single marker flag.
+- Kit did not change at all — `MenuBarLayout`, `BarView.idle`, `BarStyle` are the same. This is a
+  render-only change, like the entire `BarStyle` line.

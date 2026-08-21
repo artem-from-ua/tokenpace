@@ -5,138 +5,147 @@ supersedes: []
 superseded_by: []
 ---
 
-# ADR-0092: Кредитний бар — власна шкала з підписаними межами місяця
+# ADR-0092: The credits bar — its own scale, with labeled month boundaries
 
-> **Примітка про застарілу цитату.** У §«Альтернативи», п. 4 Pressure наведено як приклад шкали з
-> «єдиним тіком на 20 %». Того тіка більше немає
-> ([ADR-0098](0098-ruler-split-identify-always-explain-on-option.md)), а сама позиція «рівно за
-> планом» переїхала на нуль шкали ([ADR-0101](0101-pressure-is-the-gauge-ahead-half.md)). Аргумент
-> від цього не страждає: він про те, що поділка має позначати **справжній** орієнтир, а не довільну
-> частку, — і рішення цього ADR (жодних зубців, дві підписані межі місяця) чинне без змін.
+> **Note on a stale quote.** In §"Alternatives considered," point 4 cites Pressure as an example
+> of a scale with "a single tick at 20%." That tick no longer exists
+> ([ADR-0098](0098-ruler-split-identify-always-explain-on-option.md)), and the "exactly on plan"
+> position itself moved to the scale's zero ([ADR-0101](0101-pressure-is-the-gauge-ahead-half.md)).
+> The argument is unaffected: it's about a mark needing to denote a **real** reference point, not
+> an arbitrary fraction — and this ADR's decision (no ticks at all, two labeled month boundaries)
+> still stands unchanged.
 
-## Контекст
+## Context
 
-Секція «Extra usage» ділила з токенними рядками не лише вигляд, а й **вибір стилю**: `BarStyle`
-дропдауна керував і нею. Пропозиція звучала так — закріпити за кредитним баром **Progress** назавжди
-й прибрати цей вибір.
+The "Extra usage" section shared not just its look with the token rows but also its **style
+choice**: the dropdown's `BarStyle` controlled it too. The proposal was to pin the credits bar to
+**Progress** forever and remove that choice.
 
-Причина в тому, що кредити паняться інакше, ніж токени. Гроші витрачаються лише коли базовий ліміт
-вичерпано (`CreditsPacing.shouldShowIcon`), тож типовий профіль витрат — нуль-нуль-нуль-сплеск, а не
-рівний потік. На такому профілі шкали, що вимірюють **тиск проти часу, що лишився**, кажуть мало:
-Pressure сплющує кожен спокійний стан у мінімальну пігулку
-([ADR-0076](0076-pressure-scale-for-marker-less-bar.md)), а Gauge показує «запас, який не встигнеш
-витратити» ([ADR-0079](0079-centred-zero-gauge-scale.md)) — але невитрачений грошовий бюджет це не
-втрата, а просто несплачені гроші. Що для кредитів справді дієве — **скільки капу з'їдено і як далеко
-зайшов місяць**, тобто рівно пара позицій, які розмічає шкала вікна.
+The reason is that credits pace differently from tokens. Money is spent only once a base limit is
+exhausted (`CreditsPacing.shouldShowIcon`), so the typical spending profile is
+zero-zero-zero-spike, not a steady flow. On that profile, scales that measure **pressure against
+time remaining** say little: Pressure flattens every calm state into a minimal pill
+([ADR-0076](0076-pressure-scale-for-marker-less-bar.md)), and Gauge shows "the balance you won't
+manage to spend in time" ([ADR-0079](0079-centred-zero-gauge-scale.md)) — but an unspent money
+budget isn't a loss, it's simply money not yet paid. What's actually useful for credits is **how
+much of the cap has been eaten and how far the month has gotten** — exactly the pair of positions a
+window's scale marks out.
 
-Головне заперечення проти хардкоду було не арифметичним, а **візуальним**: `BarStyle` обіцяє «no
-marker anywhere» для Pressure і Gauge, тож єдиний бар із маркером посеред колонки безмаркерних
-стрічок читався б як **баг**, а не як рішення — тим паче, що поруч немає перемикача, який би пояснив
-виняток. Друге заперечення — **дві шкали в одній колонці**: однакова ширина стрічки означала б різне
-в сусідніх рядках, саме та плутанина, від якої проєкт послідовно тікає.
+The main objection to hardcoding it wasn't arithmetic, it was **visual**: `BarStyle` promises "no
+marker anywhere" for Pressure and Gauge, so a single bar with a marker in the middle of a column of
+marker-free strips would read as a **bug**, not a decision — especially with no nearby toggle to
+explain the exception. The second objection was **two scales in one column**: identical strip width
+would mean different things in adjacent rows, exactly the confusion this project consistently
+avoids.
 
-## Рішення
+## Decision
 
-**Кредитний бар завжди малюється на шкалі вікна (Progress), незалежно від `BarStyle` дропдауна — і
-несе власну лінійку: підписи першого й останнього дня календарного місяця на краях треку**
-(`Aug 1` … `Aug 31`).
+**The credits bar always draws on the window scale (Progress), regardless of the dropdown's
+`BarStyle` — and it carries its own ruler: labels for the first and last day of the calendar month
+at the track's edges** (`Aug 1` … `Aug 31`).
 
-Підписи — не оздоба, а саме те, що знімає обидва заперечення. Вони **називають вікно на самому
-барі**, тому бар читається як *інший інструмент*, а не як той самий, що поводиться дивно. Різні
-шкали стають видимо різними, замість того щоб мовчки виглядати однаково.
+The labels aren't decoration — they're exactly what removes both objections. They **name the
+window right on the bar**, so the bar reads as a *different tool*, not as the same one behaving
+oddly. Different scales become visibly different, instead of silently looking the same.
 
-**Тіків кредитний бар не має взагалі.** Внутрішні поділки на місяці неможливі (28–31 день, жоден
-рівний поділ не потрапляє в реальну межу), а межові зубці виявилися зайвими, щойно межі отримали
-імена: слово вже стоїть там, де стояв би зубець, тож зубець позначає те, що підпис і так сказав. До
-того ж правий зубець тіснить маркер часу наприкінці місяця.
+**The credits bar has no ticks at all.** Internal month subdivisions are impossible (28–31 days,
+no even split lands on a real boundary), and the boundary ticks turned out redundant the moment the
+boundaries got names: the word already sits where a tick would, so a tick would mark what the label
+already said. On top of that, the right-hand tick crowds the time marker near month's end.
 
-**Обидві половини рішення веде одне поле — `CreditsRow.monthBounds`.** І шкала, і лінійка випливають
-з одного факту («це вікно — календарний місяць»), тож вони не можуть розійтися: немає двох
-незалежних прапорців, які хтось колись виставить суперечливо. У рендері з'явилися `effectiveScale` /
-`effectiveShowsTimeMarker`, і **всі** гілки малювання читають їх, а не `barStyle.scale` — інакше
-стрічка малювалася б на одній шкалі, а маркер стояв на іншій.
+**One field drives both halves of the decision — `CreditsRow.monthBounds`.** Both the scale and the
+ruler follow from a single fact ("this window is a calendar month"), so they can never drift apart:
+there are no two independent flags someone could someday set inconsistently. The render gained
+`effectiveScale` / `effectiveShowsTimeMarker`, and **every** drawing branch reads them, not
+`barStyle.scale` — otherwise the strip would draw on one scale while the marker sat on another.
 
-**Підписи рахуються в UTC** — тій самій зоні, у якій рахується `timeFraction`
-(`CreditsPacing.resetTimeZone`; місячний ліміт скидається о 00:00 UTC 1-го, підтверджено доками
-Anthropic). Підпис не має права називати не той місяць, який міряє його власна геометрія.
+**Labels are computed in UTC** — the same zone `timeFraction` is computed in
+(`CreditsPacing.resetTimeZone`; the monthly limit resets at 00:00 UTC on the 1st, confirmed by
+Anthropic's docs). A label has no business naming a different month than the one its own geometry
+measures.
 
-## Розглянуті альтернативи: чим саме показати, що бар інший
+## Alternatives considered: what exactly should show that the bar is different
 
-Виняток без пояснення читається як баг — це визнали з самого початку. Питання було в тому, **що**
-саме несе пояснення. Розглянули п'ять варіантів; чотири відкинуто.
+That an unexplained exception reads as a bug was accepted from the start. The question was **what**
+carries the explanation. Five options were considered; four rejected.
 
-**1. Тільки хінт у Settings, бар без змін.** Найдешевше: один рядок тексту, жодної роботи в рендері.
-Відкинуто як **недостатнє за місцем**: хінт стоїть у Settings, а подив виникає **в попапі**, де
-Settings не видно. Користувач, який ніколи не відкривав цю сторінку — тобто більшість, — побачить
-бар-виняток без жодного натяку. Хінт лишився, але як доповнення, а не як несуча конструкція.
+**1. Only a hint in Settings, no change to the bar.** The cheapest option: one line of text, no
+render work. Rejected as **insufficient in place**: the hint sits in Settings, while the surprise
+happens **in the popup**, where Settings isn't visible. A user who never opened that page — i.e.
+most people — would see a bar exception with no hint at all. The hint stayed, but as a supplement,
+not as the load-bearing piece.
 
-**2. Тихий хардкод — просто закріпити Progress і нічого не додавати.** Відкинуто одразу: це рівно та
-конфігурація, у якій `BarStyle` обіцяє «no marker anywhere», а один бар малює маркер. Найгірше
-співвідношення користь/подив із усіх варіантів — виняток мовчки суперечить обіцянці, яку дав
-перемикач.
+**2. A silent hardcode — just pin Progress and add nothing.** Rejected immediately: this is exactly
+the configuration where `BarStyle` promises "no marker anywhere" and one bar draws a marker anyway.
+The worst benefit-to-surprise ratio of all the options — the exception silently contradicts the
+promise the toggle made.
 
-**3. Тихіший маркер місяця замість повного 7×14.** Ідея: позначити позицію в місяці, не імпортуючи
-**гліф-ідентифікатор** Progress — у проєкті вже є прецедент такої конструкції, центральна риска
-Gauge (1 pt, нейтральний тон, під треком, видно лише кінчики —
-[ADR-0079](0079-centred-zero-gauge-scale.md), [ADR-0089](0089-gauge-centre-tick-calm-tone.md)).
-Відкинуто, бо лікує **не ту** половину: тихий маркер прибирає стилістичну суперечність, але нічого
-не каже про **шкалу** — а саме різниця шкал робить сусідні бари непорівнянними. До того ж для тих,
-хто вже сидить на Progress, кредитний бар почав би відрізнятися від токенних, тобто виняток лише
-переїхав би в іншу конфігурацію.
+**3. A quieter month marker instead of the full 7×14.** The idea: mark the position within the
+month without importing Progress's **identifying glyph** — the project already has a precedent for
+this kind of construction, the Gauge center tick (1 pt, neutral tone, under the track, only the
+tips visible — [ADR-0079](0079-centred-zero-gauge-scale.md),
+[ADR-0089](0089-gauge-centre-tick-calm-tone.md)). Rejected because it cures the **wrong** half: a
+quiet marker removes the stylistic contradiction, but says nothing about the **scale** — and it's
+exactly the scale difference that makes neighboring bars incomparable. On top of that, for anyone
+already on Progress, the credits bar would start differing from the token ones — the exception
+would just move to a different configuration.
 
-**4. Календарна лінійка з чвертей місяця (`subdivisions: 4`).** Механіка вже існувала — один
-аргумент у виклику. Відкинуто, бо чверті **нічого не позначають**: місяць має 28–31 день, рівний
-поділ не потрапляє в жодну реальну межу, тож зубці зображували б точність, якої немає. Порівняй із
-Pressure, де єдиний тік стоїть на 20 % — там це **справжній** орієнтир («рівно за планом»), а не
-довільна поділка.
+**4. A calendar ruler with quarter-month subdivisions (`subdivisions: 4`).** The mechanism already
+existed — one argument to the call. Rejected because quarters **mark nothing real**: a month has
+28–31 days, an even split lands on no real boundary, so the ticks would depict a precision that
+doesn't exist. Compare with Pressure, where the single tick sits at 20% — there it's a **real**
+reference point ("exactly on plan"), not an arbitrary subdivision.
 
-**5. Підписані межі місяця — обрано.** Дві точки, які на цій шкалі справді існують і які варто
-знати, підписані так, що бар **називає своє вікно сам**. Це єдиний варіант, що закриває обидва
-заперечення одночасно: слово «Aug 1» ліворуч і «Aug 31» праворуч кажуть і «шкала тут інша», і «яка
-саме» — без відсилання до Settings.
+**5. Labeled month boundaries — chosen.** The two points that genuinely exist on this scale and are
+worth knowing, labeled so the bar **names its own window**. This is the only option that closes
+both objections at once: the words "Aug 1" on the left and "Aug 31" on the right say both "the
+scale here is different" and "which one exactly" — with no need to point back to Settings.
 
-Під час реалізації відпала й **шоста** проміжна ідея — межові зубці **разом** із підписами. Живий
-рендер показав, що зубець під словом позначає те, що слово вже сказало, а правий зубець ще й тісниться
-з маркером часу наприкінці місяця. Лишилися самі підписи.
+During implementation, a **sixth** intermediate idea also fell away — boundary ticks **together**
+with the labels. The live render showed a tick under a word marks what the word already said, and
+the right-hand tick additionally crowds the time marker near month's end. Only the labels remained.
 
-Окремо відкинуто **колір** як засіб розрізнення: severity рахується **до** вибору стилю, і стан «та
-сама `(u, t)` з різним кольором на різних барах» — задекларована неможлива комбінація. Колір тут
-вихід моделі, а не спосіб щось підкреслити.
+**Color** was separately rejected as a way to differentiate: severity is computed **before** the style
+choice, and the state "the same `(u, t)` with a different color on different bars" is a declared
+impossible combination. Color here is the model's output, not a way to emphasize something.
 
-## Наслідки
+## Consequences
 
-**Ціна названа: підпис може розійтися з локальним календарем користувача.** На схід від UTC (Київ,
-Токіо, Сідней) у перші години місяця бар ще каже «Aug 1 … Aug 31», коли на стіні вже вересень; на
-захід (Нью-Йорк, Лос-Анджелес) — дзеркально. Вікно неузгодженості — до ~11 год на схід і ~8 год на
-захід, раз на місяць. Це не помилка: останній день **вашого розрахункового вікна** справді 31 серпня
-за UTC, і кредити о 01:00 у Києві 1 вересня ще не скинулися. Альтернативу — рахувати локально —
-відкинуто, бо вона створює гіршу ваду: підпис проти власної геометрії («Sep 1» на барі, що міряє
-серпень). Поруч у тому ж рядку `resetLine` рендериться **локально**, і це навмисно: момент ресету —
-точка на осі часу, спільна для всіх, а мітка місяця — властивість календаря самого вікна.
+**The cost is named: a label can drift from the user's local calendar.** East of UTC (Kyiv, Tokyo,
+Sydney), in the first hours of a new month the bar still says "Aug 1 … Aug 31" while the wall
+calendar already reads September; west of UTC (New York, Los Angeles), it's the mirror case. The
+window of mismatch is up to ~11 hours east and ~8 hours west, once a month. This isn't a bug: the
+last day of **your billing window** really is August 31 UTC, and credits at 01:00 in Kyiv on
+September 1 haven't reset yet. The alternative — computing locally — was rejected because it
+creates a worse flaw: a label contradicting its own geometry ("Sep 1" on a bar measuring August).
+Right next to it, in the same row, `resetLine` renders **locally**, and that's deliberate: the
+moment of reset is a point on a timeline shared by everyone, while a month label is a property of
+the window's own calendar.
 
-**Рішення не тихе.** Під контролом Bar style у Settings → Dropdown стоїть хінт «*Extra usage* bar
-always draws in *Progress* style.» — прив'язаний до самого контрола (спільний `VStack`), як і всі
-інші пояснення на цих сторінках. Обґрунтування в хінт не винесено: воно переказувало б те, що бар і
-так показує підписами.
+**The decision is not silent.** Under the Bar style control in Settings → Dropdown there is a hint,
+"*Extra usage* bar always draws in *Progress* style." — anchored to the control itself (a shared
+`VStack`), the same as every other explanation on those pages. The reasoning isn't repeated in the
+hint: it would just restate what the bar's own labels already show.
 
-**Симетрія з правилом «credits pace exactly like a token limit» збережена там, де вона важить.**
-Колір і severity кредитів рахуються тим самим `aheadColor`-ладдером, що й раніше (spike #142) —
-змінилася лише **геометрія рендера**, а `BarStyle` і був render-only. Стан «та сама `(u, t)` з різним
-кольором» лишається неможливим.
+**Symmetry with "credits pace exactly like a token limit" is preserved where it matters.** The
+color and severity of credits are computed by the same `aheadColor` ladder as before (spike #142) —
+only the **render geometry** changed, and `BarStyle` was always render-only. The state "the same
+`(u, t)` with a different color" remains impossible.
 
-**Що стало неможливим у рендерах:** кредитний бар у Pressure- чи Gauge-анатомії, кредитний бар із
-тіками, кредитний бар без підписів меж (при наявному капі). Виняток «лівоприв'язана стрічка на
-кредитному рядку при `.pressure`», що жив у
-[ui-state-truth.md](../reference/ui-state-truth.md), зник разом із можливістю цього стану.
+**What became impossible in renders:** a credits bar in Pressure or Gauge anatomy, a credits bar
+with ticks, a credits bar with no boundary labels (while a cap exists). The exception "a
+left-anchored strip on the credits row under `.pressure`," which lived in
+[ui-state-truth.md](../reference/ui-state-truth.md), disappeared along with that state's
+possibility.
 
-**Безлімітний кап нічого не малює** — ні бару, ні підписів (`bar == nil` ⟹ `monthBounds == nil`):
-підписати можна лише те, що існує.
+**An unlimited cap draws nothing** — no bar, no labels (`bar == nil` ⟹ `monthBounds == nil`): only
+what exists can be labeled.
 
-**Стуб `credits-month-end`** фіксує годинник на 90 % місяця — точці, де маркер часу підходить до
-правого підпису найближче. Це найтісніше місце геометрії, і саме його треба дивитися при змінах
-метрик.
+**The `credits-month-end` stub** freezes the clock at 90% of the month — the point where the time
+marker gets closest to the right-hand label. This is the tightest spot in the geometry, and the one
+to check whenever metrics change.
 
-Уточнює [ADR-0062](0062-configurable-bar-presentation.md) (вибір стилю більше не поширюється на
-кредитний бар) і додає до [ADR-0076](0076-pressure-scale-for-marker-less-bar.md) /
-[ADR-0079](0079-centred-zero-gauge-scale.md) четвертий випадок: бар, чия шкала задана **даними**, а
-не налаштуванням.
+Refines [ADR-0062](0062-configurable-bar-presentation.md) (the style choice no longer applies to
+the credits bar) and adds a fourth case to [ADR-0076](0076-pressure-scale-for-marker-less-bar.md) /
+[ADR-0079](0079-centred-zero-gauge-scale.md): a bar whose scale is set by **the data**, not by a
+setting.

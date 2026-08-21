@@ -4,99 +4,110 @@ date: 2026-07-27
 superseded_by: [0042, 0059, 0069]
 ---
 
-# ADR-0040: Нативний вигляд UI через системні механізми, а не захардкоджені метрики
+# ADR-0040: A native UI look via system mechanisms, not hardcoded metrics
 
-> **Частково переглянуто [ADR-0042](0042-settings-swiftui-form.md) (#168):** §2 (винятки-хардкод для
-> grouped-inset контейнера, chip і time-picker) і §4 («поки лишаємо AppKit hand-drawing») виконано —
-> вікно Settings переписано на SwiftUI `Form.formStyle(.grouped)` + `NavigationSplitView`, тож
-> grouped-inset/chip/time-picker більше **не** ручні винятки (їх дають Form/List/DatePicker системними
-> дефолтами), а виміряні константи усунено. Принцип §1 «нуль хардкоду для системних елементів» лишається
-> чинним.
+> **Partially revised by [ADR-0042](0042-settings-swiftui-form.md) (#168):** §2 (hardcode exceptions
+> for the grouped-inset container, chip, and time picker) and §4 ("for now we keep AppKit
+> hand-drawing") were carried out — the Settings window was rewritten to SwiftUI
+> `Form.formStyle(.grouped)` + `NavigationSplitView`, so the grouped-inset/chip/time-picker cases are
+> **no longer** manual exceptions (Form/List/DatePicker supply them via system defaults), and the
+> measured constants were removed. The §1 principle ("zero hardcode for system elements") still
+> stands.
 >
-> **Частково переглянуто [ADR-0059](0059-menu-bar-native-semantic-colours.md):** §3-виняток «menu-bar
-> `StatusItemView` — фіксований sRGB, бо `labelColor` дає неправильний RGB» **скасовано** — бар тепер
-> підпорядковано §1 (нуль хардкоду): системні semantic-кольори (`labelColor`-родина + `.system*`).
-> Виняток pacing-барів **попапа** (ADR-0022) лишається.
+> **Partially revised by [ADR-0059](0059-menu-bar-native-semantic-colours.md):** the §3 exception —
+> "the menu-bar `StatusItemView` uses a fixed sRGB because `labelColor` gives the wrong RGB" — is
+> **withdrawn**: the bar now falls under §1 (zero hardcode) — system semantic colors (the
+> `labelColor` family + `.system*`). The exception for the **popup**'s pacing bars (ADR-0022) still
+> stands.
 >
-> **Частково уточнено [ADR-0069](0069-settings-window-height-resizable.md):** клауза §1 «Вікно →
-> фіксоване 857 pt» стосується тепер лише **ширини** — висота вікна Settings користувацька (resizable)
-> і персистується. Принцип §1 цим не порушено, а виконано: ресайз якраз усуває хардкод, бо ручні бампи
-> фіксованої висоти під кожну нову опцію Appearance більше не потрібні — контент скролить системним
-> `Form.grouped`. Sidebar 258 лишається фіксованим.
+> **Partially clarified by [ADR-0069](0069-settings-window-height-resizable.md):** the §1 clause "the
+> window → fixed at 857 pt" now applies only to **width** — the Settings window's height is
+> user-resizable and persisted. This does not violate the §1 principle but rather fulfills it: the
+> resize actually removes hardcode, since manual bumps to the fixed height for every new Appearance
+> option are no longer needed — content scrolls via the system `Form.grouped`. The 258 pt sidebar
+> stays fixed.
 
-## Контекст
+## Context
 
-Мета продукту — **TokenPace має максимально слідувати дизайну рідних застосунків macOS** (передусім
-System Settings). Під час великого проходу паритету (#156, поверх redesign #131 / ADR-0035) виявилося,
-що вікно Settings рясніло **захардкодженими** розмірами, шрифтами, відступами й кольорами, підібраними
-«на око». Це давало відхилення від System Settings, які нескінченно «підкручувались» числами.
+The product goal is for **TokenPace to follow the native macOS app design as closely as possible**
+(System Settings above all). During a big parity pass (#156, on top of the redesign #131 /
+ADR-0035) it turned out the Settings window was riddled with **hardcoded** sizes, fonts, spacing,
+and colors picked "by eye." This produced drift from System Settings, which then got endlessly
+"tuned" number by number.
 
-Корінна причина: код **малює grouped-inset UI вручну** (кастомний `SettingsCard`, кастомний chip за
-sidebar-іконкою, свій `NSTableView`, ручні констрейнти рядків), обходячи системні механізми AppKit,
-які самі дають нативний вигляд.
+The root cause: the code **hand-draws grouped-inset UI** (a custom `SettingsCard`, a custom chip
+behind the sidebar icon, its own `NSTableView`, manual row constraints), bypassing the system
+mechanisms AppKit already offers that produce a native look on their own.
 
-Постало рішення того ж класу, що ADR-0009…0011 (де межа системного vs власного): **що брати з системи,
-а що лишати власним — і як не хардкодити те, що система дає сама.**
+This called for the same class of decision as ADR-0009…0011 (where the boundary between system and
+custom sits): **what to take from the system, what to keep custom — and how to avoid hardcoding
+what the system already gives you.**
 
-## Рішення
+## Decision
 
-**1. Для стандартних системних елементів — нуль захардкоджених метрик.** Використовувати те, що AppKit
-дає сам, замість підбирати числа:
+**1. For standard system elements — zero hardcoded metrics.** Use what AppKit provides rather than
+picking numbers:
 
-- Розмір sidebar-іконок → читати `NSTableViewDefaultSizeMode` (`NSGlobalDomain`), реагувати на зміну
-  через `DistributedNotificationCenter` (`AppleSideBarDefaultIconSizeChanged`). `effectiveRowSizeStyle`
-  **не** резолвить `.large` для source-list — не покладатись на нього.
-- Перемикачі → `NSSwitch.controlSize = .mini`; popup → `.flexiblePush` + `.small` +
-  `showsBorderOnlyWhileMouseInside`; шрифти → `NSFont.systemFontSize`/`smallSystemFontSize`/text styles.
-- Вирівнювання рядків → `NSStackView.alignment = .firstBaseline` + `edgeInsets` (висота рядка = контент
-  + симетричний inset), а не ручне центрування top/bottom (робить текст top-heavy).
-- Символи секцій → точні з `.appex Info.plist` System Settings (General=`gear`, Notifications=
-  `bell.badge.fill`, вага `.regular`). Довгі мітки → truncate + `allowsExpansionToolTips`. Шлях до
-  папки → `NSPathControl`. Вікно → фіксоване 857 pt (як System Settings), sidebar фіксований 258.
+- Sidebar icon size → read `NSTableViewDefaultSizeMode` (`NSGlobalDomain`), react to changes via
+  `DistributedNotificationCenter` (`AppleSideBarDefaultIconSizeChanged`). `effectiveRowSizeStyle`
+  does **not** resolve `.large` for a source list — don't rely on it.
+- Switches → `NSSwitch.controlSize = .mini`; popup buttons → `.flexiblePush` + `.small` +
+  `showsBorderOnlyWhileMouseInside`; fonts → `NSFont.systemFontSize`/`smallSystemFontSize`/text
+  styles.
+- Row alignment → `NSStackView.alignment = .firstBaseline` + `edgeInsets` (row height = content +
+  a symmetric inset), not manual top/bottom centering (which makes text top-heavy).
+- Section symbols → the exact ones from System Settings' `.appex Info.plist`
+  (General=`gear`, Notifications=`bell.badge.fill`, weight `.regular`). Long labels → truncate +
+  `allowsExpansionToolTips`. A folder path → `NSPathControl`. The window → fixed at 857 pt (like
+  System Settings), sidebar fixed at 258.
 
-**2. Винятки — де AppKit НЕ має API (хардкод неминучий, але ВИМІРЯНИЙ, не вгаданий).** macOS AppKit не
-має iOS-подібних grouped-примітивів; System Settings рендерить через SwiftUI/приватне, чистого
-AppKit-аналога немає. У цих місцях малюємо вручну, але значення **виміряні з живого System Settings**
-(AX `AXSize` / Retina ÷2) і задокументовані:
+**2. Exceptions — where AppKit has NO API (hardcode is unavoidable, but MEASURED, not guessed).**
+AppKit has no iOS-like grouped primitives; System Settings renders via SwiftUI/private APIs, and
+there is no pure AppKit equivalent. In these spots we hand-draw, but the values are **measured from
+a live System Settings** (AX `AXSize` / Retina ÷2) and documented:
 
-- **Колір картки/фону** — немає семантичного grouped-background (ні `NSColor`, ні матеріалу з
-  правильним light↔dark фліпом) → фіксований dynamic `NSColor` (картка 242/43, фон 246/40).
-- **Grouped-inset контейнер** (`SettingsCard` row height, corner radius, padding) — AppKit не має
-  контейнера з цими дефолтами → ручне малювання з виміряними значеннями.
-- **Скруглений time picker** — `NSDatePicker` не округлює власний bezel → bezelless picker у кастомному
-  `RoundedFieldBox`.
-- **Кольоровий sidebar-chip** — стандартний `.imageView` outlet накладає source-list tint/vibrancy
-  (блідне, зникає на неактивному вікні) → кастомний chip, розмір із виміряної таблиці.
+- **Card/background color** — there is no semantic grouped-background (neither an `NSColor` nor a
+  material with a correct light↔dark flip) → a fixed dynamic `NSColor` (card 242/43, background
+  246/40).
+- **Grouped-inset container** (`SettingsCard` row height, corner radius, padding) — AppKit has no
+  container with these defaults → hand-drawn with measured values.
+- **Rounded time picker** — `NSDatePicker` doesn't round its own bezel → a bezelless picker inside a
+  custom `RoundedFieldBox`.
+- **Colored sidebar chip** — the standard `.imageView` outlet applies source-list tint/vibrancy (it
+  fades, disappears on an inactive window) → a custom chip, sized from a measured table.
 
-**3. Свідомі власні винятки (не System Settings-елементи).** Фіксована палітра лишається:
-- Menu-bar-віджет (`StatusItemView`) — фіксований sRGB, бо `labelColor` дає неправильний RGB в
-  off-screen `NSImage` (ADR-0009).
-- Pacing-бари попапа — фіксована палітра, спільна зі statusline (ADR-0022).
+**3. Deliberate custom exceptions (not System Settings elements).** A fixed palette stays:
+- The menu-bar widget (`StatusItemView`) — a fixed sRGB, because `labelColor` gives the wrong RGB
+  in an off-screen `NSImage` (ADR-0009).
+- The popup's pacing bars — a fixed palette, shared with the statusline (ADR-0022).
 
-**4. Остаточний паритет без констант — SwiftUI Form.** System Settings — це SwiftUI
-`Form { Section }.formStyle(.grouped)` (перевірено: і shell, і pane-extensions лінкують SwiftUI). Це
-єдиний спосіб отримати row height/padding/corner radius/dividers **системними дефолтами** без жодної
-константи. Переписати `SettingsCard` на SwiftUI Form через `NSHostingView` (#168); поки що
-лишаємо AppKit hand-drawing з виміряними значеннями (менший ризик, фазовано).
+**4. Final parity without constants — a SwiftUI Form.** System Settings is a SwiftUI
+`Form { Section }.formStyle(.grouped)` (verified: both the shell and the pane extensions link
+SwiftUI). This is the only way to get row height/padding/corner radius/dividers from **system
+defaults** with zero constants. Rewrite `SettingsCard` as a SwiftUI Form via `NSHostingView` (#168);
+for now, keep AppKit hand-drawing with measured values (lower risk, phased).
 
-## Наслідки
+## Consequences
 
-- **Процес верифікації посилено:** будь-яка UI-зміна перевіряється в **обох** темах (light+dark) і
-  **всіх** станах (sidebar icon size 1/2/3, dev-білд/`.app`) скриншотами перед PR. Пропуск цього був
-  найчастішою причиною регресій у #156 (див. [system-settings-parity.md](../reference/system-settings-parity.md)).
-- Частина ADR-0035 переглянута: ручний `controlBackgroundColor` fill картки → dynamic grouped-колір /
-  material-підхід; чекбокс-дизейбл-логіка поширена на «Back to work» для dev-білдів.
-- Де хардкод неминучий — він **іменований, виміряний і задокументований**, не «магічне число».
-- Детальний розбір (уроки, метод вимірювання, типові помилки) — у
+- **The verification process is tightened:** any UI change is checked in **both** themes
+  (light+dark) and **every** state (sidebar icon size 1/2/3, dev build/`.app`) with screenshots
+  before a PR. Skipping this was the most common cause of regressions in #156 (see
+  [system-settings-parity.md](../reference/system-settings-parity.md)).
+- Part of ADR-0035 is revised: the card's manual `controlBackgroundColor` fill → a dynamic grouped
+  color / material approach; the checkbox-disable logic is extended to "Back to work" for dev
+  builds.
+- Where hardcode is unavoidable — it is **named, measured, and documented**, not a "magic number."
+- A detailed breakdown (lessons, the measurement method, common mistakes) lives in
   [docs/reference/system-settings-parity.md](../reference/system-settings-parity.md).
 
-## Пов'язане
+## Related
 
-- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — pure-core/thin-shell; menu-bar
-  фіксований колір (виняток §3).
-- [ADR-0021](0021-popup-two-column-layout-and-uniform-dropdown-typography.md) — HIG-звірка перед
-  комітом; «не eyeball-ити розмір».
-- [ADR-0022](0022-popup-bar-transparency-and-contrast-experiment.md) — pacing-бари фіксована палітра.
-- [ADR-0035](0035-settings-window-sidebar-grouped-inset.md) — початковий Settings-redesign (частково
-  переглянутий тут).
+- [ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md) — pure-core/thin-shell; the menu
+  bar's fixed color (the §3 exception).
+- [ADR-0021](0021-popup-two-column-layout-and-uniform-dropdown-typography.md) — the HIG check before
+  a commit; "don't eyeball a size."
+- [ADR-0022](0022-popup-bar-transparency-and-contrast-experiment.md) — the pacing bars' fixed
+  palette.
+- [ADR-0035](0035-settings-window-sidebar-grouped-inset.md) — the initial Settings redesign
+  (partially revised here).
 - Issue #156.
