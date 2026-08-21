@@ -379,7 +379,7 @@ consistency matters more here than anything else.
 > for SF Symbol side bearings, `.required` hugging, an explicit width constraint, shifting
 > `drawingRect`, `titleRect`, trailing kern, manual drawing) were measured and rejected — the list and
 > the numbers are in
-> [agent-workflow.md § "Субпіксельна фаза йде від РЯДКА"](agent-workflow.md#субпіксельна-фаза-йде-від-рядка-не-від-layout--лагодь-текст-а-не-геометрію).
+> [agent-workflow.md § "Subpixel phase comes from the STRING"](agent-workflow.md#subpixel-phase-comes-from-the-string-not-from-layout--fix-the-text-not-the-geometry).
 > The next attempt has to start from **why** the 4 pt stretch happens despite `.required` hugging, not
 > from tuning a constant.
 

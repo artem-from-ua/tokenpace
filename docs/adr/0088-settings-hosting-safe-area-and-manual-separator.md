@@ -90,7 +90,7 @@ sidebar, і в detail).
   перегляд має або зберегти ручний драйвер, або довести заміром, що `.automatic` забіндився.
 - Сценарій верифікації — [ui-verification.md](../guides/ui-verification.md#detail-pane-scrolling-toolbar-rule-minimum-height-346);
   метод діагностики таких багів —
-  [agent-workflow.md § «Діагностика layout-багів у вікнах»](../guides/agent-workflow.md#діагностика-layout-багів-у-вікнах).
+  [agent-workflow.md § «Diagnosing window layout bugs»](../guides/agent-workflow.md#diagnosing-window-layout-bugs).
 
 ## Пов'язане
 

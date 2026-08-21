@@ -1,65 +1,65 @@
-# Процедура релізу
+# Release procedure
 
-Як зібрати, нотаризувати й опублікувати реліз `TokenPace` на GitHub, щоб ним могли
-користуватися інші (друзі, тестувальники) без попереджень Gatekeeper.
+How to build, notarize and publish a `TokenPace` release on GitHub so that other people (friends,
+testers) can use it without Gatekeeper warnings.
 
-> **Стейдж 1 — ручний реліз** (цей документ). Автоматизацію планують окремо:
-> скрипт `scripts/release.sh` і GitHub Actions workflow — див. issues у трекері.
+> **Stage 1 — manual release** (this document). Automation is planned separately:
+> a `scripts/release.sh` script and a GitHub Actions workflow — see the issues in the tracker.
 
-## Передумови (одноразово)
+## Prerequisites (one-time)
 
-- **Developer ID Application** identity у Keychain
-  (`security find-identity -v -p codesigning` показує 1 valid identity).
-- **notarytool keychain-профіль** `tokenpace-notary`:
+- A **Developer ID Application** identity in the Keychain
+  (`security find-identity -v -p codesigning` shows 1 valid identity).
+- A **notarytool keychain profile** named `tokenpace-notary`:
   ```sh
   xcrun notarytool store-credentials tokenpace-notary \
         --apple-id <APPLE_ID> --team-id <TEAM_ID>
-  # запитає app-specific password з appleid.apple.com (НЕ основний пароль)
+  # it will ask for an app-specific password from appleid.apple.com (NOT your main password)
   ```
-- `gh` CLI автентифікований (`gh auth status`).
+- The `gh` CLI authenticated (`gh auth status`).
 
-Деталі налаштування підпису — [ADR-0004](../adr/0004-build-system.md),
+Signing setup details are in [ADR-0004](../adr/0004-build-system.md),
 [ADR-0012](../adr/0012-configure-window-and-launch-at-login.md).
 
-## Передпольотні перевірки (перед збіркою)
+## Preflight checks (before building)
 
-Прогнати **перед** тим, як бампати версію та збирати. Мета — не випустити реліз, що
-тихо ламає збережені налаштування чи стан у користувачів, які оновлюються з попередньої
-версії. За базу порівняння беремо тег останнього GitHub-релізу:
+Run these **before** bumping the version and building. The goal is not to ship a release that quietly
+breaks saved settings or state for users upgrading from the previous version. The comparison base is
+the tag of the last GitHub release:
 
 ```sh
-LAST="$(gh release view --json tagName -q .tagName)"   # напр. v0.44.0
+LAST="$(gh release view --json tagName -q .tagName)"   # e.g. v0.44.0
 ```
 
-### A. Чи змінилися конфігураційні опції — і чи потрібна міграція
+### A. Did the configuration options change — and is a migration needed
 
-Усі опції користувача живуть у єдиному файлі `Sources/TokenPace/PersistedConfig.swift`
-(`enum PersistedConfig` над `UserDefaults`; приватний `enum Key` — канонічний реєстр
-рядкових ключів). `@AppStorage` ніде не використовується, `register(defaults:)` немає —
-дефолти зашиті в геттерах.
+Every user option lives in the single file `Sources/TokenPace/PersistedConfig.swift`
+(`enum PersistedConfig` over `UserDefaults`; the private `enum Key` is the canonical registry of
+string keys). `@AppStorage` is not used anywhere, there is no `register(defaults:)` — the defaults are
+baked into the getters.
 
 ```sh
 git diff "${LAST}..HEAD" -- Sources/TokenPace/PersistedConfig.swift
 ```
 
-На що дивитися в дифі й що це означає для міграції:
+What to look for in the diff, and what it means for migration:
 
-- **Новий ключ** — сумісно, міграція не потрібна: стара збірка його просто не писала,
-  геттер віддасть дефолт.
-- **Перейменований або видалений ключ** — **несумісно**. Старе значення осиротіє під
-  старим рядком. Або читати старий ключ і переписувати в новий (справжня міграція, див.
-  нижче), або зберегти зворотну сумісність через fallback у геттері.
-- **Змінений дефолт** — перевір ідіому. Opt-out опції читаються як
-  `object(forKey:) ... ?? true`, opt-in — `?? false`; це навмисно відрізняє «не задано»
-  від явного вибору. Зміна цієї гілки мовчки перевизначить те, що користувач уже вимкнув/
-  увімкнув — це помітна поведінкова зміна, а не косметика.
+- **A new key** — compatible, no migration needed: the old build simply never wrote it, and the getter
+  returns the default.
+- **A renamed or deleted key** — **incompatible**. The old value is orphaned under the old string.
+  Either read the old key and rewrite it into the new one (a real migration, see below), or preserve
+  backward compatibility with a fallback in the getter.
+- **A changed default** — check the idiom. Opt-out options read as `object(forKey:) ... ?? true`,
+  opt-in as `?? false`; that deliberately distinguishes "not set" from an explicit choice. Changing
+  that branch silently overrides what the user has already turned off or on — a noticeable behavioral
+  change, not a cosmetic one.
 
-### B. Чи змінилися persistent-стани — і чи потрібна міграція
+### B. Did the persistent state change — and is a migration needed
 
-Persistent-стан (переживає рестарт, окрім простих опцій) теж лежить у тих самих
-`UserDefaults`-ключах. Окремого on-disk сховища немає (usage-snapshot тримається лише в
-пам'яті; `UpdateInstaller` пише лише в temp із `defer`-видаленням). Ключове — це
-серіалізовані типи, чия **форма** персиститься:
+Persistent state (anything that survives a restart, beyond plain options) also lives in those same
+`UserDefaults` keys. There is no separate on-disk store (the usage snapshot is kept in memory only;
+`UpdateInstaller` writes only into temp with a `defer` deletion). What matters is the serialized types
+whose **shape** is persisted:
 
 ```sh
 git diff "${LAST}..HEAD" -- \
@@ -71,96 +71,95 @@ git diff "${LAST}..HEAD" -- \
   Sources/TokenPaceKit/PopupSectionVisibility.swift
 ```
 
-- `MonitoredServices` (`Codable`) серіалізується як JSON-блоб у `monitoredServices`.
-  `MonitoredServicesTests.swift` пінить raw-рядки саме тому, що вони персистяться.
-- `SuppressDays`, `TopBarHiding`, `ColorAdvice`, `BarStyle`, `PopupSectionVisibility` —
-  raw-string enums, зберігаються за raw-значенням. (`ResetCountdownMode` був тут до
-  [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md) — тип видалено, ключ
-  `resetCountdownModeMenuBar` ретировано й підмітається.)
-- **Правило сумісності:** усі декодуються **forward-compatible** — несумісний/невідомий
-  raw тихо падає в дефолт (не креш). Якщо міняєш форму (нове/перейменоване поле, інший
-  raw) — **збережи цю властивість**: старий блоб має або коректно декодуватись, або
-  безпечно відкотитись у дефолт. Легенду legacy-значень тримай у коментарях типу (як уже
-  зроблено для `TopBarHiding.migrated(fromLegacyHide:)` і `BarStyle.legacySurfaceStyles`).
-- **Перейменування raw-значення — це дві правки, а не одна**
-  ([ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)). Крім нового
-  кейса потрібен запис у `legacyRawValues` типу (`ColorAdvice`, `TopBarHiding`,
-  `PopupSectionVisibility`, `BarStyle` — у кожного вона своя) і кастомний `init(from:)`,
-  що консультується з нею **перед** дефолтним fallback. Без цього збережений вибір
-  користувача тихо падає в дефолт — те, чого перейменування не має права робити.
+- `MonitoredServices` (`Codable`) is serialized as a JSON blob into `monitoredServices`.
+  `MonitoredServicesTests.swift` pins the raw strings precisely because they are persisted.
+- `SuppressDays`, `TopBarHiding`, `ColorAdvice`, `BarStyle`, `PopupSectionVisibility` are raw-string
+  enums, stored by raw value. (`ResetCountdownMode` was here until
+  [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md) — the type was deleted, and the
+  `resetCountdownModeMenuBar` key was retired and is swept up.)
+- **The compatibility rule:** all of them decode **forward-compatible** — an incompatible or unknown
+  raw value falls back to the default quietly (no crash). If you change the shape (a new or renamed
+  field, a different raw value) — **preserve that property**: an old blob must either decode correctly
+  or fall back to the default safely. Keep the legend of legacy values in the type's comments (as is
+  already done for `TopBarHiding.migrated(fromLegacyHide:)` and `BarStyle.legacySurfaceStyles`).
+- **Renaming a raw value is two edits, not one**
+  ([ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)). Besides the new case you
+  need an entry in the type's `legacyRawValues` (`ColorAdvice`, `TopBarHiding`,
+  `PopupSectionVisibility`, `BarStyle` — each has its own) and a custom `init(from:)` that consults it
+  **before** the default fallback. Without that, the user's saved choice quietly falls back to the
+  default — which is exactly what a rename has no right to do.
 
-**Ключі Appearance мають префікс поверхні** (`menuBar.*` / `dropdown.*`), а експорт конфіга
-видає **вкладені** групи `menuBar` / `dropdown`. Якщо перейменовуєш ключ, потрібні **обидві**
-половини:
+**Appearance keys are prefixed by surface** (`menuBar.*` / `dropdown.*`), and the config export emits
+**nested** `menuBar` / `dropdown` groups. If you rename a key, you need **both** halves:
 
-1. крок `migrateRawKey(from:to:label:resolve:)` у
+1. a `migrateRawKey(from:to:label:resolve:)` step in
    [`PersistedConfig.migrateAppearanceKeysIfNeeded()`](../../Sources/TokenPace/PersistedConfig.swift)
-   — він переносить сировину зі старого ключа в новий і **зʼїдає** старий, тож ідемпотентність
-   не потребує окремого маркер-ключа;
-2. `legacyRawValues` у самому типі — щоб те саме перенесення працювало й для **імпортованого**
-   конфіга, який міграції `UserDefaults` не бачить.
+   — it moves the raw value from the old key to the new one and **eats** the old one, so idempotency
+   needs no separate marker key;
+2. `legacyRawValues` in the type itself — so that the same transfer also works for an **imported**
+   config, which never sees the `UserDefaults` migration.
 
-Забути другу половину найлегше: `defaults` мігрує, а вставлений із чужого дампа JSON тихо
-з'їжджає в дефолти.
+The second half is the easiest to forget: `defaults` migrates, while JSON pasted from someone else's
+dump quietly slides into the defaults.
 
-Також перевір edge-detect / update / archive стан (`backToWorkWasBlocked`,
-`pendingWhatsNewVersion`, `lastFailedInstallVersion`, `lastUpdateCheck`,
-`lastSeenLatestVersion`, `lastArchiveSync`) у тому ж дифі `PersistedConfig.swift` — зміна
-семантики цих ключів між версіями теж може дати неочікувану поведінку після оновлення.
+Also check the edge-detect / update / archive state (`backToWorkWasBlocked`,
+`pendingWhatsNewVersion`, `lastFailedInstallVersion`, `lastUpdateCheck`, `lastSeenLatestVersion`,
+`lastArchiveSync`) in the same `PersistedConfig.swift` diff — a change in the semantics of those keys
+between versions can also produce unexpected behavior after an update.
 
-### C. Якщо міграція таки потрібна
+### C. If a migration really is needed
 
-Каркас існує, але **реальних кроків міграції ще немає** (див.
+The scaffolding exists, but there are **no real migration steps yet** (see
 [ADR-0023](../adr/0023-persisted-config-version-marker.md)):
 
-- Чисте ядро — `Sources/TokenPaceKit/MigrationPlan.swift` (`MigrationPlan.transition`,
+- The pure core is `Sources/TokenPaceKit/MigrationPlan.swift` (`MigrationPlan.transition`,
   `needsMigration`).
-- Хук на старті — `AppDelegate.runConfigMigrationsIfNeeded()` (`Sources/TokenPace/App.swift`),
-  викликається першим у `applicationDidFinishLaunching`. Гілка `.upgraded` зараз **порожня**
-  (scaffold, #71); маркер версії — `PersistedConfig.lastRunVersion`.
+- The startup hook is `AppDelegate.runConfigMigrationsIfNeeded()` (`Sources/TokenPace/App.swift`),
+  called first in `applicationDidFinishLaunching`. The `.upgraded` branch is currently **empty**
+  (scaffold, #71); the version marker is `PersistedConfig.lastRunVersion`.
 
-Найдешевший шлях — зробити зміну forward-compatible (як існуючі enum-decode). Якщо це
-неможливо (перейменування ключа зі збереженням значення, реальна трансформація форми) —
-наповни `.upgraded`-гілку в `runConfigMigrationsIfNeeded` кроком from→to й покрий тестом.
-Зміна `MigrationPlan`/поява реального кроку — привід оновити ADR-0023.
+The cheapest route is to make the change forward-compatible (like the existing enum decoding). If that
+is impossible (renaming a key while preserving its value, a real transformation of the shape) — fill
+the `.upgraded` branch in `runConfigMigrationsIfNeeded` with a from→to step and cover it with a test.
+Changing `MigrationPlan` or introducing a real step is a reason to update ADR-0023.
 
-## Кроки
+## Steps
 
-### 1. Визначити версію
+### 1. Determine the version
 
-Версія береться з файлу `VERSION` (марк. версія) і дублюється в
-`Sources/TokenPaceKit/TokenPaceKit.swift` (`TokenPaceKit.version`). Якщо бампаєш —
-онови **обидва** місця в окремому PR **перед** релізом і дотримуйся
-[SemVer](https://semver.org/).
+The version comes from the `VERSION` file (the marketing version) and is duplicated in
+`Sources/TokenPaceKit/TokenPaceKit.swift` (`TokenPaceKit.version`). If you're bumping it — update
+**both** places in a separate PR **before** the release and follow [SemVer](https://semver.org/).
 
 ```sh
-VERSION="$(tr -d ' \t\n\r' < VERSION)"   # напр. 0.9.0
+VERSION="$(tr -d ' \t\n\r' < VERSION)"   # e.g. 0.9.0
 ```
 
-**Звір обидва джерела ПЕРЕД тегом** — розбіжність означає, що бамп зачепив лише одне місце:
+**Reconcile both sources BEFORE tagging** — a mismatch means the bump only touched one of them:
 
 ```sh
 grep -q "\"${VERSION}\"" Sources/TokenPaceKit/TokenPaceKit.swift \
-  || echo "MISMATCH: VERSION=${VERSION} != TokenPaceKit.version — онови обидва в окремому PR"
+  || echo "MISMATCH: VERSION=${VERSION} != TokenPaceKit.version — update both in a separate PR"
 ```
 
-### 2. Зібрати, підписати, нотаризувати
+### 2. Build, sign, notarize
 
 ```sh
 ./scripts/build-app.sh
 ```
 
-Скрипт сам: збирає release-бінар як **universal** (arm64 + x86_64 — кожна арка
-окремо за `--triple`, потім `lipo -create`, щоб `.app` працював і на Apple
-Silicon, і на Intel), складає `.app`, підписує Developer ID (`--options
-runtime`), нотаризує (`notarytool submit --wait`) і прикріплює квиток (`stapler
-staple`). Нотаризація може зайняти кілька хвилин.
+The script does all of it: builds the release binary as **universal** (arm64 + x86_64 — each
+architecture separately via `--triple`, then `lipo -create`, so the `.app` runs on both Apple
+Silicon and Intel), assembles the `.app`, signs it with Developer ID (`--options runtime`),
+notarizes it (`notarytool submit --wait`) and staples the ticket (`stapler staple`). Notarization
+can take several minutes.
 
-Очікувати в логах: `lipo archs: x86_64 arm64`, `status: Accepted` і
+Expect in the logs: `lipo archs: x86_64 arm64`, `status: Accepted` and
 `The staple and validate action worked!`.
 
-**Агент/фонова сесія:** харнес блокує голий `sleep`, тож не чекай нотаризацію через `sleep N` —
-підніми білд у фоні й опитуй лог until-циклом (нотаризація може зайняти кілька хвилин):
+**Agent / background session:** the harness blocks a bare `sleep`, so don't wait out notarization with
+`sleep N` — start the build in the background and poll the log with an until-loop (notarization can
+take several minutes):
 
 ```sh
 ( ./scripts/build-app.sh 2>&1 | tee "$CLAUDE_JOB_DIR/tmp/build.log" ) &
@@ -169,7 +168,7 @@ until grep -qE 'notarization complete|done:|error|Invalid' "$CLAUDE_JOB_DIR/tmp/
 done
 ```
 
-### 3. Перевірити нотаризацію
+### 3. Verify the notarization
 
 ```sh
 spctl -a -vvv -t exec ./build/TokenPace.app   # → accepted (Notarized Developer ID)
@@ -177,34 +176,34 @@ xcrun stapler validate ./build/TokenPace.app  # → The validate action worked!
 lipo -archs ./build/TokenPace.app/Contents/MacOS/TokenPace   # → x86_64 arm64
 ```
 
-Якщо `spctl` дає `rejected` — реліз **не** публікувати, спершу розібратися.
-Якщо `lipo` показує лише одну арку — бінар не universal, перебудувати.
+If `spctl` says `rejected` — do **not** publish the release, work out why first.
+If `lipo` shows only one architecture — the binary isn't universal, rebuild it.
 
-### 4. Спакувати реліз-архів
+### 4. Pack the release archive
 
-`build-app.sh` видаляє свій тимчасовий ZIP після нотаризації, тож архів для
-релізу робимо окремо — з **уже застейпленого** `.app` (щоб квиток поїхав усередині):
+`build-app.sh` deletes its own temporary ZIP after notarization, so the release archive is made
+separately — from the **already stapled** `.app` (so the ticket travels inside it):
 
 ```sh
 ditto -c -k --keepParent ./build/TokenPace.app "./build/TokenPace-${VERSION}.zip"
 ```
 
-`--keepParent` зберігає теку `TokenPace.app` усередині архіву (інакше
-розпакується «розсипом»). `ditto` (а не `zip`) коректно зберігає підпис і
-extended attributes.
+`--keepParent` keeps the `TokenPace.app` folder inside the archive (otherwise it unpacks as loose
+files). `ditto` (rather than `zip`) preserves the signature and extended attributes correctly.
 
-### 5. Створити тег і GitHub Release
+### 5. Create the tag and the GitHub Release
 
-**Перед тегуванням переконайся, що стоїш на чистому `main`** — тег на випадковій feature-гілці
-(або коміт прямо в `main`) уже колись ламав реліз, коли `checkout -b` тихо не спрацював через
-git-lock:
+**Before tagging, make sure you're on a clean `main`** — a tag on some random feature branch (or a
+commit straight into `main`) has broken a release before, when `checkout -b` silently failed because of
+a git lock:
 
 ```sh
 [ "$(git branch --show-current)" = main ] && git diff --quiet && git diff --cached --quiet \
-  || echo "STOP: не на чистому main — не тегуй звідси (див. agent-workflow.md § Гілки)"
+  || echo "STOP: not on a clean main — don't tag from here (see agent-workflow.md § Branches)"
 ```
 
-Деталі git-дисципліни — [agent-workflow.md § Гілки, PR і синхронізація main](agent-workflow.md#гілки-pr-і-синхронізація-main).
+Git discipline details are in
+[agent-workflow.md § Branches, PRs and syncing main](agent-workflow.md#branches-prs-and-syncing-main).
 
 ```sh
 git tag "v${VERSION}"
@@ -213,198 +212,203 @@ git push origin "v${VERSION}"
 RELEASE_NOTES_APPROVED=1 gh release create "v${VERSION}" \
    "./build/TokenPace-${VERSION}.zip" \
    --title "TokenPace v${VERSION}" \
-   --notes "Опис релізу: що нового, як встановити (див. нижче)."
+   --notes "Release description: what's new, how to install (see below)."
 ```
 
-Тег ставимо на актуальний `main` (усі PR уже змерджені).
+The tag goes on the current `main` (with every PR already merged).
 
-> **Гейт release notes.** `gh release create` стереже hook
-> (`.claude/hooks/release-notes-guard.sh`): він блокує публікацію, доки команду не запущено з
-> префіксом `RELEASE_NOTES_APPROVED=1`. Префікс додають **лише після** того, як нотатки складено за
-> цим документом (автооновлення — канонічний шлях) і затверджено мейнтейнером. Це запобіжник проти
-> публікації нотаток, написаних із пам'яті без звірки з цим файлом.
+> **The release notes gate.** `gh release create` is guarded by a hook
+> (`.claude/hooks/release-notes-guard.sh`): it blocks publishing until the command is run with the
+> `RELEASE_NOTES_APPROVED=1` prefix. That prefix is added **only after** the notes have been composed
+> per this document (auto-update being the canonical path) and approved by the maintainer. It is a
+> safeguard against publishing notes written from memory without checking them against this file.
 
-### 6. Перевірити з боку користувача
+### 6. Verify from the user's side
 
-Завантаж ZIP із релізу на «чистому» Mac (або симулюй quarantine):
+Download the ZIP from the release onto a "clean" Mac (or simulate quarantine):
 
 ```sh
-# симуляція завантаженого з інтернету застосунку
+# simulating an app downloaded from the internet
 cp -R ./build/TokenPace.app /tmp/TokenPace-test.app
 xattr -w com.apple.quarantine "0081;0;Safari;" /tmp/TokenPace-test.app
-spctl -a -vvv -t exec /tmp/TokenPace-test.app   # має бути accepted
+spctl -a -vvv -t exec /tmp/TokenPace-test.app   # should be accepted
 rm -rf /tmp/TokenPace-test.app
 ```
 
-## Якщо реліз обірвався посередині — як продовжити
+## If a release broke off halfway — how to continue
 
-Реліз — це ланцюг кроків, і сесія може обірватися (перервали, впала мережа GitHub, `--wait`
-завис) посеред нього. **Не перезапускай із нуля** — спершу перевір, що вже зроблено, і продовжуй
-з місця зупинки. Кожна перевірка нижче — недеструктивна (читає стан, не змінює його).
+A release is a chain of steps, and the session can break off (interrupted, GitHub's network failed,
+`--wait` hung) in the middle of it. **Don't restart from scratch** — first check what has already been
+done, and continue from where it stopped. Every check below is non-destructive (it reads state, it
+doesn't change it).
 
-### `.app` уже зібраний і застейплений
+### The `.app` is already built and stapled
 
 ```sh
-spctl -a -t exec ./build/TokenPace.app   # accepted → build+notarize+staple вже позаду
+spctl -a -t exec ./build/TokenPace.app   # accepted → build+notarize+staple are already behind you
 ```
 
-Якщо `accepted` — пропусти кроки 2–3, йди прямо до пакування (крок 4). Перебудовувати не треба:
-`.app` у `build/` уже нотаризований і з квитком.
+If it says `accepted` — skip steps 2–3 and go straight to packing (step 4). There is no need to
+rebuild: the `.app` in `build/` is already notarized and carries its ticket.
 
-### Нотаризація: `--wait` завис на `In Progress`
+### Notarization: `--wait` hung on `In Progress`
 
-Це не збій — `submit --wait` іноді не відпускає, хоча Apple уже завершила. **Не перезбирай.**
-Дізнайся фінальний статус окремо від `--wait`:
+This is not a failure — `submit --wait` sometimes doesn't return even though Apple has already
+finished. **Don't rebuild.** Find out the final status independently of `--wait`:
 
 ```sh
-xcrun notarytool history --keychain-profile tokenpace-notary        # знайди свій submission-id
+xcrun notarytool history --keychain-profile tokenpace-notary        # find your submission id
 xcrun notarytool log <submission-id> --keychain-profile tokenpace-notary
 ```
 
-Якщо статус `Accepted` — одразу застейпли й перевір, минаючи повторний `submit`:
+If the status is `Accepted` — staple and verify right away, bypassing a second `submit`:
 
 ```sh
 xcrun stapler staple ./build/TokenPace.app
 spctl -a -t exec ./build/TokenPace.app   # → accepted
 ```
 
-### Тег `v${VERSION}` уже існує
+### The tag `v${VERSION}` already exists
 
 ```sh
-git rev-parse "v${VERSION}" 2>/dev/null   # існує → звір, куди вказує
+git rev-parse "v${VERSION}" 2>/dev/null   # exists → check what it points at
 ```
 
-- Вказує на потрібний HEAD (актуальний `main`) → пропусти `git tag`, йди до `git push` / релізу.
-- Вказує на інший коміт (залишок обірваної спроби) → `git tag -d "v${VERSION}"` і перестворити
-  на правильному коміті.
+- Points at the right HEAD (the current `main`) → skip `git tag`, go to `git push` / the release.
+- Points at a different commit (left over from an interrupted attempt) → `git tag -d "v${VERSION}"` and
+  recreate it on the correct commit.
 
-### Реліз для цієї версії частково існує
+### A release for this version partially exists
 
 ```sh
-gh release view "v${VERSION}"   # існує? з яким асетом?
+gh release view "v${VERSION}"   # does it exist? with which asset?
 ```
 
-- Реліз є, але **без ZIP-асета** → долий асет:
+- The release exists but has **no ZIP asset** → upload the asset:
   `gh release upload "v${VERSION}" "./build/TokenPace-${VERSION}.zip"`.
-- Лишився **конфліктний старіший реліз**, що заважає (напр. попередній `latest`, чий бінар не
-  відповідає новому тегу) → видали його перед публікацією нового:
-  `gh release delete "v${VERSION_OLD}"` (з підтвердженням мейнтейнера).
-- Тег є, релізу нема → просто виконай `gh release create` (крок 5), тег повторно не створюй.
+- A **conflicting older release** is in the way (e.g. the previous `latest`, whose binary doesn't match
+  the new tag) → delete it before publishing the new one:
+  `gh release delete "v${VERSION_OLD}"` (with the maintainer's confirmation).
+- The tag exists but the release doesn't → just run `gh release create` (step 5), don't recreate the
+  tag.
 
-## Зміст і стиль release notes
+## Release notes: content and style
 
-Аудиторія — **гіки, що самі користуються Claude Code**. Пиши українською, як для колеги, а не для
-пресрелізу.
+The audience is **geeks who use Claude Code themselves**. Write in English, the way you would to a
+colleague — not for a press release.
 
-**Обов'язково перед публікацією — показати згенеровані нотатки мейнтейнеру на затвердження.** Не
-публікувати реліз, доки він не сказав «ок».
+**Mandatory before publishing: show the generated notes to the maintainer for approval.** Do not
+publish the release until he has said "ok".
 
-**Дав своє формулювання — бери дослівно.** Мейнтейнерові версії коротші й точніші за
-згенеровані; не «причісуй» уже затверджений текст і не міняй розмітку без запиту
-(розгортання блока коду «щоб зручніше копіювати з GitHub» відкотили словами «а не, назад»).
-Якщо його правка щось ламає фактично — скажи це, але не переписуй мовчки.
+**If he gives you his own wording, take it verbatim.** The maintainer's versions are shorter and more
+precise than the generated ones; don't "tidy up" text that has already been approved, and don't change
+the markup without asking (expanding a code block "so it's easier to copy from GitHub" was reverted
+with "no, put it back"). If his edit breaks something factually — say so, but don't silently rewrite
+it.
 
-**Крок 0 — узгодити, що взагалі ввійде в нотатки.** Перш ніж писати текст, склади
-**повний перелік нових фічей і помітних змін** з останнього GitHub-релізу й дай
-мейнтейнеру відзначити чекбоксами ті, що потрапляють у release notes. Не вирішуй сам, що
-«дрібне» — покажи все й дай обрати.
+**Step 0 — agree on what goes into the notes at all.** Before writing any text, put together the
+**complete list of new features and notable changes** since the last GitHub release and let the
+maintainer tick the checkboxes for the ones that make it into the release notes. Don't decide on your
+own what counts as "minor" — show everything and let him choose.
 
 ```sh
-LAST="$(gh release view --json tagName -q .tagName)"        # напр. v0.44.0
-git log "${LAST}..HEAD" --no-merges --pretty='- [ ] %s'     # кандидати як чекбокс-список
+LAST="$(gh release view --json tagName -q .tagName)"        # e.g. v0.44.0
+git log "${LAST}..HEAD" --no-merges --pretty='- [ ] %s'     # candidates as a checkbox list
 ```
 
-Подай результат як Markdown-чекліст, згрупувавши споріднені коміти в один пункт (див.
-правила мержу нижче) і відсіявши суто внутрішнє (рефактор без видимого ефекту, CI, бампи
-версії). Кожен рядок — `- [ ] <людський опис фічі>`, напр.:
+Present the result as a Markdown checklist, grouping related commits into a single item (see the
+merging rules below) and filtering out the purely internal (refactors with no visible effect, CI,
+version bumps). Each line is `- [ ] <human description of the feature>`, e.g.:
 
 ```markdown
-- [ ] Динамічний yellow→orange поріг pacing + 20-хв override (#179)
-- [ ] Reset-line єдиного формату для всіх лімітів у попапі (#175)
-- [ ] Чесна grace-межа ресету — більше без «resetting…» (#180)
+- [ ] Dynamic yellow→orange pacing threshold + 20-minute override (#179)
+- [ ] A single reset-line format for every limit in the popup (#175)
+- [ ] An honest reset grace boundary — no more "resetting…" (#180)
 ```
 
-Номери тікетів тут **доречні** — вони потрібні мейнтейнеру, щоб швидко відкрити PR. У
-**текст самих нотаток** вони не переходять (див. правило про номери нижче).
+Ticket numbers **belong here** — the maintainer needs them to open the PR quickly. They do **not**
+carry over into the **text of the notes themselves** (see the rule about numbers below).
 
-Мейнтейнер проставляє `[x]` навпроти тих, що йдуть у реліз; лише **відзначені** пункти
-стають основою тексту нотаток. Ті, що лишились `[ ]`, у нотатки не потрапляють.
+The maintainer puts `[x]` next to the ones going into the release; only the **ticked** items become the
+basis for the notes. Those left as `[ ]` don't make it in.
 
-### Скільки з чеклісту доживає до нотаток
+### How much of the checklist survives into the notes
 
-**Реліз — це два-три пункти, а не changelog.** Фактичне співвідношення «запропоновано →
-залишено» за останні релізи: `v0.69.1` 10→3, `v0.65.1` 5→3, `v0.62.0` 11→4, `v0.76.0` 4→2.
-Тобто мейнтейнер лишає приблизно **третину**. Це не привід не показувати повний перелік
-(крок 0 лишається як є) — це калібрування очікувань: якщо ти вважаєш, що всі вісім твоїх
-пунктів варті нотаток, ти майже напевно помиляєшся у семи.
+**A release is two or three items, not a changelog.** The actual "proposed → kept" ratio over recent
+releases: `v0.69.1` 10→3, `v0.65.1` 5→3, `v0.62.0` 11→4, `v0.76.0` 4→2. So the maintainer keeps roughly
+**a third**. That is not a reason to stop showing the full list (step 0 stays exactly as it is) — it's
+a calibration of expectations: if you believe all eight of your items deserve to be in the notes, you
+are almost certainly wrong about seven of them.
 
-**Критерій — не «видиме», а «змінює те, що користувач робить».** Видимість надто слабкий
-поріг, і саме на ньому агент помиляється найчастіше. У `v0.76.0` під «непотрібну косметику»
-пішли єдиний формат часу до ресету (`20:40` → `5h` просто в menu bar) і кінець стрибання
-ширини віджета — обидві зміни очевидно видимі щодня, і обидві не пройшли.
+**The criterion isn't "visible", it's "changes what the user does".** Visibility is far too weak a bar,
+and it is precisely the one the agent gets wrong most often. In `v0.76.0`, the single reset-time format
+(`20:40` → `5h` right there in the menu bar) and the end of the widget's width jumping both went under
+"unnecessary cosmetics" — both changes are obviously visible every day, and neither made the cut.
 
-Що системно **не** йде в нотатки, за спостереженнями з минулих релізів:
+What systematically does **not** go into the notes, per observations from past releases:
 
-- лінки/пункти меню, додані «для зручності» (напр. «Release notes» біля версії в About);
-- переїзд іконки між елементами, зміна ширини маркера на 1.5 pt, вирівнювання смужок;
-- злиття двох опцій в одну, перейменування секції налаштувань;
-- виправлення позиції вікна, що відкривалося за межами екрана;
-- будь-яка зміна, яку описуєш словами «заодно причесали».
+- links and menu items added "for convenience" (e.g. "Release notes" next to the version in About);
+- an icon moving between elements, a marker's width changing by 1.5 pt, bars being aligned;
+- two options merged into one, a settings section renamed;
+- fixing the position of a window that opened off-screen;
+- any change you'd describe with the words "while we were at it, we tidied up".
 
-**Не заводь секцію «Дрібніше» / «Menu-bar дрібниці» / «Для тих, хто копається».** Такі
-секції видаляли цілком щоразу, разом із реальними фіксами всередині (у `v0.74.1` — шість
-пунктів одним рядком «та усі Дрібніше»). Якщо пункт годиться лише у відро для дрібного —
-він не годиться в нотатки взагалі. Заголовки секцій — прості й описові: «Для тих, хто
-копається» замінили на «Нові Development Tools».
+**Don't create a "Minor" / "Menu-bar odds and ends" / "For those who dig around" section.** Sections
+like that got deleted wholesale every time, along with the real fixes inside them (in `v0.74.1` — six
+items in one line, "and all the Minor stuff"). If an item is only good enough for the bucket of small
+things, it isn't good enough for the notes at all. Section headings are plain and descriptive: "For
+those who dig around" was replaced with "New Development Tools".
 
-**Пуш-бек — один раз, не двічі.** Якщо вважаєш, що викреслений пункт вартий згадки, скажи
-це одним реченням і прийми відповідь. У `v0.74.1` агент посперечався за один фікс, не
-отримав відповіді — і це був сигнал, а не запрошення повторити.
+**Push back once, not twice.** If you think a struck-out item deserves a mention, say so in one
+sentence and accept the answer. In `v0.74.1` the agent argued for one fix, got no reply — and that was
+a signal, not an invitation to repeat it.
 
-**Що охоплювати:**
+**What to cover:**
 
-- **Охоплюй усе з останнього GitHub-релізу** — у **чеклісті** кроку 0. Між релізами накопичується
-  кілька проміжних версій; бери всі значущі зміни від останнього тегу на GitHub
-  (`gh release view` → його тег → `git log <тег>..HEAD`). У **текст нотаток** із цього переліку
-  доживає меншість — див. «Скільки з чеклісту доживає до нотаток» вище.
-- **Не вказуй окремі проміжні версії.** Читачеві байдуже, що фіча зайшла в `0.32.0`, а допрацювалась
-  у `0.34.0` — пиши про зміну як про одне ціле. У нотатках фігурує лише **фінальна** версія релізу.
-- **Мерж текст споріднених фічей, коли доречно.** Кілька новин про ту саму фічу з різних проміжних
-  версій — злий в одну. Приклади: параметри однієї фічі, додані в різних версіях → один пункт;
-  доданий функціонал + виправлена його поведінка в наступній версії → один пункт (описуй кінцевий
-  стан, не історію ітерацій).
-- **Предмет нотаток — діф до попереднього релізу, а не історія комітів.** Між релізами фіча
-  може сильно видозмінитися, а то й з'явитися і зникнути повністю. Користувач стрибає з
-  минулого релізу одразу на цей — для нього існує лише **різниця між цими двома точками**.
-  Тож:
-  - фіча, додана й **видалена** в межах одного релізного циклу, у нотатки не потрапляє **взагалі**
-    — для читача її ніколи не було, згадка лише спантеличить;
-  - фіча, що встигла кілька разів перероблятися, описується **в тому вигляді, у якому виходить**
-    — проміжні варіанти не згадуються навіть як «спершу зробили X, потім передумали»;
-  - опція, додана в `0.75.0` й перейменована в `0.75.2`, має в нотатках **одну** назву — фінальну.
+- **Cover everything since the last GitHub release** — in the step 0 **checklist**. Several
+  intermediate versions accumulate between releases; take every significant change since the last tag
+  on GitHub (`gh release view` → its tag → `git log <tag>..HEAD`). Only a minority of that list survives
+  into the **text of the notes** — see "How much of the checklist survives into the notes" above.
+- **Don't name individual intermediate versions.** The reader doesn't care that a feature landed in
+  `0.32.0` and was polished in `0.34.0` — write about the change as one whole. Only the **final** release
+  version appears in the notes.
+- **Merge the text of related features where it makes sense.** Several pieces of news about the same
+  feature from different intermediate versions — fold them into one. Examples: parameters of one feature
+  added across different versions → one item; functionality added plus its behavior fixed in the next
+  version → one item (describe the end state, not the history of iterations).
+- **The subject of the notes is the diff against the previous release, not the commit history.** Between
+  releases a feature can change a great deal, or even appear and disappear entirely. The user jumps from
+  the previous release straight to this one — for them only the **difference between those two points**
+  exists. So:
+  - a feature added and **removed** within one release cycle doesn't go into the notes **at all** — for
+    the reader it never existed, and mentioning it only confuses;
+  - a feature that got reworked several times is described **as it ships** — intermediate variants aren't
+    mentioned, not even as "we first did X, then changed our minds";
+  - an option added in `0.75.0` and renamed in `0.75.2` has **one** name in the notes — the final one.
 
-  Практично це означає: чеклісти кроку 0 будуй із `git log`, але **звіряй кожен пункт із дифом**
-  `git diff <останній-тег>..HEAD`, і коли вони розходяться — істина в дифі.
+  In practice this means: build the step 0 checklist from `git log`, but **check every item against the
+  diff** `git diff <last-tag>..HEAD`, and where the two disagree — the truth is in the diff.
 
   ```sh
   LAST="$(gh release view --json tagName -q .tagName)"
-  git diff --stat "${LAST}..HEAD" -- Sources/    # що реально змінилося в підсумку
+  git diff --stat "${LAST}..HEAD" -- Sources/    # what actually changed in the end
   ```
 
-**Без номерів тікетів і PR у тексті нотаток.** `(#307)`, `(PR #308)`, посилання на issue —
-нічого цього в опублікованих нотатках немає. Читач релізу — користувач, а не контриб'ютор;
-номер нічого йому не каже, а решті доступна вкладка Commits самого релізу. Це стосується
-**тексту нотаток**, а не **чекліста кроку 0** — там номери навпаки корисні, бо мейнтейнеру
-треба швидко дістатися до PR і зрозуміти, про що пункт.
+**No ticket or PR numbers in the text of the notes.** `(#307)`, `(PR #308)`, links to issues — none of
+that appears in the published notes. The reader of a release is a user, not a contributor; the number
+tells them nothing, and everyone else has the release's own Commits tab. This applies to the **text of
+the notes**, not to the **step 0 checklist** — there the numbers are useful precisely because the
+maintainer needs to get to the PR quickly and understand what an item is about.
 
-> Це правило довго існувало як усна домовленість: 2026-07-28 мейнтейнер послався на нього
-> («я ж просив не згадувати номери тікетів в реліз ноутсах»), агент не знайшов його в доці —
-> і вимогу тоді відкликали саме тому, що вона не була записана. Тепер записана.
+> This rule existed as a verbal agreement for a long time: on 2026-07-28 the maintainer invoked it ("I
+> did ask you not to mention ticket numbers in the release notes"), the agent couldn't find it in the
+> docs — and the requirement was withdrawn at the time precisely because it wasn't written down. Now it
+> is.
 
-**Назви елементів UI — звіряй із кодом, не з пам'яттю.** Пишеш «перейменували X на Y» —
-відкрий файл, де підпис задано, і процитуй обидві назви звідти. Для стилів барів це
-`Sources/TokenPace/Settings/UIPanes.swift` (рядки `.init(value: BarStyle.…, title: "…")`),
-для старої назви — той самий файл на тегу минулого релізу:
+**Check UI element names against the code, not against memory.** Writing "X was renamed to Y" — open
+the file where the caption is defined and quote both names from there. For bar styles that is
+`Sources/TokenPace/Settings/UIPanes.swift` (the `.init(value: BarStyle.…, title: "…")` lines); for the
+old name, the same file at the previous release's tag:
 
 ```sh
 LAST="$(gh release view --json tagName -q .tagName)"
@@ -412,100 +416,102 @@ git show "${LAST}:Sources/TokenPace/Settings/UIPanes.swift" | grep -n 'title:'
 grep -n 'title:' Sources/TokenPace/Settings/UIPanes.swift
 ```
 
-Помилитись тут легко й непомітно: у `v0.76.0` чернетка нотаток двічі стверджувала
-«`Pace` → `Progress`», хоча насправді `Pace & Time` → `Progress`, а `Pace` → `Pressure`.
-Назва `Pace` не зникла, а «переїхала» на інший стиль — тож хибний рядок читався б як
-«моє налаштування підмінили». Raw-значення в `UserDefaults` (`pacing`/`simple`) **не є**
-назвами UI і в нотатки не йдуть.
+Getting this wrong is easy and hard to notice: in `v0.76.0` a draft of the notes twice asserted
+"`Pace` → `Progress`", when in reality it was `Pace & Time` → `Progress`, and `Pace` → `Pressure`. The
+name `Pace` didn't disappear, it "moved" to a different style — so the wrong line would have read as
+"my setting was swapped out from under me". Raw values in `UserDefaults` (`pacing`/`simple`) are **not**
+UI names and don't go into the notes.
 
-**Перейменував або замінив опцію — скажи, що збережений вибір мігрує сам.** Один рядок
-на кшталт «твій збережений вибір стилю мігрує сам — нічого перевибирати не треба».
-Перейменування, побачене без цієї гарантії, читається як «налаштування могли з'їхати», і
-користувач іде перевіряти Settings дарма. Спершу **переконайся, що міграція справді є**
-(для стилів барів це `PersistedConfig.migrateBarStyleIfNeeded` + **`BarStyle.legacySurfaceStyles(for:)`**) —
-якщо її немає, це не рядок у нотатках, а незакритий баг перед релізом.
+**If you renamed or replaced an option, say that the saved choice migrates by itself.** One line along
+the lines of "your saved style choice migrates by itself — there's nothing to re-pick". A rename seen
+without that guarantee reads as "my settings may have slipped", and the user goes off to check Settings
+for nothing. First **make sure the migration really exists** (for bar styles that is
+`PersistedConfig.migrateBarStyleIfNeeded` + **`BarStyle.legacySurfaceStyles(for:)`**) — if it doesn't,
+that's not a line in the notes, it's an open bug to fix before the release.
 
-> ⚠️ **`legacyRawValues` — не повний перелік міграцій.** Та таблиця мапить raw у **один** `BarStyle`,
-> тож значення, що розкладається на **різні** стилі двох поверхонь, у неї не вміщається за
-> конструкцією — і його там свідомо немає. Саме так із `"mixed"` (#329,
-> [ADR-0080](../adr/0080-per-surface-bar-style.md)): він мігрує в пару Pressure + Progress, але
-> перевірка лише за `legacyRawValues` покаже «міграції немає» і підштовхне або написати хибне
-> попередження в нотатках, або заблокувати реліз через неіснуючий баг. **Джерело істини —
-> `legacySurfaceStyles(for:)`**, який читають обидва споживачі: міграція `UserDefaults` і декод
-> експортованого конфігу.
+> ⚠️ **`legacyRawValues` is not a complete list of migrations.** That table maps a raw value to **one**
+> `BarStyle`, so a value that decomposes into **different** styles for the two surfaces doesn't fit in
+> it by construction — and is deliberately absent from it. That is exactly the case with `"mixed"`
+> (#329, [ADR-0080](../adr/0080-per-surface-bar-style.md)): it migrates into a Pressure + Progress pair,
+> but a check against `legacyRawValues` alone will report "there is no migration" and push you either to
+> write a false warning in the notes or to block the release over a non-existent bug. **The source of
+> truth is `legacySurfaceStyles(for:)`**, which both consumers read: the `UserDefaults` migration and
+> the decoding of an exported config.
 
-**Опція зникла — це не перейменування, і нотатки мають казати саме це.** `grep 'title:'` на двох
-тегах покаже зниклий сегмент так само, як перейменований, тож розрізняй їх свідомо: у #329 сегмент
-`Mixed` **видалено**, а не перейменовано — його роль перебрала пара незалежних контролів, і
-збережений вибір відтворюється точно (менюбар Pressure + дропдаун Progress). Формулювання «Mixed
-перейменували» тут було б неправдою; правильний рядок — що вибір стилю тепер окремий для кожної
-поверхні, а старий вигляд зберігається сам.
+**An option disappearing is not a rename, and the notes have to say exactly that.** `grep 'title:'` on
+two tags will show a vanished segment the same way it shows a renamed one, so distinguish them
+deliberately: in #329 the `Mixed` segment was **deleted**, not renamed — its role was taken over by a
+pair of independent controls, and the saved choice is reproduced exactly (menu bar Pressure + dropdown
+Progress). The phrasing "Mixed was renamed" would have been untrue here; the correct line is that the
+style choice is now separate for each surface, and the old look is preserved automatically.
 
-### Як описувати пункт: одне речення про те, що змінилося
+### How to write an item: one sentence about what changed
 
-**Пункт — це одне-два речення, і вони кажуть *що стало*, а не чому й як.** Нижче — чотири
-типи «хвостів», які мейнтейнер вирізає щоразу. Вони виглядають корисними при написанні й
-однаково не доживають до публікації:
+**An item is one or two sentences, and they say *what it is now*, not why and how.** Below are four
+kinds of "tails" the maintainer cuts every time. They look useful while you're writing and equally
+never survive to publication:
 
-- **Причина бага.** «Стан job-и застигає, бо демон тягне транскрипт не з тієї теки» —
-  прибрано. Користувач не лагодить наш баг, йому досить знати, що баг пішов.
-- **Обґрунтування дизайну.** «Показуємо просто „Claude" без здогадок — краще нічого, ніж
-  вигадка, що виглядає як баг» — прибрано. Виправдання рішення нікуди не веде.
-- **«Заодно ми ще».** «Заразом Settings трохи перебрали», «заодно причесали фідбек
-  копіювання» — прибрано разом із самим пунктом.
-- **Переказ бага історією користувача**, коли заголовок його вже назвав: «Claude щось
-  робить, а лічильник каже, що він на тебе чекає» після заголовка про той самий лічильник.
+- **The cause of the bug.** "The job's state freezes because the daemon pulls the transcript from the
+  wrong folder" — cut. The user isn't fixing our bug; it's enough for them to know the bug is gone.
+- **Design rationale.** "We show just 'Claude' with no guessing — better nothing than an invention that
+  looks like a bug" — cut. Justifying a decision leads nowhere.
+- **"While we were at it".** "We also went over Settings a bit", "we tidied up the copy feedback while
+  we were at it" — cut along with the item itself.
+- **Retelling the bug as a user story** when the heading has already named it: "Claude is doing
+  something while the counter says it's waiting on you" after a heading about that very counter.
 
-**Не перелічуй поверхні й не описуй вигляд.** «У попапі — іконка руки в шапці секції, гола
-при одній сесії, з числом, коли їх кілька; у menu bar — та сама іконка першим елементом
-зліва» → лишилося `Утримай ⌥ (Option) для розбивки по проектах`. Тридцять слів про те, де
-що намальовано, згорнулися в шість слів про те, що можна зробити.
+**Don't enumerate surfaces and don't describe the appearance.** "In the popup — a hand icon in the
+section header, bare with one session, with a number when there are several; in the menu bar — the same
+icon as the first element on the left" → what was left is `Hold ⌥ (Option) for a per-project breakdown`.
+Thirty words about where what is drawn collapsed into six words about what you can do.
 
-**Єдине, що варто *дописати* — де це увімкнути.** Опція, вимкнена за замовчуванням, без
-шляху в Settings змушує читача її шукати. Це протилежність попереднім правилам: тут бракує
-дії, а не пояснення.
+**The one thing worth *adding* is where to turn it on.** An option that's off by default, with no path
+in Settings, makes the reader hunt for it. This is the opposite of the preceding rules: here it's an
+action that's missing, not an explanation.
 
-**Кожне твердження звіряй із кодом перед показом чернетки.** Чернетка, що стверджувала,
-ніби попап показує «список сесій, що чекають», тоді як він показує лічильник, отримала
-відповідь з одного слова: «брехня». Хибне твердження коштує дорожче за пропущене — пиши з
-тіла PR і з коду, ніколи з пам'яті.
+**Check every statement against the code before showing a draft.** A draft that claimed the popup shows
+"a list of sessions that are waiting", when it actually shows a counter, got a one-word answer: "a lie".
+A false statement costs more than an omitted one — write from the body of the PR and from the code,
+never from memory.
 
-**Тон і структура:**
+**Tone and structure:**
 
-- **Дружньо й лаконічно.** «Додали / полагодили / тепер», а не «реалізовано / здійснено оптимізацію».
-- **Головне — вперед.** Що змінилось для користувача в першому реченні; технічні деталі — нижче або
-  за посиланням на ADR/PR.
-- **Гумор — гомеопатично.** Одна легка фраза на нотатку максимум, і лише якщо доречна. Без емодзі-спаму.
-- **Поважай читача.** Гік не потребує пояснення, що таке menu bar чи ресет.
-- **Структура** (гнучка): короткий заголовок фічі → 1–2 речення суті → за потреби компактний список
-  конкретики → секція про оновлення й встановлення (нижче).
+- **Friendly and concise.** "Added / fixed / now", not "implemented / performed an optimization of".
+- **Lead with what matters.** What changed for the user in the first sentence; technical detail below,
+  or behind a link to an ADR/PR.
+- **Humor homeopathically.** One light phrase per set of notes at most, and only where it fits. No
+  emoji spam.
+- **Respect the reader.** A geek doesn't need to be told what a menu bar or a reset is.
+- **Structure** (flexible): a short feature heading → 1–2 sentences of substance → where needed, a
+  compact list of specifics → the section about updating and installing (below).
 
-**Секція про оновлення (в кінці нотаток):**
+**The updating section (at the end of the notes):**
 
-- **Рекомендуй увімкнути автооновлення** в застосунку (Settings → About → «Check for updates periodically» +
-  «Install updates automatically»).
-- **Лиши короткий опис ручного встановлення** для тих, хто ставить уперше або віддає перевагу вручну
-  (завантажити zip → розпакувати → перетягнути в Applications → запустити з Launchpad). Повна
-  інструкція — нижче.
-- **Не дописуй пояснень, навіщо це користувачеві.** «Щоб наступні релізи прилітали самі, без
-  ручного качання» — саме такий хвіст прибрали з `v0.76.0`. Назва опції каже все; фраза
-  пояснює дорослому те, що він щойно прочитав. Дай крок, не мотивацію до нього.
+- **Recommend turning on auto-updates** in the app (Settings → About → "Check for updates periodically"
+  + "Install updates automatically").
+- **Leave a short description of manual installation** for anyone installing for the first time or who
+  prefers doing it by hand (download the zip → unpack → drag into Applications → launch from
+  Launchpad). The full instructions are below.
+- **Don't add explanations of why the user would want this.** "So that future releases arrive on their
+  own, without downloading them by hand" — that's exactly the tail that got cut from `v0.76.0`. The name
+  of the option says everything; the phrase explains to an adult what they've just read. Give the step,
+  not the motivation for it.
 
-Приклад вдалого тону: «Тепер віджет не мозолить очі часом ресету, коли й так усе спокійно — показує
-його лише коли пора звертати увагу.» Приклад невдалого (надто сухо): «Реалізовано механізм умовного
-приховування countdown-елемента згідно з матрицею станів.»
+An example of the right tone: "The widget no longer nags you with the reset time when everything is
+calm anyway — it shows it only when it's time to pay attention." An example of the wrong one (too dry):
+"Implemented a mechanism for conditionally hiding the countdown element according to the state matrix."
 
-## Інструкція для користувачів (у тілі релізу)
+## Instructions for users (in the release body)
 
-> 1. Завантаж `TokenPace-X.Y.Z.zip` і розпакуй (подвійний клік).
-> 2. Перетягни **TokenPace.app** у теку **Applications**.
-> 3. Запусти з **Launchpad** або Finder. Іконки в Dock не буде — застосунок
->    живе в menu bar (`LSUIElement`).
+> 1. Download `TokenPace-X.Y.Z.zip` and unpack it (double-click).
+> 2. Drag **TokenPace.app** into the **Applications** folder.
+> 3. Launch it from **Launchpad** or Finder. There will be no Dock icon — the app
+>    lives in the menu bar (`LSUIElement`).
 >
-> **Launch-at-login** працює лише для копії в `/Applications`, запущеної звідти.
+> **Launch-at-login** only works for a copy in `/Applications`, launched from there.
 
-**Не згадувати нотаризацію / Gatekeeper у тілі релізу.** Кожен білд нотаризований — це
-незмінна властивість процесу, а не новина конкретної версії, і читачеві вона не диктує
-жодної дії. Рядок «застосунок нотаризований Apple, Gatekeeper не лаятиметься» стояв тут до
-`v0.76.0` і був прибраний як шум. Технічна перевірка нотаризації нікуди не дівається —
-вона лишається кроком 3 вище, просто не потрапляє в текст для користувача.
+**Don't mention notarization or Gatekeeper in the release body.** Every build is notarized — that is an
+invariant property of the process, not news about a particular version, and it dictates no action to
+the reader. The line "the app is notarized by Apple, Gatekeeper won't complain" stood here until
+`v0.76.0` and was removed as noise. The technical notarization check isn't going anywhere — it remains
+step 3 above, it just doesn't make it into the text for the user.
