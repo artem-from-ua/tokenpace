@@ -6,7 +6,7 @@ import Security
 /// Claude Code OAuth credentials, read from the macOS Keychain.
 ///
 /// Mirrors the nested `claudeAiOauth` payload of the `"Claude Code-credentials"` generic-password
-/// item (SPEC "Стратегія токена", issue #8). Fields the agent does not consume directly
+/// item (SPEC "Token strategy", issue #8). Fields the agent does not consume directly
 /// (`scopes` / `subscriptionType` / `rateLimitTier`) are kept for diagnostics and the future popup
 /// breakdown, but never drive logic.
 ///
@@ -139,7 +139,7 @@ public enum TokenError: Error, Equatable {
 /// | ``readRawData()`` / ``credentials()`` | Keychain I/O (`security` CLI) | no (manual check, issue #8) |
 /// | fallback refresh | network | PR 8b (test account) |
 ///
-/// ## Token strategy (SPEC "Стратегія токена")
+/// ## Token strategy (SPEC "Token strategy")
 /// 1. Read from the Keychain; if `expiresAt` is in the future → hand back `accessToken` as is.
 /// 2. **Fallback only (rare, ADR-0017):** if expired — the polling layer performs a *delegated
 ///    refresh*: it spawns the `claude` CLI (`ClaudeCLIRefresher`) so Claude Code rotates its own

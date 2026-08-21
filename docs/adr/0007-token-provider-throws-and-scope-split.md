@@ -29,7 +29,7 @@ Issue #8 описує `TokenProvider` як «читання OAuth-токена �
   `class: genp`, `svce: "Claude Code-credentials"`, payload — JSON з обгорткою `claudeAiOauth`
   (`accessToken`, `refreshToken`, `expiresAt` у **мілісекундах**, `scopes`, `subscriptionType`,
   `rateLimitTier`); `acct` — ім'я користувача, **системозалежне**.
-- **Fallback-refresh** — головний техризик Фази 1 (SPEC «Відкриті питання», рядки 270–273, 287):
+- **Fallback-refresh** — головний техризик Фази 1 (SPEC «Open questions», рядки 270–273, 287):
   `refreshToken` може бути одноразовим і **інвалідувати живий робочий токен**, тож перевіряється
   лише на *тестовому* Max-акаунті; точні `client_id` / refresh endpoint / форма PKCE **не
   підтверджені**. Писати робочий код навколо невідомих констант передчасно.

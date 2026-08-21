@@ -289,7 +289,7 @@ public struct IntervalDecision: Sendable, Equatable {
 /// math) is the single-source-of-truth choice recorded in ADR-0032.
 public struct PollingEngine: Sendable {
 
-    /// The healthy base cadence — 180 s (SPEC "Частота оновлення"). The floor every override narrows
+    /// The healthy base cadence — 180 s (SPEC "Refresh cadence"). The floor every override narrows
     /// from, and the value the loop returns to after a 429 clears.
     public static let baseInterval: TimeInterval = 180
 

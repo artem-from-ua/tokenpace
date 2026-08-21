@@ -13,7 +13,7 @@ Issue #9 описує `UsageClient` як HTTP-клієнт для `GET /api/oaut
 [ADR-0006](0006-reset-time-absolute-vs-relative.md) і
 [ADR-0007](0007-token-provider-throws-and-scope-split.md).
 
-1. **Де живе backoff.** SPEC «Частота оновлення» віддає *таймер* опитування тікету #13
+1. **Де живе backoff.** SPEC «Refresh cadence» віддає *таймер* опитування тікету #13
    (sleep/wake + мережа): саме polling-шар планує наступне пробудження, реагує на сон/прокидання
    й мережу. Але acceptance-критерій #9 явно вимагає «Backoff працює (unit-тест на логіку
    інтервалів)». Якщо backoff жив би всередині асинхронного `fetch` (який спить і ретраїть),

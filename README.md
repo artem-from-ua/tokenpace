@@ -1,53 +1,54 @@
 # TokenPace
 
-> 👀 *Найвитонченіша форма прокрастинації — стежити за власним лімітом.*
+> 👀 *The most refined form of procrastination is watching your own limit.*
 
-Лаконічні ліміти твоєї підписки Claude Code у menu bar macOS.
+Your Claude Code subscription limits, concisely, in the macOS menu bar.
 
-TokenPace показує просто в menu bar, чи **випереджаєш чи відстаєш** від рівномірної норми витрат
-(*pacing*) у **5-годинному** та **7-денному** вікнах ліміту — двома смужками, без переходу в
-термінал. Коли працювати вже не виходить (ліміт вичерпано) або виходить лише за гроші, смужки
-поступаються місцем **відліку до ресету** з іконкою, що називає причину. Числа й смужки не
-зʼявляються разом: [як читати menu bar](docs/reference/menu-bar-signals.md).
+TokenPace shows right in the menu bar whether you are **ahead of or behind** the even spending rate
+(*pacing*) in the **5-hour** and **7-day** limit windows — as two bars, without switching to the
+terminal. When work can no longer run (the limit is exhausted) or runs only for money, the bars give
+way to a **countdown to the reset** with a glyph that names the cause. Numbers and bars never appear
+together: [how to read the menu bar](docs/reference/menu-bar-signals.md).
 
-Це для тих, хто працює в Claude Code на Mac і не хоче зненацька впертися в «ліміт вичерпано»: видно
-залишок у кожному вікні, тож можна спланувати роботу під найближчий ресет, вчасно помітити, що йдеш
-надто швидко, і не перервати сесію посеред задачі. Колір смужки одразу підказує темп: **червоне**,
-коли витрачаєш швидше за рівномірну норму (ризикуєш вичерпати вікно зарано), **зелене**, коли йдеш у
-межах лімітів або забагато прокрастинуєш.
+This is for people who work in Claude Code on a Mac and don't want to hit "limit exhausted" out of
+nowhere: you can see what is left in each window, so you can plan work around the next reset, notice
+in time that you are going too fast, and avoid breaking off a session mid-task. The bar's color tells
+you the pace at once: **red** when you are spending faster than the even rate (risking exhausting the
+window early), **green** when you are within the limits or procrastinating too much.
 
-<img src="docs/assets/tokenpace-demo.png" alt="TokenPace у menu bar: дві pacing-смужки + статус-крапка, а в попапі — статуси сервісів, ліміти 5h/7d/Sonnet із кольоровим pacing і часом до ресету" width="240">
+<img src="docs/assets/tokenpace-demo.png" alt="TokenPace in the menu bar: two pacing bars + a status dot, and in the popup — service statuses, the 5h/7d/Sonnet limits with colored pacing and time to reset" width="240">
 
-Окремо TokenPace стежить за **статусом сервісів Claude** (Claude Code та Claude API) зі сторінки
-status.claude.com: у попапі видно стан кожного кольоровою крапкою, а коли є проблема — крапка
-з'являється і в menu bar, тож зрозуміло, що сповільнення чи помилки на боці Anthropic, а не в тебе.
+Separately, TokenPace watches the **status of Claude's services** (Claude Code and Claude API) from
+the status.claude.com page: the popup shows each one's state as a colored dot, and when there is a
+problem the dot also appears in the menu bar, so it is clear that the slowdown or the errors are on
+Anthropic's side, not yours.
 
-Джерело даних — офіційний endpoint Anthropic `GET /api/oauth/usage`, авторизація — OAuth-токен
-Claude Code з macOS Keychain. **Токен ніколи не покидає Mac.**
+The data source is Anthropic's official `GET /api/oauth/usage` endpoint; authorization uses the Claude
+Code OAuth token from the macOS Keychain. **The token never leaves the Mac.**
 
-> 🚧 Рання розробка. Фаза 1 — menu bar app для macOS; згодом — віджети iPhone та комплікейшен
-> Apple Watch.
+> 🚧 Early development. Phase 1 is the menu bar app for macOS; iPhone widgets and an Apple Watch
+> complication come later.
 
-## Встановлення
+## Installation
 
-1. Завантаж `TokenPace-X.Y.Z.zip` з [останнього релізу](https://github.com/artem-from-ua/tokenpace/releases/latest)
-   і розпакуй (подвійний клік).
-2. Перетягни **TokenPace.app** у теку **Applications**.
-3. Запусти з **Launchpad** або Finder. Іконки в Dock не буде — застосунок живе в menu bar.
+1. Download `TokenPace-X.Y.Z.zip` from the [latest release](https://github.com/artem-from-ua/tokenpace/releases/latest)
+   and unpack it (double-click).
+2. Drag **TokenPace.app** into the **Applications** folder.
+3. Launch it from **Launchpad** or Finder. There will be no Dock icon — the app lives in the menu bar.
 
-Працює на Apple Silicon та Intel (universal binary). **Launch-at-login** (автозапуск) умикається
-в `Settings…` і працює для копії, запущеної з `/Applications`.
+Runs on Apple Silicon and Intel (universal binary). **Launch-at-login** is enabled in `Settings…` and
+works for a copy launched from `/Applications`.
 
-## Документація
+## Documentation
 
-- [docs/README.md](docs/README.md) — **карта всієї документації** (почни звідси).
-- [SPEC.md](SPEC.md) — продуктовий спек (проблема, архітектура, UI, фази, монетизація).
-- [docs/architecture.md](docs/architecture.md) — архітектура та потік даних.
-- [docs/building.md](docs/guides/building.md) — збірка з джерел (для контриб'юторів).
-- [docs/conventions.md](docs/reference/conventions.md) — конвенції розробки.
-- [docs/adr/](docs/adr/) — записи архітектурних рішень.
+- [docs/README.md](docs/README.md) — **the map of all documentation** (start here).
+- [SPEC.md](SPEC.md) — the product spec (problem, architecture, UI, phases, monetization).
+- [docs/architecture.md](docs/architecture.md) — architecture and data flow.
+- [docs/building.md](docs/guides/building.md) — building from source (for contributors).
+- [docs/conventions.md](docs/reference/conventions.md) — development conventions.
+- [docs/adr/](docs/adr/) — architecture decision records.
 
-## Ліцензія
+## License
 
-**Поки що закрите.** Питання open-source (та можливої ліцензії) — відкрите, з'ясуємо пізніше.
-Серед мотивів на користь відкриття коду — довіра до поводження з токеном.
+**Closed for now.** The open-source question (and a possible license) is open; we'll settle it later.
+One of the arguments for opening the code is trust in how the token is handled.

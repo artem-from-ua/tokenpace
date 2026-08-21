@@ -5,7 +5,7 @@ import Foundation
 /// The limit window whose reset comes first, plus its instant.
 ///
 /// The menu bar shows the countdown to whichever of the 5h / 7d limits resets soonest
-/// (SPEC "час до найближчого ресету"). Returned by ``ResetClock/nearestReset(fiveHour:sevenDay:)``
+/// (SPEC "the time to the nearest reset"). Returned by ``ResetClock/nearestReset(fiveHour:sevenDay:)``
 /// so callers know which limit drives the display.
 public struct NearestReset: Sendable, Equatable {
     /// Which rolling window resets first. Reuses `PacingModel`'s ``LimitWindow``.
@@ -84,7 +84,7 @@ public enum ResetClock {
     // MARK: nearestReset
 
     /// Pick the limit that resets **first** (smallest `resets_at`) between the 5h and 7d
-    /// windows — the countdown the menu bar shows (SPEC "найближчий ресет").
+    /// windows — the countdown the menu bar shows (SPEC "the nearest reset").
     ///
     /// Both inputs are optional because either `resets_at` may be missing or unparseable
     /// (see ``parse(_:)``). Returns `nil` only when **both** are `nil`. When exactly one is

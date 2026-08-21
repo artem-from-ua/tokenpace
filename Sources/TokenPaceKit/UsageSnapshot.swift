@@ -356,7 +356,7 @@ public struct SpendInfo: Sendable, Equatable {
 /// ``UsageError/decode`` by ``UsageClient/decode(from:)``).
 ///
 /// `sevenDayOpus` / `sevenDaySonnet` are optional — the API omits them or sends `null`
-/// when that model was not used in the window (issue #9 acceptance: "не падати"). Both
+/// when that model was not used in the window (issue #9 acceptance: "must not crash"). Both
 /// an explicit `null` and an absent key decode to `nil` via the synthesized
 /// `decodeIfPresent`.
 ///

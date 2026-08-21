@@ -1,538 +1,551 @@
-# TokenPace — продуктовий спек
+# TokenPace — product spec
 
-> Статус: **Чернетка** (після продуктового інтерв'ю, 2026-06-21)
-> Горизонт: Фаза 1 (menu bar app) — для власного користування; архітектура спроєктована так, щоб
-> у Фазі 2 додати iPhone/Watch через CloudKit, а далі — публічний реліз.
+> Status: **Draft** (after the product interview, 2026-06-21)
+> Horizon: Phase 1 (menu bar app) — for personal use; the architecture is designed so that Phase 2 can
+> add iPhone/Watch via CloudKit, and a public release after that.
 
-## Проблема
+## The problem
 
-Використання підписки Claude Code обмежене двома ковзними лімітами — **5-годинним** вікном і
-**7-денним** вікном. Наявний statusline-плагін показує обидва з *pacing* (ви випереджаєте чи
-відстаєте від лінійної норми витрат відносно часу, що минув?). Ця інформація видима лише в
-терміналі. `TokenPace` виносить її **на один погляд** — спершу в menu bar macOS (Фаза 1), а
-згодом на комплікейшен Apple Watch і віджети головного екрана iPhone (Фаза 2), разом із
-зворотним відліком до найближчого ресету ліміту.
+Claude Code subscription usage is bounded by two rolling limits — a **5-hour** window and a **7-day**
+window. The existing statusline plugin shows both with *pacing* (are you ahead of or behind the linear
+spending rate relative to the time elapsed?). That information is visible only in the terminal.
+`TokenPace` brings it **into a single glance** — first in the macOS menu bar (Phase 1), and later onto
+an Apple Watch complication and iPhone home-screen widgets (Phase 2), together with a countdown to the
+nearest limit reset.
 
-Продукт еволюціонує у два кроки:
-- **Фаза 1 — menu bar app для macOS.** Самостійний нативний застосунок на тому ж Mac, де лежить
-  токен. Ланцюг простий: `Keychain → usage API → малювання в menu bar`. **CloudKit не потрібен.**
-- **Фаза 2 — iPhone + Apple Watch.** Щоб винести дані за межі Mac, додається CloudKit як
-  транспорт; той самий Mac-агент починає писати usage-snapshot, а пристрої його читають.
+The product evolves in two steps:
+- **Phase 1 — a menu bar app for macOS.** A standalone native app on the same Mac that holds the
+  token. The chain is simple: `Keychain → usage API → drawing in the menu bar`. **No CloudKit needed.**
+- **Phase 2 — iPhone + Apple Watch.** To take the data beyond the Mac, CloudKit is added as the
+  transport; the same Mac agent starts writing usage snapshots, and the devices read them.
 
-## Джерело даних (підтверджено)
+## Data source (confirmed)
 
 - Endpoint: `GET https://api.anthropic.com/api/oauth/usage`
-- Заголовки:
+- Headers:
   - `Authorization: Bearer <accessToken>`
   - `anthropic-beta: oauth-2025-04-20`
-  - `User-Agent: claude-code/<version>` — **обов'язковий.** Без нього клієнт потрапляє в
-    агресивно обмежений rate-limit bucket і отримує постійні 429 (див. джерело нижче). Завжди
-    слати, навіть для одиничного запиту — нульова вартість.
+  - `User-Agent: claude-code/<version>` — **mandatory.** Without it the client lands in an
+    aggressively rate-limited bucket and gets constant 429s (see the source below). Always send it,
+    even for a one-off request — it costs nothing.
   - `Content-Type: application/json`
-- Використовувані поля: `five_hour.utilization`, `five_hour.resets_at`,
+- Fields used: `five_hour.utilization`, `five_hour.resets_at`,
   `seven_day.utilization`, `seven_day.resets_at`.
-- **Джерело документації API:**
+- **API documentation source:**
   [Claude-Code-Usage-Monitor#202](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor/issues/202)
-  — детальний розбір endpoint, заголовків, схеми відповіді, UA-quirk і стратегії кешування.
-  Реф-імплементації: [aistat](https://github.com/drogers0/aistat) (Go), jens-duttke/usage-monitor-for-claude
-  (Windows tray), LightspeedDMS/claude-usage (Python CLI).
-- Токен авторизації: OAuth-облікові дані Claude Code з macOS Keychain
-  (`Claude Code-credentials`). Структура: `accessToken`, `refreshToken`, `expiresAt`,
+  — a detailed breakdown of the endpoint, the headers, the response schema, the UA quirk, and caching
+  strategies. Reference implementations: [aistat](https://github.com/drogers0/aistat) (Go),
+  jens-duttke/usage-monitor-for-claude (Windows tray), LightspeedDMS/claude-usage (Python CLI).
+- Authorization token: the Claude Code OAuth credentials from the macOS Keychain
+  (`Claude Code-credentials`). Structure: `accessToken`, `refreshToken`, `expiresAt`,
   `scopes`, `subscriptionType`, `rateLimitTier`.
 
-### Життєвий цикл токена (підтверджено)
+### Token lifecycle (confirmed)
 
-- Час життя `accessToken` — **~8 годин** за нашим прямим виміром `expiresAt` із Keychain
-  (на момент перевірки лишалось 7.6 год). ⚠️ Джерело #202 натомість стверджує **~60 хв** —
-  розбіжність; довіряємо власному виміру, але поведінку варто перепровірити (можливо, залежить
-  від типу токена / версії CC). У будь-якому разі гібридна стратегія нижче коректна для обох.
-- Зберігання токена (з джерела #202): macOS Keychain `Claude Code-credentials`; Linux/Windows —
-  `~/.claude/.credentials.json`; або змінна `CLAUDE_CODE_OAUTH_TOKEN`. Усі містять
-  `claudeAiOauth.accessToken`, `.refreshToken`, `.expiresAt` (epoch у мілісекундах).
-- Rate-limit рахується **per-access-token**, не per-account.
-- Присутній `refreshToken` → access-токен можна оновити без повторного логіну.
-- Наслідок: будь-який наївний підхід «вставити токен один раз на iPhone» ламається при протуханні.
-  **Тому токен ніколи не покидає Mac.**
+- The lifetime of `accessToken` is **~8 hours** by our own direct measurement of `expiresAt` from the
+  Keychain (7.6 h remained at the moment we checked). ⚠️ Source #202 instead claims **~60 min** — a
+  discrepancy; we trust our own measurement, but the behavior is worth rechecking (it may depend on
+  the token type / the CC version). Either way, the hybrid strategy below is correct for both.
+- Token storage (from source #202): the macOS Keychain `Claude Code-credentials`; on Linux/Windows —
+  `~/.claude/.credentials.json`; or the `CLAUDE_CODE_OAUTH_TOKEN` variable. All of them contain
+  `claudeAiOauth.accessToken`, `.refreshToken`, `.expiresAt` (epoch in milliseconds).
+- The rate limit is counted **per access token**, not per account.
+- A `refreshToken` is present → the access token can be renewed without logging in again.
+- Consequence: any naive "paste the token into the iPhone once" approach breaks when it expires.
+  **That is why the token never leaves the Mac.**
 
-### Стратегія токена: спершу читати, refresh — делегувати CLI
+### Token strategy: read first, delegate refresh to the CLI
 
-Claude Code сам оновлює токен у Keychain, поки запущений, перезаписуючи `Claude Code-credentials`
-свіжою парою. Тож **поки CC запущено, агенту достатньо лише читати** завжди свіжий токен —
-жодного refresh не потрібно.
+Claude Code refreshes the token in the Keychain itself while it is running, overwriting
+`Claude Code-credentials` with a fresh pair. So **while CC is running, the agent only ever needs to
+read** an always-fresh token — no refresh required.
 
-Розрив: агент — це демон 24/7, який має тримати віджет свіжим **навіть коли CC закрито**
-(наприклад, уночі). Якщо токен протухне, поки CC не запущено — ніхто його не оновить.
+The gap: the agent is a 24/7 daemon that has to keep the widget fresh **even when CC is closed** (at
+night, for instance). If the token expires while CC is not running, nobody will renew it.
 
-**Стратегія (див. [ADR-0017](docs/adr/0017-delegated-token-refresh.md)):**
-1. Читати токен з Keychain. Якщо ще валідний (`expiresAt` у майбутньому) → використати як є.
-   Це звичайний шлях; агент жодного разу не торкається refresh.
-2. **Лише fallback:** якщо токен протух (CC не запущено, ніхто не оновив) — агент виконує
-   **делегований refresh**: запускає `claude --model haiku -p '/usage'` сабпроцесом, і CC сам
-   ротує пару у власному Keychain (`/usage` — локальна команда, ліміти не витрачає; перевірено
-   спайком в issue #8). Агент перечитує Keychain і продовжує в тому ж циклі опитування.
+**The strategy (see [ADR-0017](docs/adr/0017-delegated-token-refresh.md)):**
+1. Read the token from the Keychain. If it is still valid (`expiresAt` in the future) → use it as is.
+   This is the ordinary path; the agent never touches a refresh.
+2. **Fallback only:** if the token has expired (CC is not running, nobody renewed it) — the agent
+   performs a **delegated refresh**: it spawns `claude --model haiku -p '/usage'` as a subprocess, and
+   CC rotates the pair in its own Keychain (`/usage` is a local command that spends no limits; verified
+   by the spike in issue #8). The agent re-reads the Keychain and continues within the same polling
+   cycle.
 
-Агент **ніколи не виконує `refresh_token` grant сам і ніколи не пише в Keychain**: refresh-токени
-ротуються (підтверджено дослідженням аналогів), тож self-refresh без коректного write-back
-розсинхронізував би пару Claude Code і розлогінив CLI. Делегування усуває і гонитву з CC за
-токен, і сам write-back.
+The agent **never performs a `refresh_token` grant itself and never writes to the Keychain**: refresh
+tokens rotate (confirmed by studying comparable tools), so a self-refresh without a correct write-back
+would desynchronize Claude Code's pair and log the CLI out. Delegation removes both the race with CC
+over the token and the write-back itself.
 
-## Архітектурне рішення
+## Architectural decision
 
-**Без власного бекенду.** Mac — єдиний компонент, що торкається Anthropic API.
+**No backend of our own.** The Mac is the only component that touches the Anthropic API.
 
-### Фаза 1 (menu bar, без CloudKit)
+### Phase 1 (menu bar, no CloudKit)
 
 ```
-Mac-агент (токен у Keychain)
-  → делегований refresh через claude CLI (fallback, ~8 год)
+Mac agent (token in the Keychain)
+  → delegated refresh via the claude CLI (fallback, ~8 h)
   → GET /api/oauth/usage
-  → малювання мінівіджета в menu bar (лише перемалювати при зміні use АБО ресеті таймера)
+  → drawing the mini-widget in the menu bar (redraw only when use changes OR the timer resets)
 ```
 
-Усе локально на одному Mac. Жодної мережі, крім самого Anthropic API. Жодного CloudKit,
-жодного Apple ID-зв'язування, жодного iOS host-застосунку.
+Everything is local, on one Mac. No network beyond the Anthropic API itself. No CloudKit, no Apple ID
+pairing, no iOS host app.
 
-### Фаза 2 (додається транспорт для пристроїв)
+### Phase 2 (a transport for devices is added)
 
 ```
-Mac-агент (той самий)
-  → ... (як у Фазі 1)
-  → запис snapshot у приватну CloudKit DB  (лише коли use змінився АБО ресет таймера)
-CloudKit (той самий Apple ID)
-  → віджети iPhone читають snapshot
-  → комплікейшен Apple Watch читає snapshot
+Mac agent (the same one)
+  → ... (as in Phase 1)
+  → writes a snapshot into the private CloudKit DB  (only when use changed OR the timer reset)
+CloudKit (the same Apple ID)
+  → iPhone widgets read the snapshot
+  → the Apple Watch complication reads the snapshot
 ```
 
-- **Зв'язування:** один Apple ID на Mac + iPhone + Watch. Приватна база CloudKit автоматично
-  спільна для власних пристроїв користувача, тож — **нуль авторизації на пристроях**.
-  (Cross-Apple-ID sharing через QR/CloudKit-sharing — розгляд далі.)
-- **Жодного введення токена на пристрої.** (Початкова ідея — вставляти токен в iPhone — відкинута.)
-- **Запис лише при зміні:** Mac-агент пише новий snapshot у CloudKit лише коли змінився
-  `utilization` або перекинувся `resets_at` (ресет таймера 5h чи 7d). Це мінімізує записи в
-  CloudKit, заряд і мережу на пристроях.
+- **Pairing:** one Apple ID across Mac + iPhone + Watch. The private CloudKit database is automatically
+  shared across the user's own devices, so — **zero authorization on the devices**.
+  (Cross-Apple-ID sharing via QR/CloudKit sharing — to be considered later.)
+- **No token entry on the device.** (The initial idea — pasting the token into the iPhone — was
+  rejected.)
+- **Writes only on change:** the Mac agent writes a new snapshot into CloudKit only when `utilization`
+  changed or `resets_at` rolled over (a 5h or 7d timer reset). This minimizes CloudKit writes, battery,
+  and network use on the devices.
 
 ## UI
 
-### Мінівіджет у menu bar macOS (Фаза 1 — основний UI)
+### The mini-widget in the macOS menu bar (Phase 1 — the primary UI)
 
-Кастомна `NSView` усередині `NSStatusItem` (не template-іконка й не простий текст), бо потрібні
-кольори, які система не має перефарбовувати під Dark/Light.
+A custom `NSView` inside an `NSStatusItem` (not a template icon and not plain text), because we need
+colors the system must not repaint for Dark/Light.
 
-- **Ліворуч:** дві горизонтальні паралельні смужки — верхня **5h**, нижня **7d**. Дизайн
-  **точно повторює поточний statusline** (`build_progress_bar`): кожна смужка має чотири
-  складові, а не один колір:
-  - **сіра зона** (`dark_gray`) ліворуч = частка **використання** (`u_blocks`);
-  - **темносиня зона** (`dark_blue`) праворуч = ще не використане / «майбутнє»;
-  - **pacing-проміжок** між use і часом:
-    - якщо `time_pct > usage_pct` (відстаєш від норми — добре) → проміжок **зелений**
+- **On the left:** two horizontal parallel bars — **5h** on top, **7d** below. The design **follows the
+  current statusline exactly** (`build_progress_bar`): each bar has four parts, not one color:
+  - a **gray zone** (`dark_gray`) on the left = the share **used** (`u_blocks`);
+  - a **dark blue zone** (`dark_blue`) on the right = not yet used / the "future";
+  - the **pacing gap** between use and time:
+    - if `time_pct > usage_pct` (behind the rate — good) → the gap is **green**
       (`bright_green`);
-    - якщо `usage_pct > time_pct` (випереджаєш норму — погано) → проміжок **червоний**
+    - if `usage_pct > time_pct` (ahead of the rate — bad) → the gap is **red**
       (`bright_red`);
-    - > **Еволюція кольорів (не в оригінальному statusline).** Обидва боки згодом отримали внутрішній
-    >   поділ. Бік «попереду» ділиться на **жовтий** (мʼякий відрив) / **помаранчевий** (сильний, ≥
-    >   *динамічного* порогу `0.16·(1−time)`) + **червоний** при вичерпанні
-    >   ([ADR-0044](docs/adr/0044-dynamic-pacing-threshold.md)). Бік «позаду» ділиться на **синій**
-    >   (`.farBehind`, глибоко позаду / великий запас) / **зелений** (близько до лінії) за **фіксованим**
-    >   порогом (база 1h/5h, 1d/7d × 2 → 2h/2d) — лише для базових 5h/7d барів, і лише поки **тижневе
-    >   вікно саме має запас** (weekly-capacity gate: синій радить розганятися, і ця порада не має
-    >   з'являтися при вичерпаному чи гарячому тижні)
+    - > **Color evolution (not in the original statusline).** Both sides eventually gained an internal
+    >   split. The "ahead" side splits into **yellow** (a soft lead) / **orange** (a strong one, ≥ the
+    >   *dynamic* `0.16·(1−time)` threshold) + **red** on exhaustion
+    >   ([ADR-0044](docs/adr/0044-dynamic-pacing-threshold.md)). The "behind" side splits into **blue**
+    >   (`.farBehind`, deep behind / a large reserve) / **green** (close to the line) by a **fixed**
+    >   threshold (base 1h/5h, 1d/7d × 2 → 2h/2d) — only for the base 5h/7d bars, and only while the
+    >   **weekly window itself has reserve** (the weekly-capacity gate: blue advises speeding up, and
+    >   that advice must not appear on an exhausted or hot week)
     >   ([ADR-0061](docs/adr/0061-far-behind-blue-pacing-zone.md),
-    >   [ADR-0081](docs/adr/0081-weekly-capacity-gate-for-blue.md)). Повний порядок спокою: синій →
-    >   зелений → жовтий → помаранчевий → червоний. Це синій пейсингу (`.paceBlue`), відмінний від
-    >   синього «майбутнього»/idle-бару вище.
-  - **індикатор поточного часу** — окрема позначка позиції `time_pct` (у statusline це блок
-    `■̿` з подвійним надкресленням; у menu bar — тонка вертикальна риска на смужці). Подача бару
-    конфігурована (`BarStyle`, [ADR-0062](docs/adr/0062-configurable-bar-presentation.md),
+    >   [ADR-0081](docs/adr/0081-weekly-capacity-gate-for-blue.md)). The full calm-to-alarm order: blue →
+    >   green → yellow → orange → red. This is the pacing blue (`.paceBlue`), distinct from the
+    >   "future"/idle-bar blue above.
+  - the **current-time indicator** — a separate mark for the `time_pct` position (in the statusline it
+    is a `■̿` block with a double overline; in the menu bar it is a thin vertical line on the bar). The
+    bar's presentation is configurable (`BarStyle`, [ADR-0062](docs/adr/0062-configurable-bar-presentation.md),
     [ADR-0076](docs/adr/0076-pressure-scale-for-marker-less-bar.md),
-    [ADR-0079](docs/adr/0079-centred-zero-gauge-scale.md)) — **три стилі**: «Progress» малює цей
-    маркер у шкалі вікна; «Pressure» — лише кольорову стрічку від лівого краю без нього, вимірювану
-    проти **часу, що лишився** (`max(0, balanceOffset)` = `clamp(r, 0, 1)`, `r = (u − t)/(1 − t)` —
-    нуль бару означає «рівно за планом», [ADR-0101](docs/adr/0101-pressure-is-the-gauge-ahead-half.md));
-    «Balance» — стрічку від **центру** зі знаком (`clamp(r, −1, +1)`), праворуч при випередженні
-    й ліворуч при відставанні, тож видно й невитрачений запас — Pressure є рівно її правою половиною.
-    **Стиль обирається окремо для menu bar і для дропдауна**
-    ([ADR-0080](docs/adr/0080-per-surface-bar-style.md)): два незалежні ключі, тож поверхні можуть
-    малювати різне (напр. тихіший Pressure у тісному барі й Progress у просторому попапі — саме ця
-    пара була доступна до #329 як окремий кейс «Mixed», який тепер видалено).
-    **Виняток — бар «Extra usage»** ([ADR-0092](docs/adr/0092-extra-usage-own-ruler.md)): він завжди
-    Progress, бо його вікно — календарний місяць, а не ліміт-вікно, і несе власну лінійку з підписами
-    першого й останнього дня місяця замість тіків.
-  - Логіка позиціонування індикатора та зон — портувати 1:1 з `build_progress_bar`
+    [ADR-0079](docs/adr/0079-centred-zero-gauge-scale.md)) — **three styles**: "Progress" draws that
+    marker on the window's scale; "Pressure" draws only a colored strip from the left edge without it,
+    measured against the **time remaining** (`max(0, balanceOffset)` = `clamp(r, 0, 1)`,
+    `r = (u − t)/(1 − t)` — a zero bar means "exactly on plan",
+    [ADR-0101](docs/adr/0101-pressure-is-the-gauge-ahead-half.md));
+    "Balance" draws a signed strip from the **center** (`clamp(r, −1, +1)`), to the right when ahead and
+    to the left when behind, so the unspent reserve is visible too — Pressure is exactly its right half.
+    **The style is chosen separately for the menu bar and for the dropdown**
+    ([ADR-0080](docs/adr/0080-per-surface-bar-style.md)): two independent keys, so the surfaces can draw
+    different things (e.g. the quieter Pressure in the cramped bar and Progress in the roomy popup —
+    exactly the pair that was available before #329 as a separate "Mixed" case, now removed).
+    **The exception is the "Extra usage" bar** ([ADR-0092](docs/adr/0092-extra-usage-own-ruler.md)): it
+    is always Progress, because its window is a calendar month rather than a limit window, and it
+    carries its own ruler labeled with the first and last day of the month instead of ticks.
+  - The positioning logic for the indicator and the zones — port it 1:1 from `build_progress_bar`
     (`u_blocks`/`t_blocks`, `ind_pos`).
-- **Замість смужок — відлік до ресету, і тільки там, де робота не йде на підписці**
-  ([ADR-0091](docs/adr/0091-countdown-only-where-work-is-not-running.md)). Віджет має рівно два
-  вигляди: **смужки без числа**, поки робота йде на підписці, і **гліф + число без смужок**, коли
-  робота стала (⏸) або коштує грошей (¤). Пара «смужки + число» не існує: `MenuBarMode.expanded`
-  не має поля для відліку, тож вона **нерепрезентовна**. Причина — число не каже, чиє воно: біля
-  двох смужок «21m» доводиться вгадувати за величиною. Гліф поруч називає причину однозначно, тож
-  питання не виникає.
-  - Формат — **одна односкладова тривалість, округлена до найближчої одиниці, на будь-якій
-    відстані**: `<1m`, `45m`, `1h`, `5h`, `4d`
+- **Instead of bars — a countdown to the reset, and only where work is not running on the
+  subscription** ([ADR-0091](docs/adr/0091-countdown-only-where-work-is-not-running.md)). The widget has
+  exactly two looks: **bars without a number** while work is running on the subscription, and a **glyph
+  + a number without bars** when work has stopped (⏸) or costs money (¤). The "bars + a number" pair
+  does not exist: `MenuBarMode.expanded` has no field for a countdown, so it is
+  **unrepresentable**. The reason is that a number does not say whose it is: next to two bars, "21m"
+  has to be guessed at by magnitude. The glyph beside it names the cause unambiguously, so the question
+  never arises.
+  - The format is **a single-unit duration, rounded to the nearest unit, at any distance**: `<1m`,
+    `45m`, `1h`, `5h`, `4d`
     ([#284](https://github.com/artem-from-ua/tokenpace/issues/284),
     [ADR-0074](docs/adr/0074-one-reset-format-on-both-surfaces.md)).
-  - Це **те саме число**, яким починається рядок ресету в дропдауні (`5h` у барі ↔ `5h at 20:40` у
-    попапі) — обидві поверхні беруть його з `ResetClock.relativeRounded`. Але з ADR-0091 поверхні
-    вже **не показують його одночасно**: у робочому стані число є лише в дропдауні (рядок ресету
-    там не гейтиться severity ніколи), у меню-барі — лише в безсмужкових станах.
-  - **Настінного годинника (`20:40`) у меню-барі немає.** Поріг 90 хв, ухвалений колись в
-    [ADR-0006](docs/adr/0006-reset-time-absolute-vs-relative.md), прибрано: він робив дві поверхні
-    неузгодженими й давав стрибок ширини на межі формату. Годинник лишився **тільки** в дропдауні,
-    як кваліфікатор (`at 03:00`), де для нього є місце.
-  - **Немає активної 5h-сесії** (#100, [ADR-0027](docs/adr/0027-session-idle-no-phantom-reset.md)):
-    коли 5h-вікна не існує на сервері (немає `resets_at`), синтезований «фантомний» 5h-час
-    (`now+5h`) **не** показується. Сам по собі idle лишається станом зі смужками, тобто **без
-    числа**; відлік зʼявляється, лише якщо idle водночас **заблокований** (тижневе вікно вичерпане,
-    кредити не покривають) — тоді це вже безсмужковий стан ⏸ + `4d`.
-  - **Вичерпане вікно зі зламаним `resets_at`** — самотній **⚠️**, без паузи, без валюти й без
-    смужок (`MenuBarMode.exhaustedUnknownReset`): стан відомий, а його кінець — ні, і суперечливі
-    дані отримують один сигнал, а не два.
-  - Як читати те, що на екрані, з боку користувача — [docs/reference/menu-bar-signals.md](docs/reference/menu-bar-signals.md).
+  - It is **the same number** the reset line in the dropdown starts with (`5h` in the bar ↔ `5h at
+    20:40` in the popup) — both surfaces take it from `ResetClock.relativeRounded`. But since ADR-0091
+    the surfaces **no longer show it at the same time**: in the working state the number exists only in
+    the dropdown (the reset line there is never gated by severity), and in the menu bar only in the
+    bar-less states.
+  - **There is no wall clock (`20:40`) in the menu bar.** The 90-minute threshold once adopted in
+    [ADR-0006](docs/adr/0006-reset-time-absolute-vs-relative.md) has been removed: it made the two
+    surfaces inconsistent and produced a width jump at the format boundary. The clock stayed **only** in
+    the dropdown, as a qualifier (`at 03:00`), where there is room for it.
+  - **No active 5h session** (#100, [ADR-0027](docs/adr/0027-session-idle-no-phantom-reset.md)): when
+    the 5h window does not exist on the server (no `resets_at`), the synthesized "phantom" 5h time
+    (`now+5h`) is **not** shown. Idle on its own remains a state with bars, i.e. **without a number**;
+    the countdown appears only if idle is simultaneously **blocked** (the weekly window is exhausted and
+    credits do not cover it) — and then it is already a bar-less ⏸ + `4d` state.
+  - **An exhausted window with a broken `resets_at`** — a lone **⚠️**, with no pause, no currency, and
+    no bars (`MenuBarMode.exhaustedUnknownReset`): the state is known, its end is not, and contradictory
+    data gets one signal, not two.
+  - How to read what is on screen from the user's side — [docs/reference/menu-bar-signals.md](docs/reference/menu-bar-signals.md).
 
-- **Без компактного/idle-режиму.** Поки робота йде на підписці й є валідні дані, menu bar **завжди**
-  показує pacing-смужки — незалежно від рівня `utilization`. Раніше планувався «компактний режим» —
-  згортання до малої іконки `*` при низькому `utilization` — але його **прибрано**: поріг спирався
-  лише на відсоток витрат, а не на реальну активність Claude, тож зірочка з'являлася навіть під час
-  активної роботи одразу після ресету вікна (обидва ліміти < 5%). Це збивало з пантелику й не давало
-  корисної інформації. Смужки **відсутні** у безсмужкових станах (робота стала або коштує грошей —
-  ⏸/¤ з відліком; вичерпане вікно зі зламаною датою — ⚠️) і у стані помилки / на холодному старті
-  (токен протух, API недоступне, ще не було першого успішного полла) — тоді показується перекреслена
-  антена (див. нижче). Рішення — [ADR-0015](docs/adr/0015-no-idle-mode.md),
+- **No compact/idle mode.** While work is running on the subscription and the data is valid, the menu
+  bar **always** shows the pacing bars — regardless of the `utilization` level. A "compact mode" was
+  planned earlier — collapsing to a small `*` icon at low `utilization` — but it has been **removed**:
+  the threshold relied only on the spending percentage, not on Claude's actual activity, so the asterisk
+  appeared even during active work right after a window reset (both limits < 5%). That was confusing and
+  gave no useful information. The bars are **absent** in the bar-less states (work has stopped or costs
+  money — ⏸/¤ with a countdown; an exhausted window with a broken date — ⚠️) and in the error state / on
+  a cold start (the token expired, the API is unreachable, there has not been a first successful poll
+  yet) — the crossed-out antenna is shown then (see below). The decisions —
+  [ADR-0015](docs/adr/0015-no-idle-mode.md),
   [ADR-0090](docs/adr/0090-menu-bar-answers-can-we-work.md),
   [ADR-0091](docs/adr/0091-countdown-only-where-work-is-not-running.md).
 
-- **Стан «немає активної 5h-сесії»** (#100, [ADR-0027](docs/adr/0027-session-idle-no-phantom-reset.md)).
-  Це **не** повернення прибраного idle-режиму: обидві смужки лишаються. Коли 5h-вікна не існує на
-  сервері (перша витрата токенів ще не створила його — `resets_at` відсутній), 5h-мінібар малюється
-  як **нуль** — сірий трек із **зеленою** пігулкою на нулі (нейтральне «вікно не запущене»; сіра, коли
-  працювати ніде — `isBlocked`, [ADR-0038](docs/adr/0038-idle-blocked-status.md)); під стилем
-  Progress зверху додається маркер часу на нулі, і форма однакова в обох
-  стилях ([ADR-0078](docs/adr/0078-idle-drawn-as-zero-in-both-styles.md)). Синьої пігулки немає:
-  вона означала другу претензію («є що палити») на тій самій мітці
-  ([ADR-0105](docs/adr/0105-color-advice-governs-pacing-bars-only.md), витісняє §4
-  [ADR-0081](docs/adr/0081-weekly-capacity-gate-for-blue.md)). 7d-бар —
-  звичайний, а час праворуч показує 7-денний ресет (див. вище). `is_active` для детекту **не**
-  використовується (ненадійний).
+- **The "no active 5h session" state** (#100, [ADR-0027](docs/adr/0027-session-idle-no-phantom-reset.md)).
+  This is **not** the removed idle mode coming back: both bars stay. When the 5h window does not exist
+  on the server (the first token spend has not created it yet — `resets_at` is absent), the 5h minibar
+  is drawn as **zero** — a gray track with a **green** pill at zero (a neutral "the window has not
+  started"; gray when there is nowhere to work — `isBlocked`,
+  [ADR-0038](docs/adr/0038-idle-blocked-status.md)); under the Progress style a time marker at zero is
+  added on top, and the shape is the same in both styles
+  ([ADR-0078](docs/adr/0078-idle-drawn-as-zero-in-both-styles.md)). There is no blue pill: it stood for
+  a second claim ("there is something to burn") on the same mark
+  ([ADR-0105](docs/adr/0105-color-advice-governs-pacing-bars-only.md), superseding §4 of
+  [ADR-0081](docs/adr/0081-weekly-capacity-gate-for-blue.md)). The 7d bar is ordinary, and the time on
+  the right shows the 7-day reset (see above). `is_active` is **not** used for the detection
+  (unreliable).
 
-Технічні зауваги (Dark/Light, ширина item, sandbox, дистрибуція) — див. розділ «Технічні
-зауваги (menu bar)».
+Technical notes (Dark/Light, item width, sandbox, distribution) — see the "Technical notes (menu bar)"
+section.
 
-#### Dropdown / popup (клік по іконці)
-- **Деталі обох лімітів:** 5h і 7d — `%`, час ресету, pacing-статус текстом. Базові рядки видимі
-  завжди; дві **необов'язкові** групи — per-model/per-service рядки та секція «Extra usage» — мають
-  налаштовувану видимість (#211, [ADR-0072](docs/adr/0072-dropdown-section-visibility.md),
-  [ADR-0104](docs/adr/0104-appearance-named-for-behaviour-on-three-layers.md)). Per-model рядки
-  пропонують **три** режими — `When it needs attention` / `Once used` / `Always`; секція «Extra
-  usage» — **два**, **без** `When it needs attention`, бо при безлімітному капі витрат бару немає, а
-  отже й severity. Окремого сегмента `⌥ Option` немає
-  ([ADR-0100](docs/adr/0100-dropdown-style-tiles-and-retired-option-segment.md)): утримання ⌥
-  розкриває групу в **кожному** сховному режимі, тож власної поведінки той сегмент не мав.
-  `Once used` показує групу, щойно в ній щось ненульове (використання > 0 % або витрачені гроші),
-  `When it needs attention` — коли рядок помаранчевий/червоний. Порядок сегментів — **тихіше
-  ліворуч**, як і на решті панелі Appearance.
-- **Рядок 5h без активної сесії** (#100, [ADR-0027](docs/adr/0027-session-idle-no-phantom-reset.md)):
-  коли 5h-вікна не існує, рядок компактніший — заголовок «5-hour» + статус праворуч **«ready to
-  start»**, бар малює нуль — сірий трек із **зеленою** пігулкою на нулі (сіра, коли `isBlocked`;
-  синьої немає — [ADR-0105](docs/adr/0105-color-advice-governs-pacing-bars-only.md)), під Progress плюс маркер часу
-  там само ([ADR-0078](docs/adr/0078-idle-drawn-as-zero-in-both-styles.md); тіки-поділки лишаються),
-  і **другого текстового рядка немає взагалі** (без «0%», без часу).
-- **Розбивка по моделях:** `seven_day_opus` / `seven_day_sonnet` окремо (дані вже є в API; поля
-  можуть бути `null`, якщо модель не використовувалась — не падати). Новіші моделі (напр. Fable)
-  **не мають** top-level поля — приходять лише як записи `limits[]` із `kind: "weekly_scoped"`
-  та `scope.model.display_name`; такі рядки рендеряться узагальнено (`<display_name> (7-day)`)
-  і не дублюються з legacy-полями (перевірено живим API 2026-07-06).
-- **Завжди (службовий рядок, навіть у нормі):**
-  - «Останнє оновлення: N хв/год тому» (час останнього успішного `200`).
-  - «Інтервал оновлень: Xс» — поточний **динамічний** інтервал (180 с у нормі; під час backoff
-    показувати збільшений інтервал, напр. `6 хв`).
+#### Dropdown / popup (click on the icon)
+- **Details for both limits:** 5h and 7d — `%`, the reset time, the pacing status as text. The base
+  lines are always visible; two **optional** groups — the per-model/per-service lines and the "Extra
+  usage" section — have configurable visibility (#211, [ADR-0072](docs/adr/0072-dropdown-section-visibility.md),
+  [ADR-0104](docs/adr/0104-appearance-named-for-behaviour-on-three-layers.md)). The per-model lines offer
+  **three** modes — `When it needs attention` / `Once used` / `Always`; the "Extra usage" section offers
+  **two**, **without** `When it needs attention`, because with an unlimited spending cap there is no bar
+  and therefore no severity. There is no separate `⌥ Option` segment
+  ([ADR-0100](docs/adr/0100-dropdown-style-tiles-and-retired-option-segment.md)): holding ⌥ reveals the
+  group in **every** hiding mode, so that segment had no behavior of its own.
+  `Once used` shows the group as soon as anything in it is nonzero (usage > 0 % or money spent),
+  `When it needs attention` — when the line is orange/red. The order of the segments is **quieter on the
+  left**, as everywhere else on the Appearance panel.
+- **The 5h line without an active session** (#100, [ADR-0027](docs/adr/0027-session-idle-no-phantom-reset.md)):
+  when the 5h window does not exist, the line is more compact — a "5-hour" heading + the status
+  **"ready to start"** on the right, the bar draws zero — a gray track with a **green** pill at zero
+  (gray when `isBlocked`; there is no blue — [ADR-0105](docs/adr/0105-color-advice-governs-pacing-bars-only.md)),
+  under Progress plus a time marker in the same place
+  ([ADR-0078](docs/adr/0078-idle-drawn-as-zero-in-both-styles.md); the tick marks stay), and **there is
+  no second text line at all** (no "0%", no time).
+- **The per-model breakdown:** `seven_day_opus` / `seven_day_sonnet` separately (the data is already in
+  the API; the fields may be `null` if the model was not used — must not crash). Newer models (Fable,
+  for example) **have no** top-level field — they arrive only as `limits[]` entries with
+  `kind: "weekly_scoped"` and `scope.model.display_name`; such lines are rendered generically
+  (`<display_name> (7-day)`) and are not duplicated with the legacy fields (verified against the live
+  API on 2026-07-06).
+- **Always (the service line, even in the normal state):**
+  - "Last update: N min/h ago" (the time of the last successful `200`).
+  - "Refresh interval: Xs" — the current **dynamic** interval (180 s in the normal state; during backoff
+    show the increased interval, e.g. `6 min`).
 
-#### Стан помилок / відсутньої авторизації
-- **Якщо авторизація не працює довше за поріг** → у menu bar смужки зникають **зовсім**, а на їхнє
-  місце стає **перекреслена антена** (`antenna.radiowaves.left.and.right.slash`) —
-  «не дістаємось API». Поріг рахується **у спробах, а не у хвилинах**:
-  `UsageHealth.glyphAfter(for:)` = `max(15 хв, 3 × pollInterval)` — 15 хв під час активної сесії й
-  45 хв, поки жодної немає ([ADR-0091](docs/adr/0091-countdown-only-where-work-is-not-running.md)).
-  Пласкі 15 хв підняли б гліф після **однієї** невдалої спроби на неактивній машині, бо
-  `PollingEngine.inactiveInterval` сам дорівнює 15 хв.
-  - **Фаз рівно дві, не три.** Проміжної («гліф **поряд зі** старими смужками») більше немає: смужки
-    такої давнини провокують прочитання, якого не витримують («ось де я стою»), а попап уже пояснює
-    збій словами. До порогу — старі смужки без гліфа; після — голий гліф без смужок.
-  - **⚠️ (знак оклику в трикутнику) до цього стану не належить.** Трикутник лишився виключно за
-    «дані суперечать собі» — вичерпане вікно зі зламаним `resets_at`. «Не можу дістатися API» —
-    подія регулярна, і малювати її тим самим гліфом, що й рідкісний баг сервера, означало б
-    зрівняти їх у вазі.
-  - **429 не рахується збоєм**: це сервер каже «не так швидко», і самого `Retry-After` вистачило б,
-    щоб підняти гліф на системі, яка працює як задумано. Backoff і причина в попапі лишаються.
-- **За будь-якої непрацюючої авторизації** (одразу, не чекаючи порога) → у popup показати
-  ворнінг із поясненням («не вдалося отримати дані використання; перевірте, що ви ввійшли в
-  Claude Code»). Сам menu bar до порога може ще показувати останні відомі дані з міткою часу.
-- Службовий рядок «останнє оновлення + інтервал» допомагає користувачу зрозуміти, наскільки
-  дані застарілі й коли буде наступна спроба.
-- **macOS-сповіщень немає** — увесь сигнал у menu bar + popup (свідоме рішення).
+#### Error states / missing authorization
+- **If authorization has been failing for longer than the threshold** → the bars disappear from the menu
+  bar **entirely**, and a **crossed-out antenna**
+  (`antenna.radiowaves.left.and.right.slash`) takes their place — "we can't reach the API". The
+  threshold is counted **in attempts, not in minutes**:
+  `UsageHealth.glyphAfter(for:)` = `max(15 min, 3 × pollInterval)` — 15 min during an active session and
+  45 min while there is none ([ADR-0091](docs/adr/0091-countdown-only-where-work-is-not-running.md)).
+  A flat 15 min would raise the glyph after **one** failed attempt on an inactive machine, because
+  `PollingEngine.inactiveInterval` is itself 15 min.
+  - **There are exactly two phases, not three.** The intermediate one (the "glyph **next to** the old
+    bars") is gone: bars that stale invite a reading they cannot support ("here is where I stand"), and
+    the popup already explains the failure in words. Before the threshold — the old bars with no glyph;
+    after it — a bare glyph with no bars.
+  - **⚠️ (the exclamation mark in a triangle) does not belong to this state.** The triangle stayed
+    exclusively for "the data contradicts itself" — an exhausted window with a broken `resets_at`. "I
+    can't reach the API" is a routine event, and drawing it with the same glyph as a rare server bug
+    would put the two on equal footing.
+  - **A 429 does not count as a failure**: that is the server saying "not so fast", and `Retry-After`
+    alone would be enough to raise the glyph on a system that works as intended. The backoff and the
+    reason in the popup stay.
+- **On any non-working authorization** (immediately, without waiting for the threshold) → show a warning
+  in the popup with an explanation ("could not fetch usage data; check that you are signed in to Claude
+  Code"). Until the threshold, the menu bar itself may still show the last known data with a timestamp.
+- The "last update + interval" service line helps the user understand how stale the data is and when the
+  next attempt will happen.
+- **There are no macOS notifications** — the entire signal is in the menu bar + the popup (a deliberate
+  decision).
 
-### Комплікейшен Apple Watch (Фаза 2)
-- Два міні-кільця: **5h** і **7d** utilization.
-- Колір кільця кодує **pacing** (випереджаєш / у нормі / відстаєш) — портовано зі statusline
-  (`>90%` use при `<=90%` часу → попередження, `100%` → критично).
-- Під кільцями: **час до найближчого ресету** того ліміту, що ресетиться першим — і відносно
-  (`3h22m`), і абсолютним часом (`год:хв`).
+### The Apple Watch complication (Phase 2)
+- Two mini rings: **5h** and **7d** utilization.
+- The ring's color encodes **pacing** (ahead / on rate / behind) — ported from the statusline
+  (`>90%` use at `<=90%` time → warning, `100%` → critical).
+- Under the rings: the **time to the nearest reset** of whichever limit resets first — both relative
+  (`3h22m`) and as an absolute time (`hh:mm`).
 
-### iPhone (Фаза 2)
-- Мінімальний host-застосунок — контейнер, якого вимагає iOS для віджетів. Без повноекранного
-  режиму, без налаштувань, без UI статусу агента (на старті Фази 2).
-- Віджети головного екрана дублюють комплікейшен (кільця 5h + 7d + колір pacing + найближчий ресет).
-- **Майбутнє (бэклог, за пріоритетом):** (1) повноекранний детальний екран із графіками/історією,
-  (2) налаштування віджетів/тем + преміум-unlock, (3) статус зв'язку з Mac-агентом.
+### iPhone (Phase 2)
+- A minimal host app — the container iOS requires for widgets. No full-screen mode, no settings, no UI
+  for the agent's status (at the start of Phase 2).
+- The home-screen widgets mirror the complication (5h + 7d rings + the pacing color + the nearest reset).
+- **The future (backlog, by priority):** (1) a full-screen detail screen with charts/history,
+  (2) widget/theme settings + a premium unlock, (3) the status of the link to the Mac agent.
 
-## Логіка pacing (порт зі statusline)
+## Pacing logic (ported from the statusline)
 
-Перевикористати перевірені формули зі `statusline.sh` (порт 1:1):
-- `calc_time_pct(resets_at, window_seconds)`: частка вікна, що минула
+Reuse the proven formulas from `statusline.sh` (a 1:1 port):
+- `calc_time_pct(resets_at, window_seconds)`: the fraction of the window that has elapsed
   (5h = 18000s, 7d = 604800s).
-- `build_progress_bar(u_pct, t_pct)`: зони сіра/зелена-або-червона/синя + індикатор часу
-  (див. опис у розділі «Мінівіджет у menu bar»).
-- `get_limit_indicator(usage, time)` — пороги дослівно:
-  - `usage == 100` → критично (статуслайн показує `❌`);
-  - `usage > 90` **і** `time <= 90` → попередження «випереджаєш норму» (`⚠️`);
-  - інакше → нейтрально.
-- **Бонус:** сервер у `limits[].severity` уже віддає рівень тривоги — можна звіряти власну
-  формулу з серверним сигналом.
+- `build_progress_bar(u_pct, t_pct)`: the gray / green-or-red / blue zones + the time indicator
+  (see the description in the "The mini-widget in the macOS menu bar" section).
+- `get_limit_indicator(usage, time)` — the thresholds verbatim:
+  - `usage == 100` → critical (the statusline shows `❌`);
+  - `usage > 90` **and** `time <= 90` → a warning, "ahead of the rate" (`⚠️`);
+  - otherwise → neutral.
+- **Bonus:** the server already hands back an alarm level in `limits[].severity` — we can check our own
+  formula against the server's signal.
 
-## Поведінка агента (sleep, мережа, час, логування)
+## Agent behavior (sleep, network, time, logging)
 
-- **Sleep/wake та мережа — розумна поведінка** (через `NSWorkspace.shared.notificationCenter`):
-  - сон Mac → пауза таймера опитування;
-  - пробудження → одразу позачерговий опит (дані могли застаріти);
-  - втрата мережі → показати останні відомі дані з міткою stale; автоматичне поновлення опитування
-    при відновленні зв'язку.
-- **Логування — `os.Logger` (unified logging).** Без файлів; видно в Console.app / `log stream`.
-  **Токен ніколи не логувати** (позначати чутливі поля як `private`, дефолт unified logging).
-  Логувати: успіх/код помилки запиту, спрацювання backoff, події Keychain-доступу (для
-  діагностики головного ризику Фази 1), sleep/wake.
-- **Час ресету — локальний час пристрою.** API віддає `resets_at` в UTC (`+00:00`); конвертувати
-  у локальну таймзону пристрою через Foundation (`Calendar`/`DateFormatter`), що автоматично
-  враховує DST (літній/зимовий час). Формат: **меню-бар — завжди відносна односкладова тривалість**
-  (`45m`, `5h`, `4d`); **дропдаун** додає до неї локальний кваліфікатор — `hh:mm` за локаллю
-  користувача (12/24-год) для ресету в межах доби, інакше день тижня
+- **Sleep/wake and the network — sensible behavior** (via `NSWorkspace.shared.notificationCenter`):
+  - the Mac sleeps → pause the polling timer;
+  - waking up → an immediate out-of-band poll (the data may have gone stale);
+  - loss of network → show the last known data marked stale; polling resumes automatically when
+    connectivity is back.
+- **Logging — `os.Logger` (unified logging).** No files; visible in Console.app / `log stream`.
+  **Never log the token** (mark sensitive fields as `private`, the unified-logging default).
+  Do log: request success / error code, backoff firing, Keychain-access events (to diagnose Phase 1's
+  main risk), sleep/wake.
+- **Reset times are in the device's local time.** The API returns `resets_at` in UTC (`+00:00`); convert
+  it to the device's local time zone via Foundation (`Calendar`/`DateFormatter`), which handles DST
+  (summer/winter time) automatically. The format: **the menu bar always shows a relative single-unit
+  duration** (`45m`, `5h`, `4d`); **the dropdown** adds a local qualifier to it — `hh:mm` in the user's
+  locale (12/24-hour) for a reset within the day, otherwise the day of the week
   ([ADR-0074](docs/adr/0074-one-reset-format-on-both-surfaces.md),
-  [ADR-0043](docs/adr/0043-unified-reset-line-and-remove-resetnow.md)). Парсинг `resets_at` має
-  нормалізувати мікросекунди.
+  [ADR-0043](docs/adr/0043-unified-reset-line-and-remove-resetnow.md)). Parsing `resets_at` must
+  normalize the microseconds.
 
-## Технічні зауваги (menu bar)
+## Technical notes (menu bar)
 
-- **Dark/Light tinting.** macOS за замовчуванням перефарбовує template-іконки menu bar (білі/
-  чорні під тему). Щоб кольорові pacing-смужки не з'їлися — малювати **non-template** `NSView` і
-  самим контролювати контраст під обидві теми.
-- **Ширина item.** Дві смужки + час ≈ ширина 2–3 звичайних menu bar-іконок. Прийнятно, але
-  стежити, щоб не роздувати без потреби.
-- **Демон 24/7.** Застосунок без іконки в Dock (`LSUIElement = true`), автозапуск при логіні
-  (`SMAppService`), перемалювання menu bar лише при зміні даних (енергоефективність).
-- **Доступ до Keychain — головний технічний ризик Фази 1.** Токен лежить у `login.keychain` як
-  generic-password айтем (`class: genp`, `svce: "Claude Code-credentials"`, `acct: <user>`),
-  створений Claude Code. `statusline.sh` читає його через CLI `security` з-під терміналу.
-  Нативний **підписаний** .app, який читає **чужий** (створений іншим застосунком) айтем,
-  найімовірніше отримає системний діалог «TokenPace wants to use confidential information…» при
-  першому доступі. Це керовано (користувач один раз тисне «Always Allow»), але треба:
-  - закласти в UX перший запуск (пояснити, чому з'являється діалог);
-  - **перевірити фактично** на ранньому етапі, чи доступ тихий після першого дозволу, чи
-    повторюється. Це **не залежить від системи збірки** (SPM чи Xcode — однаково).
-  - Примітка: це питання ACL айтема, а не `keychain-access-groups` entitlement (той — лише для
-    айтемів, створених самим застосунком).
-- **Sandbox.** Поза App Store sandbox не обов'язковий. У разі майбутнього App Store-розповсюдження
-  sandbox + доступ до чужого Keychain-айтема стають проблемними — перевірити окремо (ще один
-  аргумент тримати menu bar-версію поза App Store).
-- **Дистрибуція — поки не вирішено.** Для себе/перших користувачів — локальна збірка. Варіанти
-  на майбутнє: GitHub Releases (.dmg/.app, потребує Apple notarization інакше Gatekeeper
-  блокує), Homebrew cask (теж потребує notarization), Mac App Store (review + sandbox-ризик із
-  доступом до Keychain CC). Рішення відкладене.
+- **Dark/Light tinting.** By default macOS repaints template menu bar icons (white/black to match the
+  theme). To keep the colored pacing bars from being eaten — draw a **non-template** `NSView` and
+  control the contrast for both themes ourselves.
+- **Item width.** Two bars + the time ≈ the width of 2–3 ordinary menu bar icons. Acceptable, but watch
+  that it does not bloat without reason.
+- **A 24/7 daemon.** An app with no Dock icon (`LSUIElement = true`), launching at login
+  (`SMAppService`), redrawing the menu bar only when the data changes (energy efficiency).
+- **Keychain access is Phase 1's main technical risk.** The token sits in `login.keychain` as a
+  generic-password item (`class: genp`, `svce: "Claude Code-credentials"`, `acct: <user>`), created by
+  Claude Code. `statusline.sh` reads it through the `security` CLI from a terminal. A native **signed**
+  .app that reads someone **else's** item (created by another app) will most likely get the system's
+  "TokenPace wants to use confidential information…" dialog on first access. That is manageable (the
+  user presses "Always Allow" once), but we need to:
+  - build the first run into the UX (explain why the dialog appears);
+  - **verify in practice**, early on, whether access is silent after the first permission or whether it
+    repeats. This does **not depend on the build system** (SPM or Xcode — same thing).
+  - Note: this is a question of the item's ACL, not of the `keychain-access-groups` entitlement (that one
+    covers only items created by the app itself).
+- **Sandbox.** Outside the App Store the sandbox is not required. Should we ever distribute through the
+  App Store, the sandbox + access to another app's Keychain item become problematic — to be checked
+  separately (one more argument for keeping the menu bar version out of the App Store).
+- **Distribution — not decided yet.** For ourselves and the first users — a local build. Options for the
+  future: GitHub Releases (.dmg/.app, requires Apple notarization or Gatekeeper blocks it), a Homebrew
+  cask (also requires notarization), the Mac App Store (review + the sandbox risk around accessing CC's
+  Keychain). The decision is deferred.
 
-## Частота оновлення
+## Refresh cadence
 
-### Фаза 1 (menu bar)
-Агент сам опитує usage API за власним таймером — тут немає обмежень WidgetKit. Базовий ритм —
-**180 с** (рекомендація джерела #202: безпечно за наявності правильного `User-Agent`; TTL-кеш
-180 с). Перемальовувати menu bar лише при зміні даних. Інтервал **адаптивний** — обчислюється з
-трьох осей із чітким пріоритетом (реалізація — `PollingEngine`, [ADR-0011](docs/adr/0011-polling-engine-adaptive-cadence-and-signal-seams.md)):
+### Phase 1 (menu bar)
+The agent polls the usage API on its own timer — there are no WidgetKit constraints here. The base
+rhythm is **180 s** (the recommendation from source #202: safe when the correct `User-Agent` is present;
+TTL cache 180 s). Redraw the menu bar only when the data changes. The interval is **adaptive** —
+computed from three axes with a clear priority (the implementation is `PollingEngine`,
+[ADR-0011](docs/adr/0011-polling-engine-adaptive-cadence-and-signal-seams.md)):
 
-1. **Backoff при 429** (найвищий пріоритет): експоненційно `3 → 6 → 12 → 15 хв`, тримати 15 хв до
-   успіху. Перекриває обидві осі нижче — це вказівка сервера.
-2. **Немає запущених сесій Claude Code → 30 хв** (жорсткий оверрайд). Без активної сесії ліміти
-   майже не рухаються, тож часто опитувати немає сенсу. Детект — за точним ім'ям процесу `claude`
-   (CLI, не Claude Desktop).
-3. **Адаптація за вмістом** (за активної сесії, без 429): якщо два сусідні успішні опити дають
-   однаковий `utilization` (5h або 7d) → подвоювати інтервал `3 → 6 → 12 → 15 хв`; щойно дані
-   змінились → миттєво скинути до **3 хв**, щоб тісно відстежувати рух.
+1. **Backoff on a 429** (highest priority): exponentially `3 → 6 → 12 → 15 min`, hold at 15 min until
+   success. It overrides both axes below — it is the server's instruction.
+2. **No running Claude Code sessions → 30 min** (a hard override). Without an active session the limits
+   barely move, so polling often makes no sense. Detection is by the exact process name `claude` (the
+   CLI, not Claude Desktop).
+3. **Adaptation by content** (with an active session, no 429): if two consecutive successful polls return
+   the same `utilization` (5h or 7d) → double the interval `3 → 6 → 12 → 15 min`; as soon as the data
+   changes → snap back to **3 min** to track the movement closely.
 
-**Кожне рішення змінити інтервал логується окремим повідомленням із причиною** (лише при реальній
-зміні — без спаму).
-- (Раніше розглядався інтервал 60 с за аналогією зі statusline — відкинуто на користь 180 с, бо
-  статуслайн опитує лише під час активної сесії, а наш демон працює 24/7.)
+**Every decision to change the interval is logged as its own message with a reason** (only on an actual
+change — no spam).
+- (A 60 s interval was considered earlier, by analogy with the statusline — rejected in favor of 180 s,
+  because the statusline polls only during an active session while our daemon runs 24/7.)
 
-### Фаза 2 (віджети/комплікейшен)
-Обмежена тим, що реально дозволяє WidgetKit timeline (планує система, не гарантовано точні
-інтервали):
-- **Безкоштовний тір:** ~15 хв.
-- **Преміум-тір:** ~5 хв (якщо платформа дозволить).
+### Phase 2 (widgets/complication)
+Bounded by what the WidgetKit timeline actually allows (the system schedules it, and the intervals are
+not guaranteed to be exact):
+- **Free tier:** ~15 min.
+- **Premium tier:** ~5 min (if the platform allows).
 
-> Примітка: без бекенду **немає APNs push** — оновлення керується перезавантаженнями WidgetKit
-> timeline, які планує ОС. «5 хв» / «15 хв» — це цілі, а не жорсткі гарантії.
+> Note: without a backend there is **no APNs push** — updates are driven by WidgetKit timeline reloads,
+> which the OS schedules. "5 min" / "15 min" are targets, not hard guarantees.
 
-## Монетизація
+## Monetization
 
-- **Фаза 1 (menu bar app) — повністю безкоштовна.** Жодної межі free/premium у menu bar
-  застосунку: усі функції (обидва ліміти, розбивка по моделях, службовий рядок) доступні всім.
-- **Монетизація починається з Фази 2 (пристрої).** Ціль: **разовий IAP**, що відкриває
-  «Преміум» (швидша частота оновлення віджетів + преміум-формати/теми), досяжний **без власної
-  інфраструктури**.
-- **Mac-агент поки закритий.** Питання open-source (і ліцензії) — відкрите, з'ясуємо пізніше;
-  серед мотивів відкриття — довіра до поводження з токеном.
+- **Phase 1 (the menu bar app) is entirely free.** No free/premium boundary in the menu bar app: every
+  feature (both limits, the per-model breakdown, the service line) is available to everyone.
+- **Monetization starts with Phase 2 (the devices).** The goal is a **one-time IAP** unlocking "Premium"
+  (a faster widget refresh cadence + premium formats/themes), achievable **without infrastructure of our
+  own**.
+- **The Mac agent is closed for now.** The open-source question (and the license) is open; we'll settle
+  it later — one of the arguments for opening it is trust in how the token is handled.
 
-## Фази
+## Phases
 
-- **Фаза 0 — технічний spike (до продуктового коду).**
-  - Перевірити, що блок `seven_day` є у відповіді usage з очікуваною структурою — безпечно
-    зробити зараз одним read-only `GET` на живому токені (нічого не інвалідує). ✅ **Виконано.**
-  - Перевірити **fallback refresh** на *тестовому* Max-акаунті. ✅ **Знято** (ADR-0017):
-    self-refresh замінено делегованим refresh через `claude` CLI — ротацію виконує сам Claude
-    Code, тож тестовий акаунт не потрібен. Команду `claude --model haiku -p '/usage'`
-    перевірено спайком (issue #8): рефрешить без витрати лімітів.
-- **Фаза 1 — menu bar app для macOS** (особистий MVP, без App Store, без монетизації, без
-  CloudKit):
-  Mac-агент (наразі закритий) із мінівіджетом у menu bar (дві pacing-смужки + час ресету) і dropdown
-  (деталі обох лімітів + розбивка по моделях). Локально: `Keychain → usage API → menu bar`.
-- **Фаза 2 — iPhone + Apple Watch:** додати CloudKit як транспорт (той самий Mac-агент пише
-  snapshot), мінімальний iOS host-застосунок + віджети головного екрана + комплікейшен watchOS,
-  усі читають із CloudKit на спільному Apple ID.
-- **Фаза 3 — публічний реліз + монетизація:** App Store review, розкриття поводження з токеном
-  (privacy), разовий преміум-IAP, опційний cross-Apple-ID CloudKit sharing.
-- **Фаза 4 — поліш:** більше форматів віджетів/комплікейшенів, теми, локалізація.
+- **Phase 0 — a technical spike (before any product code).**
+  - Verify that the `seven_day` block is present in the usage response with the expected structure —
+    safe to do right now with a single read-only `GET` on a live token (it invalidates nothing).
+    ✅ **Done.**
+  - Verify the **fallback refresh** on a *test* Max account. ✅ **Dropped** (ADR-0017): the self-refresh
+    was replaced by a delegated refresh through the `claude` CLI — Claude Code performs the rotation
+    itself, so no test account is needed. The `claude --model haiku -p '/usage'` command was verified by
+    a spike (issue #8): it refreshes without spending limits.
+- **Phase 1 — a menu bar app for macOS** (a personal MVP, no App Store, no monetization, no CloudKit):
+  the Mac agent (closed for now) with a mini-widget in the menu bar (two pacing bars + the reset time)
+  and a dropdown (details for both limits + the per-model breakdown). Locally:
+  `Keychain → usage API → menu bar`.
+- **Phase 2 — iPhone + Apple Watch:** add CloudKit as the transport (the same Mac agent writes the
+  snapshot), a minimal iOS host app + home-screen widgets + a watchOS complication, all reading from
+  CloudKit on a shared Apple ID.
+- **Phase 3 — public release + monetization:** App Store review, disclosure of how the token is handled
+  (privacy), a one-time premium IAP, optional cross-Apple-ID CloudKit sharing.
+- **Phase 4 — polish:** more widget/complication formats, themes, localization.
 
-## Відкриті питання
+## Open questions
 
-- ~~Чи `refreshToken` одноразовий~~ — **закрито** (issue #8): так, ротується (підтверджено
-  дослідженням аналогів — CodexBar, hunaczech та ін. документують це явно). Саме тому агент не
-  рефрешить сам, а делегує CLI (ADR-0017).
-- **Open-source та ліцензія Mac-агента** — поки закрите, з'ясуємо пізніше (див.
+- ~~Whether `refreshToken` is single-use~~ — **closed** (issue #8): yes, it rotates (confirmed by
+  studying comparable tools — CodexBar, hunaczech and others document it explicitly). That is exactly
+  why the agent does not refresh on its own but delegates to the CLI (ADR-0017).
+- **Open source and the Mac agent's license** — closed for now, we'll settle it later (see
   [ADR-0003](docs/adr/0003-agent-closed-source-for-now.md)).
-- Спосіб дистрибуції Mac-агента (GitHub Releases / Homebrew / App Store) — відкладено.
+- How to distribute the Mac agent (GitHub Releases / Homebrew / App Store) — deferred.
 
-## Ухвалені рішення
+## Decisions made
 
-- **Мова Mac-агента: Swift.** Рідний доступ до CloudKit + Keychain в одному стеку з iOS/watchOS
-  застосунком. Go відкинуто: CloudKit з Go вимагає CloudKit Web Services + server-to-server
-  ключ, і немає рідного доступу до Keychain.
+- **The Mac agent's language: Swift.** Native access to CloudKit + the Keychain in the same stack as the
+  iOS/watchOS app. Go was rejected: CloudKit from Go requires CloudKit Web Services + a server-to-server
+  key, and there is no native access to the Keychain.
 - **Documentation language: English** — everything in the repository and on GitHub (see
   [ADR-0116](docs/adr/0116-english-as-documentation-language.md), superseding
   [ADR-0002](docs/adr/0002-ukrainian-documentation.md)). Ukrainian remains only outside the
   repository: agent conversation, plan files, private `memory/`.
-- **Фаза 1 = menu bar app для macOS, без CloudKit.** iPhone/Watch і CloudKit зсунуто у Фазу 2.
-  Причина: menu bar app живе на тому ж Mac, що й токен, тож не потребує жодного транспорту й дає
-  робочий продукт найшвидшим шляхом.
-- **Menu bar UI:** дві горизонтальні pacing-смужки (5h зверху, 7d знизу) ліворуч + час до
-  найближчого ресету праворуч (односкладова тривалість: `45m` / `5h` / `4d`). Dropdown: деталі
-  обох лімітів + розбивка по моделях.
-- **Обов'язковий `User-Agent: claude-code/<version>`** на кожному запиті до usage API + інтервал
-  опитування 180 с з експоненційним backoff при 429. Підстава — джерело #202 (UA-quirk:
-  невідомий UA → агресивний rate-limit). Зверни увагу: наш statusline-плагін UA не шле — варто
-  виправити і там, щоб уникнути можливих 429.
-- **Мінімальна версія: macOS 15 Sequoia.** Для особистого MVP охоплення аудиторії не важливе, а
-  свіжий target прибирає legacy-код і workaround'и. Знизити target (якщо знадобиться ширше
-  охоплення при публічному релізі) — тривіальна зміна, на архітектуру не впливає.
-- **Menu bar API: `NSStatusItem` (AppKit) з кастомною `NSView`/`NSHostingView`.** Потрібен повний
-  контроль над малюванням двох кольорових смужок, idle-режимом і шириною item. `MenuBarExtra`
-  (SwiftUI) обмежує кастомізацію самого label — не підходить для нетривіальної графіки.
-- **Збірка Фази 1: Swift Package Manager + build-скрипт.** Логіка тестовна й git-friendly;
-  build-скрипт автоматизує складання `.app` bundle (структура + `Info.plist` з `LSUIElement`),
-  `codesign --options runtime`, notarization (`notarytool` + `stapler`). У **Фазі 2**
-  приєднується Xcode project для iOS/watchOS таргетів (SPM їх не тягне). Див.
+- **Phase 1 = a menu bar app for macOS, without CloudKit.** iPhone/Watch and CloudKit moved to Phase 2.
+  The reason: a menu bar app lives on the same Mac as the token, so it needs no transport at all and
+  yields a working product by the shortest path.
+- **Menu bar UI:** two horizontal pacing bars (5h on top, 7d below) on the left + the time to the
+  nearest reset on the right (a single-unit duration: `45m` / `5h` / `4d`). Dropdown: details for both
+  limits + the per-model breakdown.
+- **A mandatory `User-Agent: claude-code/<version>`** on every request to the usage API + a 180 s polling
+  interval with exponential backoff on a 429. The basis is source #202 (the UA quirk: an unknown UA →
+  an aggressive rate limit). Note: our own statusline plugin does not send a UA — worth fixing there too,
+  to avoid possible 429s.
+- **Minimum version: macOS 15 Sequoia.** Audience reach does not matter for a personal MVP, and a recent
+  target removes legacy code and workarounds. Lowering the target (should wider reach be needed for a
+  public release) is a trivial change with no architectural impact.
+- **Menu bar API: `NSStatusItem` (AppKit) with a custom `NSView`/`NSHostingView`.** We need full control
+  over drawing the two colored bars, the idle mode, and the item's width. `MenuBarExtra` (SwiftUI)
+  limits customization of the label itself — not suitable for nontrivial graphics.
+- **Phase 1 build: Swift Package Manager + a build script.** The logic is testable and git-friendly; the
+  build script automates assembling the `.app` bundle (the structure + an `Info.plist` with
+  `LSUIElement`), `codesign --options runtime`, and notarization (`notarytool` + `stapler`). In
+  **Phase 2** an Xcode project joins for the iOS/watchOS targets (SPM does not cover them). See
   [ADR-0004](docs/adr/0004-build-system.md).
 
-## Стан dev-середовища (перевірено 2026-06-21)
+## Dev environment status (verified 2026-06-21)
 
-| Компонент | Стан |
+| Component | Status |
 |---|---|
-| macOS 15.7.8 Sequoia (arm64) | ✅ збігається з target |
+| macOS 15.7.8 Sequoia (arm64) | ✅ matches the target |
 | Swift 6.1.2 + SwiftPM | ✅ |
 | Command Line Tools 16.4 | ✅ |
-| `codesign`, `notarytool`, `stapler` | ✅ (у CLT) |
+| `codesign`, `notarytool`, `stapler` | ✅ (in the CLT) |
 | git 2.54 / gh 2.95 | ✅ |
-| Повний Xcode | ❌ відсутній (лише CLT) |
+| Full Xcode | ❌ absent (CLT only) |
 | Developer ID signing identity | ❌ `0 valid identities` |
 
-**Рішення:**
+**Decisions:**
 
-- **Фаза 1 пишеться і запускається вже зараз** через `swift build` / `swift run` — повний Xcode
-  не потрібен (підтверджує SPM-first з ADR-0004).
-- **Повний Xcode** встановити **у Фазі 2** (для iOS/watchOS таргетів).
-- **Збирати без підпису зараз** — unsigned `.app` для особистого користування (Gatekeeper:
-  «Open anyway»). Developer ID + notarization додамо при дистрибуції. Build-скрипт зробити з
-  **опційним** підписом (підписувати, лише якщо identity доступна).
-- ⚠️ **Keychain-ризик і unsigned-білд:** діалог доступу до Keychain може поводитись інакше для
-  unsigned vs підписаного застосунку. Тримати в голові при перевірці головного ризику Фази 1 —
-  локальна (unsigned) поведінка може не збігтися з майбутнім підписаним релізом.
+- **Phase 1 is written and run right now** via `swift build` / `swift run` — full Xcode is not needed
+  (this confirms the SPM-first choice from ADR-0004).
+- **Full Xcode** to be installed **in Phase 2** (for the iOS/watchOS targets).
+- **Build unsigned for now** — an unsigned `.app` for personal use (Gatekeeper: "Open anyway").
+  Developer ID + notarization will be added at distribution time. Make the build script's signing
+  **optional** (sign only if an identity is available).
+- ⚠️ **The Keychain risk and unsigned builds:** the Keychain-access dialog may behave differently for an
+  unsigned app than for a signed one. Keep this in mind while verifying Phase 1's main risk — the local
+  (unsigned) behavior may not match a future signed release.
 
-## Обсяг Фази 1 (MVP)
+## Phase 1 scope (MVP)
 
-- **Налаштування — мінімум:** перемикач launch-at-login + пункт Quit. Решта — розумні дефолти
-  (інтервал 180 с, локальний час, idle-режим). Без екрана налаштувань.
-  - ⚠️ **launch-at-login через `SMAppService.mainApp`** найкраще працює з **підписаним**
-    застосунком. На unsigned-білді (наш особистий MVP) реєстрація автозапуску може бути
-    ненадійною — реалізуємо як «найкраще зусилля», повна надійність очікується після підпису.
-    API підтверджено доступним у SDK (macOS 13+).
-- **Тести — unit на логіку (XCTest у SPM):** `PacingModel` (порт `calc_time_pct`/
-  `build_progress_bar`/`get_limit_indicator`), парсинг `resets_at` (мікросекунди + TZ),
-  форматування часу (`hh:mm`/`1h10m`, локаль, DST), логіка backoff. UI (`NSStatusItem`,
-  малювання, idle) — перевіряється вручну. Чиста логіка ізольована від мережі/Keychain для
-  тестовності.
+- **Settings — the minimum:** a launch-at-login toggle plus a Quit item. Everything else is sensible
+  defaults (a 180 s interval, local time, the idle mode). No settings screen.
+  - ⚠️ **launch-at-login via `SMAppService.mainApp`** works best with a **signed** app. On an unsigned
+    build (our personal MVP) registering the login item may be unreliable — we implement it as a "best
+    effort", with full reliability expected after signing. The API is confirmed available in the SDK
+    (macOS 13+).
+- **Tests — unit tests on the logic (XCTest in SPM):** `PacingModel` (the port of `calc_time_pct`/
+  `build_progress_bar`/`get_limit_indicator`), parsing `resets_at` (microseconds + TZ), time formatting
+  (`hh:mm`/`1h10m`, locale, DST), the backoff logic. The UI (`NSStatusItem`, drawing, idle) is verified
+  by hand. The pure logic is isolated from the network/Keychain for testability.
 
-## Результати Phase 0 spike (підтверджено)
+## Phase 0 spike results (confirmed)
 
-`GET /api/oauth/usage` повертає такі релевантні поля:
+`GET /api/oauth/usage` returns these relevant fields:
 
-- `five_hour.utilization` (float, **відсотки 0–100**, напр. `0.0`) + `five_hour.resets_at`
-  (ISO-8601 з таймзоною + мікросекунди, напр. `2026-06-21T05:30:00.619428+00:00`).
-- `seven_day.utilization` (напр. `13.0`) + `seven_day.resets_at` — підтверджено, та сама структура.
-- **Ліміти по моделях:** `seven_day_opus`, `seven_day_sonnet` (та сама структура) — можливість
-  для преміум-розбивки «по моделях».
-- **`limits[]`**: масив активних лімітів із `kind`, `group`, `percent`, `severity`
-  (`normal`/...), `resets_at`, `is_active`. Сервер уже віддає сигнал pacing/severity — можна
-  звіряти з власною формулою. *Оновлення 2026-07-06:* записи тепер несуть і `scope`
-  (`{model: {id, display_name}, surface}`); `kind: "weekly_scoped"` зі `scope.model.display_name`
-  — **єдине** джерело лімітів моделей без top-level поля (напр. Fable).
-- `extra_usage`, `spend`: інфо про доплати в доларах (наразі `is_enabled: false`) — гачок для
-  майбутнього показу платного овериджу.
+- `five_hour.utilization` (float, **percent 0–100**, e.g. `0.0`) + `five_hour.resets_at`
+  (ISO-8601 with a time zone + microseconds, e.g. `2026-06-21T05:30:00.619428+00:00`).
+- `seven_day.utilization` (e.g. `13.0`) + `seven_day.resets_at` — confirmed, the same structure.
+- **Per-model limits:** `seven_day_opus`, `seven_day_sonnet` (the same structure) — an opportunity for a
+  premium "per-model" breakdown.
+- **`limits[]`**: an array of active limits with `kind`, `group`, `percent`, `severity`
+  (`normal`/...), `resets_at`, `is_active`. The server already returns a pacing/severity signal — we can
+  check it against our own formula. *Update 2026-07-06:* the entries now also carry `scope`
+  (`{model: {id, display_name}, surface}`); `kind: "weekly_scoped"` with `scope.model.display_name` is
+  the **only** source of model limits that have no top-level field (Fable, for example).
+- `extra_usage`, `spend`: information about extra charges in dollars (currently `is_enabled: false`) — a
+  hook for showing paid overage in the future.
 
-Примітка парсингу: нормалізувати мікросекунди + суфікс `+00:00` у `resets_at` (statusline робить
-це через `sed`).
+A parsing note: normalize the microseconds + the `+00:00` suffix in `resets_at` (the statusline does this
+with `sed`).
 
-## План роботи
+## Work plan
 
-Послідовність (узгоджено):
+The sequence (agreed):
 
-1. **Доки** — завершити продуктовий спек та документацію (цей файл, `docs/`). ← поточний етап.
-2. **Планування + тікети** — нарізати роботу Фази 1 на **середні тікети** (1 тікет ≈ 1 компонент
-   ≈ 1 сесія), відкрити їх на GitHub із **залежностями** та **рекомендованим порядком виконання**.
-   - Формат: **Epic-issue «Фаза 1»** + дочірні issues на кожен компонент (залежності через
-     «blocked by #N»), усе зібране в **GitHub Project (board)** для візуального прогресу.
+1. **Docs** — finish the product spec and the documentation (this file, `docs/`). ← the current stage.
+2. **Planning + tickets** — cut Phase 1's work into **medium-sized tickets** (1 ticket ≈ 1 component ≈ 1
+   session), open them on GitHub with **dependencies** and a **recommended execution order**.
+   - The format: an **Epic issue "Phase 1"** + child issues per component (dependencies via "blocked by
+     #N"), all collected into a **GitHub Project (board)** for visual progress.
    - **Ticket language: English** (per
      [ADR-0116](docs/adr/0116-english-as-documentation-language.md)).
-3. **Виконання** — реалізовувати тікети **по одному в окремих сесіях**, у визначеному порядку.
+3. **Execution** — implement the tickets **one at a time, in separate sessions**, in the defined order.
 
-Компоненти Фази 1 у **рекомендованому порядку виконання** (стануть основою тікетів):
+The Phase 1 components in the **recommended execution order** (they will become the tickets):
 
-1. **SPM scaffold + build-скрипт** — структура пакета, `.app` bundle, опційний підпис/notarization.
-2. **Логування (`os.Logger`)** — наскрізне, додається **на початку**, щоб одразу діагностувати
-   решту (зокрема Keychain-діалоги).
-3. **`PacingModel`** — порт `calc_time_pct`/`build_progress_bar`/`get_limit_indicator` + unit-тести.
-4. **Форматування часу** — `resets_at` → локальний `hh:mm`/`1h10m` (DST) + unit-тести.
-5. **`TokenProvider`** — читання Keychain + fallback-refresh (головний ризик — раніше перевірити).
-6. **`UsageClient`** — запити до usage API (обов'язковий `User-Agent`, backoff). Залежить від #5.
-7. **`StatusItemView`** — `NSStatusItem` з кастомним малюванням смужок + idle-режим. Залежить від
-   #3, #4, #6.
-8. **Popup** — деталі лімітів, розбивка по моделях, службовий рядок. Залежить від #7.
-9. **Стани помилок** — перекреслена антена після порога `max(15 хв, 3 × pollInterval)`
-   ([ADR-0091](docs/adr/0091-countdown-only-where-work-is-not-running.md)), ворнінг у popup одразу.
-   Залежить від #7.
-10. **Sleep/wake + мережа** (`NSWorkspace`). Залежить від #6.
-11. **launch-at-login** (`SMAppService`, best-effort на unsigned) + Quit. Залежить від #1.
+1. **SPM scaffold + build script** — the package structure, the `.app` bundle, optional
+   signing/notarization.
+2. **Logging (`os.Logger`)** — cross-cutting, added **at the beginning** so everything else can be
+   diagnosed right away (the Keychain dialogs in particular).
+3. **`PacingModel`** — the port of `calc_time_pct`/`build_progress_bar`/`get_limit_indicator` + unit tests.
+4. **Time formatting** — `resets_at` → local `hh:mm`/`1h10m` (DST) + unit tests.
+5. **`TokenProvider`** — reading the Keychain + the fallback refresh (the main risk — check it early).
+6. **`UsageClient`** — requests to the usage API (the mandatory `User-Agent`, backoff). Depends on #5.
+7. **`StatusItemView`** — `NSStatusItem` with custom bar drawing + the idle mode. Depends on #3, #4, #6.
+8. **Popup** — limit details, the per-model breakdown, the service line. Depends on #7.
+9. **Error states** — the crossed-out antenna after the `max(15 min, 3 × pollInterval)` threshold
+   ([ADR-0091](docs/adr/0091-countdown-only-where-work-is-not-running.md)), a warning in the popup
+   immediately. Depends on #7.
+10. **Sleep/wake + network** (`NSWorkspace`). Depends on #6.
+11. **launch-at-login** (`SMAppService`, best-effort on unsigned) + Quit. Depends on #1.
 
-Точний граф залежностей — у Epic-issue Фази 1 та `docs/architecture.md`.
+The exact dependency graph is in the Phase 1 Epic issue and `docs/architecture.md`.
