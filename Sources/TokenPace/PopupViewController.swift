@@ -1787,9 +1787,9 @@ final class PopupViewController: NSViewController {
     /// method owns the gap after the last bar, and a row appended inside `stack` would change what
     /// "last" means.
     ///
-    /// Outside the card, but aligned to the **content** inside it: the caption's right edge sits under
-    /// the column of right-aligned status words ("on pace", "2h at 00:50"), not on the plate's own edge,
-    /// which is `hPadding` further out and left the caption looking pushed off the side.
+    /// Aligned to the **card's** edges, flush with the widget box: the caption speaks for the popup as a
+    /// whole, not for the column of limits inside it, so it is measured against the plate rather than
+    /// against the content the plate holds.
     ///
     /// `nil` until `loadView` builds it, like `cardView`.
     private var optionHintLabel: NSTextField?
@@ -1998,16 +1998,16 @@ final class PopupViewController: NSViewController {
             card.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: Metrics.hPadding),
             card.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: Metrics.bottomPadding),
             container.widthAnchor.constraint(equalToConstant: Metrics.width),
-            // The hint's right edge has to land under the column of right-aligned status words above it
-            // ("on pace", "2h at 00:50"), which sits `hPadding` inside the card.
+            // Flush with the **card's** edges — the widget box, not the content inside it. The caption
+            // belongs to the popup as a whole rather than to the column of limits, so it is measured
+            // against the plate that holds them, and its right edge finishes where the plate does.
             //
-            // **Not** pinned to `stack`, though that looks like the way to say "the content's width".
-            // The stack is `alignment: .leading` and shrink-wraps its widest row, so its trailing edge
-            // is wherever that row happens to end — several points short of the content column on most
-            // frames, which is exactly the gap that survived the first fix. The card's edge minus
-            // `hPadding` is the column's true position and does not depend on what the rows contain.
-            hint.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Metrics.hPadding),
-            card.trailingAnchor.constraint(equalTo: hint.trailingAnchor, constant: Metrics.hPadding),
+            // Two near misses on the way here, both worth naming because each looks correct in code:
+            // `stack` is `alignment: .leading` and shrink-wraps its widest row, so its trailing edge
+            // stops wherever that row ends; and the card's edge less `hPadding` lands on the status
+            // column ("on pace"), which is inset from the box by exactly that padding.
+            hint.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            hint.trailingAnchor.constraint(equalTo: card.trailingAnchor),
         ])
         self.view = container
         applyOptionHintVisibility()
