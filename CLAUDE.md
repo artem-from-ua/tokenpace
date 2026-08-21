@@ -91,7 +91,7 @@ store**.
 
 - **Спершу проба живого дерева, потім теорії** — і жодних програмних resize вікна користувача
   під час діагностики. Правила й шаблон проби —
-  [agent-workflow.md § «Діагностика layout-багів у вікнах»](docs/guides/agent-workflow.md#діагностика-layout-багів-у-вікнах).
+  [agent-workflow.md § «Diagnosing window layout bugs»](docs/guides/agent-workflow.md#diagnosing-window-layout-bugs).
 - **SwiftUI дивно поводиться біля window chrome → першим перевір межу хостингу**
   (`sizingOptions`/`safeAreaRegions`), а не SwiftUI-модифікатори —
   [ADR-0088](docs/adr/0088-settings-hosting-safe-area-and-manual-separator.md).
@@ -242,7 +242,7 @@ store**.
 ## Стиль release notes
 
 **НІКОЛИ не склад release notes з пам'яті.** Перед написанням нотаток **обов'язково відкрий і прочитай
-[docs/releasing.md](docs/guides/releasing.md)** (розділ «Зміст і стиль release notes») — саме там канонічні
+[docs/guides/releasing.md](docs/guides/releasing.md)** (розділ «Release notes: content and style») — саме там канонічні
 правила, а не в пам'яті чи в цьому файлі. Ключове звідти:
 
 - **Канонічний шлях встановлення — автооновлення** (Settings → About → «Check for updates periodically» +
