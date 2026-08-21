@@ -1701,6 +1701,19 @@ final class PopupViewController: NSViewController {
         /// the space between bars.
         static let bottomPadding: CGFloat = 14
         static let rowSpacing: CGFloat = 3
+        /// Indent of an awaiting **session** row under its project heading (#438). Applied as a left
+        /// `edgeInsets` on the row, so the row itself stays ``contentWidth`` wide and the hand keeps
+        /// the same right column as every other row in the popup — only the text moves.
+        ///
+        /// The value is a readability choice, not a fitting one: the column is 320 pt and a name gets
+        /// ~276 of it, so going 0 → 24 pt of indent moves the truncation threshold by all of three
+        /// characters (38 → 35). 14 pt matches the `cardInset` family and reads as one level of
+        /// nesting at the popup's 13 pt text.
+        static let awaitingSessionIndent: CGFloat = 14
+        /// Gap above a project heading that follows another project's sessions (#438). At plain
+        /// ``rowSpacing`` a heading would sit as close to the previous project's last session as that
+        /// session sits to its own heading, and the two groups would read as one flat list.
+        static let awaitingProjectGap: CGFloat = 10
         static let sectionSpacing: CGFloat = 14
         /// Gap **between limit blocks** (after each section's bar) — the same 14 pt the header takes.
         ///
@@ -1754,6 +1767,15 @@ final class PopupViewController: NSViewController {
     /// line. The localisation seam (ADR-0009) — like the other status phrases, the English word lives
     /// here, not in the kit.
     static let idleStatusText = "ready to start"
+
+    /// Stands in for the name of an awaiting session Claude Code never titled (#438).
+    ///
+    /// Not the placeholder the session file carries — that is the session's own 8-character job id,
+    /// which looks like an identifier worth copying while `--resume` accepts only a full UUID or a
+    /// session title. A row that names nothing is more honest than a row that names something
+    /// unusable. Rendered italic and dimmed, like the ⌥ style caption: it describes the row rather
+    /// than reporting a fact in it.
+    static let unnamedSessionText = "<unnamed>"
 
     /// The status word for a **blocked** idle 5-hour row (#158): the 5h window is idle, but the 7-day
     /// limit is exhausted and paid credits cannot cover, so there is no path to start — the user is
@@ -1963,12 +1985,21 @@ final class PopupViewController: NSViewController {
         let sectionHeader = addSplitRow(leadingView: leading, rightView: right)
         stack.setCustomSpacing(Metrics.sectionSpacing, after: sectionHeader)
 
-        // #233: while ⌥ is held, reveal the per-project awaiting breakdown right under the header —
-        // one row per project with a coloured hand chip per non-empty time-to-deletion bucket.
+        // #233/#438: while ⌥ is held, reveal the awaiting breakdown right under the header — a bare
+        // project heading, then one row per session beneath it, each naming the session and carrying
+        // its own hand. No cap: the list is meant to grow, because a long column under ⌥ is itself the
+        // answer to "why is so much waiting on me".
         if optionHeld, let awaiting = layout.awaitingInput {
             var lastRow: NSView?
             for stat in awaiting.perProject {
+                // Projects after the first get a wider gap: at `rowSpacing` a heading would sit as
+                // close to the previous project's last session as that session sits to its own
+                // heading, and the two groups would read as one list.
+                if let lastRow { stack.setCustomSpacing(Metrics.awaitingProjectGap, after: lastRow) }
                 lastRow = makeAwaitingProjectRow(stat)
+                for session in stat.sessions {
+                    lastRow = makeAwaitingSessionRow(session)
+                }
             }
             if let lastRow { stack.setCustomSpacing(Metrics.sectionSpacing, after: lastRow) }
         }
@@ -2366,16 +2397,18 @@ final class PopupViewController: NSViewController {
     private func makeAwaitingBadge(_ sessions: AwaitingSessions) -> NSView {
         // Header badge: bare hand when a single session, hand + count otherwise. Icon + count share
         // the urgency tint.
-        let chip = makeHandChip(count: sessions.count, tint: Self.awaitingTint(sessions.urgency),
-                                showCountForOne: false)
-        chip.toolTip = "Sessions waiting for your answer.\nHold ⌥ (Option) for per-project stats"
+        let chip = makeHandChip(count: sessions.count, tint: Self.awaitingTint(sessions.urgency))
+        chip.toolTip = "Sessions waiting for your answer.\nHold ⌥ (Option) for the sessions themselves"
         return chip
     }
 
     /// A `hand.raised` icon + count chip (#233), the icon tinted by `tint`, the count kept neutral
-    /// (uncoloured). When `showCountForOne` is false a count of `1` renders as the bare hand (the
-    /// header badge); the per-project rows pass `true` so every bucket shows the count including 1.
-    private func makeHandChip(count: Int, tint: NSColor, showCountForOne: Bool) -> NSStackView {
+    /// (uncoloured). A count of `1` renders as the bare hand — one hand already says "one".
+    ///
+    /// It once took a `showCountForOne` flag, because the per-project ⌥ rows wanted `1✋` spelled out
+    /// to line up against `2✋`. Those rows are gone (#438): a session row's hand is always exactly one
+    /// session, so no caller has a count to spell.
+    private func makeHandChip(count: Int, tint: NSColor) -> NSStackView {
         let size = Metrics.textSize
         let config = NSImage.SymbolConfiguration(pointSize: size, weight: .semibold)
         let iconView = NSImageView()
@@ -2405,7 +2438,7 @@ final class PopupViewController: NSViewController {
         // Count **before** the icon — reads as "N sessions" (numeral + noun), the natural English
         // count order. The count is dimmed (same colour as the "20%" utilisation text); the hand keeps
         // its bucket colour (red/orange, or the plain label colour when neutral).
-        if count >= 2 || showCountForOne {
+        if count >= 2 {
             let countLabel = NSTextField(labelWithString: "\(count)")
             countLabel.font = .systemFont(ofSize: size)
             countLabel.textColor = Self.dimmedLabelColor
@@ -2418,32 +2451,82 @@ final class PopupViewController: NSViewController {
         return stack
     }
 
-    /// One per-project breakdown row (#233), revealed while ⌥ is held: the project name flush-left, a
-    /// hand chip per **non-empty** bucket flush-right — neutral (>15d left), orange (<15d), red (<7d),
-    /// in that order — each showing its count (including 1). The hand carries the bucket colour; the count is
-    /// neutral.
+    /// One project **heading** in the ⌥ awaiting breakdown (#233, #438): the project name alone, with
+    /// nothing on the right.
+    ///
+    /// It used to carry a hand chip per non-empty time-to-deletion bucket (`1✋ 2✋`). Those chips were
+    /// an aggregate of the very sessions that now each get their own row below, so keeping both would
+    /// state the same fact twice — once as a number the eye has to decode, once as the named lines it
+    /// summarizes. The heading is now a pure grouping label; every hand hangs off a session.
+    ///
+    /// A plain `addArrangedSubview` would leave the label sized to its text rather than to
+    /// ``Metrics/contentWidth``; it lands in the same place today (the stack is `.leading`-aligned)
+    /// but stops tracking the column the rest of the popup measures against. The tooltip keeps the
+    /// count reachable now that no chip states it.
     private func makeAwaitingProjectRow(_ stat: ProjectAwaitingStats) -> NSView {
         let name = NSTextField(labelWithString: stat.projectName)
         name.font = .systemFont(ofSize: Metrics.textSize)
         name.textColor = ColorRole.label.defaultColor
+        name.lineBreakMode = .byTruncatingTail
+        let row = addSplitRow(leadingView: name, rightView: NSView())
+        row.toolTip = stat.total == 1 ? "1 session waiting" : "\(stat.total) sessions waiting"
+        return row
+    }
 
-        let chips = NSStackView()
-        chips.orientation = .horizontal
-        chips.alignment = .centerY
-        chips.spacing = 8
-        // Order: neutral → orange → red; only non-empty buckets. Each chip's tooltip states its
-        // time-to-deletion bucket.
-        let buckets: [(Int, NSColor, String)] = [
-            (stat.recent, ColorRole.label.defaultColor, ">15d till deletion"),
-            (stat.orange, .systemOrange, "<15d till deletion"),
-            (stat.red, .systemRed, "<7d till deletion"),
-        ]
-        for (n, color, tip) in buckets where n > 0 {
-            let chip = makeHandChip(count: n, tint: color, showCountForOne: true)
-            chip.toolTip = tip
-            chips.addArrangedSubview(chip)
+    /// One awaiting **session** row (#438), indented under its project heading: the session's name on
+    /// the left, a single hand tinted by *this* session's urgency on the right.
+    ///
+    /// The name is the same string Claude Code's agentic view lists the session under, so the two
+    /// surfaces share a vocabulary — the popup answers "which one is waiting", not just "how many".
+    /// A session Claude Code never titled renders as ``unnamedSessionText`` in italic: the placeholder
+    /// it carries on disk is its own 8-char job id, which reads like a copyable identifier while
+    /// `--resume` rejects exactly that form.
+    ///
+    /// **Truncation, and why it needs three priorities.** ``addSplitRow`` pins the row to
+    /// ``Metrics/contentWidth`` under `.equalSpacing`, and both halves default to `.defaultHigh`
+    /// compression resistance — so a name wider than the column leaves Auto Layout with two equally
+    /// valid victims and no rule to pick one. `.byTruncatingTail` alone changes nothing: it says *how*
+    /// to draw text that was already given less room than it wants, not *who* gives room up. Naming
+    /// the label as the victim (`.defaultLow`) and the hand as untouchable (`.required`) is what turns
+    /// the line break mode on in practice.
+    ///
+    /// Deliberately **not** gated by ``detailHalvesFit(left:right:font:)``: that gate drops the right
+    /// half when both cannot fit, which is right for a reset caption and wrong here — the hand is the
+    /// row's whole point, and a clipped name still identifies the session.
+    private func makeAwaitingSessionRow(_ session: AwaitingSession) -> NSView {
+        let font = NSFont.systemFont(ofSize: Metrics.textSize)
+        let label = NSTextField(labelWithString: session.name ?? Self.unnamedSessionText)
+        // Italic *and* dimmed, the pair the ⌥ style caption already uses: the word is about the row
+        // rather than a fact in it. Dimmed alone would file the placeholder next to real names.
+        label.font = session.name == nil ? Self.italic(font) : font
+        label.textColor = Self.dimmedLabelColor
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let chip = makeHandChip(count: 1, tint: Self.awaitingTint(session.urgency))
+        chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let row = addSplitRow(leadingView: label, rightView: chip)
+        // Left inset only. `edgeInsets` does not narrow the row — the width constraint still reads
+        // `contentWidth` — it eats into the content from that edge, so insetting the right side too
+        // would pull the hand off the column every other row's trailing element aligns to.
+        (row as? NSStackView)?.edgeInsets = NSEdgeInsets(
+            top: 0, left: Metrics.awaitingSessionIndent, bottom: 0, right: 0)
+        // The full name survives truncation here, and the bucket phrase replaces the tooltip the
+        // per-bucket chips used to carry.
+        row.toolTip = "\(session.name ?? Self.unnamedSessionText)\n\(Self.awaitingBucketPhrase(session.urgency))"
+        return row
+    }
+
+    /// How long this session has before Claude Code's cleanup deletes it, as the tooltip phrase the
+    /// per-bucket chips used to show (#233).
+    private static func awaitingBucketPhrase(_ urgency: AwaitingUrgency) -> String {
+        switch urgency {
+        case .red: return "<7d till deletion"
+        case .orange: return "<15d till deletion"
+        case .neutral: return ">15d till deletion"
         }
-        return addSplitRow(leadingView: name, rightView: chips)
     }
 
     /// The AppKit colour for an awaiting-input urgency, shared by the icon and the count label so they
