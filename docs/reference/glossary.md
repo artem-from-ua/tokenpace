@@ -34,7 +34,8 @@ docs and the code they describe.
 | **tick** | one iteration of a periodic task | тік |
 | **snapshot** | one captured reading of usage state | знімок |
 | **badge** | the small count/marker drawn over a glyph | бейдж |
-| **strip** | the thin progress band inside the popup bar | стрічка |
+| **track** | the gray full-width base every bar is drawn on — the layer things sit *above* or *below*. Not a synonym for **bar**: "the zero tick is drawn under the track" and "an empty track would read as no data" are both false if you substitute *bar*. | трек |
+| **strip** | the colored band drawn over the track (Balance, Pressure) | стрічка |
 | **chip** | a compact labeled element (e.g. the incident chip) | чіп |
 | **swatch** | a color sample, and the mode that renders one for measurement | swatch |
 | **gate** | a condition that stops a periodic task from running | гейт |
@@ -43,7 +44,38 @@ docs and the code they describe.
 | **cadence** | how often a periodic task runs | каденція |
 | **marker** | a drawn indicator on a bar | маркер |
 | **glyph** | an SF Symbol drawn in the menu bar | гліф |
-| **pill** | a rounded capsule shape | пігулка |
+| **pill** | a rounded capsule shape — the zero-width minimum a strip floors to | пігулка |
+| **color capsule** | the colored span Progress draws over `gapStart..gapEnd` — deliberately *not* a fill from zero ([ADR-0079](../adr/0079-centred-zero-gauge-scale.md)) | кольорова капсула |
+
+
+### `bar` carries two senses — both are correct
+
+The UI element (`смужка`/`бар`) and the criterion (`планка`) both land on **bar**, and they appear in
+adjacent paragraphs in [personas.md](personas.md) and [users-and-goals.md](users-and-goals.md). This is
+deliberate: "clears the bar" and "raise the bar" are live English idioms carrying the same
+height metaphor the Ukrainian had, and the verb disambiguates in practice — a bar that is *orange* is
+the widget, a bar that is *cleared* is the criterion.
+
+Do not "fix" this by renaming the criterion to *threshold*: that word is already taken in these files
+for actual numeric thresholds (the dynamic pacing threshold, the 20-minute threshold), and the collision
+would be worse than the one it solves.
+
+### Bar anatomy — the layers have distinct names
+
+Ordering matters in the rendering ADRs, so the parts are named separately and are not interchangeable:
+
+| Part | What it is |
+|---|---|
+| **bar** | the whole widget |
+| **track** | the gray full-width base |
+| **strip** | the colored band over the track (Balance, Pressure) |
+| **color capsule** | the colored span over `gapStart..gapEnd` (Progress) |
+| **pill** | the rounded minimum a strip floors to at zero |
+| **marker** | the time indicator drawn on the bar |
+| **ruler** / **tick** | the subdivision scale under the bar |
+
+`track` is already in use in the translated [SPEC.md](../../SPEC.md) ("a gray track with a green pill at
+zero") and across the rendering ADRs — this table records existing practice rather than introducing it.
 
 ## Pinned mappings — one English word per concept
 
@@ -52,7 +84,8 @@ are **wrong here** — each is a word a reasonable translator would otherwise pi
 
 | Ukrainian | English | Do NOT use |
 |---|---|---|
-| смужка / бар | **bar** | stripe, gauge |
+| смужка / бар | **bar** — the whole widget: track + strip/capsule + marker + ruler | stripe, gauge |
+| планка (the criterion) | **bar**, as in "clears the bar", "raise the bar" | threshold, test, standard |
 | стрічка | **strip** | ribbon, band |
 | ресет | **reset** | refresh, rollover |
 | вікно (5h/7d) | **window** | period, cycle |
