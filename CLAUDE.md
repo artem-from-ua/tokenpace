@@ -13,14 +13,19 @@ iPhone та комплікейшен Apple Watch.
 - [SPEC.md](SPEC.md) — повний продуктовий спек: архітектура, UI, поведінка, обсяг Фази 1, план робіт.
 - [docs/architecture.md](docs/architecture.md) — архітектура та потік даних.
 - [docs/conventions.md](docs/reference/conventions.md) — конвенції розробки.
-- [docs/adr/](docs/adr/) — архітектурні рішення (Swift, українська дока, закритий агент, збірка).
+- [docs/adr/](docs/adr/) — архітектурні рішення (Swift, мова документації, закритий агент, збірка).
 
-## Мова
+## Language
 
-- **Документація — українська** (README, SPEC, docs/, ADR, GitHub issues). Див.
-  [ADR-0002](docs/adr/0002-ukrainian-documentation.md).
-- **Код, ідентифікатори, повідомлення комітів, PR — англійська.**
-- Ідентифікатори API (`five_hour`, `resets_at`, `client_id`) — в оригіналі навіть в укр. тексті.
+- **Everything in the repository and on GitHub is English** — README, SPEC, `docs/`, ADRs, this
+  file, skills, code, identifiers, commit messages, PRs, issues, comments, release notes. See
+  [ADR-0116](docs/adr/0116-english-as-documentation-language.md).
+- **Ukrainian remains only outside the repository:** agent conversation, plan files, private
+  `memory/`. None of those are repo artifacts.
+- API identifiers (`five_hour`, `resets_at`, `client_id`) keep their original form and are never
+  translated.
+- The corpus is still being migrated, so untranslated Ukrainian documents remain; each is
+  translated by its own package. **New text is written in English regardless.**
 
 ## Стек і збірка
 

@@ -420,8 +420,10 @@ CloudKit (той самий Apple ID)
 - **Мова Mac-агента: Swift.** Рідний доступ до CloudKit + Keychain в одному стеку з iOS/watchOS
   застосунком. Go відкинуто: CloudKit з Go вимагає CloudKit Web Services + server-to-server
   ключ, і немає рідного доступу до Keychain.
-- **Мова документації: українська** (проєктне перевизначення глобального правила «репо-артефакти
-  англійською», за прямою інструкцією користувача для цього проєкту).
+- **Documentation language: English** — everything in the repository and on GitHub (see
+  [ADR-0116](docs/adr/0116-english-as-documentation-language.md), superseding
+  [ADR-0002](docs/adr/0002-ukrainian-documentation.md)). Ukrainian remains only outside the
+  repository: agent conversation, plan files, private `memory/`.
 - **Фаза 1 = menu bar app для macOS, без CloudKit.** iPhone/Watch і CloudKit зсунуто у Фазу 2.
   Причина: menu bar app живе на тому ж Mac, що й токен, тож не потребує жодного транспорту й дає
   робочий продукт найшвидшим шляхом.
@@ -511,7 +513,8 @@ CloudKit (той самий Apple ID)
    ≈ 1 сесія), відкрити їх на GitHub із **залежностями** та **рекомендованим порядком виконання**.
    - Формат: **Epic-issue «Фаза 1»** + дочірні issues на кожен компонент (залежності через
      «blocked by #N»), усе зібране в **GitHub Project (board)** для візуального прогресу.
-   - **Мова тікетів — українська** (узгоджено з [ADR-0002](docs/adr/0002-ukrainian-documentation.md)).
+   - **Ticket language: English** (per
+     [ADR-0116](docs/adr/0116-english-as-documentation-language.md)).
 3. **Виконання** — реалізовувати тікети **по одному в окремих сесіях**, у визначеному порядку.
 
 Компоненти Фази 1 у **рекомендованому порядку виконання** (стануть основою тікетів):

@@ -2,8 +2,9 @@
 
 Карта всієї документації проєкту. Почни звідси, якщо шукаєш, де що лежить.
 
-Мова документації — українська (див. [ADR-0002](adr/0002-ukrainian-documentation.md)); код,
-ідентифікатори й повідомлення комітів — англійська.
+The documentation language is English, as are code, identifiers, and commit messages (see
+[ADR-0116](adr/0116-english-as-documentation-language.md)). Files not yet migrated are still in
+Ukrainian.
 
 ## Джерела істини
 

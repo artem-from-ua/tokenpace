@@ -1,7 +1,13 @@
 ---
-status: accepted
+status: superseded
+superseded_by: [0116]
 date: 2026-06-21
 ---
+
+> **Superseded by [ADR-0116](0116-english-as-documentation-language.md).** English is now the
+> language of everything in the repository and on GitHub. This record is kept in Ukrainian on
+> purpose: an accepted ADR is immutable, and translating it would rewrite the decision as it was
+> made. Only its status changed.
 
 # ADR-0002: Українська як мова документації
 
