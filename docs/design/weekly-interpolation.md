@@ -1,115 +1,119 @@
-# Design: реконструкція тижневого `utilization` із п'ятигодинного лічильника
+# Design: reconstructing the weekly `utilization` from the five-hour counter
 
-Формальний опис алгоритму, реалізованого в [#386](https://github.com/artem-from-ua/tokenpace/issues/386).
-Супутник до [ADR-0103](../adr/0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md): ADR
-фіксує **що** ми вирішили й **чому**, цей документ — **як саме воно рахується**, з інваріантами,
-крайовими випадками та вимірами, на яких стоять константи.
+A formal description of the algorithm implemented in [#386](https://github.com/artem-from-ua/tokenpace/issues/386).
+A companion to [ADR-0103](../adr/0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md): the ADR
+records **what** we decided and **why**, this document records **how it is actually computed**, with the
+invariants, the edge cases and the measurements the constants rest on.
 
-> Пов'язане: [usage-api-quirks](../reference/usage-api-quirks.md) — вимір квантування, на якому все
-> стоїть; [users-and-goals § «The ratio between the windows' quotas»](../reference/users-and-goals.md) — звідки взявся
-> коефіцієнт `N`.
+> Related: [usage-api-quirks](../reference/usage-api-quirks.md) — the quantization measurement everything
+> stands on; [users-and-goals § "The ratio between the windows' quotas"](../reference/users-and-goals.md) — where the
+> coefficient `N` comes from.
 
-## Проблема
+## Problem
 
-API округлює `seven_day.utilization` до цілого відсотка. На семиденному вікні один пункт — це
-**1 год 40 хв** роботи. Заміри на живому журналі (4 327 записів, серпень):
+The API rounds `seven_day.utilization` to a whole percent. On the seven-day window one point is
+**1 h 40 min** of work. Measured against a live journal (4,327 records, August):
 
-- **96.4 %** послідовних пар не змінюються взагалі;
-- **~88 %** руху витрат тижнева шкала не показує;
-- 137 зі 140 зростань — рівно на 1 пп.
+- **96.4%** of consecutive pairs do not change at all;
+- the weekly scale shows nothing for **~88%** of spending movement;
+- 137 of 140 increases are exactly 1 pp.
 
-П'ятигодинний лічильник квантований так само, але його пункт — **3 хв**, тобто в 33.6 раза дрібніше.
-Обидва міряють ті самі витрати. Звідси ідея: читати тижневу шкалу **через** п'ятигодинну.
+The five-hour counter is quantized the same way, but its point is **3 min** — 33.6× finer. Both measure
+the same spending. Hence the idea: read the weekly scale **through** the five-hour one.
 
-## Модель квантування
+## The quantization model
 
-Спостережене ціле `k` — це не значення, а **інтервал**. Крайні кошики вдвічі вужчі, бо шкала
-обмежена з обох боків:
+An observed integer `k` is not a value but an **interval**. The edge buckets are half as wide, because
+the scale is bounded on both ends:
 
-| спостережене `k` | істинне значення | ширина |
+| observed `k` | true value | width |
 |---|---|---|
 | `0` | `[0, 0.5)` | 0.5 |
 | `1…99` | `[k − 0.5, k + 0.5)` | 1.0 |
 | `100` | `[99.5, 100]` | 0.5 |
 
-`ceiling(100) == 100` — це не деталь, а **захист усіх детекторів вичерпання**: реконструкція не може
-перенести значення через межу 100, тож `CreditsPacing`, `BlockingReset`, `MenuBarLayout` і
-`PacingModel.limitIndicator` лишаються недоторканими.
+`ceiling(100) == 100` is not a detail but the **protection for every exhaustion detector**: the
+reconstruction cannot carry a value across the 100 boundary, so `CreditsPacing`, `BlockingReset`,
+`MenuBarLayout` and `PacingModel.limitIndicator` stay untouched.
 
-## Два якорі
+## Two anchors
 
-Це головна розвилка алгоритму, і вона про те, **що ми насправді знаємо**.
-
-```
-   A. Бамп засічено (firm)                B. Якір успадкований (inherited)
-
-   k−0.5        k+0.5                     k−0.5    k    k+0.5
-     |============|                         |=======|=======|
-     ^                                              ^
-     якір: точна нижня межа                         якір: центр кошика
-     (ми бачили перехід k−1 → k,                    (t₀ невідомий, позиція
-      тож значення щойно її перетнуло)               в кошику не спостережувана)
-```
-
-**A — бамп засічено.** Ми самі бачили перехід `k−1 → k` між двома полами. У цей момент істинне
-значення щойно перетнуло `k − 0.5`, тож якір — саме ця межа. Жодних припущень.
-
-**B — якір успадкований.** Перший запуск або повернення після довгої перерви: `k` відоме, а коли воно
-ним стало — ні. Позиція всередині кошика не спостережувана з жодного доступного сигналу (`h5` теж не
-допомагає — його фаза у п'ятигодинному вікні не корелює з позицією в тижневому кошику). Якір — центр.
-
-**Чому центр.** На 4 295 семплах, де момент бампу був **відомий**, розподіл позиції всередині кошика
-виявився практично рівномірним: медіана рівно **0.500**, квартилі 0.20 / 0.50 / 0.70. Отже центр
-мінімізує очікувану похибку. І він **не гірший за те, що було до #386**: раніше ми показували `k` при
-істині в `[k−0.5, k+0.5)` — та сама межа похибки 0.5 пп, лише значення стояло на місці.
-
-Це єдиний вибір, який справді важить: заміна `k − 0.5` на `k` зсуває результат на **0.37–0.42 пп**
-у середньому — на порядок більше за будь-який інший компонент (див. «Що виміряно» нижче).
-
-## Оцінка `N`
-
-Одиниця спостереження — **сегмент**: проміжок між двома послідовними стрибками `d7`. Усередині
-сегмента накопичуємо суму **додатних** приростів `h5`.
+This is the algorithm's main fork, and it is about **what we actually know**.
 
 ```
-на кожному полі:
-    якщо h5 ≥ h5_попередній:     Δ = h5 − h5_попередній        // звичайний приріст
-    інакше якщо пол свіжий:      Δ = min(h5, стеля(gap))       // ресет 5h між полами: нове значення
-                                                               // — витрати після нього, але не більше,
-                                                               // ніж вікно встигло б спалити
-    інакше (діра):               Δ = 0, degraded = true        // у дірі міг бути не один ресет
+   A. Bump observed (firm)                 B. Anchor inherited (inherited)
+
+   k−0.5        k+0.5                      k−0.5    k    k+0.5
+     |============|                          |=======|=======|
+     ^                                               ^
+     anchor: the exact lower bound                   anchor: the bucket's center
+     (we saw the k−1 → k transition,                 (t₀ is unknown, the position
+      so the value has just crossed it)               in the bucket is not observable)
+```
+
+**A — bump observed.** We saw the `k−1 → k` transition between two polls ourselves. At that moment the
+true value had just crossed `k − 0.5`, so that boundary is the anchor. No assumptions.
+
+**B — anchor inherited.** First launch, or a return after a long break: `k` is known, but when it became
+`k` is not. The position inside the bucket is not observable from any available signal (`h5` does not help
+either — its phase within the five-hour window does not correlate with the position in the weekly bucket).
+The anchor is the center.
+
+**Why the center.** Across 4,295 samples where the moment of the bump **was** known, the distribution of
+the position inside the bucket turned out to be practically uniform: a median of exactly **0.500**,
+quartiles 0.20 / 0.50 / 0.70. So the center minimizes the expected error. And it is **no worse than what
+we had before #386**: we used to show `k` while the truth was in `[k−0.5, k+0.5)` — the same 0.5 pp error
+bound, only the value sat still.
+
+This is the one choice that genuinely matters: replacing `k − 0.5` with `k` shifts the result by
+**0.37–0.42 pp** on average — an order of magnitude more than any other component (see "What was measured"
+below).
+
+## Estimating `N`
+
+The unit of observation is a **segment**: the span between two consecutive `d7` jumps. Within a segment we
+accumulate the sum of the **positive** `h5` increments.
+
+```
+on every poll:
+    if h5 ≥ h5_previous:        Δ = h5 − h5_previous          // an ordinary increment
+    else if the poll is fresh:  Δ = min(h5, ceiling(gap))     // a 5h reset between polls: the new value
+                                                              // is the spending after it, but no more
+                                                              // than the window could have burned
+    else (a gap):               Δ = 0, degraded = true        // a gap may have held more than one reset
     acc += Δ
 
-коли d7 зросло:
-    localN = acc / (d7 − d7_попереднє)
-    segments.append(localN)        // ring buffer на 15
+when d7 increased:
+    localN = acc / (d7 − d7_previous)
+    segments.append(localN)        // a ring buffer of 15
     acc = 0;  anchor = floor(d7);  firm = true
 
 N = segments.isEmpty ? 10.0 : median(segments)
 ```
 
-**Чому падіння `h5` капується.** Правило «впало на свіжому полі → нове значення це витрати після
-ресету» правдиве, коли падіння лягає біля нуля — а так і виглядає справжній ресет (виміряно: медіана
-0, p90 2). Але падіння **не є доказом** ресету: у тому ж журналі є `49 → 42`, `67 → 21` і `53 → 51`
-з різницею в хвилини — це сервер сам знижує лічильник, а не 42 пункти витрат за три хвилини.
-Зарахувати їх означало б вигадати роботу, якої не було. Тож приріст обмежений тим, що п'ятигодинне
-вікно фізично встигло б спалити за проміжок: майже всі пост-ресетні значення проходять недоторканими,
-а ці три обрізаються до чесних кількох пунктів.
+**Why a drop in `h5` is capped.** The rule "it dropped on a fresh poll → the new value is the spending
+after the reset" holds when the drop lands near zero — and that is what a real reset looks like (measured:
+median 0, p90 2). But a drop is **not proof** of a reset: the same journal holds `49 → 42`, `67 → 21` and
+`53 → 51` minutes apart — that is the server lowering the counter itself, not 42 points of spending in
+three minutes. Counting them would be inventing work that never happened. So the increment is bounded by
+what the five-hour window could physically have burned over the interval: almost every post-reset value
+passes through untouched, and those three get trimmed to an honest few points.
 
-**Чому медіана, а не середнє чи МНК.** Обидва ряди квантовані, тож окремий сегмент має похибку ±0.5 пп
-у знаменнику — це ±50 % при кроці 1. Виміряно: окремі `localN` розкидані **3–24** (Max 5x) і **4–30**
-(Pro), середнє по вікну гуляє 8.4–11.7, а **медіана стабільно тримає 10.0** на обох журналах.
+**Why a median, not a mean or least squares.** Both series are quantized, so an individual segment carries
+a ±0.5 pp error in the denominator — that is ±50% at a step of 1. Measured: individual `localN` values
+scatter **3–24** (Max 5x) and **4–30** (Pro), the windowed mean wanders 8.4–11.7, and the **median holds
+10.0 steadily** on both journals.
 
-**Чому вікно, а не вся історія.** Сума-по-всьому не є ковзною: вона відповідає з інерцією всієї
-історії, тож промо-акцію показала б за дні. Вікно на 15 сегментів забуває старий курс за ≈25 год
-активної роботи — той масштаб, на якому тариф справді змінюється.
+**Why a window, not the whole history.** A sum-over-everything is not rolling: it responds with the inertia
+of the entire history, so it would take days to show a promo. A window of 15 segments forgets the old rate
+after ≈25 h of active work — the scale on which the plan actually changes.
 
-**Чому сегмент використовується одразу, без порогу.** Симуляція проти реального розкиду (192
-спостережені `localN`): медіана навіть **одного** сегмента б'є сід для будь-якого користувача, чий
-курс не рівно 10 — 10 % похибки проти 43 % (при істинному `N = 7`) або 33 % (при `N = 15`). Сід
-виграє лише коли випадково має рацію, а це саме те, чого ми наперед не знаємо.
+**Why a segment is used immediately, with no threshold.** A simulation against the real scatter (192
+observed `localN` values): the median of even **one** segment beats the seed for any user whose rate is not
+exactly 10 — 10% error against 43% (at a true `N = 7`) or 33% (at `N = 15`). The seed only wins when it
+happens to be right, and that is exactly what we do not know in advance.
 
-## Реконструкція
+## The reconstruction
 
 ```
 anchor  = firm ? floor(k) : centre(k)
@@ -117,146 +121,150 @@ gained  = acc / N
 u       = min(anchor + gained, ceiling(k))
 ```
 
-Стани, які може повернути обчислення:
+The states the computation can return:
 
-| стан | коли | що показуємо |
+| state | when | what we show |
 |---|---|---|
-| `inherited` | бампу ще не бачили | центр + приріст |
-| `interpolated` | штатний режим | нижня межа + приріст |
-| `clipped` | `anchor + gained` перевищив стелю | стелю кошика |
-| `degraded` | діра в полінгу | нижню межу, не нижче вже показаного |
+| `inherited` | no bump seen yet | center + increment |
+| `interpolated` | the normal mode | lower bound + increment |
+| `clipped` | `anchor + gained` exceeded the ceiling | the bucket's ceiling |
+| `degraded` | a gap in polling | the lower bound, never below what was already shown |
 
-## Інваріанти
+## Invariants
 
-**1. Монотонність — за побудовою, не за перевіркою.**
+**1. Monotonicity — by construction, not by a check.**
 
 ```
-до бампу, при raw = k:      u_before ≤ k + 0.5        (кліп)
-після бампу на k+1:         u_after  = (k+1) − 0.5 = k + 0.5
-                            ⟹ u_after ≥ u_before      завжди
+before the bump, at raw = k:   u_before ≤ k + 0.5        (the clip)
+after the bump to k+1:         u_after  = (k+1) − 0.5 = k + 0.5
+                               ⟹ u_after ≥ u_before      always
 ```
 
-Стеля одного кошика й підлога наступного — **та сама точка**, тож перехід не має розриву. Емпірично:
-0 порушень на 98 599 семплах із 44 точок холодного старту (Max 5x) і 0 на журналі Pro.
+One bucket's ceiling and the next one's floor are **the same point**, so the transition has no
+discontinuity. Empirically: 0 violations across 98,599 samples from 44 cold-start points (Max 5x) and 0 on
+the Pro journal.
 
-**2. Межа вичерпання недоторкана.** `raw = 100` проходить наскрізь без змін. Інтерполяція всередині
-верхнього кошика дала б значення в `[99.5, 100)`, а всі детектори перевіряють `>= 100` — тобто
-реконструйовані 99.7 **тихо зняли б** заблокований тиждень: ні червоного бара, ні блокуючого ресету,
-ні переходу на кредити.
+**2. The exhaustion boundary is untouched.** `raw = 100` passes straight through unchanged. Interpolating
+inside the top bucket would produce a value in `[99.5, 100)`, and every detector checks `>= 100` — meaning
+a reconstructed 99.7 would **silently clear** a blocked week: no red bar, no blocking reset, no switch to
+credits.
 
-**3. Нуль лишається нулем.** `raw = 0` → накладка no-op, бо на цьому стоять кілька предикатів `> 0`
-(зокрема `PopupLayout.groupIsAboveZero`).
+**3. Zero stays zero.** `raw = 0` → the overlay is a no-op, because several `> 0` predicates rest on it
+(`PopupLayout.groupIsAboveZero` among them).
 
-**4. Розсинхрон якоря → no-op.** Якщо вікно в снапшоті більше не несе значення, яке міряв
-інтерполятор, накладка не застосовується. Це те, що робить її безпечною поруч із
-`ResetClock.optimisticReset`, який може обнулити тижневе вікно локально раніше за сервер.
+**4. An anchor out of sync → a no-op.** If the window in the snapshot no longer carries the value the
+interpolator measured, the overlay is not applied. That is what makes it safe next to
+`ResetClock.optimisticReset`, which can zero the weekly window locally ahead of the server.
 
-> **Порядок застосування важить.** Реконструкція йде **до** `optimisticReset`, а не після: той
-> overlay обнуляє вікно на межі, і тоді інваріант 4 зробив би реконструкцію тихим no-op саме на
-> граничних полах.
+> **The order of application matters.** The reconstruction runs **before** `optimisticReset`, not after:
+> that overlay zeroes the window at the boundary, and invariant 4 would then turn the reconstruction into a
+> silent no-op on exactly the boundary polls.
 
-## Діри в полінгу
+## Gaps in polling
 
-Полінг спить: 3 хв активно / 15 хв неактивно, плюс сон системи. Замір: **127 дір довших за 6 хв,
-14 понад годину, 5 перекривають ціле п'ятигодинне вікно**.
+Polling sleeps: 3 min active / 15 min inactive, plus system sleep. Measured: **127 gaps longer than 6 min,
+14 over an hour, 5 spanning an entire five-hour window**.
 
-Небезпека конкретна: за велику діру `h5` міг зрости **і** ресетнутись, тож правило «тільки додатні
-прирости» мовчки втратить витрати.
+The danger is specific: across a large gap `h5` could have grown **and** reset, so the "positive increments
+only" rule would silently lose the spending.
 
-**Поріг адаптивний** — від *фактичного* інтервалу, а не від базових 3 хв. Це не косметика: на журналі
-Pro (каданс 15 хв) фіксований поріг позначив **576 із 862** семплів як діру замість 128.
+**The threshold is adaptive** — derived from the *actual* interval, not from the baseline 3 min. This is
+not cosmetic: on the Pro journal (a 15-minute cadence) a fixed threshold flagged **576 of 862** samples as a
+gap instead of 128.
 
-**Деградація не залипає.** Діра псує накопичення, а не здатність міряти далі — з наступного пола все
-знову вимірюване. Латентна деградація до наступного бампу давала 33 % і 63 % семплів у стані
-`degraded` замість реальних 2 % і 15 %.
+**Degradation does not stick.** A gap spoils the accumulation, not the ability to keep measuring — from the
+next poll on, everything is measurable again. Latent degradation until the next bump put 33% and 63% of
+samples in the `degraded` state instead of the real 2% and 15%.
 
-**Деградація не відкочує бар назад.** Фолбек — **нижня межа** кошика, а не сире `k`. Сире `k` це
-центр, тобто твердження про пів пункту витрат, яких ми не міряли; щойно вимірювання відновиться з
-чеснішою нижчою оцінкою, бар зробив би крок **униз**. Виміряно на реальних журналах: 41 такий крок
-(Pro) і 22 (Max 5x), усі — на переході `degraded → interpolated`.
+**Degradation does not roll the bar back.** The fallback is the bucket's **lower bound**, not the raw `k`.
+The raw `k` is the center, i.e. a claim about half a point of spending we never measured; the moment
+measurement resumes with an honester lower estimate, the bar would step **down**. Measured on the real
+journals: 41 such steps (Pro) and 22 (Max 5x), all on a `degraded → interpolated` transition.
 
-## Що виміряно (ablation)
+## What was measured (ablation)
 
-Дев'ять варіантів із вимкненими компонентами, обидва журнали. **Жоден не порушив інваріантів** — 0
-порушень монотонності й 0 виходів за квант скрізь. Безпеку тримає **кліп**, і тільки він.
+Nine variants with components disabled, both journals. **None violated the invariants** — 0 monotonicity
+violations and 0 excursions outside the quantum everywhere. Safety is held by the **clip**, and by it alone.
 
-| компонент | розходження (сер. \|Δ\|, пп) | висновок |
+| component | divergence (mean \|Δ\|, pp) | conclusion |
 |---|---|---|
-| ratchet | 0.000 / 0.000 | недосяжний за побудовою — див. нижче |
-| санітарні фільтри | 0.001 / 0.001 | захист від патології, не точності |
-| сід 5 чи 20 замість 10 | 0.000 / 0.000 | перший сегмент витісняє — не тюнити |
-| медіана → середнє | 0.033 / 0.016 | медіана краща, але не драматично |
-| `K = 5` / `K = 40` | 0.05 / 0.01 | вікно 15 некритичне |
-| **якір `k` замість `k−0.5`** | **0.373 / 0.415** | на порядок більше за все інше |
+| ratchet | 0.000 / 0.000 | unreachable by construction — see below |
+| sanity filters | 0.001 / 0.001 | protection against pathology, not accuracy |
+| a seed of 5 or 20 instead of 10 | 0.000 / 0.000 | the first segment displaces it — do not tune |
+| median → mean | 0.033 / 0.016 | the median is better, but not dramatically |
+| `K = 5` / `K = 40` | 0.05 / 0.01 | the window of 15 is not critical |
+| **an anchor of `k` instead of `k−0.5`** | **0.373 / 0.415** | an order of magnitude more than everything else |
 
-**Ratchet недосяжний.** `N` **ніколи** не змінюється всередині сегмента — нова оцінка додається лише
-бампом, який сегмент і закриває. Отже `anchor + acc/N` із незмінними `anchor`, `N` і неспадним `acc`
-монотонний **арифметично**. Тому в коді його немає, а натомість є `shownFloor`, який розв'язує іншу
-задачу — не дати деградації відкотити вже показане.
+**The ratchet is unreachable.** `N` **never** changes inside a segment — a new estimate is only added by a
+bump, which closes that segment. So `anchor + acc/N` with an unchanging `anchor`, an unchanging `N` and a
+non-decreasing `acc` is monotonic **arithmetically**. That is why it is not in the code; what is there
+instead is `shownFloor`, which solves a different problem — keeping degradation from rolling back what has
+already been shown.
 
-## Межа методу
+## The method's limit
 
-Не в алгоритмі, а в **кроці `h5` між полами**:
+Not in the algorithm, but in the **step of `h5` between polls**:
 
-| каданс | медіанний приріст `h5` | тижневий крок | позицій на кошик |
+| cadence | median `h5` increment | weekly step | positions per bucket |
 |---|---|---|---|
-| 193 с (активний) | +1 пп | 0.10 пп ≈ **10 хв** | ~10 |
-| 900 с (неактивний) | +5 пп | 0.50 пп ≈ **50 хв** | **2** |
+| 193 s (active) | +1 pp | 0.10 pp ≈ **10 min** | ~10 |
+| 900 s (inactive) | +5 pp | 0.50 pp ≈ **50 min** | **2** |
 
-Тобто при рідкому полінгу реконструкція дає не «вдесятеро краще», а **вдвічі**. Це не привід її
-вимикати — два стани краще за один, — але це та цифра, якою слід описувати фічу.
+So under sparse polling the reconstruction is not "ten times better" but **twice** as good. That is no
+reason to turn it off — two states beat one — but it is the number the feature should be described with.
 
-## Що НЕ реконструюється
+## What is NOT reconstructed
 
-**Scoped-моделі** (Opus / Sonnet / Fable) мають власні тижневі вікна, але **не мають** власних
-п'ятигодинних. Єдиний `N` для них некоректний за побудовою, тож вони лишаються сирими. Наслідок
-видно оком: тижневий бар повзе, рядки моделей стрибають.
+**Scoped models** (Opus / Sonnet / Fable) have their own weekly windows but **not** their own five-hour
+ones. A single `N` for them is incorrect by construction, so they stay raw. The consequence is visible to
+the eye: the weekly bar creeps, the model rows jump.
 
-**Кредити** (`extra_usage`) квантування не мають — сервер віддає там дроби (спостережено
-`97.9090909090909`), тож реконструювати нічого.
+**Credits** (`extra_usage`) have no quantization — the server returns fractions there (observed:
+`97.9090909090909`), so there is nothing to reconstruct.
 
-## Що потрапляє в журнал
+## What goes into the journal
 
-Кожен `usage`-рядок несе **обидва** числа й спосіб отримання другого:
+Every `usage` line carries **both** numbers and how the second one was obtained:
 
 ```jsonc
 "v": 3,
 "d7": {
-  "util":     88.34,          // реконструйоване — те, що малював бар
-  "raw":      88,             // сире від API, verbatim
+  "util":     88.34,          // reconstructed — what the bar drew
+  "raw":      88,             // raw from the API, verbatim
   "utilSrc":  "interpolated", // inherited | interpolated | clipped | degraded
-  "resetSrc": "server",       // server | limits | reconstructed | unknown (+ суфікс -rolled)
-  "n":        9.8,            // курс обміну на момент запису
+  "resetSrc": "server",       // server | limits | reconstructed | unknown (+ a -rolled suffix)
+  "n":        9.8,            // the exchange rate at the moment of writing
   "reset":    "2026-08-25T07:00:00.058036+00:00",
   "timePct":  0.962089,
   "sev":      "green"
 }
 ```
 
-**Два поля джерела, не одне.** `utilSrc` (до v3 звався `src`) описує реконструкцію **відсотка**, про
-яку цей документ; `resetSrc` — реконструкцію **дати ресету**
-([ADR-0107](../adr/0107-weekly-reset-reconstructed-from-the-last-known-one.md)). Осі ортогональні: на
-5 029 записах заповнено шість із восьми перетинів, зокрема `degraded × reconstructed` — відсоток
-деградував через дірку в полінгу, а дата вигадана через мовчання API, дві різні причини на одному
-рядку. Одне поле мусило б обрати, яку історію розповісти.
+**Two source fields, not one.** `utilSrc` (called `src` before v3) describes the reconstruction of the
+**percentage**, the subject of this document; `resetSrc` describes the reconstruction of the **reset date**
+([ADR-0107](../adr/0107-weekly-reset-reconstructed-from-the-last-known-one.md)). The axes are orthogonal:
+across 5,029 records six of the eight intersections are populated, `degraded × reconstructed` among them —
+the percentage degraded because of a gap in polling while the date was invented because the API stayed
+silent, two different causes on one line. A single field would have had to pick which story to tell.
 
-`n` пишеться **на кожному полі**, а не лише коли змінюється: у лог ідуть зміни (інакше це ~341 рядок
-на добу), у журнал — ряд, бо саме ряд можна аналізувати потім.
+`n` is written on **every poll**, not only when it changes: the log gets the changes (otherwise it is ~341
+lines a day), the journal gets the series, because a series is what can be analyzed later.
 
-Записаний `util` — те, **на чому діяв застосунок**, тож і `weeklyHasHeadroom`, `blocked`,
-`brokenReset` та `blockingReset` у тому ж рядку рахуються з реконструйованого снапшота. Інакше
-журнал описував би стан, якого на екрані не було.
+The recorded `util` is **what the app acted on**, so `weeklyHasHeadroom`, `blocked`, `brokenReset` and
+`blockingReset` on the same line are computed from the reconstructed snapshot too. Otherwise the journal
+would describe a state that was never on screen.
 
-Деталі формату, правило точності (`decimals = ceil(log10(windowSeconds))`) і процедура міграції — в
-[ADR-0067 §6](../adr/0067-local-usage-journal.md).
+The format details, the precision rule (`decimals = ceil(log10(windowSeconds))`) and the migration
+procedure are in [ADR-0067 §6](../adr/0067-local-usage-journal.md).
 
-## Як перевірити
+## How to verify
 
-- `TOKENPACE_STUB=weekly-interp` — послідовність із трьох актів (успадкований якір → бамп → повзе й
-  упирається у стелю). Стуб іде на звичайному кадансі, тож повний прогін із 20 полів — це ~60 хв;
-  щоб не чекати, тисни **Refresh now** у Troubleshoot — кожен натиск просуває послідовність на один
-  пол, і всі три акти видно за пару хвилин. На живих даних те саме займе години, бо там бамп `d7`
-  трапляється раз на 1 год 40 хв роботи;
-- **Troubleshoot** — рядок `weekly: 80 % raw → 79.93 % est (N = 7.0, 1 sample)`: єдине місце, де обидва
-  числа стоять поруч на живих даних;
-- **журнал** — поля `raw` / `utilSrc` / `n` у кожному семплі (див. [ADR-0067](../adr/0067-local-usage-journal.md)).
+- `TOKENPACE_STUB=weekly-interp` — a sequence of three acts (inherited anchor → bump → creeps up and hits
+  the ceiling). The stub runs at the normal cadence, so a full run of 20 polls takes ~60 min; to skip the
+  wait, hit **Refresh now** in Troubleshoot — every press advances the sequence by one poll, and all three
+  acts are visible within a couple of minutes. On live data the same thing takes hours, because a `d7` bump
+  happens there once per 1 h 40 min of work;
+- **Troubleshoot** — the line `weekly: 80 % raw → 79.93 % est (N = 7.0, 1 sample)`: the only place where
+  both numbers stand side by side on live data;
+- **the journal** — the `raw` / `utilSrc` / `n` fields in every sample (see
+  [ADR-0067](../adr/0067-local-usage-journal.md)).
