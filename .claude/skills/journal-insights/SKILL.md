@@ -1,180 +1,182 @@
 ---
 name: journal-insights
 description: >
-  Відкрити сесію роботи з власним журналом використання TokenPace: порахувати профіль ряду
-  й далі відповідати на питання користувача про ці дані — сесії, статуси, вікна, тижні.
-  Тримає в курсі пасток обробки й планки корисності сигналу; артефакт будує лише за згодою.
-  Keywords: журнал, insights, аналітика, сигнали, віджети, usage-journal, jsonl,
-  analyse journal, journal analysis, insights widget, статуси, сесії, вікна.
+  Open a working session over your own TokenPace usage journal: compute the series profile,
+  then answer the user's questions about that data — sessions, states, windows, weeks.
+  Keeps the processing traps and the usefulness bar in view; builds an artifact only on request.
+  Keywords: journal, insights, analytics, signals, widgets, usage-journal, jsonl,
+  analyse journal, journal analysis, insights widget, states, sessions, windows,
+  журнал, аналітика, сигнали, віджети, статуси, сесії, вікна.
 ---
 
-# Робота з журналом використання
+# Working with the usage journal
 
-Скіл робить тебе **готовим до питань аналітиком**, а не генератором звітів. Користувач
-відкриває сесію, щоб щось запитати про свої дані; твоя робота — знати, що в них є, і
-відповісти саме на поставлене питання.
+This skill makes you an **analyst ready for questions**, not a report generator. The user opens
+a session to ask something about their data; your job is to know what is in it and to answer
+the question that was actually asked.
 
-**Головне правило: після старту зупинись і чекай питання.** Не будуй артефакт, не рахуй
-п'ять тем «щоб було», не пиши оглядовий звіт із власної ініціативи. Профіль ряду — єдине,
-що рахується без запиту.
+**The main rule: after the start, stop and wait for the question.** Do not build an artifact,
+do not compute five topics "just in case," do not write an overview report on your own
+initiative. The series profile is the only thing computed without being asked.
 
-## Крок 1. Порахуй профіль — це весь автоматичний обсяг
+## Step 1. Compute the profile — that is the entire automatic scope
 
 ```sh
 ls -la ~/Library/Application\ Support/com.artem-n.tokenpace/usage-journal-*.jsonl
 ```
 
-> ### 🚫 Журнал не потрапляє в контекст — ніколи
+> ### 🚫 The journal never enters the context
 >
-> `ls` показує **розмір**, а не вміст. Далі журнал бачить **лише скрипт**; ти бачиш його
-> агрегати.
+> `ls` shows the **size**, not the contents. From there on only the **script** sees the journal;
+> you see its aggregates.
 >
-> - **Жодного `Read`, `cat`, `head`, `tail`, `grep` по `.jsonl`** — навіть «одним оком»,
->   «глянути формат», «перевірити, чи не порожній».
-> - **Скрипт друкує тільки підсумки.** Не рядки журналу, не «перші кілька для перевірки»,
->   не сирий JSON. Якщо прогін вивалює більше ніж кількадесят рядків — це помилка скрипта,
->   а не результат.
-> - **Формат полів дивись у [§ «Що в рядку»](../../../docs/reference/journal-analysis.md#що-в-рядку)**,
->   а не в самому файлі. Таблиця там повна.
+> - **No `Read`, `cat`, `head`, `tail`, or `grep` over the `.jsonl`** — not even "just a peek,"
+>   "to see the format," "to check whether it is empty."
+> - **The script prints summaries only.** Not journal lines, not "the first few to check,"
+>   not raw JSON. If a run dumps more than a few dozen lines, that is a bug in the script,
+>   not a result.
+> - **Look up field formats in [§ "What a line contains"](../../../docs/reference/journal-analysis.md#what-a-line-contains)**,
+>   not in the file itself. The table there is complete.
 >
-> **Чому це не педантизм.** Серпневий журнал — **6,26 МБ, 9 039 рядків** (~1,6 млн токенів,
-> тобто більше за будь-яке контекстне вікно). Один рядок ≈ 700 байт, тож навіть `head -50`
-> коштує ~35k токенів — і не дає нічого, чого не дав би `python3` за той самий час. Рядки
-> JSONL нечитабельні очима, а всі відповіді все одно рахуються кодом.
+> **Why this is not pedantry.** The August journal is **6.26 MB, 9,039 lines** (~1.6M tokens,
+> more than any context window). One line is ~700 bytes, so even `head -50` costs ~35k tokens —
+> and gives you nothing that `python3` would not give in the same time. JSONL lines are
+> unreadable by eye, and every answer is computed by code anyway.
 >
-> **Виняток один:** діагностика пошкодженого файлу, коли скрипт падає на конкретному рядку.
-> Тоді дивись **той один рядок** (`sed -n '<N>p'`), а не околицю.
+> **One exception:** diagnosing a corrupted file when the script fails on a specific line.
+> Then look at **that one line** (`sed -n '<N>p'`), not its neighborhood.
 
-Одним прогоном дістань те, від чого залежить **будь-яка** подальша відповідь:
+In a single run, get everything that **any** subsequent answer depends on:
 
-| Складник | Як дістати | Навіщо |
+| Component | How to get it | What for |
 |---|---|---|
-| Довжина ряду | перший і останній `t` | які метрики взагалі дозріли |
-| Крок опитування | медіана різниці сусідніх `t` | межа роздільності = `2 · poll` |
-| Тариф | `plan` / `tier` (ціну спитай) | скільки роботи вміщає вікно |
-| Однорідність | розподіл `v` і `sevV` | чи можна брати `sev` готовим |
-| Вікна й тижні | к-сть 5h-вікон після дедупу, завершених циклів `d7` | що є в наявності для питань |
-| Графік | годин роботи на добу, вікон на добу | щільність профілю |
-| Вага задачі | медіана приросту `util` за сесію | чи одна задача здатна вичерпати вікно |
+| Series length | first and last `t` | which metrics have matured at all |
+| Polling step | median difference between adjacent `t` | resolution limit = `2 · poll` |
+| Plan | `plan` / `tier` (ask for the price) | how much work fits in a window |
+| Homogeneity | distribution of `v` and `sevV` | whether `sev` can be taken as given |
+| Windows and weeks | number of 5h windows after dedup, completed `d7` cycles | what is available to answer questions |
+| Schedule | working hours per day, windows per day | the density of the profile |
+| Task weight | median `util` increase per session | whether one task can exhaust a window |
 
-Скажи результат **одним компактним абзацом**: скільки діб, який крок, скільки вікон і
-тижнів, нижче якої межі висновків робити не можна. Без діаграм і без артефакту.
+State the result in **one compact paragraph**: how many days, what step, how many windows and
+weeks, and below which limit no conclusions can be drawn. No charts, no artifact.
 
-### Пастки, без яких навіть профіль вийде хибним
+### The traps without which even the profile comes out wrong
 
-Ці чотири діють уже на цьому кроці — решта довідника чекає свого питання:
+These four are in play already at this step — the rest of the reference waits for its question:
 
-- **`resets_at` двоїться на секунду.** Групувати за сирим значенням не можна: дало
-  **4 207 «вікон» замість 73**. Округляй ключ до хвилини.
-- **Парсер має бути толерантним.** Порожній `reset` мають **27–56 % рядків** — це
-  idle-вікна, не пошкоджені дані. Наївний `fromisoformat` падає посеред прогону, часто
-  вже вивівши частину результатів.
-- **Тривалості квантовані** кроком опитування: значень між кластерами `k · poll` не існує.
-- **Однорідність `sevV`.** Якщо весь зріз — поточне покоління, `sev` беруть готовим;
-  перерахунок лише за наявності старіших рядків.
+- **`resets_at` doubles by a second.** Grouping by the raw value is not allowed: it produced
+  **4,207 "windows" instead of 73**. Round the key to the minute.
+- **The parser must be tolerant.** An empty `reset` appears in **27–56% of lines** — those are
+  idle windows, not corrupted data. A naive `fromisoformat` fails mid-run, often after printing
+  part of the results.
+- **Durations are quantized** by the polling step: there are no values between the `k · poll` clusters.
+- **`sevV` homogeneity.** If the whole slice is the current generation, `sev` is taken as given;
+  recompute only when older lines are present.
 
-## Крок 2. Запропонуй напрямки — і зупинись
+## Step 2. Suggest directions — then stop
 
-Назви **3–4 конкретні питання**, на які саме цей ряд може відповісти, і окремо згадай
-оглядовий звіт як один із варіантів. Формулюй питаннями користувача, не назвами метрик:
+Name **3–4 concrete questions** this particular series can answer, and mention the overview
+report separately as one of the options. Phrase them as the user's questions, not as metric names:
 
-> Твій ряд — 16,8 доби, крок 3,2 хв, 74 п'ятигодинні вікна, 3 завершені тижні.
-> Можу відповісти на: як виглядають твої 5h-сесії накладено · скільки часу бари були
-> в кожному стані (матриця 5h × 7d) · чи тиждень тисне раніше за вікно · коли доба
-> найщільніша. Що цікавить? Або зібрати оглядовий звіт по всьому.
+> Your series is 16.8 days, step 3.2 min, 74 five-hour windows, 3 completed weeks.
+> I can answer: what your 5h sessions look like overlaid · how much time the bars spent
+> in each state (the 5h × 7d matrix) · whether the week presses earlier than the window ·
+> when the day is densest. What are you interested in? Or I can put together an overview
+> report on everything.
 
-**Оглядовий звіт будується лише тоді, коли користувач його обрав** — прямо або сказавши,
-що не знає, з чого почати. Сам по собі він не є дефолтом.
+**The overview report is built only when the user chooses it** — either directly or by saying
+they do not know where to start. It is not a default on its own.
 
-## Крок 3. Відповідай на питання, яке поставлене
+## Step 3. Answer the question that was asked
 
-Питання задає і метрику, і форму. Приклади реальних формулювань:
+The question determines both the metric and the form. Examples of real phrasings:
 
-| Питання користувача | Що будувати |
+| The user's question | What to build |
 |---|---|
-| «покажи аналіз моїх 5h сесій» | усі вікна накладені в координатах «частка вікна × `util`», одна крива на вікно |
-| «покажи аналіз статусів моїх інтервалів» | матриця 5h × 7d із крайовими смугами, перемикач вибірки часу — вимоги до форми в [§ «Частки станів»](../../../docs/reference/journal-analysis.md#частки-станів-матриця-5h--7d-із-крайовими-смугами) |
-| «коли я найбільше працюю» | профіль по годинах доби / днях тижня |
-| «скільки лишилось на тиждень» | залишок у повних вікнах: `залишок_% · N / 100` |
-| «чи можна передбачити тривогу» | що передує помаранчевому за 20–30 хв |
+| "show me an analysis of my 5h sessions" | all windows overlaid in "fraction of window × `util`" coordinates, one curve per window |
+| "show me an analysis of my interval states" | a 5h × 7d matrix with edge bands and a time-sample switch — the form requirements are in [§ "State shares"](../../../docs/reference/journal-analysis.md#state-shares-a-5h--7d-matrix-with-marginal-bands) |
+| "when do I work the most" | a profile by hour of day / day of week |
+| "how much is left for the week" | the remainder in whole windows: `remaining_% · N / 100` |
+| "can the alarm be predicted" | what precedes orange by 20–30 min |
 
-**Довантажуй з [journal-analysis.md](../../../docs/reference/journal-analysis.md) розділ під
-тему**, а не файл цілком:
+**Load the section for the topic from
+[journal-analysis.md](../../../docs/reference/journal-analysis.md)**, not the whole file:
 
-| Тема питання | Розділ довідника |
+| Question topic | Reference section |
 |---|---|
-| сесії, паузи, тривалості | «Склеювання сесій», «Статистичні властивості» |
-| кольори, статуси, частки часу | «Коли рахувати стани: три вибірки часу» |
-| вікна, піки, згоріле | «Повнота спостереження», «Пік проти останнього значення» |
-| гроші, вартість вікна | «Переведення в гроші», «Коефіцієнт N» |
-| правила, пороги, тривога | «Оптимізація поведінки застосунку», «Спершу: повні правила кольору» |
-| вибір форми діаграми | «Які діаграми будувати і коли» |
+| sessions, pauses, durations | "Stitching sessions", "Statistical properties" |
+| colors, states, time shares | "When to count states: three time samples" |
+| windows, peaks, burned quota | "Observation completeness", "The peak versus the last value" |
+| money, cost of a window | "Converting to money", "Coefficient N" |
+| rules, thresholds, alarm | "Optimizing app behavior", "First: the complete color rules" |
+| choosing a chart form | "Which charts to build, and when" |
 
-### Технічні умови, що діють у кожній відповіді
+### Technical conditions that apply to every answer
 
-- **Вибірка часу.** Для «скільки часу бар був у стані X» — тільки «робота з Claude»
-  (±15 хв навколо зростання `util`). `sessionIdle` завищує активність **утричі**.
-- **Зважування.** Кожен замір — часом до наступного, обрізаним на 4 кроках опитування.
-- **Заблоковані стани — окремо.** Вибірка «робота з Claude» їх недорахує за конструкцією.
-  Блокування — подія з тривалістю, не стан із часткою.
-- **Значущість.** Ефект перевіряй проти нуль-моделі. На реальних даних дві з трьох
-  переконливих на око гіпотез не пройшли поріг.
-- **Зріз називай явно.** Довжина ряду перевертає висновки: шість уже перевернулися між
-  зрізами 1 / 3,5 / 11 діб.
+- **Time sample.** For "how much time the bar spent in state X" — only "working with Claude"
+  (±15 min around a rise in `util`). `sessionIdle` inflates activity **threefold**.
+- **Weighting.** Each sample is weighted by the time to the next one, capped at 4 polling steps.
+- **Blocked states are separate.** The "working with Claude" sample undercounts them by
+  construction. Being blocked is an event with a duration, not a state with a share.
+- **Significance.** Test the effect against a null model. On real data, two out of three
+  hypotheses that looked convincing failed the threshold.
+- **Name the slice explicitly.** Series length overturns conclusions: six have already flipped
+  between the 1 / 3.5 / 11-day slices.
 
-## Крок 4. Спитай про формат, перш ніж будувати сторінку
+## Step 4. Ask about the format before building a page
 
-**За замовчуванням відповідь іде в термінал** — таблиця, кілька чисел, короткий висновок.
-Це дешево і достатньо для більшості питань.
+**By default the answer goes to the terminal** — a table, a few numbers, a short conclusion.
+That is cheap and sufficient for most questions.
 
-Артефакт коштує помітно більше токенів, тож **коли питання тягне на сторінку — спитай,
-а не вирішуй сам**: «зробити таблицею тут чи зібрати сторінку з перемикачами?» Виняток
-один: користувач сам сказав «сторінка», «артефакт», «покажи візуально» — тоді будуй без
-уточнень.
+An artifact costs noticeably more tokens, so **when a question is page-sized, ask rather than
+decide on your own**: "a table here, or a page with switches?" One exception: the user said
+"page," "artifact," or "show me visually" — then build without asking.
 
-Артефакт справді доречний там, де без нього форма не працює: перемикачі вибірки,
-накладені траєкторії, велика матриця, кілька пов'язаних діаграм на одній осі.
+An artifact genuinely fits where the form does not work without one: sample switches, overlaid
+trajectories, a large matrix, several related charts on one axis.
 
-Якщо будуєш — обов'язкові елементи:
+If you do build one, these elements are mandatory:
 
-- **Липка панель параметрів**, якщо контроли міняють усі діаграми.
-- **Секція «що з цим робити»** — що діє, чого робити не варто, і що пропонується, якщо
-  сигналу немає.
-- **Зріз, на якому отримано висновок**, названий явно.
-- Перед публікацією — контрольний список довідника (17 пунктів).
+- **A sticky parameter panel**, if the controls change every chart.
+- **A "what to do with this" section** — what holds, what is not worth doing, and what is
+  proposed if there is no signal.
+- **The slice the conclusion came from**, named explicitly.
+- Before publishing — the reference's checklist (17 items).
 
-## Планка корисності — діє на будь-яку відповідь
+## The usefulness bar — it applies to every answer
 
-Перш ніж рахувати щось, що претендує на місце в Insights чи Notifications:
+Before computing anything that lays claim to a place in Insights or Notifications:
 
-> Чи існує дія, яку користувач виконає інакше, побачивши це — і яку виконав би
-> неправильно, не побачивши?
+> Is there an action the user would take differently having seen this — and would have taken
+> wrongly without seeing it?
 
-**Не пройшло — скажи це одразу**, до побудови, і запропонуй, чим сигнал добути: інший
-вимір, інша вибірка, інша метрика.
+**If it does not pass, say so right away**, before building, and suggest where the signal might
+come from instead: another dimension, another sample, another metric.
 
-**Тиша — валідний результат.** Чотири кандидати вже відпали: розподіл сесій за годиною
-старту, кодування вікон за піковою швидкістю, кореляція простою з фінальним `util`,
-згорілий хвіст у грошах.
+**Silence is a valid result.** Four candidates have already fallen away: the distribution of
+sessions by starting hour, coding windows by peak rate, the correlation between idle time and
+final `util`, and the burned tail in money terms.
 
-Питання на кшталт «покажи мої сесії» цієї планки **не потребують** — користувач хоче
-подивитись на власні дані, і це законно саме по собі. Планка стосується пропозицій
-покласти щось у продукт.
+Questions like "show me my sessions" do **not** need to clear this bar — the user wants to look
+at their own data, and that is legitimate in itself. The bar applies to proposals to put
+something into the product.
 
-## Чого не робити
+## What not to do
 
-- **Не заганяти журнал у контекст.** Ані `Read`, ані `cat`/`head`/`grep` по `.jsonl`; скрипт
-  друкує агрегати, не рядки. 6,26 МБ ≈ 1,6 млн токенів — більше за контекстне вікно, і жодної
-  інформації, якої не дасть `python3`. Деталі — у блоці на кроці 1.
-- **Не будувати артефакт без згоди.** Найдорожчий спосіб не вгадати — зібрати сторінку
-  на питання, яке вимагало трьох чисел.
-- **Не рахувати «заодно» сусідні теми.** Одне питання — одна відповідь; решту запропонуй
-  словами.
-- **Не пропонувати крутити пороги кольорів.** Пересунути межу = змінити вердикт, не
-  змінивши витрати. Розтягнути поріг на 56 % прибирає менш ніж пів пункта помаранчевого.
-- **Не подавати невитрачену квоту як борг.** П'ятигодинні вікна відкриваються кілька разів
-  на добу й покриваються тим самим тижневим платежем — підсумувавши їхні залишки, ти
-  рахуєш одну оплату по кілька разів. Спокійний тиждень — просто спокійний тиждень.
-- **Не змішувати ряди різних профілів.** Усереднення приховає саме ту різницю, заради
-  якої сигнал існує.
-- **Не показувати сирі дані замість висновку.** Хмара з 3 000 крапок — це не аналіз.
+- **Do not pull the journal into the context.** No `Read`, no `cat`/`head`/`grep` over the
+  `.jsonl`; the script prints aggregates, not lines. 6.26 MB ≈ 1.6M tokens — more than the
+  context window, and none of it is information `python3` would not give you. Details are in
+  the block in step 1.
+- **Do not build an artifact without consent.** The most expensive way to guess wrong is to
+  assemble a page for a question that needed three numbers.
+- **Do not compute neighboring topics "while you are at it."** One question, one answer;
+  offer the rest in words.
+- **Do not propose tuning the color thresholds.** Moving a boundary changes the verdict without
+  changing the spending. Stretching the threshold by 56% removes less than half a point of orange.
+- **Do not present unspent quota as a debt.** Five-hour windows open several times a day and are
+  covered by the same weekly payment — summing their remainders counts one payment several times
+  over. A calm week is just a calm week.
+- **Do not mix series with different profiles.** Averaging hides exactly the difference the
+  signal exists for.
+- **Do not show raw data instead of a conclusion.** A cloud of 3,000 dots is not an analysis.

@@ -1,426 +1,438 @@
-# Аналіз журналу використання
+# Analyzing the usage journal
 
-Довідник для тих, хто рахує статистику з `usage-journal-*.jsonl` — власного чи наданого іншим
-користувачем. Описує, **що в журналі є, як його правильно обробляти і на яких місцях обробка
-мовчки бреше**.
+A reference for anyone computing statistics from `usage-journal-*.jsonl` — your own or one supplied
+by another user. It describes **what the journal contains, how to process it correctly, and where
+processing silently lies to you**.
 
-> Пов'язане: [ADR-0067](../adr/0067-local-usage-journal.md) — рішення про формат і збір;
-> [usage-api-quirks.md](usage-api-quirks.md) — особливості самого API (квантування `util`,
-> незрівнянність 5h і 7d, зникнення `resets_at`);
-> [users-and-goals.md](users-and-goals.md) — перевірка, чи знайдений сигнал взагалі корисний.
+> Related: [ADR-0067](../adr/0067-local-usage-journal.md) — the decision on format and collection;
+> [usage-api-quirks.md](usage-api-quirks.md) — quirks of the API itself (quantized `util`,
+> the incomparability of 5h and 7d, the disappearance of `resets_at`);
+> [users-and-goals.md](users-and-goals.md) — the check for whether a signal you found is useful at all.
 
-Цей файл **не** дублює два перші: там — звідки беруться дані, тут — що з ними робити далі.
+This file does **not** duplicate the first two: those cover where the data comes from, this one
+covers what to do with it next.
 
-## Навіщо він
+## Why it exists
 
-Проєкт у фазі пошуку сигналів для Insights ([#241](https://github.com/artem-from-ua/tokenpace/issues/241))
-і Notifications. Кожен такий пошук починається з того самого: розібрати JSONL, звести до вікон або
-сесій, порахувати агрегат. Помилки теж повторюються — і коштують не тільки часу, а й хибних
-продуктових висновків, які виглядають переконливо.
+The project is in the phase of hunting for signals for Insights
+([#241](https://github.com/artem-from-ua/tokenpace/issues/241)) and Notifications. Every such hunt
+starts the same way: parse the JSONL, roll it up into windows or sessions, compute an aggregate. The
+mistakes repeat too — and they cost not just time but false product conclusions that look convincing.
 
-## Планка для сигналу — та сама, що в меню-барі
+## The bar for a signal — the same one as in the menu bar
 
-**Insights і Notifications не мають пільгового режиму.** Вимога з
-[users-and-goals.md](users-and-goals.md) чинна для них дослівно:
+**Insights and Notifications get no discount.** The requirement from
+[users-and-goals.md](users-and-goals.md) applies to them word for word:
 
-> Чи існує дія, яку користувач виконає інакше, побачивши це — і яку виконав би неправильно,
-> не побачивши?
+> Is there an action the user would take differently having seen this — and would have taken
+> wrongly without seeing it?
 
-Спокуса послабити планку виникає щоразу: Insights — окреме вікно, куди йдуть свідомо, тож здається,
-що туди «можна покласти все цікаве». Це хибно з двох причин.
+The temptation to lower the bar comes up every time: Insights is a separate window you open
+deliberately, so it feels like "anything interesting can go in there." That is wrong for two reasons.
 
-- **Показ коштує уваги на будь-якій поверхні.** Графік, який нічого не змінює, витісняє той, що
-  змінює, — і привчає не дивитися взагалі.
-- **Нотифікація коштує дорожче за меню-бар, а не дешевше.** Вона приходить сама, перериває роботу і
-  не має «спокійного стану», у якому її можна проігнорувати поглядом. Планка для неї **вища**.
+- **Showing something costs attention on any surface.** A chart that changes nothing crowds out the
+  one that does — and trains the user not to look at all.
+- **A notification costs more than the menu bar, not less.** It arrives on its own, interrupts work,
+  and has no "calm state" you can ignore with a glance. Its bar is **higher**.
 
-Що з цього випливає практично:
+What follows in practice:
 
-| Принцип із меню-бару | Як читається для Insights / Notifications |
+| Principle from the menu bar | How it reads for Insights / Notifications |
 |---|---|
-| **Значення — вхід моделі, колір і вердикт — вихід** | Графік самого `util` у часі не є сигналом. Сигнал — коли з нього видно рішення, яке інакше було б неправильним |
-| **Тиша — валідний стан** | Порожній екран Insights у спокійний тиждень — результат, а не недоробка. Нотифікація, якої не було, — теж |
-| **Ієрархія за терміновістю корекції, не за величиною числа** | Велике число (77 % невикористаного) без можливої дії — тихіше за мале (лишилось 0,6 вікна до ресету) |
-| **Користувач уже щось контролює сам** | Перш ніж пропонувати сигнал, перевірити, чи відповідь не задається там, де задається сама величина (напр. cap у білінгу) |
+| **The value is the model's input, the color and the verdict are its output** | A chart of `util` over time is not a signal. It becomes one when a decision that would otherwise be wrong is visible in it |
+| **Silence is a valid state** | An empty Insights screen in a calm week is a result, not an unfinished feature. A notification that never fired is one too |
+| **Ranked by how urgently a correction is needed, not by how big the number is** | A big number (77% unused) with no action available is quieter than a small one (0.6 of a window left before the reset) |
+| **The user already controls some things** | Before proposing a signal, check whether the answer is not already set where the value itself is set (e.g. the billing cap) |
 
-**Найчастіший провал** на цих даних — статистично бездоганний результат без дії. Приклади, що не
-пройшли перевірку в реальному пошуку: розподіл сесій за годиною старту, кодування вікон кольором за
-піковою швидкістю, кореляція простою з фінальним `util`. Усі троє коректні й нічого не змінюють.
+**The most common failure** on this data is a statistically flawless result with no action attached.
+Examples that failed the test in a real hunt: the distribution of sessions by start hour, coloring
+windows by peak rate, correlating idle time with final `util`. All three are correct and change
+nothing.
 
-## Журнал обробляють скриптом, а не читають
+## The journal is processed by a script, never read
 
-**Файл ніколи не потрапляє в контекст агента.** Таблиця полів нижче існує саме для того, щоб
-не було потреби зазирати у файл: формат повний, і `Read`/`cat`/`head`/`grep` по `.jsonl` не
-додають нічого, крім витрачених токенів.
+**The file never enters the agent's context.** The field table below exists precisely so that there
+is no need to peek inside the file: the format is complete, and `Read`/`cat`/`head`/`grep` over the
+`.jsonl` add nothing but spent tokens.
 
-Порядок величин, щоб було зрозуміло, чому це правило, а не порада: серпневий ряд — **6,26 МБ,
-9 039 рядків**, тобто ~1,6 млн токенів (**більше за контекстне вікно**). Один рядок ≈ 700 байт,
-тож навіть `head -50` коштує ~35k токенів і не дає нічого, чого не порахує `python3` за той
-самий час.
+Orders of magnitude, so it is clear why this is a rule rather than a suggestion: the August series is
+**6.26 MB, 9,039 lines**, or ~1.6M tokens (**larger than the context window**). One line is ≈700
+bytes, so even `head -50` costs ~35k tokens and gives you nothing `python3` will not compute in the
+same amount of time.
 
-- **Скрипт друкує агрегати, не рядки.** Прогін, що вивалює сирий JSON «для перевірки», —
-  помилка скрипта, а не проміжний результат.
-- **Єдиний виняток** — діагностика пошкодженого рядка, на якому падає парсер: дивись **той
-  один рядок** (`sed -n '<N>p'`), не околицю.
+- **The script prints aggregates, not lines.** A run that dumps raw JSON "just to check" is a bug in
+  the script, not an intermediate result.
+- **The only exception** is diagnosing a corrupted line the parser chokes on: look at **that one
+  line** (`sed -n '<N>p'`), not its neighborhood.
 
-## Що в рядку
+## What a line contains
 
-Один об'єкт на рядок, тегований `kind`. Для аналітики цікаві `usage`-рядки; `status`, `error` і
-`resume` описані в [ADR-0067](../adr/0067-local-usage-journal.md).
+One object per line, tagged with `kind`. For analytics the `usage` lines are the interesting ones;
+`status`, `error` and `resume` are described in [ADR-0067](../adr/0067-local-usage-journal.md).
 
-| Поле | Тип | Що це |
+| Field | Type | What it is |
 |---|---|---|
-| `t` | ISO-8601 UTC | момент полла |
-| `h5.util` | Int 0…100 | 5-годинне вікно, цілий відсоток |
-| `h5.reset` | ISO-8601 | коли вікно ресетиться |
-| `h5.timePct` | Double 0…1 | скільки вікна минуло |
-| `h5.sev` | `blue`/`green`/`yellow`/`orange`/`red` | колір-бакет, незалежний від косметичних налаштувань |
-| `h5.sevRaw` | те саме, **необов'язкове** | вердикт, записаний під час полла, — **лише** якщо він відрізняється від `sev`. Відсутнє поле означає «збігається», а не «немає даних» |
-| `d7.*` | те саме | 7-денне вікно |
-| `scoped[]` | масив | per-model ліміти (`name`, `pct`, `reset`, `timePct`, `sev`, `sevRaw`) |
-| `v` | Int | версія **формату** рядка (4 — поточна); відсутнє читається як 1 |
-| `sevV` | Int | покоління **колірної моделі**, що винесла `sev` (1 — поточне); відсутнє = старіше за перше іменоване |
-| `spend` | об'єкт | ліміт витрат, спожиті кредити, валюта |
-| `plan` / `tier` | String | `max`/`pro`, тариф — потрібні для атрибуції ряду |
-| `sessionIdle` | Bool | застосунок вважав сесію неактивною |
-| `ms` | Int | латентність відповіді API |
+| `t` | ISO-8601 UTC | the moment of the poll |
+| `h5.util` | Int 0…100 | the 5-hour window, whole percent |
+| `h5.reset` | ISO-8601 | when the window resets |
+| `h5.timePct` | Double 0…1 | how much of the window has elapsed |
+| `h5.sev` | `blue`/`green`/`yellow`/`orange`/`red` | the color bucket, independent of cosmetic settings |
+| `h5.sevRaw` | same | the verdict recorded at poll time — **only** if it differs from `sev`. A missing field means "identical", not "no data" |
+| `d7.*` | same | the 7-day window |
+| `scoped[]` | array | per-model limits (`name`, `pct`, `reset`, `timePct`, `sev`, `sevRaw`) |
+| `v` | Int | the version of the line **format** (4 is current); absent reads as 1 |
+| `sevV` | Int | the generation of the **color model** that produced `sev` (1 is current); absent = older than the first named one |
+| `spend` | object | the spend limit, credits consumed, currency |
+| `plan` / `tier` | String | `max`/`pro`, the plan — needed to attribute the series |
+| `sessionIdle` | Bool | the app considered the session inactive |
+| `ms` | Int | API response latency |
 
-**`sev` беруть готовим — але спершу дивляться на `sevV`.** Готове значення вже враховує
-weekly-capacity gate ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md)), заборону синього для
-per-model вікон ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)) і не залежить від
-косметичних налаштувань користувача — відтворити все це в аналітиці важче, ніж здається (див.
-[«Спершу: повні правила кольору»](#спершу-повні-правила-кольору-а-не-самі-пороги)).
+**Take `sev` as given — but look at `sevV` first.** The ready-made value already accounts for the
+weekly-capacity gate ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md)) and the ban on blue
+for per-model windows ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)), and it does not
+depend on the user's cosmetic settings — reproducing all of that in analysis is harder than it looks
+(see ["First: the complete color rules"](#first-the-complete-color-rules-not-just-the-thresholds)).
 
-Умова — щоб зріз був однорідний: усі рядки з `sevV`, що дорівнює поточному поколінню. Якщо в
-журналі є семпли з меншим `sevV` (або без нього), вони судилися **іншою** моделлю, і змішувати їх з
-рештою не можна. Що з цим робити — пункт 16
-[контрольного списку](#контрольний-список-перед-тим-як-показати-результат).
+The condition is that the slice be homogeneous: every line with a `sevV` equal to the current
+generation. If the journal holds samples with a lower `sevV` (or none at all), they were judged by a
+**different** model, and mixing them with the rest is not allowed. What to do about it is item 16 of
+the [checklist](#checklist-before-showing-a-result).
 
-## Гранулярність: що можна виміряти, а що ні
+## Granularity: what can be measured and what cannot
 
-**Опитування не частіше ніж раз на 3 хвилини, а в простої — раз на 15**
-([ADR-0032](../adr/0032-simplified-polling-cadence.md)). Це фізична межа роздільності всього, що
-рахується з журналу.
+**Polling happens no more than once every 3 minutes, and once every 15 while idle**
+([ADR-0032](../adr/0032-simplified-polling-cadence.md)). This is the physical resolution limit of
+everything computed from the journal.
 
-Виміряно на реальних рядах:
+Measured on real series:
 
-| Ряд | Медіанний інтервал | Частка інтервалів > 20 хв |
+| Series | Median interval | Share of intervals > 20 min |
 |---|---|---|
-| Max, серпень 2026 | 3,2 хв | 0,6 % |
-| Pro, серпень 2026 | 15,0 хв | 5,1 % |
+| Max, August 2026 | 3.2 min | 0.6% |
+| Pro, August 2026 | 15.0 min | 5.1% |
 
-Розподіл інтервалів **бімодальний**, не неперервний: 3,2 хв (штатний полл) або ~16 хв (після
-простою). Значень між ними майже немає — на ряді Max їх 20 із 5 679, тобто 0,35 %.
+The interval distribution is **bimodal**, not continuous: 3.2 min (the regular poll) or ~16 min
+(after idling). There is almost nothing in between — on the Max series there are 20 out of 5,679,
+i.e. 0.35%.
 
-### Наслідок: тривалості квантовані
+### Consequence: durations are quantized
 
-Будь-яка тривалість, обчислена як різниця між замірами, є **сумою цілих інтервалів**. На ряді з
-кроком 3,2 хв реальні значення збиваються в кластери 6,4 · 9,6 · 12,8 · 16,0 · 19,3 хв — а **між
-кластерами значень не існує в принципі**.
+Any duration computed as a difference between measurements is a **sum of whole intervals**. On a
+series with a 3.2 min step, real values cluster at 6.4 · 9.6 · 12.8 · 16.0 · 19.3 min — and
+**between the clusters no values exist at all**.
 
-Це не шум, який згладиться на великій вибірці. Це гребінка, і вона ламає гістограми:
+This is not noise that smooths out on a large sample. It is a comb, and it breaks histograms:
 
-> **Пастка.** Логарифмічна сітка бінів ріже цю гребінку навскіс: одні біни ловлять по два кластери
-> й виглядають переповненими, інші падають точно в проміжок і виходять **порожніми при насичених
-> сусідах**. На реальному ряді бін 9,8–12,2 хв виявився нульовим, тоді як сусідні мали 238 і 242
-> спостереження. Виглядає як втрачені дані — насправді там не може бути значень.
+> **Trap.** A logarithmic bin grid cuts across that comb at an angle: some bins catch two clusters
+> each and look overflowing, others land exactly in a gap and come out **empty next to saturated
+> neighbors**. On a real series the 9.8–12.2 min bin turned out to be zero while its neighbors had
+> 238 and 242 observations. It looks like lost data — in fact no values can be there.
 >
-> **Як правильно:** біни по цілій кількості кроків опитування (`k · poll`, `k = 1, 2, 3…`), а не
-> геометричні. Після цього порожніх бінів на ряді Max лишився 1 із 28 — і той у хвості, де просто
-> мало даних.
+> **How to do it right:** bin by a whole number of polling steps (`k · poll`, `k = 1, 2, 3…`), not
+> geometrically. After that the Max series was left with 1 empty bin out of 28 — and that one in the
+> tail, where there is simply little data.
 
-### Що з цього не можна робити
+### What you must not do with this
 
-- **Не порівнювати абсолютні короткі тривалості між користувачами з різним інтервалом.** Пауза
-  тривалістю 10 хв у ряді з кроком 15 хв невидима взагалі. Порівняння коректне лише на масштабах,
-  помітно більших за грубіший із двох кроків.
-- **Не вважати односемплові події такими, що мають тривалість.** Один-єдиний замір із приростом
-  фіксує факт роботи, але його тривалість невимірна: вона десь між 0 і одним кроком.
-- **Не будувати висновки нижче межі роздільності** — це `2 · poll` для будь-якої величини, що
-  рахується як різниця двох моментів.
+- **Do not compare absolute short durations between users with different intervals.** A 10-minute
+  pause in a series with a 15-minute step is invisible entirely. The comparison is only valid at
+  scales noticeably larger than the coarser of the two steps.
+- **Do not treat single-sample events as having a duration.** A lone measurement with an increment
+  records the fact that work happened, but its duration is unmeasurable: it is somewhere between 0
+  and one step.
+- **Do not draw conclusions below the resolution limit** — that is `2 · poll` for any quantity
+  computed as the difference between two moments.
 
-## Дедуплікація вікон: `resets_at` двоїться
+## Deduplicating windows: `resets_at` comes in doubles
 
-Той самий ресет трапляється в журналі у двох написаннях, що різняться на секунду:
-`06:59:59.883…` і `07:00:00.276…`. Це один ресет, а не два вікна.
+The same reset shows up in the journal in two spellings a second apart: `06:59:59.883…` and
+`07:00:00.276…`. That is one reset, not two windows.
 
-Групування за сирим значенням дає **катастрофічно хибний результат**: на ряді Max — **4 207 «вікон»
-замість 73**, тобто майже шістдесятикратне завищення.
+Grouping by the raw value gives a **catastrophically wrong result**: on the Max series — **4,207
+"windows" instead of 73**, nearly a sixtyfold overcount.
 
 ```python
-# ПРАВИЛЬНО: округлити до хвилини
+# CORRECT: round to the minute
 key = reset.replace(second=0, microsecond=0) + timedelta(minutes=1 if reset.second >= 30 else 0)
 ```
 
-Для тижневих вікон надійніше групувати **за добою ресету** — секундна похибка там теж є, а вікна
-рознесені на 7 днів, тож колізій не буває.
+For weekly windows it is more reliable to group **by the day of the reset** — the one-second error is
+there too, but the windows are 7 days apart, so collisions do not happen.
 
-> Окремо: значення `resets_at`, що лягають **рівно** на 10-хвилинну межу без дробових секунд, —
-> це старий локальний фолбек, а не серверні дані. Деталі й спосіб відрізнити —
-> [usage-api-quirks.md § «10-хвилинна сітка в даних»](usage-api-quirks.md#the-10-minute-grid-in-the-data-is-ours-not-the-servers).
+> Separately: `resets_at` values that land **exactly** on a 10-minute boundary with no fractional
+> seconds are the old local fallback, not server data. The details and how to tell them apart are in
+> [usage-api-quirks.md § "The 10-minute grid in the data is ours, not the server's"](usage-api-quirks.md#the-10-minute-grid-in-the-data-is-ours-not-the-servers).
 
-## Детекція ресету: інстант плюс падіння, ніколи щось одне
+## Reset detection: the instant plus the drop, never just one
 
-Дедуплікація вище дає **межі вікон**. Але «коли саме вікно обернулося» — окреме питання, і наївна
-відповідь на нього хибна двічі.
+The deduplication above gives you **window boundaries**. But "when exactly did the window turn over"
+is a separate question, and the naive answer to it is wrong twice over.
 
-**Ресет = зсув інстанта `resets_at` І падіння `util`.** Обидві умови обов'язкові:
+**A reset = a shift of the `resets_at` instant AND a drop in `util`.** Both conditions are required:
 
-- **Тільки падіння `util`** — недостатньо: воно може бути give-back'ом
-  ([#239](https://github.com/artem-from-ua/tokenpace/issues/239)), тобто поверненням квоти без
-  обертання вікна. Сплутати їх означає зламати саме ту фічу, заради якої журнал збирається.
-- **Тільки зсув інстанта** — недостатньо: інстант дрейфує вперед на idle-вікні без жодної витрати.
+- **The `util` drop alone** is not enough: it can be a give-back
+  ([#239](https://github.com/artem-from-ua/tokenpace/issues/239)), i.e. quota returned without the
+  window turning over. Confusing the two means breaking the very feature the journal is collected for.
+- **The instant shift alone** is not enough: the instant drifts forward on an idle window without any
+  spend at all.
 
 ```python
-TOLERANCE_S  = 600    # 10 хв: гасить джитер resets_at і оптимістичне округлення
-MIN_DROP_PP  = 1.0    # падіння util мусить бути змістовним
+TOLERANCE_S  = 600    # 10 min: damps resets_at jitter and optimistic rounding
+MIN_DROP_PP  = 1.0    # the util drop has to be meaningful
 
-moved = (abs(epoch - epoch.shift()) / 1e9 > TOLERANCE_S)   # інстант зсунувся
-      | (epoch.isna()  & prev.notna())                     # інстант → порожньо
-      | (epoch.notna() & prev.isna())                      # порожньо → інстант
-moved.iloc[0] = False                                      # перший семпл — не подія
+moved = (abs(epoch - epoch.shift()) / 1e9 > TOLERANCE_S)   # the instant shifted
+      | (epoch.isna()  & prev.notna())                     # instant → empty
+      | (epoch.notna() & prev.isna())                      # empty → instant
+moved.iloc[0] = False                                      # the first sample is not an event
 turnover = moved & (util_drop >= MIN_DROP_PP)
 ```
 
-**Чому `TOLERANCE_S = 600`.** Два джерела шуму складаються: API щополла джитерить дробову частину
-`resets_at`, а біля межі застосунок оптимістично округлює наступний ресет уперед до ~10 хв
-([ADR-0030](../adr/0030-optimistic-reset-and-exact-timer.md)). Без допуску наївне порівняння дає
-**близько 200 «ресетів» за добу замість трьох**.
+**Why `TOLERANCE_S = 600`.** Two sources of noise add up: the API jitters the fractional part of
+`resets_at` on every poll, and near the boundary the app optimistically rounds the next reset forward
+by up to ~10 min ([ADR-0030](../adr/0030-optimistic-reset-and-exact-timer.md)). Without a tolerance,
+naive comparison yields **about 200 "resets" a day instead of three**.
 
-### Порожній `reset` — це ідентичність вікна, а не пропуск
+### An empty `reset` is a window identity, not a missing value
 
-Найтонше місце. `""` означає idle-вікно без пейсинг-геометрії, і перехід **у** порожнечу — така сама
-подія обертання, як і зсув на новий інстант. Тому в умові вище три гілки, а `NaT` бере участь як
-повноцінне значення.
+The subtlest spot. `""` means an idle window with no pacing geometry, and the transition **into**
+emptiness is just as much a turnover event as a shift to a new instant. That is why the condition
+above has three branches, and `NaT` participates as a full-fledged value.
 
-> **Що ламається без цього.** Наївний `dropna()` з'їдає idle-вікна: один ресет губиться зовсім,
-> інший датується на **8 годин пізніше**. Після виправлення частка ресетів `h5`, спостережених
-> наживо, зросла з 5 із 10 до **8 із 10**.
+> **What breaks without this.** A naive `dropna()` eats idle windows: one reset is lost entirely,
+> another is dated **8 hours later**. After the fix, the share of `h5` resets observed live rose from
+> 5 out of 10 to **8 out of 10**.
 
-### Оптимістичне округлення занижує піки
+### Optimistic rounding understates the peaks
 
-Інстант ресету брати з **останнього `reset` серед семплів до падіння**, округленого до хвилини — не
-з першого семпла після. Інакше пік вікна систематично занижується: виміряні розбіжності —
-**67 % замість 21 %** і **49 % замість 42 %** на тих самих вікнах.
+Take the reset instant from the **last `reset` among the samples before the drop**, rounded to the
+minute — not from the first sample after it. Otherwise the window peak is systematically understated:
+the measured discrepancies were **67% instead of 21%** and **49% instead of 42%** on the same windows.
 
-### Подія «через діру» — недатована
+### An event "across a gap" is undated
 
-Якщо обертання сталося всередині розриву спостереження, ми не знаємо ні коли воно було, ні чи було
-воно одне. Позначати окремим прапорцем (`across_gap`) і **не датувати**: таймстемп детекції — це
-момент, коли ми знову подивилися, а не момент події. Фактичний інстант брати з `prev_reset`.
+If the turnover happened inside an observation gap, we know neither when it was nor whether there was
+only one. Mark it with its own flag (`across_gap`) and **do not date it**: the detection timestamp is
+the moment we looked again, not the moment of the event. Take the actual instant from `prev_reset`.
 
-Поріг для прапорця — **діра > 15 хв**. Без нього 4 з 5 позначок виявляються дірами по 3 хвилини,
-тобто звичайною каденцією опитування.
+The threshold for the flag is a **gap > 15 min**. Without it, 4 out of 5 flags turn out to be
+3-minute gaps — i.e. the ordinary polling cadence.
 
-## Розрив спостереження — першокласна сутність
+## An observation gap is a first-class entity
 
-`pausePollingWhenScreenLocked` зупиняє опитування при заблокованому екрані, тож **діри в ряді є за
-дизайном**. Головний інваріант:
+`pausePollingWhenScreenLocked` stops polling while the screen is locked, so **gaps in the series are
+by design**. The main invariant:
 
-> **«Немає даних» ≠ «нічого не відбувалося».** Ніколи не інтерполювати через діру, не з'єднувати
-> лінією і не рахувати діру за нуль.
+> **"No data" ≠ "nothing happened."** Never interpolate across a gap, never connect it with a line,
+> and never count a gap as zero.
 
-Розрив визначається за **двома незалежними ознаками**, і достатньо однієї:
+A gap is identified by **two independent signs**, and one of them is enough:
 
 ```python
-CADENCE_IDLE_S  = 900     # консервативний дефолт: per-sample каденція невідома
+CADENCE_IDLE_S  = 900     # conservative default: the per-sample cadence is unknown
 GAP_MULTIPLIER  = 2
 
-break_here = (dt_s > CADENCE_IDLE_S * GAP_MULTIPLIER)   # spacing удвічі більший за idle-каденцію
-           | (sample is first after a `resume` marker)  # застосунок сам зафіксував розрив
+break_here = (dt_s > CADENCE_IDLE_S * GAP_MULTIPLIER)   # spacing twice the idle cadence
+           | (sample is first after a `resume` marker)  # the app recorded the gap itself
 ```
 
-`resume`-маркер **авторитетніший** за spacing: це рішення самого застосунку, а не наша здогадка.
-Він же несе довжину діри, тож її початок реконструюється як `t − gap_s`.
+The `resume` marker is **more authoritative** than spacing: it is the app's own decision, not our
+guess. It also carries the gap length, so its start is reconstructed as `t − gap_s`.
 
-Практичні наслідки:
+Practical consequences:
 
-- **Кожен сегмент — окрема лінія на графіку.** Жоден штрих не перетинає діру.
-- **Приріст сумується лише всередині одного сегмента**, і лише додатний.
-- **`error` — не діра.** «Дивилися й не змогли» — окремий шар; малювати тим самим сірим, що й
-  «не дивилися», означає стверджувати неправду.
-- **Діру коротшу за ~30 хв** малювати рискою на осі, не смугою на всю висоту: інакше 15-хвилинна
-  діра важить візуально стільки ж, скільки дев'ятигодинна.
+- **Every segment is a separate line on the chart.** No stroke crosses a gap.
+- **Increments sum only within one segment**, and only positive ones.
+- **`error` is not a gap.** "We looked and could not" is a separate layer; drawing it in the same gray
+  as "we did not look" means stating something untrue.
+- **A gap shorter than ~30 min** should be drawn as a tick on the axis, not a full-height band:
+  otherwise a 15-minute gap carries as much visual weight as a nine-hour one.
 
-## Коли рахувати стани: три вибірки часу, і чому це не косметика
+## When to count states: three time samples, and why this is not cosmetic
 
-Питання «скільки часу бар був помаранчевим» не має відповіді, поки не сказано, **з якого часу** береться частка. Три варіанти, від найгрубішого:
+The question "how long was the bar orange" has no answer until you say **which time** the share is
+taken from. Three options, from the coarsest:
 
-| Вибірка | Що включає | Як отримати |
+| Sample | What it includes | How to get it |
 |---|---|---|
-| **Комп розблокований** | усе, що є в журналі | нічого не фільтрувати |
-| **Сесія активна** | застосунок вважав сесію живою | `sessionIdle == false` |
-| **Робота з Claude** | моменти, коли справді йшли запити | ±15 хв навколо зростання `util` |
+| **Computer unlocked** | everything in the journal | filter nothing |
+| **Session active** | the app considered the session alive | `sessionIdle == false` |
+| **Working with Claude** | the moments when requests were actually going out | ±15 min around `util` growth |
 
-Перша безкоштовна: polling зупиняється при заблокованому екрані
-([ADR-0032](../adr/0032-simplified-polling-cadence.md)), тож **кожен запис у журналі вже є моментом
-розблокованого комп'ютера**. Окремий фільтр для цього не потрібен.
+The first is free: polling stops while the screen is locked
+([ADR-0032](../adr/0032-simplified-polling-cadence.md)), so **every record in the journal is already
+a moment with the computer unlocked**. No separate filter is needed for it.
 
-### Чому `sessionIdle` — грубий фільтр
+### Why `sessionIdle` is a coarse filter
 
-Це прапорець застосунку про **власний** стан, а не факт роботи з Claude. Виміряна різниця:
+It is the app's flag about its **own** state, not the fact of working with Claude. The measured
+difference:
 
-| | Комп розблокований | `sessionIdle = false` | Робота з Claude |
+| | Computer unlocked | `sessionIdle = false` | Working with Claude |
 |---|---|---|---|
-| Max-ряд | 323,4 год | 228,7 год | **172,7 год** |
-| Pro-ряд | 162,4 год | 70,6 год | **23,5 год** |
+| Max series | 323.4 h | 228.7 h | **172.7 h** |
+| Pro series | 162.4 h | 70.6 h | **23.5 h** |
 
-На Pro-ряді `sessionIdle` **завищує активність утричі**.
+On the Pro series `sessionIdle` **overstates activity threefold**.
 
-### Детекція роботи за зростанням `util`
+### Detecting work by `util` growth
 
-Прямий доказ запиту — приріст лічильника. Навколо кожного моменту береться вікно ±15 хв (перекриття
-зливаються), щоб покрити паузи між запитами всередині сесії.
+The direct evidence of a request is the counter going up. A ±15 min window is taken around each
+moment (overlaps are merged) to cover the pauses between requests inside a session.
 
 ```python
 same_window = (cur.reset and prev.reset
                and abs((cur.reset - prev.reset).total_seconds()) <= 90)
-if not same_window: continue            # ресет або зсув вікна — не робота
+if not same_window: continue            # a reset or a window shift — not work
 delta = cur.util - prev.util
-if delta > 0: moments.append(cur.t)     # від'ємне — give-back, теж не робота
+if delta > 0: moments.append(cur.t)     # negative is a give-back, also not work
 ```
 
-Перевірка `same_window` обов'язкова: без неї скидання в нуль при ресеті й стрибок після зсуву
-`resets_at` читаються як активність. **Що саме відсіюється** (Max-ряд): з 1 622 відкинутих переходів
-**1 522 — пари idle-вікон**, де обидва `reset` порожні й росту бути не могло; справжніх ресетів 44,
-зсувів вікна 56. Фільтр не з'їдає роботу.
+The `same_window` check is mandatory: without it the drop to zero at a reset and the jump after a
+`resets_at` shift read as activity. **What exactly gets filtered out** (Max series): of 1,622
+rejected transitions, **1,522 are pairs of idle windows** where both `reset` fields are empty and no
+growth was possible; genuine resets number 44, window shifts 56. The filter does not eat work.
 
-### Чому це змінює висновки, а не лише числа
+### Why this changes the conclusions, not just the numbers
 
-Частка часу, коли 5-годинний бар вимагав дії (orange + red), на Pro-ряді:
+The share of time when the 5-hour bar demanded action (orange + red), on the Pro series:
 
-| Вибірка | Частка |
+| Sample | Share |
 |---|---|
-| Комп розблокований | 7,6 % |
-| `sessionIdle = false` | 17,5 % |
-| **Робота з Claude** | **34,4 %** |
+| Computer unlocked | 7.6% |
+| `sessionIdle = false` | 17.5% |
+| **Working with Claude** | **34.4%** |
 
-На грубій вибірці це читається як «майже ніколи», на точній — **третину робочого часу бар просить
-гальмувати**. Idle-час систематично розбавляє вибірку й занижує частку станів, що вимагають дії.
+On the coarse sample this reads as "almost never"; on the precise one, **a third of working time the
+bar is asking you to slow down**. Idle time systematically dilutes the sample and understates the
+share of states that demand action.
 
-**Правило:** для будь-якої метрики виду «скільки часу бар був у стані X» брати вибірку «робота з
-Claude». Для метрик про сам ресурс (скільки спожито, скільки згоріло) фільтр не потрібен — там
-одиницею є вікно, а не час.
+**Rule:** for any metric of the form "how long was the bar in state X", use the "working with Claude"
+sample. For metrics about the resource itself (how much was consumed, how much burned) no filter is
+needed — there the unit is the window, not time.
 
-### Межа застосовності: заблоковані стани сюди не входять
+### The limit of applicability: blocked states are not covered here
 
-**Вибірка «робота з Claude» відповідає на питання про незаблоковані стани.** Червоний стан за
-визначенням не має приростів `util` — вікно вичерпане, лічильник стоїть на стелі, — тож halo
-навколо приростів для нього не будується.
+**The "working with Claude" sample answers questions about non-blocked states.** The red state by
+definition has no `util` increments — the window is exhausted, the counter sits at the ceiling — so no
+halo around increments is built for it.
 
-Виміряно: єдиний епізод `5h = red` на Pro-ряді тривав 114 хв, і у вікно активності потрапили лише
-**14 % його замірів**. Для порівняння, `yellow` і `orange` зберігаються на 65–92 %.
+Measured: the single `5h = red` episode on the Pro series lasted 114 min, and only **14% of its
+samples** fell inside the activity window. For comparison, `yellow` and `orange` are retained at
+65–92%.
 
-Це **не вада фільтра, а межа його призначення**. Наслідок для роботи:
+This is **not a flaw in the filter but the limit of its purpose**. The consequence for the work:
 
-- **Питання «яку частку часу бар був помаранчевим» — до цієї вибірки.** Вона про пейсинг, тобто про
-  стани, у яких користувач ще може щось змінити.
-- **Питання «скільки я простояв заблокованим» — до окремої метрики.** Блокування це **подія з
-  тривалістю**, а не стан із часткою: його описують кількістю епізодів, їхньою довжиною і тим,
-  скільки часу лишалося до ресету на початку. Стек-бар часток тут не годиться — він розчинить
-  двогодинний простій у сотнях годин спостереження.
-- **Малювати їх треба різними формами.** Частки станів — стек або матриця; епізоди блокування —
-  таймлайн подій або розподіл тривалостей. Змішувати їх в одній діаграмі означає порівнювати
-  величини різної природи.
+- **The question "what share of time was the bar orange" belongs to this sample.** It is about pacing,
+  i.e. about the states in which the user can still change something.
+- **The question "how long was I blocked" belongs to a separate metric.** Being blocked is an **event
+  with a duration**, not a state with a share: it is described by the number of episodes, their length,
+  and how much time was left before the reset at the start of each. A stacked bar of shares will not do
+  here — it would dissolve
+ a two-hour idle stretch into hundreds of hours of observation.
+- **They must be drawn as different shapes.** State shares — a stack or a matrix; blocking episodes —
+  an event timeline or a distribution of durations. Mixing them in one diagram means comparing
+  quantities of different natures.
 
-## Виділення роботи
+## Isolating work
 
-У журналі немає поля «користувач працював». Є лише зростання лічильника.
+The journal has no "the user was working" field. All it has is the counter going up.
 
 ```python
-# "момент роботи" = сусідня пара замірів, між якими util зріс усередині ОДНОГО вікна
+# a "moment of work" = an adjacent pair of measurements between which util rose inside ONE window
 same_window = r5 and prev_r5 and abs((r5 - prev_r5).total_seconds()) < 90
 delta = (util - prev_util) if same_window else (util if util > 0 else 0)
 if delta > 0:
     work.append((prev_t, t, delta))
 ```
 
-Перевірка `same_window` обов'язкова: без неї ресет вікна (падіння 94 % → 0 %) читається як
-від'ємний приріст, а перший замір нового вікна — як стрибок.
+The `same_window` check is mandatory: without it a window reset (a drop from 94% to 0%) reads as a
+negative increment, and the first measurement of the new window as a jump.
 
-## Склеювання сесій: поріг — параметр, а не константа
+## Stitching sessions: the threshold is a parameter, not a constant
 
-«Сесія» в журналі не існує. Вона **конструюється** склеюванням моментів роботи, розділених паузами
-коротшими за поріг. Поріг обирає аналітик, і від нього залежить усе:
+A "session" does not exist in the journal. It is **constructed** by stitching together moments of work
+separated by pauses shorter than a threshold. The analyst picks the threshold, and everything depends
+on it:
 
-| Поріг склейки | Сесій | Медіана | Типова (логнорм.) |
+| Stitching threshold | Sessions | Median | Typical (lognormal) |
 |---|---|---|---|
-| 20 хв | 87 | 44 хв | 35 хв |
-| 40 хв | 53 | 98 хв | 70 хв |
-| **60 хв** | **37** | **178 хв** | **121 хв** |
-| 80 хв | 28 | 296 хв | 168 хв |
-| 120 хв | 25 | 296 хв | 201 хв |
+| 20 min | 87 | 44 min | 35 min |
+| 40 min | 53 | 98 min | 70 min |
+| **60 min** | **37** | **178 min** | **121 min** |
+| 80 min | 28 | 296 min | 168 min |
+| 120 min | 25 | 296 min | 201 min |
 
-Розкид типової тривалості — **×5,7** між краями діапазону. Тому:
+The spread of the typical duration is **×5.7** between the ends of the range. Therefore:
 
-- **Ніколи не наводити «середню тривалість сесії» без порогу, яким її отримано.** Це число без
-  порогу — не величина, а вибір.
-- **Поріг не знаходиться в даних.** Паузи розподілені степенево (див. нижче), тож природної межі
-  «ось тут закінчується сесія» не існує на жодному масштабі.
-- **Практичний вибір — там, де крива кількості сесій вирівнюється.** На ряді Max це ~60 хв: до
-  нього кількість падає вдвічі (87 → 37), далі майже застигає (37 → 25).
+- **Never quote an "average session duration" without the threshold it was obtained with.** Without
+  the threshold that number is not a quantity, it is a choice.
+- **The threshold is not found in the data.** Pauses are power-law distributed (see below), so there is
+  no natural boundary of "the session ends here" at any scale.
+- **The practical choice is where the session-count curve flattens out.** On the Max series that is
+  ~60 min: up to it the count halves (87 → 37), after it barely moves (37 → 25).
 
-### Рекомендований дефолт
+### Recommended default
 
-**60 хвилин** для рядів із кроком 3 хв. Для рядів із кроком 15 хв нижні пороги вироджені — там
-кожен момент роботи стає окремою сесією, бо коротших пауз просто не видно.
+**60 minutes** for series with a 3 min step. For series with a 15 min step the lower thresholds are
+degenerate — there every moment of work becomes its own session, because shorter pauses are simply
+invisible.
 
-## Статистичні властивості, перевірені на реальних рядах
+## Statistical properties, verified on real series
 
-Знання цих фактів рятує від хибних інтерпретацій.
+Knowing these facts saves you from false interpretations.
 
-### Паузи — степеневі, характерного розміру немає
+### Pauses are power-law — there is no characteristic size
 
-CCDF пауз лягає на пряму в лог-лог координатах на чотирьох порядках (3 хв → 30 год), показник
-**−0,83**, R² = 0,91. Перевірка гіпотези «два режими» зі зламом на 20/30/45/60/90/120 хв **жоден
-злам не покращує опис**.
+The CCDF of pauses falls on a straight line in log-log coordinates across four orders of magnitude
+(3 min → 30 h), exponent **−0.83**, R² = 0.91. Testing the "two regimes" hypothesis with a break at
+20/30/45/60/90/120 min shows that **no break improves the description**.
 
-Наслідки:
+Consequences:
 
-- **«Типова пауза» — величина без змісту.** Медіана 6,4 хв, але 33 % усього часу простою припадає
-  на паузи, довші за 12 годин.
-- **З тривалості паузи неможливо визначити, чи сесія закінчилась.** Пауза, що триває годину, з тією
-  ж логікою може обірватися на 61-й хвилині, що й на 5-й.
+- **A "typical pause" is a quantity without meaning.** The median is 6.4 min, yet 33% of all idle time
+  falls in pauses longer than 12 hours.
+- **You cannot tell from a pause's duration whether the session has ended.** A pause that has lasted an
+  hour is, by the same logic, as likely to end at minute 61 as at minute 5.
 
-### Сесії — логнормальні, характерний масштаб є
+### Sessions are lognormal — there is a characteristic scale
 
-На відміну від пауз. Похибка підгонки (KS) логнормального 0,14–0,19 проти степеневого 0,24–0,39;
-бутстрап на 300 перевибірок дає логнормальному перемогу **в 100 % випадків на всіх шести порогах**.
+Unlike pauses. The fit error (KS) is 0.14–0.19 for lognormal against 0.24–0.39 for power-law; a
+bootstrap over 300 resamples gives lognormal the win **in 100% of cases at all six thresholds**.
 
-Це означає, що питання «чи ця сесія незвично довга» **має сенс**, на відміну від того самого
-питання про паузу.
+This means the question "is this session unusually long" **is meaningful**, unlike the same question
+about a pause.
 
-### Ритм існує тільки на масштабі доби
+### Rhythm exists only at the daily scale
 
-Періодограма ряду приростів із порогом значущості від 120 перемішувань:
+A periodogram of the increment series with a significance threshold from 120 shuffles:
 
-- домінантний пік на **23,4 год** — 7,8× над шумом;
-- **нижче 6 годин структури майже немає** — з 43 перевірених коротких періодів поріг долають 2.
+- the dominant peak is at **23.4 h** — 7.8× above the noise;
+- **below 6 hours there is almost no structure** — of 43 short periods tested, 2 clear the threshold.
 
-Тобто **всередині сесії робота рівна**, без власної періодичності. Короткостроковий прогноз із
-ритму побудувати не вийде; добовий — можна.
+That is, **inside a session the work is even**, with no periodicity of its own. You will not build a
+short-term forecast from the rhythm; a daily one you can.
 
-### Паузи мають слабку пам'ять
+### Pauses have a weak memory
 
-Автокореляція логарифмів тривалості: `r = +0,14` на лагу 1 при порозі шуму 0,077, **p = 0,0005**.
-Ефект малий, але стійкий. Це не суперечить степеневому розподілу: він описує, *які* тривалості
-трапляються, автокореляція — *в якому порядку*.
+Autocorrelation of the log durations: `r = +0.14` at lag 1 against a noise threshold of 0.077,
+**p = 0.0005**. The effect is small but robust. This does not contradict the power-law distribution:
+that describes *which* durations occur, autocorrelation describes *in what order*.
 
-## Шум і значущість
+## Noise and significance
 
-Ряди короткі (тижні, не роки), а більшість цікавих величин — з важкими хвостами. Тому **майже
-кожен знайдений «патерн» треба перевіряти проти нуль-моделі**, інакше знаходиться структура в
-випадковості.
+The series are short (weeks, not years), and most of the interesting quantities have heavy tails. So
+**almost every "pattern" you find has to be checked against a null model**, otherwise you find
+structure in randomness.
 
-### Нуль-модель: перемішування
+### The null model: shuffling
 
-Найдешевший і найнадійніший метод для цих даних. Ідея: зберегти розподіл величин, зруйнувати
-часовий порядок — і подивитися, чи вціліє ефект.
+The cheapest and most reliable method for this data. The idea: preserve the distribution of values,
+destroy the temporal order — and see whether the effect survives.
 
 ```python
 import random
 def null_threshold(values, statistic, n=400, q=0.95):
-    """Поріг: 95-й перцентиль статистики на перемішаних даних."""
+    """Threshold: the 95th percentile of the statistic on shuffled data."""
     nulls = []
     for _ in range(n):
         shuffled = values[:]
@@ -429,50 +441,51 @@ def null_threshold(values, statistic, n=400, q=0.95):
     return sorted(nulls)[int(n * q)]
 ```
 
-Що чим перевіряти:
+What to check with what:
 
-| Гіпотеза | Що перемішувати | Статистика |
+| Hypothesis | What to shuffle | Statistic |
 |---|---|---|
-| «є періодичність» | біни ряду приростів | потужність на періоді |
-| «паузи пам'ятають попередню» | послідовність пауз | автокореляція лаг-k |
-| «нічні паузи інші» | мітки ніч/день | різниця показників степеня |
-| «пауза довша після інтенсивної роботи» | значення пауз | відношення медіан |
+| "there is periodicity" | bins of the increment series | power at the period |
+| "pauses remember the previous one" | the sequence of pauses | lag-k autocorrelation |
+| "night pauses are different" | the night/day labels | difference of the exponents |
+| "the pause is longer after intense work" | the pause values | ratio of medians |
 
-**Кількість ітерацій:** 200 для орієнтиру, 400–2000 коли число піде в UI або в рішення.
+**Number of iterations:** 200 for a rough idea, 400–2000 when the number is going into the UI or into
+a decision.
 
-### Приклад, чому це не формальність
+### An example of why this is not a formality
 
-На реальному ряді три гіпотези виглядали однаково переконливо «на око». Після пермутаційного тесту:
+On a real series three hypotheses looked equally convincing "by eye." After the permutation test:
 
-| Гіпотеза | Ефект | p | Вердикт |
+| Hypothesis | Effect | p | Verdict |
 |---|---|---|---|
-| паузи мають пам'ять | r = +0,14 | **0,0005** | доведено |
-| нічні паузи мають інший показник | −0,70 проти −0,91 | 0,062 | тенденція |
-| пауза довша після сильного приросту | ×1,48 | 0,054 | не доведено |
+| pauses have memory | r = +0.14 | **0.0005** | proven |
+| night pauses have a different exponent | −0.70 vs −0.91 | 0.062 | a trend |
+| the pause is longer after a large increment | ×1.48 | 0.054 | not proven |
 
-Дві з трьох не пройшли поріг 0,05 — а без перевірки всі три потрапили б у висновки як рівноцінні.
-**Ефект розміром ×1,5 на 695 спостереженнях може бути шумом** — це неінтуїтивно, і саме тому
-перевірка обов'язкова.
+Two of the three failed the 0.05 threshold — and without the check all three would have gone into the
+conclusions as equals. **An effect of ×1.5 on 695 observations can be noise** — that is
+counterintuitive, and exactly why the check is mandatory.
 
-### Обережно з обраною постфактум гіпотезою
+### Careful with a hypothesis picked after the fact
 
-Якщо перебрати 20 розрізів і взяти найкращий, один із них покаже p < 0,05 просто випадково. Коли
-розрізів багато, або застосовувати поправку (Бонферроні: `p · кількість_перевірок`), або чесно
-писати «знайдено перебором, потребує підтвердження на новому ряді».
+If you try 20 slices and take the best one, one of them will show p < 0.05 purely by chance. When
+there are many slices, either apply a correction (Bonferroni: `p · number_of_tests`) or honestly write
+"found by search, needs confirmation on a new series."
 
-## Довірчі інтервали
+## Confidence intervals
 
-Наводити голу точкову оцінку на короткому ряді — найпоширеніший спосіб перебільшити впевненість.
+Quoting a bare point estimate on a short series is the most common way to overstate your confidence.
 
-### Бутстрап — універсальний метод для цих даних
+### The bootstrap is the universal method for this data
 
-Розподіли не нормальні (степеневі, логнормальні), тож формули на кшталт `± 1,96 σ/√n` не працюють.
-Бутстрап працює завжди:
+The distributions are not normal (power-law, lognormal), so formulas along the lines of `± 1.96 σ/√n`
+do not work. The bootstrap always does:
 
 ```python
 import random, statistics as st
 def bootstrap_ci(values, statistic=st.median, n=2000, alpha=0.05):
-    """95 % ДІ перцентильним бутстрапом."""
+    """95% CI by the percentile bootstrap."""
     boots = []
     for _ in range(n):
         sample = [random.choice(values) for _ in range(len(values))]
@@ -481,391 +494,408 @@ def bootstrap_ci(values, statistic=st.median, n=2000, alpha=0.05):
     return boots[int(n * alpha / 2)], boots[int(n * (1 - alpha / 2))]
 ```
 
-### Скільки даних треба для чого
+### How much data is needed for what
 
-| Величина | Мінімум | Чому саме стільки |
+| Quantity | Minimum | Why exactly that much |
 |---|---|---|
-| Медіана паузи | ~50 пауз | важкий хвіст, ДІ широкий |
-| Коефіцієнт N | 10–15 тиків `d7_util` | тижневий лічильник рухається рідко |
-| Тижнева втрата | 8–10 повних тижнів | двох вікон замало для середньої |
-| Показник степеня | ~100 значень | нахил CCDF чутливий до хвоста |
-| Добовий профіль | ≥ 5 спостережень на годину | інакше медіана години недостовірна |
+| Median pause | ~50 pauses | heavy tail, wide CI |
+| Coefficient N | 10–15 ticks of `d7_util` | the weekly counter moves rarely |
+| Weekly loss | 8–10 full weeks | two windows are too few for an average |
+| Power-law exponent | ~100 values | the CCDF slope is sensitive to the tail |
+| Daily profile | ≥ 5 observations per hour | otherwise the hour's median is untrustworthy |
 
-**Виміряний приклад:** для N на добовому ряді 95 % ДІ вийшов **8,9–10,8** при точковій оцінці 9,76.
-Тобто «≈10» — чесне формулювання, а «9,76» у UI створює хибне враження точності.
+**A measured example:** for N on the daily series the 95% CI came out as **8.9–10.8** against a point
+estimate of 9.76. So "≈10" is the honest phrasing, while "9.76" in the UI creates a false impression
+of precision.
 
-### Правила подачі
+### Presentation rules
 
-- **У UI — округлене число, у документі — з ДІ.** Користувачу «≈10 вікон» корисніше, ніж «9,76».
-- **Поки даних мало — писати «ще рахуємо», а не передчасну оцінку.** Це прямо записано в
-  [users-and-goals.md](users-and-goals.md) про коефіцієнт N.
-- **Ніколи не наводити ДІ там, де вибірка < 10.** Він буде ширшим за саму величину й тільки
-  заплутає.
+- **In the UI a rounded number, in a document one with a CI.** "≈10 windows" is more useful to the user
+  than "9.76".
+- **While the data is thin, write "still counting" rather than a premature estimate.** This is stated
+  outright in [users-and-goals.md](users-and-goals.md) about the coefficient N.
+- **Never quote a CI where the sample is < 10.** It will be wider than the quantity itself and will
+  only confuse.
 
-## Коефіцієнт N: скільки 5h-шкали в одному пункті тижневої
+## Coefficient N: how much of the 5h scale fits in one point of the weekly one
 
-Робить дві незрівнянні шкали сумірними. Вимірюється **з ряду самого користувача**:
+It makes the two incomparable scales commensurable. It is measured **from the user's own series**:
 
 ```python
-# накопичені суми додатних приростів, НЕ миттєве відношення похідних
+# cumulative sums of positive increments, NOT the instantaneous ratio of derivatives
 N = sum(positive_deltas_h5) / sum(positive_deltas_d7)
 ```
 
-Виміряні значення: **9,76** (Max) і **10,18** (Pro) — тобто одне повністю спалене 5-годинне вікно
-з'їдає ~10 пп тижневого ліміту.
+Measured values: **9.76** (Max) and **10.18** (Pro) — that is, one fully burned 5-hour window eats
+~10 pp of the weekly limit.
 
-- **Не хардкодити.** N залежить від тарифу, міксу моделей і чинних акцій Anthropic.
-- **Не рахувати миттєве відношення.** `d7_util` цілочисельний і рухається рідко; ділення крок-у-крок
-  дає нулі й нескінченності.
-- **Потрібно ≥ 10–15 тиків `d7_util`**, тобто кілька діб. До того — показувати «ще рахуємо».
+- **Do not hardcode it.** N depends on the plan, the model mix, and whatever promotions Anthropic has
+  running.
+- **Do not compute an instantaneous ratio.** `d7_util` is an integer and moves rarely; dividing
+  step-by-step gives you zeros and infinities.
+- **You need ≥ 10–15 ticks of `d7_util`**, i.e. several days. Until then, show "still counting".
 
-Похідна величина, зручна для UI: `100 / N` ≈ **10,2 пп** — вартість одного повного вікна, і
-`залишок_% · N / 100` — залишок тижня у «повних 5-годинних вікнах».
+A derived quantity convenient for the UI: `100 / N` ≈ **10.2 pp** — the cost of one full window — and
+`remaining_% · N / 100` — the remainder of the week in "full 5-hour windows".
 
-> **Термінологічна пастка.** «Повне 5-годинне вікно» як одиниця виміру ≠ реальний сеанс роботи.
-> Реальний сеанс триває ~2 год і витрачає вікно на чверть. Формулювання «лишилось 9,2 сесії» читається
-> як прогноз кількості сеансів і **вводить в оману** — правильно «ліміту вистачить на 9,2 повних
-> 5-годинних вікна».
+> **Terminological trap.** A "full 5-hour window" as a unit of measurement ≠ a real work session. A
+> real session lasts ~2 h and spends a quarter of the window. Phrasing it as "9.2 sessions left" reads
+> as a forecast of how many sessions there will be and is **misleading** — the correct form is "the
+> limit will cover 9.2 full 5-hour windows".
 
-## Повнота спостереження
+## Observation completeness
 
-Журнал пишеться, лише поки застосунок працює. Тому перед будь-яким агрегатом по вікну треба
-вирішити, чи спостереження достатнє.
+The journal is only written while the app is running. So before any per-window aggregate you have to
+decide whether the observation is sufficient.
 
-### Для 5-годинних вікон
+### For 5-hour windows
 
-Вікно придатне, якщо: останній замір **не далі 30 хв до ресету**, спостережено **≥ 3 год** вікна,
-і в ньому **≥ 10 замірів**. На реальному ряді це лишає 44 вікна з 71.
+A window qualifies if: the last measurement is **no more than 30 min before the reset**, **≥ 3 h** of
+the window were observed, and it contains **≥ 10 measurements**. On a real series this leaves 44
+windows out of 71.
 
-### Для 7-денних вікон
+### For 7-day windows
 
-**Критерій — чи застосунок працював у момент ресету** (`timePct ≥ 0,985`), бо саме тоді видно
-фінальний пік.
+**The criterion is whether the app was running at the moment of the reset** (`timePct ≥ 0.985`),
+because that is when the final peak is visible.
 
-> **Пастка, на якій легко помилитися.** Вимагати ще й бачити *початок* вікна — неправильно: вікно,
-> до якого підключилися на 96 % його тривалості, все одно дало виміряний фінальний пік. Додаткова
-> вимога `timePct_first ≤ 0,05` помилково викидає такі вікна в «неповні».
+> **A trap that is easy to fall into.** Requiring that you also see the *start* of the window is wrong:
+> a window you connected to at 96% of its duration still gave you a measured final peak. The additional
+> requirement `timePct_first ≤ 0.05` mistakenly throws such windows into the "incomplete" pile.
 
-### Незавершене вікно — екстраполювати, не викидати
+### An unfinished window — extrapolate it, do not discard it
 
-Вікно, що ще триває, дає безглуздий «залишок», якщо взяти його пік як фінальний. Правильно:
+A window still in progress gives a nonsensical "remainder" if you take its peak as the final one. The
+right way:
 
 ```python
-projected = min(100.0, peak / last_timePct)   # «якщо темп не зміниться до ресету»
+projected = min(100.0, peak / last_timePct)   # "if the pace does not change before the reset"
 ```
 
-На реальних даних це змінило оцінку тижня з «77 % втрати» на «8,8 %» — бо вікно прожило лише чверть
-свого часу. Екстрапольовані значення **позначати як прогноз** і не змішувати з виміряними в
-підсумках.
+On real data this changed the week's estimate from "77% loss" to "8.8%" — because the window had only
+lived a quarter of its time. **Mark extrapolated values as a forecast** and do not mix them with
+measured ones in the totals.
 
-## Пік проти останнього значення
+## The peak versus the last value
 
-Для «скільки спожито за вікно» брати **максимум за вікно**, а не останній замір: лічильники іноді
-відкочуються назад (спостережено падіння 67 % → 21 % усередині одного 5h-вікна).
+For "how much was consumed over the window", take the **maximum over the window**, not the last
+measurement: the counters sometimes roll back (a drop from 67% to 21% was observed inside a single
+5h window).
 
-## Два тижневі ліміти
+## Two weekly limits
 
-У `scoped[]` живе **окремий семиденний ліміт на модель** (спостережено `Fable`) зі своїм `pct` і
-тим самим розкладом ресетів, що й `d7`.
+`scoped[]` holds a **separate seven-day per-model limit** (`Fable` was observed) with its own `pct` and
+the same reset schedule as `d7`.
 
-- Для більшості аналітики потрібен **лише `d7`**.
-- **Не множити втрати обох на повну ціну підписки** — обидва ліміти покриваються тією самою
-  оплатою, тож це подвійний рахунок.
+- Most analysis needs **only `d7`**.
+- **Do not multiply the losses of both by the full subscription price** — both limits are covered by
+  the same payment, so that is double counting.
 
-## Якщо колись читатимемо транскрипти Claude Code
+## If we ever read Claude Code transcripts
 
-Журнал не містить атрибуції: він знає, **скільки** спожито, але не знає, **на що**. Спокуса взяти це
-з `.jsonl`-транскриптів самого Claude Code велика — там є проєкт, бранч, модель, токени. Але поля
-там **різної надійності**, і плутати їх дорого.
+The journal carries no attribution: it knows **how much** was consumed but not **on what**. The
+temptation to take that from Claude Code's own `.jsonl` transcripts is strong — they have the project,
+the branch, the model, the tokens. But the fields there have **varying reliability**, and confusing
+them is expensive.
 
-| Поле | Надійність | Чому |
+| Field | Reliability | Why |
 |---|---|---|
-| `message.model` | **надійне** | структурний факт |
-| `cwd`, `gitBranch`, `sessionId` | **надійне** | структурні факти |
-| `tool_use.name` | **надійне** | інструмент або викликано, або ні |
-| `cache_read_input_tokens` | **надійне** | збігається з ground truth ≈1× |
-| `message.usage.input_tokens` | **НЕНАДІЙНЕ** | плейсхолдер зі стрімінгу; недорахунок **до 137×** |
-| `message.usage.output_tokens` | **НЕНАДІЙНЕ** | не включає thinking-токени; **10–17×** на Opus |
-| ті самі після дедупу за `requestId` | **частково** | дедуп прибирає подвійний рахунок, але не лікує плейсхолдери |
+| `message.model` | **reliable** | a structural fact |
+| `cwd`, `gitBranch`, `sessionId` | **reliable** | structural facts |
+| `tool_use.name` | **reliable** | a tool was either invoked or it was not |
+| `cache_read_input_tokens` | **reliable** | matches ground truth ≈1× |
+| `message.usage.input_tokens` | **UNRELIABLE** | a streaming placeholder; undercounts **by up to 137×** |
+| `message.usage.output_tokens` | **UNRELIABLE** | does not include thinking tokens; **10–17×** on Opus |
+| the same after deduplicating by `requestId` | **partially** | dedup removes the double counting but does not cure the placeholders |
 
-**Висновок, який варто запам'ятати: транскрипт читати заради атрибуції, не заради токенів.** Хто
-працював і над чим — точно. Скільки токенів — ні.
+**The conclusion worth remembering: read the transcript for attribution, not for tokens.** Who worked
+and on what — exactly. How many tokens — no.
 
-Надійна доріжка для токенів і вартості — **statusline** (`context_window.*`, `cost.*`): вона
-ведеться внутрішньо з фіналізованих API-відповідей, окремим шляхом від JSONL.
+The reliable track for tokens and cost is the **statusline** (`context_window.*`, `cost.*`): it is
+maintained internally from finalized API responses, on a separate path from the JSONL.
 
-> **`cost.total_cost_usd` — це API-equivalent, а не гроші з підписки.** Формулювати лише як
-> «коштувало б $X за API-цінами», ніколи «ти витратив $X». На Max підписка вже оплачена.
+> **`cost.total_cost_usd` is an API equivalent, not money off the subscription.** Phrase it only as "it
+> would have cost $X at API prices", never "you spent $X". On Max the subscription is already paid for.
 
-**Приватність.** Шлях проєкту — це PII: зберігати хеш плюс назву теки, не повний шлях. Назви бранчів
-можуть містити номери тікетів. Вміст транскрипта (код, секрети) не зберігати взагалі — агрегувати на
-місці.
+**Privacy.** The project path is PII: store a hash plus the folder name, not the full path. Branch
+names can contain ticket numbers. Do not store transcript contents (code, secrets) at all — aggregate
+them in place.
 
-## Переведення в гроші
+## Converting to money
 
 ```
 averageWeeksInAMonth = 365.25 / 12 / 7 = 4.3482
-тижнева вартість     = місячна ціна / 4.3482
-втрата, €            = lossPercent / 100 · тижнева вартість
-вартість вікна, €    = тижнева вартість · (100 / N) / 100
+weekly cost          = monthly price / 4.3482
+loss, €              = lossPercent / 100 · weekly cost
+window cost, €       = weekly cost · (100 / N) / 100
 ```
 
-Виміряні орієнтири: Max 110,70 €/міс → 25,46 €/тиждень → **2,60 € за повне 5h-вікно**;
-Pro 22,14 €/міс → 5,09 €/тиждень → **0,50 €**.
+Measured reference points: Max €110.70/mo → €25.46/week → **€2.60 for a full 5h window**;
+Pro €22.14/mo → €5.09/week → **€0.50**.
 
-**Обережно з інтерпретацією.** Невитрачений ліміт — не збиток. Тиждень із меншою потребою просто
-менший, а не змарнований. Число корисне для одного рішення — **чи виправданий тариф** — і воно
-ухвалюється раз на місяці, не щотижня.
+**Careful with the interpretation.** An unspent limit is not a loss. A week with less need is simply
+smaller, not wasted. The number is useful for one decision — **whether the plan is justified** — and
+that is made once every few months, not every week.
 
-## Оптимізація поведінки застосунку: критерій пишеться першим
+## Optimizing app behavior: the criterion gets written first
 
-Правило пейсингу, поріг, тригер нотифікації — усе це **оптимізується проти критерію**, і критерій
-має бути записаний **до** першого вимірювання. Інакше відбувається те, що вже сталося в цьому
-проєкті: кожен новий критерій давав інший рейтинг, і порівняння підганялося під результат.
+A pacing rule, a threshold, a notification trigger — all of these are **optimized against a
+criterion**, and the criterion has to be written down **before** the first measurement. Otherwise
+what happens is what already happened in this project: every new criterion produced a different
+ranking, and the comparison got tuned to fit the result.
 
-Виміряний приклад того, як це виглядає:
+A measured example of how that looks:
 
-| Критерій | Хто «виграв» | Чому критерій хибний |
+| Criterion | Who "won" | Why the criterion is wrong |
 |---|---|---|
-| «чи вікно дійде до 70 %» | `util ≥ 70 %` | правило спрацьовує **після** настання умови — це констатація, не прогноз |
-| точність + покриття | прогнозне `u/t ≥ 0,9` | ігнорує стійкість: на одному ряді додало епізодів і перемикань |
-| + флапання | чинне правило | три виміри тягнуть у різні боки, а ваг між ними ніхто не задав |
+| "will the window reach 70%" | `util ≥ 70%` | the rule fires **after** the condition arrives — that is a statement of fact, not a forecast |
+| accuracy + coverage | predictive `u/t ≥ 0.9` | ignores stability: on one series it added episodes and switches |
+| + flapping | the current rule | three dimensions pull in different directions, and nobody assigned weights between them |
 
-### Структура критерію: три обов'язкові частини
+### The structure of a criterion: three mandatory parts
 
-**1. Що правило мусить робити — одним реченням, у термінах дії користувача.**
+**1. What the rule must do — in one sentence, in terms of a user action.**
 
-Не «передбачити високий `util`», а «попередити тоді, коли зміна поведінки ще може змінити
-результат». З формулювання одразу випливає метрика: не точність передбачення, а **чи лишалося
-досить часу на реакцію**.
+Not "predict high `util`", but "warn at the point where a change in behavior can still change the
+outcome". The metric falls straight out of that phrasing: not prediction accuracy, but **whether
+enough time was left to react**.
 
-**2. Що правило не має права робити — обмеження, які відкидають кандидата незалежно від метрик.**
+**2. What the rule may not do — constraints that disqualify a candidate regardless of metrics.**
 
-Ці перевірки бінарні: не пройшов — вибуває, скільки б не виграв за іншими вимірами.
+These checks are binary: fail one and you are out, no matter how much you win on the other
+dimensions.
 
-| Обмеження | Як перевірити | Звідки взялося |
+| Constraint | How to check it | Where it came from |
 |---|---|---|
-| не тривожити, коли користувач **позаду** темпу | частка спрацювань із `util ≤ timePct` = 0 | правило `util ≥ 70 %` давало 43 % таких |
-| не блимати | медіана епізоду > 20 хв, вікон із 3+ перемиканнями = 0 | одне вікно перемикалося 8 разів |
-| не переносити константу між вікнами | усі пороги — функція від `windowDurationSeconds` | поріг 5h у гістерезисі 7d зробив синій недосяжним |
-| не залежати від косметичних налаштувань | `sev` рахується без `ColorAdvice` | інакше ряди різних користувачів незрівнянні |
+| do not alarm when the user is **behind** the pace | share of firings with `util ≤ timePct` = 0 | the `util ≥ 70%` rule produced 43% of those |
+| do not blink | median episode > 20 min, windows with 3+ switches = 0 | one window switched 8 times |
+| do not carry a constant across windows | every threshold is a function of `windowDurationSeconds` | the 5h threshold in the 7d hysteresis made blue unreachable |
+| do not depend on cosmetic settings | `sev` is computed without `ColorAdvice` | otherwise series from different users are incomparable |
 
-**3. Скільки даних потрібно, щоб відповідь щось означала.**
+**3. How much data it takes for the answer to mean anything.**
 
-Порівняння правил тривоги впирається не в загальну кількість вікон, а в кількість **подій, які
-правило мало б спіймати**. За порогами дозрівання з цього ж файлу — **15–20 таких подій**.
+Comparing alarm rules is limited not by the total number of windows but by the number of **events
+the rule was supposed to catch**. By the maturity thresholds from this same file — **15–20 such
+events**.
 
-### Критерій для жовто-помаранчевого
+### The criterion for yellow-orange
 
-**Що робить:** попереджає, що за поточного темпу вікно вичерпається до ресету — поки ще є час
-пригальмувати.
+**What it does:** warns that at the current pace the window will be exhausted before the reset —
+while there is still time to ease off.
 
-**Ключове спостереження з даних:** подія, про яку він попереджає, **майже не трапляється**. На
-Max-ряді вичерпаних вікон (`util ≥ 95 %`) — **нуль із 50**; на Pro-ряді — **одне з 15**. Високих
-(`≥ 70 %`) — 4 і 5 відповідно.
+**The key observation from the data: the event it warns about almost never happens.** On the Max
+series, exhausted windows (`util ≥ 95%`) — **zero out of 50**; on the Pro series — **one out of 15**.
+High ones (`≥ 70%`) — 4 and 5 respectively.
 
-Звідси два висновки:
+Two conclusions follow:
 
-- **Оптимізувати точність на такій вибірці неможливо.** Різниця «40 % проти 67 %» на чотирьох
-  подіях — це одне-два вікна, тобто шум. Будь-який рейтинг формул тут буде випадковим.
-- **Питання, чи потрібне це попередження взагалі, законне.** Якщо вікно не вичерпується ніколи,
-  сигнал охороняє від події, якої немає. Але вибірка мала й нетипова (один ряд знятий у період
-  канікул), тож це гіпотеза, а не висновок.
+- **Optimizing accuracy on a sample like that is impossible.** A difference of "40% versus 67%" on
+  four events is one or two windows, i.e. noise. Any ranking of formulas here would be random.
+- **The question of whether this warning is needed at all is legitimate.** If the window is never
+  exhausted, the signal guards against an event that does not occur. But the sample is small and
+  atypical (one series was captured during a vacation period), so this is a hypothesis, not a
+  conclusion.
 
-**Формальний критерій, коли даних вистачить:**
+**The formal criterion, once there is enough data:**
 
 ```
-серед вікон, що дійшли до вичерпання:
-    частка, де правило спрацювало щонайменше за 30 хв до цього   → максимізувати
-серед вікон, що НЕ дійшли:
-    частка, де правило спрацювало                                 → мінімізувати
-при обмеженнях: жодного спрацювання при util <= timePct,
-                медіана епізоду > 20 хв
+among windows that reached exhaustion:
+    share where the rule fired at least 30 min beforehand   → maximize
+among windows that did NOT reach it:
+    share where the rule fired                              → minimize
+subject to: no firing when util <= timePct,
+            median episode > 20 min
 ```
 
-30 хвилин — не довільне число: це час, за який на 5-годинному вікні можна змістити темп настільки,
-щоб змінити результат (при медіанній швидкості ~19 пп/год це ~10 пп).
+30 minutes is not an arbitrary number: it is the time in which, on a 5-hour window, you can shift
+your pace enough to change the outcome (at a median speed of ~19 pp/h that is ~10 pp).
 
-### Критерій для синьо-зеленого — він **не** про запас, а про згорілі гроші
+### The criterion for blue-green — it is **not** about headroom, it is about money burned
 
-Це формулювання від мейнтейнера, і воно міняє критерій повністю: синій каже не «є запас», а
-**«ти платиш за повітря»**. Отже оптимізується не точність опису стану, а **скільки згорілої квоти
-він допоміг урятувати**.
+This framing comes from the maintainer, and it changes the criterion completely: blue does not say
+"you have headroom", it says **"you are paying for air"**. So what gets optimized is not the accuracy
+of the state description, but **how much burned quota it helped rescue**.
 
-**Виміряно на Max-ряді:**
+**Measured on the Max series:**
 
-| Величина | Значення |
+| Quantity | Value |
 |---|---|
-| Згоріло всього | **30,5 повних вікон** |
-| З них теоретично рятівних (лишалося ≥ 2 год і пік < 60 %) | **6,3 вікна** |
-| Вікон, де синій показувався | 28 |
-| З них справді рятівних | 7 |
+| Burned in total | **30.5 full windows** |
+| Of those, theoretically rescuable (≥ 2 h left and peak < 60%) | **6.3 windows** |
+| Windows where blue was shown | 28 |
+| Of those, genuinely rescuable | 7 |
 
-**Тобто три чверті спрацювань синього марні** — він світить у вікнах, які й так закінчаться
-нормально, або де вже нічого не встигнути. Це протилежна до помаранчевого проблема: там сигнал
-занадто рідкісний, тут — занадто щедрий.
+**So three quarters of blue's firings are pointless** — it lights up in windows that would have
+ended fine anyway, or where there is no longer time to do anything. This is the opposite problem
+from orange: there the signal is too rare, here it is too generous.
 
-**Формальний критерій:**
+**The formal criterion:**
 
 ```
-максимізувати: пп згорілої квоти у вікнах, де синій з'явився,
-               коли ще лишалося >= 2 год до ресету
-мінімізувати:  час показу синього у вікнах, які закінчились вище 60 %
-при обмеженнях: ті самі чотири з таблиці вище
+maximize: pp of burned quota in windows where blue appeared
+          while >= 2 h still remained until the reset
+minimize: time blue was shown in windows that ended above 60%
+subject to: the same four constraints from the table above
 ```
 
-Друга частина важлива: синій у вікні, яке й так буде використане, — це не безневинний шум, а
-**заклик витрачати квоту без потреби**, тобто рівно те, від чого застерігає
-[users-and-goals.md](users-and-goals.md).
+The second part matters: blue in a window that is going to be used anyway is not harmless noise but
+**an invitation to spend quota for no reason** — exactly what
+[users-and-goals.md](users-and-goals.md) warns against.
 
-**Чому «100 % точності» чинного порога нічого не доводить.** Критерій «вікно закінчилось нижче
-60 %» задовольняють 42 з 50 вікон — за такої бази майже будь-яке правило влучить. Легкий критерій
-дає хибне відчуття, що поріг оптимальний.
+**Why "100% accuracy" for the current threshold proves nothing.** The criterion "the window ended
+below 60%" is satisfied by 42 of 50 windows — with a base rate like that, almost any rule will hit.
+An easy criterion gives a false sense that the threshold is optimal.
 
-### Залежить не від тарифу, а від профілю споживання
+### It depends not on the plan but on the consumption profile
 
-Спокусливо сказати «критерій залежить від тарифу», але це неточно. Тариф — лише один із трьох
-складників, і на виміряних рядах він **не найважливіший**:
+It is tempting to say "the criterion depends on the plan", but that is imprecise. The plan is only
+one of three components, and on the measured series it is **not the most important one**:
 
-| Складник | Max-ряд | Pro-ряд | Різниця |
+| Component | Max series | Pro series | Difference |
 |---|---|---|---|
-| **Тариф** | `max`, 110,70 €/міс | `pro`, 22,14 €/міс | ×5 за ціною |
-| **Графік роботи** | 10,2 год/добу, 2,9 вікна/добу | 2,1 год/добу, 1,4 вікна/добу | **×5 за щільністю** |
-| **Типові задачі** | медіана сплеску 34 пп, p90 65 | медіана 30 пп, p90 80 | **майже однакові** |
-| **Налаштування CC** | невідомі — немає в журналі | невідомі | не вимірюється |
+| **Plan** | `max`, €110.70/mo | `pro`, €22.14/mo | ×5 in price |
+| **Work schedule** | 10.2 h/day, 2.9 windows/day | 2.1 h/day, 1.4 windows/day | **×5 in density** |
+| **Typical tasks** | median burst 34 pp, p90 65 | median 30 pp, p90 80 | **nearly identical** |
+| **CC settings** | unknown — not in the journal | unknown | not measured |
 
-Найнесподіваніше тут — третій рядок: **розмір типової задачі в обох майже збігається**. Обидва
-запускають порівнянні за вагою прогони; різниця повністю в тому, **скільки таких прогонів
-уміщається в добу** і **скільки вікон їх приймає**.
+The most surprising thing here is the third row: **the size of a typical task is nearly the same for
+both**. Both run comparably heavy jobs; the difference is entirely in **how many such runs fit into
+a day** and **how many windows take them in**.
 
-Тобто трактувати це як «тарифну» різницю означало б приписати ціні те, що робить графік.
+Treating this as a "plan" difference would mean crediting price with what the schedule does.
 
-**Чотири складники профілю, кожен зі своїм внеском:**
+**Four components of a profile, each with its own contribution:**
 
-1. **Тариф** — скільки роботи вміщає вікно. Визначає, чи стеля взагалі досяжна.
-2. **Графік** — скільки вікон на добу відкривається і наскільки щільно заповнюється. Визначає,
-   як часто взагалі буває що показувати.
-3. **Типові задачі** — вага одного прогону в пунктах. Визначає, чи одна задача здатна вичерпати
-   вікно, чи потрібна їх серія.
-4. **Налаштування Claude Code** — обрана модель, рівень reasoning effort, використання воркфловів і
-   субагентів. Той самий запит на Opus із високим effort і на Sonnet коштує різних часток вікна, а
-   воркфлов із фан-аутом множить це на кількість агентів.
+1. **Plan** — how much work a window holds. Determines whether the ceiling is reachable at all.
+2. **Schedule** — how many windows a day open and how densely they fill. Determines how often there
+   is anything to show in the first place.
+3. **Typical tasks** — the weight of one run in points. Determines whether a single task can exhaust
+   a window or whether it takes a series of them.
+4. **Claude Code settings** — the model chosen, the reasoning effort level, use of workflows and
+   subagents. The same request on Opus at high effort and on Sonnet costs different fractions of a
+   window, and a workflow with fan-out multiplies that by the number of agents.
 
-Перші три вимірюються з журналу без жодних додаткових полів — усе видно з приростів `util` і
-розкладу вікон.
+The first three are measurable from the journal with no extra fields at all — everything is visible
+from `util` increments and the schedule of windows.
 
-> **Четвертий складник журналу недоступний.** У рядку є `plan`, `tier` і `scoped[]` (per-model
-> ліміти — на виміряних рядах лише `Fable`), але **немає ані обраної моделі, ані `effort`, ані
-> ознак воркфлову чи субагентів**. Тому будь-яка різниця, спричинена ними, зараз виглядає як
-> «незрозумілий розкид ваги задач» і приписується третьому складнику.
+> **The fourth component is unavailable from the journal.** A line has `plan`, `tier` and `scoped[]`
+> (per-model limits — on the measured series, only `Fable`), but **neither the chosen model, nor
+> `effort`, nor any trace of a workflow or subagents**. So any difference they cause currently looks
+> like "unexplained spread in task weight" and gets attributed to the third component.
 >
-> Це найімовірніше пояснення того, чому медіанний сплеск на двох рядах збігається (34 і 30 пп), а
-> `p90` розходиться (65 проти 80): важкий хвіст може бути не про розмір задачі, а про модель, якою
-> її запускали. **Розрізнити це на наявних даних неможливо** — потрібні поля зі statusline
-> (`model`, `ctxOut`), і саме тому вони в реєстрі полів на розширення журналу.
+> This is the most likely explanation for why the median burst on the two series matches (34 and
+> 30 pp) while `p90` diverges (65 versus 80): the heavy tail may be about the model a task was run
+> on rather than the size of the task. **Telling those apart is impossible with the data at hand** —
+> it needs the statusline fields (`model`, `ctxOut`), which is exactly why they are in the registry
+> of fields for extending the journal.
 
-**Практичний наслідок для аналітики:** висновок про «типові задачі користувача» тримається доти,
-доки він не змінив модель або effort. Порівнюючи ряди, зафіксовані в різні періоди, треба
-припускати, що четвертий складник міг змінитися мовчки — жодного сліду в журналі він не лишає.
+**Practical consequence for analysis:** a conclusion about "the user's typical tasks" holds only
+until they change model or effort. When comparing series captured in different periods, you have to
+assume the fourth component may have changed silently — it leaves no trace whatsoever in the journal.
 
-**Чому це може стати налаштуванням.** Профіль — не характеристика, яку застосунок мусить вгадувати,
-а величина, яку користувач знає про себе краще за будь-який алгоритм — надто четвертий складник,
-якого застосунок не бачить узагалі. Правдоподібна форма — не повзунки порогів (їх крутити не можна,
-див. вище), а **вибір режиму, який уже містить узгоджений набір параметрів**: наприклад «тісний
-ліміт, довгі прогони на важкій моделі» проти «просторий ліміт, розсипана робота». Внутрішньо це
-задає і пороги, і те, який сигнал взагалі має право з'являтися.
+**Why this may become a setting.** The profile is not a characteristic the app has to guess, but a
+quantity the user knows about themselves better than any algorithm — especially the fourth
+component, which the app cannot see at all. The plausible form is not threshold sliders (those must
+not be twiddled, see above) but **choosing a mode that already carries a coherent set of
+parameters**: say "tight limit, long runs on a heavy model" versus "roomy limit, scattered work".
+Internally that sets both the thresholds and which signal is even allowed to appear.
 
-Ключова відмінність від налаштовуваних порогів: користувач описує **себе**, а не бажаний вердикт.
-Вибір «мої задачі великі» — це факт про роботу; вибір «показуй мені менше помаранчевого» — спроба
-вимкнути неприємну відповідь.
+The key difference from adjustable thresholds: the user is describing **themselves**, not the
+verdict they want. Choosing "my tasks are big" is a fact about the work; choosing "show me less
+orange" is an attempt to switch off an unwelcome answer.
 
-**Наслідок для аналітики:** результат порівняння формул наводиться **по кожному профілю окремо**, і
-профіль описується всіма трьома складниками, а не одним лише планом. Ряди з різними профілями не
-змішуються — інакше усереднення приховає саме ту різницю, заради якої сигнал існує.
+**Consequence for analysis:** the result of a formula comparison is reported **per profile
+separately**, and a profile is described by all three components, not by the plan alone. Series with
+different profiles are not mixed — otherwise the averaging hides the very difference the signal
+exists for.
 
-### Як це виглядає на двох наявних рядах
+### How this looks on the two series at hand
 
-Обидві формули важать по-різному на різних профілях, тож **єдиного оптимуму не існує**. Контраст на
-виміряних рядах:
+The two formulas weigh differently on different profiles, so **there is no single optimum**. The
+contrast on the measured series:
 
-| | Max-ряд | Pro-ряд |
+| | Max series | Pro series |
 |---|---|---|
-| Вікон вичерпано (`≥ 95 %`) | **0 із 50** | **1 із 15** |
-| Вікон високих (`≥ 70 %`) | 4 | 5 |
-| Тривожно (orange+red) у роботі | 2,5 % часу | **34,4 %** |
+| Windows exhausted (`≥ 95%`) | **0 of 50** | **1 of 15** |
+| High windows (`≥ 70%`) | 4 | 5 |
+| Alarming (orange+red) while working | 2.5% of the time | **34.4%** |
 
-**Жовто-помаранчевий на меншому тарифі критичніший**, бо підписочні вікна там містять менше
-токенів: та сама робота підводить до стелі, якої на Max не видно. Правило, налаштоване на ряді, де
-вичерпання не траплялося жодного разу, буде для такого користувача занадто пізнім.
+**Yellow-orange matters more on the smaller plan**, because subscription windows there hold fewer
+tokens: the same work brings you up against a ceiling that is out of sight on Max. A rule tuned on a
+series where exhaustion never once happened will be too late for that user.
 
-**Синій на меншому тарифі теж читається інакше.** На Max він каже «економиш», на Pro —
-**«вікно свіже, встигни запустити щось велике»**: коли ліміт тісний, важливо знати, що великий
-прогін ще вміститься цілком, а не обірветься посередині. Це не той самий сигнал з іншою вагою, а
-**інша дія**: там де один користувач читає «можна не поспішати», інший читає «зараз або ніколи».
+**Blue reads differently on the smaller plan too.** On Max it says "you are saving", on Pro —
+**"the window is fresh, get something big started"**: when the limit is tight, it matters to know
+that a big run will still fit whole rather than being cut off halfway. This is not the same signal
+with a different weight but **a different action**: where one user reads "no need to hurry", the
+other reads "now or never".
 
-**Наслідок для методу:** правило оптимізується **окремо для кожного профілю** — тариф, графік і вага
-типової задачі разом. Критерій, зведений до одного числа на змішаній вибірці, приховає саме ту
-різницю, заради якої сигнал існує.
+**Consequence for the method:** the rule is optimized **separately for each profile** — plan,
+schedule and typical task weight together. A criterion collapsed to a single number on a mixed
+sample will hide the very difference the signal exists for.
 
-### Що з цього випливає для роботи зараз
+### What this means for the work right now
 
-**Не міняти жодну формулу до накопичення даних.** Не тому, що вони бездоганні — жовто-помаранчевий
-має 40 % точності, синій 75 % марних спрацювань, — а тому, що **на 4–5 подіях будь-яка зміна буде
-підгонкою під два ряди**, один із яких знятий у нетиповий період.
+**Do not change any formula until the data accumulates.** Not because the formulas are flawless —
+yellow-orange has 40% accuracy, blue has 75% pointless firings — but because **on 4–5 events any
+change is fitting to two series**, one of which was captured in an atypical period.
 
-**Що робити натомість:** писати другий вердикт паралельно
-([#426](https://github.com/artem-from-ua/tokenpace/issues/426)) і накопичувати. Через 8–10 тижнів
-буде 15–20 подій, і критерії вище стануть застосовними.
+**What to do instead:** write a second verdict in parallel
+([#426](https://github.com/artem-from-ua/tokenpace/issues/426)) and accumulate. In 8–10 weeks there
+will be 15–20 events, and the criteria above become applicable.
 
-## Обов'язково: перевірка сигналу — до генерації, не після
+## Mandatory: check for signal before generating, not after
 
-**Кожен аналітичний артефакт мусить містити секцію про те, чи є на його діаграмах корисний для
-користувача сигнал.** Не «що видно», а **що з побаченим робити**. Якщо сигналу немає — це теж
-результат, і його треба назвати прямо.
+**Every analytical artifact must contain a section about whether its diagrams carry a signal that is
+useful to the user.** Not "what you can see", but **what to do about what you see**. If there is no
+signal, that is a result too, and it has to be stated plainly.
 
-**Порядок має значення: питання ставиться до того, як щось намальовано.** Побудувати діаграму, а
-потім шукати в ній сенс — найдорожчий спосіб працювати: витрачається час на форму, яка може не
-знадобитися, і виникає спокуса виправдати вже зроблене. Правильний порядок такий.
+**The order matters: the question is asked before anything is drawn.** Building a diagram and then
+looking for meaning in it is the most expensive way to work: time goes into a form that may turn out
+to be unnecessary, and the temptation arises to justify what has already been made. The right order
+is this.
 
-### Перед побудовою
+### Before building
 
-1. **Сформулювати, на яке рішення це вплине.** Одне речення виду «побачивши це, користувач
-   зробить X замість Y». Не пройшло — сказати про це замовнику **до** побудови, а не після.
-2. **Перевірити, чи запитана діаграма взагалі може нести цей сигнал.** Часто виявляється, що
-   потрібна сусідня форма або інша вибірка — і краще перепитати, ніж намалювати не те.
-3. **Якщо сигналу в чистому вигляді немає — запропонувати, чим його добути:** розширити діаграму
-   (додати вимір, перемикач, крайову смугу), змінити вибірку, або взяти іншу метрику з тих самих
-   даних. Пропозиція формулюється **до** генерації, разом із оцінкою, що саме вона додасть.
+1. **State which decision this will affect.** One sentence of the form "having seen this, the user
+   will do X instead of Y". Doesn't pass — say so to whoever asked **before** building, not after.
+2. **Check whether the requested diagram can even carry that signal.** It often turns out that an
+   adjacent form or a different sample is what's needed — and asking is better than drawing the
+   wrong thing.
+3. **If there is no signal in pure form, propose how to get one:** extend the diagram (add a
+   dimension, a toggle, a marginal bar), change the sample, or take a different metric from the same
+   data. The proposal is stated **before** generation, together with an estimate of what exactly it
+   adds.
 
-### У самому артефакті
+### In the artifact itself
 
-Секція наприкінці, поруч із висновками. Що в ній має бути:
+A section at the end, next to the conclusions. What it has to contain:
 
-- **Що з цього діє.** Конкретна дія, а не «цікаво знати».
-- **Чого робити не варто.** Найчастіше саме тут ховається головне: числа, які виглядають як заклик
-  щось оптимізувати, а насправді не є боргом (невитрачена квота, спокійний тиждень).
-- **Чому не спрацював альтернативний хід.** Якщо перевірялися варіанти й вони відпали — назвати їх
-  із причиною; це рятує наступного від повторення.
+- **What acts on this.** A concrete action, not "interesting to know".
+- **What not to do.** This is most often where the important part hides: numbers that look like a
+  call to optimize something but are not actually a debt (unspent quota, a calm week).
+- **Why the alternative approach didn't work.** If options were tried and dropped — name them with
+  the reason; it saves the next person from repeating them.
 
-### Панель параметрів — липка при прокручуванні
+### The parameter panel — sticky on scroll
 
-Якщо артефакт має контроли, що змінюють **усі** діаграми на сторінці (вибір джерела даних, вибірки
-часу, порогу обробки), вони мають лишатися доступними, коли читач прокрутив нижче.
+If an artifact has controls that change **all** the diagrams on the page (data source selection,
+time sample, processing threshold), they have to stay reachable once the reader has scrolled down.
 
 ```css
 .toolbar{
   position:sticky; top:0; z-index:20;
-  margin:0 -24px; padding:12px 24px;              /* компенсувати падінг обгортки */
+  margin:0 -24px; padding:12px 24px;              /* compensate for the wrapper padding */
   background:color-mix(in srgb, var(--ground) 88%, transparent);
   backdrop-filter:saturate(180%) blur(12px);
-  border-bottom:1px solid transparent;            /* межа з'являється лише коли прилипло */
+  border-bottom:1px solid transparent;            /* the border appears only once stuck */
 }
 .toolbar.stuck{ border-bottom-color:var(--line); box-shadow:0 2px 12px rgba(0,0,0,.06) }
 ```
 
-Клас `.stuck` вішається через `IntersectionObserver` на порожній sentinel-елемент **перед** панеллю:
-`position: sticky` сам по собі не дає знати, чи він спрацював, а тінь у неприлиплому стані виглядає
-як зайва лінія посеред сторінки.
+The `.stuck` class is attached via an `IntersectionObserver` on an empty sentinel element **before**
+the panel: `position: sticky` on its own gives no way to know whether it has engaged, and a shadow
+in the unstuck state looks like a stray line in the middle of the page.
 
 ```js
 new window.IntersectionObserver(([e]) => {
@@ -873,545 +903,568 @@ new window.IntersectionObserver(([e]) => {
 }, {threshold: 0}).observe(sentinel);
 ```
 
-Три деталі, кожна з причини:
+Three details, each for a reason:
 
-- **Напівпрозорий фон із `backdrop-filter`**, а не суцільний: під панеллю видно, що контент
-  прокручується, і вона не читається як обрив сторінки.
-- **Від'ємні маргіни на ширину падінгу обгортки** — інакше смуга обривається на межі колонки й
-  виглядає як віджет, а не як панель. Разом із ними потрібен `overflow-x: hidden` на `body`.
-- **Тінь лише в прилиплому стані** — у звичайному панель має бути частиною сторінки, а не окремим
-  елементом.
+- **A translucent background with `backdrop-filter`**, not an opaque one: content is visible
+  scrolling underneath the panel, so it does not read as the page being cut off.
+- **Negative margins the width of the wrapper padding** — otherwise the bar stops at the column edge
+  and looks like a widget rather than a panel. They also require `overflow-x: hidden` on `body`.
+- **A shadow only in the stuck state** — in the normal state the panel should be part of the page,
+  not a separate element.
 
-Не робити липкими: легенди окремих діаграм, підписи, будь-що, що стосується **однієї** панелі. Липке
-має бути лише те, що керує всім.
+Do not make sticky: legends of individual diagrams, captions, anything that concerns **one** panel.
+Only what controls everything gets to be sticky.
 
-### Спершу: повні правила кольору, а не самі пороги
+### First: the complete color rules, not just the thresholds
 
-Найпоширеніша помилка при порівнянні формул — узяти **лише поріг** і забути override'и. Правило
-складається з кількох гілок, і кожна щось ловить. Скорочення на кшталт «`lead ≥ 0,16·(1−t)`» описує
-одну гілку з чотирьох і при перенесенні в код дає інші числа.
+The most common mistake when comparing formulas is to take **only the threshold** and forget the
+overrides. A rule consists of several branches, and each one catches something. A shorthand like
+"`lead ≥ 0.16·(1−t)`" describes one branch out of four, and carried into code it produces different
+numbers.
 
-**Жовтий → помаранчевий** (гілка `util > timePct`, порядок перевірок обов'язковий):
+**Yellow → orange** (the `util > timePct` branch, the order of checks is mandatory):
 
 ```
-if util >= 1                        → red        # вичерпано
-if remainingSeconds <= 20 хв        → orange     # вікно от-от скинеться, будь-який відрив вартий уваги
-if lead < 0,16·(1 − timeFraction)   → yellow
+if util >= 1                        → red        # exhausted
+if remainingSeconds <= 20 min       → orange     # the window is about to reset, any gap is worth attention
+if lead < 0.16·(1 − timeFraction)   → yellow
 else                                → orange
 ```
 
-**Синій → зелений** (гілка `util <= timePct`, теж по порядку):
+**Blue → green** (the `util <= timePct` branch, also in order):
 
 ```
-if util >= 1                        → red        # щойно ресетнуте 100 % вікно читається як on-pace
-if !blueAllowed                     → green      # синій тут не пропонується — див. три причини нижче
-if elapsed <= 20 хв від старту      → green      # на початку майже будь-що читається як великий надлишок
-if surplus > behindThreshold        → blue       # 2 год для 5h (0,40), 2 доби для 7d (≈0,286)
+if util >= 1                        → red        # a just-reset 100% window reads as on-pace
+if !blueAllowed                     → green      # blue is not offered here — see the three reasons below
+if elapsed <= 20 min from the start → green      # early on, almost anything reads as a large surplus
+if surplus > behindThreshold        → blue       # 2 h for 5h (0.40), 2 days for 7d (≈0.286)
 else                                → green
 ```
 
-**Нульова гілка — idle, і в жодному з двох блоків її немає.** Якщо `reset` порожній або не
-парситься, пейсингової геометрії не існує взагалі: `BarLayout` не будується, `timePct` записано
-нулем, обидва 20-хвилинні override'и й `blueAllowed` не діють, а вердикт беруть із самої лише
-утилізації:
+**The zeroth branch is idle, and it is in neither of the two blocks.** If `reset` is empty or fails
+to parse, there is no pacing geometry at all: `BarLayout` is not built, `timePct` is recorded as
+zero, both 20-minute overrides and `blueAllowed` are inert, and the verdict comes from utilization
+alone:
 
 ```
-if reset не парситься   → (util >= 100 ? red : green)   # і жодна гілка нижче не виконується
+if reset does not parse   → (util >= 100 ? red : green)   # and no branch below runs
 ```
 
-Це не рідкість: на серпневому ряді так виглядає **1 551 із 5 789** 5-годинних вікон (27 %), на
-Pro-ряді — 56 %. Наївний перерахунок, що проганяє їх через звичайні гілки, зіпсує більше рядків,
-ніж виправить. І окремо: `timePct == 0` тут означає «стану вікна немає», **не** «вікно щойно
-почалося» — розрізнити можна лише за порожнім `reset`.
+This is not rare: on the August series that is what **1,551 of 5,789** 5-hour windows look like
+(27%), and 56% on the Pro series. A naive recomputation that runs them through the ordinary branches
+will spoil more lines than it fixes. And separately: `timePct == 0` here means "there is no window
+state", **not** "the window just started" — the only way to tell them apart is by an empty `reset`.
 
-Два 20-хвилинні override'и **симетричні**: один охороняє кінець вікна (не дає пропустити відрив
-перед ресетом), другий — початок (не дає синьому блимати одразу після ресету).
+The two 20-minute overrides are **symmetric**: one guards the end of the window (so a gap right
+before the reset is not missed), the other the beginning (so blue does not blink right after the
+reset).
 
-**`blueAllowed` — не косметика, а факт про дані**, і причин у нього **три**, не одна
-([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)). Синій каже «у тижня є запас, який ти не
-використовуєш», тож він `false`, коли це твердження неправдиве, ні до кого не звернене або
-беззмістовне:
+**`blueAllowed` is not cosmetics but a fact about the data**, and it has **three** reasons, not one
+([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)). Blue says "the week has headroom you are
+not using", so it is `false` whenever that statement is untrue, addressed to nobody, or meaningless:
 
-| Бар | `blueAllowed` | Чому |
+| Bar | `blueAllowed` | Why |
 |---|---|---|
-| `d7` | `true` завжди | сам себе не гейтить |
-| `h5` | `weeklyHasHeadroom` | тиждень мусить справді мати запас, інакше порада нефінансована |
-| `opus` / `sonnet` / `scoped` | **`false`** | вони **є** зрізами того тижня — порада адресована сама собі |
-| credits, idle | `false` | пейсингової поради не дають узагалі |
+| `d7` | `true` always | it does not gate itself |
+| `h5` | `weeklyHasHeadroom` | the week must genuinely have headroom, otherwise the advice is unfunded |
+| `opus` / `sonnet` / `scoped` | **`false`** | they **are** slices of that week — the advice is addressed to itself |
+| credits, idle | `false` | they give no pacing advice at all |
 
-Третій рядок — свіжий. До #426 per-model вікна несли `weeklyHasHeadroom`, і в журналі через це
-осіло **2 214** записів `scoped.sev == "blue"`, яких на екрані ніколи не було (попап глушив їх
-власним прапорцем рендера). Міграція v4 перерахувала їх; у мігрованих рядках початковий вердикт
-лишився в `sevRaw`.
+The third row is new. Before #426, per-model windows carried `weeklyHasHeadroom`, and because of
+that **2,214** `scoped.sev == "blue"` records settled in the journal that were never on screen (the
+popup suppressed them with its own render flag). The v4 migration recomputed them; in migrated lines
+the original verdict is preserved in `sevRaw`.
 
-Джерело істини — `PacingBucket.of(_:)` і константи `PacingModel`; при відтворенні в аналітиці
-портувати **всі** гілки, інакше розподіли розійдуться з тим, що бачив користувач.
+The source of truth is `PacingBucket.of(_:)` and the `PacingModel` constants; when reproducing this
+in analysis, port **all** the branches, otherwise the distributions will diverge from what the user
+saw.
 
-### Сигнал не має блимати — і це вимірюється
+### The signal must not blink — and this is measurable
 
-**Правило, яке перемикається туди-сюди на звичайних коливаннях, гірше за відсутність правила.**
-Користувач перестає його читати, а на менюбарі блимання ще й фізично відволікає. Тому будь-який
-поріг перевіряється не лише на точність, а й на **стійкість**.
+**A rule that switches back and forth on ordinary fluctuations is worse than no rule.** The user
+stops reading it, and in the menu bar the blinking is physically distracting on top of that. So any
+threshold is checked not only for accuracy but for **stability**.
 
-Три метрики, які треба порахувати перед тим, як пропонувати формулу:
+Three metrics to compute before proposing a formula:
 
-| Метрика | Як рахувати | Що погано |
+| Metric | How to compute it | What is bad |
 |---|---|---|
-| **Перемикань усього** | скільки разів стан змінився на всьому ряді | більше, ніж епізодів × 2 |
-| **Вікон із флапом** | вікна з ≥ 3 перемиканнями | будь-яке |
-| **Медіана епізоду** | скільки триває одне ввімкнення | коротше за ~20 хв |
+| **Total switches** | how many times the state changed across the whole series | more than episodes × 2 |
+| **Windows with flapping** | windows with ≥ 3 switches | any at all |
+| **Median episode** | how long one activation lasts | shorter than ~20 min |
 
-Останнє найважливіше: епізод, коротший за час, потрібний щоб прочитати повідомлення, не встигає
-нічого сказати. На виміряних рядах трапилося вікно, де правило перемкнулося **вісім разів**, а
-медіана епізоду впала до **8 хвилин** — бар блимав би чверть години поспіль.
+The last is the most important: an episode shorter than the time it takes to read the message does
+not manage to say anything. On the measured series there was a window where the rule switched
+**eight times** and the median episode dropped to **8 minutes** — the bar would have been blinking
+for a quarter of an hour straight.
 
-### Що спричиняє флапання
+### What causes flapping
 
-- **Ділення на малу величину.** Правила виду `util / timePct` нестійкі на початку вікна: на 5 %
-  минулого часу знаменник крихітний, і один крок лічильника кидає результат через поріг. Лікується
-  запобіжником на кшталт `util ≥ 0,4`, а не гістерезисом.
-- **Поріг у зоні щільних даних.** Статичний поріг, що припадає на типовий рівень, дає дрижання
-  щополла. Динамічний поріг, який рухається геть від даних, стійкіший — і саме тому чинна
-  `0,16·(1−t)` флапає менше за статичну `0,10` попри гіршу точність.
-  (Порівнюється лише гілка порога — override'и в усіх варіантах однакові.)
-- **Ресет вікна.** Стан скидається разом із лічильником; це не флапання, і гістерезисом не
-  лікується — треба відсікати переходи через межу вікна.
+- **Division by a small quantity.** Rules of the form `util / timePct` are unstable at the start of
+  a window: at 5% of elapsed time the denominator is tiny, and a single counter step throws the
+  result across the threshold. The cure is a guard like `util ≥ 0.4`, not hysteresis.
+- **A threshold in a dense region of the data.** A static threshold that lands on a typical level
+  jitters on every poll. A dynamic threshold that moves away from the data is more stable — which is
+  exactly why the current `0.16·(1−t)` flaps less than a static `0.10` despite worse accuracy.
+  (Only the threshold branch is being compared — the overrides are identical in every variant.)
+- **A window reset.** The state resets along with the counter; this is not flapping and hysteresis
+  will not cure it — transitions across a window boundary have to be excluded.
 
-### Пороги не переносяться між вікнами — навіть похідні
+### Thresholds do not carry across windows — not even derived ones
 
-Незрівнянність 5h і 7d стосується не лише `util`, а **всіх похідних величин**, включно з порогами
-кольору. `behindThreshold` — **0,400 для 5-годинного** вікна (2 год) і **0,286 для тижневого**
-(2 доби): це та сама фіксована ширина в реальному часі, поділена на різні тривалості.
+The incomparability of 5h and 7d applies not only to `util` but to **every derived quantity**,
+color thresholds included. `behindThreshold` is **0.400 for the 5-hour** window (2 h) and **0.286
+for the weekly** one (2 days): the same fixed width in real time, divided by different durations.
 
-> **Пастка, що вже спрацювала.** Гістерезис синього був заданий як фіксована пара «вхід 0,40 /
-> вихід 0,35». Число 0,40 — це поріг **5-годинного** вікна; застосоване до тижневого, воно підняло
-> його поріг на **11,4 пп** і зробило синій там практично недосяжним. Проявилося не там, де
-> помилка: з матриці зникла колонка `7d = blue`, а разом із нею крайова клітинка «5h синій» —
-> і виглядало це як зникнення 15 годин синього на 5h.
+> **A trap that has already sprung.** The blue hysteresis was specified as a fixed pair, "enter 0.40
+> / exit 0.35". The number 0.40 is the **5-hour** window's threshold; applied to the weekly one, it
+> raised that threshold by **11.4 pp** and made blue there effectively unreachable. It showed up
+> nowhere near the mistake: the `7d = blue` column vanished from the matrix, and with it the
+> marginal cell for "5h blue" — which looked like 15 hours of blue disappearing from 5h.
 >
-> **Правильно:** гістерезис **відносний до порога вікна**, а не абсолютний.
+> **The right way:** hysteresis is **relative to the window's threshold**, not absolute.
 >
 > ```python
 > base = behind_threshold(window_seconds)      # 0.400 (5h) / 0.286 (7d)
 > thr  = base * 0.875 if state == "blue" else base
 > ```
 
-Правило ширше за цей випадок: **будь-яка константа, взята з одного вікна, потребує перерахунку для
-іншого.** Якщо в коді з'явився літерал на кшталт `0.40`, він майже напевно належить одному вікну —
-і має бути функцією від `windowDurationSeconds`.
+The rule is broader than this case: **any constant taken from one window needs recomputing for the
+other.** If a literal like `0.40` has appeared in the code, it almost certainly belongs to one
+window — and it should be a function of `windowDurationSeconds`.
 
-### Осі діаграми — з повного набору станів, не з наявних даних
+### Diagram axes come from the full set of states, not from the data at hand
 
-Суміжний урок із того самого випадку. Осі матриці будувалися зі списку **наявних перетинів**:
+An adjacent lesson from the same incident. The matrix axes were built from the list of
+**intersections present**:
 
 ```js
-const cols = SEV.filter(s => matrix.some(x => x.b === s));   // ✗ крихко
+const cols = SEV.filter(s => matrix.some(x => x.b === s));   // ✗ brittle
 ```
 
-Коли одна комбінація зникла, зник цілий стовпчик — **разом із крайовою клітинкою, яка до неї не
-належала**. Симптом вказував не на місце помилки, і на пошук пішов час.
+When one combination disappeared, a whole column disappeared — **together with a marginal cell that
+did not belong to it**. The symptom pointed away from the site of the mistake, and finding it took
+time.
 
 ```js
 const cols = SEV.filter(s => matrix.some(x => x.b === s) || marginal7.some(x => x.k === s)); // ✓
 ```
 
-Загальний принцип: **вісь категоріальної діаграми виводиться з домену, а не з вибірки.** Порожній
-рядок або стовпчик — це інформація («такого стану не траплялося»), а зникла вісь — це втрачений
-контекст і хибний висновок про сусідні дані.
+The general principle: **the axis of a categorical diagram is derived from the domain, not from the
+sample.** An empty row or column is information ("that state did not occur"), whereas a vanished
+axis is lost context and a wrong conclusion about the neighboring data.
 
-### Гістерезис: коли працює, а коли ні
+### Hysteresis: when it works and when it doesn't
 
-Різні пороги на ввімкнення й вимкнення (`вхід 0,90 / вихід 0,80`) допомагають лише проти дрижання
-**біля самої межі**. Виміряно на двох правилах:
+Different thresholds for switching on and off ("enter 0.90 / exit 0.80") help only against jitter
+**right at the boundary**. Measured on two rules:
 
-| Правило | Без гістерезису | З гістерезисом |
+| Rule | Without hysteresis | With hysteresis |
 |---|---|---|
-| чинне правило (гілка порога) | 2 флап-вікна, медіана епізоду 19 хв | **1 вікно, 62 хв** |
-| `прогноз u/t ≥ 0,9` | 2 флап-вікна, 49 хв | **без змін** |
+| the current rule (threshold branch) | 2 flap windows, median episode 19 min | **1 window, 62 min** |
+| `forecast u/t ≥ 0.9` | 2 flap windows, 49 min | **no change** |
 
-На другому правилі гістерезис не дав нічого, бо його перемикання спричиняє не дрижання, а ресет
-вікна. **Перш ніж додавати гістерезис — з'ясувати, що саме перемикає стан.**
+On the second rule hysteresis gave nothing, because its switching is caused not by jitter but by the
+window reset. **Before adding hysteresis, work out what is actually switching the state.**
 
-### Наслідок для порівняння формул
+### Consequence for comparing formulas
 
-Точність і стійкість часто тягнуть у різні боки, і виграш за одним виміром не є перемогою:
+Accuracy and stability often pull in different directions, and a win on one dimension is not a
+victory:
 
-| Правило | Точність | Покриття | Флап-вікна |
+| Rule | Accuracy | Coverage | Flap windows |
 |---|---|---|---|
-| чинне правило | 40 % | 50 % | **0** |
-| поріг замінено на статичний `0,10` | 50 % | 75 % | 1 (8 перемикань) |
-| поріг замінено на `util/timePct ≥ 0,9` І `util ≥ 0,4` | **67 %** | **100 %** | 1 |
+| the current rule | 40% | 50% | **0** |
+| threshold replaced with a static `0.10` | 50% | 75% | 1 (8 switches) |
+| threshold replaced with `util/timePct ≥ 0.9` AND `util ≥ 0.4` | **67%** | **100%** | 1 |
 
-Тому таблиця порівняння формул **мусить містити колонку флапання** — інакше вибір робиться наосліп.
+So a formula comparison table **must include a flapping column** — otherwise the choice is made
+blind.
 
-### Обов'язкова умова кольорових правил
+### The mandatory condition on color rules
 
-Окремо, бо це не про стійкість, а про правдивість: **правило тривоги мусить містити умову «попереду
-темпу» (`util > timePct`)**. Без неї виникають стани, які прямо брешуть.
+Separately, because this is not about stability but about truthfulness: **an alarm rule must include
+the "ahead of pace" condition (`util > timePct`)**. Without it, states arise that flatly lie.
 
-Виміряно на правилі `util ≥ 70 %` без цієї умови: **43 % спрацювань припали на моменти, коли
-користувач насправді відставав** від рівномірного темпу. Найгірший випадок — `util 71 %` при
-`92 %` минулого часу: людина недовикористовує вікно на 21 пункт, а бар вимагає гальмувати.
+Measured on the `util ≥ 70%` rule without that condition: **43% of firings landed on moments when
+the user was in fact behind** an even pace. The worst case — `util 71%` at `92%` of time elapsed:
+the person is underusing the window by 21 points, and the bar is demanding they slow down.
 
-Перевірка проста і має бути в кожному порівнянні: **частка спрацювань, де `util ≤ timePct`, мусить
-дорівнювати нулю.**
+The check is simple and belongs in every comparison: **the share of firings where `util ≤ timePct`
+must equal zero.**
 
-### Приклад, як це виглядає на практиці
+### An example of how this looks in practice
 
-Запит «дай покрутити пороги перемикання кольорів» перевірявся саме в такому порядку — і **не
-пройшов крок 1**:
+The request "let me twiddle the color switching thresholds" was checked in exactly this order — and
+**failed step 1**:
 
-- **Виміряно чутливість:** розтягнути `aheadThreshold` з 0,16 до 0,25 (на 56 %) прибирає **менш ніж
-  пів пункта** помаранчевого, бо поріг усе одно звужується до нуля наприкінці вікна. Параметр
-  майже нечутливий у той бік, у який його хотілося б крутити.
-- **Знайдено концептуальну ваду:** пересунути межу означає **змінити вердикт, не змінивши витрати**.
-  Це прямо суперечить принципу «значення — вхід моделі, колір — її вихід» з
-  [users-and-goals.md](users-and-goals.md). Для приглушення кольорів уже є `Colors tell me`, який
-  гасить спокійні тони, а не зсуває тривогу.
-- **Запропоновано заміну, що дає дію:** панель «наскільки близько до порога» — розподіл
-  `lead = util − timePct` проти динамічної кривої порога. Вона відповідає на справжнє питання
-  («чому я так рідко бачу помаранчевий»), не даючи зламати шкалу.
+- **Sensitivity measured:** stretching `aheadThreshold` from 0.16 to 0.25 (by 56%) removes **less
+  than half a point** of orange, because the threshold narrows to zero at the end of the window
+  anyway. The parameter is almost insensitive in the direction you would want to turn it.
+- **A conceptual flaw found:** moving the boundary means **changing the verdict without changing the
+  spending**. That directly contradicts the "the value is the model's input, the color is its
+  output" principle from [users-and-goals.md](users-and-goals.md). For toning colors down there is
+  already `Colors tell me`, which damps the calm tones rather than shifting the alarm.
+- **A replacement proposed that yields an action:** a "how close to the threshold" panel — the
+  distribution of `lead = util − timePct` against the dynamic threshold curve. It answers the real
+  question ("why do I so rarely see orange") without letting anyone break the scale.
 
-Результат панелі на двох рядах виявився протилежним і в обох випадках дав дію: на одному медіана
-випередження **31 % порога** (типово до межі не доходить, попередження лишається рідкісним і тому
-помітним), на другому — **174 %** (типово вже за межею, тобто помаранчевий став нормальним робочим
-станом і перестав бути сигналом; дивитися треба на тижневий бар).
+The panel's result on the two series turned out to be opposite, and in both cases it yielded an
+action: on one, the median was **31% of the threshold** (typically it does not reach the boundary,
+so the warning stays rare and therefore noticeable), on the other — **174%** (typically already past
+the boundary, meaning orange has become the normal working state and stopped being a signal; the
+thing to watch is the weekly bar).
 
-## Які діаграми будувати і коли
+## Which charts to build, and when
 
-Форму обирає **завдання читача**, а не наявність даних. Нижче — типи, перевірені на цих рядах, із
-зазначенням, що саме кожен доводить і де він бреше.
+The form is chosen by the **reader's task**, not by what data happens to exist. Below are the types
+tested on these series, with a note on what each one proves and where it lies.
 
-> Загальні правила побудови (палітра, підписи, легенди, темна тема) — у навичці `dataviz`.
-> Тут — специфіка саме журнальних даних.
+> General plotting rules (palette, labels, legends, dark theme) live in the `dataviz` skill.
+> This section covers what is specific to journal data.
 
-### Часовий ряд / траєкторія вікна
+### Time series / window trajectory
 
-**Коли:** треба показати, *як розвивалася* величина всередині вікна — де робота стояла, де був
-сплеск.
+**When:** you need to show *how a value developed* inside a window — where work stalled, where it
+spiked.
 
-**Приклад:** залишок тижневого ліміту проти частки минулого часу; пласка ділянка = простій, крутий
-спуск = інтенсивна сесія.
+**Example:** weekly limit remaining versus fraction of elapsed time; a flat stretch = idle, a steep
+descent = an intense session.
 
-**Застереження:** по осі X краще брати `timePct`, а не абсолютний час — тоді вікна різної
-тривалості порівнянні між собою. Розриви в даних (застосунок був вимкнений) з'єднувати прямою
-**не можна** — це домальовує роботу, якої не було; лишати розрив або пунктир.
+**Caveat:** prefer `timePct` on the X axis over absolute time — that makes windows of different
+lengths comparable. Gaps in the data (the app was off) **must not** be joined with a straight line —
+that draws in work that never happened; leave the gap, or use a dashed segment.
 
-### Scatter (розсіювання)
+### Scatter
 
-**Коли:** перевіряється зв'язок двох величин на рівні окремих вікон.
+**When:** you are testing a relationship between two values at the level of individual windows.
 
-**Приклад:** час простою до ресету × фінальний `util`.
+**Example:** idle time before the reset × final `util`.
 
-**Застереження:** обидві осі часто квантовані (див. вище), тож точки лягають ґратками — це нормально,
-але додавати джиттер не варто: він приховає справжню дискретність. Кореляцію рахувати на логарифмах,
-якщо величина має важкий хвіст.
+**Caveat:** both axes are often quantized (see above), so points land on a lattice — that is normal,
+but do not add jitter: it hides the real discreteness. Compute correlation on logarithms if the
+value has a heavy tail.
 
-### CCDF у лог-лог координатах
+### CCDF in log-log coordinates
 
-**Коли:** треба відповісти, **чи є характерний розмір** у величини — пауз, тривалостей, розривів.
+**When:** you need to answer whether the value — pauses, durations, gaps — **has a characteristic
+size**.
 
-Це головний інструмент для цих даних. Пряма лінія = степеневий закон = характерного розміру немає;
-вигин = масштаб існує.
+This is the main instrument for these data. A straight line = a power law = no characteristic size;
+a bend = a scale exists.
 
-**Чому саме CCDF, а не гістограма:** гістограма важкого хвоста залежить від вибору бінів і в хвості
-завжди виглядає порожньою. CCDF не має бінів узагалі, тож не має і цієї свободи.
+**Why CCDF and not a histogram:** a histogram of a heavy tail depends on the choice of bins, and the
+tail always looks empty. A CCDF has no bins at all, so it does not have that freedom either.
 
-**Застереження:** нахил чутливий до нижньої межі; наводити разом із R² і діапазоном, на якому фіт
-робився.
+**Caveat:** the slope is sensitive to the lower cutoff; report it together with R² and the range the
+fit was done over.
 
-### Гістограма в логарифмічних бінах
+### Histogram in logarithmic bins
 
-**Коли:** треба показати, **скільки чого трапляється**, а величина охоплює кілька порядків.
+**When:** you need to show **how much of what occurs**, and the value spans several orders of
+magnitude.
 
-**Застереження:** для тривалостей — біни по кроках опитування, не геометричні (див. § про
-квантування). Для не-часових величин геометричні біни нормальні.
+**Caveat:** for durations, bin by polling steps, not geometrically (see the § on quantization). For
+non-temporal values, geometric bins are fine.
 
-### Спектрограма / карта «параметр × розподіл»
+### Spectrogram / "parameter × distribution" map
 
-**Коли:** результат залежить від параметра обробки, і треба показати саму цю залежність, а не
-ховати вибір параметра.
+**When:** the result depends on a processing parameter, and you need to show that dependence itself
+instead of hiding the choice of parameter.
 
-**Приклад:** кількість і тривалість сесій як функція порогу склейки; двовимірна карта «поріг ×
-тривалість».
+**Example:** session count and duration as a function of the merge threshold; a two-dimensional
+"threshold × duration" map.
 
-**Це найчесніший спосіб подати параметризовану метрику** — читач бачить, що змінюється з порогом, і
-може обрати сам. Альтернатива (одне число + виноска про поріг) приховує масштаб залежності.
+**This is the most honest way to present a parameterized metric** — the reader sees what changes
+with the threshold and can pick for themselves. The alternative (one number plus a footnote about
+the threshold) hides the magnitude of the dependence.
 
-**Застереження:** на карті обов'язково позначати **межу роздільності** — зону, де значень бути не
-може.
+**Caveat:** the map must mark the **resolution limit** — the zone where no values can exist.
 
-### Стовпчики з розбиттям «використано / згоріло»
+### Bars split into "used / burned"
 
-**Коли:** треба показати частку від фіксованого цілого — скільки з ліміту спожито.
+**When:** you need to show a share of a fixed whole — how much of the limit was consumed.
 
-**Застереження:** незавершені вікна показувати окремим стилем (пунктир, приглушений колір) і
-підписувати як прогноз, інакше вони читаються як провал.
+**Caveat:** show incomplete windows in a separate style (dashed, muted color) and label them as a
+forecast, otherwise they read as a failure.
 
-### Періодограма
+### Periodogram
 
-**Коли:** перевіряється гіпотеза про періодичність.
+**When:** you are testing a hypothesis about periodicity.
 
-**Обов'язково з порогом шуму** від перемішувань — без нього будь-який спектр має піки, і вони
-нічого не означають.
+**Always with a noise floor** from shuffles — without it any spectrum has peaks, and they mean
+nothing.
 
-### Профіль по годинах доби / днях тижня
+### Profile by hour of day / day of week
 
-**Коли:** треба показати, **коли** відбувається робота.
+**When:** you need to show **when** the work happens.
 
-**Застереження:** вимагає ≥ 5 спостережень на комірку, інакше медіана недостовірна; порожні
-години краще лишати порожніми, ніж малювати нуль. Обов'язково перевірити, чи вибірка покриває всі
-дні тижня — на 10-денному ряді може не бути жодної неділі, і «нуль у неділю» буде артефактом,
-а не поведінкою.
+**Caveat:** requires ≥ 5 observations per cell, otherwise the median is not trustworthy; empty hours
+are better left empty than drawn as zero. Always check whether the sample covers every day of the
+week — a 10-day series may contain no Sunday at all, and "zero on Sunday" will be an artifact rather
+than behavior.
 
-### Частки станів: матриця 5h × 7d із крайовими смугами
+### State shares: a 5h × 7d matrix with marginal bands
 
-**Коли:** треба показати, скільки часу бари провели в кожному кольорі — і окремо, і разом.
+**When:** you need to show how much time the bars spent in each color — separately and together.
 
-Ця форма перевірена на реальних рядах і дає відповідь, якої не дають два окремі стек-бари. Її
-складові, кожна з причиною:
+This form has been tested on real series and answers a question two separate stacked bars do not.
+Its parts, each with its reason:
 
-**Матриця перетинів 5h × 7d.** Рядок — стан п'ятигодинного бара, стовпчик — тижневого, клітинка —
-частка часу, коли вони збіглися саме так. Показує те, чого не видно в окремих розподілах: **чи
-тривожаться бари разом, чи по черзі**. На виміряних рядах — по черзі: тривожний стан на обох
-одночасно займає частки відсотка, тоді як хоч на одному — на порядок більше. Це прямо обґрунтовує
-дефолт «ховати спокійну смужку»: у момент, коли вона спокійна, вона справді не несе інформації.
+**The 5h × 7d intersection matrix.** A row is the five-hour bar's state, a column is the weekly
+bar's, a cell is the fraction of time when they coincided in exactly that way. It shows what the
+separate distributions do not: **whether the bars alarm together or in turn**. On the measured
+series — in turn: the alarming state on both at once takes fractions of a percent, while on at least
+one of them it is an order of magnitude more. That directly justifies the "hide the calm bar"
+default: at the moment it is calm, it really does carry no information.
 
-**Крайові смуги — перші рядок і стовпчик.** Той самий бар незалежно від другого: сума рядка й сума
-стовпчика. Стоять **перед** блоком перетинів і відділені проміжком, бо читаються першими — спершу
-«як розподілений кожен бар», потім «як вони поєднуються». Кут на їх перетині лишається порожнім:
-перетин двох маргіналів не має змісту.
+**Marginal bands — the first row and the first column.** The same bar independently of the other
+one: the row sum and the column sum. They stand **before** the intersection block and are separated
+by a gap, because they are read first — first "how is each bar distributed", then "how do they
+combine". The corner where they meet stays empty: the intersection of two marginals has no meaning.
 
-> **Проміжок потрібен з обох боків — це два різні елементи, і другий легко забути.** Порожня
-> колонка між маргінальним стовпчиком і матрицею напрошується сама, бо в HTML-таблиці це видима
-> клітинка; порожній **рядок** між маргінальним рядком і матрицею доводиться додавати окремим
-> `<tr>`, і без нього смуга «усього» читається як звичайний рядок станів. Симптом на реальному
-> рендері: маргінальний рядок 7d візуально прилипає до першого рядка перетинів, і око бере його
-> за комбінацію «синій × щось», якої не існує.
+> **The gap is needed on both sides — these are two different elements, and the second one is easy
+> to forget.** The empty column between the marginal column and the matrix suggests itself, since in
+> an HTML table it is a visible cell; the empty **row** between the marginal row and the matrix has
+> to be added as its own `<tr>`, and without it the "total" band reads as an ordinary state row.
+> The symptom on a real render: the 7d marginal row visually sticks to the first intersection row,
+> and the eye takes it for a "blue × something" combination that does not exist.
 >
-> **Обидва проміжки мусять бути однакові на око — і винний тут не проміжок.** Симптом: розрив
-> між маргінальною смугою й блоком перетинів у кілька разів більший за рядковий, скільки б не
-> звужували spacer-колонку. Причина інша: у маргінальному **рядку** кутова клітинка порожня (кут
-> не має змісту), але вона все одно займає **повну ширину маргінального стовпчика**. Виміряно на
-> реальному рендері: `td.zero` = 82 px + spacer 12 px = 94 px порожнечі проти 10 px між рядками.
+> **Both gaps must look equal — and the gap is not what is at fault here.** The symptom: the break
+> between the marginal band and the intersection block is several times larger than the row gap, no
+> matter how much you narrow the spacer column. The cause is different: in the marginal **row** the
+> corner cell is empty (the corner has no meaning), but it still takes up the **full width of the
+> marginal column**. Measured on a real render: `td.zero` = 82 px + spacer 12 px = 94 px of
+> emptiness against 10 px between rows.
 >
-> Звуження spacer'а тут не діє взагалі — він і так був 10–12 px. **Лікується поглинанням кута**:
-> заголовок маргінального рядка отримує `colspan="2"` і накриває порожню клітинку, після чого
-> смуга «усього» починається рівно там, де починається блок перетинів, а єдиним видимим розривом
-> лишається spacer.
+> Narrowing the spacer does nothing here — it was already 10-12 px. **The cure is absorbing the
+> corner**: the marginal row's header gets `colspan="2"` and covers the empty cell, after which the
+> "total" band starts exactly where the intersection block starts, and the only visible break left
+> is the spacer.
 >
-> **Мораль ширша за цей випадок: міряй геометрію, а не читай CSS.** Значення `width` у стилі
-> збігалося із заданим на всіх трьох невдалих спробах — брехала не властивість, а припущення про
-> те, який елемент створює порожнечу. Один прогін, що друкує `getBoundingClientRect()` для кожної
-> клітинки рядка (`L`, `R`, `w`), знаходить винуватця одразу.
+> **The moral is broader than this case: measure geometry, don't read CSS.** The `width` value in
+> the style matched what had been set on all three failed attempts — what lied was not the property
+> but the assumption about which element creates the emptiness. A single run that prints
+> `getBoundingClientRect()` for every cell in the row (`L`, `R`, `w`) finds the culprit immediately.
 >
-> **Надійний спосіб задати треки — `<colgroup>` з явними ширинами**, а не `width` на клітинках.
-> Під `table-layout: fixed` браузер бере ширини з першого рядка, і колонка-проміжок лишається
-> єдиним треком без власного вмісту, тож будь-який залишок ширини осідає саме в ній. `<col>` плюс
-> `min-width`/`max-width` на самій spacer-клітинці знімають цю свободу повністю.
+> **The reliable way to set the tracks is a `<colgroup>` with explicit widths**, not `width` on the
+> cells. Under `table-layout: fixed` the browser takes widths from the first row, and the spacer
+> column remains the only track with no content of its own, so any leftover width settles right
+> there. `<col>` plus `min-width`/`max-width` on the spacer cell itself removes that freedom
+> entirely.
 >
-> **Окремо: перевіряй у тому середовищі, де дивиться читач.** Локальний headless-рендер показував
-> розрив 16 px на всіх ширинах вікна, тоді як у published-артефакті мейнтейнер бачив приблизно
-> вдесятеро більший. Поки причину не відтворено, «у мене виглядає правильно» не є відповіддю —
-> і кожна правка «за описом» витрачає цикл наосліп.
+> **Separately: verify in the environment the reader is looking at.** The local headless render
+> showed a 16 px break at every window width, while in the published artifact the maintainer saw one
+> roughly ten times larger. Until the cause is reproduced, "it looks right on my end" is not an
+> answer — and every fix made "from the description" spends a cycle blind.
 >
-> **Побічний ефект `colspan`, який видно не одразу:** заголовок рядка тепер удвічі ширший, і
-> `text-align: right` притискає підпис до правого краю **подвоєної** ширини — він перестає бути на
-> одній лінії з підписами решти рядків. Лікується внутрішнім `<span>` фіксованої ширини трека,
-> а не зміною вирівнювання.
+> **A side effect of `colspan` that is not visible right away:** the row header is now twice as
+> wide, and `text-align: right` pushes the label to the right edge of the **doubled** width — it
+> stops lining up with the labels of the other rows. The cure is an inner `<span>` of the track's
+> fixed width, not a change of alignment.
 
-**Підпис горизонтальної осі центрується над сіткою, а не над контейнером.** Він описує стовпчики
-перетинів, тож притиснутий вліво опиняється над колонкою назв рядків, до якої не має стосунку.
+**The horizontal axis label is centered over the grid, not over the container.** It describes the
+intersection columns, so pushed to the left it ends up over the row-name column, which it has
+nothing to do with.
 
-**Осі підписані обидві — інакше матриця не читається взагалі.** Рядок і стовпчик тут різні
-сутності (5-годинне вікно проти тижневого), і в них однакові назви станів, тож без підписів
-неможливо сказати, який бар де. Це не косметика: без них таблиця перетворюється на сітку чисел
-із однаковими заголовками по двох осях. Підпис ставиться **до самої осі**, а не лише в текст під
-діаграмою — читач дивиться на сітку, а не на підпис. Зі стрілкою напрямку (`7-денне вікно →`,
-`5-годинне вікно ↓`) прив'язка однозначна.
+**Both axes are labeled — otherwise the matrix cannot be read at all.** The row and the column are
+different entities here (the five-hour window versus the weekly one), and they carry identical state
+names, so without labels there is no way to say which bar is where. This is not cosmetics: without
+them the table turns into a grid of numbers with identical headers along both axes. The label goes
+**on the axis itself**, not merely into the text under the chart — the reader is looking at the
+grid, not at the caption. With a direction arrow (`7-day window →`, `5-hour window ↓`) the binding
+is unambiguous.
 
-**Клітинка мусить мати попап, і не через `title`.** Число в клітинці — це частка від вибірки, але
-з нього не видно ні того, які два стани зійшлися (кольорова суміш неоднозначна), ні скільки це
-годин. Нативний `title` для цього не годиться: він з'являється лише через секунду затримки,
-не стилізується й на published-сторінці читається як **відсутність** попапа. Потрібен власний
-елемент, що показує обидва стани з їхніми свотчами, відсоток, абсолютні години й одне речення
-про те, що клітинка означає. Вішати його треба і на `mouseenter`, і на `focus` (клітинкам —
-`tabindex="0"`), інакше матриця недоступна з клавіатури.
+**A cell must have a popup, and not via `title`.** The number in a cell is a share of the sample,
+but it shows neither which two states met (the color blend is ambiguous) nor how many hours that
+was. The native `title` is no good for this: it appears only after a one-second delay, cannot be
+styled, and on a published page reads as the **absence** of a popup. What is needed is a custom
+element showing both states with their swatches, the percentage, the absolute hours, and one
+sentence about what the cell means. It has to be attached to `mouseenter` **and** `focus` (cells get
+`tabindex="0"`), otherwise the matrix is inaccessible from the keyboard.
 >
-> **Позиціювання:** попап над клітинкою перекриває заголовки стовпців, коли клітинка в першому
-> ряду. Правило — якщо розрахований верх виходить вище за верх таблиці, показувати попап **під**
-> клітинкою; якщо не влазить знизу — повертати вгору.
+> **Positioning:** a popup above the cell covers the column headers when the cell is in the first
+> row. The rule — if the computed top goes above the top of the table, show the popup **below** the
+> cell; if it does not fit below, flip it back up.
 
-**Змішування кольорів в OKLab.** Заливка клітинки — суміш двох severity: **відтінок каже, які саме
-два стани зійшлися, яскравість — скільки це тривало**. Крайові смуги фарбуються чистим кольором
-свого стану — але **насиченість там кодує величину так само, як у клітинках**: смуга на 71 % і
-смуга на 2,6 %, залиті однаково яскраво, роблять маргіналію єдиним місцем діаграми, де колір не
-несе інформації, і око читає слабкий стан як однаково важливий. Домен ширший, ніж у клітинок
-(маргінали сумуються в 100, клітинки рідко перевищують 40), тож рампа береться своя; потрібен
-нижній поріг (~0,18), інакше смуга в кілька відсотків розчиняється в тлі картки. Разом із заливкою
-міняється й колір цифри: коли заливка тьмяніє нижче ~55 %, крізь неї проступає поверхня, і
-білий/темний текст, підібраний під суцільний свотч, перестає читатися — нижче цієї межі текст
-береться з токена основного чорнила. Змішувати треба в перцептивному просторі: у RGB середина між зеленим і помаранчевим
-дає брудний колір, а в OKLab — читабельний проміжний. Перевірено, що пари лишаються розрізнюваними
-(мінімальна хроматична відстань ≈ 2,6 при наявності числових підписів).
+**Color mixing in OKLab.** The cell fill is a blend of two severities: **the hue says which two
+states met, the lightness says how long it lasted**. The marginal bands are painted in the pure
+color of their state — but **saturation there encodes magnitude just as it does in the cells**: a
+band at 71% and a band at 2.6%, filled equally bright, make the marginals the one place on the chart
+where color carries no information, and the eye reads a weak state as equally important. Their
+domain is wider than the cells' (marginals sum to 100, cells rarely exceed 40), so the ramp is their
+own; a lower floor (~0.18) is needed, otherwise a band of a few percent dissolves into the card's
+background. The digit's color changes along with the fill: when the fill dims below ~55%, the
+surface shows through it, and white/dark text picked for a solid swatch stops being legible — below
+that boundary the text is taken from the primary-ink token. The mixing has to happen in a perceptual
+space: in RGB the midpoint between green and orange gives a muddy color, while in OKLab it gives a
+legible intermediate. It has been verified that the pairs stay distinguishable (minimum chromatic
+distance ≈ 2.6 given that numeric labels are present).
 
-**Перемикач вибірки часу над діаграмою.** Три режими з § вище. Без нього діаграма мовчазно
-відповідає на питання, якого читач не ставив.
+**A time-sample switch above the chart.** The three modes from the § above. Without it the chart
+silently answers a question the reader never asked.
 
-**Розбивка по днях під матрицею.** Стек станів на кожен день, де **висота смуги** — скільки годин
-доби потрапило у вибірку. Показує, чи рівномірно розподілене спостереження, і не дає прийняти
-день із двома годинами даних за повноцінний.
+**A per-day breakdown under the matrix.** A stack of states for each day, where the **height of the
+band** is how many hours of the day fell into the sample. It shows whether the observation is evenly
+distributed, and keeps you from taking a day with two hours of data for a full one.
 
-**Застереження:** вимагає вибірки «робота з Claude» і **не годиться для червоного** — там потрібна
-форма нижче.
+**Caveat:** it requires the "working with Claude" sample and is **not suitable for red** — that
+needs the form below.
 
-### Вимоги до матриці: перевірити списком перед показом
+### Matrix requirements: run through the list before showing it
 
-Усі вісім здобуті на реальних ітераціях цієї діаграми — кожну довелося виправляти після того, як
-готову матрицю вже показали читачеві. Прози вище вистачає, щоб зрозуміти **чому**; цей список — щоб
-не пропустити **що**.
+All eight were earned on real iterations of this chart — every one had to be fixed after the
+finished matrix had already been shown to a reader. The prose above is enough to understand **why**;
+this list is so you do not miss **what**.
 
-| # | Вимога | Симптом, якщо порушено |
+| # | Requirement | Symptom if violated |
 |---|---|---|
-| 1 | **Обидві осі підписані** — яке вікно по рядках, яке по стовпчиках, зі стрілкою напрямку | Сітка чисел з однаковими назвами станів на двох осях; неможливо сказати, який бар де |
-| 2 | **Підпис горизонтальної осі центрований над сіткою**, а не над контейнером | Опиняється над колонкою назв рядків, до якої не має стосунку |
-| 3 | **Крайові смуги відділені проміжком по обох осях** — колонка й окремий `<tr>` | Смуга «усього» прилипає до перетинів і читається як неіснуюча комбінація |
-| 4 | **Обидва проміжки однакові на око**, задані через `<colgroup>` | Горизонтальний розрив у кілька разів більший; сітка читається як дві таблиці поруч |
-| 5 | **Порожній кут поглинуто** (`colspan` на заголовку маргінального рядка) | Порожня клітинка на всю ширину маргінального стовпчика тримає ~90 px порожнечі |
-| 6 | **Підпис маргінального рядка на одній лінії з рештою** — внутрішній `<span>` фіксованої ширини | Після `colspan` `text-align: right` притискає його до краю подвоєної ширини |
-| 7 | **Крайові смуги кодують величину насиченістю**, з нижнім порогом і перемиканням кольору цифри | Смуга 71 % і смуга 2,6 % однаково гучні; маргіналія — єдине місце, де колір не несе інформації |
-| 8 | **Клітинки мають власний попап** (не `title`), на `mouseenter` **і** `focus`, з перевертанням під клітинку біля верху | Нативний тултип на published-сторінці читається як відсутність попапа; матриця недоступна з клавіатури |
+| 1 | **Both axes labeled** — which window is on the rows, which on the columns, with a direction arrow | A grid of numbers with identical state names on both axes; no way to say which bar is where |
+| 2 | **Horizontal axis label centered over the grid**, not over the container | It ends up over the row-name column, which it has nothing to do with |
+| 3 | **Marginal bands separated by a gap along both axes** — a column and a dedicated `<tr>` | The "total" band sticks to the intersections and reads as a combination that does not exist |
+| 4 | **Both gaps equal to the eye**, set via `<colgroup>` | The horizontal break is several times larger; the grid reads as two tables side by side |
+| 5 | **The empty corner absorbed** (`colspan` on the marginal row's header) | An empty cell the full width of the marginal column holds ~90 px of emptiness |
+| 6 | **The marginal row's label on the same line as the rest** — an inner `<span>` of fixed width | After `colspan`, `text-align: right` pushes it to the edge of the doubled width |
+| 7 | **Marginal bands encode magnitude by saturation**, with a lower floor and a digit-color switch | A 71% band and a 2.6% band are equally loud; the marginals are the one place where color carries no information |
+| 8 | **Cells have their own popup** (not `title`), on `mouseenter` **and** `focus`, flipping below the cell near the top | The native tooltip on a published page reads as the absence of a popup; the matrix is inaccessible from the keyboard |
 
-**Метод, а не пункт списку:** перевіряти **заміром геометрії** (`getBoundingClientRect()` по
-клітинках рядка) і **в published-артефакті**, а не лише в локальному рендері. На цій діаграмі
-чотири підряд «виправлення» пішли в порожнечу саме тому, що локально розрив був правильний, а
-читач бачив інший.
+**A method, not a list item:** verify **by measuring geometry** (`getBoundingClientRect()` across
+the cells of a row) and **in the published artifact**, not only in the local render. On this chart
+four consecutive "fixes" went nowhere for exactly that reason: locally the break was correct, and
+the reader was seeing a different one.
 
-### Блокування: таймлайн подій, а не частка
+### Blocking: a timeline of events, not a share
 
-**Коли:** треба показати простій через вичерпане вікно.
+**When:** you need to show idle time caused by an exhausted window.
 
-**Чому окремо:** блокування — це **подія з тривалістю**, а не стан із часткою. Двогодинний простій,
-розчинений у сотнях годин спостереження, дає частку в 1 %, і читач робить висновок «майже не
-трапляється» — тоді як для людини це були дві години, коли робота стояла.
+**Why separately:** blocking is **an event with a duration**, not a state with a share. A two-hour
+stall, dissolved into hundreds of observed hours, gives a share of 1%, and the reader concludes "it
+practically never happens" — when for the person those were two hours with work at a standstill.
 
-**Форма:** таймлайн епізодів (коли почалося, скільки тривало) або розподіл тривалостей, якщо
-епізодів багато. Корисний додатковий вимір — скільки часу лишалося до ресету на початку епізоду:
-він відрізняє «вперся за 10 хв до ресету» від «вперся на початку вікна».
+**Form:** a timeline of episodes (when it started, how long it lasted), or a distribution of
+durations if there are many episodes. A useful extra dimension is how much time was left until the
+reset at the start of the episode: it distinguishes "hit the wall 10 min before the reset" from "hit
+the wall at the start of the window".
 
-### Чого будувати не варто
+### What is not worth building
 
-- **Кругові діаграми** для часток — на цих даних завжди програють стовпчикам.
-- **Подвійні осі Y** — ніколи; дві величини різного масштабу дають два графіки.
-- **Криву відношення двох лічильників у часі** — це майже горизонтальна лінія, що нічого не додає
-  до самого числа (перевірено на N).
-- **Згладжування ковзним середнім** без явної позначки — приховує квантування і створює хибне
-  враження неперервності.
+- **Pie charts** for shares — on these data they always lose to bars.
+- **Dual Y axes** — never; two values of different magnitude mean two charts.
+- **The curve of the ratio of two counters over time** — it is a nearly horizontal line that adds
+  nothing to the number itself (verified on N).
+- **Moving-average smoothing** without an explicit marker — it hides quantization and creates a
+  false impression of continuity.
 
-## Довжина ряду перевертає висновки — фіксуй, що спростувалося
+## Series length overturns conclusions — record what got refuted
 
-Найдорожча помилка в цій роботі — не помилка обчислення, а **впевнений висновок із короткого ряду**.
-Журнал зростає, і те, що на добі виглядало режимом, на двох тижнях виявляється викидом.
+The most expensive mistake in this work is not a computation error but **a confident conclusion from
+a short series**. The journal grows, and what looked like a regime over one day turns out to be an
+outlier over two weeks.
 
-Перевірено на практиці: той самий журнал перечитувався тричі — **1 доба → 3,5 доби → 11 діб**, і
-шість висновків перевернулися:
+Verified in practice: the same journal was re-read three times — **1 day → 3.5 days → 11 days** —
+and six conclusions flipped:
 
-| На короткому зрізі | Після накопичення | Що це було |
+| On the short slice | After accumulation | What it actually was |
 |---|---|---|
-| «Пік 92 % — типовий режим» | разовий викид, решта циклів ≤ 57 % | вибірка з 3 подій |
-| «Темп перевищує дозволений» (1,72 вікна/добу) | вкладається із запасом 21 % (1,07) | добовий сплеск як норма |
-| «Обмежує 5-годинне вікно» | обмежує **тиждень**, стеля 5h не тисне | не було жодного повного циклу 7d |
-| «Тижневу проєкцію не робити» | робити — після першого завершеного циклу `d7` | конус був ширший за вікно |
-| «Інциденти видно по латентності» | спростовано тричі | збіг на малій вибірці |
-| «Транскрипти не потрібні» | потрібні, але **лише структурні поля** | не розрізняли типи полів |
+| "A 92% peak is the typical regime" | a one-off outlier, the rest of the cycles ≤ 57% | a sample of 3 events |
+| "The pace exceeds what is allowed" (1.72 windows/day) | fits with 21% to spare (1.07) | a one-day spike taken for the norm |
+| "The 5-hour window is the constraint" | the **week** is the constraint, the 5h ceiling does not press | there had not been a single complete 7d cycle |
+| "Don't do a weekly projection" | do it — after the first completed `d7` cycle | the cone was wider than the window |
+| "Incidents are visible in latency" | refuted three times | a coincidence on a small sample |
+| "Transcripts are not needed" | they are, but **only the structural fields** | field types were not being distinguished |
 
-**Практичне правило:** записувати не лише висновок, а й **зріз, на якому він отриманий**, і при
-кожному перечитуванні явно перевіряти попередні. Формулювання «на 3 добах виглядало так, на 11 —
-інакше» цінніше за будь-яке з двох окремо.
+**Practical rule:** record not only the conclusion but also **the slice it was obtained on**, and on
+every re-read explicitly re-check the earlier ones. The phrasing "over 3 days it looked like this,
+over 11 it looks different" is worth more than either statement on its own.
 
-### Стан «замало історії» — це фіча, а не заглушка
+### "Not enough history" is a feature, not a placeholder
 
-Для кожної метрики має бути **поріг дозрівання**, і до нього застосунок каже «ще рахуємо», а не
-показує передчасне число:
+Every metric should have a **maturity threshold**, and until it is reached the app says "still
+computing" rather than showing a premature number:
 
-| Метрика | Дозріває | Чому саме там |
+| Metric | Matures at | Why there |
 |---|---|---|
-| Коефіцієнт N | 10–15 тиків `d7` | тижневий лічильник рухається рідко |
-| Тижнева проєкція | ≥ 1 завершений цикл `d7` | на 1 добі конус був 4,0–8,7 доби — **ширший за саме вікно** |
-| Розподіл «до скількох % доводжу вікно» | ~тиждень | 3 цикли не дають розподілу |
-| Профіль доби | ≥ 5–7 діб | 1 доба = 1 спостереження на годину |
-| Heatmap день × година | ≥ 14 діб | 2 рядки сітки — не сітка |
-| Базлайн «1,4× твого звичного» | ≥ 14 діб | немає розподілу для «звичного» |
+| Coefficient N | 10-15 `d7` ticks | the weekly counter moves rarely |
+| Weekly projection | ≥ 1 completed `d7` cycle | over 1 day the cone was 4.0-8.7 days — **wider than the window itself** |
+| Distribution of "how far into the window I take it" | ~a week | 3 cycles do not make a distribution |
+| Day profile | ≥ 5-7 days | 1 day = 1 observation per hour |
+| Day × hour heatmap | ≥ 14 days | 2 rows of a grid are not a grid |
+| The "1.4× your usual" baseline | ≥ 14 days | there is no distribution for "usual" yet |
 
-> **Найгірший тип віджета** — той, що «переконливо виглядає й нічого не означає». Проєкція на одній
-> добі саме така: вона малює гарний конус, ширина якого перевищує величину, яку прогнозує.
+> **The worst kind of widget** is the one that "looks convincing and means nothing". A projection on
+> a single day is exactly that: it draws a handsome cone whose width exceeds the value it forecasts.
 
-### Три трансформації, коли ряд переростає графік
+### Three transformations for when the series outgrows the chart
 
-Коли даних більшає, форма має мінятися — інакше графік деградує:
+As data accumulates, the form has to change — otherwise the chart degrades:
 
-- **подія → розподіл**: 32 ресети показувати гістограмою, не списком лоліпопів;
-- **день → фасет**: 12 добових смуг 0–24 год замість наскрізної часової осі;
-- **вікно → об'єкт**: тижні накладені в координатах «доба від ресету» — вісь лишається 7-денною за
-  будь-якої довжини журналу.
+- **event → distribution**: show 32 resets as a histogram, not a list of lollipops;
+- **day → facet**: 12 daily bands of 0-24 h instead of one continuous time axis;
+- **window → object**: weeks overlaid in "day since reset" coordinates — the axis stays 7-day long
+  no matter how long the journal is.
 
-Останній прийом особливо цінний: **накладені цикли в нормалізованих координатах** («частка вікна» ×
-`util`) не є часовим рядом, тож масштабуються без застережень аж до ~40–50 циклів на одному полотні.
+The last trick is especially valuable: **overlaid cycles in normalized coordinates** ("fraction of
+the window" × `util`) are not a time series, so they scale without caveats up to ~40-50 cycles on one
+canvas.
 
-## Контрольний список перед тим, як показати результат
+## Checklist before showing a result
 
-1. Дедуплікував ресети (округлення до хвилини / доби)?
-2. Ресет визначено за **інстантом І падінням**, а не за чимось одним? Порожній `reset` оброблено як
-   ідентичність вікна, а не як пропуск?
-3. Розриви спостереження не з'єднані лінією? Події «через діру» позначені й не датовані?
-4. Відсіяв вікна з недостатнім спостереженням? Незавершені — екстраполював і позначив?
-5. Біни гістограм узгоджені з кроком опитування?
-6. Поріг склейки сесій названий поруч із числом?
-7. Порівняння між користувачами — на масштабах, більших за грубіший крок опитування?
-8. Для метрики «скільки часу бар був у стані X» — взято вибірку «робота з Claude», а не весь журнал?
-   Заблоковані стани винесено в окрему метрику, а не втоплено в частках?
-9. Взято пік, а не останнє значення?
-10. N виміряний із цього ж ряду, а не запозичений?
-11. Ефект перевірено проти нуль-моделі? Точкова оцінка супроводжується ДІ або позначкою
-    «мало даних»?
-12. **Зріз, на якому отримано висновок, названий явно?** Попередні висновки на коротших зрізах
-    перевірені наново?
-13. Сигнал пройшов перевірку [users-and-goals.md](users-and-goals.md): чи існує дія, яку користувач
-    виконає інакше, побачивши це?
-14. **В артефакті є секція про корисність сигналу** — що діє, чого робити не варто, і що
-    пропонується, якщо сигналу немає? Питання поставлено **до** побудови, а не після?
-15. Жодна константа не перенесена між 5h і 7d без перерахунку? Осі категоріальних діаграм
-    побудовані з повного домену станів, а не з наявної вибірки?
-16. **Двовимірна матриця пройшла свій список із восьми вимог**
-    ([§ «Вимоги до матриці»](#вимоги-до-матриці-перевірити-списком-перед-показом)) — осі, проміжки,
-    кут, підписи, насиченість крайових смуг, попапи? Перевірено **заміром геометрії** і **в
-    published-артефакті**, а не лише в локальному рендері?
-17. **Перерахунок статусів застосовано умовно?** Чинний алгоритм кольору проганяють по даних
-    **лише якщо в зрізі є семпли, писані неактуальним алгоритмом** — тобто рядки, чий `sevV` менший
-    за поточне покоління моделі (або відсутній). Якщо весь зріз уже мігрований, `sev` беруть
-    готовим: зайвий перерахунок нічого не виправляє, зате додає ризик розійтися з тим, що бачив
-    користувач, на межах порогів — журнальні `util`/`timePct` округлені при записі, а живий полл
-    рахував колір до округлення.
+1. Did you deduplicate resets (rounding to the minute / to the day)?
+2. Is a reset identified by **both the instant AND the drop**, not by one of the two? Is an empty
+   `reset` handled as window identity rather than as a gap?
+3. Are observation gaps left unjoined by a line? Are "across the hole" events marked and left
+   undated?
+4. Did you filter out windows with insufficient observation? Did you extrapolate the incomplete ones
+   and mark them?
+5. Are the histogram bins consistent with the polling step?
+6. Is the session merge threshold named next to the number?
+7. Are cross-user comparisons made at scales larger than the coarser polling step?
+8. For the "how much time the bar spent in state X" metric — did you take the "working with Claude"
+   sample rather than the whole journal? Are blocked states pulled out into a separate metric
+   instead of being drowned in the shares?
+9. Did you take the peak rather than the last value?
+10. Was N measured from this same series rather than borrowed?
+11. Was the effect checked against a null model? Does the point estimate come with a CI or a "not
+    enough data" mark?
+12. **Is the slice the conclusion was obtained on named explicitly?** Have earlier conclusions from
+    shorter slices been re-checked?
+13. Does the signal clear the [users-and-goals.md](users-and-goals.md) bar: is there an action the
+    user would take differently after seeing it?
+14. **Does the artifact have a section on the signal's usefulness** — what to act on, what not to
+    do, and what is proposed if there is no signal? Was the question asked **before** building it,
+    not after?
+15. Has any constant been carried between 5h and 7d without recomputation? Are the axes of
+    categorical charts built from the full domain of states rather than from the sample at hand?
+16. **Has the two-dimensional matrix passed its list of eight requirements**
+    ([§ "Matrix requirements"](#matrix-requirements-run-through-the-list-before-showing-it)) — axes,
+    gaps, corner, labels, marginal band saturation, popups? Was it verified **by measuring
+    geometry** and **in the published artifact**, not only in the local render?
+17. **Is the status recomputation applied conditionally?** The current color algorithm is run over
+    the data **only if the slice contains samples written by an out-of-date algorithm** — that is,
+    rows whose `sevV` is lower than the model's current generation (or missing). If the whole slice
+    is already migrated, `sev` is taken as-is: a redundant recomputation fixes nothing, while adding
+    the risk of diverging at threshold boundaries from what the user actually saw — journal
+    `util`/`timePct` are rounded on write, and the live poll computed the color before rounding.
 
-Останній пункт відсіює найбільше. Статистично бездоганний результат, що не змінює жодного рішення,
-в Insights не потрапляє.
+The last item filters out the most. A statistically flawless result that changes no decision does
+not make it into Insights.
 
-## Як відтворити заміри
+## How to reproduce the measurements
 
-Усі числа в цьому файлі отримані з двох рядів: `usage-journal-2026-08.jsonl` (Max, ~5 760
-`usage`-записів станом на 20 серпня 2026) і наданий другим користувачем Pro-ряд (862 записи,
-4–15 серпня 2026 — період шкільних канікул, тож форма тижня в ньому нетипова).
+All the numbers in this file come from two series: `usage-journal-2026-08.jsonl` (Max, ~5,760
+`usage` records as of August 20, 2026) and a Pro series supplied by a second user (862 records,
+August 4-15, 2026 — a school-holiday period, so the shape of the week in it is atypical).
 
-**Абсолютні лічильники зростають** із кожним поллом, тож розбіжність у сотні записів при повторному
-прогоні — норма. Частки, медіани й показники розподілів стабільні; якщо розійшлися вони — це сигнал,
-що змінилася або поведінка, або сам API.
+**Absolute counters grow** with every poll, so a discrepancy of a few hundred records on a repeat
+run is expected. Shares, medians and distribution statistics are stable; if *those* diverge, it is a
+signal that either the behavior or the API itself has changed.
 
 ```sh
 python3 - <<'PY'
 import json, datetime
 
 def P(t):
-    """Толерантний парсер: порожній / зіпсований timestamp -> None, не виняток."""
+    """Tolerant parser: empty / malformed timestamp -> None, not an exception."""
     try:
         d = datetime.datetime.fromisoformat((t or "").replace("Z", "+00:00"))
     except ValueError:
@@ -1431,24 +1484,24 @@ with open("usage-journal-2026-08.jsonl") as f:
         t, reset = P(o.get("t")), P(h5.get("reset"))
         if t is None or h5.get("util") is None:
             continue
-        rows.append((t, float(h5["util"]), reset))   # reset може бути None
+        rows.append((t, float(h5["util"]), reset))   # reset may be None
 rows.sort(key=lambda r: r[0])
 
 gaps = [(rows[i][0] - rows[i - 1][0]).total_seconds() / 60 for i in range(1, len(rows))]
 gaps.sort()
-print("замірів:", len(rows))
-print("медіанний інтервал, хв:", gaps[len(gaps) // 2])
-print("частка > 20 хв: %.1f%%" % (100 * sum(1 for g in gaps if g > 20) / len(gaps)))
+print("samples:", len(rows))
+print("median interval, min:", gaps[len(gaps) // 2])
+print("share > 20 min: %.1f%%" % (100 * sum(1 for g in gaps if g > 20) / len(gaps)))
 PY
 ```
 
-> **Обов'язково толерантний парсинг — це не рідкісний випадок.** Порожній `reset` мають **27 %
-> рядків на ряді Max** (1 550 із 5 760) і **56 % на ряді Pro** (481 із 862). Причина — вікна, для
-> яких API не віддав `resets_at`
-> ([usage-api-quirks.md § «Щотижня API на 4–6 годин перестає віддавати `seven_day.resets_at`»](usage-api-quirks.md#every-week-the-api-stops-returning-seven_dayresets_at-for-4-6-hours)).
-> Наївний `fromisoformat` падає на них з `ValueError`, і скрипт обривається посеред обробки — часто
-> вже після того, як вивів частину результатів, тож помилку легко не помітити.
+> **Tolerant parsing is mandatory — this is not a rare case.** An empty `reset` is present in **27%
+> of rows in the Max series** (1,550 out of 5,760) and **56% in the Pro series** (481 out of 862).
+> The cause is windows for which the API did not return `resets_at`
+> ([usage-api-quirks.md § "Every week, the API stops returning `seven_day.resets_at` for 4-6 hours"](usage-api-quirks.md#every-week-the-api-stops-returning-seven_dayresets_at-for-4-6-hours)).
+> A naive `fromisoformat` blows up on them with `ValueError`, and the script breaks off mid-run —
+> often after it has already printed part of the results, so the error is easy to miss.
 >
-> Такі рядки треба **пропускати або тримати з `reset = None`**, а не вважати пошкодженими: їхні
-> `util` і `t` цілком придатні для аналізу темпу, і викидати чверть ряду немає підстав. Не годяться
-> вони лише там, де потрібне групування за вікном.
+> Such rows should be **skipped or kept with `reset = None`** rather than treated as corrupted:
+> their `util` and `t` are perfectly usable for pace analysis, and there is no reason to throw away
+> a quarter of the series. They are unusable only where grouping by window is required.
