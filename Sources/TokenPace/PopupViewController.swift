@@ -1773,11 +1773,14 @@ final class PopupViewController: NSViewController {
 
     /// The caption standing in for the action items while ⌥ Option is up (#475).
     ///
-    /// Lives **outside** the card, as a sibling of it in the container, for two reasons. It is not part
-    /// of the widget — it speaks for the native items below, which the card's inner padding would
-    /// misalign it with (`hPadding` on top of `cardInset` puts text 30 pt from the popup edge, where no
-    /// menu item's text ever sits). And it must not be rebuilt by `rebuild()`: that method owns the
-    /// bottom gap after the last bar, and a row appended inside `stack` would change what "last" means.
+    /// Lives **outside** the card, as a sibling of it in the container: it speaks for the native items
+    /// below rather than being part of the widget, and it must not be rebuilt by `rebuild()` — that
+    /// method owns the gap after the last bar, and a row appended inside `stack` would change what
+    /// "last" means.
+    ///
+    /// Outside the card, but aligned to the **content** inside it: the caption's right edge sits under
+    /// the column of right-aligned status words ("on pace", "2h at 00:50"), not on the plate's own edge,
+    /// which is `hPadding` further out and left the caption looking pushed off the side.
     ///
     /// `nil` until `loadView` builds it, like `cardView`.
     private var optionHintLabel: NSTextField?
@@ -1957,11 +1960,13 @@ final class PopupViewController: NSViewController {
             card.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: Metrics.hPadding),
             card.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: Metrics.bottomPadding),
             container.widthAnchor.constraint(equalToConstant: Metrics.width),
-            // The hint spans the card's own width. Its right edge is what matters — the text is
-            // right-aligned — and pinning it to the card rather than to the container states the intent:
-            // the caption lines up with the widget above it, whatever `cardInset` becomes later.
-            hint.leadingAnchor.constraint(equalTo: card.leadingAnchor),
-            hint.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            // The hint spans the **content's** width, not the card's. Its right edge is what matters —
+            // the text is right-aligned — and the content is what it has to line up under: the card's
+            // edge is `hPadding` further out, which put the caption visibly proud of the column of
+            // right-aligned status words above it ("on pace", "2h at 00:50"). Pinned to `stack` rather
+            // than restating `hPadding` here, so the two cannot drift apart.
+            hint.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
+            hint.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
         ])
         self.view = container
         applyOptionHintVisibility()
