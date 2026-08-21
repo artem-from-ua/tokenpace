@@ -99,7 +99,7 @@ Downstream не має перераховувати те, що app уже обч
 `resume`-рядки від рестартів (`lastWriteInstant` — in-memory) і безумовна `migrateIfNeeded()`, що
 переписує наявний файл (із незнищуваним `.v<n>.bak`). Тому тестові запуски нотаризованої копії
 ведуть журнал через `TOKENPACE_JOURNAL_FILE` — див.
-[ui-verification.md § «Журнал використання»](../guides/ui-verification.md#журнал-використання-242-adr-0067).
+[ui-verification.md § «Usage journal»](../guides/ui-verification.md#usage-journal-242-adr-0067).
 
 ### 5. Concurrency — flock advisory lock
 

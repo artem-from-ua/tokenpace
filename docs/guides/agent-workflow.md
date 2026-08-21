@@ -367,7 +367,7 @@ tail -20 "$TMP/tp.log"
 - **Скріншоти придатні для вимірів layout, не лише «побачити».** Масштаб виводиться з відомої
   величини в кадрі (ширина вікна запінена — 792/857 pt) → px/pt → різниці відступів рахуються з
   уже надісланих скріншотів без нового раунду. Заборона стосується лише **кольорів**
-  (див. [ui-verification.md § «Тестування кольорів menu-bar віджета»](ui-verification.md#тестування-кольорів-menu-bar-віджета-swatch-режим--піпетка)).
+  (див. [ui-verification.md § «Testing menu-bar widget colors»](ui-verification.md#testing-menu-bar-widget-colors-swatch-mode--color-picker)).
 - **SwiftUI дивно поводиться біля window chrome → першим перевір межу хостингу.** У цьому репо
   вікна — AppKit-shell зі SwiftUI-вмістом ([ADR-0009](../adr/0009-statusitemview-pure-layout-and-thin-shell.md)),
   і контракт `NSHostingController` (`sizingOptions`, `safeAreaRegions`, `contentLayoutRect`)
