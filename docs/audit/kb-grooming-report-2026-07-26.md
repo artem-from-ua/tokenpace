@@ -47,10 +47,10 @@
 
 ### Duplicate content (semantic) — info — NO ACTION
 
-- `CLAUDE.md:59` — the "Верифікація UI перед PR" section restates rules already in
+- `CLAUDE.md:59` — the "UI verification before a PR" section restates rules already in
   `docs/guides/agent-workflow.md` and `docs/guides/ui-verification.md`. This is **intentional**
   near-duplication (CLAUDE.md is a quick-reference pointer). Optional future tidy: trim to a one-line
-  pointer, mirroring the "Стиль release notes" section — not required.
+  pointer, mirroring the "Release notes style" section — not required.
 
 ## Overall assessment
 

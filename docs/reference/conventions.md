@@ -5,8 +5,6 @@
 - **Everything in the repository and on GitHub is English** — README, SPEC, `docs/`, ADRs,
   agent-instruction files, skills, code, identifiers, comments, commit messages, PRs, issues,
   release notes. See [ADR-0116](../adr/0116-english-as-documentation-language.md).
-- **Ukrainian remains only outside the repository:** agent conversation, plan files, private
-  `memory/`.
 - API identifiers (`five_hour`, `resets_at`, `client_id`, …) keep their original form and are
   never translated. The same holds for UI strings quoted from the app.
 

@@ -644,7 +644,7 @@ struct PopupLayoutIdleTests {
     }
 
     @Test func activeSevenExhaustedFiveHasQuotaBadgesSevenDay() {
-        // Артем's #177 bug: active session, 7d at 100 % but 5h still below (48 %), no credits. Before the
+        // Artem's #177 bug: active session, 7d at 100 % but 5h still below (48 %), no credits. Before the
         // fix isBlocked was false → no red badge. Now the weekly cap blocks: only 7d is a candidate, so
         // the badge points at the 7-day row (index 1). The 5h row stays a normal (non-blocked) row.
         let snap = snapshot(fiveHourUtil: 48, sevenDayUtil: 100)

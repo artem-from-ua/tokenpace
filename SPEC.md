@@ -436,8 +436,7 @@ not guaranteed to be exact):
   key, and there is no native access to the Keychain.
 - **Documentation language: English** — everything in the repository and on GitHub (see
   [ADR-0116](docs/adr/0116-english-as-documentation-language.md), superseding
-  [ADR-0002](docs/adr/0002-ukrainian-documentation.md)). Ukrainian remains only outside the
-  repository: agent conversation, plan files, private `memory/`.
+  [ADR-0002](docs/adr/0002-ukrainian-documentation.md)).
 - **Phase 1 = a menu bar app for macOS, without CloudKit.** iPhone/Watch and CloudKit moved to Phase 2.
   The reason: a menu bar app lives on the same Mac as the token, so it needs no transport at all and
   yields a working product by the shortest path.

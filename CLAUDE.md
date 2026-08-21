@@ -1,41 +1,40 @@
 # CLAUDE.md
 
-Інструкції для Claude Code (та інших AI-агентів) під час роботи в цьому репозиторії.
+Instructions for Claude Code (and other AI agents) working in this repository.
 
-## Що це за проєкт
+## What this project is
 
-`TokenPace` — мінівіджет для menu bar macOS, що показує використання лімітів підписки Claude Code
-(5-годинного та 7-денного вікон) з *pacing* і часом до найближчого ресету. Згодом — віджети
-iPhone та комплікейшен Apple Watch.
+`TokenPace` is a macOS menu bar mini-widget showing Claude Code subscription limit usage
+(the 5-hour and 7-day windows) with *pacing* and the time to the nearest reset. Later come the
+iPhone widgets and an Apple Watch complication.
 
-**Джерела істини (читати перед роботою):**
+**Sources of truth (read before working):**
 
-- [SPEC.md](SPEC.md) — повний продуктовий спек: архітектура, UI, поведінка, обсяг Фази 1, план робіт.
-- [docs/architecture.md](docs/architecture.md) — архітектура та потік даних.
-- [docs/conventions.md](docs/reference/conventions.md) — конвенції розробки.
-- [docs/adr/](docs/adr/) — архітектурні рішення (Swift, мова документації, закритий агент, збірка).
+- [SPEC.md](SPEC.md) — the full product spec: architecture, UI, behavior, Phase 1 scope, work plan.
+- [docs/architecture.md](docs/architecture.md) — architecture and data flow.
+- [docs/conventions.md](docs/reference/conventions.md) — development conventions.
+- [docs/adr/](docs/adr/) — architectural decisions (Swift, documentation language, closed-source agent, build).
 
 ## Language
 
 - **Everything in the repository and on GitHub is English** — README, SPEC, `docs/`, ADRs, this
   file, skills, code, identifiers, commit messages, PRs, issues, comments, release notes. See
   [ADR-0116](docs/adr/0116-english-as-documentation-language.md).
-- **Ukrainian remains only outside the repository:** agent conversation, plan files, private
-  `memory/`. None of those are repo artifacts.
 - API identifiers (`five_hour`, `resets_at`, `client_id`) keep their original form and are never
   translated.
-- The corpus is still being migrated, so untranslated Ukrainian documents remain; each is
-  translated by its own package. **New text is written in English regardless.**
+- A few Ukrainian fragments survive on purpose: [ADR-0002](docs/adr/0002-ukrainian-documentation.md)
+  as an immutable record, the glossary's source column, test fixtures, and quoted strings that are
+  data rather than prose (a localized macOS pane title, a command the maintainer actually types).
 
-## Стек і збірка
+## Stack and build
 
-- **Swift 6.1+**, мінімальний target **macOS 15 Sequoia**.
-- Фаза 1: **Swift Package Manager** + build-скрипт (`.app` bundle, опційний підпис/notarization).
-  Повний Xcode не потрібен — `swift build` / `swift run` працюють із Command Line Tools.
-- macOS UI: AppKit `NSStatusItem` з кастомним малюванням (не `MenuBarExtra`).
-- Фаза 2 (iOS/watchOS): додається Xcode project. Див. [ADR-0004](docs/adr/0004-build-system.md).
+- **Swift 6.1+**, minimum target **macOS 15 Sequoia**.
+- Phase 1: **Swift Package Manager** + a build script (`.app` bundle, optional signing/notarization).
+  A full Xcode is not needed — `swift build` / `swift run` work with the Command Line Tools.
+- macOS UI: AppKit `NSStatusItem` with custom drawing (not `MenuBarExtra`).
+- Phase 2 (iOS/watchOS): an Xcode project gets added. See [ADR-0004](docs/adr/0004-build-system.md).
 
-## Команди
+## Commands
 
 ```sh
 swift build        # build
@@ -43,214 +42,226 @@ swift test         # unit tests (PacingModel, time parsing/formatting, backoff)
 swift run          # run
 ```
 
-## Логи — читати ПРАВИЛЬНО (не гатити не в ті логи)
+## Logs — read them RIGHT (don't hammer the wrong ones)
 
-**Перед будь-якою `log`-командою прочитай розділ «Collecting logs — methods & gotchas» у
-[log-messages.md](docs/reference/log-messages.md)** — там команди, шаблони й пастки. Це найчастіша
-пастка в цьому проєкті: майже всі наші рядки — `.notice`/`.info`, а вони **не пишуться в persistent
-store**.
+**Before any `log` command, read the "Collecting logs — methods & gotchas" section in
+[log-messages.md](docs/reference/log-messages.md)** — the commands, the patterns and the traps are
+there. This is the most common trap in this project: nearly all our lines are `.notice`/`.info`, and
+those **are not written to the persistent store**.
 
-- **`log show` НЕ показує `.notice`/`.info`/`.debug`** — лише `.error`/`.fault`. Порожній
-  `log show` **не** означає «застосунок не логує». Не роби такого висновку.
-- **Живий стрім — дефолт, і `--level debug` ОБОВʼЯЗКОВИЙ** — без нього видно лише `.error`.
-- **Launch-time / одноразові події** (перший пол, edge-детект, міграція): підніми стрім **першим**,
-  тоді запускай застосунок — інакше подія станеться до того, як стрім приєднається.
+- **`log show` does NOT show `.notice`/`.info`/`.debug`** — only `.error`/`.fault`. An empty
+  `log show` does **not** mean "the app isn't logging". Don't draw that conclusion.
+- **A live stream is the default, and `--level debug` is MANDATORY** — without it you only see `.error`.
+- **Launch-time / one-shot events** (the first poll, edge detection, a migration): bring the stream
+  up **first**, then launch the app — otherwise the event happens before the stream attaches.
 
-## Статистика з журналу — читати довідник перед обробкою
+## Statistics from the journal — read the reference before processing
 
-**Перед будь-яким підрахунком із `usage-journal-*.jsonl` (свого чи наданого іншим користувачем)
-відкрий [docs/reference/journal-analysis.md](docs/reference/journal-analysis.md)** — формат рядків,
-межі роздільності, пастки обробки й вимоги до значущості. Наївний парсинг журналу дає числа, які
-виглядають переконливо і є хибними: подвоєні ресети, падіння на порожньому `reset`, квантовані
-тривалості, поріг склейки сесій як прихований параметр.
+**Before any count over `usage-journal-*.jsonl` (yours or one provided by another user), open
+[docs/reference/journal-analysis.md](docs/reference/journal-analysis.md)** — the line format, the
+resolution limits, the processing traps and the significance requirements. Naive journal parsing
+yields numbers that look convincing and are wrong: doubled resets, a crash on an empty `reset`,
+quantized durations, the session-stitching threshold as a hidden parameter.
 
-**Планка для сигналу в Insights/Notifications — та сама, що в меню-барі** (перевірка «чи існує дія,
-яку користувач виконає інакше» з [users-and-goals.md](docs/reference/users-and-goals.md)); для
-нотифікацій вона **вища**, бо вони приходять самі й перебивають роботу.
+**The bar for a signal in Insights/Notifications is the same one as in the menu bar** (the "is there
+an action the user would take differently" test from
+[users-and-goals.md](docs/reference/users-and-goals.md)); for notifications it is **higher**, because
+they arrive on their own and interrupt work.
 
-Щоб почати таку сесію з нуля — скіл **`/journal-insights`**
-([`.claude/skills/journal-insights/`](.claude/skills/journal-insights/SKILL.md)): він рахує профіль
-ряду й далі відповідає на твої питання про ці дані. Оглядовий звіт і артефакт — за окремою згодою,
-не за замовчуванням.
+To start such a session from scratch, use the **`/journal-insights`** skill
+([`.claude/skills/journal-insights/`](.claude/skills/journal-insights/SKILL.md)): it computes the
+series profile and then answers your questions about that data. An overview report and an artifact
+happen by separate agreement, not by default.
 
-## Кольори: жоден скріншот не дає достовірних RGB — міряй Digital Color Meter
+## Colors: no screenshot gives trustworthy RGB — measure with Digital Color Meter
 
-**Перед будь-якою звіркою або калібруванням кольору відкрий
-[ui-verification.md § «Testing menu-bar widget colors»](docs/guides/ui-verification.md#testing-menu-bar-widget-colors-swatch-mode--color-picker)** —
-метод, цільові значення, swatch-режим.
+**Before any color comparison or calibration, open
+[ui-verification.md § "Testing menu-bar widget colors"](docs/guides/ui-verification.md#testing-menu-bar-widget-colors-swatch-mode--color-picker)** —
+the method, the target values, the swatch mode.
 
-- **Будь-який скріншот — наш, надісланий, з будь-якого джерела — НЕ є джерелом кольору.** macOS
-  застосовує color management, тож піксель у PNG не дорівнює тому, що на екрані. Не калібруй за
-  замірами піксела зі скріншота: це вже коштувало сесії годин хибної калібрації.
-- **Джерело істини — Digital Color Meter** у режимі **sRGB**; ЦІЛЬ і РЕНДЕР порівнюй в одному просторі.
-- **Знімай реальний menu bar, а не вікно** (повний екран + кроп верхньої смуги). Прозорість і
-  vibrancy зі шпалерою видно тільки там; вібрантні поверхні малюють власний матеріал, а не
-  `windowBackgroundColor`.
+- **No screenshot — ours, sent to us, from any source — is a source of color.** macOS applies color
+  management, so a pixel in a PNG is not what is on the screen. Do not calibrate against a pixel
+  measured from a screenshot: that has already cost a session hours of false calibration.
+- **The source of truth is Digital Color Meter** in **sRGB** mode; compare TARGET and RENDER in the
+  same space.
+- **Capture the real menu bar, not a window** (full screen + crop the top strip). Transparency and
+  vibrancy against the wallpaper are visible only there; vibrant surfaces draw their own material,
+  not `windowBackgroundColor`.
 
-## Layout-баги у вікнах: замір перед гіпотезами
+## Layout bugs in windows: measure before hypothesizing
 
-- **Спершу проба живого дерева, потім теорії** — і жодних програмних resize вікна користувача
-  під час діагностики. Правила й шаблон проби —
-  [agent-workflow.md § «Diagnosing window layout bugs»](docs/guides/agent-workflow.md#diagnosing-window-layout-bugs).
-- **SwiftUI дивно поводиться біля window chrome → першим перевір межу хостингу**
-  (`sizingOptions`/`safeAreaRegions`), а не SwiftUI-модифікатори —
+- **Probe the live tree first, theorize second** — and no programmatic resizing of the user's window
+  during diagnosis. The rules and the probe template are in
+  [agent-workflow.md § "Diagnosing window layout bugs"](docs/guides/agent-workflow.md#diagnosing-window-layout-bugs).
+- **SwiftUI behaving strangely near window chrome → check the hosting boundary first**
+  (`sizingOptions`/`safeAreaRegions`), not the SwiftUI modifiers —
   [ADR-0088](docs/adr/0088-settings-hosting-safe-area-and-manual-separator.md).
 
-## 🚫 Заборони, які не можна порушити (повний текст — тут, не в гайді)
+## 🚫 Prohibitions that must not be violated (the full text lives here, not in the guide)
 
-Ці правила раніше жили лише в [agent-workflow.md](docs/guides/agent-workflow.md). **Це й було
-причиною їхніх порушень:** файли з `docs/` не завантажуються в контекст автоматично — CLAUDE.md лише
-посилався на них, тож у момент, коли рука тягнулася до `pkill`, заборони фізично не було перед
-очима. Тепер вона тут. Гайд лишається деталізацією та історією; **чинний текст — цей**.
+These rules used to live only in [agent-workflow.md](docs/guides/agent-workflow.md). **That is
+exactly why they got violated:** files under `docs/` are not loaded into context automatically —
+CLAUDE.md only linked to them, so at the moment a hand reached for `pkill`, the prohibition was
+physically not in front of it. Now it is here. The guide remains the detail and the history; **the
+text in force is this one**.
 
-### Процеси застосунку
+### App processes
 
-- **🚫 Ніколи `pkill` / `killall` / `pgrep … | kill` для TokenPace.** Ні за іменем, ні за шляхом, ні
-  «точно за одним PID із pgrep». У мейнтейнера працює **нотаризована копія з `/Applications`**, і
-  будь-який такий виклик кладе її разом із твоїм білдом; pattern за іменем убиває ще й його
-  `log stream`.
-- **✅ Замість цього — запускай зі збереженим PID і зупиняй лише за ним:**
+- **🚫 Never `pkill` / `killall` / `pgrep … | kill` for TokenPace.** Not by name, not by path, not
+  "precisely by the one PID from pgrep". The maintainer runs a **notarized copy from
+  `/Applications`**, and any such call takes it down along with your build; a pattern by name kills
+  his `log stream` too.
+- **✅ Instead — launch with the PID saved and stop only by that PID:**
   ```sh
   TOKENPACE_STUB=<name> swift run & echo $! > /tmp/tp-dev.pid
   kill "$(cat /tmp/tp-dev.pid)" && rm -f /tmp/tp-dev.pid
   ```
-  **PID не збережено → зупиняти нічого не можна.** Кілька іконок TokenPace у барі — очікувано й
-  нормально; запусти ще один інстанс або попроси мейнтейнера закрити зайве.
-- **Правило про ЦІЛЬ, а не про механізм.** Акуратний спосіб влучити в чужий процес — це влучання в
-  чужий процес. «Заважає автоматизації», «щоб лишився один», «на секунду, потім підніму» — це не
-  винятки, а опис того, як саме правило порушують.
-- **Запустив «щоб мейнтейнер глянув» — не зупиняй і не перезапускай**, доки він не скаже «бачив».
-  Навіть власний процес у цей момент — **чужий інструмент перевірки**.
-- **✅ Єдиний виняток:** мейнтейнер сам просить перевстановити / оновити / перезапустити встановлену
-  копію («перевстанови», «онови мою копію», «постав свіжий білд»). Тоді дозволено весь ланцюжок:
-  зупинити стару за PID, замінити бандл, запустити нову. Дозвіл — на **це прохання**, не на сесію.
-- **🚫 Ніколи не збирай dev-`.app` у `/Applications`** за власною ініціативою.
+  **No PID saved → nothing may be stopped.** Several TokenPace icons in the bar are expected and
+  normal; launch one more instance or ask the maintainer to close the extra ones.
+- **The rule is about the TARGET, not the mechanism.** A tidy way to hit someone else's process is
+  still hitting someone else's process. "It gets in the way of automation", "so only one is left",
+  "just for a second, then I'll bring it back" — these are not exceptions, they are a description of
+  how the rule gets violated.
+- **Launched it "for the maintainer to look at" — don't stop it and don't restart it** until he says
+  "seen it". At that moment even your own process is **someone else's verification instrument**.
+- **✅ The one exception:** the maintainer himself asks to reinstall / update / restart the installed
+  copy ("reinstall it", "update my copy", "put a fresh build in"). Then the whole chain is allowed:
+  stop the old one by PID, replace the bundle, launch the new one. The permission covers **that
+  request**, not the session.
+- **🚫 Never build a dev `.app` into `/Applications`** on your own initiative.
 
-### Логи
+### Logs
 
-- **🚫 Не запускай власний `log stream`, що конкурує з мейнтейнеровим.** Для своєї діагностики —
-  `log show --last <вікно>`.
-- **Пиши `/usr/bin/log`, ніколи `log`.** Zsh-функція `log` у профілі мейнтейнера перекриває бінарник
-  і падає з `too many arguments`.
-- **`log show` НЕ показує `.notice`/`.info`/`.debug`** — лише `.error`/`.fault`. Порожній вивід ≠
-  «застосунок не логує». Для живого стріму `--level debug` обов'язковий.
+- **🚫 Don't start your own `log stream` competing with the maintainer's.** For your own diagnosis,
+  use `log show --last <window>`.
+- **Write `/usr/bin/log`, never `log`.** The zsh function `log` in the maintainer's profile shadows
+  the binary and fails with `too many arguments`.
+- **`log show` does NOT show `.notice`/`.info`/`.debug`** — only `.error`/`.fault`. Empty output ≠
+  "the app isn't logging". For a live stream `--level debug` is mandatory.
 
-### Налаштування
+### Settings
 
-- **🚫 Ніколи `defaults delete` на домені застосунку.** Це стирає реальні налаштування мейнтейнера й
-  виглядає як баг збереження.
-- **Домени різні:** `swift run` пише в **`TokenPace`**, встановлена копія — в
-  **`com.artem-n.tokenpace`**. Не переплутай, і не пінуй налаштування через `-key value` при
-  запуску — контрол у Settings виглядатиме зламаним.
+- **🚫 Never `defaults delete` on the app's domain.** It wipes the maintainer's real settings and
+  looks like a save bug.
+- **The domains differ:** `swift run` writes to **`TokenPace`**, the installed copy to
+  **`com.artem-n.tokenpace`**. Don't mix them up, and don't pin a setting via `-key value` at launch
+  — the control in Settings will look broken.
 
 ### Git
 
-- **🚫 Не комітити й не пушити в `main` напряму** — лише feature-гілка (`<prefix>/<kebab>`) + PR
-  проти `main`, не stacked.
-- **🚫 Не видаляй гілки/worktrees, які створила не ця сесія.** Перед видаленням своїх — довести, що
-  зміни в `main`: `git diff <branch> origin/main` має бути **порожнім**.
+- **🚫 Don't commit or push to `main` directly** — only a feature branch (`<prefix>/<kebab>`) + a PR
+  against `main`, not stacked.
+- **🚫 Don't delete branches/worktrees this session didn't create.** Before deleting your own, prove
+  the changes are in `main`: `git diff <branch> origin/main` must be **empty**.
 
-## Критичні правила
+## Critical rules
 
-- **Ніколи не комітити токени/креденшали.** Токен лежить у macOS Keychain
-  (`Claude Code-credentials`); він **не покидає Mac**. Не логувати, не виводити в UI.
-- **Обов'язковий заголовок `User-Agent: claude-code/<version>`** на кожному запиті до
-  `GET /api/oauth/usage` — інакше агресивний rate-limit (429).
-- **Не комітити в `main` напряму.** Робота — через feature-гілки (`<prefix>/<kebab>`) і PR проти
-  `main` (не stacked).
-- **Доки — частина коду.** Зміна модуля → оновити `docs/architecture.md`; нове рішення між
-  підходами → новий ADR; **зміна логування** (новий/видалений виклик, інший текст меседжа,
-  рівень чи категорія) → оновити `docs/log-messages.md` у тому самому коміті.
-- **PR без доків не мержиться — зупинись і скажи.** Перед тим як відкривати PR або мержити його,
-  перевір, чи зміна зачіпає щось із переліку вище (модуль, рішення між підходами, логування, назви
-  UI-рядків, сценарії верифікації). Якщо так, а доків у диффі немає — **зупинись і повідом
-  мейнтейнеру**, замість мержити з наміром «доки потім». Окремий docs-PR після мержу ламає
-  атомарність: у `main` лишається коміт, де код і доки розходяться, і ніщо про це не сигналить.
-  Продовжити без доків можна лише за явним словом мейнтейнера в цій сесії.
-- **Не стверджувати з пам'яті** факти про зовнішні API/інструменти — перевіряти (curl/--help/docs).
+- **Never commit tokens/credentials.** The token lives in the macOS Keychain
+  (`Claude Code-credentials`); it **never leaves the Mac**. Don't log it, don't show it in the UI.
+- **The `User-Agent: claude-code/<version>` header is mandatory** on every request to
+  `GET /api/oauth/usage` — otherwise an aggressive rate limit (429).
+- **Don't commit to `main` directly.** Work goes through feature branches (`<prefix>/<kebab>`) and a
+  PR against `main` (not stacked).
+- **Docs are part of the code.** A module changed → update `docs/architecture.md`; a new decision
+  between approaches → a new ADR; **a logging change** (a call added/removed, different message
+  text, a different level or category) → update `docs/log-messages.md` in the same commit.
+- **A PR without docs doesn't get merged — stop and say so.** Before opening a PR or merging one,
+  check whether the change touches anything on the list above (a module, a decision between
+  approaches, logging, UI string names, verification scenarios). If it does and the diff has no docs
+  — **stop and tell the maintainer**, instead of merging with "docs later" in mind. A separate docs
+  PR after the merge breaks atomicity: `main` keeps a commit where code and docs disagree, and
+  nothing signals it. Proceeding without docs takes the maintainer's explicit word in this session.
+- **Don't assert from memory** facts about external APIs/tools — verify them (curl/--help/docs).
 - **`gh release create` runs only after the maintainer's explicit go-ahead.** A direct instruction to publish this release — "релізь", "make release", "publish the release" or equivalent — is required each time. Building, notarizing, tagging and drafting release notes may proceed without it, but the actual `gh release create` waits for that explicit word. This is separate from and additional to the `RELEASE_NOTES_APPROVED=1` notes-approval gate (that gate guards the notes; this rule guards the act of publishing).
 
-## Робочий процес
+## Workflow
 
-Робота Фази 1 розбита на тікети (Epic + дочірні issues, GitHub Project). Виконання — **по одному
-тікету в окремих сесіях**, у рекомендованому порядку (див. Epic / план у `SPEC.md`).
+Phase 1 work is split into tickets (an Epic + child issues, a GitHub Project). Execution goes **one
+ticket per separate session**, in the recommended order (see the Epic / the plan in `SPEC.md`).
 
-## Дії, яким заважає паралельна робота мейнтейнера — попередь до і після
+## Actions the maintainer's parallel work disrupts — warn before and after
 
-Скріншот вікна, AX-навігація по запущеному застосунку, зміна системних налаштувань, будь-яка команда,
-що залежить від стану GUI — усе це ламається, якщо мейнтейнер у цей момент рухає мишкою, перемикає
-вікна чи закриває те, що знімається. Він не може здогадатися, коли саме настав такий момент.
+Screenshotting a window, AX navigation over the running app, changing system settings, any command
+that depends on GUI state — all of it breaks if the maintainer happens to be moving the mouse,
+switching windows or closing the very thing being captured. He cannot guess when that moment has
+arrived.
 
-- **Перед такою дією — явно попередь і зачекай:** одним рядком скажи, що зараз буде, і попроси на
-  кілька секунд не чіпати екран/мишу.
-- **Одразу після — скажи, що можна працювати далі.** Без цього мейнтейнер лишається заблокованим і не
-  знає, чи вже вільний.
-- Стосується **лише** дій, які реально залежать від стану GUI. Збірка, тести, git, редагування
-  файлів — не потребують ні попередження, ні відбою.
+- **Before such an action — warn explicitly and wait:** say in one line what is about to happen and
+  ask him not to touch the screen/mouse for a few seconds.
+- **Right after — say he can carry on.** Without that the maintainer stays blocked and doesn't know
+  whether he is free yet.
+- This applies **only** to actions that genuinely depend on GUI state. Builds, tests, git, editing
+  files need neither a warning nor an all-clear.
 
-## Верифікація UI перед PR
+## UI verification before a PR
 
-- **Не відкривати PR, доки мейнтейнер не перевірив зміну вживу** — на стубах (`TOKENPACE_STUB=…`)
-  та/або на реальній даті. Лише після підтвердження — PR.
-- **Скриншоти з тимчасового dev-only коду НЕ рахуються за верифікацію** (синтетичний рендер доводить
-  лише логіку малювання, не роботу в живому віджеті/Settings/потоці даних).
-- **Доки й ADR пишуться ПІСЛЯ того, як мейнтейнер побачив фічу вживу.** Порядок: код →
-  `swift build`/`swift test` → **скриншоти мейнтейнеру** → його підтвердження → доки/ADR → PR.
-  Писати ADR до підтвердження — марна робота: якщо поведінка зміниться, переписувати доведеться
-  не лише код, а й обґрунтування рішення.
-- **🚫 Ніколи не запускай нотаризовану копію без `TOKENPACE_JOURNAL_FILE`.** Фічі, що залежать від
-  підпису (launch-at-login/SMAppService, авто-встановлення оновлень), у `swift run` не працюють — їх
-  перевіряють на `.app` із `/Applications`. Без цієї змінної тестовий прогін пише в **реальний**
-  журнал мейнтейнера (файл без суфікса `-dev` — той самий, що в бойовій роботі), і зіпсовані дані
-  вже не відкотиш:
+- **Don't open a PR until the maintainer has checked the change live** — on stubs (`TOKENPACE_STUB=…`)
+  and/or on real data. A PR comes only after his confirmation.
+- **Screenshots from temporary dev-only code do NOT count as verification** (a synthetic render
+  proves the drawing logic alone, not that it works in the live widget/Settings/data flow).
+- **Docs and ADRs are written AFTER the maintainer has seen the feature live.** The order is: code →
+  `swift build`/`swift test` → **screenshots to the maintainer** → his confirmation → docs/ADR → PR.
+  Writing an ADR before the confirmation is wasted work: if the behavior changes, it is not just the
+  code that has to be rewritten but the rationale for the decision too.
+- **🚫 Never launch the notarized copy without `TOKENPACE_JOURNAL_FILE`.** Features that depend on
+  the signature (launch-at-login/SMAppService, automatic update installation) don't work under
+  `swift run` — they are checked on the `.app` from `/Applications`. Without that variable a test
+  run writes into the maintainer's **real** journal (the file without the `-dev` suffix — the very
+  one used in production work), and corrupted data can't be rolled back:
   ```sh
   TOKENPACE_JOURNAL_FILE=/tmp/tp-test.jsonl /Applications/TokenPace.app/Contents/MacOS/TokenPace
   ```
-- Робочий цикл: коміт у feature-гілку → `swift build` → **віддати мейнтейнеру** → підтвердження → PR.
+- The working cycle: commit to a feature branch → `swift build` → **hand it to the maintainer** →
+  confirmation → PR.
 
-Перелік стубів, сценарії без стубу й деталі команд — у
+The list of stubs, the scenarios without a stub and the command details are in
 [ui-verification.md](docs/guides/ui-verification.md).
-**Додаючи фічу зі своїм станом — додай стуб і онови той перелік.**
+**Adding a feature with a state of its own — add a stub and update that list.**
 
-## Аналіз пропозицій і мокапи поза застосунком
+## Analyzing proposals and mockups outside the app
 
-Стосується всього, що описує або зображає UI **не в самому застосунку**: артефакти, мокапи,
-коментарі в issue, розбори чужих пропозицій, дизайн-нотатки.
+This covers everything that describes or depicts the UI **outside the app itself**: artifacts,
+mockups, issue comments, reviews of other people's proposals, design notes.
 
-- **Малюєш UI — перед рендером відкрий [ui-state-truth.md](docs/reference/ui-state-truth.md).** Там
-  метрики обох поверхонь (вони різні — не бери числа «взагалі»), анатомія бару, таблиця **неможливих
-  комбінацій** і вимога рендерити іконки справжніми SF Symbols, а не емодзі. Рендер із неіснуючого
-  стану робить хибним увесь розбір навколо нього, навіть коли текст правильний.
-- **Стверджуєш щось про поведінку — процитуй рядок коду**, не «схоже, що воно робить X». Порядок
-  гілок вирішує так само, як їхній вміст, а назва властивості не є доказом — вона буває кон'юнкцією
-  з живими даними ([правило й приклади](docs/reference/ui-state-truth.md#claiming-something-about-behavior--quote-the-line-of-code)).
-- **Мотивуєш зміну потребою користувача — звір із
-  [users-and-goals.md](docs/reference/users-and-goals.md)**: перевірка «чи існує дія, яку користувач
-  виконає інакше», приклади сигналів, що її не проходять, і перелік того, що користувач **уже
-  контролює сам**. Перш ніж пропонувати «прибрати X», перевір, чи перемикач уже не стоїть там, де
-  задається сама величина.
-- **Кожна згадка тікета, PR, коміта, файлу чи ADR — гіперпосилання**
-  ([таблиця цілей і скрипт перевірки](docs/reference/ui-state-truth.md#every-mention-is-a-hyperlink)).
-  Найлегше пропустити ті, що стоять одразу після тега (`<div>#283`). **Виняток — рядок `Closes #NNN`
-  у тілі PR:** GitHub тригерить автозакриття лише на голий номер, тож посилання там тихо ламає його.
+- **Drawing UI — open [ui-state-truth.md](docs/reference/ui-state-truth.md) before rendering.** It
+  has the metrics of both surfaces (they differ — don't take numbers "in general"), the anatomy of
+  the bar, the table of **impossible combinations** and the requirement to render icons as real SF
+  Symbols rather than emoji. A render of a nonexistent state makes the whole analysis around it
+  false, even when the text is right.
+- **Claiming something about behavior — quote the line of code**, not "it looks like it does X". The
+  order of the branches decides as much as their contents, and a property's name is not proof — it
+  is often a conjunction with live data ([the rule and
+  examples](docs/reference/ui-state-truth.md#claiming-something-about-behavior--quote-the-line-of-code)).
+- **Motivating a change by a user need — check it against
+  [users-and-goals.md](docs/reference/users-and-goals.md)**: the "is there an action the user would
+  take differently" test, examples of signals that fail it, and the list of what the user **already
+  controls himself**. Before proposing to "remove X", check whether the switch isn't already right
+  where that very value is set.
+- **Every mention of a ticket, PR, commit, file or ADR is a hyperlink**
+  ([the table of targets and the check script](docs/reference/ui-state-truth.md#every-mention-is-a-hyperlink)).
+  The easiest ones to miss are those sitting right after a tag (`<div>#283`). **The exception is the
+  `Closes #NNN` line in a PR body:** GitHub triggers auto-closing only on a bare number, so a link
+  there quietly breaks it.
 
-Наскрізний принцип: **значення — це вхід моделі, колір і вердикт — її вихід**
-([users-and-goals.md](docs/reference/users-and-goals.md)). Пропозиції підняти вагу входу (заливка
-рівнем, залишок у severity, первинне чорнило на відсотку) з'являються регулярно й падають з тієї
-самої причини.
+The principle running through all of it: **a value is the model's input, the color and the verdict
+are its output** ([users-and-goals.md](docs/reference/users-and-goals.md)). Proposals to raise the
+weight of the input (a fill by level, the remainder in severity, primary ink on the percentage) come
+up regularly and fall for that same reason.
 
-## Стиль release notes
+## Release notes style
 
-**НІКОЛИ не склад release notes з пам'яті.** Перед написанням нотаток **обов'язково відкрий і прочитай
-[docs/guides/releasing.md](docs/guides/releasing.md)** (розділ «Release notes: content and style») — саме там канонічні
-правила, а не в пам'яті чи в цьому файлі. Ключове звідти:
+**NEVER compose release notes from memory.** Before writing the notes you **must open and read**
+[docs/guides/releasing.md](docs/guides/releasing.md) (the "Release notes: content and style"
+section) — the canonical rules are there, not in memory and not in this file. The key points from
+it:
 
-- **Канонічний шлях встановлення — автооновлення** (Settings → About → «Check for updates periodically» +
-  «Install updates automatically»), щоб наступні релізи прилітали самі. Ручний zip — лише **короткий
-  запасний** варіант для тих, хто ставить уперше.
-- Охоплювати все з останнього GitHub-релізу без згадки проміжних версій; мержити споріднені фічі.
-- **Обов'язково показувати згенеровані нотатки мейнтейнеру на затвердження перед публікацією.**
+- **The canonical installation path is auto-update** (Settings → About → "Check for updates
+  periodically" + "Install updates automatically"), so that subsequent releases arrive on their own.
+  The manual zip is only a **short fallback** for those installing for the first time.
+- Cover everything since the last GitHub release without mentioning the intermediate versions; merge
+  related features.
+- **The generated notes must be shown to the maintainer for approval before publishing.**
 
-Публікацію релізу стереже hook (`.claude/hooks/release-notes-guard.sh`): він блокує `gh release
-create`, доки команду не запущено з префіксом `RELEASE_NOTES_APPROVED=1`, який додають **лише** після
-затвердження нотаток мейнтейнером.
+Publishing a release is guarded by a hook (`.claude/hooks/release-notes-guard.sh`): it blocks
+`gh release create` until the command is run with the `RELEASE_NOTES_APPROVED=1` prefix, which is
+added **only** after the maintainer has approved the notes.
