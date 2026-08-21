@@ -174,3 +174,42 @@ The same applies to ADR titles: `ADR-0116: English as the documentation language
 `five_hour`, `seven_day`, `resets_at`, `client_id`, `utilization`, `is_active` and every other
 field name from the Claude usage API keep their original form, in prose as well as in code. They
 are names, not words.
+
+## Comments inside code blocks are prose — translate them
+
+The byte-for-byte rule for fenced blocks protects **executable content**: commands, identifiers,
+paths, JSON keys, Swift, log strings, PlantUML source. A `//`, `#`, `--` or `←` comment explaining
+an example is not executable — it is written for the reader, and it must be translated like any
+other sentence. Leaving it Cyrillic defeats the point of translating the paragraph above it.
+
+A string literal a script **prints for the reader** is prose too: `print('нецілих:', n)` becomes
+`print('non-integer:', n)`. The reader has to understand what was printed.
+
+**Nothing else in the block is touched.** Not the code, not the illustrated output, not values
+compared against real data — including Cyrillic ones that are *data*: `"1 ГБ"`, `"Обліковий запис
+Apple"`, a test fixture such as the `TOKENPACE_AWAITING_NAMES` session name that exists precisely to
+exercise long non-ASCII rendering. If a line both executes and explains, only the trailing comment
+is translated.
+
+Typography inside those comments follows the prose rules: en dash in ranges (`4–6`, `10–12 px`),
+`"…"` rather than `«…»`.
+
+The sweep that finds the remaining cases ([#465](https://github.com/artem-from-ua/tokenpace/issues/465)):
+
+```sh
+python3 - <<'PY'
+import subprocess, re
+cyr = re.compile(r'[Ѐ-ӿ]')
+for f in subprocess.run(['git', 'ls-files', '*.md'],
+                        capture_output=True, text=True).stdout.split():
+    fence = False
+    for i, l in enumerate(open(f, encoding='utf-8'), 1):
+        if l.lstrip().startswith(('```', '~~~')):
+            fence = not fence
+            continue
+        if fence and cyr.search(l):
+            print(f"{f}:{i}: {l.rstrip()[:100]}")
+PY
+```
+
+It cannot tell a comment from a deliberate literal — every hit is reviewed by hand.

@@ -85,10 +85,10 @@ The link validator has four more modes, needed while the docs are being migrated
 ([#441](https://github.com/artem-from-ua/tokenpace/issues/441)):
 
 ```sh
-python3 scripts/check-doc-links.py --snapshot OUT     # граф якорів у JSON (поіменний перелік)
-python3 scripts/check-doc-links.py --compare OLD NEW  # що зламалося між двома знімками
-python3 scripts/check-doc-links.py --inbound FILE     # хто посилається на якорі цього файлу
-python3 scripts/check-doc-links.py --no-dup-slugs     # колізії slug'ів заголовків
+python3 scripts/check-doc-links.py --snapshot OUT     # anchor graph as JSON (a named listing)
+python3 scripts/check-doc-links.py --compare OLD NEW  # what broke between two snapshots
+python3 scripts/check-doc-links.py --inbound FILE     # who links to this file's anchors
+python3 scripts/check-doc-links.py --no-dup-slugs     # heading slug collisions
 ```
 
 **`--no-dup-slugs` is a separate mode for a reason.** Two different headings that produce the same

@@ -252,8 +252,8 @@ for line in open(p):
         if v == prev: same += 1
         elif v > prev: jumps.append(v - prev)
     prev = v
-print('нецілих:', [v for v in vals if v != int(v)])
-print('без зміни:', same, 'стрибки:', collections.Counter(jumps))
+print('non-integer:', [v for v in vals if v != int(v)])
+print('unchanged:', same, 'jumps:', collections.Counter(jumps))
 PY
 ```
 
