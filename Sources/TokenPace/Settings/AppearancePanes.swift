@@ -442,22 +442,24 @@ struct DropdownPane: View {
                 }
             }
 
-            // The ⌥ caption's switch is on General, not here (#475/#476) — it must not travel in a
-            // preset or an exported config, and membership in `AppearancePresetValues` is what decides
-            // that. This pane is where someone looks for it, so this is where it has to be named; the
-            // link makes the pointer worth following rather than a note about somewhere else.
+            // The ⌥ caption (#475), in its own unnamed section at the foot of the page — this is where
+            // someone looks for it, so this is where it lives.
             //
-            // In the `footer:` slot, so it renders outside the grouped card: it is a statement about the
-            // page, not another control on it. That also keeps it clear of the two segmented rows above,
-            // which are dense enough already.
+            // **The one control on this pane that is not a preset value.** Everything above is an
+            // `AppearancePresetValues` member: picking a preset rewrites it, and Copy config carries it
+            // to another Mac. This switch does neither, on purpose — it records that its owner already
+            // knows the shortcut, which is a fact about a person rather than about how the dropdown
+            // should look, and restoring it onto a second Mac would be restoring the wrong thing.
+            //
+            // Unnamed because a heading would have to name that distinction ("Not in presets"?) and a
+            // section header is the wrong place to argue it. The row sits apart, which is as much as the
+            // layout needs to say; the reasoning is here, and in `PersistedConfig.showOptionHint`.
+            //
+            // No `SettingsHint`: the label names the caption verbatim and the caption says what it does.
             Section {
-                EmptyView()
-            } footer: {
-                SettingsCrossPaneHint(
-                    prefix: "The *hold ⌥ Option* hint is set in",
-                    destination: .general,
-                    suffix: " — it is not part of an appearance preset.",
-                    model: model)
+                Toggle("Show «hold ⌥ Option» hint in dropdown", isOn: Binding(
+                    get: { model.showOptionHint },
+                    set: { model.setShowOptionHint($0) }))
             }
         }
         .formStyle(.grouped)

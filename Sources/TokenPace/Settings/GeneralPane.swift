@@ -3,8 +3,7 @@ import TokenPaceKit
 
 // MARK: - GeneralPane (#168, ADR-0042)
 
-/// Settings → General: how the app lives on this Mac — launch-at-login and the usage journal — plus the
-/// one dropdown switch that is not an appearance choice (the ⌥ caption, #475; see its section below).
+/// Settings → General: how the app lives on this Mac — launch-at-login and the usage journal.
 ///
 /// The screen-lock polling pause used to sit here; it moved to `Providers`, where the polling it
 /// suspends is configured.
@@ -72,26 +71,6 @@ struct GeneralPane: View {
                     }
                     .transition(SettingsRowReveal.transition)
                 }
-            }
-
-            // MARK: Dropdown — the ⌥ caption (#475)
-            //
-            // On *this* pane, not on Appearance › Dropdown where it would seem to belong, because it must
-            // not travel in an appearance preset or in an exported config: it records that this person
-            // already knows the shortcut, which is not a look worth carrying to another Mac. Membership
-            // in `AppearancePresetValues` is what decides that, and this setting stays out of it.
-            //
-            // Its own `Section` rather than a row among the app-lifetime switches above: the pane's other
-            // controls answer "how does TokenPace live on this Mac", and this one answers "what does the
-            // dropdown say" — a different question deserves its own card. Appearance › Dropdown points
-            // here so it is findable from where it is missed (#476).
-            // No `SettingsHint` under the row: the label names the caption verbatim, and the caption says
-            // what it does. A line explaining that ⌥ still works without it would be telling the reader
-            // something the switch's own wording already implies.
-            Section("Dropdown") {
-                Toggle("Show «hold ⌥ Option» hint in dropdown", isOn: Binding(
-                    get: { model.showOptionHint },
-                    set: { model.setShowOptionHint($0) }))
             }
         }
         .formStyle(.grouped)

@@ -1987,8 +1987,19 @@ final class PopupViewController: NSViewController {
     private func makeOptionHintLabel() -> NSTextField {
         let label = NSTextField(labelWithString: Self.optionHintText)
         label.font = Self.italic(NSFont.systemFont(ofSize: dropdownTextSize))
-        label.textColor = Self.dimmedLabelColor
+        // `secondaryLabelColor`, not the popup's own `dimmedLabelColor`. That one is
+        // `tertiaryLabelColor` blended halfway to secondary — right for a caption sitting *inside* the
+        // card, against the plate's own fill, and too faint out here on the menu's material, where this
+        // line is the only thing on the row and has to be read at a glance. Both are dynamic system
+        // colours, so either follows a light/dark switch on its own with no second rule and no redraw
+        // of ours; this one simply starts a step brighter.
+        label.textColor = .secondaryLabelColor
         label.alignment = .right
+        // Without this the field hugs its own text and the frame ends where the string does — so
+        // `.right` has nothing to align *within* and the caption sits wherever the label happens to
+        // start. Lowering the hugging lets it take the full content width, which is what makes the
+        // right edge land under the status column.
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
         label.refusesFirstResponder = true
         // Out of the accessibility tree as an element of its own: VoiceOver reading "hold ⌥ Option for
         // more" as a row would suggest a control, and the popup's own description already covers it.

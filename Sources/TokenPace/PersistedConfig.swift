@@ -1016,9 +1016,11 @@ enum PersistedConfig {
     /// someone who already knows the shortcut and a dead end for someone who does not. Hence an opt-out
     /// that person takes deliberately, never a default.
     ///
-    /// Deliberately **not** an ``AppearancePresetValues`` member, so it travels in no preset and in no
-    /// exported config: it records what its owner has learned, not what the dropdown should look like.
-    /// Read live on each menu open, so a change needs no restart.
+    /// Its control sits on **Appearance › Dropdown** — where someone looks for it — yet it is
+    /// deliberately **not** an ``AppearancePresetValues`` member, making it the one switch on that pane a
+    /// preset does not rewrite and Copy config does not carry. That is the point: it records what its
+    /// owner has already learned, not what the dropdown should look like, and restoring it onto a second
+    /// Mac would restore the wrong thing. Read live on each menu open, so a change needs no restart.
     static var showOptionHint: Bool {
         get { defaults.object(forKey: Key.showOptionHint) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.showOptionHint) }

@@ -131,16 +131,6 @@ final class SettingsModel {
         popToRoot()
     }
 
-    /// Move to another **section** from inside a pane — the cross-pane link's entry point (#476).
-    ///
-    /// A thin wrapper over `selection`, whose `didSet` already pops any open child page and records the
-    /// visit, so ‹ returns to where the reader came from. It exists so a pane states an intent rather
-    /// than assigning to a property, matching ``drill(into:)`` one level down; the sidebar keeps writing
-    /// `selection` directly, because there the assignment *is* the intent.
-    func select(_ section: SettingsSection) {
-        selection = section
-    }
-
     /// Open a child page of the current section, recording it as its own history stop (#341).
     func drill(into page: SettingsChildPage) {
         guard childPage != page else { return }
