@@ -199,7 +199,7 @@ The sweep that finds the remaining cases ([#465](https://github.com/artem-from-u
 ```sh
 python3 - <<'PY'
 import subprocess, re
-cyr = re.compile(r'[Ѐ-ӿ]')
+cyr = re.compile('[\\u0400-\\u04ff]')   # escaped, so this sweep never flags itself
 for f in subprocess.run(['git', 'ls-files', '*.md'],
                         capture_output=True, text=True).stdout.split():
     fence = False
