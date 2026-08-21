@@ -122,17 +122,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Verification stub: `TOKENPACE_AWAITING=N` synthesizes `N` awaiting sessions, bypassing the
     /// watcher. `TOKENPACE_AWAITING_DAYS=d1,d2,…` sets each session's days-until-deletion (to drive the
     /// urgency tint / red/orange buckets); missing days default to 20 (neutral). `TOKENPACE_AWAITING_
-    /// PROJECTS=a,b,…` names the sessions' projects (round-robin) for the per-project popover. See
-    /// docs/guides/ui-verification.md. Verification only — no such env var in a real build.
+    /// PROJECTS=a,b,…` names the sessions' projects (round-robin) for the per-project popover.
+    /// `TOKENPACE_AWAITING_NAMES=n1,n2,…` titles the sessions **positionally** — an empty slot
+    /// (`a,,c`) or a missing one renders as `<unnamed>`. See docs/guides/ui-verification.md.
+    /// Verification only — no such env var in a real build.
     private let awaitingInputStub: AwaitingSessions? = {
         let env = ProcessInfo.processInfo.environment
         guard let n = env["TOKENPACE_AWAITING"].flatMap(Int.init), n >= 0 else { return nil }
         let days = (env["TOKENPACE_AWAITING_DAYS"] ?? "").split(separator: ",").compactMap { Double($0) }
         let projects = (env["TOKENPACE_AWAITING_PROJECTS"] ?? "app").split(separator: ",").map(String.init)
+        // Positional, unlike `_PROJECTS`: projects repeat by design (several sessions share one), but
+        // names identify, so cycling them would print the same title on different rows and make
+        // "several distinctly named sessions in one project" impossible to stage. Empty subsequences
+        // are kept so `a,,c` can address the middle slot — that is how an unnamed session is staged.
+        let names = env["TOKENPACE_AWAITING_NAMES"].map {
+            $0.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+        } ?? []
         let sessions = (0..<n).map { i in
-            AwaitingSession(
+            let name = i < names.count && !names[i].isEmpty ? names[i] : nil
+            return AwaitingSession(
                 project: projects.isEmpty ? "app" : projects[i % projects.count],
-                daysUntilDeletion: i < days.count ? days[i] : 20)
+                daysUntilDeletion: i < days.count ? days[i] : 20,
+                name: name)
         }
         return AwaitingSessions(sessions)
     }()

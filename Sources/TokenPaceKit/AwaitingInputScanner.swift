@@ -111,15 +111,50 @@ public struct AwaitingInputScanner {
         let ageDays: Double = updatedMs.map { max(0, (now.timeIntervalSince1970 * 1000 - $0) / 86_400_000) } ?? 0
         let daysLeft = cleanupDays - ageDays
 
+        // Read once and share: `jobId` resolves the project *and* recognizes the unnamed placeholder.
+        let jobId = firstMatch(Self.reJobID, in: sessionJSON)
+
         // Project: the job's originCwd (repo root, worktrees collapse) if resolvable, else session cwd.
         let cwd = firstMatch(Self.reCwd, in: sessionJSON) ?? ""
         var project = cwd
-        if let jobId = firstMatch(Self.reJobID, in: sessionJSON),
+        if let jobId,
            let state = try? String(contentsOf: jobStateURL(jobId), encoding: .utf8),
            let origin = firstMatch(Self.reOriginCwd, in: state), !origin.isEmpty {
             project = origin
         }
-        return AwaitingSession(project: project, daysUntilDeletion: daysLeft)
+
+        // Name: taken from this file only. `jobs/<id>/state.json` carries a copy, but the two encode
+        // "unnamed" differently (placeholder here, absent field there) and neither is reliably the
+        // fresher of the pair — while this file is already in memory, so reading it costs no I/O.
+        let name = Self.normalizedName(
+            firstMatch(Self.reName, in: sessionJSON),
+            jobId: jobId,
+            sessionId: firstMatch(Self.reSessionID, in: sessionJSON))
+        return AwaitingSession(project: project, daysUntilDeletion: daysLeft, name: name)
+    }
+
+    /// The session's display title, or `nil` when Claude Code never gave it one (#438).
+    ///
+    /// An unnamed session does not omit the key — it gets a **placeholder**: its own `jobId`, which is
+    /// the sessionId's first 8 characters. Four shapes therefore all mean "unnamed", and this collapses
+    /// them into one `nil` so no caller has to know the format:
+    ///
+    /// 1. the field is absent, 2. it is empty or blank, 3. it equals `jobId`, 4. it equals
+    /// `sessionId`'s 8-char prefix — the same value by another route, kept as a fallback for a session
+    /// file that somehow lacks `jobId`.
+    ///
+    /// Matching is by **equality with this session's own ids**, never by shape. A real title that
+    /// happens to look like a hex blob (`deadbeef`) is a title, and a `^[0-9a-f]{8}$` test would eat it.
+    ///
+    /// Internal, not private, so tests can drive it directly without a fixture tree — the same seam
+    /// ``parseProcStart(_:)`` uses.
+    static func normalizedName(_ raw: String?, jobId: String?, sessionId: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let jobId, trimmed == jobId { return nil }
+        if let sessionId, trimmed == String(sessionId.prefix(8)) { return nil }
+        return trimmed
     }
 
     /// Claude Code's cleanup horizon in days: `cleanupPeriodDays` from `~/.claude/settings.json`, or
@@ -340,6 +375,18 @@ public struct AwaitingInputScanner {
     private static let reStatus = regex(#""status"\s*:\s*"([a-z]+)""#)
     /// `"jobId":"04c0e8f2"` (compact, from `sessions/*.json`).
     private static let reJobID = regex(#""jobId"\s*:\s*"([^"]+)""#)
+    /// `"sessionId":"04c0e8f2-d0a7-4a2a-b2c8-ac7008ec04d3"` (from `sessions/*.json`) — only read to
+    /// recognize the unnamed-session placeholder; see ``normalizedName(_:jobId:sessionId:)``.
+    private static let reSessionID = regex(#""sessionId"\s*:\s*"([^"]+)""#)
+    /// `"name":"refactor popup layout"` (from `sessions/*.json`) — the session title Claude Code's
+    /// agentic view lists. `*` not `+`: an empty `""` should *match* and be normalized to "unnamed",
+    /// rather than look like an absent field (both end up `nil`, but the intent is explicit).
+    ///
+    /// Unlike every other field here this one is **free user text**, so `[^"]*` stops at the first
+    /// escaped quote: a session titled `fix "flaky" test` reads back as `fix `. Deliberate — the
+    /// degradation is a shortened title, and a `(?:[^"\\]|\\.)*` pattern would cost real legibility
+    /// to fix a case no observed name exhibits (0 of 224 names carried a quote or a backslash).
+    private static let reName = regex(#""name"\s*:\s*"([^"]*)""#)
     /// `"pid":1245` (from `sessions/*.json`) — the owning `claude` process. Also the file's own name
     /// (`1245.json`), but read from the body so a renamed/copied file can't mislead the check.
     private static let rePID = regex(#""pid"\s*:\s*(\d+)"#)

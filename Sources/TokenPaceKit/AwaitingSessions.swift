@@ -43,10 +43,21 @@ public struct AwaitingSession: Sendable, Equatable {
     /// where age is `now − updatedAt`. Can go negative if already past the window (still counted —
     /// it's awaiting until it actually disappears).
     public let daysUntilDeletion: Double
+    /// The session's title — the same string Claude Code's agentic view lists it under (`refactor
+    /// popup layout`), or `nil` when the session was never named (#438).
+    ///
+    /// `nil` is the *normalized* absence, not merely a missing field: Claude Code writes a
+    /// **placeholder** rather than omitting the key, so an unnamed session carries its own `jobId`
+    /// (the sessionId's first 8 chars) as its `name`. ``AwaitingInputScanner/normalizedName(_:jobId:sessionId:)``
+    /// collapses every such shape to `nil` at the scanner boundary, so the UI only ever has to ask
+    /// "is this nil". The placeholder must not reach the screen: it reads as a copyable identifier
+    /// while `--resume` rejects it (it takes a full UUID or a session title, not the 8-char prefix).
+    public let name: String?
 
-    public init(project: String, daysUntilDeletion: Double) {
+    public init(project: String, daysUntilDeletion: Double, name: String? = nil) {
         self.project = project
         self.daysUntilDeletion = daysUntilDeletion
+        self.name = name
     }
 
     /// This session's urgency bucket.
@@ -62,24 +73,31 @@ public struct AwaitingSession: Sendable, Equatable {
 
 // MARK: - ProjectAwaitingStats
 
-/// Per-project counts of awaiting sessions bucketed by urgency (#233) — one row in the click popover.
+/// One project's awaiting sessions (#233, #438) — a heading row in the ⌥ breakdown plus the session
+/// rows beneath it.
+///
+/// The bucket counts are **derived** from ``sessions`` rather than stored alongside it: they used to
+/// be the whole payload, back when the row rendered them as `1✋ 2✋` chips and no session was named.
+/// Now that every session gets its own row and its own hand, a stored count could disagree with the
+/// array it summarizes — so there is nothing to keep in sync.
 public struct ProjectAwaitingStats: Sendable, Equatable {
     public let projectName: String
-    /// Sessions with under 7 days left before deletion (red).
-    public let red: Int
-    /// Sessions with under 15 days (but ≥ 7) left before deletion (orange).
-    public let orange: Int
-    /// Sessions with more than 15 days left (neutral / "recent").
-    public let recent: Int
+    /// This project's awaiting sessions, **freshest first** (see ``AwaitingSessions/perProject``).
+    public let sessions: [AwaitingSession]
 
-    public init(projectName: String, red: Int, orange: Int, recent: Int) {
+    public init(projectName: String, sessions: [AwaitingSession]) {
         self.projectName = projectName
-        self.red = red
-        self.orange = orange
-        self.recent = recent
+        self.sessions = sessions
     }
 
-    public var total: Int { red + orange + recent }
+    /// Sessions with under 7 days left before deletion (red).
+    public var red: Int { sessions.count { $0.urgency == .red } }
+    /// Sessions with under 15 days (but ≥ 7) left before deletion (orange).
+    public var orange: Int { sessions.count { $0.urgency == .orange } }
+    /// Sessions with more than 15 days left (neutral / "recent").
+    public var recent: Int { sessions.count { $0.urgency == .neutral } }
+
+    public var total: Int { sessions.count }
 }
 
 // MARK: - AwaitingSessions
@@ -107,22 +125,36 @@ public struct AwaitingSessions: Sendable, Equatable {
         sessions.map(\.urgency).max() ?? .neutral
     }
 
-    /// Per-project breakdown for the click popover, one ``ProjectAwaitingStats`` per project, sorted
-    /// most-urgent-first (most red, then orange, then name) so the projects that need attention are on
-    /// top.
+    /// Per-project breakdown for the ⌥ popup: one ``ProjectAwaitingStats`` per project, **sorted by
+    /// name**, each carrying its sessions **freshest first**.
+    ///
+    /// Projects sort alphabetically rather than most-urgent-first (#438). The urgency ordering made
+    /// sense while the project row itself carried the coloured chips; now that row is a bare heading
+    /// and every hand hangs off a session line, so ranking headings by a quantity they no longer
+    /// display would order the list by something the eye cannot check.
+    ///
+    /// Sessions sort by ``AwaitingSession/daysUntilDeletion`` **descending**, which is exactly
+    /// "most recently updated first": the scanner derives that number as `cleanupDays − ageDays` from
+    /// `updatedAt`, and `cleanupDays` is one value for the whole scan — so more days left means a
+    /// fresher session, with no second timestamp to carry.
+    ///
+    /// The tie-break is load-bearing, not cosmetic. `ageDays` is clamped at `max(0, …)`, so every
+    /// session touched within the last moment collapses onto the *same* `daysUntilDeletion`; without
+    /// a total order the row order would follow `contentsOfDirectory`, and ``AwaitingSessions`` is
+    /// `Equatable` — the watcher would read each reshuffle as a change and re-render on every scan.
     public var perProject: [ProjectAwaitingStats] {
-        let grouped = Dictionary(grouping: sessions, by: \.projectName)
-        return grouped.map { name, group in
-            ProjectAwaitingStats(
-                projectName: name,
-                red: group.filter { $0.urgency == .red }.count,
-                orange: group.filter { $0.urgency == .orange }.count,
-                recent: group.filter { $0.urgency == .neutral }.count)
-        }
-        .sorted { a, b in
-            if a.red != b.red { return a.red > b.red }
-            if a.orange != b.orange { return a.orange > b.orange }
-            return a.projectName < b.projectName
-        }
+        Dictionary(grouping: sessions, by: \.projectName)
+            .map { name, group in
+                ProjectAwaitingStats(projectName: name, sessions: group.sorted(by: Self.freshestFirst))
+            }
+            .sorted { $0.projectName < $1.projectName }
+    }
+
+    /// Freshest first, with a total order: more days left wins, then name, then project — so equal
+    /// timestamps still land in one stable sequence rather than in directory order.
+    private static func freshestFirst(_ a: AwaitingSession, _ b: AwaitingSession) -> Bool {
+        if a.daysUntilDeletion != b.daysUntilDeletion { return a.daysUntilDeletion > b.daysUntilDeletion }
+        if a.name != b.name { return (a.name ?? "") < (b.name ?? "") }
+        return a.project < b.project
     }
 }

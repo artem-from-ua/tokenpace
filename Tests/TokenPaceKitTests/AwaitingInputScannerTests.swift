@@ -41,13 +41,16 @@ private final class ClaudeFixture {
     @discardableResult
     func session(_ pid: String, status: String, jobId: String? = nil,
                  ageDays: Double = 0, cwd: String = "/repo/app",
-                 procStart: String? = nil) -> URL {
+                 procStart: String? = nil, name: String? = nil,
+                 sessionId: String? = nil) -> URL {
         let updatedMs = Int((refNow.timeIntervalSince1970 - ageDays * 86_400) * 1000)
         // Both `updatedAt` and `statusUpdatedAt` are set to the same instant, as Claude Code does; the
         // freshness guard prefers `statusUpdatedAt`, and age math reads `updatedAt`.
         var s = #"{"pid":\#(pid),"status":"\#(status)","cwd":"\#(cwd)","updatedAt":\#(updatedMs),"statusUpdatedAt":\#(updatedMs)"#
         if let jobId { s += #","jobId":"\#(jobId)""# }
         if let procStart { s += #","procStart":"\#(procStart)""# }
+        if let name { s += #","name":"\#(name)""# }
+        if let sessionId { s += #","sessionId":"\#(sessionId)""# }
         s += "}"
         let url = home.appendingPathComponent("sessions/\(pid).json")
         try? s.write(to: url, atomically: true, encoding: .utf8)
@@ -384,11 +387,114 @@ struct AwaitingInputScannerTests {
         fx.session("3", status: "waiting", ageDays: 20, cwd: "/repo/lib")
         let per = fx.scan().perProject
         #expect(per.count == 2)
-        // "app" sorts first (has a red)
         #expect(per[0].projectName == "app")
         #expect(per[0].red == 1 && per[0].orange == 0 && per[0].recent == 1)
+        #expect(per[0].sessions.count == 2)
         #expect(per[1].projectName == "lib")
         #expect(per[1].orange == 1 && per[1].red == 0 && per[1].recent == 0)
+    }
+
+    /// Projects sort by **name**, not by urgency (#438) — the heading no longer shows the chips that
+    /// ranking was based on.
+    ///
+    /// `aaa` deliberately holds the only red session and still sorts first only because of its name,
+    /// while `zzz` — which under the old most-urgent-first comparator would have led — sorts last.
+    /// A two-project fixture cannot tell the comparators apart when the urgent project also happens
+    /// to be alphabetically first, which is exactly why the case above proves nothing on its own.
+    @Test func projectsSortByNameNotUrgency() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "waiting", ageDays: 1, cwd: "/repo/aaa")    // 29 left → neutral
+        fx.session("2", status: "waiting", ageDays: 26, cwd: "/repo/zzz")   // 4 left → red
+        fx.session("3", status: "waiting", ageDays: 20, cwd: "/repo/mmm")   // 10 left → orange
+        #expect(fx.scan().perProject.map(\.projectName) == ["aaa", "mmm", "zzz"])
+    }
+
+    /// Sessions inside a project run freshest first (#438): `daysUntilDeletion` descending is the same
+    /// order as `updatedAt` descending, since one `cleanupDays` applies to the whole scan.
+    @Test func sessionsWithinAProjectRunFreshestFirst() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "waiting", ageDays: 20, cwd: "/repo/app", name: "oldest")
+        fx.session("2", status: "waiting", ageDays: 1, cwd: "/repo/app", name: "freshest")
+        fx.session("3", status: "waiting", ageDays: 9, cwd: "/repo/app", name: "middle")
+        let sessions = fx.scan().perProject.first!.sessions
+        #expect(sessions.map(\.name) == ["freshest", "middle", "oldest"])
+    }
+
+    // MARK: session name (#438)
+
+    @Test func sessionNameIsRead() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "waiting", name: "refactor popup layout")
+        #expect(fx.scan().sessions.first!.name == "refactor popup layout")
+    }
+
+    @Test func missingNameFieldReadsAsUnnamed() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "waiting")
+        #expect(fx.scan().sessions.first!.name == nil)
+    }
+
+    @Test func emptyNameReadsAsUnnamed() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "waiting", name: "")
+        #expect(fx.scan().sessions.first!.name == nil)
+    }
+
+    @Test func blankNameReadsAsUnnamed() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "waiting", name: "   ")
+        #expect(fx.scan().sessions.first!.name == nil)
+    }
+
+    /// The shape Claude Code actually writes for a session that was never titled: `name` **is** the
+    /// jobId. Showing it would put an 8-char id on screen that `--resume` refuses.
+    @Test func namePlaceholderEqualToJobIdReadsAsUnnamed() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "waiting", jobId: "04c0e8f2", name: "04c0e8f2")
+        fx.job("04c0e8f2", needs: "approve plan")
+        #expect(fx.scan().sessions.first!.name == nil)
+    }
+
+    /// Same placeholder reached without a `jobId` to compare against — the sessionId's 8-char prefix
+    /// is the same string by another route.
+    @Test func namePlaceholderEqualToSessionIdPrefixReadsAsUnnamed() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "waiting", name: "c8db2514",
+                   sessionId: "c8db2514-d0a7-4a2a-b2c8-ac7008ec04d3")
+        #expect(fx.scan().sessions.first!.name == nil)
+    }
+
+    /// Detection is equality with *this* session's own ids, never a guess at the shape. A title that
+    /// merely looks like a job id is a title — a `^[0-9a-f]{8}$` test would have eaten it.
+    @Test func nameThatMerelyLooksLikeAJobIdIsKept() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "waiting", jobId: "04c0e8f2", name: "deadbeef")
+        fx.job("04c0e8f2", needs: "approve plan")
+        #expect(fx.scan().sessions.first!.name == "deadbeef")
+    }
+
+    @Test func cyrillicNameSurvivesIntact() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "waiting", name: "рефакторинг індикатора")
+        #expect(fx.scan().sessions.first!.name == "рефакторинг індикатора")
+    }
+
+    @Test func nameWithSpacesAndPunctuationIsRead() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "waiting", name: "fix: popup — layout (v2)")
+        #expect(fx.scan().sessions.first!.name == "fix: popup — layout (v2)")
+    }
+
+    /// The name is read from the session file while the project still resolves through the job state —
+    /// `jobId` serves both, and hoisting it out of the project branch must not have coupled them.
+    @Test func nameIsIndependentOfProjectResolution() {
+        let fx = ClaudeFixture()
+        fx.session("1", status: "idle", jobId: "j1", cwd: "/repo/app/.claude/worktrees/x",
+                   name: "worktree session")
+        fx.job("j1", needs: "approve plan", originCwd: "/repo/app")
+        let s = fx.scan().sessions.first!
+        #expect(s.projectName == "app")
+        #expect(s.name == "worktree session")
     }
 
     // MARK: liveness — dead sessions never count (#275)
