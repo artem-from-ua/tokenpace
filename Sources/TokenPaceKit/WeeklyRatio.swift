@@ -13,7 +13,8 @@ import Foundation
 /// through August 19"*). Crucially, `GET /api/oauth/usage` carries **no field** announcing any of
 /// that — measured over 4 327 journal records, `tier` never changed once. So a shifted N is the
 /// *only* observable trace of a changed exchange rate, which is why this type estimates rather
-/// than hard-codes (see `docs/reference/users-and-goals.md` § "Співвідношення квот між вікнами").
+/// than hard-codes (see `docs/reference/users-and-goals.md` § "The ratio between the windows'
+/// quotas").
 ///
 /// ## Why the median
 ///

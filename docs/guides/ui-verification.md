@@ -337,7 +337,7 @@ defaults read TokenPace | grep -i -e Visibility -e showPerModelLimits -e showExt
   переміряє хостовану вʼюху сам ([ADR-0021](../adr/0021-popup-two-column-layout-and-uniform-dropdown-typography.md) §2).
 
 Продуктове обґрунтування (навіщо сигнал і чому три шари тиші) —
-[users-and-goals.md](../reference/users-and-goals.md#рядок-stand-by--for-green-що-він-додає-й-чому-майже-завжди-мовчить).
+[users-and-goals.md](../reference/users-and-goals.md#the-stand-by--for-green-line-what-it-adds-and-why-it-is-almost-always-silent).
 
 ### Рядок деталей ліміту: слова під ⌥ Option
 

@@ -1,501 +1,517 @@
-# Персони цільової аудиторії та enrichment-дані
+# Target-audience personas and enrichment data
 
-Хто потенційні користувачі TokenPace за межами ядрової персони, що ними рухає, і які фічі на
-додаткових джерелах даних (jsonl сесій, календар, git, живі сесії) проходять для кожної персони
-планку корисності. Це довідник для чотирьох рішень: фільтрувати пропозиції фіч, пріоритизувати
-роадмап, формулювати позиціювання і проєктувати enrichment-фічі.
+Who TokenPace's potential users are beyond the core persona, what drives them, and which features
+built on additional data sources (session jsonl, calendar, git, live sessions) clear the usefulness
+bar for each persona. This is the reference for four decisions: filtering feature proposals,
+prioritizing the roadmap, wording the positioning, and designing the enrichment features.
 
-> Пов'язане: [users-and-goals.md](users-and-goals.md) — ядрова персона, планка «сигнал має
-> змінювати рішення», дефіцитні ресурси; [SPEC.md](../../SPEC.md) — продуктовий спек;
-> [journal-analysis.md](journal-analysis.md) і [usage-api-quirks.md](usage-api-quirks.md) —
-> межі роздільності даних, з якими мусить рахуватися будь-яка enrichment-ідея.
+> Related: [users-and-goals.md](users-and-goals.md) — the core persona, the bar that a signal
+> "has to change a decision", the scarce resources; [SPEC.md](../../SPEC.md) — the product spec;
+> [journal-analysis.md](journal-analysis.md) and [usage-api-quirks.md](usage-api-quirks.md) —
+> the resolution limits of the data that any enrichment idea has to live with.
 
-> **Статус доказовості: три гіпотези й одна перевірена персона** (продуктове інтерв'ю
-> 2026-08-21). «Артур» спирається на виміряний журнальний ряд **і уточнену власну поведінку**;
-> «Віктор», «Оскар» та «Ігор» — обґрунтовані припущення, і кожна фіча з каталогу перед побудовою
-> потребує перевірки на реальному користувачеві відповідного типу.
+> **Evidential status: three hypotheses and one verified persona** (product interview
+> 2026-08-21). "Arthur" rests on a measured journal series **and on clarified first-hand
+> behavior**; "Viktor", "Oskar", and "Igor" are reasoned assumptions, and every feature in the
+> catalog needs checking against a real user of the matching type before it gets built.
 >
-> **Що дала перша ж така перевірка.** Ідея, заявлена як «найширша в каталозі»
-> ([J3](#j3-модельний-мікс-і-підказка-перемикання)), впала для персони, яка вже постійно працює на
-> найсильнішій моделі. Натомість з'ясувалося, що я застосував до **пост-аналізу** планку, писану
-> для **сигналів**, і через це помилково поховав розріз по проєктах — див.
-> [§ дві планки](#дві-планки-сигнал-і-пост-аналіз). Обидві помилки одного роду: кабінетний
-> архетип помиляється найчастіше саме там, де виглядає найпереконливіше.
+> **What the very first such check produced.** The idea billed as "the widest in the catalog"
+> ([J3](#j3-model-mix-and-the-switch-prompt)) collapsed for a persona who already works on the
+> strongest model all the time. What surfaced instead was that I had applied to **retrospective
+> analysis** a bar written for **signals**, and on that basis wrongly buried the per-project
+> breakdown — see [§ two bars](#two-bars-signal-and-retrospective-analysis). Both mistakes are of
+> one kind: the armchair archetype is wrongest exactly where it looks most convincing.
 
-Кожна персона має **кодове ім'я** — коротку ручку для тікетів, обговорень і вердиктів
-(«це фіча для Оскара»), щоб не тягти повний архетипний опис у кожну згадку.
+Every persona has a **code name** — a short handle for tickets, discussions, and verdicts
+("this is a feature for Oskar"), so that the full archetypal description need not be dragged into
+every mention.
 
-## Що цей документ додає до users-and-goals.md
+## What this document adds to users-and-goals.md
 
-[users-and-goals.md](users-and-goals.md) описує **ядро**: розробник зі сплесковою роботою, якого
-ліміт б'є посеред задачі, і планку корисності сигналу — «чи існує дія, яку користувач виконає
-інакше». Цей документ **не заміняє планку — він її уточнює**: сигнал може проходити перевірку для
-однієї персони й не проходити для іншої. Вердикт «будувати чи ні» тепер зважує, *чия* це фіча і
-наскільки ця персона центральна.
+[users-and-goals.md](users-and-goals.md) describes **the core**: a developer whose work comes in
+bursts, whom the limit hits mid-task, and the bar for a useful signal — "is there an action the
+user would take differently". This document **does not replace that bar — it refines it**: a signal
+can pass the test for one persona and fail it for another. The verdict "build it or not" now weighs
+*whose* feature this is and how central that persona is.
 
-## Сегментаційна рамка
+## The segmentation frame
 
-**Тарифний план (Pro/Max) — не вісь сегментації, а параметр інтенсивності.** Сплескова робота
-(велика кодова база, паралельні агенти) б'є будь-яку квоту — різниця лише в частоті ударів.
-Справжні осі:
+**The subscription tier (Pro/Max) is not an axis of segmentation but a parameter of intensity.**
+Bursty work (a large codebase, parallel agents) hits any quota — the only difference is how often
+the blows land. The real axes:
 
-1. **Апетит / квота** — як часто користувач реально впирається: щодня, раз на тиждень, майже
-   ніколи.
-2. **Структура дня** — фіксовані передбачувані вікна роботи проти фрагментованого графіка з
-   обов'язками посеред дня.
-3. **Мотивація** — вижати максимум із малої квоти · не втратити оплачене · встигнути до дедлайну
-   з ціною зриву.
+1. **Appetite / quota** — how often the user actually hits the wall: daily, weekly, almost never.
+2. **The shape of the day** — fixed, predictable windows of work versus a fragmented schedule with
+   obligations in the middle of the day.
+3. **Motivation** — squeeze the most out of a small quota · don't waste what's paid for · make the
+   deadline, where missing it costs.
 
-| Персона | Архетип | План | Апетит/квота | Структура дня | Мотивація |
+| Persona | Archetype | Plan | Appetite/quota | Shape of the day | Motivation |
 |---|---|---|---|---|---|
-| «Віктор» | вечірній білдер | Pro | впирається щотижня | фіксовані вечори/вікенди | вижати максимум |
-| «Оскар» | жонглер графіка | Pro/Max | помірний, але концентрований | фрагментована двічі: обов'язками й кількома клієнтами | зловити збіг «час × квота» |
-| «Артур» | ROI-професіонал | Max | майже не впирається | переважно фіксована | не втратити оплачене |
-| «Ігор» | інтенсив-шипер | Max | впирається навіть на Max | ділова, з дедлайнами | встигнути до дедлайну |
+| "Viktor" | evening builder | Pro | hits the wall weekly | fixed evenings/weekends | squeeze the most out |
+| "Oskar" | schedule juggler | Pro/Max | moderate but concentrated | fragmented twice over: by obligations and by several clients | catch the "time × quota" overlap |
+| "Arthur" | ROI professional | Max | almost never hits the wall | mostly fixed | don't waste what's paid for |
+| "Igor" | intensive shipper | Max | hits the wall even on Max | business-like, with deadlines | make the deadline |
 
-## Персони
+## The personas
 
-### «Віктор» — вечірній білдер (Pro)
+### "Viktor" — the evening builder (Pro)
 
-**Хто це.** Працює вдень на основній роботі; Claude Code — для власних сайд-проєктів увечері та
-на вікендах. Вікно роботи коротке й фіксоване: 2–3 години на вечір, і саме тому кожна година в
-ньому на вагу золота.
+**Who this is.** Works a day job; Claude Code is for his own side projects in the evenings and on
+weekends. The window of work is short and fixed: 2–3 hours an evening, and that is precisely why
+every hour inside it is worth its weight in gold.
 
-**Стосунок до квоти.** Усередині вечірнього вікна палить інтенсивно — 5-годинне вікно відчутне
-щовечора, тижневе Pro-вікно на межі. **Доплачувати extra usage майже ніколи не буде** — це
-хобі-бюджет; замість доплати він адаптує поведінку.
+**Relationship to the quota.** Inside the evening window he burns hard — the 5-hour window is
+noticeable every evening, the weekly Pro window is on the edge. **He will almost never pay for
+extra usage** — this is a hobby budget; instead of paying, he adapts his behavior.
 
-**Стратегії при лімітах** (комбінуються): планує важке одразу після ресету; знижує темп
-заздалегідь, побачивши помаранчевий (менша модель, дрібніші задачі); якщо вперся — перемикається
-на ручну роботу до ресету.
+**Strategies at the limits** (they combine): schedules the heavy work right after a reset; eases
+off in advance on seeing orange (a smaller model, smaller tasks); if he does hit the wall, switches
+to manual work until the reset.
 
-**Сигнали, що змінюють його рішення:** відлік до ресету («чи влізе ця задача в мій вечір»),
-pacing до кінця вечора, підказка перемикання моделі ([J3](#j3-модельний-мікс-і-підказка-перемикання)),
-місячна статистика впирань ([N0](#n0-статистика-впирань-із-наявного-журналу)) — як аргумент
-«чи вартий мені Max».
+**Signals that change his decisions:** the countdown to the reset ("will this task fit into my
+evening"), pacing to the end of the evening, the model-switch prompt ([J3](#j3-model-mix-and-the-switch-prompt)),
+monthly statistics on hitting the wall ([N0](#n0-wall-hitting-statistics-from-the-existing-journal)) — as an
+argument for "is Max worth it to me".
 
-**Позиціювання:** *встигни більше за свій вечір.*
+**Positioning:** *get more done in your evening.*
 
-### «Оскар» — жонглер графіка (Pro або Max)
+### "Oskar" — the schedule juggler (Pro or Max)
 
-**Хто це.** Фрілансер або ремоут-працівник із фрагментованим днем: діти й школа, побутові та
-ділові справи посеред дня. Робота йде уривками по 40–120 хвилин між обов'язками; вечір не
-гарантований. Календар — не декорація, а фактична мапа його доступності.
+**Who this is.** A freelancer or remote worker with a fragmented day: kids and school, errands and
+business to run mid-day. Work happens in 40–120-minute snatches between obligations; the evening is
+not guaranteed. The calendar is not decoration but the actual map of his availability.
 
-**Фрагментація подвійна — у часі й у контексті.** Це його визначальна властивість: паралельно
-веде **кілька фрілансових проєктів і активно перемикається між ними**. Тобто день ріжеться двічі
-— обов'язками на слоти, а слоти розподіляються між клієнтами. Наслідки для продукту:
+**The fragmentation is twofold — in time and in context.** This is his defining property: he runs
+**several freelance projects in parallel and switches between them constantly**. So the day is cut
+twice over — by obligations into slots, and the slots are divided between clients. The consequences
+for the product:
 
-- **Питання «куди пішла квота» для нього не риторичне, а робоче.** Кілька клієнтів означають, що
-  розріз по проєктах ([J2](#j2-розподіл-квоти-по-проєктахклієнтах)) — це матеріал для **звіту за
-  витрачений ресурс**, а не просто цікавинка. Це та сама потреба, що й у «Ігоря», лише масштабом
-  менша.
-- **Атрибуція має витримувати перемикання.** Одне 5-годинне вікно в нього легко містить роботу за
-  двома-трьома клієнтами; агрегат «за вікно» без розбивки нічого йому не каже.
-- **Це відрізняє його від «Віктора».** Обидва Pro-персони з обмеженим часом, але в «Віктора» один
-  проєкт і розподіл вироджений, а тут — багатоклієнтський контекст.
+- **"Where did the quota go" is not a rhetorical question for him but a working one.** Several
+  clients mean that the per-project breakdown ([J2](#j2-quota-distribution-across-projectsclients))
+  is material for **a report on the resource spent**, not just a curiosity. It is the same need
+  "Igor" has, only smaller in scale.
+- **Attribution has to survive the switching.** One 5-hour window of his easily contains work for
+  two or three clients; an aggregate "per window" without a breakdown tells him nothing.
+- **This is what separates him from "Viktor".** Both are Pro personas short on time, but Viktor has
+  one project and a degenerate distribution, whereas here the context is multi-client.
 
-**Стосунок до квоти.** Сумарний обсяг помірний, але робота сконцентрована в короткі слоти, тож
-5-годинне вікно відчутне. Головний дефіцит — **не квота і не час окремо, а їхній збіг**: вільний
-слот із вичерпаною квотою і свіжа квота під час зустрічі однаково марні.
+**Relationship to the quota.** The total volume is moderate, but the work is concentrated into
+short slots, so the 5-hour window is noticeable. His main shortage is **neither quota nor time
+separately but the overlap of the two**: a free slot with the quota spent and a fresh quota during
+a meeting are equally useless.
 
-**Стратегії при лімітах:** планує важке під вікна вільного часу; найбільше виграє від знання
-наперед, чи збіжиться ресет із вільним слотом. За вичерпаної квоти має природний запасний хід,
-якого немає в інших персон — **перемкнутися на іншого клієнта** й робити те, що не потребує
-Claude Code.
+**Strategies at the limits:** schedules the heavy work into windows of free time; gains the most
+from knowing in advance whether a reset will coincide with a free slot. When the quota is spent he
+has a natural fallback the other personas lack — **switch to a different client** and do the work
+that does not need Claude Code.
 
-**Сигнали, що змінюють його рішення:** ресет × зайнятість ([C1](#c1-ресет--зайнятість)),
-безпечне вікно для важкого ([C2](#c2-безпечне-вікно-для-важкого)), pacing проти реального
-графіка ([C3](#c3-pacing-проти-реального-графіка)). **Головна персона календарного enrichment**
-— і друга після «Ігоря» за цінністю розрізу по клієнтах.
+**Signals that change his decisions:** reset × busyness ([C1](#c1-reset--busyness)), a safe window
+for the heavy work ([C2](#c2-a-safe-window-for-the-heavy-work)), pacing against the real schedule
+([C3](#c3-pacing-against-the-real-schedule)). **The principal persona for calendar enrichment** —
+and second after "Igor" in how much the per-client breakdown is worth.
 
-**Позиціювання:** *квота і вільний час нарешті на одному екрані.*
+**Positioning:** *quota and free time on one screen at last.*
 
-### «Артур» — ROI-професіонал (Max)
+### "Arthur" — the ROI professional (Max)
 
-**Хто це.** Розробник чи соло-підприємець на Max; ліміти б'ють рідко. Мотивація — «за сервіс
-заплачено, і я не хочу втрачати гроші»: невикористана квота — це втрачена цінність, нераціонально
-розподілена — теж.
+**Who this is.** A developer or solo entrepreneur on Max; the limits rarely bite. The motivation is
+"the service is paid for and I don't want to lose money": an unused quota is value lost, and a
+badly distributed one is too.
 
-**Стосунок до квоти.** Не виживання, а ефективність: чи працює підписка на повну, чи не лишається
-запас невикористаним наприкінці тижневого вікна.
+**Relationship to the quota.** Not survival but efficiency: is the subscription working at full
+capacity, or is there room left unused at the end of the weekly window?
 
-**Модель фіксована — регулюється складність задачі.** Це найважливіше спостереження про цю
-персону, і воно суперечить очікуванню: постійно працює на найсильнішій моделі (Opus high),
-перемикаючись угору лише для дуже складних і важкоформалізованих задач. **Униз не перемикається
-взагалі.** Отже підказка «перейди на дешевшу модель» для нього не є дією — важіль інший:
+**The model is fixed — what gets adjusted is the difficulty of the task.** This is the most
+important observation about this persona, and it runs against expectation: he works on the
+strongest model (Opus high) all the time, switching up only for the very hard, hard-to-formalize
+tasks. **He does not switch down at all.** So the prompt "move to a cheaper model" is not an action
+for him — his lever is a different one:
 
-| Стан | Дія |
+| State | Action |
 |---|---|
-| Помаранчевий | Взяти простішу задачу або зробити паузу — модель не чіпає |
-| Синій під кінець 7d | Запустити щось свідомо важке: kb-grooming, великий рефакторинг |
+| Orange | Take an easier task or take a break — the model stays put |
+| Blue near the end of 7d | Launch something deliberately heavy: kb-grooming, a large refactor |
 
-**Стратегії:** вибір складності задачі під поточний стан бару, паузи при помаранчевому, свідоме
-використання запасу (синій бар для нього — сигнал дії так само, як помаранчевий для інших:
-«можна палити вільніше — і треба, бо оплачено»).
+**Strategies:** choosing the difficulty of the task to fit the current state of the bar, pauses on
+orange, deliberate use of the surplus (a blue bar is a call to action for him just as orange is for
+the others: "I can burn more freely — and I should, because it's paid for").
 
-**Чого він не робить** (перевірено — важливо, щоб не будувати під нього зайве): не перебалансовує
-квоту між проєктами і не переносить класи задач на дешевшу модель. **Це про дії, не про дані:**
-пост-аналіз «куди пішла квота» лишається для нього цінним як розуміння — просто з нього не
-випливає перерозподіл ([§ дві планки](#дві-планки-сигнал-і-пост-аналіз)).
+**What he does not do** (verified — and it matters, so as not to build things for him that he will
+not use): he does not rebalance quota between projects and he does not move classes of task onto a
+cheaper model. **This is about actions, not about data:** the retrospective "where did the quota
+go" remains valuable to him as understanding — it simply does not imply any redistribution
+([§ two bars](#two-bars-signal-and-retrospective-analysis)).
 
-**Сигнали, що змінюють його рішення:** синій бар як запрошення до важкої задачі, моніторинг N
-(«тижневий ліміт став ширшим» — [users-and-goals § N](users-and-goals.md#співвідношення-квот-між-вікнами-n--рахується-не-хардкодиться)),
-статистика невикористаного запасу ([N0](#n0-статистика-впирань-із-наявного-журналу)) — як
-аргумент «чи не переплачую».
+**Signals that change his decisions:** the blue bar as an invitation to a heavy task, watching N
+("the weekly limit just got wider" — [users-and-goals § N](users-and-goals.md#the-ratio-between-the-windows-quotas-n--computed-not-hardcoded)),
+statistics on the surplus left unused ([N0](#n0-wall-hitting-statistics-from-the-existing-journal)) — as an
+argument for "am I overpaying".
 
-**Доказовість:** єдина персона з виміряним журнальним рядом **і підтвердженою власною
-поведінкою** (уточнення 2026-08-21).
+**Evidence:** the only persona with a measured journal series **and confirmed first-hand
+behavior** (clarified 2026-08-21).
 
-**Позиціювання:** *бачиш, за що заплатив.*
+**Positioning:** *see what you paid for.*
 
-### «Ігор» — інтенсив-шипер (Max, малий бізнес)
+### "Igor" — the intensive shipper (Max, small business)
 
-**Хто це.** Малий бізнес чи соло-агенція: велика кодова база або кілька клієнтських проєктів,
-паралельні сесії, фонові агенти й воркфлови. Впирається в ліміти **навіть на Max**, бо апетит
-перевищує будь-яку квоту — три агенти можуть з'їсти тижневе вікно за вечір.
+**Who this is.** A small business or solo agency: a large codebase or several client projects,
+parallel sessions, background agents and workflows. Hits the limits **even on Max**, because the
+appetite outgrows any quota — three agents can eat a weekly window in an evening.
 
-**Бізнес-вимір** (те, що відрізняє його від приватних проєктів):
+**The business dimension** (what separates him from private projects):
 
-- **Дедлайни з ціною зриву.** Ліміт перед п'ятничним релізом — це гроші й репутація, а не
-  незручність. Єдина персона з реальною готовністю платити extra usage, коли дедлайн дорожчий
-  за доплату.
-- **Квота — бізнес-ресурс.** Розподіл квоти між клієнтами/проєктами має самостійну цінність:
-  входить у собівартість робіт і обґрунтування рейтів.
+- **Deadlines that cost something to miss.** A limit before a Friday release is money and
+  reputation, not an inconvenience. The only persona genuinely willing to pay for extra usage when
+  the deadline is worth more than the surcharge.
+- **Quota is a business resource.** How it is distributed between clients and projects has value in
+  its own right: it feeds into the cost of the work and into justifying rates.
 
-**Сигнали, що змінюють його рішення:** атрибуція сплеску ([J1](#j1-атрибуція-сплеску)), живі
-сесії × горіння ([L1](#l1-живі-сесії--горіння)), розподіл по клієнтах
-([J2](#j2-розподіл-квоти-по-проєктахклієнтах)), прогноз «вистачить до дедлайну», кредитний рядок
-extra usage (уже в продукті).
+**Signals that change his decisions:** attribution of a burst ([J1](#j1-attribution-of-a-burst)),
+live sessions × burn rate ([L1](#l1-live-sessions--burn-rate)), the per-client breakdown
+([J2](#j2-quota-distribution-across-projectsclients)), a forecast of "will it last to the deadline",
+the extra usage credits row (already in the product).
 
-**Позиціювання:** *контроль, коли працює не один агент.*
+**Positioning:** *control when more than one agent is working.*
 
-## Team / Enterprise: аудиторія за горизонтом
+## Team / Enterprise: the audience beyond the horizon
 
-За зовнішніми джерелами, Team і seat-based Enterprise використовують ту саму механіку вікон, що
-й Pro/Max (5-годинне + тижневе; підняття 5h-лімітів 2026-05-06 стосувалося всіх чотирьох планів),
-тоді як usage-based Enterprise метериться за споживанням без цих вікон. Адміністратор організації
-може [вмикати extra usage окремим користувачам і ставити ліміти витрат](https://www.anthropic.com/news/claude-code-on-team-and-enterprise)
-на рівні org та кожного користувача; на
-[consumption-моделі Enterprise](https://support.claude.com/en/articles/14782391-claude-enterprise-consumption-guide)
-seat взагалі не містить токенів — усе споживання білиться поверх, під тими самими капами.
+According to external sources, Team and seat-based Enterprise use the same window mechanics as
+Pro/Max (5-hour + weekly; the raising of the 5h limits on 2026-05-06 applied to all four plans),
+whereas usage-based Enterprise is metered by consumption without those windows. An organization
+administrator can [enable extra usage for individual users and set spending limits](https://www.anthropic.com/news/claude-code-on-team-and-enterprise)
+at both the org and the per-user level; on the
+[consumption model of Enterprise](https://support.claude.com/en/articles/14782391-claude-enterprise-consumption-guide)
+a seat contains no tokens at all — all consumption is billed on top, under those same caps.
 
-Це породжує потенційну п'яту персону — **працівник на виданій квоті**: ті самі вікна 5h/7d, але
-грошовий кап місячний і **не його** — його контролює роботодавець. Мотивація «квота — виданий
-ресурс, який контролює не ти» поєднує риси «Віктора» (вижати максимум із фіксованого)
-та «Ігоря» (дедлайни), без важеля доплати.
+That gives rise to a potential fifth persona — **the employee on an issued quota**: the same 5h/7d
+windows, but the money cap is monthly and **not his** — his employer controls it. The motivation
+"the quota is an issued resource that somebody else controls" combines traits of "Viktor" (squeeze
+the most out of something fixed) and "Igor" (deadlines), without the lever of paying more.
 
-**Чому це ще не персона, а гіпотеза** — три неперевірені передумови:
+**Why this is still a hypothesis rather than a persona** — three unverified premises:
 
-1. Чи віддає `GET /api/oauth/usage` для Team-токенів той самий формат відповіді — не перевірено
-   (весь наш вимір — Pro/Max).
-2. Чи бачить сам користувач свій адмінський кап через API (аналог `spend.limit`), чи це видно
-   лише адмінові.
-3. Дистрибуція: чи можливий сторонній menu-bar застосунок у керованому (MDM) середовищі.
+1. Whether `GET /api/oauth/usage` returns the same response format for Team tokens — not verified
+   (all of our measurement is Pro/Max).
+2. Whether the user can see their own admin-set cap through the API (an analog of `spend.limit`),
+   or whether only the admin sees it.
+3. Distribution: whether a third-party menu bar app is even possible in a managed (MDM)
+   environment.
 
-Досить одного підтвердженого Team-користувача з доступом до відповіді API, щоб підняти це в
-повноцінну персону.
+One confirmed Team user with access to the API response would be enough to raise this into a
+full persona.
 
-## Enrichment-джерела та рамка приватності
+## Enrichment sources and the privacy frame
 
-**Рамка: все локально, opt-in на кожне джерело.** Кожне джерело вмикається окремим перемикачем у
-Settings; вимкнене — не читається взагалі. Обробка тільки на Mac; жодні сирі дані не покидають
-пристрій (у Фазі 2 в CloudKit ідуть лише агрегати, як і для usage-snapshot — див.
+**The frame: everything local, opt-in per source.** Each source is enabled by its own switch in
+Settings; a disabled one is not read at all. Processing happens on the Mac only; no raw data leaves
+the device (in Phase 2 only aggregates go to CloudKit, as they do for the usage snapshot — see
 [SPEC.md § Architectural decision](../../SPEC.md#architectural-decision)).
 
-| Джерело | Що додає до usage API | Механізм доступу |
+| Source | What it adds to the usage API | Access mechanism |
 |---|---|---|
-| JSONL сесій Claude Code (`~/.claude/projects/**/*.jsonl`) | **на що** пішла квота: проєкти, моделі, обсяг роботи | читання файлової системи |
-| Календар користувача | реальна доступність: зустрічі, обов'язки | EventKit, системний дозвіл |
-| Git-активність локальних реп | зв'язка витрати з output (коміти, гілки, PR) | читання локальних реп |
-| Живі сесії Claude Code | хто палить квоту **зараз**: running/waiting | локальний стан процесів |
+| Claude Code session JSONL (`~/.claude/projects/**/*.jsonl`) | **what** the quota went on: projects, models, volume of work | reading the file system |
+| The user's calendar | real availability: meetings, obligations | EventKit, a system permission |
+| Git activity in local repos | tying spending to output (commits, branches, PRs) | reading local repos |
+| Live Claude Code sessions | who is burning quota **right now**: running/waiting | local process state |
 
-## Дві планки: сигнал і пост-аналіз
+## Two bars: signal and retrospective analysis
 
-**Планку не можна застосовувати однаково до всіх поверхонь**, і плутанина тут коштувала одного
-хибного вердикту в цьому документі (див. [J2](#j2-розподіл-квоти-по-проєктахклієнтах)).
+**The bar cannot be applied identically to every surface**, and confusing the two cost one wrong
+verdict in this document (see [J2](#j2-quota-distribution-across-projectsclients)).
 
-| | **Сигнал** (меню-бар, попап, нотифікація) | **Пост-аналіз** (Insights) |
+| | **Signal** (menu bar, popup, notification) | **Retrospective analysis** (Insights) |
 |---|---|---|
-| Хто ініціює показ | застосунок — перебиває роботу | користувач — приходить сам, коли захотів |
-| Що коштує показ | увагу, якої не просили | нічого: екран уже відкрито заради цього |
-| Планка | «чи існує дія, яку користувач виконає **інакше**» | «чи відповідає це на питання, яке користувач **сам собі ставить**» |
-| Ціна хибного показу | шум, до якого звикають і перестають реагувати | зайвий блок, який гортають |
+| Who initiates the showing | the app — it interrupts the work | the user — who comes on their own, when they want to |
+| What the showing costs | attention nobody asked for | nothing: the screen is already open for this |
+| The bar | "is there an action the user would take **differently**" | "does this answer a question the user **asks themselves**" |
+| The cost of showing wrongly | noise, which people get used to and stop reacting to | one more block, which people scroll past |
 
-Планка [users-and-goals.md](users-and-goals.md#що-означає-корисний-сигнал) написана для **першої**
-колонки — для поверхонь, де показ коштує уваги. Переносити її дослівно на ретроспективу
-неправильно: **розуміння — теж результат**, навіть коли з нього не випливає негайна дія.
-Класичний приклад — «куди пішла квота цього тижня»: користувач може нічого не змінити, і все одно
-відповідь була вартою того, щоб її отримати.
+The bar in [users-and-goals.md](users-and-goals.md#what-makes-a-signal-useful) was written for the
+**first** column — for the surfaces where showing something costs attention. Carrying it verbatim
+over to a retrospective is wrong: **understanding is a result too**, even when no immediate action
+follows from it. The classic example is "where did the quota go this week": the user may change
+nothing, and the answer was still worth having.
 
-**Що це не скасовує.** Пост-аналіз досі мусить бути правдивим і не показувати вхід замість виходу
-там, де вердикт можливий; він просто не зобов'язаний закінчуватися кнопкою «зроби Х». І для
-нотифікацій планка лишається **найвищою** — вони приходять самі.
+**What this does not cancel.** Retrospective analysis still has to be truthful and must not show
+the input in place of the output where a verdict is possible; it simply is not obliged to end in a
+"do X" button. And for notifications the bar remains **the highest** — they arrive on their own.
 
-## Каталог enrichment-ідей з вердиктами
+## The catalog of enrichment ideas, with verdicts
 
-Кожна ідея проходить планку **своєї поверхні** (див. таблицю вище). Усі ідеї нижче живуть в
-Insights, попапі або нотифікаціях; **меню-бар не чіпає жодна** — його ширина є дефіцитним ресурсом
-([users-and-goals § дефіцитні ресурси](users-and-goals.md#дефіцитні-ресурси)).
+Every idea clears the bar of **its own surface** (see the table above). All the ideas below live in
+Insights, the popup, or notifications; **not one of them touches the menu bar** — its width is a
+scarce resource ([users-and-goals § scarce resources](users-and-goals.md#scarce-resources)).
 
-### J1. Атрибуція сплеску
+### J1. Attribution of a burst
 
-«Це вікно з'їли: сесія в repo X, Opus, 3 фонові агенти». Usage API каже *скільки* згоріло; jsonl
-сесій каже *хто саме* — і перетворює «палиш удвічі швидше» на конкретну мішень.
+"This window was eaten by: a session in repo X, Opus, 3 background agents." The usage API says *how
+much* burned; the session jsonl says *who exactly* — and turns "you're burning twice as fast" into a
+concrete target.
 
-| Персона | Рішення, яке змінюється | Вердикт |
+| Persona | The decision that changes | Verdict |
 |---|---|---|
-| «Ігор» | зупинити найдорожчого агента, звузити скоуп | ✅ проходить |
-| «Артур» | зрозуміти, що саме з'їло вікно (без зміни моделі) | ❔ як ретроспектива — так; як привід змінити модель — ✖ |
-| «Оскар» | розкласти витрату вікна між клієнтами, між якими перемикався | ✅ як пост-аналіз (у моменті сесія одна, тож живої атрибуції не потребує) |
-| «Віктор» | — (одна сесія за раз) | ✖ не проходить |
+| "Igor" | stop the most expensive agent, narrow the scope | ✅ passes |
+| "Arthur" | understand what exactly ate the window (without changing the model) | ❔ as a retrospective, yes; as grounds for changing the model, ✖ |
+| "Oskar" | break the window's spending down across the clients he switched between | ✅ as retrospective analysis (in the moment there is only one session, so live attribution is not needed) |
+| "Viktor" | — (one session at a time) | ✖ does not pass |
 
-### J2. Розподіл квоти по проєктах/клієнтах
+### J2. Quota distribution across projects/clients
 
-Розріз «куди пішла квота» по репозиторіях, проєктах і — за потреби глибше — по PR, issue чи
-окремих сесіях. **Це пост-аналіз, а не сигнал**, тож планка тут інша (див.
-[§ дві планки](#дві-планки-сигнал-і-пост-аналіз)): достатньо, щоб відповідь була на питання, яке
-користувач сам собі ставить.
+The "where did the quota go" breakdown by repository, by project and — where more depth is needed —
+by PR, issue, or individual session. **This is retrospective analysis, not a signal**, so the bar
+here is a different one (see [§ two bars](#two-bars-signal-and-retrospective-analysis)): it is
+enough that the answer addresses a question the user asks themselves.
 
-**Дві різні цінності, які легко сплутати:**
+**Two different kinds of value, easily conflated:**
 
-1. **Розуміння** — «куди воно все дівається». Не зобов'язане закінчуватися дією; сам факт
-   відповіді вартий екрана в Insights.
-2. **Звітність** — розріз стає **робочим артефактом**: фрілансер звітує клієнтові за витрачений
-   ресурс, малий бізнес закладає квоту в собівартість і рейти. Тут у цифри вже вбудована зовнішня
-   вимога, тож потрібна точність атрибуції, а не лише порядок величин.
+1. **Understanding** — "where does it all go". Not obliged to end in an action; the answer alone is
+   worth a screen in Insights.
+2. **Reporting** — the breakdown becomes **a working artifact**: a freelancer accounts to a client
+   for the resource spent, a small business builds quota into its costs and its rates. Here an
+   external requirement is already baked into the numbers, so what is needed is accuracy of
+   attribution, not just the right order of magnitude.
 
-| Персона | Що це дає | Вердикт |
+| Persona | What it gives them | Verdict |
 |---|---|---|
-| «Ігор» | звіт клієнту, квота в собівартості й обґрунтуванні рейтів | ✅ проходить — робочий артефакт |
-| «Оскар» | звіти клієнтам; кілька проєктів із активним перемиканням між ними | ✅ проходить — робочий артефакт |
-| «Артур» | пост-аналіз «куди пішла квота» як розуміння | ✅ проходить як ретроспектива, ✖ як привід перебалансувати |
-| «Віктор» | цікавість щодо власних проєктів | ❔ один-два проєкти, розподіл майже вироджений |
+| "Igor" | a report to the client, quota in the cost base and in the rate justification | ✅ passes — a working artifact |
+| "Oskar" | reports to clients; several projects with active switching between them | ✅ passes — a working artifact |
+| "Arthur" | the retrospective "where did the quota go" as understanding | ✅ passes as a retrospective, ✖ as grounds for rebalancing |
+| "Viktor" | curiosity about his own projects | ❔ one or two projects, the distribution is nearly degenerate |
 
-**Уточнення по «Артуру» — приклад того, як планка помиляється при переносі.** Він підтвердив, що
-потреби *перебалансовувати* квоту між проєктами не відчуває, і я з цього зробив хибний висновок,
-що JSONL не дає йому нічого. Насправді спростована лише **дія**; пост-аналіз як розуміння
-лишається цінним. Помилка була в тому, що до ретроспективи застосували планку, написану для
-сигналів.
+**The correction on "Arthur" — an example of how the bar goes wrong when it is carried across.** He
+confirmed that he feels no need to *rebalance* quota between projects, and from that I concluded,
+wrongly, that JSONL gives him nothing. In fact only the **action** was disproved; retrospective
+analysis as understanding remains valuable. The mistake was applying to a retrospective a bar
+written for signals.
 
-**Що з цього випливає для реалізації.** Глибина атрибуції — не одна на всіх: для розуміння
-достатньо рівня проєкту, для звітності потрібні PR/issue/сесія, бо саме на такому рівні клієнт
-впізнає свою роботу. Друге дорожче й вимагає звірки з git ([G1](#g1-output-на-одиницю-квоти) як
-довідник імен), тож починати варто з проєктного рівня.
+**What follows for the implementation.** The depth of attribution is not one size for all: for
+understanding, the project level is enough; for reporting you need PR/issue/session, because that
+is the level at which a client recognizes their own work. The second is more expensive and requires
+cross-checking with git ([G1](#g1-output-per-unit-of-quota) as the directory of names), so the place
+to start is the project level.
 
-### J3. Модельний мікс і підказка перемикання
+### J3. Model mix and the switch prompt
 
-«Помаранчевий + 80 % витрати цього вікна — Opus → перемкнись на Sonnet для рутини». Дія конкретна
-й доступна кожному: зміна моделі — перший важіль, за який береться будь-яка персона при
-помаранчевому. Працює і в зворотний бік: «синій + усе на Sonnet → можна дозволити собі Opus».
+"Orange + 80 % of this window's spending was Opus → switch to Sonnet for the routine work." The
+action is concrete and available to anyone: changing the model is the first lever any persona
+reaches for on orange. It works in reverse too: "blue + everything on Sonnet → you can afford
+Opus."
 
-| Персона | Рішення, яке змінюється | Вердикт |
+| Persona | The decision that changes | Verdict |
 |---|---|---|
-| «Віктор» | перемкнути модель, дотягнути вечір | ✅ проходить |
-| «Оскар» | те саме в короткому слоті | ✅ проходить |
-| «Артур» | — (уже завжди на найсильнішій моделі) | ✖ спростовано на реальній поведінці |
-| «Ігор» | вибрати модель для фонових агентів | ✅ проходить |
+| "Viktor" | switch the model, stretch the evening out | ✅ passes |
+| "Oskar" | the same, inside a short slot | ✅ passes |
+| "Arthur" | — (already on the strongest model always) | ✖ disproved against real behavior |
+| "Igor" | pick the model for the background agents | ✅ passes |
 
-**Була заявлена як найширша ідея каталогу — єдина для всіх чотирьох персон. Перевірка на живому
-користувачеві це спростувала.** «Артур» постійно працює на найсильнішій моделі й униз не
-перемикається; підказка «перейди на дешевшу» не описує дію, яку він виконає, а зворотний бік
-(«можна дозволити собі Opus») для нього беззмістовний, бо він і так там.
+**It was billed as the widest idea in the catalog — the only one that served all four personas. A
+check against a live user disproved that.** "Arthur" works on the strongest model all the time and
+does not switch down; the prompt "move to a cheaper one" does not describe an action he will take,
+and the reverse side ("you can afford Opus") is meaningless for him, because he is already there.
 
-**Що це міняє для дизайну підказки.** Перемикання моделі — не універсальний важіль, а важіль
-персон, які взагалі готові рухати модель. Для решти зворотний бік має говорити мовою **складності
-задачі**, а не назви моделі: «є запас — час для важкої задачі» замість «є запас — можна Opus».
+**What this changes for the design of the prompt.** Switching the model is not a universal lever
+but the lever of the personas who are willing to move the model at all. For the rest, the reverse
+side has to speak the language of **task difficulty** rather than of model names: "there's room —
+time for a heavy task" instead of "there's room — you can use Opus".
 
-Застереження лишається чинним: сам мікс без вердикту не показувати — це вхід моделі, а не вихід
-([users-and-goals § правило входу/виходу](users-and-goals.md#що-означає-корисний-сигнал));
-показується лише підказка, і лише коли їй є що радити.
+The caveat still stands: never show the mix on its own without a verdict — that is the model's
+input, not its output
+([users-and-goals § the input/output rule](users-and-goals.md#what-makes-a-signal-useful)); only
+the prompt is shown, and only when it has something to advise.
 
-### C1. Ресет × зайнятість
+### C1. Reset × busyness
 
-«Вікно ресетнеться о 14:00, але з 14 до 16 у тебе зустрічі → фактично працюватимеш із 16:00».
-Відлік до ресету коригується на реальну доступність, а не астрономічний час.
+"The window resets at 14:00, but you have meetings from 14 to 16 → in practice you'll be working
+from 16:00." The countdown to the reset is corrected for real availability rather than astronomical
+time.
 
-| Персона | Рішення, яке змінюється | Вердикт |
+| Persona | The decision that changes | Verdict |
 |---|---|---|
-| «Оскар» | починати задачу зараз чи планувати після слота | ✅ проходить |
-| «Ігор» | те саме навколо ділових зустрічей | ✅ проходить |
-| «Артур» | залежить від щільності календаря | ❔ |
-| «Віктор» | — (у вечірньому вікні календар порожній) | ✖ не проходить |
+| "Oskar" | start the task now or schedule it after the slot | ✅ passes |
+| "Igor" | the same, around business meetings | ✅ passes |
+| "Arthur" | depends on how dense the calendar is | ❔ |
+| "Viktor" | — (the calendar is empty inside the evening window) | ✖ does not pass |
 
-### C2. Безпечне вікно для важкого
+### C2. A safe window for the heavy work
 
-«Наступні 3 години вільні + квота свіжа → зараз найкращий момент для великого рефакторингу».
-Проактивна підказка збігу «час × квота».
+"The next 3 hours are free + the quota is fresh → now is the best moment for that large refactor."
+A proactive prompt about the "time × quota" overlap.
 
-| Персона | Рішення, яке змінюється | Вердикт |
+| Persona | The decision that changes | Verdict |
 |---|---|---|
-| «Оскар» | коли ставити сплеск — головне щоденне рішення | ✅ проходить |
-| «Артур» | планування важких сесій | ✅ проходить |
-| «Віктор» | — (його вікно й так відоме) | ✖ не проходить |
-| «Ігор» | другорядно: сплески диктує дедлайн, не вікно | ❔ |
+| "Oskar" | when to place a burst — his main daily decision | ✅ passes |
+| "Arthur" | planning the heavy sessions | ✅ passes |
+| "Viktor" | — (his window is known anyway) | ✖ does not pass |
+| "Igor" | secondary: bursts are dictated by the deadline, not the window | ❔ |
 
-Нотифікаційна форма — лише якщо збіг рідкісний для конкретного користувача; частий збіг має
-мовчати ([users-and-goals § тиша](users-and-goals.md#чому-тиша--валідний-стан)).
+A notification form is warranted only if the overlap is rare for the particular user; a frequent
+overlap should stay silent ([users-and-goals § silence](users-and-goals.md#why-silence-is-a-valid-state)).
 
-### C3. Pacing проти реального графіка
+### C3. Pacing against the real schedule
 
-Лінійна норма pacing ([ADR-0005](../adr/0005-pacing-fractions-not-blocks.md)) припускає
-рівномірний тиждень. Календар дає реальну доступність: якщо четвер–п'ятниця забиті справами,
-«відставання» у середу — насправді норма, а «випередження» у вільний понеділок — ні.
+The linear pacing norm ([ADR-0005](../adr/0005-pacing-fractions-not-blocks.md)) assumes an even
+week. The calendar supplies real availability: if Thursday and Friday are packed with obligations,
+"falling behind" on Wednesday is in fact the norm, while "running ahead" on a free Monday is not.
 
-| Персона | Рішення, яке змінюється | Вердикт |
+| Persona | The decision that changes | Verdict |
 |---|---|---|
-| «Оскар» | не гальмувати даремно при поясненому «відставанні» | ✅ найсильніша для нього |
-| решта | — (рівномірний графік ≈ лінійна норма) | ✖/❔ |
+| "Oskar" | not to ease off for nothing when the "lag" is explained | ✅ his strongest one |
+| the rest | — (an even schedule ≈ the linear norm) | ✖/❔ |
 
-**Застереження:** це зміна серцевини `PacingModel` — потребує окремого ADR; точність поправки
-обмежена квантуванням 7d-вікна (крок 1 пп = 1 год 40 хв,
-[usage-api-quirks.md](usage-api-quirks.md)); досліджувати останньою з календарних ідей — цінність
-для однієї персони проти найвищої складності в каталозі.
+**Caveat:** this changes the core of `PacingModel` — it needs an ADR of its own; the accuracy of the
+correction is bounded by the quantization of the 7d window (a step of 1 pp = 1 hour 40 minutes,
+[usage-api-quirks.md](usage-api-quirks.md)); explore it last of the calendar ideas — value for a
+single persona against the highest complexity in the catalog.
 
-### G1. Output на одиницю квоти
+### G1. Output per unit of quota
 
-«Цей тиждень: 4 PR за 60 % квоти» — зв'язка git-активності з витратою.
+"This week: 4 PRs for 60 % of the quota" — tying git activity to spending.
 
-| Персона | Рішення, яке змінюється | Вердикт |
+| Persona | The decision that changes | Verdict |
 |---|---|---|
-| «Артур» | аргумент апгрейд/даунгрейд плану в ретроспективі | ❔ раз на місяць, не частіше |
-| решта | — (немає дії в моменті) | ✖ не проходить |
+| "Arthur" | an argument for upgrading or downgrading the plan, in a retrospective | ❔ monthly, no more often |
+| the rest | — (no action in the moment) | ✖ does not pass |
 
-**Найслабша ідея каталогу**, і це чесний вердикт: продуктивність не зводиться до кількості PR, а
-дії в моменті число не змінює. Git цінніший **як довідник для атрибуції** — імена реп і гілок у
-[J1](#j1-атрибуція-сплеску)/[J2](#j2-розподіл-квоти-по-проєктахклієнтах) беруться саме з нього —
-ніж як самостійна метрика.
+**The weakest idea in the catalog**, and that is an honest verdict: productivity does not reduce to
+a count of PRs, and the number changes no action in the moment. Git is more valuable **as a
+directory for attribution** — the repo and branch names in
+[J1](#j1-attribution-of-a-burst)/[J2](#j2-quota-distribution-across-projectsclients) come from
+exactly there — than as a metric in its own right.
 
-### L1. Живі сесії × горіння
+### L1. Live sessions × burn rate
 
-«Тижневе горить удвічі швидше + 3 активні сесії просто зараз». Атрибуція наживо, коли ще можна
-втрутитися — на відміну від ретроспективної [J1](#j1-атрибуція-сплеску).
+"The weekly window is burning twice as fast + 3 active sessions right now." Attribution while it is
+still possible to intervene — unlike the retrospective [J1](#j1-attribution-of-a-burst).
 
-| Персона | Рішення, яке змінюється | Вердикт |
+| Persona | The decision that changes | Verdict |
 |---|---|---|
-| «Ігор» | зупинити/відкласти фонового агента зараз | ✅ головна його фіча |
-| «Артур» | помітити агента, що працює марно | ❔ |
-| «Віктор», «Оскар» | — (одна сесія) | ✖ не проходить |
+| "Igor" | stop or postpone a background agent now | ✅ his headline feature |
+| "Arthur" | spot an agent that is working for nothing | ❔ |
+| "Viktor", "Oskar" | — (one session) | ✖ does not pass |
 
-### L2. «Горить, а сесій нема»
+### L2. "Burning, but no sessions"
 
-Витрата йде, а локальних сесій нуль → забутий фоновий агент або інший пристрій. Стан рідкісний і
-аномальний — саме тому проходить **нотифікаційну** планку: приходить лише коли щось справді не
-так, і дія очевидна (піти перевірити).
+Spending is happening while local sessions number zero → a forgotten background agent, or another
+device. The state is rare and anomalous — which is exactly why it clears the **notification** bar:
+it arrives only when something really is wrong, and the action is obvious (go and check).
 
-| Персона | Рішення, яке змінюється | Вердикт |
+| Persona | The decision that changes | Verdict |
 |---|---|---|
-| усі | знайти джерело неврахованої витрати | ✅ як рідкісна нотифікація, тиша за замовчуванням |
+| everyone | find the source of the unaccounted spending | ✅ as a rare notification, silent by default |
 
-### S1. Запас під кінець вікна як запрошення до важкої задачі
+### S1. End-of-window surplus as an invitation to a heavy task
 
-Виросла з уточнення реальної поведінки, а не з кабінетного припущення: побачивши багато синього
-під кінець 7-денного вікна, користувач свідомо запускає щось важке — kb-grooming, великий
-рефакторинг, довгий аудит. Запас, який не встигнути витратити, — це втрачена цінність, і саме
-кінець вікна робить її видимою.
+This grew out of clarified real behavior rather than an armchair assumption: on seeing a lot of blue
+near the end of the 7-day window, the user deliberately launches something heavy — kb-grooming, a
+large refactor, a long audit. A surplus you will not manage to spend is value lost, and it is the
+end of the window that makes it visible.
 
-Відрізняється від [C2](#c2-безпечне-вікно-для-важкого) джерелом даних і питанням: C2 питає
-«**коли** я вільний», ця — «**чи не пропаде** оплачене». Календар тут не потрібен взагалі.
+It differs from [C2](#c2-a-safe-window-for-the-heavy-work) in its data source and in its question:
+C2 asks "**when** am I free", this one asks "**is what I paid for about to go to waste**". No
+calendar is needed here at all.
 
-| Персона | Рішення, яке змінюється | Вердикт |
+| Persona | The decision that changes | Verdict |
 |---|---|---|
-| «Артур» | запустити важку задачу, поки запас не згорів | ✅ підтверджено на реальній поведінці |
-| «Віктор» | те саме, якщо тижневе вікно закривається із запасом | ❔ на Pro запас буває рідше |
-| «Оскар» | залежить від того, чи є вільний слот — це вже C2 | ❔ |
-| «Ігор» | — (запасу під кінець вікна зазвичай немає) | ✖ не проходить |
+| "Arthur" | launch a heavy task before the surplus expires | ✅ confirmed against real behavior |
+| "Viktor" | the same, if the weekly window closes with room left | ❔ on Pro the surplus is rarer |
+| "Oskar" | depends on whether there is a free slot — which is C2 already | ❔ |
+| "Igor" | — (there is usually no surplus at the end of the window) | ✖ does not pass |
 
-**Умова тиші:** сигнал має сенс лише в останній чверті вікна й лише за помітного запасу. Синій
-бар на початку тижня нічого не означає — попереду ще кілька діб, за які все може змінитися.
-Формулювати мовою задачі («є запас на велику задачу»), а не мовою моделі — див. урок із
-[J3](#j3-модельний-мікс-і-підказка-перемикання).
+**The condition for silence:** the signal makes sense only in the last quarter of the window and
+only when the surplus is substantial. A blue bar at the start of the week means nothing — there are
+still several days ahead in which everything can change. Word it in the language of the task
+("there's room for a big task") rather than the language of the model — see the lesson from
+[J3](#j3-model-mix-and-the-switch-prompt).
 
-### N0. Статистика впирань (із наявного журналу)
+### N0. Wall-hitting statistics (from the existing journal)
 
-Без нового доступу — журнал уже це містить: «цього місяця 5h-вікно вичерпувалося N разів,
-сумарне очікування M годин» / «тижневий запас не використано на K %».
+No new access required — the journal already holds this: "this month the 5h window was exhausted N
+times, for M hours of waiting in total" / "K % of the weekly surplus went unused".
 
-| Персона | Рішення, яке змінюється | Вердикт |
+| Persona | The decision that changes | Verdict |
 |---|---|---|
-| «Віктор» | чи вартий мені Max — грошове рішення з цифрами | ✅ проходить |
-| «Артур» | чи не переплачую — дзеркальне рішення | ✅ проходить |
-| «Ігор» | скільки коштує мені ліміт проти extra usage | ✅ проходить |
-| «Оскар» | те саме, що «Віктор» | ✅ проходить |
+| "Viktor" | is Max worth it to me — a money decision with numbers behind it | ✅ passes |
+| "Arthur" | am I overpaying — the mirror image of that decision | ✅ passes |
+| "Igor" | what the limit costs me against extra usage | ✅ passes |
+| "Oskar" | the same as "Viktor" | ✅ passes |
 
-Частота показу — місячна ретроспектива в Insights, не постійний елемент; обробка журналу — лише
-за правилами [journal-analysis.md](journal-analysis.md).
+The cadence of showing it is a monthly retrospective in Insights, not a permanent element; the
+journal is processed strictly by the rules of [journal-analysis.md](journal-analysis.md).
 
-## Зведена матриця: джерело × персона
+## The summary matrix: source × persona
 
-Найсильніша ідея кожної пари; порожня клітинка — жодна ідея цього джерела не проходить планку
-для цієї персони.
+The strongest idea of each pair; an empty cell means no idea from that source clears the bar for
+that persona.
 
-Ідеї-**сигнали** й ідеї-**пост-аналіз** позначені окремо, бо проходять різні планки
-([§ дві планки](#дві-планки-сигнал-і-пост-аналіз)).
+The **signal** ideas and the **retrospective analysis** ideas are marked separately, because they
+clear different bars ([§ two bars](#two-bars-signal-and-retrospective-analysis)).
 
-| | «Віктор» | «Оскар» | «Артур» | «Ігор» |
+| | "Viktor" | "Oskar" | "Arthur" | "Igor" |
 |---|---|---|---|---|
-| **JSONL — пост-аналіз** | (J2 ❔) | **J1, J2** — звіти клієнтам | **J1, J2** — розуміння | **J1, J2** — звіти й собівартість |
-| **JSONL — сигнал** | J3 | J3 | ✖ (моделі не міняє) | J3 |
-| **Календар** | — | C1, C2, C3 | C2 | C1 |
-| **Git** | — | довідник для J2 | (G1 ❔) | довідник для J1/J2 |
-| **Живі сесії** | — | — | (L1 ❔) | L1 |
-| **Журнал (наявний)** | N0, (S1 ❔) | N0 | **S1**, N0, N | N0 |
+| **JSONL — retrospective** | (J2 ❔) | **J1, J2** — reports to clients | **J1, J2** — understanding | **J1, J2** — reports and cost base |
+| **JSONL — signal** | J3 | J3 | ✖ (does not change models) | J3 |
+| **Calendar** | — | C1, C2, C3 | C2 | C1 |
+| **Git** | — | a directory for J2 | (G1 ❔) | a directory for J1/J2 |
+| **Live sessions** | — | — | (L1 ❔) | L1 |
+| **Journal (existing)** | N0, (S1 ❔) | N0 | **S1**, N0, N | N0 |
 
-Читання по стовпчиках дає пріоритет джерел для кожної персони; по рядках — яку персону
-обслуговує кожне джерело.
+Reading down the columns gives the priority of sources for each persona; reading across the rows
+gives which persona each source serves.
 
-**JSONL корисний усім чотирьом — але різними своїми боками.** Як пост-аналіз він відповідає на
-питання «куди пішла квота», і це цінно навіть тоді, коли з відповіді не випливає дія; для тих, хто
-працює на клієнтів, той самий розріз стає **робочим артефактом звітності**. Як джерело сигналу він
-працює лише для персон, готових рухати модель, — а «Артур» показав, що така готовність не
-універсальна.
+**JSONL is useful to all four — but by different sides of itself.** As retrospective analysis it
+answers "where did the quota go", and that is valuable even when no action follows from the answer;
+for those who work for clients, the same breakdown becomes **a working artifact of reporting**. As a
+source of signals it works only for the personas willing to move the model — and "Arthur" showed
+that such willingness is not universal.
 
-**Розріз по клієнтах потрібен трьом персонам із чотирьох** — «Оскару», «Артуру» й «Ігорю», хоч і
-з різною глибиною: від «зрозуміти, куди дівається» до «вкласти в рахунок клієнту». Це робить J2
-найширшою ідеєю каталогу після падіння [J3](#j3-модельний-мікс-і-підказка-перемикання) — з тією
-різницею, що J2 спирається на **потребу знати**, а не на готовність змінити поведінку, і саме
-тому виявилася стійкішою до перевірки реальним користувачем.
+**Three personas out of four need the per-client breakdown** — "Oskar", "Arthur", and "Igor", albeit
+at different depths: from "understand where it goes" to "put it on the client's invoice". That makes
+J2 the widest idea in the catalog after the fall of [J3](#j3-model-mix-and-the-switch-prompt) — with
+the difference that J2 rests on **the need to know** rather than on a willingness to change
+behavior, and that is exactly why it proved more robust against a check with a real user.
 
-**Найдешевше джерело лишається недооціненим.** Наявний журнал (S1, N0, моніторинг N) не потребує
-жодного нового доступу й дає найбільше саме тій персоні, за якою стоять реальні дані. Календар —
-фіча однієї персони («Оскара»), і його пріоритет дорівнює пріоритету цієї персони в роадмапі.
+**The cheapest source remains the underrated one.** The existing journal (S1, N0, watching N) needs
+no new access whatsoever and gives the most to precisely the persona backed by real data. The
+calendar is a one-persona feature ("Oskar"), and its priority equals that persona's priority on the
+roadmap.
 
-## Пресети першого налаштування
+## First-run presets
 
-Практичний вихід персон в onboarding: замість того, щоб новий користувач розбирався в
-налаштуваннях поодинці, перше налаштування ставить одне питання «як ти працюєш?» і застосовує
-**пресет** — узгоджену комбінацію **вже наявних** налаштувань (див.
-[users-and-goals § що користувач контролює сам](users-and-goals.md#що-користувач-контролює-сам))
-плюс майбутні нотифікаційні дефолти. Пресет лише задає стартові значення — кожен перемикач
-лишається доступним і після нього; це не окрема поверхня налаштувань.
+The practical output of the personas in onboarding: instead of leaving a new user to work through
+the settings alone, the first run asks a single question — "how do you work?" — and applies a
+**preset**: a coherent combination of settings that **already exist** (see
+[users-and-goals § what the user already controls](users-and-goals.md#what-the-user-already-controls))
+plus future notification defaults. A preset only sets the starting values — every switch stays
+available afterwards; this is not a separate settings surface.
 
-| Налаштування | «Віктор» | «Оскар» | «Артур» | «Ігор» |
+| Setting | "Viktor" | "Oskar" | "Arthur" | "Igor" |
 |---|---|---|---|---|
-| Hide the top 5h bar | Never — увечері 5h-вікно головне | Until it needs attention | Until it needs attention | Never — сплески щодня |
-| Стиль menu bar | Pressure — терміновість у ширині | Balance — видно і запас, і перебір | Balance — ліва половина показує невикористаний запас | Pressure |
-| Стиль дропдауна | Pressure | Balance | **Balance** — той самий знак від центру, що і в барі | Pressure |
-| Colors tell me | Slow down | Slow down or speed up | Slow down or speed up — синій для нього сигнал дії | Slow down |
-| Секції попапа (per-model, кредити) | Once used | When it needs attention | **When it needs attention** | Always — кредити критичні |
-| Нотифікації (майбутнє) | «вікно вичерпається до кінця вечора» | збіг «ресет × вільний слот» ([C2](#c2-безпечне-вікно-для-важкого)) | запас під кінець вікна ([S1](#s1-запас-під-кінець-вікна-як-запрошення-до-важкої-задачі)), місячна ретроспектива ([N0](#n0-статистика-впирань-із-наявного-журналу)) | [L2](#l2-горить-а-сесій-нема) + «не вистачить до дедлайну» |
+| Hide the top 5h bar | Never — the 5h window is what matters in the evening | Until it needs attention | Until it needs attention | Never — bursts every day |
+| Menu bar style | Pressure — urgency in the width | Balance — both the surplus and the overshoot are visible | Balance — the left half shows the unused surplus | Pressure |
+| Dropdown style | Pressure | Balance | **Balance** — the same signed-from-center reading as in the bar | Pressure |
+| Colors tell me | Slow down | Slow down or speed up | Slow down or speed up — blue is a call to action for him | Slow down |
+| Popup sections (per-model, credits) | Once used | When it needs attention | **When it needs attention** | Always — the credits are critical |
+| Notifications (future) | "the window will run out before the evening ends" | the "reset × free slot" overlap ([C2](#c2-a-safe-window-for-the-heavy-work)) | the end-of-window surplus ([S1](#s1-end-of-window-surplus-as-an-invitation-to-a-heavy-task)), the monthly retrospective ([N0](#n0-wall-hitting-statistics-from-the-existing-journal)) | [L2](#l2-burning-but-no-sessions) + "it won't last to the deadline" |
 
-Це **гіпотези для валідації**, не специфікація: значення в клітинках треба звірити з реальними
-користувачами кожного типу, і лише потім проєктувати сам onboarding-екран (окремий тікет і,
-ймовірно, ADR — зокрема про те, чи питати «як ти працюєш?» напряму, чи вивести персону з
-перших тижнів журналу).
+These are **hypotheses for validation**, not a specification: the values in the cells have to be
+checked against real users of each type, and only then should the onboarding screen itself be
+designed (a separate ticket and, most likely, an ADR — not least about whether to ask "how do you
+work?" outright or to infer the persona from the first weeks of the journal).
 
-**Колонка «Артура» — уже не гіпотеза, а знімок реальних налаштувань** (2026-08-21), і дві
-клітинки в ній довелося виправити: дропдаун стоїть на **Balance**, а не Progress, і секції — на
-**When it needs attention**, а не Always. Обидві мої початкові здогадки виходили з того, що
-персона, яка дивиться на розподіл, хоче більше даних на екрані. Насправді вона хоче **той самий
-спосіб читання на обох поверхнях** і тишу, доки нема на що реагувати — це рівно те, чого вимагає
-[правило про тишу](users-and-goals.md#чому-тиша--валідний-стан), і воно виявилося сильнішим за
-«більше даних для аналітика».
+**"Arthur"'s column is no longer a hypothesis but a snapshot of real settings** (2026-08-21), and
+two cells in it had to be corrected: the dropdown is set to **Balance**, not Progress, and the
+sections to **When it needs attention**, not Always. Both of my initial guesses came from assuming
+that a persona who looks at distributions wants more data on screen. In fact he wants **the same way
+of reading on both surfaces** and silence until there is something to react to — which is exactly
+what the [rule about silence](users-and-goals.md#why-silence-is-a-valid-state) demands, and it
+turned out to be stronger than "more data for the analyst".
 
-## Позиціювання: один меседж на персону
+## Positioning: one message per persona
 
-| Персона | Меседж |
+| Persona | Message |
 |---|---|
-| «Віктор» | Встигни більше за свій вечір |
-| «Оскар» | Квота і вільний час нарешті на одному екрані |
-| «Артур» | Бачиш, за що заплатив |
-| «Ігор» | Контроль, коли працює не один агент |
+| "Viktor" | Get more done in your evening |
+| "Oskar" | Quota and free time on one screen at last |
+| "Arthur" | See what you paid for |
+| "Igor" | Control when more than one agent is working |

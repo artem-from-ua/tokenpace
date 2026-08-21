@@ -6,7 +6,7 @@
 крайовими випадками та вимірами, на яких стоять константи.
 
 > Пов'язане: [usage-api-quirks](../reference/usage-api-quirks.md) — вимір квантування, на якому все
-> стоїть; [users-and-goals § «Співвідношення квот»](../reference/users-and-goals.md) — звідки взявся
+> стоїть; [users-and-goals § «The ratio between the windows' quotas»](../reference/users-and-goals.md) — звідки взявся
 > коефіцієнт `N`.
 
 ## Проблема
