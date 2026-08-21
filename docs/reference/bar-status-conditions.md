@@ -1,418 +1,432 @@
-# Умови переходу барів у статуси
+# Conditions that put bars into each status
 
-Вичерпний довідник: **за яких саме умов кожен тип бару набуває кожного статусу/кольору**.
+An exhaustive reference: **under exactly which conditions each bar type takes on each status/color**.
 
-Для чого: `severity`, колір зазору, колір маркера й журнальний бакет — це **чотири різні
-переформулювання** одного предикату, розкидані по Kit і AppKit. Розійтися вони можуть тихо. Цей
-документ зводить усі гілки в одне місце, з посиланням на рядок коду для кожної.
+Why this exists: `severity`, gap color, marker color, and journal bucket are **four different
+restatements** of the same predicate, scattered across Kit and AppKit. They can drift apart silently.
+This document collects all the branches in one place, with a code-line reference for each.
 
-> **Джерела істини, а не переказ.** Кожне твердження тут має supporting-рядок. Якщо код і документ
-> розійшлися — правий код, а документ треба виправити тим самим PR.
+> **Sources of truth, not a retelling.** Every claim here has a supporting line. If the code and the
+> document disagree — the code is right, and the document must be fixed in the same PR.
 
-Пов'язані документи: [ui-state-truth.md](ui-state-truth.md) (анатомія й метрики бару),
-[menu-bar-signals.md](menu-bar-signals.md) (обернена задача — як читати те, що вже на екрані:
-спершу «чи є число», і лише потім смужки),
-[users-and-goals.md](users-and-goals.md) (навіщо статус узагалі існує),
-[ADR-0061](../adr/0061-far-behind-blue-pacing-zone.md) (синя зона),
-[ADR-0044](../adr/0044-dynamic-pacing-threshold.md) (динамічний ahead-поріг),
-[ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md) (idle як нуль).
+Related documents: [ui-state-truth.md](ui-state-truth.md) (bar anatomy and metrics),
+[menu-bar-signals.md](menu-bar-signals.md) (the inverse problem — how to read what's already on
+screen: first "is there a number," and only then the bars),
+[users-and-goals.md](users-and-goals.md) (why status exists at all),
+[ADR-0061](../adr/0061-far-behind-blue-pacing-zone.md) (the blue zone),
+[ADR-0044](../adr/0044-dynamic-pacing-threshold.md) (the dynamic ahead threshold),
+[ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md) (idle drawn as zero).
 
 ---
 
-## 1. Типи барів і що їм узагалі доступно
+## 1. Bar types and what's even available to them
 
-Не всі бари можуть набути всіх статусів. Це найчастіше джерело хибних мокапів.
+Not every bar can take on every status. This is the most common source of bogus mockups.
 
-Колонка «Пейсинговий синій» — про `farBehind`-зону, тобто про **статус**, а не про будь-який синій
-піксель (усе синє в застосунку тепер бере одну роль `ColorRole.blue`).
+The "Pacing blue" column is about the `farBehind` **zone** — i.e., a **status** — not about any blue
+pixel in general (everything blue in the app now shares one `ColorRole.blue`).
 
-| Тип бару | Джерело | Вікно | Пейсинговий синій? | Де малюється |
+| Bar type | Source | Window | Pacing blue? | Where it's drawn |
 |---|---|---|---|---|
-| **h5** — 5-годинний | `snapshot.fiveHour` | 18 000 c | **так** | menu bar + попап |
-| **d7** — 7-денний | `snapshot.sevenDay` | 604 800 c | **так** | menu bar + попап |
-| **Opus / Sonnet** | `snapshot.sevenDayOpus/Sonnet` | 7d-paced | **ні** | лише попап |
-| **scoped per-model** | `snapshot.scopedModelWindows` | 7d-paced | **ні** | лише попап |
-| **credits (money)** | `snapshot.spend` | календарний місяць, UTC | **ні** | лише попап |
-| **idle-h5** | плейсхолдер | немає | **ні** — пейсингу не має | menu bar + попап |
+| **h5** — 5-hour | `snapshot.fiveHour` | 18,000 s | **yes** | menu bar + popup |
+| **d7** — 7-day | `snapshot.sevenDay` | 604,800 s | **yes** | menu bar + popup |
+| **Opus / Sonnet** | `snapshot.sevenDayOpus/Sonnet` | 7d-paced | **no** | popup only |
+| **scoped per-model** | `snapshot.scopedModelWindows` | 7d-paced | **no** | popup only |
+| **credits (money)** | `snapshot.spend` | calendar month, UTC | **no** | popup only |
+| **idle-h5** | placeholder | none | **no** — has no pacing | menu bar + popup |
 
-**Чому синій лише для h5/d7.** Синій каже «у **тижня** є запас, який ти не використовуєш». Per-model
-рядки — зрізи того самого тижня, тож порада була б адресована сама собі; credits — не токенне вікно
-взагалі. Обидва отримують `blueAllowed: false` **у моделі**
+**Why blue only on h5/d7.** Blue says "the **week** has headroom you aren't using." Per-model rows
+are slices of that same week, so the advice would be pointed at itself; credits aren't a token window
+at all. Both get `blueAllowed: false` **in the model**
 ([PopupLayout.swift](../../Sources/TokenPaceKit/PopupLayout.swift),
-[CreditsPacing.swift](../../Sources/TokenPaceKit/CreditsPacing.swift)), і `behindColor` віддає їм
-зелений на першій же перевірці. Menu bar per-model барів не має взагалі.
+[CreditsPacing.swift](../../Sources/TokenPaceKit/CreditsPacing.swift)), and `behindColor` hands them
+green at the very first check. The menu bar has no per-model bars at all.
 
-> До [ADR-0115](../adr/0115-no-blue-on-per-model-windows.md) це робив прапорець рендера
-> `PopupBarView.isBaseLimit`, що ставився за індексом рядка. Він і був причиною розбіжності нижче:
-> модель про нього не знала.
+> Before [ADR-0115](../adr/0115-no-blue-on-per-model-windows.md) this was done by the render flag
+> `PopupBarView.isBaseLimit`, set by row index. That flag was the cause of the discrepancy below: the
+> model didn't know about it.
 
-**Чому в idle «ні».** Idle-бар не має пейсингу як такого — він не проходить через `severity` і не
-може набути `farBehind`. Його заливка — це стан «ready to start», а не вердикт: із
-[#381](https://github.com/artem-from-ua/cc-timer/issues/381) вона **завжди зелена** (сіра при
-blocked), і тижневий gate до неї більше не входить. Детально — §6.
+**Why "no" for idle.** The idle bar has no pacing as such — it doesn't go through `severity` and
+can't take on `farBehind`. Its fill is a "ready to start" state, not a verdict: since
+[#381](https://github.com/artem-from-ua/cc-timer/issues/381) it's **always green** (gray when
+blocked), and the weekly gate no longer factors into it at all. Details in §6.
 
-> **Журнал і UI збігаються — від [ADR-0115](../adr/0115-no-blue-on-per-model-windows.md).**
-> `PacingBucket.of` читає те саме `blueAllowed`, що й рендер, і per-model рядки мають його `false`
-> **у моделі**, тож scoped-вікно не може отримати `sev: "blue"`, якого користувач не бачив.
+> **Journal and UI agree — since [ADR-0115](../adr/0115-no-blue-on-per-model-windows.md).**
+> `PacingBucket.of` reads the same `blueAllowed` the renderer does, and per-model rows have it
+> `false` **in the model**, so a scoped window can never get the `sev: "blue"` the user never saw.
 >
-> Раніше тут стояло те саме твердження з іншою підставою — «per-model рядки несуть той самий
-> weekly-gate» — і воно **було хибним**. Gate закривається лише коли тиждень іде поперед темпу; при
-> спокійному тижні він відкритий, і синій проходив у файл, поки попап глушив його своїм
-> `isBaseLimit`. У серпневому журналі мейнтейнера так з'явилося **2 214** scoped-синіх записів.
-> Міграція v4 перерахувала їх у зелений, лишивши `sevRaw: "blue"`.
+> This used to state the same claim on a different basis — "per-model rows carry the same weekly
+> gate" — and that basis **was wrong**. The gate closes only when the week is running ahead of pace;
+> during a calm week it's open, and blue was written to the file while the popup muted it via its own
+> `isBaseLimit`. In the maintainer's August journal this produced **2,214** scoped-blue entries.
+> The v4 migration recomputed them as green, leaving `sevRaw: "blue"` in place.
 
 ---
 
-## 2. Спільний кістяк: чотири переформулювання одного предикату
+## 2. The shared skeleton: four restatements of one predicate
 
-| # | Місце | Що дає | Рядок |
+| # | Location | What it returns | Line |
 |---|---|---|---|
 | 1 | `BarLayout.severity` | `PacingSeverity` (Kit) | [PacingModel.swift:265](../../Sources/TokenPaceKit/PacingModel.swift) |
-| 2 | `PacingBucket.of` | бакет для jsonl | [PacingBucket.swift:49](../../Sources/TokenPaceKit/PacingBucket.swift) |
-| 3 | `aheadColor` / `behindColor` | `NSColor` зазору | [PopupViewController.swift:645, 665](../../Sources/TokenPace/PopupViewController.swift) |
-| 4 | `isFarBehind` | слово «far behind pace» | [PopupViewController.swift:2592](../../Sources/TokenPace/PopupViewController.swift) |
+| 2 | `PacingBucket.of` | bucket for jsonl | [PacingBucket.swift:49](../../Sources/TokenPaceKit/PacingBucket.swift) |
+| 3 | `aheadColor` / `behindColor` | gap `NSColor` | [PopupViewController.swift:645, 665](../../Sources/TokenPace/PopupViewController.swift) |
+| 4 | `isFarBehind` | the phrase "far behind pace" | [PopupViewController.swift:2592](../../Sources/TokenPace/PopupViewController.swift) |
 
-`StatusItemView.gapColorTarget` ([:1043](../../Sources/TokenPace/StatusItemView.swift)) —
-не п'яте переформулювання: він читає `severity` й делегує в `behindColor`.
+`StatusItemView.gapColorTarget` ([:1043](../../Sources/TokenPace/StatusItemView.swift)) is **not** a
+fifth restatement: it reads `severity` and delegates to `behindColor`.
 
-### Константи
+### Constants
 
-| Константа | Значення | Що робить |
+| Constant | Value | What it does |
 |---|---|---|
-| `pacingOrangeOverrideSeconds` | 1200 c (20 хв) | кінець вікна → будь-яке випередження помаранчеве |
-| `pacingBlueStartOverrideSeconds` | 1200 c (20 хв) | старт вікна → синій не блимає |
-| `aheadThreshold(timeFraction:)` | `0.16 × (1 − t)` | межа жовтий→помаранчевий, **динамічна** |
-| `behindThreshold(...)` | 5h: 0.40, 7d: ≈0.2857 | межа зелений→синій, **фіксована в реальному часі** |
-| `farBehindWidthMultiplier` | 2 | множник базової ширини, **константа** (не налаштування) |
-| `blueAllowed` | Bool | чи взагалі дозволений синій для цього бару |
+| `pacingOrangeOverrideSeconds` | 1200 s (20 min) | window ending → any lead turns orange |
+| `pacingBlueStartOverrideSeconds` | 1200 s (20 min) | window starting → blue doesn't flash |
+| `aheadThreshold(timeFraction:)` | `0.16 × (1 − t)` | yellow→orange boundary, **dynamic** |
+| `behindThreshold(...)` | 5h: 0.40, 7d: ≈0.2857 | green→blue boundary, **fixed in wall-clock time** |
+| `farBehindWidthMultiplier` | 2 | multiplier on the base width, **a constant** (not a setting) |
+| `blueAllowed` | Bool | whether blue is allowed for this bar at all |
 
-`behindThreshold` = `blueBehindWidthSeconds × 2 / windowDurationSeconds`, де база — 60 хв (5h) і
-24 год (7d). Раніше множник задавав користувач (`FarBehindInterval`); тепер він фіксований, а
-питання «чи малювати синій» повністю переїхало в `blueAllowed`
+`behindThreshold` = `blueBehindWidthSeconds × 2 / windowDurationSeconds`, with a base of 60 min (5h)
+and 24 hours (7d). It used to be user-configurable (`FarBehindInterval`); now the multiplier is fixed,
+and the question "should blue be drawn at all" has moved entirely into `blueAllowed`
 ([PacingModel.swift](../../Sources/TokenPaceKit/PacingModel.swift)).
 
-### `blueAllowed` — weekly-capacity gate
+### `blueAllowed` — the weekly-capacity gate
 
-`blueAllowed` ставиться при побудові бару й відповідає на питання «чи має цей бар право радити
-розганятися»:
+`blueAllowed` is set when a bar is built and answers the question "does this bar have the right to
+advise speeding up":
 
-| Бар | `blueAllowed` |
+| Bar | `blueAllowed` |
 |---|---|
-| d7 | `true` завжди — сам себе не гейтить |
+| d7 | always `true` — doesn't gate itself |
 | h5 | `PacingModel.weeklyHasHeadroom(in:now:)` |
-| Opus / Sonnet / scoped | **`false` завжди** — вони є зрізами того тижня, про який говорить синій ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)) |
-| credits, idle-плейсхолдери | `false` — пейсингу не мають |
+| Opus / Sonnet / scoped | **always `false`** — they are slices of the same week that blue is talking about ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)) |
+| credits, idle placeholders | `false` — they have no pacing |
 
-`weeklyHasHeadroom` = `d7.pacing == .onPaceOrBehind && d7.usageFraction < 1`, тобто d7-бакет ∈
-{blue, green}. **Closed by default:** якщо `resets_at` тижня не парситься, повертає `false` — інакше
-fallback `?? now` дав би `timeFraction = 1.0` і хибно **відкрив** би gate.
-
----
-
-## 3. Базові бари h5 / d7 — повна таблиця переходів
-
-Позначення: `u` = `usageFraction` (`utilization/100`, кліп `[0,1]`), `t` = `timeFraction`
-(частка вікна, що минула), `elapsed` = `windowDurationSeconds − remainingSeconds`.
-
-Гілки перевіряються **згори вниз, перша істинна виграє**.
-
-| # | Умова | Severity | Колір | Бакет |
-|---|---|---|---|---|
-| 0 | `u <= t` **і** `!blueAllowed` | `.calm` | зелений | `green` |
-| 1 | `u <= t` **і** `elapsed <= 1200` | `.calm` | зелений | `green` |
-| 2 | `u <= t`, `blueAllowed` **і** `(t − u) > behindThreshold` | `.farBehind` | **синій** | `blue` |
-| 3 | `u <= t` (решта) | `.calm` | зелений | `green` |
-| 4 | `u > t` **і** `u >= 1` | `.exhausted` | червоний | `red` |
-| 5 | `u > t` **і** `remainingSeconds <= 1200` | `.ahead` | помаранчевий | `orange` |
-| 6 | `u > t` **і** `(u − t) < 0.16×(1−t)` | `.calm` | жовтий | `yellow` |
-| 7 | `u > t` (решта) | `.ahead` | помаранчевий | `orange` |
-
-Гілка 0 — weekly-gate (або інертний бар); вона **передує** start-override. На відміну від
-скасованого `FarBehindInterval.off`, це не налаштування, а факт про дані, тож **журнал її теж
-поважає** — саме тому в колонці «Бакет» стоїть `green`, а не пропуск.
-
-### Чотири пастки в цій таблиці
-
-**Пастка 1 — рівність `u == t` спокійна.** Гілка `pacing == .onPaceOrBehind` тестує `t >= u`, тож
-точна рівність іде **вліво**, у спокій ([PacingModel.swift:266](../../Sources/TokenPaceKit/PacingModel.swift)).
-
-**Пастка 2 — 20-хвилинні override'и НЕ симетричні за досяжністю.** Обидва лежать після виходу зі
-спокійної гілки, тож при `u <= t` кінець-override (рядок 5) **недосяжний**. Стан «97 % спожито,
-97 % часу минуло, 9 хвилин до ресету» лишається **зеленим**, не помаранчевим.
-
-**Пастка 3 — `severity` зливає зелений і жовтий.** Обидва — `.calm` (рядки 3 і 6). Розділяє їх лише
-колірний шар і `PacingBucket`. Тому «бар `.calm`» ≠ «бар зелений».
-
-**Пастка 4 — вичерпання на спокійному боці не дає `.exhausted`.** Щойно скинуте 100 %-вікно може
-читатися як `u <= t` і піти гілкою 1-3 — тобто `severity` буде `.calm`. `PacingBucket.of` це
-**виправляє окремо** (`if usageFraction >= 1 { return .red }` на спокійному боці,
-[PacingBucket.swift:60](../../Sources/TokenPaceKit/PacingBucket.swift)), а `severity` — ні.
-Це розбіжність №2 між UI і журналом.
-
-### Числові приклади порогів
-
-| Вікно | `t` | `aheadThreshold` | Жовтий, поки лід < | Синій, коли запас > |
-|---|---|---|---|---|
-| 5h | 10 % | 0.144 | 14.4 пп | 40 пп |
-| 5h | 50 % | 0.080 | 8.0 пп | 40 пп |
-| 5h | 90 % | 0.016 | 1.6 пп | 40 пп (недосяжно: `t−u ≤ 0.9`) |
-| 7d | 30 % | 0.112 | 11.2 пп | 28.6 пп |
-| 7d | 80 % | 0.032 | 3.2 пп | 28.6 пп |
-
-Ahead-поріг **звужується** з часом (лід наприкінці вікна небезпечніший — вікно скинеться раніше,
-ніж встигнеш повернутися на темп), behind-поріг **не рухається** (це фіксований проміжок реального
-часу: «відстаю більше ніж на 2 години» однаково значуще на початку й наприкінці).
+`weeklyHasHeadroom` = `d7.pacing == .onPaceOrBehind && d7.usageFraction < 1`, i.e., the d7 bucket ∈
+{blue, green}. **Closed by default:** if the week's `resets_at` fails to parse, it returns `false` —
+otherwise a `?? now` fallback would give `timeFraction = 1.0` and wrongly **open** the gate.
 
 ---
 
-## 4. Per-model бари (Opus / Sonnet / scoped)
+## 3. Base h5 / d7 bars — the full transition table
 
-Пейсяться **як 7-денні** — беруть `LimitWindow.sevenDay` і позичають `seven_day.resets_at`, коли
-власного немає ([UsageSnapshot.swift:591](../../Sources/TokenPaceKit/UsageSnapshot.swift)).
+Notation: `u` = `usageFraction` (`utilization/100`, clipped to `[0,1]`), `t` = `timeFraction` (the
+fraction of the window elapsed), `elapsed` = `windowDurationSeconds − remainingSeconds`.
 
-Таблиця з §3 діє **з одним винятком**: рядок 2 (синій) недосяжний — замість нього завжди зелений,
-бо ці бари будуються з `blueAllowed: false` ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)).
-Не «недосяжний у UI», а недосяжний узагалі: правило живе в моделі, тож його бачать і рендер, і
-`PacingBucket`.
+Branches are checked **top to bottom, first match wins**.
 
-| # | Умова | Колір у попапі |
+| # | Condition | Severity | Color | Bucket |
+|---|---|---|---|---|
+| 0 | `u <= t` **and** `!blueAllowed` | `.calm` | green | `green` |
+| 1 | `u <= t` **and** `elapsed <= 1200` | `.calm` | green | `green` |
+| 2 | `u <= t`, `blueAllowed` **and** `(t − u) > behindThreshold` | `.farBehind` | **blue** | `blue` |
+| 3 | `u <= t` (remaining) | `.calm` | green | `green` |
+| 4 | `u > t` **and** `u >= 1` | `.exhausted` | red | `red` |
+| 5 | `u > t` **and** `remainingSeconds <= 1200` | `.ahead` | orange | `orange` |
+| 6 | `u > t` **and** `(u − t) < 0.16×(1−t)` | `.calm` | yellow | `yellow` |
+| 7 | `u > t` (remaining) | `.ahead` | orange | `orange` |
+
+Branch 0 is the weekly gate (or an inert bar); it **precedes** the start override. Unlike the retired
+`FarBehindInterval.off`, this isn't a setting but a fact about the data, so **the journal honors it
+too** — that's exactly why the "Bucket" column shows `green` rather than a blank.
+
+### Four traps in this table
+
+**Trap 1 — the equality `u == t` is calm.** The `pacing == .onPaceOrBehind` branch tests `t >= u`, so
+exact equality goes **left**, into calm
+([PacingModel.swift:266](../../Sources/TokenPaceKit/PacingModel.swift)).
+
+**Trap 2 — the two 20-minute overrides are NOT symmetric in reachability.** Both sit after the exit
+from the calm branch, so when `u <= t` the end-of-window override (row 5) is **unreachable**. The
+state "97% spent, 97% of time elapsed, 9 minutes to reset" stays **green**, not orange.
+
+**Trap 3 — `severity` merges green and yellow.** Both are `.calm` (rows 3 and 6). Only the color
+layer and `PacingBucket` split them apart. So a bar being `.calm` ≠ a bar being green.
+
+**Trap 4 — exhaustion on the calm side does not produce `.exhausted`.** A window that was just reset
+to 100% can read as `u <= t` and fall through branches 1-3 — meaning `severity` will be `.calm`.
+`PacingBucket.of` **fixes this separately** (`if usageFraction >= 1 { return .red }` on the calm
+side, [PacingBucket.swift:60](../../Sources/TokenPaceKit/PacingBucket.swift)), but `severity` does
+not. This is discrepancy #2 between the UI and the journal.
+
+### Numeric threshold examples
+
+| Window | `t` | `aheadThreshold` | Yellow while lead < | Blue when headroom > |
+|---|---|---|---|---|
+| 5h | 10% | 0.144 | 14.4 pp | 40 pp |
+| 5h | 50% | 0.080 | 8.0 pp | 40 pp |
+| 5h | 90% | 0.016 | 1.6 pp | 40 pp (unreachable: `t−u ≤ 0.9`) |
+| 7d | 30% | 0.112 | 11.2 pp | 28.6 pp |
+| 7d | 80% | 0.032 | 3.2 pp | 28.6 pp |
+
+The ahead threshold **narrows** over time (a lead late in the window is more dangerous — the window
+will reset before you can get back on pace), while the behind threshold **doesn't move** (it's a
+fixed span of wall-clock time: "more than 2 hours behind" means the same thing at the start and at
+the end).
+
+---
+
+## 4. Per-model bars (Opus / Sonnet / scoped)
+
+Paced **like 7-day windows** — they take `LimitWindow.sevenDay` and borrow `seven_day.resets_at` when
+they have none of their own ([UsageSnapshot.swift:591](../../Sources/TokenPaceKit/UsageSnapshot.swift)).
+
+The table from §3 applies **with one exception**: row 2 (blue) is unreachable — green stands in its
+place always, because these bars are built with `blueAllowed: false`
+([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)). Not "unreachable in the UI," but
+unreachable, period: the rule lives in the model, so both the renderer and `PacingBucket` see it.
+
+| # | Condition | Popup color |
 |---|---|---|
-| 1-3 | `u <= t` (будь-який запас) | **зелений завжди** |
-| 4 | `u >= 1` | червоний |
-| 5 | `remainingSeconds <= 1200` | помаранчевий |
-| 6 | лід < `0.16×(1−t)` | жовтий |
-| 7 | решта | помаранчевий |
+| 1-3 | `u <= t` (any amount of headroom) | **always green** |
+| 4 | `u >= 1` | red |
+| 5 | `remainingSeconds <= 1200` | orange |
+| 6 | lead < `0.16×(1−t)` | yellow |
+| 7 | remaining | orange |
 
-Слово «far behind pace» їм теж недоступне — `isFarBehind` віддає `false` для будь-якого бару з
-`blueAllowed == false` ([PopupViewController.swift](../../Sources/TokenPace/PopupViewController.swift));
-вони показують «on pace».
+The phrase "far behind pace" is unavailable to them too — `isFarBehind` returns `false` for any bar
+with `blueAllowed == false`
+([PopupViewController.swift](../../Sources/TokenPace/PopupViewController.swift)); they show "on
+pace" instead.
 
-**У журналі так само — і це нове.** До [ADR-0115](../adr/0115-no-blue-on-per-model-windows.md) тут
-стояло, що вони «несуть `blueAllowed = weeklyHasHeadroom`, тож `sev` для них ніколи не `blue`». Друге
-з першого не випливає: при спокійному тижні gate відкритий, і синій записувався — **2 214** разів у
-серпневому журналі, тоді як попап глушив його своїм `isBaseLimit`. Тепер `blueAllowed` для них
-безумовне `false`, а міграція v4 перерахувала архів (`sevRaw` зберігає те, що було записано).
+**The journal matches now too — and this is new.** Before
+[ADR-0115](../adr/0115-no-blue-on-per-model-windows.md), this doc claimed they "carry
+`blueAllowed = weeklyHasHeadroom`, so `sev` is never `blue` for them." The second claim doesn't
+follow from the first. During a calm week the gate is open, and blue **was** being recorded —
+**2,214** times in the maintainer's August journal, while the popup muted it via its own
+`isBaseLimit`. Now `blueAllowed` for them is unconditionally `false`, and the v4 migration
+recomputed the archive (`sevRaw` preserves what was originally written).
 
 ---
 
-## 5. Credits (money) бар
+## 5. The credits (money) bar
 
-Найбільше відхилень від токенних барів.
+The biggest set of departures from the token bars.
 
-| Аспект | Токенні бари | Credits |
+| Aspect | Token bars | Credits |
 |---|---|---|
 | `u` | `utilization / 100` | `used / limit` |
-| `t` | частка вікна | частка **календарного місяця** |
-| Часова зона | локальна | **UTC** (жорстко) — і для `t`, і для підписів країв місяця |
-| Вікно | 5h / 7d | місяць; у `BarLayout` підставляється 7d як плейсхолдер |
-| Синій | так (базові) | **ніколи** (`blueAllowed: false`) |
-| Бар існує? | завжди | **лише коли є cap** |
-| Стиль подачі | за `dropdownStyle` (Pressure / Balance / Progress) | **завжди Progress**; `BarStyle` ігнорується ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)) |
-| Тіки | набір за стилем (частки вікна / 20 % / 0.5) | **жодного**; натомість два підписи країв місяця (`Jan 1` / `Jan 31`) |
+| `t` | fraction of the window | fraction of the **calendar month** |
+| Time zone | local | **UTC** (hardcoded) — for both `t` and the month-edge labels |
+| Window | 5h / 7d | month; `BarLayout` substitutes 7d as a placeholder |
+| Blue | yes (base bars) | **never** (`blueAllowed: false`) |
+| Bar exists? | always | **only when a cap is set** |
+| Presentation style | follows `dropdownStyle` (Pressure / Balance / Progress) | **always Progress**; `BarStyle` is ignored ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)) |
+| Ticks | a per-style set (fractions of the window / 20% / 0.5) | **none**; instead, two month-edge labels (`Jan 1` / `Jan 31`) |
 
-**Підписи країв — теж UTC, і це видимий користувачеві текст.** На межі місяця вони можуть на кілька
-годин розійтися з локальним календарем (до ~11 год на схід від UTC, ~8 год на захід) — на відміну від
-`resetLine` у тому ж рядку, який рендериться **локально**. Компроміс свідомий: момент ресету це точка
-на осі часу, спільна для всіх, а мітка місяця — властивість календаря самого вікна, тож підпис мусить
-називати той місяць, який міряє геометрія бару ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)).
+**The edge labels are UTC too, and that's visible user-facing text.** Near a month boundary they can
+diverge from the local calendar by several hours (up to ~11 hours east of UTC, ~8 hours west) — unlike
+the `resetLine` on the same row, which renders **locally**. This tradeoff is deliberate: the reset
+moment is a point on a timeline shared by everyone, while the month label is a property of the
+window's own calendar, so the label must name the month that the bar's geometry actually measures
+([ADR-0092](../adr/0092-extra-usage-own-ruler.md)).
 
-**Бар відсутній, якщо немає ліміту.** `barLayout(for:now:)` повертає `nil`, коли `spentFraction`
-не визначена (немає cap / необмежено / нульовий ліміт) — попап тоді показує лише витрачену суму
-без бару й кольору ([CreditsPacing.swift:194](../../Sources/TokenPaceKit/CreditsPacing.swift)).
+**The bar is absent when there's no limit.** `barLayout(for:now:)` returns `nil` when
+`spentFraction` is undefined (no cap / unlimited / zero limit) — the popup then shows only the amount
+spent, with no bar and no color ([CreditsPacing.swift:194](../../Sources/TokenPaceKit/CreditsPacing.swift)).
 
-**При досягненні cap `u` форсується в рівно 1**, щоб червоний спрацював попри округлення:
+**When the cap is reached, `u` is forced to exactly 1**, so red fires despite rounding:
 `spend.spendLimitReached ? 1 : min(1, max(0, rawUsage))`.
 
-**20-хвилинний кінець-override працює й тут** — кінець місяця може бути ближче ніж за 20 хв; якщо
-календар не зміг обчислити межу, підставляється довжина 7d, тож діє лише динамічний поріг.
+**The 20-minute end-of-window override applies here too** — the end of the month can be less than 20
+minutes away; if the calendar can't compute the boundary, a 7d length is substituted, so only the
+dynamic threshold applies.
 
-Переходи: рядки 4-7 таблиці §3 (червоний / помаранчевий / жовтий), спокійний бік — **завжди
-зелений**.
+Transitions: rows 4-7 of the §3 table (red / orange / yellow); the calm side is **always green**.
 
 ---
 
-## 6. Idle-бар (немає активної 5h-сесії)
+## 6. The idle bar (no active 5h session)
 
-`sessionIdle` виникає, коли сервер не віддає 5-годинного вікна — тоді `resetsAt: ""`, а вікно
-**не синтезується** ([UsageSnapshot.swift:439](../../Sources/TokenPaceKit/UsageSnapshot.swift)).
+`sessionIdle` occurs when the server doesn't hand back a 5-hour window — then `resetsAt: ""`, and the
+window **is not synthesized**
+([UsageSnapshot.swift:439](../../Sources/TokenPaceKit/UsageSnapshot.swift)).
 
-Це **окремий код-шлях**: idle-бар не проходить через `barLayout`/`severity` взагалі. Його
-`BarLayout` — інертний плейсхолдер (`u = 0, t = 0, windowDurationSeconds = 0`), який рендер ігнорує
-([PopupLayout.swift:542](../../Sources/TokenPaceKit/PopupLayout.swift),
+This is a **separate code path**: the idle bar never goes through `barLayout`/`severity` at all. Its
+`BarLayout` is an inert placeholder (`u = 0, t = 0, windowDurationSeconds = 0`), which the renderer
+ignores ([PopupLayout.swift:542](../../Sources/TokenPaceKit/PopupLayout.swift),
 [MenuBarLayout.swift:348](../../Sources/TokenPaceKit/MenuBarLayout.swift)).
 
-Пігулка **двозначна** (з [#381](https://github.com/artem-from-ua/cc-timer/issues/381) — до того була
-тризначною):
+The pill is **binary** (since [#381](https://github.com/artem-from-ua/cc-timer/issues/381) — it used
+to be ternary):
 
-| Умова | Заливка | Слово |
+| Condition | Fill | Word |
 |---|---|---|
-| `sessionIdle` **і** `CreditsPacing.isBlocked` | **сіра** | «waiting for limit reset» |
-| `sessionIdle`, не blocked | **зелена** | «ready to start» |
+| `sessionIdle` **and** `CreditsPacing.isBlocked` | **gray** | "waiting for limit reset" |
+| `sessionIdle`, not blocked | **green** | "ready to start" |
 
 - `isBlocked` = `mainWindowExhausted && !creditsCanCover`
-  ([CreditsPacing.swift:150](../../Sources/TokenPaceKit/CreditsPacing.swift)) — сірий лише коли
-  головне вікно вичерпане **на 100 %** *і* кредити не покривають: працювати неможливо.
-- **Синьої idle-пігулки більше немає на жодній поверхні**
-  ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)). До
-  [#381](https://github.com/artem-from-ua/cc-timer/issues/381) вона була синьою при тижневому запасі
-  й зеленою без нього — і саме її синій колір розходився з тим, що синій означає на **активному**
-  барі. Тепер обидва рендери цілять у зелений безумовно:
+  ([CreditsPacing.swift:150](../../Sources/TokenPaceKit/CreditsPacing.swift)) — gray only when the
+  main window is exhausted **at 100%** *and* credits don't cover it: working is impossible.
+- **There is no more blue idle pill on any surface**
+  ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)). Before
+  [#381](https://github.com/artem-from-ua/cc-timer/issues/381) it was blue when the week had
+  headroom and green otherwise — and its blue color was exactly what diverged from what blue means on
+  an **active** bar. Now both renderers target green unconditionally:
   [PopupViewController.swift:432](../../Sources/TokenPace/PopupViewController.swift)
-  (`blocked ? monochromeGrey : color(.green)`) і
+  (`blocked ? monochromeGrey : color(.green)`) and
   [StatusItemView.swift:995](../../Sources/TokenPace/StatusItemView.swift).
-- Разом із кольором пішов і прапорець: полів `LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom`
-  **немає** — idle-бару більше нема чого питати про тиждень.
-- `PacingModel.weeklyHasHeadroom` лишається й далі гейтить `blueAllowed` — але тепер лише для
-  **5-годинного** бару ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md) чинний у цій
-  частині; per-model рядки вийшли з-під нього в
-  [ADR-0115](../adr/0115-no-blue-on-per-model-windows.md), idle — ще раніше).
-- **Слово не змінюється** між зеленою й (колишньою) синьою: працювати справді можна. Раніше текст
-  обіцяв «ready to start, full quota available» — цю частину прибрано.
+- The flag went away along with the color: the fields `LimitRow.weeklyHeadroom` /
+  `BarView.weeklyHeadroom` **no longer exist** — the idle bar has nothing left to ask about the week.
+- `PacingModel.weeklyHasHeadroom` still gates `blueAllowed` — but now only for the **5-hour** bar
+  ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md) still stands in that part; per-model rows
+  moved out from under it in [ADR-0115](../adr/0115-no-blue-on-per-model-windows.md), idle even
+  earlier).
+- **The wording doesn't change** between green and (formerly) blue: you genuinely can work either
+  way. The text used to promise "ready to start, full quota available" — that part has been removed.
 
-**Поверх цього — [`ColorAdvice`](../../Sources/TokenPaceKit/ColorAdvice.swift)** (лише menu bar, §7):
-зелена пігулка глушиться в білий під обома глушильними режимами (і **безумовно** під Pressure), сіра
-не глушиться ніколи.
+**On top of this — [`ColorAdvice`](../../Sources/TokenPaceKit/ColorAdvice.swift)** (menu bar only,
+§7): the green pill gets muted to white under both muting modes (and **unconditionally** under
+Pressure); the gray pill is never muted.
 
-> **Один синій, одна роль.** Раніше idle-заливка (`ColorRole.blue`) і пейсинговий зазор
-> (`ColorRole.paceBlue`) були двома записами палітри з **однаковим** дефолтом `.systemBlue` — на
-> екрані нерозрізненні, а розділені лише тим, що тюнер міг їх розвести (сам тюнер прибрано —
-> [ADR-0106](../adr/0106-remove-dev-color-tuner-and-dissolve-colorstore.md)). Ролі злито в одну `.blue`,
-> а з [#381](https://github.com/artem-from-ua/cc-timer/issues/381) idle не читає її взагалі —
-> `.blue` лишився суто пейсинговим.
+> **One blue, one role.** Previously the idle fill (`ColorRole.blue`) and the pacing gap
+> (`ColorRole.paceBlue`) were two separate palette entries sharing the **same** default,
+> `.systemBlue` — indistinguishable on screen, and separated only in that the tuner could pull them
+> apart (the tuner itself has since been removed —
+> [ADR-0106](../adr/0106-remove-dev-color-tuner-and-dissolve-colorstore.md)). The roles were merged
+> into a single `.blue`, and since [#381](https://github.com/artem-from-ua/cc-timer/issues/381) idle
+> doesn't read it at all — `.blue` is now purely a pacing color.
 
-**Узгодженість із «Back to work!».** Зелена пігулка може співіснувати з нотіфікацією, і це не
-суперечність: `WorkAvailability.subscriptionAvailable` питає «чи доступна квота» (вичерпання —
-[ADR-0113](../adr/0113-back-to-work-tracks-the-subscription-quota.md)), а gate — «чи є запас» (темп). Тиждень, що скинувся зі 100 % до 85 % на початку вікна, дає і нотіфікацію, і зелену
-пігулку: «працювати можна, тільки без розгону».
+**Consistency with "Back to work!"** A green pill can coexist with the notification, and that isn't a
+contradiction: `WorkAvailability.subscriptionAvailable` asks "is quota available" (exhaustion —
+[ADR-0113](../adr/0113-back-to-work-tracks-the-subscription-quota.md)), while the gate asks "is there
+headroom" (pace). A week that reset from 100% to 85% early in its window produces both the
+notification and a green pill: "you can work, just don't push the pace."
 
-**Геометрія, не колір.** [ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md) «idle малюється
-як нуль» стосується **форми** — суцільна knobless-пігулка на нулі, без зон і без маркера часу.
-Колір при цьому синій, а не нейтральний. Плутати ці два твердження — типова помилка.
+**Geometry, not color.** [ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md), "idle is drawn
+as zero," is about **shape** — a solid, knobless pill at zero, with no zones and no time marker. The
+color there is blue, not neutral. Confusing these two claims is a common mistake.
 
 ---
 
-## 7. Модифікатори поверх обчисленого кольору
+## 7. Modifiers layered on top of the computed color
 
-Колір із §3-6 — це **вхід**, а не фінальний піксель.
+The color from §3-6 is an **input**, not the final pixel.
 
-### `ColorAdvice` — приглушення в біле (лише menu bar)
+### `ColorAdvice` — muting to white (menu bar only)
 
-Тип названо за **порадою, яку несе колір**, а не за механізмом гасіння
-([ColorAdvice.swift](../../Sources/TokenPaceKit/ColorAdvice.swift), перейменований із `CalmColorMode`
-у [#381](https://github.com/artem-from-ua/cc-timer/issues/381) —
-[ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)). Рядок у Settings → Appearance ›
-Menu bar зветься **«Colors tell me»**, сегменти — нижче в першій колонці; старі raw
-(`yellowGreenBlue`/`yellowGreen`/`off`) читаються через `legacyRawValues`.
+The type is named for the **advice the color carries**, not the muting mechanism
+([ColorAdvice.swift](../../Sources/TokenPaceKit/ColorAdvice.swift), renamed from `CalmColorMode` in
+[#381](https://github.com/artem-from-ua/cc-timer/issues/381) —
+[ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md)). The row in Settings →
+Appearance › Menu bar is called **"Colors tell me"**, with the segments listed below in the first
+column; the old raw values (`yellowGreenBlue`/`yellowGreen`/`off`) are read through
+`legacyRawValues`.
 
-| Режим (сегмент) | Зелений/жовтий | Синій | Помаранчевий/червоний |
+| Mode (segment) | Green/yellow | Blue | Orange/red |
 |---|---|---|---|
-| `.slowDown` (`Slow down`) | **білі** | **білий** | кольорові |
-| `.slowDownOrSpeedUp` (`Slow down or speed up`, дефолт) | **білі** | кольоровий | кольорові |
-| `.howItsGoing` (`How it's going`) | кольорові | кольоровий | кольорові |
+| `.slowDown` (`Slow down`) | **white** | **white** | colored |
+| `.slowDownOrSpeedUp` (`Slow down or speed up`, default) | **white** | colored | colored |
+| `.howItsGoing` (`How it's going`) | colored | colored | colored |
 
-Попередження ніколи не глушаться. Попап не глушить нічого. Рендер читає не сам кейс, а два derived-
-прапорці — `mutesCalm` і `mutesBlue`.
+Warnings are never muted. The popup mutes nothing. The renderer doesn't read the case directly — it
+reads two derived flags, `mutesCalm` and `mutesBlue`.
 
-**Під Pressure гасіння безумовне.** У menu bar при `menuBarStyle == .pressure` увесь спокійний бік
-(синій/зелений/жовтий) і idle-пігулка глушаться в білий **незалежно від `ColorAdvice`**
-([StatusItemView.swift:995](../../Sources/TokenPace/StatusItemView.swift) — `barStyle ==
-.pressure || colorsTell.mutesCalm`). Саме тому рядок «Colors tell me» під Pressure **стає неактивним і
-показує `Slow down`**: під цим стилем кольоровим лишається рівно помаранчевий «витрачаєш зашвидко», а
-це і є той сегмент. Контрол звітує про стан замість пропонувати вибір, який нічого не змінить;
-збережене значення не переписується й повертається на Balance чи Progress.
+**Under Pressure, muting is unconditional.** In the menu bar, when `menuBarStyle == .pressure`, the
+entire calm side (blue/green/yellow) and the idle pill are muted to white **regardless of
+`ColorAdvice`** ([StatusItemView.swift:995](../../Sources/TokenPace/StatusItemView.swift) —
+`barStyle == .pressure || colorsTell.mutesCalm`). That's exactly why the "Colors tell me" row
+**becomes inert and shows `Slow down`** under Pressure: under this style, the only color that
+survives is orange's "you're spending too fast," which is exactly that segment. The control reports
+the state instead of offering a choice that wouldn't change anything; the saved value isn't
+overwritten and reverts once you switch back to Balance or Progress.
 
-**Ці три поверхні більше не читають `ColorAdvice` взагалі**
+**These three surfaces no longer read `ColorAdvice` at all**
 ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md),
-[#381](https://github.com/artem-from-ua/cc-timer/issues/381)), бо відповідають на інші питання:
+[#381](https://github.com/artem-from-ua/cc-timer/issues/381)), because they answer different
+questions:
 
-- **Service-крапка**: її шкала (сірий → жовтий → помаранчевий → червоний) самодостатня, і від
-  [#410](https://github.com/artem-from-ua/tokenpace/issues/410) однакова на всіх трьох поверхнях —
-  menu bar, попап, Legend ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md)).
-  Змінився **тон** `degraded`, а не те, хто його вирішує: налаштування крапка не читала й не читає.
-- **Символ валюти (¤)**: його власна шкала біла→помаранчева→червона самодостатня
+- **The service dot**: its scale (gray → yellow → orange → red) is self-contained, and since
+  [#410](https://github.com/artem-from-ua/tokenpace/issues/410) it's identical across all three
+  surfaces — menu bar, popup, Legend ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md)).
+  What changed was the **tone** of `degraded`, not who decides it: the setting never read the dot,
+  and still doesn't.
+- **The currency symbol (¤)**: its own white→orange→red scale is self-contained
   ([ADR-0068](../adr/0068-credits-in-use-marker-anatomy.md)).
-- **Idle-пігулка** (§6): гаситься за спільним `idleMuted`, тим самим, що й решта спокійного боку.
+- **The idle pill** (§6): muted through the shared `idleMuted`, the same flag that governs the rest
+  of the calm side.
 
-### Journal vs UI
+### Journal vs. UI
 
-`PacingBucket` ігнорує **лише** `ColorAdvice` — це косметика, і серія має лишатися порівнюваною
-між користувачами. `blueAllowed` він, навпаки, **поважає**: це не налаштування, а факт про дані
-([PacingBucket.swift](../../Sources/TokenPaceKit/PacingBucket.swift)).
+`PacingBucket` ignores **only** `ColorAdvice` — that's cosmetic, and the series has to stay
+comparable across users. `blueAllowed`, by contrast, it **honors**: that's not a setting, it's a fact
+about the data ([PacingBucket.swift](../../Sources/TokenPaceKit/PacingBucket.swift)).
 
-Ширина синьої зони більше не налаштовується: колишній `FarBehindInterval` (×1/×2/×3/off) прибрано,
-множник фіксований на ×2.
+The width of the blue zone is no longer configurable: the old `FarBehindInterval` (×1/×2/×3/off) has
+been removed, and the multiplier is fixed at ×2.
 
 ---
 
-## 8. Неможливі комбінації
+## 8. Impossible combinations
 
-Стани, яких код **не може** видати. Рендер із них робить хибним увесь розбір навколо.
+States the code **cannot** produce. Rendering one makes everything around it in the analysis wrong.
 
-| Комбінація | Чому неможлива |
+| Combination | Why it's impossible |
 |---|---|
-| Синій per-model / credits рядок | `blueAllowed == false` у самому лейауті → зелений і на екрані, і в журналі ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)) |
-| Синій у перші 20 хв вікна | start-override, гілка 1 |
-| Помаранчевий при `u <= t` | кінець-override недосяжний на спокійному боці |
-| Синій бар зі словом «far behind» на Opus | `isFarBehind` віддає `false` при `blueAllowed == false` |
-| Credits-бар при `limit == nil` | `barLayout` повертає `nil` — бару немає |
-| Credits-бар у Pressure чи Balance | Завжди шкала вікна, незалежно від `dropdownStyle` ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)) |
-| Credits-бар із тіками | Його лінійка — два підписи країв місяця, зубців немає (0092); та й самі підписи видно **лише під ⌥** ([ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md)) — без нього бар стоїть без лінійки взагалі |
-| Idle-бар із маркером часу | idle малює нуль без маркера й зон |
-| Idle-бар із заливкою на всю ширину | idle — це пігулка на нулі |
-| **Синя idle-пігулка** — за будь-яких налаштувань і будь-якого стану тижня | З [#381](https://github.com/artem-from-ua/cc-timer/issues/381) синього idle немає на жодній поверхні: заливка або зелена, або біла (під гасінням), або сіра (blocked). Виняток `Yellow + Green` для idle, що діяв за [#343](https://github.com/artem-from-ua/cc-timer/issues/343), зник разом із синім |
-| **Кольорова idle-пігулка під Pressure у menu bar** | Під Pressure гасіння безумовне (`barStyle == .pressure \|\| colorsTell.mutesCalm`), тож зелена пігулка там **завжди** біла — незалежно від `ColorAdvice`, який під цим стилем навіть не показується в Settings |
-| **Біла (нейтральна) service-крапка в menu bar — у будь-якому стані** | Від [#410](https://github.com/artem-from-ua/tokenpace/issues/410) ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md)) `statusDotTarget` не має жодного винятку: усі шість станів беруть свій тон зі шкали (`degraded` — жовтий, як у попапі й на Legend). Гілки `calmWhite` там більше немає, тож нейтральна крапка не малюється ніде |
-| Жовтий на спокійному боці | жовтий існує лише при `u > t` |
-| Синій на 5h при `t < 0.40` | `t − u ≤ t`, тож запас не досягне порога |
-| **Синій h5 при d7 ∈ {yellow, orange, red}** | weekly-gate закритий → `blueAllowed == false` |
-| **Idle-пігулка, що змінює колір за станом тижня** | Тижневий gate більше не входить у idle: полів `LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom` немає, тож `idle` і `idle-week-hot` малюють однакову **зелену** пігулку |
-| `sev: "blue"` у журналі, якого не було на екрані | журнал читає те саме `blueAllowed` |
+| A blue per-model / credits row | `blueAllowed == false` in the layout itself → green both on screen and in the journal ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)) |
+| Blue in the first 20 minutes of a window | start override, branch 1 |
+| Orange when `u <= t` | the end-of-window override is unreachable on the calm side |
+| A blue bar with the words "far behind" on Opus | `isFarBehind` returns `false` when `blueAllowed == false` |
+| A credits bar when `limit == nil` | `barLayout` returns `nil` — there's no bar |
+| A credits bar under Pressure or Balance | Always the month-window scale, regardless of `dropdownStyle` ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)) |
+| A credits bar with ticks | Its ruler is two month-edge labels, no ticks at all (0092); and even those labels only show **under ⌥** ([ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md)) — without it, the bar has no ruler at all |
+| An idle bar with a time marker | idle draws as zero, with no marker and no zones |
+| An idle bar filled full width | idle is a pill at zero |
+| **A blue idle pill** — under any settings, in any state of the week | Since [#381](https://github.com/artem-from-ua/cc-timer/issues/381) there's no blue idle on any surface: the fill is green, or white (under muting), or gray (blocked). The `Yellow + Green` exception for idle that applied under [#343](https://github.com/artem-from-ua/cc-timer/issues/343) disappeared along with blue |
+| **A colored idle pill under Pressure in the menu bar** | Under Pressure, muting is unconditional (`barStyle == .pressure \|\| colorsTell.mutesCalm`), so a green pill there is **always** white — regardless of `ColorAdvice`, which isn't even shown in Settings under this style |
+| **A white (neutral) service dot in the menu bar — in any state** | Since [#410](https://github.com/artem-from-ua/tokenpace/issues/410) ([ADR-0111](../adr/0111-degraded-dot-is-yellow-on-every-surface.md)) `statusDotTarget` has no exception left: all six states take their tone from the scale (`degraded` is yellow, same as in the popup and on the Legend). The `calmWhite` branch no longer exists, so a neutral dot is drawn nowhere |
+| Yellow on the calm side | yellow only exists when `u > t` |
+| Blue on 5h when `t < 0.40` | `t − u ≤ t`, so the headroom can never reach the threshold |
+| **Blue h5 when d7 ∈ {yellow, orange, red}** | the weekly gate is closed → `blueAllowed == false` |
+| **An idle pill that changes color with the week's state** | The weekly gate no longer factors into idle at all: the fields `LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom` don't exist, so `idle` and `idle-week-hot` draw the same **green** pill |
+| `sev: "blue"` in the journal that never appeared on screen | the journal reads the same `blueAllowed` |
 
 ---
 
-## 9. Як перевірити стан арифметично
+## 9. How to verify a state arithmetically
 
-Перш ніж стверджувати «бар буде такого кольору», порахуй:
+Before claiming "the bar will be this color," work it out:
 
 ```
 u = utilization / 100
-t = elapsed / windowDuration          # частка вікна, що минула
+t = elapsed / windowDuration          # fraction of the window elapsed
 elapsed = windowDuration - remainingSeconds
 
 if u <= t:
-    if not blueAllowed:                     -> ЗЕЛЕНИЙ (weekly gate / інертний бар)
-    elif elapsed <= 1200:                   -> ЗЕЛЕНИЙ (start-override)
-    elif (t - u) > behindThreshold:         -> СИНІЙ (лише h5/d7)
-    else:                                   -> ЗЕЛЕНИЙ
+    if not blueAllowed:                     -> GREEN (weekly gate / inert bar)
+    elif elapsed <= 1200:                   -> GREEN (start override)
+    elif (t - u) > behindThreshold:         -> BLUE (h5/d7 only)
+    else:                                   -> GREEN
 else:
-    if u >= 1:                              -> ЧЕРВОНИЙ
-    elif remainingSeconds <= 1200:          -> ПОМАРАНЧЕВИЙ (end-override)
-    elif (u - t) < 0.16 * (1 - t):          -> ЖОВТИЙ
-    else:                                   -> ПОМАРАНЧЕВИЙ
+    if u >= 1:                              -> RED
+    elif remainingSeconds <= 1200:          -> ORANGE (end override)
+    elif (u - t) < 0.16 * (1 - t):          -> YELLOW
+    else:                                   -> ORANGE
 ```
 
-Далі: якщо бар не має права на синій (`blueAllowed == false`) — синій замінюється зеленим. Якщо menu bar і цей
-тон глушиться — колір стає білим; глушить його `ColorAdvice` (§7) **або**, безумовно, стиль
-Pressure.
+Then: if the bar isn't entitled to blue (`blueAllowed == false`), blue is replaced with green. If
+it's the menu bar and that tone gets muted, the color becomes white; muting comes from `ColorAdvice`
+(§7) **or**, unconditionally, from the Pressure style.
 
 ---
 
-## 10. Стуби для перевірки живцем
+## 10. Stubs for live verification
 
-| Сценарій | Що показує |
+| Scenario | What it shows |
 |---|---|
-| `far-behind` | обидва базові бари сині (5h запас ~0.55, 7d ~0.61) |
-| `both-orange` / `both-red` | ahead-бік і вичерпання |
-| `calm-both` | обидва зелені |
-| `near-reset` | 20-хв кінець-override (2 пп ліду → помаранчевий) |
-| `bar-extremes` | 5h синій (75 пп запасу) + 7d позаду темпу (щоб gate лишався відкритим) |
-| `idle` | **зелена** idle-пігулка, «ready to start» (до [#381](https://github.com/artem-from-ua/cc-timer/issues/381) була синя) |
-| `idle-week-hot` | тиждень попереду темпу — і пігулка **та сама зелена**. Стан лишився стубом навмисно: він доводить, що idle **не** реагує на тиждень; розбіжність із `idle` була б регресією |
-| `idle-blocked` | сіра idle-пігулка, «waiting for limit reset» |
-| `weekly-gate` | 5h глибоко позаду, але тиждень вичерпаний → 5h **зелений**, не синій |
-| `credits-*` | money-бар у різних станах, зокрема без cap |
-| `credits-month-end` | той самий money-бар на **90 % місяця** — найтісніше місце його лінійки: маркер часу підходить до правого підпису (`Jan 31`) найближче |
-| `color-cycle` | прогін усіх бакетів по черзі |
+| `far-behind` | both base bars blue (5h headroom ~0.55, 7d ~0.61) |
+| `both-orange` / `both-red` | the ahead side and exhaustion |
+| `calm-both` | both green |
+| `near-reset` | the 20-min end override (2 pp lead → orange) |
+| `bar-extremes` | 5h blue (75 pp headroom) + 7d behind pace (so the gate stays open) |
+| `idle` | **green** idle pill, "ready to start" (was blue before [#381](https://github.com/artem-from-ua/cc-timer/issues/381)) |
+| `idle-week-hot` | the week is ahead of pace — and the pill is **the same green**. This state was kept as a stub deliberately: it proves idle does **not** react to the week; a divergence from `idle` would be a regression |
+| `idle-blocked` | gray idle pill, "waiting for limit reset" |
+| `weekly-gate` | 5h deeply behind pace, but the week is exhausted → 5h is **green**, not blue |
+| `credits-*` | the money bar in various states, including without a cap |
+| `credits-month-end` | the same money bar at **90% of the month** — the tightest spot on its ruler: the time marker gets closest to the right-hand label (`Jan 31`) |
+| `color-cycle` | cycles through every bucket in turn |
 
-Запуск: `TOKENPACE_STUB=<id> swift run`.
-Повний перелік — [ui-verification.md](../guides/ui-verification.md).
+Run with: `TOKENPACE_STUB=<id> swift run`.
+Full list — [ui-verification.md](../guides/ui-verification.md).

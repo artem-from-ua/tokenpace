@@ -1,17 +1,17 @@
-# Архітектура — система оновлень
+# Architecture — update system
 
-Наскрізна картина — в [overview.md](overview.md). Тут — перевірка релізів, авто-встановлення й
-єдиний update-пункт дропдауна. Ланцюг рішень: ADR-0025 (перевірка) → ADR-0033 (встановлення) →
-ADR-0036 (сигнальний UX). Перші два частково витіснені 0036 — див.
-[../../adr/README.md](../../adr/README.md).
+The cross-cutting picture is in [overview.md](overview.md). Here — release checking,
+auto-install, and the single update item in the dropdown. Decision chain: ADR-0025 (checking) →
+ADR-0033 (installing) → ADR-0036 (signal UX). The first two are partially superseded by 0036 —
+see [../../adr/README.md](../../adr/README.md).
 
-## Перевірка оновлень (ADR-0025)
+## Update checking (ADR-0025)
 
-Чек іде через GitHub releases: анонімний HTTPS (`HTTPUpdateFetcher`) або `gh`-subprocess
-(`GHReleaseFetcher`, поки репо приватне — гейт `TOKENPACE_GH_AUTH`). Семвер-порівняння —
-`SemanticVersion`; будь-яка помилка парсингу → жодного фантомного оновлення.
+The check goes through GitHub releases: anonymous HTTPS (`HTTPUpdateFetcher`) or a `gh` subprocess
+(`GHReleaseFetcher`, while the repo is private — gated by `TOKENPACE_GH_AUTH`). SemVer comparison
+is `SemanticVersion`; any parse error → no phantom update.
 
-**Каденція чеку** — фіксовані 12 год плюс безумовний чек при старті:
+**Check cadence** — a fixed 12 hours plus an unconditional check at launch:
 
 ```plantuml
 @startuml
@@ -27,11 +27,11 @@ Checking : GitHubReleaseClient.checkForUpdate
 
 ![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/JP1DJiCm48NtFiKi4vIWK9LD5wWeBJyIgqWW8SfY6eyQgyuaYYT57863S35EWkqKbEtp-_mzU-q41nbRgyI89NZkDGf1tL1zX1erSKsGJ6aPmdBAChZTL7bHBAvJzNRn3db-0qyuSjt45gm0-nxYvJjEVDwnDc8wHfkgUJ60ZzgRLz3YSAG1B3gP2G7r2RrHgrWB_PWRFdZ6kCr8IK1Yc05t7-cEVxw-uMhHW3DXVpW65A6s5_KFpyndnNc17zmnR5-srUiVbG6TY65PB5DrPWRAuoyvEFYf6lQVmQXcs-wDF8pxYYoXez8QOhcCo5qtJ0zKQsBjF_yN)
 
-## Єдиний update-пункт дропдауна (ADR-0036)
+## The single dropdown update item (ADR-0036)
 
-`UpdateMenuState` — чиста машина станів **єдиного** пункту меню (#130), що замінила банер
-`UpdateNotifier` (жодних `UserNotifications`). `evaluate(...)` → семантичний `Item`-enum за
-пріоритетною таблицею; будь-яка версія, новіша за встановлену, витісняє «what's new».
+`UpdateMenuState` is a pure state machine for the **single** menu item (#130) that replaced the
+`UpdateNotifier` banner (no `UserNotifications` at all). `evaluate(...)` → a semantic `Item` enum
+per a priority table; any version newer than the installed one supersedes "what's new".
 
 ```plantuml
 @startuml
@@ -55,24 +55,25 @@ end note
 
 ![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/ZLBDJiCm3BxdANn26r9VODAgSQd4WGq90GVW48YtHagTod5NxSP3y8Gy2MPjLwhjm2cExU_7SLP9B4jJ1IDU0i9ZxQpW7LBp81h0z-SN94yxBJcEjOijWHUipClr6sHP3gLt3ibqnp7J72aAwmCwM42mIRhBBQbO24_8oKU2vL9hWadEmJTx1TXt5LtqFP23x-3eNcbc6ubPdu1DKSpFEUwHd1h_7yDwGj2MLj8QMyNM7Sjpdncy9nGpbRam-S2Ep94ljF-HEJc3As0Cjg6F4fsP45uQZL7u03F25bbD8StDYNNSZZOwdogVad9IrBMotvK2SJknR01gzf6z71QmxKHpiCCkj9mFxm6ZUqrREa1dOT-_JysOOLLB6jiK2B_QPgMHVhWV)
 
-Колір і текст — у view (`AppDelegate`, переюзує `PopupViewController.dotColor`: 🔴 `.majorOutage`
-для failed / 🔵 `.underMaintenance` для pending).
+Color and text live in the view (`AppDelegate`, which reuses `PopupViewController.dotColor`: 🔴
+`.majorOutage` for failed / 🔵 `.underMaintenance` for pending).
 
-## Рішення про авто-встановлення (ADR-0033)
+## The auto-install decision (ADR-0033)
 
-`UpdateInstallPlan.decide(...)` — один вердикт «ставити зараз?» за впорядкованими гейтами.
-Environment-гейти (місце / живлення / metered) — **лише для встановлення**, не для check-шляху;
-`.defer…` переоцінюється наступним heartbeat, `.skip…` — settled.
+`UpdateInstallPlan.decide(...)` is a single "install now?" verdict over an ordered set of gates.
+Environment gates (space / power / metered) apply **only to installing**, not to the check path;
+`.defer…` is re-evaluated on the next heartbeat, `.skip…` is settled.
 
-**Явний запит користувача — «Update now» у Settings → About** (#221, `AppDelegate.installUpdateNow`)
-проходить ті самі гейти, але з `onACPower: true, networkIsMetered: false`: гейти живлення й мережі —
-це *ввічливість* фонового процесу (не палити metered-трафік, не ризикувати розрядом посеред заміни),
-і явний клік цю ввічливість знімає. Клік також рахується за opt-in для **цієї** інсталяції
-(`autoInstallEnabled: true`), інакше кнопка була б мертвою рівно там, де потрібна найбільше —
-коли авто-встановлення вимкнене. Free-space-гейт **не** обходиться: жоден намір не робить безпечним
-заповнення диска. Чому не через `TOKENPACE_UPDATE_DRYRUN` — той прапорець зліплює «обійти гейти» з
-«не встановлювати насправді»; тут потрібна лише перша половина, тож `startInstall(…,
-forceRealInstall: true)` явно передає `dryRunForced: false`.
+**An explicit user request — "Update now" in Settings → About** (#221,
+`AppDelegate.installUpdateNow`) goes through the same gates, but with `onACPower: true,
+networkIsMetered: false`: the power and network gates are *courtesy* of a background process (not
+burning metered traffic, not risking a mid-swap power loss), and an explicit click waives that
+courtesy. The click also counts as opt-in for **this** installation (`autoInstallEnabled: true`),
+otherwise the button would be dead exactly where it's needed most — when auto-install is off. The
+free-space gate is **not** bypassed: no intent makes filling the disk safe. Why not through
+`TOKENPACE_UPDATE_DRYRUN` — that flag conflates "bypass the gates" with "don't actually install";
+only the first half is needed here, so `startInstall(…, forceRealInstall: true)` explicitly passes
+`dryRunForced: false`.
 
 ```plantuml
 @startuml
@@ -120,16 +121,16 @@ stop
 
 ![PlantUML Diagram](https://www.plantuml.com/plantuml/svg/ZPF1JW8n48Rl-nIJU853CHv841L1NOmtBzwu3DifD9Hfi-rAyEH3-8G-YRCBH18YxctI_lD_k_zCnp5XcQgrov9DZc1I9QyiowbpeAcmqNg61IQAq7aBMegNtUshG-xL2atTh779h84E7XiGuzoHlkz2MX93Xtqt0nZ6bGtm_Va5nsBbZRc1szkBwLC-o0UZaIXZyY4Z5mawMuhTZ5XRqs2ODbIAApBi-yzWs2VLDBJtBojcoml023qCGI1mEGd1sGAJ91BFigH1pIlMZje3rvYAPKryfxBEN36kIKFlGtmnHafdYAeHj6UPaWXYm89WT0TzU7u0D4dor7x3pkD9afgCtDOm2RionXQMEAd6OeUTJWVvrJzOMQJ98mGlW_WR87y-noGVisrlp9Gslbn1nMfDqdgw2h_-Uu7QzxI330yBBGupFgG4QYJ8Ua1IoDYisSvOofA2gxDjIeSL5yi6am-c_VnQC0raBDRoxdu0)
 
-## Компоненти системи оновлень
+## Update system components
 
-| Компонент | Відповідальність |
+| Component | Responsibility |
 |---|---|
-| **SemanticVersion / UpdateComparison** | Чистий семвер-парсер (#37, `TokenPaceKit`, ADR-0025). `SemanticVersion(_:)` парсить `vX.Y.Z`/`X.Y.Z` консервативно (рівно 3 числові компоненти; суфікс `-beta`/`+meta` відкидається), `Comparable`. `UpdateComparison.isNewer(tag:than:)` → `false` на будь-якій помилці парсингу (контракт «ніколи не смикати на смітті») |
-| **GitHubRelease / GitHubReleaseClient** | HTTP-seam GitHub-релізу (#37, ADR-0025). `GitHubRelease` (Decodable) парсить `tag_name`/`html_url` + `assets[]` (forward-compat). `checkForUpdate(using:currentVersion:)` — fetch → decode → `isNewer`, повертає реліз лише якщо новіший, будь-яка помилка (в т.ч. 404) → `nil`. Транспорт абстрагований на `UpdateFetcher` (не `UsageTransport`), бо один шлях — subprocess |
-| **UpdateAssetSelector / UpdateInstallPlan** | Чисті seam-и авто-встановлення (#122, `TokenPaceKit`, ADR-0033). `selectZIP(from:)` вибирає version-named `.zip` (`TokenPace-<X.Y.Z>.zip`), відкидає не-HTTPS. `decide(...)` — впорядковані гейти (opt-in → newer → real `.app` → asset → free space ≥5 GB → AC power → unmetered) → `.install` / `.skip…` / `.defer…`. Факти інжектяться з shell |
-| **UpdateDeferralReason** | Пояснювальний двійник `decide` (#221, `TokenPaceKit`). `UpdateInstallPlan.deferralReasons(...)` повертає **всі** активні environment-блокери (`onBattery` / `meteredNetwork` / `insufficientSpace`) у сталому порядку `allCases`, тоді як `decide` спиняється на першому — тож UI не жене користувача чинити одну умову, щоб потім відкрити наступну. Settled-no випадки (auto off / not newer / dev / no asset) → `[]`: там немає відкладеного install, який треба пояснювати. `pendingExplanation(for:)` складає з них одне речення («a», «a and b», «a, b and c») для About-рядка ⚠ |
-| **UpdateCheckCadence** | Чистий seam частоти update-чеку (#37, ADR-0025) — фіксований 12-год інтервал (не прив'язаний до usage-cadence). Shell також перевіряє **безумовно при старті**; маркер `lastUpdateCheck` радиться на **кожній** спробі (навіть 404) |
-| **UpdateMenuState** | Чиста машина станів **єдиного** update-пункту (#130, `TokenPaceKit`, ADR-0036). `evaluate(...)` → `Item`-enum (`hidden`/`updateFailed`/`updateAvailable`/`updatePending`/`whatsNew`) за пріоритетною таблицею. Колір/текст — у view. **Замінив `UpdateNotifier`** (банер видалено). ADR-0036 |
-| **GHReleaseFetcher / ShellEnvironment** | `gh`-subprocess-конформер `UpdateFetcher` (#37, ADR-0025) — `gh api repos/…/releases/latest`, таймаут 20 с, stdout захоплюється, середовище успадковується (`gh` потребує keyring). Обирається коли встановлено `TOKENPACE_GH_AUTH`, який резолвиться власним `AppDelegate.resolveGHAuth`: `ProcessInfo` → login-shell fallback через `ShellEnvironment` (`zsh -l -i`; `SMAppService` стартує без шелла). `StubUpdateFetcher` — `TOKENPACE_FAKE_LATEST` |
-| **UpdateInstaller** | Тонкий I/O-shell авто-інсталятора (#123, ADR-0033) за seam-ом `AppUpdateInstalling`. Пайплайн off-main: **download** (двошляховий: `gh release download` за `TOKENPACE_GH_AUTH` / анонімний `URLSession`) → **unzip** (`ditto -x -k`) → **verify** (`codesign --verify` + звірка Team ID через `codesign -dv` + Gatekeeper `spctl`) → **replace** (атомарний `replaceItemAt` з backup) → **relaunch**. Fail-safe (не кидає). `TOKENPACE_UPDATE_DRYRUN` зупиняє після verify; `TOKENPACE_UPDATE_TARGET` перенаправляє заміну на тестову копію |
-| **PowerSource / DiskSpace / NetworkMonitor.isMetered** | Shell-факти середовища для defer-гейтів (#123/#124, ADR-0033). `isOnACPower` — IOKit-read (fail-open → `true`). `availableBytes` — `volumeAvailableCapacityForImportantUsage`. `isMetered` — `path.isExpensive \|\| path.isConstrained`. Гейтять **лише встановлення**, ніколи не check-шлях |
+| **SemanticVersion / UpdateComparison** | Pure SemVer parser (#37, `TokenPaceKit`, ADR-0025). `SemanticVersion(_:)` parses `vX.Y.Z`/`X.Y.Z` conservatively (exactly 3 numeric components; a `-beta`/`+meta` suffix is dropped), `Comparable`. `UpdateComparison.isNewer(tag:than:)` → `false` on any parse error (the contract is "never act on garbage") |
+| **GitHubRelease / GitHubReleaseClient** | HTTP seam for the GitHub release (#37, ADR-0025). `GitHubRelease` (Decodable) parses `tag_name`/`html_url` + `assets[]` (forward-compat). `checkForUpdate(using:currentVersion:)` — fetch → decode → `isNewer`, returns a release only if newer, any error (including 404) → `nil`. Transport is abstracted as `UpdateFetcher` (not `UsageTransport`) because one path is a subprocess |
+| **UpdateAssetSelector / UpdateInstallPlan** | Pure auto-install seams (#122, `TokenPaceKit`, ADR-0033). `selectZIP(from:)` picks the version-named `.zip` (`TokenPace-<X.Y.Z>.zip`), rejects non-HTTPS. `decide(...)` — ordered gates (opt-in → newer → real `.app` → asset → free space ≥5 GB → AC power → unmetered) → `.install` / `.skip…` / `.defer…`. Facts are injected from the shell |
+| **UpdateDeferralReason** | The explanatory counterpart to `decide` (#221, `TokenPaceKit`). `UpdateInstallPlan.deferralReasons(...)` returns **all** active environment blockers (`onBattery` / `meteredNetwork` / `insufficientSpace`) in the stable `allCases` order, whereas `decide` stops at the first one — so the UI doesn't chase the user to fix one condition only to reveal the next. Settled-no cases (auto off / not newer / dev / no asset) → `[]`: there's no deferred install to explain there. `pendingExplanation(for:)` composes them into one sentence ("a", "a and b", "a, b and c") for the About-page ⚠ line |
+| **UpdateCheckCadence** | Pure seam for the update-check frequency (#37, ADR-0025) — a fixed 12-hour interval (not tied to the usage cadence). The shell also checks **unconditionally at launch**; the `lastUpdateCheck` marker advances on **every** attempt (even a 404) |
+| **UpdateMenuState** | Pure state machine for the **single** update item (#130, `TokenPaceKit`, ADR-0036). `evaluate(...)` → an `Item` enum (`hidden`/`updateFailed`/`updateAvailable`/`updatePending`/`whatsNew`) per a priority table. Color/text live in the view. **Replaced `UpdateNotifier`** (the banner was removed). ADR-0036 |
+| **GHReleaseFetcher / ShellEnvironment** | The `gh`-subprocess conformer to `UpdateFetcher` (#37, ADR-0025) — `gh api repos/…/releases/latest`, 20 s timeout, stdout captured, environment inherited (`gh` needs the keyring). Selected when `TOKENPACE_GH_AUTH` is set, which is resolved by its own `AppDelegate.resolveGHAuth`: `ProcessInfo` → login-shell fallback via `ShellEnvironment` (`zsh -l -i`; `SMAppService` starts without a shell). `StubUpdateFetcher` — `TOKENPACE_FAKE_LATEST` |
+| **UpdateInstaller** | A thin I/O shell for the auto-installer (#123, ADR-0033) behind the `AppUpdateInstalling` seam. Off-main pipeline: **download** (two paths: `gh release download` under `TOKENPACE_GH_AUTH` / anonymous `URLSession`) → **unzip** (`ditto -x -k`) → **verify** (`codesign --verify` + Team ID check via `codesign -dv` + Gatekeeper `spctl`) → **replace** (atomic `replaceItemAt` with backup) → **relaunch**. Fail-safe (never throws). `TOKENPACE_UPDATE_DRYRUN` stops after verify; `TOKENPACE_UPDATE_TARGET` redirects the replace to a test copy |
+| **PowerSource / DiskSpace / NetworkMonitor.isMetered** | Shell facts about the environment for the defer gates (#123/#124, ADR-0033). `isOnACPower` — an IOKit read (fail-open → `true`). `availableBytes` — `volumeAvailableCapacityForImportantUsage`. `isMetered` — `path.isExpensive || path.isConstrained`. These gate **only installing**, never the check path |

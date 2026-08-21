@@ -157,7 +157,7 @@ key = reset.replace(second=0, microsecond=0) + timedelta(minutes=1 if reset.seco
 
 > Окремо: значення `resets_at`, що лягають **рівно** на 10-хвилинну межу без дробових секунд, —
 > це старий локальний фолбек, а не серверні дані. Деталі й спосіб відрізнити —
-> [usage-api-quirks.md § «10-хвилинна сітка в даних»](usage-api-quirks.md#10-хвилинна-сітка-в-даних--наша-не-серверна).
+> [usage-api-quirks.md § «10-хвилинна сітка в даних»](usage-api-quirks.md#the-10-minute-grid-in-the-data-is-ours-not-the-servers).
 
 ## Детекція ресету: інстант плюс падіння, ніколи щось одне
 
@@ -1445,7 +1445,7 @@ PY
 > **Обов'язково толерантний парсинг — це не рідкісний випадок.** Порожній `reset` мають **27 %
 > рядків на ряді Max** (1 550 із 5 760) і **56 % на ряді Pro** (481 із 862). Причина — вікна, для
 > яких API не віддав `resets_at`
-> ([usage-api-quirks.md § «Щотижня API на 4–6 годин перестає віддавати `seven_day.resets_at`»](usage-api-quirks.md#щотижня-api-на-46-годин-перестає-віддавати-seven_dayresets_at)).
+> ([usage-api-quirks.md § «Щотижня API на 4–6 годин перестає віддавати `seven_day.resets_at`»](usage-api-quirks.md#every-week-the-api-stops-returning-seven_dayresets_at-for-4-6-hours)).
 > Наївний `fromisoformat` падає на них з `ValueError`, і скрипт обривається посеред обробки — часто
 > вже після того, як вивів частину результатів, тож помилку легко не помітити.
 >

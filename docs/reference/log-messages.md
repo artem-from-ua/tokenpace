@@ -6,7 +6,7 @@ unified logging) — see [`Sources/TokenPaceKit/AppLogger.swift`](../../Sources/
 
 > **Keep this in sync.** Whenever you add, remove, or change the text of a log
 > statement, update the matching row here in the same change. See
-> [conventions.md → Логування](conventions.md#логування).
+> [conventions.md → Logging](conventions.md#logging).
 
 ## Facade
 

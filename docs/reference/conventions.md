@@ -1,4 +1,4 @@
-# Конвенції розробки
+# Development conventions
 
 ## Language
 
@@ -10,76 +10,78 @@
 - API identifiers (`five_hour`, `resets_at`, `client_id`, …) keep their original form and are
   never translated. The same holds for UI strings quoted from the app.
 
-## Стек
+## Stack
 
-- **Swift** для всього проєкту (menu bar app, згодом iOS/watchOS). Див.
+- **Swift** for the whole project (menu bar app, iOS/watchOS later). See
   [ADR-0001](../adr/0001-swift-stack.md).
-- macOS: AppKit (`NSStatusItem`) + SwiftUI всередині (`NSHostingView`).
-- **Мінімальний target: macOS 15 Sequoia.**
-- **Збірка Фази 1:** Swift Package Manager + build-скрипт (bundle/sign/notarize). Xcode —
-  у Фазі 2 для iOS/watchOS. Див. [ADR-0004](../adr/0004-build-system.md).
-- **Тести:** `swift-testing` (`import Testing`, `@Test func`, `#expect(…)`) — `XCTest` недоступний
-  на Command Line Tools без повного Xcode. `swift-testing` вбудований у Swift 6.1 CLT.
+- macOS: AppKit (`NSStatusItem`) + SwiftUI inside (`NSHostingView`).
+- **Minimum target: macOS 15 Sequoia.**
+- **Phase 1 build:** Swift Package Manager + a build script (bundle/sign/notarize). Xcode comes in
+  Phase 2, for iOS/watchOS. See [ADR-0004](../adr/0004-build-system.md).
+- **Tests:** `swift-testing` (`import Testing`, `@Test func`, `#expect(…)`) — `XCTest` is unavailable
+  on Command Line Tools without a full Xcode. `swift-testing` ships with Swift 6.1 CLT.
 
-### Ресурси (картинки тощо)
+### Resources (images and the like)
 
-**Наразі застосунок не має жодного ресурсу.** Три PNG прев'ю стилю бару були єдиними; вони
-малюються рантаймом ([ADR-0097](../adr/0097-bar-style-preview-rendered-at-runtime.md)), тож
-`Package.swift` не має `resources:`, а `scripts/build-app.sh` нічого не копіює. Правило нижче
-лишається — воно про **наступний** ресурс, і саме на цій міні вже підірвався реліз 0.94.0.
+**Right now the app has no resources at all.** The three PNG previews of the bar styles were the
+only ones; they are drawn at runtime
+([ADR-0097](../adr/0097-bar-style-preview-rendered-at-runtime.md)), so `Package.swift` has no
+`resources:` and `scripts/build-app.sh` copies nothing. The rule below stays — it is about the
+**next** resource, and this is the exact mine that blew up release 0.94.0.
 
-**Перш ніж додавати ресурс, спитай, чи не можна намалювати це кодом.** Картинка не має способу
-розійтися з кодом голосно: прев'ю стилю бару два релізи показувало бар, якого застосунок уже не
-малював, і жоден тест цього не побачив.
+**Before adding a resource, ask whether it can be drawn in code instead.** An image has no way to
+diverge from the code loudly: the bar style preview spent two releases showing a bar the app no
+longer drew, and no test saw it.
 
-Якщо ресурс усе-таки потрібен: файли в `Sources/TokenPace/Resources/`, підключені як
-`resources: [.process("Resources")]`. `.process` (не `.copy`) — тоді вони лежать плоско в корені
-бандла й доступні за голим іменем. Retina-знімки називати з суфіксом `@2x`: `NSImage` тоді сам
-виставляє правильний логічний розмір.
+If a resource is genuinely needed: files go in `Sources/TokenPace/Resources/`, wired up as
+`resources: [.process("Resources")]`. `.process` (not `.copy`) — then they sit flat at the root of
+the bundle and are reachable by their bare name. Name retina images with an `@2x` suffix: `NSImage`
+then sets the correct logical size on its own.
 
-**Читати їх через `Bundle.module` не можна — у `.app` це гарантований креш.** Згенерований
-SwiftPM аксесор шукає бандл за `Bundle.main.bundleURL/<name>.bundle`, тобто **поруч** із `.app`
-(`/Applications/TokenPace_TokenPace.bundle`), тоді як у `.app` ресурси лежать усередині, в
-`Contents/Resources/`. Запасний шлях — абсолютний шлях у `.build/` девелопера, якого на чужій машині
-немає. Обидва промахуються, і аксесор викликає `fatalError`. У `swift run` бандл справді лежить
-поруч із бінарником, тому дефект у дев-режимі невидимий — саме так креш і доїхав до релізу 0.94.0
+**Reading them through `Bundle.module` is not allowed — in a `.app` it is a guaranteed crash.** The
+generated SwiftPM accessor looks for the bundle at `Bundle.main.bundleURL/<name>.bundle`, i.e.
+**next to** the `.app` (`/Applications/TokenPace_TokenPace.bundle`), whereas in a `.app` the
+resources live inside it, in `Contents/Resources/`. The fallback path is an absolute path into the
+developer's `.build/`, which does not exist on anyone else's machine. Both miss, and the accessor
+calls `fatalError`. Under `swift run` the bundle really does sit next to the binary, so the defect
+is invisible in dev mode — which is exactly how the crash rode all the way into release 0.94.0
 ([ADR-0095](../adr/0095-own-resource-bundle-lookup.md)).
 
-Натомість резолвити бандл самому: спершу `Contents/Resources/`, далі поруч із `.app` і поруч із
-виконуваним файлом; промах має повертати `nil`, а не валити процес. У `.app` бандл потрапляє лише
-тому, що `scripts/build-app.sh` копіює його в `Contents/Resources` — і робить це **до** `codesign`
-(бандл, доданий після підпису, ламає печатку). Копіювання треба супроводжувати перевіркою, що
-бандл не порожній: `cp -R` порожнього каталогу проходить без помилки й ламається лише в UI.
+Resolve the bundle yourself instead: first `Contents/Resources/`, then next to the `.app` and next
+to the executable; a miss must return `nil`, not kill the process. The bundle only ends up in the
+`.app` because `scripts/build-app.sh` copies it into `Contents/Resources` — and does so **before**
+`codesign` (a bundle added after signing breaks the seal). The copy must be paired with a check that
+the bundle is not empty: `cp -R` of an empty directory succeeds and only breaks in the UI.
 
-**Додаючи ресурс, перевір його в зібраному `.app`, а не лише в `swift run`.**
+**When you add a resource, verify it in the built `.app`, not only in `swift run`.**
 
 ## Git
 
-- Гілки: `<prefix>/<kebab-case>` (`feature/`, `bugfix/`, `docs/`, `refactor/` …).
-- **Не комітити в `main` напряму.** PR проти `main` (не stacked).
-- Повідомлення комітів — англійською.
+- Branches: `<prefix>/<kebab-case>` (`feature/`, `bugfix/`, `docs/`, `refactor/` …).
+- **Do not commit to `main` directly.** A PR against `main` (not stacked).
+- Commit messages are in English.
 
 ### Git hooks
 
-Хуки лежать у `.githooks/` (закомічені в репо). Увімкнути їх локально **одноразово** після клону:
+The hooks live in `.githooks/` (committed to the repo). Enable them locally **once** after cloning:
 
 ```sh
 git config core.hooksPath .githooks
 ```
 
-`pre-commit` робить три перевірки:
+`pre-commit` runs three checks:
 
-- **Swift build + test** — лише коли коміт торкається `*.swift` / `Package.swift`
-  (docs-only коміти лишаються швидкими). Падіння збірки або тестів блокує коміт. Обійти
-  навмисний WIP-коміт: `TOKENPACE_SKIP_SWIFT_HOOK=1 git commit …`.
-- **Documentation links** — лише коли коміт торкається `*.md`. Запускає
-  `scripts/check-doc-links.py` по **всьому** корпусу (не лише по staged-файлах: перейменування
-  заголовка ламає посилання в файлах, яких коміт не торкався). Обійти:
+- **Swift build + test** — only when the commit touches `*.swift` / `Package.swift` (docs-only
+  commits stay fast). A build or test failure blocks the commit. To get a deliberate WIP commit
+  through: `TOKENPACE_SKIP_SWIFT_HOOK=1 git commit …`.
+- **Documentation links** — only when the commit touches `*.md`. Runs
+  `scripts/check-doc-links.py` over the **whole** corpus (not just the staged files: renaming a
+  heading breaks links in files the commit never touched). To bypass:
   `TOKENPACE_SKIP_DOC_LINKS_HOOK=1 git commit …`.
-- **PlantUML URL sync** — блокує коміт, якщо URL діаграм у `.md` розійшлися з джерелом
-  (керується плагіном `plantuml`, між маркерами — не редагувати вручну).
+- **PlantUML URL sync** — blocks the commit if a diagram's URL in a `.md` has diverged from its
+  source (managed by the `plantuml` plugin; do not hand-edit between the markers).
 
-Валідатор посилань має ще чотири режими, потрібні під час міграції доків на англійську
+The link validator has four more modes, needed while the docs are being migrated to English
 ([#441](https://github.com/artem-from-ua/tokenpace/issues/441)):
 
 ```sh
@@ -89,138 +91,148 @@ python3 scripts/check-doc-links.py --inbound FILE     # хто посилаєт�
 python3 scripts/check-doc-links.py --no-dup-slugs     # колізії slug'ів заголовків
 ```
 
-**`--no-dup-slugs` — окремий режим не випадково.** Два різні заголовки, що дають однаковий slug,
-для звичайної перевірки виглядають валідними: GitHub додає до другого `-1`, і посилання, написане
-на перший, резолвиться — у неправильну секцію. Саме це стається, коли два українські заголовки
-перекладаються в один англійський, тож кожен пакет перекладу зобов'язаний ганяти цей режим окремо.
+**`--no-dup-slugs` is a separate mode for a reason.** Two different headings that produce the same
+slug look valid to an ordinary check: GitHub appends `-1` to the second one, and a link written for
+the first resolves — into the wrong section. That is exactly what happens when two Ukrainian
+headings translate into one English heading, which is why every translation package is required to
+run this mode separately.
 
-## Версіонування
+## Versioning
 
 - SemVer 2.0.0.
-- **Єдине джерело істини для версії застосунку** — файл `VERSION` у корені репозиторію
-  (`CFBundleShortVersionString`). Старт: `0.1.0`. Build-number = кількість git-комітів
-  (`git rev-list --count HEAD`). `TokenPaceKit.version` у коді дублює значення з `VERSION`
-  і оновлюється разом із ним.
+- **The single source of truth for the app version** is the `VERSION` file at the repository root
+  (`CFBundleShortVersionString`). Starting point: `0.1.0`. The build number is the git commit count
+  (`git rev-list --count HEAD`). `TokenPaceKit.version` in the code duplicates the value from
+  `VERSION` and is updated along with it.
 
-## UI-дизайн (AppKit + SwiftUI)
+## UI design (AppKit + SwiftUI)
 
-- **Мета: максимально слідувати дизайну рідних застосунків macOS** (System Settings передусім). Для
-  стандартних системних елементів — **нуль захардкоджених** розмірів/шрифтів/відступів/кольорів;
-  використовувати системні механізми (семантичні `NSColor`, `NSFont.systemFontSize`/text styles,
-  `NSSwitch.controlSize`, `NSStackView.firstBaseline`,
-  `NSPathControl` тощо).
-- **Вікно Settings — SwiftUI** `Form { Section }.formStyle(.grouped)` + `NavigationSplitView`, вбудований
-  у `NSWindow` через `NSHostingController` (ADR-0042, #168) — як і сам System Settings. Grouped-inset
-  картки, chip і time-picker більше **не** ручні AppKit-винятки: row height/padding/corner
-  radius/dividers, grouped-фон, скруглений `DatePicker` дає система без жодної константи. Раніше тут були
-  виміряні константи (`SettingsCard` тощо) — усунено. **Menu-bar-віджет і popup лишаються AppKit** (див.
-  ADR-0009/0021/0022) — але **обидві поверхні тепер малюють системними semantic-кольорами**
-  (`labelColor`-родина + `.system*`; menu-bar — ADR-0059, попап — ADR-0060), не фіксованим sRGB. Виняток —
-  Claude-бренд-акцент попапа (`popupClaudeBrand`), який лишається sRGB.
-- **Перед PR перевіряти в обох темах (light+dark) і всіх станах** (sidebar icon size, dev-білд/`.app`)
-  скриншотами. Повний розбір, метод вимірювання й типові помилки —
-  [system-settings-parity.md](system-settings-parity.md); рішення-принципи — ADR-0040 (нуль хардкоду),
-  ADR-0042 (SwiftUI Form для Settings).
-- **Перед комітом UI-зміни (menu bar popup, вікна, будь-який AppKit-екран) — звірити з актуальними
-  Apple Human Interface Guidelines** (developer.apple.com/design/human-interface-guidelines).
-  Не стверджувати деталі гайдлайну з пам'яті — HIG-сайт SPA-рендериться і часто не піддається
-  прямому `WebFetch`; коли так, шукати через WebSearch офіційні сторінки/форуми Apple Developer, а
-  не community-джерела, і чесно позначати межу впевненості, якщо точного офіційного числа не
-  знайдено (див. ADR-0021 — приклад такого пошуку для типографії Troubleshoot-вікна).
-- **Спершу з'ясуй канонічний спосіб побудувати елемент — і лише тоді пиши код.** Правило вище про HIG
-  стосується *вигляду*; це — про *конструкцію*. Перш ніж робити кастомний UI-елемент (плашка з
-  текстом, бейдж, чип, кастомний рядок), знайди, яким механізмом AppKit це передбачає:
-  пошук в Apple Developer Forums / документації / Stack Overflow / Reddit `r/macdev` за назвою
-  елемента + «proper way»/«best practice». **Це дешевше за будь-яку кількість ітерацій підбору.**
-  - **Симптом, що ти робиш не те:** доводиться руками рахувати позицію тексту, компенсувати
-    округлення, підганяти константи «на око» або ганятися за суб-піксельними зсувами. Стандартний
-    механізм такого не потребує — фреймворк розв'язує округлення сам.
-  - **Приклад із цього репозиторію** (#158-follow-up, бейдж blocking-reset): відступи всередині
-    плашки робилися спершу констрейнтами вкладеного `NSTextField`, потім ручним малюванням рядка —
-    обидва рази текст «плавав» при зміні рядка під ⌥, бо поле округлює власну ширину до backing-піксела,
-    а залишок ділиться центруванням. Канонічна відповідь — **підклас `NSTextFieldCell` з
-    `drawingRect(forBounds:)`**: одна текстова сутність, відступи застосовує сам AppKit
-    (див. `PillView`/`PillCell`). Шість ітерацій підбору → один пошук.
-  - **Заміряй у пікселях відрендереного зображення, не в математиці.** Аргументи «за формулою тут
-    нуль» систематично розходилися з тим, що видно на екрані: різниця 0.2–0.4 pt зникає при
-    растеризації, тоді як справжня помилка була 6 pt. Скрипти-приклади —
+- **The goal: follow the design of native macOS apps as closely as possible** (System Settings above
+  all). For standard system elements — **zero hardcoded** sizes, fonts, insets or colors; use the
+  system mechanisms (semantic `NSColor`, `NSFont.systemFontSize`/text styles, `NSSwitch.controlSize`,
+  `NSStackView.firstBaseline`, `NSPathControl` and so on).
+- **The Settings window is SwiftUI** — `Form { Section }.formStyle(.grouped)` + `NavigationSplitView`,
+  embedded in an `NSWindow` through `NSHostingController` (ADR-0042, #168) — just like System
+  Settings itself. The grouped-inset cards, the chip and the time picker are **no longer** hand-rolled
+  AppKit exceptions: row height/padding/corner radius/dividers, the grouped background and the rounded
+  `DatePicker` all come from the system without a single constant. There used to be measured constants
+  here (`SettingsCard` and friends) — they are gone. **The menu bar widget and the popup remain
+  AppKit** (see ADR-0009/0021/0022) — but **both surfaces now draw with system semantic colors**
+  (the `labelColor` family + `.system*`; menu bar — ADR-0059, popup — ADR-0060), not fixed sRGB. The
+  exception is the popup's Claude brand accent (`popupClaudeBrand`), which stays sRGB.
+- **Before a PR, check both themes (light+dark) and every state** (sidebar icon size, dev build /
+  `.app`) with screenshots. The full breakdown, the measurement method and the usual mistakes are in
+  [system-settings-parity.md](system-settings-parity.md); the governing decisions are ADR-0040 (zero
+  hardcode) and ADR-0042 (SwiftUI Form for Settings).
+- **Before committing a UI change (menu bar popup, windows, any AppKit screen) — check it against the
+  current Apple Human Interface Guidelines**
+  (developer.apple.com/design/human-interface-guidelines). Do not assert HIG details from memory —
+  the HIG site is an SPA and often resists a direct `WebFetch`; when it does, search via WebSearch for
+  official Apple Developer pages and forums rather than community sources, and state the limits of
+  your confidence honestly when no exact official number turns up (see ADR-0021 — an example of such
+  a search, for the Troubleshoot window's typography).
+- **Find out the canonical way to build an element first — then write the code.** The HIG rule above
+  is about *appearance*; this one is about *construction*. Before building a custom UI element (a
+  labeled plate, a badge, a chip, a custom row), find the mechanism AppKit provides for it: search
+  Apple Developer Forums / the documentation / Stack Overflow / `r/macdev` for the element's name +
+  "proper way"/"best practice". **That is cheaper than any number of trial-and-error iterations.**
+  - **The symptom that you are doing the wrong thing:** you find yourself computing text positions by
+    hand, compensating for rounding, eyeballing constants, or chasing sub-pixel offsets. The standard
+    mechanism needs none of that — the framework resolves the rounding itself.
+  - **An example from this repository** (#158 follow-up, the blocking-reset badge): the insets inside
+    the plate were done first with constraints on a nested `NSTextField`, then by drawing the string
+    by hand — and both times the text "floated" when the string changed under ⌥, because the field
+    rounds its own width to the backing pixel and the remainder gets split by centering. The canonical
+    answer is an **`NSTextFieldCell` subclass with `drawingRect(forBounds:)`**: one text entity, with
+    AppKit applying the insets itself (see `PillView`/`PillCell`). Six iterations of guessing → one
+    search.
+  - **Measure in the pixels of the rendered image, not in the math.** Arguments of the form "by the
+    formula this is zero" systematically disagreed with what was on screen: a difference of 0.2–0.4 pt
+    vanishes under rasterization, whereas the real error was 6 pt. Example scripts —
     `scripts/check-badge-column.swift`.
-  - **Міряй елемент у його справжньому оточенні, а не окремо.** Той самий бейдж, зміряний соло,
-    показував однакові числа для трьох різних вирівнювань; усередині `NSStackView`-рядка, де його
-    ширину диктує `edgeInsets`, ліве вирівнювання дало **9 px** нахилу, а центрування — 1 px.
-    Стенд, який відтворює компонент без його контейнера, підтвердить будь-яку гіпотезу.
-  - **Системні контроли мають власні приховані відступи — твоя константа не дорівнює тому, що на
-    екрані.** `NSTextFieldCell` резервує ~4.5 pt з кожного боку понад усе, що задаєш через
-    `drawingRect(forBounds:)`: `hInset = 6` рендерився як 10.5 pt повітря, і бейдж виглядав
-    роздутим. Перш ніж підбирати число — зміряй залежність «константа → відрендерені пікселі» на
-    діапазоні значень; вона зазвичай лінійна зі зсувом, і саме зсув треба знати.
-- **Один кегль і одна гарнітура на весь дропдаун-попап**, вага (bold/regular) — єдина вісь, що
-  розрізняє заголовки від звичайного тексту. Не підбирати розмір кастомного `NSTextField` "на око"
-  проти нативного `NSMenuItem` — немає надійного способу *прочитати* реальний розмір, яким AppKit
-  малює `NSMenuItem.title` (сайд-ефект Big Sur+ redesign; `NSFont.menuFont(ofSize:)` не збігається
-  з рендером). Замість підбору — **один спільний конструктор** (`dropdownTextSize` у
-  `PopupViewController.swift`), яким явно проставляється шрифт і кастомним лейблам, і нативним
-  пунктам меню (через `NSMenuItem.attributedTitle`), щоб розбіжність була структурно неможливою.
-  Див. ADR-0021.
+  - **Measure the element in its real surroundings, not on its own.** The same badge, measured solo,
+    reported identical numbers for three different alignments; inside an `NSStackView` row, where its
+    width is dictated by `edgeInsets`, left alignment produced **9 px** of skew and centering produced
+    1 px. A test rig that reproduces a component without its container will confirm any hypothesis you
+    bring it.
+  - **System controls have hidden insets of their own — your constant is not what lands on screen.**
+    `NSTextFieldCell` reserves ~4.5 pt on each side on top of whatever you set through
+    `drawingRect(forBounds:)`: `hInset = 6` rendered as 10.5 pt of air, and the badge looked bloated.
+    Before you start guessing at a number, measure the "constant → rendered pixels" relationship
+    across a range of values; it is usually linear with an offset, and the offset is the thing you
+    need to know.
+- **One point size and one typeface for the whole dropdown popup**, with weight (bold/regular) the
+  only axis distinguishing headings from ordinary text. Do not eyeball the size of a custom
+  `NSTextField` against a native `NSMenuItem` — there is no reliable way to *read* the actual size
+  AppKit uses to draw `NSMenuItem.title` (a side effect of the Big Sur+ redesign;
+  `NSFont.menuFont(ofSize:)` does not match the render). Instead of guessing — **one shared
+  constructor** (`dropdownTextSize` in `PopupViewController.swift`) that sets the font explicitly on
+  both the custom labels and the native menu items (via `NSMenuItem.attributedTitle`), so a divergence
+  is structurally impossible. See ADR-0021.
 
-### Регістр user-facing рядків — sentence case, і одна назва на одну річ
+### Case of user-facing strings — sentence case, and one name per thing
 
-Стосується **всього, що бачить користувач**: Settings, попап, меню статус-айтема, нотифікації,
-заголовки вікон. HIG не наказує конкретного регістру — він вимагає **консистентності в межах типу
-елемента** ([HIG · Writing](https://developer.apple.com/design/human-interface-guidelines/writing)),
-і застосунок цю консистентність уже має: `Usage history`, `Monitored services`, `Settings…`,
-`Development tools…`, `Back to work!`. Правило записане тут не щоб щось змінити, а щоб дрейф не
-почався знову: до [#416](https://github.com/artem-from-ua/tokenpace/issues/416) конвенція існувала
-лише як звичка, тож три кнопки (`Check Now`, `Update Now`, `Archive Now`) роками стояли в Title Case
-й ніхто цього не бачив.
+This covers **everything the user sees**: Settings, the popup, the status item's menu, notifications,
+window titles. HIG does not mandate a particular case — it demands **consistency within an element
+type** ([HIG · Writing](https://developer.apple.com/design/human-interface-guidelines/writing)), and
+the app already has that consistency: `Usage history`, `Monitored services`, `Settings…`,
+`Development tools…`, `Back to work!`. The rule is written down here not to change anything but to
+keep the drift from starting again: before
+[#416](https://github.com/artem-from-ua/tokenpace/issues/416) the convention existed only as a habit,
+so three buttons (`Check Now`, `Update Now`, `Archive Now`) sat in Title Case for years and nobody
+noticed.
 
-**Пишеш новий рядок — sentence case**, велика лише перша літера й власні назви. Три види винятків,
-і кожен свідомий, а не недогляд:
+**Writing a new string — sentence case**, capital on the first letter and proper nouns only. Three
+kinds of exception, each of them deliberate rather than an oversight:
 
-- **Власні назви** — `TokenPace`, `Claude`, `Claude Usage API`, `Finder`, імена стилів бару
-  (`Pressure`/`Balance`/`Progress`, джерело — `BarStyle.displayName`).
-- **Системні фрази macOS** — цитуються в тому написанні, яке має система: `Open in Finder` саме так
-  стоїть у контекстному меню Finder, і «виправлення» його на `Open in finder` зробило б нашу дію
-  несхожою на системну.
-- **Інлайн-лінк усередині речення** — `release notes` в About лишається з малої: це не кнопка-дія, а
-  слова в реченні, які клікаються (`.buttonStyle(.link)`).
+- **Proper nouns** — `TokenPace`, `Claude`, `Claude Usage API`, `Finder`, the names of the bar styles
+  (`Pressure`/`Balance`/`Progress`, sourced from `BarStyle.displayName`).
+- **macOS system phrases** — quoted in the spelling the system uses: `Open in Finder` is exactly how
+  it appears in Finder's context menu, and "fixing" it to `Open in finder` would make our action look
+  unlike the system one.
+- **An inline link inside a sentence** — `release notes` in About stays lowercase: it is not an action
+  button but words in a sentence that happen to be clickable (`.buttonStyle(.link)`).
 
-**Називаєш елемент іншої поверхні — бери його ім'я з єдиного джерела, не з пам'яті.** Рядок Settings,
-що згадує секцію дропдауна, має писати її точно так, як пише сам дропдаун. Канонічний приклад —
-`Extra usage`: джерело `PopupViewController.extraUsageTitle`, у Settings курсивом (`*Extra usage*`),
-бо це ім'я, а не опис ([ADR-0114](../adr/0114-extra-usage-is-one-name.md)). Курсив вимагає
-`Text(.init(_:))` — плейн-`Text(String)` надрукує зірочки буквально; так уміють `SettingsHint` і
-`SettingsDisabledLabel`, а от **схована мітка `Toggle` лишається без розмітки**, бо її читає
-VoiceOver, і зірочки він промовить.
+**Naming an element of another surface — take its name from the single source, not from memory.** A
+Settings string that mentions a dropdown section must spell it exactly the way the dropdown itself
+does. The canonical example is `Extra usage`: the source is
+`PopupViewController.extraUsageTitle`, italicized in Settings (`*Extra usage*`), because it is a name
+and not a description ([ADR-0114](../adr/0114-extra-usage-is-one-name.md)). The italics require
+`Text(.init(_:))` — a plain `Text(String)` will print the asterisks literally; `SettingsHint` and
+`SettingsDisabledLabel` know how to do this, but **a `Toggle`'s hidden label stays unmarked**, because
+VoiceOver reads it and would pronounce the asterisks.
 
-Так само з текстом, що дублюється між таргетами: заголовок нотифікації живе в
-`ExtraUsageOnset.bannerTitle` (Kit), а `BackToWorkNotifier` його **читає**, не повторює літералом.
-Той самий шов, що й у `CopyFeedback` нижче — константа, продубльована через нього, неминуче розійдеться.
+The same goes for text duplicated between targets: the notification title lives in
+`ExtraUsageOnset.bannerTitle` (Kit), and `BackToWorkNotifier` **reads** it rather than repeating it as
+a literal. Same seam as `CopyFeedback` below — a constant duplicated across it will inevitably
+diverge.
 
-### Кнопки копіювання в буфер — спільна поведінка (`CopyFeedback`)
+### Copy-to-clipboard buttons — shared behavior (`CopyFeedback`)
 
-Запис у буфер обміну **невидимий**: на екрані нічого не змінюється, системного підтвердження немає.
-Тому кожна копі-кнопка на ~1.2 с підміняє свій гліф на `checkmark` і повертає назад. Константи —
-гліфи, тривалість, accessibility-лейбли — лежать у `CopyFeedback` (Kit), бо кнопки зроблені різними
-тулкітами (`AppearancePane` — SwiftUI, `TroubleshootWindowController` — AppKit), і константа,
-продубльована через цей шов, неминуче розійдеться.
+Writing to the clipboard is **invisible**: nothing changes on screen and there is no system
+confirmation. So every copy button swaps its glyph for a `checkmark` for ~1.2 s and then swaps it
+back. The constants — glyphs, duration, accessibility labels — live in `CopyFeedback` (Kit), because
+the buttons are built with different toolkits (`AppearancePane` is SwiftUI,
+`TroubleshootWindowController` is AppKit), and a constant duplicated across that seam will inevitably
+diverge.
 
-**Додаєш нову кнопку копіювання — бери гліфи й тривалість звідти**, не з власного числа. Для AppKit
-не забудь `setButtonType(.momentaryPushIn)`: `.momentaryChange` повертає картинку на mouse-up і
-затирає checkmark.
+**Adding a new copy button — take the glyphs and the duration from there**, not from a number of your
+own. For AppKit, do not forget `setButtonType(.momentaryPushIn)`: `.momentaryChange` restores the
+image on mouse-up and wipes out the checkmark.
 
-### Експорт конфіга: порядок ключів = порядок контролів у панелі
+### Config export: key order = the order of the controls in the pane
 
-Кнопка «Copy Appearance settings to clipboard» (Settings → Appearance, #257) віддає JSON, у якому
-ключі в блоці `appearance` йдуть **у тому самому порядку згори вниз, що й контроли на сторінці
-Appearance** — не за алфавітом і не в порядку полів структури. Дамп читають, тримаючи панель перед
-очима: збіг порядку дає відповідність рядок-у-рядок.
+The "Copy Appearance settings to clipboard" button (Settings → Appearance, #257) produces JSON in
+which the keys inside the `appearance` block run **in the same top-to-bottom order as the controls on
+the Appearance page** — not alphabetically and not in the order of the struct's fields. The dump gets
+read with the pane in front of you: matching the order gives you a line-for-line correspondence.
 
-**Структура — вкладена по поверхнях** (із [#381](https://github.com/artem-from-ua/cc-timer/issues/381),
-[ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md); до того всі сім ключів
-лежали плоским списком). Дві групи в порядку дочірніх сторінок, кожна зі
-своїми ключами в порядку контролів, і ключі всередині груп **без префікса поверхні** — його вже несе
-сама група, тож `menuBar.style` у `UserDefaults` — це `"style"` усередині `"menuBar"` у дампі:
+**The structure is nested by surface** (since
+[#381](https://github.com/artem-from-ua/cc-timer/issues/381),
+[ADR-0104](../adr/0104-appearance-named-for-behaviour-on-three-layers.md); before that all seven keys
+sat in a flat list). Two groups in the order of the child pages, each with its own keys in control
+order, and the keys inside a group carry **no surface prefix** — the group already provides it, so
+`menuBar.style` in `UserDefaults` is `"style"` inside `"menuBar"` in the dump:
 
 ```json
 {
@@ -242,83 +254,89 @@ Appearance** — не за алфавітом і не в порядку полі
 }
 ```
 
-**Додаєш Appearance-опцію — встав її ключ на позицію, що відповідає місцю контролу в панелі, і
-всередині своєї групи.** Не дописуй у кінець і не сортуй. Синхронізувати треба три списки:
+**Adding an Appearance option — insert its key at the position matching the control's place in the
+pane, and inside its own group.** Do not append it at the end and do not sort. Three lists have to
+stay in sync:
 
-1. [`AppearancePanes.swift`](../../Sources/TokenPace/Settings/AppearancePanes.swift) — сам контрол
-   (файл звався `UIPanes.swift` до [#381](https://github.com/artem-from-ua/cc-timer/issues/381));
+1. [`AppearancePanes.swift`](../../Sources/TokenPace/Settings/AppearancePanes.swift) — the control
+   itself (the file was called `UIPanes.swift` before
+   [#381](https://github.com/artem-from-ua/cc-timer/issues/381));
 2. [`AppearanceConfigExport`](../../Sources/TokenPaceKit/AppearanceConfigExport.swift) —
-   `json(values:preset:appVersion:)` (масиви `menuBar` / `dropdown`, що емітять рядки) і `MenuBarKeys`
-   / `DropdownKeys` у тому ж файлі;
-3. `AppearanceConfigExportTests.paneOrderedGroups` — еталон, що стереже порядок (плоский
-   `paneOrderedKeys` виводиться з нього як `"<group>.<key>"`).
+   `json(values:preset:appVersion:)` (the `menuBar` / `dropdown` arrays that emit the lines) and
+   `MenuBarKeys` / `DropdownKeys` in the same file;
+3. `AppearanceConfigExportTests.paneOrderedGroups` — the reference that guards the order (the flat
+   `paneOrderedKeys` is derived from it as `"<group>.<key>"`).
 
-Порядок **не можна** доручити `Codable`/`JSONEncoder`/`JSONSerialization`: keyed-контейнер лежить на
-невпорядкованому словнику, тож порядок ключів різниться **між запусками того самого бінарника**.
-Єдиний детермінізм, який вони дають, — `.sortedKeys`, тобто алфавіт. Тому емітить текст напряму
-`AppearanceConfigExport`, а `Codable` лишається тільки для зворотного читання (round-trip).
+The order **cannot** be delegated to `Codable`/`JSONEncoder`/`JSONSerialization`: a keyed container
+sits on top of an unordered dictionary, so the key order differs **between runs of the same binary**.
+The only determinism they offer is `.sortedKeys`, i.e. alphabetical. That is why
+`AppearanceConfigExport` emits the text directly, and `Codable` is kept only for reading it back
+(round-trip).
 
-## Безпека
+## Security
 
-- **Ніколи не комітити токени/креденшали.** `.credentials.json`, `secrets/` — у `.gitignore`.
-- Токен не логувати, не виводити в UI, не передавати за межі Mac.
+- **Never commit tokens or credentials.** `.credentials.json` and `secrets/` are in `.gitignore`.
+- Do not log the token, do not show it in the UI, do not let it leave the Mac.
 
-## Логування
+## Logging
 
-- Усі логи йдуть через фасад `AppLogger` (`os.Logger`), subsystem `com.artem-n.tokenpace`,
-  категорії `network`/`keychain`/`lifecycle`/`ui`. Не передформатовувати меседжі в `String` —
-  лишати compile-time-інтерполяцію `os.Logger` із per-argument privacy.
-- **Секрети ніколи не логувати** (OAuth-токени, payload Keychain). Лише безпечні діагностичні
-  поля позначати `, privacy: .public`; решта redactиться як `<private>` за замовчуванням.
-- **`docs/log-messages.md` — каталог усіх лог-меседжів.** Будь-яка зміна логування (новий
-  виклик, видалення, зміна тексту меседжа чи рівня/категорії) **в тому самому коміті** оновлює
-  відповідний рядок у `docs/log-messages.md` — включно з номерами рядків і підсумковими лічильниками.
-- **Як дивитися логи (методи й пастки)** — див.
-  [log-messages.md → Collecting logs](log-messages.md#collecting-logs--methods--gotchas). Головна
-  пастка: `.notice`/`.info` **не** пишуться в store, тож `log show` їх не покаже — потрібен
-  `log stream … --level debug` (без `--level debug` видно лише `.error`). Це стосується і підписаних
-  release-білдів (вони логують так само).
+- All logging goes through the `AppLogger` facade (`os.Logger`), subsystem `com.artem-n.tokenpace`,
+  categories `network`/`keychain`/`lifecycle`/`ui`. Do not pre-format messages into a `String` — keep
+  `os.Logger`'s compile-time interpolation with per-argument privacy.
+- **Never log secrets** (OAuth tokens, Keychain payloads). Mark only safe diagnostic fields with
+  `, privacy: .public`; everything else is redacted as `<private>` by default.
+- **`docs/log-messages.md` is the catalog of every log message.** Any change to logging (a new call,
+  a removal, a change to a message's text or its level/category) updates the corresponding line in
+  `docs/log-messages.md` **in the same commit** — line numbers and summary counters included.
+- **How to read the logs (methods and gotchas)** — see
+  [log-messages.md → Collecting logs](log-messages.md#collecting-logs--methods--gotchas). The main
+  gotcha: `.notice`/`.info` are **not** written to the store, so `log show` will not show them — you
+  need `log stream … --level debug` (without `--level debug` only `.error` is visible). This applies
+  to signed release builds too (they log the same way).
 
-## Верифікаційні env-змінні
+## Verification env variables
 
-Сімейство `TOKENPACE_*` перемикає застосунок у режими ручної верифікації. **Ніколи не встановлювати
-в нормальному запуску** — усі вони лише для діагностики / скріншотів / прогонки UI-флоу.
+The `TOKENPACE_*` family switches the app into manual-verification modes. **Never set them in a normal
+run** — they are all for diagnostics, screenshots or walking a UI flow.
 
-- **`TOKENPACE_STUB`** = `1` / `screenshot` / `error` / … — підміняє живий `URLSession` канованим
-  транспортом (`StubUsageTransport`), тож застосунок ганяється end-to-end без usage/status API й без
-  Keychain (`1` — зростаюча утилізація; `screenshot` — застиглий кадр для README; `error` — 401 +
-  деградовані сервіси). Повний перелік усіх стубів (idle, pacing-фрейми, calm-both тощо) — у
-  [ui-verification.md](../guides/ui-verification.md).
-- **`TOKENPACE_GH_AUTH`** (прапорець присутності, будь-яке непорожнє значення) — вмикає `gh`-шлях
-  update-чеку (`GHReleaseFetcher`): `gh api …/releases/latest` як subprocess, `gh` бере токен із
-  keyring. Для мейнтейнерів, поки репо приватне; без змінної — анонімний HTTPS (ADR-0025). Має власний
-  login-shell-резолвер `AppDelegate.resolveGHAuth`: спершу `ProcessInfo` (термінал / `launchctl setenv`),
-  а якщо там немає — з `~/.zshrc`/`~/.zprofile` через `ShellEnvironment` (`zsh -l -i`), бо застосунок
-  часто стартує через launchd (login / Finder / Dock) **без шелла**, де `export …` невидимий через
-  `ProcessInfo`. Тож достатньо `export TOKENPACE_GH_AUTH=1` у `~/.zshrc` — працює і в нотаризованому
-  `.app`, запущеному з Finder/при логіні. Жодних `launchctl setenv`/LaunchAgent не потрібно.
+- **`TOKENPACE_STUB`** = `1` / `screenshot` / `error` / … — replaces the live `URLSession` with a
+  canned transport (`StubUsageTransport`), so the app runs end-to-end without the usage/status API and
+  without the Keychain (`1` — rising utilization; `screenshot` — a frozen frame for the README;
+  `error` — 401 + degraded services). The full list of stubs (idle, pacing frames, calm-both and so
+  on) is in [ui-verification.md](../guides/ui-verification.md).
+- **`TOKENPACE_GH_AUTH`** (a presence flag — any non-empty value) — enables the `gh` route for the
+  update check (`GHReleaseFetcher`): `gh api …/releases/latest` as a subprocess, with `gh` taking the
+  token from the keyring. For maintainers, while the repo is private; without the variable it is
+  anonymous HTTPS (ADR-0025). It has its own login-shell resolver, `AppDelegate.resolveGHAuth`: first
+  `ProcessInfo` (terminal / `launchctl setenv`), and if it is not there, from `~/.zshrc`/`~/.zprofile`
+  through `ShellEnvironment` (`zsh -l -i`), because the app often starts via launchd (login / Finder /
+  Dock) **without a shell**, where `export …` is invisible to `ProcessInfo`. So `export
+  TOKENPACE_GH_AUTH=1` in `~/.zshrc` is enough — it works in the notarized `.app` launched from Finder
+  or at login too. No `launchctl setenv` or LaunchAgent needed.
 
-> **Dev-tools вмикаються не через env-змінну.** ⌥-пункт «Development tools…» — а з ним селектор стубів
-> (#187) і чекбокс payload-логу (#279) — гейтяться `UserDefaults`-ключем: `defaults write com.artem-n.tokenpace devToolsEnabled -bool true`.
-> Ключ читається лише у **встановленому `.app`** (bundle id → правильний домен `UserDefaults`); у
-> `swift run` бінарник без bundle id → інший домен, тож там ключ не діє (ADR-0053).
-- **`TOKENPACE_FAKE_LATEST`** = `vX.Y.Z` — форсує канований «останній реліз» (`StubUpdateFetcher`)
-  без мережі, щоб перевірити гілки «доступне оновлення» / «up to date». Пріоритетніший за
+> **Dev tools are not enabled through an env variable.** The ⌥ item "Development tools…" — and with it
+> the stub selector (#187) and the payload-log checkbox (#279) — are gated by a `UserDefaults` key:
+> `defaults write com.artem-n.tokenpace devToolsEnabled -bool true`.
+> The key is only read in an **installed `.app`** (bundle id → the correct `UserDefaults` domain);
+> under `swift run` the binary has no bundle id → a different domain, so the key has no effect there
+> (ADR-0053).
+- **`TOKENPACE_FAKE_LATEST`** = `vX.Y.Z` — forces a canned "latest release" (`StubUpdateFetcher`)
+  with no network, to exercise the "update available" / "up to date" branches. Takes priority over
   `TOKENPACE_GH_AUTH` (ADR-0025).
-- **`TOKENPACE_SKIP_SWIFT_HOOK`** = `1` — обходить Swift build/test у pre-commit-хуку (для навмисного
-  WIP-коміту).
-- **`TOKENPACE_SKIP_DOC_LINKS_HOOK`** = `1` — обходить перевірку посилань у доках у pre-commit-хуку
-  (для навмисного WIP-коміту з відомо битим посиланням).
+- **`TOKENPACE_SKIP_SWIFT_HOOK`** = `1` — bypasses the Swift build/test in the pre-commit hook (for a
+  deliberate WIP commit).
+- **`TOKENPACE_SKIP_DOC_LINKS_HOOK`** = `1` — bypasses the doc link check in the pre-commit hook (for
+  a deliberate WIP commit with a knowingly broken link).
 
-> **UserNotifications і запуск бандла.** Системний банер update-чеку працює лише в підписаному,
-> встановленому `.app`, запущеному через LaunchServices (`open`), **не** прямим викликом бінарника
-> `…/Contents/MacOS/TokenPace` — completion-хендлери `UNUserNotificationCenter` виконуються на
-> не-main черзі, тож будь-який `@MainActor`-ізольований код у них падає `SIGTRAP`
-> (`dispatch_assert_queue`). Логувати з таких хендлерів лише через `nonisolated`-хелпери (ADR-0025).
+> **UserNotifications and how the bundle is launched.** The update check's system banner only works in
+> a signed, installed `.app` launched through LaunchServices (`open`), **not** by invoking the binary
+> `…/Contents/MacOS/TokenPace` directly — `UNUserNotificationCenter`'s completion handlers run on a
+> non-main queue, so any `@MainActor`-isolated code inside them dies with `SIGTRAP`
+> (`dispatch_assert_queue`). Log from such handlers only through `nonisolated` helpers (ADR-0025).
 
-## Документація як частина коду
+## Documentation as part of the code
 
-- Зміна модуля → оновити `docs/architecture.md`.
-- Зміна логування → оновити `docs/log-messages.md` (див. секцію «Логування»).
-- Рішення між двома підходами → новий ADR у `docs/adr/`.
-- Нова конвенція/інструмент → оновити цей файл.
+- A module changes → update `docs/architecture.md`.
+- Logging changes → update `docs/log-messages.md` (see the "Logging" section).
+- A decision between two approaches → a new ADR in `docs/adr/`.
+- A new convention or tool → update this file.

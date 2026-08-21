@@ -1,87 +1,89 @@
-# Як читати меню-бар
+# Reading the menu bar
 
-Довідник **із боку читача**: що означає те, що зараз на екрані. Дві сусідні сторінки розвʼязують
-обернені задачі — [ui-state-truth.md](ui-state-truth.md) каже, як стан **малювати**, а
-[bar-status-conditions.md](bar-status-conditions.md) — за яких даних смужка набуває якого кольору.
+A reference **from the reader's side**: what does what's on screen right now actually mean. Two
+neighboring pages solve the inverse problems — [ui-state-truth.md](ui-state-truth.md) says how to
+**draw** a state, and [bar-status-conditions.md](bar-status-conditions.md) says under which data a
+bar takes on which color.
 
-Англомовний варіант кроків 1–2 нижче призначений для README та довідки в застосунку.
+The English version of steps 1-2 below is meant for the README and the in-app help.
 
-## Дві незалежні осі
+## Two independent axes
 
-Читаються окремо від усього іншого й присутні в **будь-якому** режимі:
+Read separately from everything else and present in **any** mode:
 
-- **Крапка праворуч** — стан сервісів Claude (#31). Кольорова = є проблема на боці Anthropic.
-  Малюється навіть тоді, коли віджет більше нічого не показує: у режимі «опитування вимкнено» вона
-  єдиний живий сигнал.
-- **Долоня ліворуч** — сесія Claude Code чекає на відповідь (#233). Найчастіша декорація: за
-  [ADR-0073](../adr/0073-awaiting-icon-reserved-slot-and-slide.md) її слот зарезервований постійно,
-  щоб віджет не смикався десятки разів на день.
+- **The dot on the right** — Claude service status (#31). Colored means there's a problem on
+  Anthropic's side. Drawn even when the widget shows nothing else: in "polling disabled" mode it's
+  the only live signal.
+- **The hand on the left** — a Claude Code session is awaiting input (#233). The most frequent
+  decoration: per [ADR-0073](../adr/0073-awaiting-icon-reserved-slot-and-slide.md) its slot is
+  permanently reserved, so the widget doesn't jitter dozens of times a day.
 
-Далі — сам віджет.
+Now the widget itself.
 
-## Крок 1. Чи є число?
+## Step 1. Is there a number?
 
-Відлік зʼявляється **лише** тоді, коли робота не йде на підписці
-([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)). Якщо число є, гліф поруч
-називає причину:
+A countdown appears **only** when work is not running on the subscription
+([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)). If a number is present, the
+glyph next to it names the reason:
 
-| На екрані | Стан | Число означає |
+| On screen | State | The number means |
 |---|---|---|
-| ⏸ + число | робота **стала** | коли відновиться |
-| ¤ + число | робота йде, але **за гроші** | коли перестане коштувати |
-| ⚠️ сам | дані **суперечать собі** — вікно вичерпане, а його `resets_at` зламаний | нічого; часу ми не знаємо |
-| перекреслена антена | **не дістаємось API** довше за поріг | нічого; даних немає |
-| `zzz` | опитування **вимкнене користувачем** (#341) | нічого; це вибір, не збій |
+| ⏸ + number | work has **stopped** | when it resumes |
+| ¤ + number | work continues, but **at a cost** | when it stops costing money |
+| ⚠️ alone | the data **contradicts itself** — the window is exhausted but its `resets_at` is broken | nothing; we don't know the time |
+| slashed antenna | **can't reach the API** past the threshold | nothing; there's no data |
+| `zzz` | polling **disabled by the user** (#341) | nothing; it's a choice, not a failure |
 
-Смужок у жодному з цих станів немає: вікно на 100 % не несе інформації про темп, і єдине, що варте
-уваги — коли це скінчиться.
+There are no bars in any of these states: a window at 100% carries no pacing information, and the
+only thing worth attention is when it ends.
 
-**Чому ⚠️ без гліфа.** Пауза стверджувала б «ти заблокований» поруч зі знаком, який відмовляється
-від даних. На екрані ніщо не каже, що недовіра стосується лише часу, тож пара читалася б як
-поламаний віджет. Суперечливі дані отримують один сигнал.
+**Why ⚠️ appears without a glyph.** A pause would assert "you're blocked" right next to a sign that
+disclaims the data. Nothing on screen says the distrust applies only to the time, so the pair would
+read as a broken widget. Contradictory data gets one signal.
 
-## Крок 2. Числа немає → читай смужки
+## Step 2. No number → read the bars
 
-Робота йде на підписці. Смужки показують **темп**, а не залишок квоти.
+Work is running on the subscription. The bars show **pace**, not remaining quota.
 
-| Що видно | Що означає |
+| What you see | What it means |
 |---|---|
-| **одна смужка** | 5-годинне вікно спокійне й відступило — лишилось тижневе |
-| **дві смужки** | 5-годинне вікно попереду темпу, тому лишається на екрані. Верхня — 5h, нижня — 7d |
-| **помаранчева** | це вікно йде попереду темпу. Нічого не заблоковано — це **прогноз** |
-| зелена, жовта | темп у нормі |
-| синя | ідеш помітно **позаду** темпу — можна прискоритись |
+| **one bar** | the 5-hour window is calm and steps aside — what's left is the weekly one |
+| **two bars** | the 5-hour window is ahead of pace, so it stays on screen. The top one is 5h, the bottom is 7d |
+| **orange** | this window is running ahead of pace. Nothing is blocked — it's a **forecast** |
+| green, yellow | pace is normal |
+| blue | you're noticeably **behind** pace — you could speed up |
 
-Дві застороги:
+Two caveats:
 
-- **«Одна смужка = 5h спокійне» справджується при дефолтному
-  [`TopBarHiding`](../../Sources/TokenPaceKit/TopBarHiding.swift)` = .untilItNeedsAttention`** —
-  сегмент `Until it needs attention` у рядку «Hide the top 5h bar» (перейменовано з
-  `CalmBarHiding.fiveHour` у [#381](https://github.com/artem-from-ua/cc-timer/issues/381)). Хто обрав
-  `Never`, завжди бачить обидві.
-- **Idle — інша причина одної смужки.** Коли активної сесії немає, 5-годинного вікна не існує
-  взагалі ([ADR-0027](../adr/0027-session-idle-no-phantom-reset.md)), і його смужка малюється як нуль
-  ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)). Той самий піксель, інша історія.
+- **"One bar = 5h is calm" holds under the default
+  [`TopBarHiding`](../../Sources/TokenPaceKit/TopBarHiding.swift)` = .untilItNeedsAttention`** — the
+  `Until it needs attention` segment in the "Hide the top 5h bar" row (renamed from
+  `CalmBarHiding.fiveHour` in [#381](https://github.com/artem-from-ua/cc-timer/issues/381)). Anyone
+  who picked `Never` always sees both.
+- **Idle is a different reason for one bar.** When there's no active session, the 5-hour window
+  doesn't exist at all ([ADR-0027](../adr/0027-session-idle-no-phantom-reset.md)), and its bar is
+  drawn as zero ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)). Same pixel, different
+  story.
 
-## Інваріант
+## Invariant
 
-**Смужка ніколи не несе відліку, а відлік ніколи не несе смужок.** Разом вони не зʼявляються ніде —
-і це властивість типу: `MenuBarMode.expanded` не має поля для числа, тож така пара
-нерепрезентовна.
+**A bar never carries a countdown, and a countdown never carries bars.** They never appear together
+— and that's a property of the type: `MenuBarMode.expanded` has no field for a number, so that pair
+is unrepresentable.
 
-Практичний наслідок: якщо бачиш число, дивись на гліф, а не на смужки — їх там немає.
+Practical consequence: if you see a number, look at the glyph, not the bars — they aren't there.
 
-## Чого меню-бар не каже
+## What the menu bar doesn't say
 
-- **Абсолютного відсотка.** Ані «88 %», ані «12 % лишилось» — ніде, у жодному стилі. Це свідомо:
-  сам по собі рівень не проходить перевірку «яку дію користувач виконає інакше»
-  ([users-and-goals.md](users-and-goals.md)). Відсотки є в попапі.
-- **Чи вистачить квоти на конкретну задачу.** Віджет не знає, що ти збираєшся робити. Він знає, чи
-  твій **поточний темп** веде до вичерпання — це й каже колір.
-- **Часу до ресету в робочому стані.** За ним — один клік у попап: рядок ресету є на кожному ліміті
-  й не ховається ніколи.
+- **The absolute percentage.** Neither "88%" nor "12% left" — nowhere, in any style. This is
+  deliberate: a bare level doesn't clear the "what action would the user take differently" test
+  ([users-and-goals.md](users-and-goals.md)). Percentages live in the popup.
+- **Whether the quota will cover a specific task.** The widget doesn't know what you're about to do.
+  It knows whether your **current pace** leads to exhaustion — that's what the color says.
+- **Time to reset while working.** One click away, in the popup: the reset line is on every limit
+  and never hidden.
 
-## Англійською — для README та довідки
+## English — for the README and in-app help
 
 > **Reading the menu bar**
 >
@@ -97,7 +99,7 @@
 > - **Slashed antenna** — the app cannot reach the API.
 > - **`zzz`** — usage polling is switched off. Nothing is wrong.
 >
-> There are no bars in any of these states: a window at 100 % carries no pacing information, and the
+> There are no bars in any of these states: a window at 100% carries no pacing information, and the
 > one thing worth knowing is when it ends.
 >
 > **Step 2. No number? Read the bars.**
@@ -113,11 +115,11 @@
 >
 > A bar never carries a countdown, and a countdown never carries bars.
 
-## Повʼязані документи
+## Related documents
 
-- [ui-state-truth.md](ui-state-truth.md) — як малювати стан (метрики, анатомія, неможливі комбінації)
-- [bar-status-conditions.md](bar-status-conditions.md) — за яких даних смужка набуває якого кольору
-- [users-and-goals.md](users-and-goals.md) — критерій «корисного сигналу»
-- [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md) — рішення, що відлік живе лише
-  в безсмужкових станах
-- [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md) — «чи можемо ми працювати» як єдине питання
+- [ui-state-truth.md](ui-state-truth.md) — how to draw state (metrics, anatomy, impossible combinations)
+- [bar-status-conditions.md](bar-status-conditions.md) — under which data a bar takes on which color
+- [users-and-goals.md](users-and-goals.md) — the "useful signal" criterion
+- [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md) — the decision that the
+  countdown lives only in barless states
+- [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md) — "can we work" as the single question
