@@ -64,10 +64,11 @@ there are no two independent flags someone could someday set inconsistently. The
 Anthropic's docs). A label has no business naming a different month than the one its own geometry
 measures.
 
-## Alternatives considered: what exactly should show that the bar is different
+## Alternatives considered
 
-That an unexplained exception reads as a bug was accepted from the start. The question was **what**
-carries the explanation. Five options were considered; four rejected.
+The question was **what exactly should show that the bar is different.** That an unexplained
+exception reads as a bug was accepted from the start; what was open is what carries the
+explanation. Five options were considered; four rejected.
 
 **1. Only a hint in Settings, no change to the bar.** The cheapest option: one line of text, no
 render work. Rejected as **insufficient in place**: the hint sits in Settings, while the surprise
