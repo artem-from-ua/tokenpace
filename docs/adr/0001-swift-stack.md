@@ -3,33 +3,33 @@ status: accepted
 date: 2026-06-21
 ---
 
-# ADR-0001: Swift як єдина мова проєкту
+# ADR-0001: Swift as the project's only language
 
-## Контекст
+## Context
 
-Mac-агент має читати macOS Keychain і (у Фазі 2) писати в CloudKit, а застосунки iPhone/Watch —
-читати з CloudKit. Розглядались дві мови для Mac-агента: Swift і Go.
+The Mac agent has to read the macOS Keychain and (in Phase 2) write to CloudKit, while the
+iPhone/Watch apps read from CloudKit. Two languages were considered for the Mac agent: Swift and Go.
 
-## Рішення
+## Decision
 
-Використовуємо **Swift** для всього проєкту — Mac menu bar app, а згодом iOS/watchOS.
+Use **Swift** for the whole project — the Mac menu bar app, and later iOS/watchOS.
 
-## Наслідки
+## Consequences
 
-**Плюси:**
+**Upsides:**
 
-- Рідний доступ до Keychain (Security framework) і CloudKit (CloudKit framework) — без обхідних
-  шляхів.
-- Один стек на весь проєкт: agent, iOS app, watchOS complication.
-- AppKit (`NSStatusItem`) + SwiftUI (`NSHostingView`) — декларативний UI смужок усередині
+- Native access to the Keychain (Security framework) and CloudKit (CloudKit framework) — no
+  workarounds.
+- One stack across the project: agent, iOS app, watchOS complication.
+- AppKit (`NSStatusItem`) + SwiftUI (`NSHostingView`) — declarative UI for the bars inside the
   menu bar.
 
-**Мінуси:**
+**Downsides:**
 
-- Swift-демони на macOS трохи менш звичні OSS-контриб'юторам, ніж Go CLI.
+- Swift daemons on macOS are somewhat less familiar to OSS contributors than a Go CLI.
 
-**Чому не Go:**
+**Why not Go:**
 
-- CloudKit з Go вимагає CloudKit Web Services API + server-to-server ключ (складно, і це вже
-  «майже бекенд»).
-- Немає рідного доступу до Keychain.
+- CloudKit from Go requires the CloudKit Web Services API plus a server-to-server key (awkward, and
+  that is already "almost a backend").
+- No native Keychain access.

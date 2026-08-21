@@ -4,93 +4,99 @@ date: 2026-06-22
 superseded_by: [0074]
 ---
 
-# ADR-0006: ResetClock — абсолютний `hh:mm` для далеких ресетів, не лише відносний час
+# ADR-0006: ResetClock — absolute `hh:mm` for distant resets, not relative time only
 
-> **СКАСОВАНО (2026-08-07, [ADR-0074](0074-one-reset-format-on-both-surfaces.md),
-> [#284](https://github.com/artem-from-ua/tokenpace/issues/284)):** центральне рішення цього ADR —
-> **поріг 90 хв і абсолютний `hh:mm` у меню-барі** — прибрано. Меню-бар тепер форматує лейбл тією
-> самою `relativeRounded`, що дає числове ядро попапа, тож один ресет читається однаково на обох
-> поверхнях (`5h` у барі, `5h at 20:40` у попапі). Настінний годинник лишився **тільки** в попапі,
-> як кваліфікатор `resetLine`. Чинним із цього документа лишається хіба опис `parse(_:)` (порт
-> `parse_reset_epoch`) — решту читай як історію.
+> **SUPERSEDED (2026-08-07, [ADR-0074](0074-one-reset-format-on-both-surfaces.md),
+> [#284](https://github.com/artem-from-ua/tokenpace/issues/284)):** this ADR's central decision —
+> **the 90-minute threshold and an absolute `hh:mm` in the menu bar** — is gone. The menu bar now
+> formats its label with the same `relativeRounded` that produces the popup's numeric core, so one
+> reset reads identically on both surfaces (`5h` in the bar, `5h at 20:40` in the popup). The wall
+> clock survived **only** in the popup, as the `resetLine` qualifier. About the only thing that still
+> stands in this document is the description of `parse(_:)` (the port of `parse_reset_epoch`) — read
+> the rest as history.
 
-> **Постскрипт (2026-07-25, [ADR-0030](0030-optimistic-reset-and-exact-timer.md)):** секундну смугу
-> `(0, 60)` с (`40s`/`1s`), ухвалену тут, **прибрано**. Menu bar перемальовується лише на ~30-с
-> каденсі, тож per-second countdown стрибав рвано; тепер під-хвилина → `"<1m"`, а `[60 с, 90 хв]`
-> округляється до найближчої хвилини (замість усічення вниз). Решта рішення (абсолютний `hh:mm` для
-> далеких ресетів, поріг 90 хв, прибирання нульових хвилин) чинна — тому статус лишається `accepted`.
+> **Postscript (2026-07-25, [ADR-0030](0030-optimistic-reset-and-exact-timer.md)):** the `(0, 60)` s
+> seconds band (`40s`/`1s`) decided here has been **removed**. The menu bar only redraws on a ~30 s
+> cadence, so a per-second countdown stuttered; sub-minute now renders as `"<1m"`, and `[60 s, 90 min]`
+> rounds to the nearest minute (instead of truncating down). The rest of the decision (absolute
+> `hh:mm` for distant resets, the 90-minute threshold, dropping zero minutes) still stands — which is
+> why the status stayed `accepted`.
 
-> **Постскрипт (2026-07-27, [ADR-0043](0043-unified-reset-line-and-remove-resetnow.md), #167):** кейс
-> `.resetNow` (рядки таблиці нижче: `≤ 0 → .resetNow`, «гліф обирає View») **видалено** — минулий
-> ресет перекочується перед форматуванням, а зламаний `resets_at` іде в ⚠️ error-стан. `TimeToReset`
-> тепер має лише `.absolute`/`.relative`. Принцип «шар логіки без UI-гліфів, View обирає рядок»
-> лишається чинним.
+> **Postscript (2026-07-27, [ADR-0043](0043-unified-reset-line-and-remove-resetnow.md), #167):** the
+> `.resetNow` case (the table rows below: `≤ 0 → .resetNow`, "the View picks the glyph") has been
+> **deleted** — a past reset is rolled forward before formatting, and a broken `resets_at` goes to the
+> ⚠️ error state. `TimeToReset` now has only `.absolute`/`.relative`. The principle "a logic layer
+> without UI glyphs, the View picks the string" still stands.
 
-## Контекст
+## Context
 
-`statusline.sh` форматує час до ресету функцією `format_time_remaining`, яка **завжди** повертає
-**відносну** тривалість і має дві гілки за порогом `threshold_hours` (2 год для 5h-вікна, 48 год
-для 7d):
+`statusline.sh` formats the time to reset with `format_time_remaining`, which **always** returns a
+**relative** duration and has two branches around a `threshold_hours` (2 hours for the 5h window, 48
+hours for the 7d one):
 
-- далеко від ресету (`total_hours >= threshold_hours`) → грубо й наближено: `~3h`, `~7d`
-  (з округленням ≥30 хв → +година, ≥12 год → +день);
-- близько (`< threshold_hours`) → точно: `${h}h${m}m` / `${m}m` (напр. `1h10m`, `45m`);
-- ресет у минулому (`diff <= 0`) → емодзі `⏰`.
+- far from the reset (`total_hours >= threshold_hours`) → coarse and approximate: `~3h`, `~7d`
+  (rounding ≥30 min up to an hour, ≥12 h up to a day);
+- close to it (`< threshold_hours`) → exact: `${h}h${m}m` / `${m}m` (e.g. `1h10m`, `45m`);
+- reset in the past (`diff <= 0`) → the ⏰ emoji.
 
-SPEC issue #7 («Agent behavior — time») вимагає **іншої** поведінки для menu bar: коли до ресету
-**> 90 хв**, показувати **абсолютний** локальний час `hh:mm` за локаллю користувача (12/24-год) і
-локальною таймзоною з авто-DST; коли **≤ 90 хв** — відносний `1h10m`. Тобто дослівний порт
-`format_time_remaining` тут неможливий: його «далека» гілка (`~Nh`/`~Nd`) суперечить вимозі
-показувати точний час ресету.
+SPEC issue #7 ("Agent behavior — time") calls for **different** behavior in the menu bar: when the
+reset is **more than 90 minutes** away, show the **absolute** local time `hh:mm` in the user's locale
+(12/24-hour) and local time zone with automatic DST; when it is **90 minutes or less**, show the
+relative `1h10m`. So a literal port of `format_time_remaining` is impossible here: its "far" branch
+(`~Nh`/`~Nd`) contradicts the requirement to show the exact reset time.
 
-Це той самий клас рішення, що й [ADR-0005](0005-pacing-fractions-not-blocks.md) (PacingModel
-свідомо відходить від дослівного порту `build_progress_bar`): порт зберігається там, де він
-відповідає продукту, і замінюється там, де ні. Рішення узгоджено з Артемом явно в сесії
-реалізації issue #7; крайні випадки формату (нульові хвилини, секунди, межа) теж його вибір.
+This is the same class of decision as [ADR-0005](0005-pacing-fractions-not-blocks.md) (PacingModel
+deliberately departing from a literal port of `build_progress_bar`): the port is kept where it fits
+the product and replaced where it does not. The decision was agreed with Artem explicitly during the
+session that implemented issue #7; the format's edge cases (zero minutes, seconds, the boundary) are
+his calls too.
 
-## Рішення
+## Decision
 
-`ResetClock.timeToReset(resetsAt:now:locale:timeZone:)` повертає типобезпечний `TimeToReset` із
-трьома смугами:
+`ResetClock.timeToReset(resetsAt:now:locale:timeZone:)` returns a type-safe `TimeToReset` with three
+bands:
 
-| Залишок до ресету | `statusline.sh` (`format_time_remaining`) | cc-timer (`ResetClock`) |
+| Time left to reset | `statusline.sh` (`format_time_remaining`) | cc-timer (`ResetClock`) |
 |---|---|---|
-| `≤ 0` | `⏰` (зашитий гліф) | `.resetNow` (гліф обирає View) |
-| `(0, 60) с` | — (bash округлює до `0m`) | `.relative("\(s)s")` — **нова** смуга секунд |
-| `[60 с, 90 хв]` | `${h}h${m}m` / `${m}m` | те саме, але **нульові хвилини прибрано** (`2h`, не `2h0m`) |
-| `> 90 хв` | грубо `~Nh` / `~Nd` | `.absolute(hh:mm)` — **абсолютний** локальний час |
+| `≤ 0` | `⏰` (hardcoded glyph) | `.resetNow` (the View picks the glyph) |
+| `(0, 60)` s | — (bash rounds to `0m`) | `.relative("\(s)s")` — a **new** seconds band |
+| `[60 s, 90 min]` | `${h}h${m}m` / `${m}m` | the same, but with **zero minutes dropped** (`2h`, not `2h0m`) |
+| `> 90 min` | coarse `~Nh` / `~Nd` | `.absolute(hh:mm)` — the **absolute** local time |
 
-Конкретні рішення (усі покриті unit-тестами):
+The specific decisions (all covered by unit tests):
 
-- **Поріг абсолютний/відносний — flat 90 хв**, не per-window `threshold_hours` (2 год / 48 год).
-  Один поріг для обох вікон простіший і відповідає SPEC.
-- **Порівняння строге `>`:** рівно 90 хв лишається **відносним** (`1h30m`) — біля порога живий
-  відлік `Nh Nm` корисніший за статичний годинник.
-- **Відносний формат — без пробілів, без zero-padding**, із прибиранням нульових хвилин:
-  `1h10m`, `45m`, `1h` (рівно година → `1h`, не `1h0m`).
-- **Смуга секунд** для `(0, 60)` с (`40s`, `1s`) — чесніше за `0m` біля ресету; statusline такого
-  не має. Поріг секунди↔хвилини — рівно 60 с (`60s → 1m`).
-- **Абсолютна гілка** форматується через `DateFormatter.setLocalizedDateFormatFromTemplate("jmm")`
-  (`j` — локаль-залежний цикл годин: 12-год з AM/PM або 24-год) з інжектованими `locale`/`timeZone`;
-  DST застосовує Foundation за іменем таймзони.
-- **`.resetNow` не несе гліфа.** Шар логіки лишається без UI-залежностей; гліф `⏰` обирає View
-  (issue #10), а позачерговий опит usage API на цей сигнал — робота координатора полінгу (окремий
-  тікет). `ResetClock` лишається чистим, без мережі й таймерів.
+- **The absolute/relative threshold is a flat 90 minutes**, not the per-window `threshold_hours`
+  (2 h / 48 h). One threshold for both windows is simpler and matches the SPEC.
+- **The comparison is strict `>`:** exactly 90 minutes stays **relative** (`1h30m`) — near the
+  threshold a live `Nh Nm` countdown is more useful than a static clock.
+- **The relative format has no spaces and no zero padding**, and drops zero minutes: `1h10m`, `45m`,
+  `1h` (exactly one hour → `1h`, not `1h0m`).
+- **A seconds band** for `(0, 60)` s (`40s`, `1s`) — more honest than `0m` right before a reset; the
+  statusline has nothing like it. The seconds↔minutes threshold is exactly 60 s (`60s → 1m`).
+- **The absolute branch** is formatted through
+  `DateFormatter.setLocalizedDateFormatFromTemplate("jmm")` (`j` is the locale-dependent hour cycle:
+  12-hour with AM/PM, or 24-hour) with injected `locale`/`timeZone`; Foundation applies DST from the
+  time zone's name.
+- **`.resetNow` carries no glyph.** The logic layer stays free of UI dependencies; the ⏰ glyph is the
+  View's choice (issue #10), and an out-of-band usage API poll on that signal is the polling
+  coordinator's job (a separate ticket). `ResetClock` stays pure, with no network and no timers.
 
-Парсинг (`parse(_:)`) портує `parse_reset_epoch` дослівно за наміром: strip мікросекунд перед
-offset (як `sed` у bash, бо `ISO8601DateFormatter.withFractionalSeconds` тримає лише мілісекунди),
-потім розбір із врахуванням offset → коректний абсолютний інстант для `+00:00` / `Z` / не-UTC.
+Parsing (`parse(_:)`) ports `parse_reset_epoch` literally in intent: strip microseconds before the
+offset (like the `sed` in bash, because `ISO8601DateFormatter.withFractionalSeconds` only handles
+milliseconds), then parse with the offset applied → the correct absolute instant for `+00:00` / `Z` /
+non-UTC.
 
-## Наслідки
+## Consequences
 
-- Користувач бачить **точний час** найближчого ресету (`17:30` / `5:30 PM`), коли він далеко —
-  корисніше за грубе `~3h`/`~7d` зі statusline.
-- Формат залежить від локалі й DST детерміновано: `locale`/`timeZone` — параметри, тож unit-тести
-  пінять 12/24-год (`en_US` vs `en_GB`/`uk_UA`) і DST-переходи (`America/New_York`, spring-forward
-  2026-03-08 / fall-back 2026-11-01) без залежності від оточення.
-- `TimeToReset` — discriminated enum, тож `StatusItemView` (#10) маплить смуги на представлення
-  (зокрема `.resetNow → ⏰`), а тести асертять кейс + значення, а не стилізований UI-рядок.
-- Розходження з `statusline.sh` зафіксоване й тут, і в doc-коментарях `ResetClock`; майбутні зміни
-  статуслайну не зобов'язують міняти цей модуль, і навпаки.
-- Смуга секунд і прибирання нульових хвилин — додаткові розходження понад SPEC, свідомо ухвалені;
-  при потребі легко звузити до дослівного `${m}m`/`${h}h${m}m`.
+- The user sees the **exact time** of the next reset (`17:30` / `5:30 PM`) when it is far away — more
+  useful than the statusline's coarse `~3h`/`~7d`.
+- The format depends on locale and DST deterministically: `locale`/`timeZone` are parameters, so unit
+  tests pin 12/24-hour (`en_US` vs `en_GB`/`uk_UA`) and DST transitions (`America/New_York`,
+  spring-forward 2026-03-08 / fall-back 2026-11-01) without depending on the environment.
+- `TimeToReset` is a discriminated enum, so `StatusItemView` (#10) maps the bands onto
+  representations (`.resetNow → ⏰` among them), and the tests assert the case plus its value rather
+  than a styled UI string.
+- The divergence from `statusline.sh` is recorded both here and in `ResetClock`'s doc comments; future
+  changes to the statusline do not oblige us to change this module, or the other way round.
+- The seconds band and dropping zero minutes are extra divergences beyond the SPEC, taken
+  deliberately; narrowing them back to a literal `${m}m`/`${h}h${m}m` would be easy if needed.
