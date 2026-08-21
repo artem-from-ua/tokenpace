@@ -88,7 +88,7 @@ exist when it started; that's why it's the wrong tool for this directory-of-chur
 
 - `FSEventStreamCreate(paths: [sessions, jobs], latency: ~0.75s, flags: kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer)`.
   - `FileEvents` → per-file granularity (path list, not just the parent dir).
-  - `latency 0.75s` **is** the "інтервал на обробку вхідних івентів" — the OS batches a burst of
+  - `latency 0.75s` **is** the "event-processing interval" — the OS batches a burst of
     writes into one callback, so a chatty session doesn't spin us. `NoDefer` delivers the first
     event of an idle→busy burst promptly, then coalesces the tail.
 - The callback is dispatched on the main queue; it does not inspect the changed paths (see above) —

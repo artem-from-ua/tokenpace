@@ -1,267 +1,270 @@
-# Design: підписка на інциденти status.claude.com
+# Design: subscribing to status.claude.com incidents
 
-Підсумок продуктового інтерв'ю (2026-08-05) щодо показу **інцидентів** у попапі та підписки на їхні
-оновлення через системні нотифікації. Документ фіксує **прийняті рішення** та **відкриті питання**,
-а також емпіричні дані, на яких ці рішення стоять. Це не план реалізації — реалізація буде окремим
-тікетом і, ймовірно, ADR.
+A summary of the product interview (2026-08-05) on showing **incidents** in the popup and subscribing to
+their updates via system notifications. The document records the **decisions taken** and the **open
+questions**, along with the empirical data those decisions rest on. This is not an implementation plan —
+the implementation will be a separate ticket and, most likely, an ADR.
 
-> **Контекст.** [ADR-0013](../adr/0013-claude-status-line.md) свідомо вирішив **не
-> декодувати `incidents[]`** взагалі: стан сервісів визначається виключно `components[].status`. Це
-> рішення лишається чинним **для визначення стану**. Цей документ надбудовує над ним окремий шар —
-> інциденти як *контекст* і як *об'єкт підписки*, а не як джерело стану.
+> **Context.** [ADR-0013](../adr/0013-claude-status-line.md) deliberately decided **not to decode
+> `incidents[]`** at all: the state of the services is determined exclusively by `components[].status`.
+> That decision **still stands for determining state**. This document builds a separate layer on top of it —
+> incidents as *context* and as an *object of subscription*, not as a source of state.
 
-## Проблема
+## Problem
 
-Попап відповідає на питання «мій Claude тупить — це я чи Anthropic?» станом сервісів. Але коли
-відповідь «Anthropic», користувач лишається без другої половини: **що саме зламано, наскільки це
-надовго, і коли можна повертатися до роботи**. Жовта крапка біля `Code` не пояснює, що зламані саме
-моделі — і людина читає «degraded» як «буде повільніше», хоча насправді частина функціональності не
-працює зовсім.
+The popup answers the question "my Claude is being dumb — is it me or Anthropic?" with the state of the
+services. But when the answer is "Anthropic", the user is left without the other half: **what exactly is
+broken, how long it will last, and when they can get back to work**. A yellow dot next to `Code` does not
+explain that it is the models that are broken — and a person reads "degraded" as "it will be slower", when
+in fact part of the functionality does not work at all.
 
-## Емпірична база
+## The empirical base
 
-Рішення нижче спираються на **виміряні** дані, а не на припущення про поведінку Statuspage.
+The decisions below rest on **measured** data, not on assumptions about how Statuspage behaves.
 
-Джерела: 50 інцидентів з `GET /api/v2/incidents.json` (2026-07-08 … 2026-08-05) плюс два інциденти,
-відстежені наживо від початку до `resolved` (`f6gkkq6txl7z`, `mgp99sn4ynd4`).
+Sources: 50 incidents from `GET /api/v2/incidents.json` (2026-07-08 … 2026-08-05) plus two incidents
+tracked live from the start through to `resolved` (`f6gkkq6txl7z`, `mgp99sn4ynd4`).
 
-### Розрив між реальним відновленням і `resolved`
+### The gap between real recovery and `resolved`
 
-Statuspage закриває інцидент **пізніше**, ніж компоненти повертаються в `operational`:
+Statuspage closes an incident **later** than the components return to `operational`:
 
-| метрика | значення |
+| metric | value |
 |---|---|
-| інцидентів із виявленим моментом позеленіння | 45 з 49 закритих |
-| медіана розриву green → `resolved` | 6 хв |
-| середнє | 36 хв |
-| розрив > 10 хв | 19 випадків |
-| розрив > 60 хв | 5 випадків |
-| максимум | **480 хв** (8 годин) |
+| incidents with a detected moment of turning green | 45 of 49 closed |
+| median gap, green → `resolved` | 6 min |
+| mean | 36 min |
+| gap > 10 min | 19 cases |
+| gap > 60 min | 5 cases |
+| maximum | **480 min** (8 hours) |
 
-Живий вимір `f6gkkq6txl7z`: компоненти позеленіли о 13:08:34 UTC, `resolved` поставили о 14:14:36 —
-**66 хвилин**. Деградація тривала 363 хв.
+The live measurement of `f6gkkq6txl7z`: the components turned green at 13:08:34 UTC, `resolved` was set at
+14:14:36 — **66 minutes**. The degradation lasted 363 min.
 
-> **Наслідок.** Сигнал «вже можна працювати» **не можна** брати з `resolved_at`. Це адміністративний
-> акт Anthropic, а не факт відновлення.
+> **Consequence.** The "you can work again" signal **cannot** be taken from `resolved_at`. That is an
+> administrative act by Anthropic, not the fact of recovery.
 
-### Чотири різні способи дійти до відновлення
+### Four different ways to arrive at recovery
 
-Два інциденти одного дня показали чотири різні форми — жодна модель, побудована на `incident_updates`,
-не покриває всі:
+Two incidents on the same day exhibited four different shapes — no model built on `incident_updates` covers
+them all:
 
-| спосіб | приклад |
+| way | example |
 |---|---|
-| апдейт зі статусом `monitoring` і переходом компонентів у `operational` | `f6gkkq6txl7z`, 13:08 |
-| **тихе** відновлення — компоненти позеленіли **без жодного апдейту** | `mgp99sn4ynd4` |
-| `resolved`-апдейт, що **дублює** вже наявний перехід | `f6gkkq6txl7z`, 14:14 |
-| `resolved`-апдейт із **порожнім** переходом (`operational` → `operational`) | `mgp99sn4ynd4`, 14:34 |
+| an update with status `monitoring` and the components moving to `operational` | `f6gkkq6txl7z`, 13:08 |
+| a **silent** recovery — the components turned green **with no update at all** | `mgp99sn4ynd4` |
+| a `resolved` update that **duplicates** an already-present transition | `f6gkkq6txl7z`, 14:14 |
+| a `resolved` update with an **empty** transition (`operational` → `operational`) | `mgp99sn4ynd4`, 14:34 |
 
-Історично трапляється й п'ятий: апдейт, що зеленить компоненти, має статус `investigating`, а не
-`monitoring` (`bdr3fq2rkchr`).
+Historically a fifth one occurs too: the update that turns the components green has status `investigating`
+rather than `monitoring` (`bdr3fq2rkchr`).
 
-### Ненадійні поля
+### Unreliable fields
 
-- **`monitoring_at`** — заповнене лише в 28 із 49 інцидентів. У `mgp99sn4ynd4` — `null`.
-- **`deliver_notifications`** — непослідовний. У наших двох інцидентів `true` на всіх 6 апдейтах,
-  включно з чисто текстовим; а в історичному `bdr3fq2rkchr` — `false` саме на `resolved`, тобто на
-  найціннішій для користувача події. Як фільтр шуму **не придатний**.
-- **`impact`** — слабо корелює з реальним болем: обидва інциденти 2026-08-05 мали `minor`, хоча
-  частина моделей не працювала 6 годин.
+- **`monitoring_at`** — populated in only 28 of 49 incidents. In `mgp99sn4ynd4` it is `null`.
+- **`deliver_notifications`** — inconsistent. In our two incidents it was `true` on all 6 updates,
+  including the purely textual one; whereas in the historical `bdr3fq2rkchr` it was `false` on `resolved`
+  precisely — the event most valuable to the user. As a noise filter it is **unusable**.
+- **`impact`** — correlates weakly with real pain: both incidents on 2026-08-05 were `minor`, even though
+  some of the models were down for 6 hours.
 
-### Обсяг оновлень
+### The volume of updates
 
-- Апдейтів на інцидент: у середньому **3.3**, максимум 8.
-- `f6gkkq6txl7z` за 429 хв видав 4 апдейти, з них **лише один** суто текстовий.
-- Тобто різниця між режимами «всі оновлення» і «тільки відновлення» на реальних даних —
-  приблизно **один банер на інцидент**.
+- Updates per incident: **3.3** on average, 8 at most.
+- `f6gkkq6txl7z` produced 4 updates over 429 min, **only one** of which was purely textual.
+- So the difference between the "all updates" and "recovery only" modes on real data is roughly
+  **one banner per incident**.
 
-### Інші спостереження
+### Other observations
 
-- **`components[]` всередині інциденту** порожній (`[]`) у загальному фіді закритих інцидентів
-  (`incidents.json`) — але **не** в `summary.json`, який і є єдиним ендпоінтом TokenPace: там він
-  заповнений і, більше того, дзеркалить **поточний** стан компонентів, а не стан на момент інциденту
-  (перевірено на знімках: у `03-monitoring-green` відкритий інцидент показує всі компоненти
-  `operational`, байт-у-байт як верхньорівневий масив). Тобто другий запит не потрібен — і це поле
-  **не можна** читати як історичне свідчення того, наскільки серйозним інцидент був колись.
-  *(Виправлено за підсумками реалізації #279; початкове формулювання було вірним лише для
+- **`components[]` inside an incident** is empty (`[]`) in the general feed of closed incidents
+  (`incidents.json`) — but **not** in `summary.json`, which is the only endpoint TokenPace uses: there it is
+  populated and, moreover, mirrors the **current** state of the components rather than their state at the
+  time of the incident (verified against snapshots: in `03-monitoring-green` an open incident shows all
+  components as `operational`, byte for byte identical to the top-level array). So a second request is not
+  needed — and this field **cannot** be read as historical evidence of how serious the incident once was.
+  *(Corrected following the implementation of #279; the original wording was true only for
   `incidents.json`.)*
-- **Апдейти редагують заднім числом**: у `71wxpw067nx2` `created_at` = 07:05, а `updated_at` = 09:13.
-  Ідентичність апдейту — це `id`, не час.
-- **Стан компонента не належить інциденту.** О 14:00 обидва активні інциденти показували ті самі 4
-  компоненти як `degraded`, хоча спричинив це лише другий.
-- **Компоненти блимають**: 13:08 зелене → 13:51 знову червоне (через *інший* інцидент) → зелене.
+- **Updates get edited after the fact**: in `71wxpw067nx2` `created_at` is 07:05 while `updated_at` is
+  09:13. An update's identity is its `id`, not its time.
+- **A component's state does not belong to an incident.** At 14:00 both active incidents showed the same 4
+  components as `degraded`, even though only the second one had caused it.
+- **Components flicker**: 13:08 green → 13:51 red again (because of a *different* incident) → green.
 
-## Прийняті рішення
+## Decisions taken
 
-### 1. Попап: ⌥ перемикає вимір
+### 1. The popup: ⌥ switches the dimension
 
-За замовчуванням попап лишається як зараз — рядки **компонентів** із проблемним статусом.
+By default the popup stays as it is now — rows of **components** with a problematic status.
 
-**Під ⌥ перелік сервісів замінюється переліком інцидентів** (теж із кольоровими крапочками). Зелені
-статуси сервісів під ⌥ більше **не** показуються.
+**Under ⌥ the list of services is replaced by a list of incidents** (with colored dots as well). Green
+service statuses are **no longer** shown under ⌥.
 
 ```
-(без ⌥)
+(without ⌥)
 ● Code ..................................... degraded
 ● API ...................................... degraded
 
-(утримуй ⌥)
+(hold ⌥)
 ● Degraded performance of multiple models
     identified · 2h                              🔔 ↗
 ● Degraded performance for Claude Opus 5
     identified · 12m                             🔕 ↗
 ```
 
-Це відрізняється від наявної поведінки ⌥ (яка показувала *усі* компоненти, включно зі здоровими) —
-⌥ тепер перемикає **вимір** (сервіси ↔ інциденти), а не «показати більше».
+This differs from the existing behavior of ⌥ (which showed *all* components, healthy ones included) — ⌥ now
+switches the **dimension** (services ↔ incidents) rather than "show more".
 
-> ⌥ у попапі вже несе інші ролі: per-project awaiting-розбивка (#233) та вік даних. Заміна стосується
-> **лише** секції статусу сервісів.
+> ⌥ already carries other roles in the popup: the per-project awaiting breakdown (#233) and data age. The
+> replacement affects **only** the service status section.
 
-**Якщо активних інцидентів немає — секція під ⌥ зникає повністю.** Попап не росте дарма.
+**If there are no active incidents, the section under ⌥ disappears entirely.** The popup does not grow for
+nothing.
 
-> **Відрендерені мокапи цього UI:** [чотири стани попапу](https://claude.ai/code/artifact/c6697546-aad0-43c5-a1e7-cf2ed5f401eb). Ескіз нижче — з інтерв'ю;
-> фінальне компонування (перенос опису, чіп `вік · стадія` справа в останньому рядку, один рядок
-> підписки на епізод) дивись в артефакті.
+> **Rendered mockups of this UI:** [four popup states](https://claude.ai/code/artifact/c6697546-aad0-43c5-a1e7-cf2ed5f401eb). The sketch below is from the
+> interview; for the final composition (the description moved, the `age · stage` chip on the right in the
+> last row, a single subscription row per episode) see the artifact.
 
-### 2. Вміст рядка інциденту
+### 2. The content of an incident row
 
-Назва інциденту + вік + статус. **Уражені сервіси НЕ показуються** — це і є поточний фільтр у
-Monitored Services, дублювати його в рядку немає сенсу.
+The incident's title + age + status. **The affected services are NOT shown** — that is exactly what the
+current filter in Monitored Services is, and duplicating it in the row makes no sense.
 
-Слово-статус (`identified`, `monitoring`, …) є **посиланням на конкретний інцидент** (`shortlink`),
-а не на загальну сторінку статусу.
+The status word (`identified`, `monitoring`, …) is a **link to the specific incident** (`shortlink`),
+not to the general status page.
 
-> Це заодно розв'язує наявну проблему: сьогодні слово-статус у рядку *компонента* веде на
-> `status.claude.com` загалом, і коли уражено кілька сервісів — виходить кілька однакових посилань
-> у нікуди. Коли рядок один на інцидент, посилання веде туди, куди має.
+> This also solves an existing problem: today the status word in a *component* row leads to
+> `status.claude.com` in general, and when several services are affected you get several identical links
+> going nowhere. When there is one row per incident, the link leads where it should.
 
-### 3. Компоненти зелені → інцидент ховається
+### 3. Components green → the incident is hidden
 
-Якщо компоненти вже `operational`, а інцидент формально ще відкритий (наш 66-хвилинний кейс) —
-**інцидент у попапі не показується взагалі**.
+If the components are already `operational` while the incident is still formally open (our 66-minute case),
+**the incident is not shown in the popup at all**.
 
-Обґрунтування: попап відповідає на «чи можу я зараз працювати». Зелені компоненти означають «так»;
-відкритий інцидент цього не заперечує.
+The rationale: the popup answers "can I work right now". Green components mean "yes"; an open incident does
+not contradict that.
 
-### 4. Підписка — виключно opt-in по кліку
+### 4. Subscription is opt-in by click, exclusively
 
-**Нічого не приходить, доки користувач сам не натиснув.** Жодного дефолтного стану, жодного
-глобального тумблера «нотифікувати про інциденти».
+**Nothing arrives until the user clicks it themselves.** No default state, no global "notify me about
+incidents" toggle.
 
-Підписка оформлюється на конкретний активний інцидент або на пачку одночасних — по кліку на
-відповідній іконці в рядку.
+A subscription is taken out on a specific active incident, or on a batch of simultaneous ones — by clicking
+the corresponding icon in the row.
 
-> **Наслідок цього рішення** (важливий, бо він знімає цілий пласт складності): відпадає задача
-> «вгадати, чи цей інцидент стосується користувача». Гейт по `MonitoredServices`, дилема «інцидент
-> `major`, а компоненти зелені», питання «інцидент розрісся і тепер зачіпає Claude Code» — усе це
-> існувало тільки щоб машина вирішила, коли будити. Коли будити просить людина, гадати не треба.
+> **A consequence of this decision** (an important one, because it removes a whole layer of complexity): the
+> problem of "guessing whether this incident concerns the user" goes away. Gating on `MonitoredServices`,
+> the dilemma of "the incident is `major` but the components are green", the question of "the incident grew
+> and now affects Claude Code" — all of it existed only so that a machine could decide when to wake someone
+> up. When a person asks to be woken, there is nothing to guess.
 
-### 5. Джерело сигналу відновлення — `components[].status`
+### 5. The recovery signal comes from `components[].status`
 
-**Не** `resolved_at`, **не** `monitoring_at`, **не** `affected_components` в апдейтах.
+**Not** `resolved_at`, **not** `monitoring_at`, **not** `affected_components` in the updates.
 
-Єдине джерело, що покриває всі п'ять спостережених форм відновлення — поточний стан компонентів у
-`summary.json`. Апдейти лишаються джерелом **тексту** («що кажуть»), а не тригером.
+The only source that covers all five observed shapes of recovery is the current state of the components in
+`summary.json`. The updates remain the source of the **text** ("what they are saying"), not the trigger.
 
-> TokenPace вже полить `summary.json` і читає `components[]` — детектор фактично існує. Бракує
-> прив'язки «компонент лежить через оцей інцидент» і власне підписки.
+> TokenPace already polls `summary.json` and reads `components[]` — the detector effectively exists. What is
+> missing is the binding of "this component is down because of that incident" and the subscription itself.
 
-### 6. Дедуплікація — по `incident_updates[].id`
+### 6. Deduplication by `incident_updates[].id`
 
-Не по факту переходу компонентів (форма непослідовна, `resolved` дублює вже показаний перехід) і не
-по `updated_at` (апдейти редагують заднім числом → повторний банер зі старим змістом).
+Not by the fact of a component transition (the shape is inconsistent, and `resolved` duplicates a transition
+already shown) and not by `updated_at` (updates get edited after the fact → a repeat banner with stale
+content).
 
-### 7. Тексти нотифікацій
+### 7. Notification texts
 
-Перед текстом — **кольорова крапочка**, що підсвічує статус (та сама візуальна мова, що й попап).
+The text is preceded by a **colored dot** highlighting the status (the same visual language as the popup).
 
-**Відновлення:**
+**Recovery:**
 
 ```
 🟢 Claude is back
 Code and API are operational again.
 ```
 
-**Текстовий апдейт:**
+**A textual update:**
 
 ```
 🟡 Degraded performance of multiple models
 We are continuing to work on a fix for this issue.
 ```
 
-> **Технічна засторога.** `UNNotificationContent` не має власного «кольорового індикатора». Колір
-> доведеться робити або емодзі-кружечком у тексті (🟢🟡🟠🔴), або через `UNNotificationAttachment`
-> із зображенням. Емодзі простіше й надійніше — перевірити вживу перед вибором.
+> **A technical caveat.** `UNNotificationContent` has no "colored indicator" of its own. The color will have
+> to be done either with an emoji circle in the text (🟢🟡🟠🔴) or via a `UNNotificationAttachment` with an
+> image. Emoji is simpler and more reliable — check it live before choosing.
 
-### 8. Дії банера
+### 8. Banner actions
 
-- **Клік** → відкриває сторінку інциденту (`shortlink`).
-- **Кнопка «Unfollow»** — відписатися прямо з банера, не відкриваючи попап.
+- **Click** → opens the incident's page (`shortlink`).
+- **An "Unfollow" button** — unsubscribe straight from the banner, without opening the popup.
 
-### 9. Quiet hours поширюються
+### 9. Quiet hours apply
 
-Ті самі тихі години, що й для «Back to work!» / «Extra usage credits»
+The same quiet hours as for "Back to work!" / "Extra usage credits"
 ([ADR-0039](../adr/0039-back-to-work-notification.md),
-[ADR-0050](../adr/0050-extra-usage-notification.md)). Одна поведінка, без сюрпризів.
+[ADR-0050](../adr/0050-extra-usage-notification.md)). One behavior, no surprises.
 
-### 10. Settings — фільтри
+### 10. Settings — filters
 
-Фільтрувати інциденти **за ураженими сервісами** (наявний Monitored Services) і **за віком
-інциденту** (ховати «зомбі», що висять добами — у вибірці був на 2741 хв ≈ дві доби).
+Filter incidents **by affected services** (the existing Monitored Services) and **by the incident's age**
+(hiding the "zombies" that hang around for days — the sample held one at 2,741 min ≈ two days).
 
-### 11. Dev-лог payload-ів у JSONL
+### 11. A dev log of payloads in JSONL
 
-Окремий JSONL із повними payload-ами status-відповідей для dev-траблшутингу.
+A separate JSONL holding the full payloads of status responses, for dev troubleshooting.
 
-- **Запис лише коли змінились суттєві поля** — відбиток = статуси компонентів + набір
-  `incident_updates[].id` + статус інциденту. Дублікати не пишуться.
-- **Вмикається чекбоксом** у вікні Development tools (#279), поруч із селектором стубів; там же —
-  «Reveal log file in Finder».
+- **Written only when significant fields changed** — the fingerprint is the component statuses + the set of
+  `incident_updates[].id` + the incident's status. Duplicates are not written.
+- **Enabled by a checkbox** in the Development tools window (#279), next to the stub selector; "Reveal log
+  file in Finder" lives there too.
 
-## Відкриті питання
+## Open questions
 
-Свідомо відкладені до живих спостережень — не вгадувати, а поміряти.
+Deliberately deferred until there are live observations — measure, do not guess.
 
-| # | Питання | Чому відкрите |
+| # | Question | Why it is open |
 |---|---|---|
-| 1 | Поведінка при **кількох одночасних** інцидентах: одна кнопка на всі, кожен окремо, чи «тільки наявні на момент кліку» | Оцінити доцільність у живих тестах протягом певного періоду |
-| 2 | Фінальний набір **подій для банерів** (текстові апдейти / зміни статусу / відновлення / погіршення / формальне закриття) | Те саме — оцінити на реальному потоці |
-| 3 | **Скільки живе підписка** після закриття інциденту; чи переживає рестарт | Потребує дослідження; для цього й потрібен dev-JSONL (п. 11) |
-| 4 | Чи потрібен **дебаунс** перед банером «відновлено» і який | Компоненти блимають (13:08 → 13:51 → зелене); без затримки банери стрибатимуть |
-| 5 | Що робити з **`impact`** і **maintenance** | Поки показуємо. Заплановані maintenance корисні **якщо вікно припадає на active hours** користувача — це окрема логіка (`scheduled_maintenances[]` наразі не декодується взагалі) |
-| 6 | Де саме живе **іконка підписки** | Рядок інциденту видно лише під ⌥ → підписатися можна лише утримуючи ⌥. Глибоко захована взаємодія; чи прийнятно — покаже практика |
+| 1 | Behavior with **several simultaneous** incidents: one button for all, each one separately, or "only the ones present at the moment of the click" | Assess whether it is worthwhile in live testing over some period |
+| 2 | The final set of **events that get banners** (textual updates / status changes / recovery / deterioration / formal closure) | The same — assess it against a real stream |
+| 3 | **How long a subscription lives** after the incident closes; whether it survives a restart | Needs research; that is what the dev JSONL (item 11) is for |
+| 4 | Whether a **debounce** is needed before the "recovered" banner, and what it should be | Components flicker (13:08 → 13:51 → green); without a delay the banners will bounce |
+| 5 | What to do about **`impact`** and maintenance | We show them for now. Scheduled maintenance is useful **if the window falls within the user's active hours** — that is separate logic (`scheduled_maintenances[]` is not decoded at all right now) |
+| 6 | Where exactly the **subscription icon** lives | The incident row is only visible under ⌥ → you can only subscribe while holding ⌥. A deeply hidden interaction; whether it is acceptable will show in practice |
 
-## Тестові дані
+## Test data
 
-Знімки реальних API-відповідей збережено **поза репозиторієм** (містять лише публічні дані, але
-зберігаються локально за загальним правилом про live-payload-и):
+Snapshots of real API responses are stored **outside the repository** (they contain only public data, but
+are kept locally under the general rule about live payloads):
 
 ```
 ~/.tokenpace-status-payloads/
-├── 00-all-clear.{summary,unresolved}.json      # інцидентів немає (157 байт — мінімальний стуб)
-├── history-50-incidents.json                    # 50 історичних інцидентів
+├── 00-all-clear.{summary,unresolved}.json      # no incidents (157 bytes — the minimal stub)
+├── history-50-incidents.json                    # 50 historical incidents
 ├── f6gkkq6txl7z/
-│   ├── 02-identified-2updates.*                 # активний, компоненти degraded, текстовий апдейт
-│   ├── 03-monitoring-green.*                    # активний, компоненти ЗЕЛЕНІ (66-хв щілина)
-│   ├── 20260805T140019Z-monitoring.*            # ДВА інциденти одночасно
-│   └── 20260805T141520Z-resolved.*              # перший зник з unresolved, другий лишився
+│   ├── 02-identified-2updates.*                 # active, components degraded, a textual update
+│   ├── 03-monitoring-green.*                    # active, components GREEN (the 66-min gap)
+│   ├── 20260805T140019Z-monitoring.*            # TWO incidents at once
+│   └── 20260805T141520Z-resolved.*              # the first left unresolved, the second stayed
 └── mgp99sn4ynd4/
-    ├── 20260805T142824Z-identified.*            # ТИХЕ відновлення (апдейту немає)
-    └── 20260805T143825Z-resolved.*              # resolved, unresolved порожній
+    ├── 20260805T142824Z-identified.*            # a SILENT recovery (there is no update)
+    └── 20260805T143825Z-resolved.*              # resolved, unresolved is empty
 ```
 
-Кожен стан — у трьох варіантах ендпоінта (`summary.json`, `incidents/unresolved.json`,
-`incidents.json`), тож можна стубити будь-який шлях коду.
+Every state comes in all three endpoint variants (`summary.json`, `incidents/unresolved.json`,
+`incidents.json`), so any code path can be stubbed.
 
-> Файли `incidents.json` важать ~210 KB. Перед використанням як фікстур у юніт-тестах їх варто
-> обрізати до 1–2 інцидентів.
+> The `incidents.json` files weigh ~210 KB. Before using them as fixtures in unit tests they are worth
+> trimming to 1–2 incidents.
 
-## Посилання
+## References
 
-- [ADR-0013](../adr/0013-claude-status-line.md) — рядок статусу сервісів; рішення не
-  декодувати інциденти
-- [ADR-0024](../adr/0024-configurable-logical-services.md) — конфігуровані логічні сервіси
+- [ADR-0013](../adr/0013-claude-status-line.md) — the service status line; the decision not to
+  decode incidents
+- [ADR-0024](../adr/0024-configurable-logical-services.md) — configurable logical services
 - [ADR-0039](../adr/0039-back-to-work-notification.md),
-  [ADR-0050](../adr/0050-extra-usage-notification.md) — наявні нотифікації, quiet hours
-- [Інцидент f6gkkq6txl7z](https://stspg.io/s2ysk4zxbyy3) — основний кейс цього документа
+  [ADR-0050](../adr/0050-extra-usage-notification.md) — the existing notifications, quiet hours
+- [Incident f6gkkq6txl7z](https://stspg.io/s2ysk4zxbyy3) — the main case behind this document

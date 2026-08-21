@@ -12,7 +12,7 @@ import TokenPaceKit
 /// **Triggers.**
 /// - **FSEvents** on `~/.claude/sessions` and `~/.claude/jobs` (recursive, file-level). The OS wakes
 ///   us with a coalesced batch of changed paths; `latency` batches a burst of writes into one
-///   callback (the "інтервал на обробку вхідних івентів").
+///   callback (the "event-processing interval").
 /// - **Safety poll**: a rare timer (``safetyPollInterval``) that also scans, to catch anything
 ///   FSEvents coalesced away or dropped across sleep/logout.
 ///
