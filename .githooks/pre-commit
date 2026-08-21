@@ -31,6 +31,29 @@ if [ -n "$SWIFT_STAGED" ] && [ "$TOKENPACE_SKIP_SWIFT_HOOK" != "1" ]; then
     fi
 fi
 
+# Documentation link gate — runs only when the commit touches markdown, so code-only commits stay
+# fast. Set TOKENPACE_SKIP_DOC_LINKS_HOOK=1 to bypass (e.g. an intentional WIP commit).
+#
+# Anchors are derived from heading *text*, so renaming a heading silently orphans every link
+# pointing at it — in files this commit never touched, and with nothing in `git status` to show for
+# it. That is why the check runs over the whole corpus rather than only the staged files: the
+# damage from a staged rename lands somewhere else. Pure Python over ~150 files costs a fraction of
+# a second, nowhere near the ~31 s that got `swift test` removed from this hook.
+DOC_STAGED_MD=$(git diff --cached --name-only --diff-filter=ACM -- '*.md')
+
+if [ -n "$DOC_STAGED_MD" ] && [ "$TOKENPACE_SKIP_DOC_LINKS_HOOK" != "1" ]; then
+    DOC_LINK_CHECKER="$(git rev-parse --show-toplevel)/scripts/check-doc-links.py"
+    if [ -f "$DOC_LINK_CHECKER" ]; then
+        echo "Markdown changed — checking documentation links…"
+        if ! python3 "$DOC_LINK_CHECKER"; then
+            echo ""
+            echo "Commit blocked: broken documentation links."
+            echo "  Bypass (WIP only): TOKENPACE_SKIP_DOC_LINKS_HOOK=1 git commit …"
+            exit 1
+        fi
+    fi
+fi
+
 # >>> artem-from-ua/plantuml >>>
 # PlantUML URL sync check — installed by plantuml Claude Code plugin.
 # Do not edit between markers; managed automatically by setup-project.sh.

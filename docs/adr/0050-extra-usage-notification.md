@@ -93,7 +93,7 @@ ISO-код). Форматер **продубльовано** в Kit навмис
 (executable target), не імпортується; правило мейнтейнера — тримати чисту копію в Kit для юніт-тестів.
 Обидві копії мають лишатися синхронними (спільний known-currency набір).
 
-### Розкол pure/shell ([ADR-0009](0009-appkit-vs-swiftui.md))
+### Розкол pure/shell ([ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md))
 
 Уся логіка (сигнал + текст) — у `TokenPaceKit` (`ExtraUsageOnset`), повністю юніт-покрита
 (`ExtraUsageOnsetTests`: 7 сигнальних + 6 формат-кейсів). Побічні ефекти (`UNUserNotificationCenter`,

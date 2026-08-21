@@ -159,4 +159,4 @@ ADR-0034 для 7d.
 - `MenuBarMode.expanded` тепер має два optional-поля, тож місця, які читають `five`, потребують
   розгортання. Реальний обсяг виявився малим: більшість тестів ходять через хелпери.
 - Гілка `(nil, nil)` у `drawBars` недосяжна за інваріантом, але існує в коді як мовчазний no-op —
-  view лишається тонким shell'ом ([ADR-0009](0009-pure-kit-thin-shell.md)), а не місцем для assertion.
+  view лишається тонким shell'ом ([ADR-0009](0009-statusitemview-pure-layout-and-thin-shell.md)), а не місцем для assertion.

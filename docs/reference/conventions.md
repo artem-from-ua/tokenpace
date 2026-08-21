@@ -67,13 +67,32 @@ SwiftPM аксесор шукає бандл за `Bundle.main.bundleURL/<name>.
 git config core.hooksPath .githooks
 ```
 
-`pre-commit` робить дві перевірки:
+`pre-commit` робить три перевірки:
 
 - **Swift build + test** — лише коли коміт торкається `*.swift` / `Package.swift`
   (docs-only коміти лишаються швидкими). Падіння збірки або тестів блокує коміт. Обійти
   навмисний WIP-коміт: `TOKENPACE_SKIP_SWIFT_HOOK=1 git commit …`.
+- **Documentation links** — лише коли коміт торкається `*.md`. Запускає
+  `scripts/check-doc-links.py` по **всьому** корпусу (не лише по staged-файлах: перейменування
+  заголовка ламає посилання в файлах, яких коміт не торкався). Обійти:
+  `TOKENPACE_SKIP_DOC_LINKS_HOOK=1 git commit …`.
 - **PlantUML URL sync** — блокує коміт, якщо URL діаграм у `.md` розійшлися з джерелом
   (керується плагіном `plantuml`, між маркерами — не редагувати вручну).
+
+Валідатор посилань має ще чотири режими, потрібні під час міграції доків на англійську
+([#441](https://github.com/artem-from-ua/tokenpace/issues/441)):
+
+```sh
+python3 scripts/check-doc-links.py --snapshot OUT     # граф якорів у JSON (поіменний перелік)
+python3 scripts/check-doc-links.py --compare OLD NEW  # що зламалося між двома знімками
+python3 scripts/check-doc-links.py --inbound FILE     # хто посилається на якорі цього файлу
+python3 scripts/check-doc-links.py --no-dup-slugs     # колізії slug'ів заголовків
+```
+
+**`--no-dup-slugs` — окремий режим не випадково.** Два різні заголовки, що дають однаковий slug,
+для звичайної перевірки виглядають валідними: GitHub додає до другого `-1`, і посилання, написане
+на перший, резолвиться — у неправильну секцію. Саме це стається, коли два українські заголовки
+перекладаються в один англійський, тож кожен пакет перекладу зобов'язаний ганяти цей режим окремо.
 
 ## Версіонування
 
@@ -288,6 +307,8 @@ Appearance** — не за алфавітом і не в порядку полі
   `TOKENPACE_GH_AUTH` (ADR-0025).
 - **`TOKENPACE_SKIP_SWIFT_HOOK`** = `1` — обходить Swift build/test у pre-commit-хуку (для навмисного
   WIP-коміту).
+- **`TOKENPACE_SKIP_DOC_LINKS_HOOK`** = `1` — обходить перевірку посилань у доках у pre-commit-хуку
+  (для навмисного WIP-коміту з відомо битим посиланням).
 
 > **UserNotifications і запуск бандла.** Системний банер update-чеку працює лише в підписаному,
 > встановленому `.app`, запущеному через LaunchServices (`open`), **не** прямим викликом бінарника
