@@ -163,7 +163,7 @@ sentence under it.
 **"Open questions", not "Open Questions".** Capitalize the first word and proper nouns only.
 
 This mirrors the rule already in force for user-facing strings
-([conventions.md § Регістр user-facing рядків](conventions.md#регістр-user-facing-рядків--sentence-case-і-одна-назва-на-одну-річ)),
+([conventions.md § Case of user-facing strings](conventions.md#case-of-user-facing-strings--sentence-case-and-one-name-per-thing)),
 which no document had yet stated for *headings*. It is stated here so it can be cited.
 
 The same applies to ADR titles: `ADR-0116: English as the documentation language`, not

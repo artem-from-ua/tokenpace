@@ -30,7 +30,7 @@
   convention describe a **partial** supersession by ADR-0015 (only §2 idle threshold 5% and §4 idle
   glyph `*` dropped; the rest stays valid). Same situation as ADR-0025/0033.
   → **Fixed in PR #152:** frontmatter `status: accepted` (keeps `superseded_by: [0015]`); index table
-  row → `partially superseded → 0015 (idle-поріг + idle-гліф)`.
+  row → `partially superseded → 0015 (idle threshold + idle glyph)`.
 
 ### Content actuality — warning — FIXED
 

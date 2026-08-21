@@ -1,39 +1,39 @@
-# Джерело істини для рендерів UI
+# Source of truth for UI renders
 
-Довідник для будь-якого зображення інтерфейсу поза застосунком: артефакти, мокапи,
-документація, коментарі в issue. **Кожна цифра тут узята з коду; кожен стан перевірений на
-досяжність.**
+The reference for any depiction of the interface outside the app itself: artifacts, mockups,
+documentation, issue comments. **Every number here is taken from the code; every state has been
+verified reachable.**
 
-> Правило, з якого це виросло: рендер, намальований із пам'яті або з чужого мокапа,
-> ілюструє неіснуючий продукт. Розбір, побудований на такому рендері, хибний навіть коли
-> текст правильний.
+> The rule this grew out of: a render drawn from memory or from somebody else's mockup illustrates a
+> product that does not exist. An analysis built on such a render is false even when the text is
+> right.
 
-Пов'язані документи: [menu-bar-signals.md](menu-bar-signals.md) розв'язує **обернену** задачу — не
-«як намалювати стан», а «що означає те, що вже на екрані» (спершу «чи є число», і лише потім
-смужки); [bar-status-conditions.md](bar-status-conditions.md) — за яких саме даних смужка набуває
-якого кольору; [users-and-goals.md](users-and-goals.md) — перевірка «чи сигнал корисний».
+Related documents: [menu-bar-signals.md](menu-bar-signals.md) solves the **inverse** problem — not
+"how do I draw this state" but "what does what's already on screen mean" (first "is there a number",
+and only then the bars); [bar-status-conditions.md](bar-status-conditions.md) — which data makes a bar
+take which color; [users-and-goals.md](users-and-goals.md) — the "is this signal useful" test.
 
-## Перед тим, як щось малювати
+## Before you draw anything
 
-1. **Знайди формтер**, який друкує цей текст, і процитуй його — не переказуй.
-2. **Прогони стан через модель** — колір і статус обчислюються, а не обираються.
-3. **Звір метрики** з `Metrics` відповідного view.
-4. **Перевір досяжність стану** — див. «Неможливі комбінації» нижче.
-5. **Іконки — справжні SF Symbols**, відрендерені з системи. Не емодзі, не Unicode-замінники,
-   не SVG з бібліотеки — див. нижче.
+1. **Find the formatter** that prints this text and quote it — do not paraphrase.
+2. **Run the state through the model** — color and status are computed, not chosen.
+3. **Check the metrics** against the `Metrics` of the relevant view.
+4. **Verify the state is reachable** — see "Impossible combinations" below.
+5. **Icons are real SF Symbols**, rendered from the system. Not emoji, not Unicode substitutes, not
+   SVGs from a library — see below.
 
-## Метрики
+## Metrics
 
-### Меню-бар — `StatusItemView.Metrics`
+### Menu bar — `StatusItemView.Metrics`
 
-| Константа | Значення |
+| Constant | Value |
 |---|---|
 | `barWidth` | 34 |
 | `barHeight` | 5 |
-| `barCorner` (трек **і** стрічка) | 1.5 |
-| `tickWidth` × `tickHeight` (маркер часу) | 5 × 9 |
-| `centreTickWidth` × `centreTickHeight` (риска нуля — Balance **і** Pressure) | **1.5** × **10** (під треком) |
-| `zeroTickAlpha` (множник до `brightAlpha` для риски нуля) | **0.55** |
+| `barCorner` (track **and** strip) | 1.5 |
+| `tickWidth` × `tickHeight` (time marker) | 5 × 9 |
+| `centreTickWidth` × `centreTickHeight` (zero tick — Balance **and** Pressure) | **1.5** × **10** (under the track) |
+| `zeroTickAlpha` (multiplier applied to `brightAlpha` for the zero tick) | **0.55** |
 | `hPadding` | 2 |
 | `labelGap` | 5 |
 | `awaitingIconSize` + gap | 12 + 6 |
@@ -42,48 +42,49 @@
 | `creditsIconSize` + gap | 12 + 4 |
 | `statusDotDiameter` + gap | 6 + 4 |
 
-Шрифт лейбла — `NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)`.
+The label font is `NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)`.
 
-**Слот awaiting-долоні резервується з опцій, а не з даних** ([#283](https://github.com/artem-from-ua/cc-timer/issues/283),
-[ADR-0073](../adr/0073-awaiting-icon-reserved-slot-and-slide.md)): `awaitingIconSize + gap` входить у
-ширину віджета, поки ввімкнені **обидва** тумблери — master «Show sessions awaiting input» (Extra
-features) **і** «Show awaiting-input icon in the menu bar» (Appearance), — **незалежно від того, чи
-хтось чекає вводу зараз**. Обидва обов'язкові: вимикання master'а лише *дизейблить* другий тумблер, а
-його збережене значення лишається `true`, тож перевірка самої лише Appearance-опції тримала б ≈18 pt
-під вимкнену фічу.
-Малюючи меню-бар у мокапі, не прибирай це місце разом з іконкою — інакше сусідні елементи стануть не
-там, де їх покаже застосунок. Сам гліф їде по Y на `awaitingSlideTravel` (з обрізанням по слоту), тож
-проміжний кадр — це **обрізана** долоня біля нижньої межі, а не зменшена або напівпрозора.
+**The awaiting-hand slot is reserved from the options, not from the data**
+([#283](https://github.com/artem-from-ua/cc-timer/issues/283),
+[ADR-0073](../adr/0073-awaiting-icon-reserved-slot-and-slide.md)): `awaitingIconSize + gap` counts
+toward the widget's width while **both** toggles are on — the master "Show sessions awaiting input"
+(Extra features) **and** "Show awaiting-input icon in the menu bar" (Appearance) — **regardless of
+whether anyone is waiting for input right now**. Both are required: turning the master off only
+*disables* the second toggle, while its stored value stays `true`, so checking the Appearance option
+alone would hold ≈18 pt for a feature that is switched off.
+When you draw the menu bar in a mockup, do not remove that space along with the icon — otherwise the
+neighboring elements land somewhere other than where the app will put them. The glyph itself travels
+along Y by `awaitingSlideTravel` (clipped to the slot), so an intermediate frame is a **clipped** hand
+near the lower edge, not a shrunken or semi-transparent one.
 
-### Попап — `PopupBarView.Metrics`
+### Popup — `PopupBarView.Metrics`
 
-| Константа | Значення |
+| Constant | Value |
 |---|---|
 | `barHeight` | 6 |
-| `corner` (трек **і** стрічка) | 2.25 |
+| `corner` (track **and** strip) | 2.25 |
 | `indicatorWidth` × `indicatorHeight` | 7 × 14 |
 | `indicatorCorner` | 2 |
-| обводка маркера | 1 pt, `monochromeGrey` змішаний 40% із кольором маркера |
+| marker outline | 1 pt, `monochromeGrey` blended 40% with the marker color |
 | `tickLength` / `tickGap` / `tickWidth` | 5 / 2 / 2 |
-| висота в'ю бару (`PopupBarView.viewHeight`) | **14** = `indicatorHeight`. Резерву під лінійку тіків **немає** (#388): тіки малюються в нижньому виступі маркера. Доти в'ю була 21 pt, і ті зайві 7 pt порожнечі під кожним баром читалися як збільшений відступ *між блоками лімітів* |
-| `boundaryCaptionSize` (підписи місяця, кредитний бар) | 9 |
+| bar view height (`PopupBarView.viewHeight`) | **14** = `indicatorHeight`. There is **no** reserve for the tick ruler (#388): the ticks are drawn inside the marker's lower overhang. Before that the view was 21 pt, and those extra 7 pt of emptiness under every bar read as increased spacing *between limit blocks* |
+| `boundaryCaptionSize` (month captions, credit bar) | 9 |
 | `boundaryCaptionDrop` / `boundaryCaptionGap` | 5 / 3 |
-| `minStripWidth` | `0.75 × barHeight − 1` = 3.5 (меню-бар: 2.75) |
+| `minStripWidth` | `0.75 × barHeight − 1` = 3.5 (menu bar: 2.75) |
 
-**Інсет `scaleX`:** усі частки мапляться як `inset + f × (width − 2·inset)`, де
-`inset = minStripWidth/2`. Частка 1.0 **не** дає правий край.
+**The `scaleX` inset:** every fraction maps as `inset + f × (width − 2·inset)`, where
+`inset = minStripWidth/2`. A fraction of 1.0 does **not** land on the right edge.
 
-Текст: `NSFont.systemFont(ofSize: dropdownTextSize)` — **жирності немає в жодній половині
-жодного рядка**.
+Text: `NSFont.systemFont(ofSize: dropdownTextSize)` — **neither half of any line is bold**.
 
-## Іконки — тільки справжні SF Symbols
+## Icons — real SF Symbols only
 
-**Емодзі, Unicode-замінники (`⚡`, `✋`, `❚❚`) і намальовані вручну гліфи в мокапах
-заборонені.** Вони мають іншу ширину, іншу оптичну вагу й іншу форму, ніж те, що намалює
-застосунок — тобто мокап показує неіснуючий інтерфейс, і всі висновки про компонування з
-нього хибні.
+**Emoji, Unicode substitutes (`⚡`, `✋`, `❚❚`) and hand-drawn glyphs in mockups are forbidden.** They
+have a different width, a different optical weight and a different shape than what the app will draw
+— which means the mockup shows an interface that does not exist, and every conclusion about layout
+drawn from it is false.
 
-Рендерити треба з системи, тими самими параметрами, що й у коді:
+Render them from the system, with the same parameters the code uses:
 
 ```swift
 // mock-symbols.swift — запустити `swift mock-symbols.swift`
@@ -111,323 +112,343 @@ func png(_ name: String, _ colour: NSColor,
 }
 ```
 
-Далі результат вставляється в HTML як `<img src="data:image/png;base64,…">` з розміром у
-пунктах (`width: 12px; height: 15px` для 12×15 pt) — CSP артефактів блокує зовнішні
-хости, тож інший шлях і не працює.
+The result then goes into the HTML as `<img src="data:image/png;base64,…">` sized in points
+(`width: 12px; height: 15px` for 12×15 pt) — the artifact CSP blocks external hosts, so no other route
+works anyway.
 
-### Що це дає, крім точності
+### What this buys you beyond accuracy
 
-- **`nil` означає, що символу не існує.** Так знайшлося, що `hare.slash` і
-  `hare.fill.slash` відсутні в SF Symbols — і саме тому в Deadline mode обрано `bolt`,
-  який має системну перекреслену пару.
-- **Реальна ширина.** `hare` — 20 pt, `bolt` — 12 pt. На поверхні, де бюджет міряють
-  пунктами, різниця у 8 pt вирішує вибір.
-- **Тонування як у коді.** `contentTintColor` у застосунку = `fill(using: .sourceAtop)`
-  тут, тож колір гліфа в мокапі той самий, що на екрані.
+- **`nil` means the symbol does not exist.** That is how we found out `hare.slash` and
+  `hare.fill.slash` are missing from SF Symbols — and exactly why Deadline mode uses `bolt`, which has
+  a system-provided slashed counterpart.
+- **Real widths.** `hare` is 20 pt, `bolt` is 12 pt. On a surface where the budget is measured in
+  points, an 8 pt difference decides the choice.
+- **Tinting as in the code.** `contentTintColor` in the app = `fill(using: .sourceAtop)` here, so the
+  glyph color in the mockup is the one on screen.
 
-### Параметри, що мають збігатися з кодом
+### Parameters that must match the code
 
-| Параметр | Звідки брати |
+| Parameter | Where to get it |
 |---|---|
-| `pointSize` | `Metrics.awaitingIconSize` (12), `pauseGlyphSize` (11), `creditsIconSize` (12), `Metrics.textSize` у попапі |
-| `weight` | `.semibold` — так конфігуруються всі наявні гліфи обох поверхонь |
-| колір | роль із `ColorRole`, не довільний відтінок |
-| `scale` | 4× для retina; розмір в HTML лишається в пунктах |
+| `pointSize` | `Metrics.awaitingIconSize` (12), `pauseGlyphSize` (11), `creditsIconSize` (12), `Metrics.textSize` in the popup |
+| `weight` | `.semibold` — that is how every existing glyph on both surfaces is configured |
+| color | a role from `ColorRole`, not an arbitrary shade |
+| `scale` | 4× for retina; the HTML size stays in points |
 
-## Анатомія бару
+## Bar anatomy
 
-> **Три шкали, не одна** ([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md), #307;
-> [ADR-0079](../adr/0079-centred-zero-gauge-scale.md), #326). `Progress` міряє в частках **вікна**,
-> `Pressure` — у частках **часу, що лишився** від лівого краю, `Balance` — у тих самих частках часу,
-> що лишився, але **зі знаком від центру**. Тому «капсула на 40 %» у кожному з них описує різну
-> величину, і порівнювати їх напряму не можна. У Kit шкала названа явно — `BarScale { window,
-> remaining, centred }`; кейсів стилю **три**: `.progress`, `.pressure`, `.balance`.
+> **Three scales, not one** ([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md), #307;
+> [ADR-0079](../adr/0079-centred-zero-gauge-scale.md), #326). `Progress` measures in fractions of the
+> **window**, `Pressure` in fractions of the **time remaining** from the left edge, `Balance` in those
+> same fractions of time remaining but **signed from the center**. That is why "a capsule at 40%"
+> describes a different quantity in each of them, and they cannot be compared directly. In Kit the
+> scale is named explicitly — `BarScale { window, remaining, centred }`; there are **three** style
+> cases: `.progress`, `.pressure`, `.balance`.
 >
-> **Стиль — властивість поверхні, а не застосунку** ([ADR-0080](../adr/0080-per-surface-bar-style.md),
-> #329). Меню-бар і попап зберігають свій вибір кожен окремо (`menuBarStyle` / `dropdownStyle`), тож
-> у мокапі **не можна припускати**, що обидві поверхні малюють одне й те саме — доступні всі дев'ять
-> пар. Колишній четвертий кейс `.mixed` (Pressure у меню-барі + Progress у попапі) видалено: він був
-> єдиним способом розвести поверхні й тому змішував у одному значенні дві різні речі — *яка подача*
-> і *на якій поверхні*. Тепер це просто пара `(.pressure, .progress)`.
+> **Style is a property of the surface, not of the app**
+> ([ADR-0080](../adr/0080-per-surface-bar-style.md), #329). The menu bar and the popup each store
+> their own choice (`menuBarStyle` / `dropdownStyle`), so in a mockup you **cannot assume** both
+> surfaces draw the same thing — all nine pairs are available. The former fourth case `.mixed`
+> (Pressure in the menu bar + Progress in the popup) has been removed: it was the only way to make the
+> surfaces differ, and therefore it mixed two different things into one value — *which presentation*
+> and *on which surface*. Now it is simply the pair `(.pressure, .progress)`.
 >
-> **Бари малюють ТРИ місця, не дві поверхні** (#261,
-> [ADR-0110](../adr/0110-legend-is-a-static-page-rendered-by-the-live-code.md)). Третє — сторінка
-> **Settings › Appearance › Legend**, і вона живе за іншими правилами, ніж дві поверхні: її стани
-> **фіксовані** (`LegendCatalog` у Kit) і **не залежать** ані від `menuBarStyle`/`dropdownStyle`, ані
-> від `ColorAdvice` — вона пояснює словник, а не конфігурацію. Практичний наслідок для мокапів і
-> розборів: фраза «на обох поверхнях виглядає так» більше не описує застосунок повністю, а зміна
-> метрики бару тепер міняє **три** картинки. Дві особливості Legend, яких немає ніде більше:
-> **зубці лінійки видно без ⌥** (сторінка існує, щоб їх називати —
-> [ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md) вирізав саме цей випадок),
-> і **всі три стилі видно одночасно**, бо анатомія кожного пояснюється поруч із рештою.
+> **Bars are drawn in THREE places, not on two surfaces** (#261,
+> [ADR-0110](../adr/0110-legend-is-a-static-page-rendered-by-the-live-code.md)). The third is the
+> **Settings › Appearance › Legend** page, and it lives by different rules than the two surfaces: its
+> states are **fixed** (`LegendCatalog` in Kit) and depend on **neither** `menuBarStyle`/`dropdownStyle`
+> nor `ColorAdvice` — it explains the vocabulary, not the configuration. The practical consequence for
+> mockups and analyses: "it looks like this on both surfaces" no longer describes the app completely,
+> and a change to a bar metric now changes **three** pictures. Two things about Legend exist nowhere
+> else: **the ruler ticks are visible without ⌥** (the page exists in order to name them —
+> [ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md) carved out exactly this
+> case), and **all three styles are visible at once**, because each one's anatomy is explained
+> alongside the others.
 >
-> Кейси перейменовано разом з UI двічі — у #307 (`"pacing"`/`"simple"`) і в #388 (`"gauge"` →
-> `"balance"`); збережені значення мігруються через `BarStyle.legacyRawValues`, яка тепер покриває
-> всі три. `"mixed"` **свідомо відсутній** у `BarStyle.legacyRawValues`: та таблиця мапить raw у
-> **один** стиль, а `"mixed"` розкладається у **різні** значення на двох поверхнях, тож його
-> міграцію несе окремий `BarStyle.legacySurfaceStyles(for:)`, що повертає пару.
+> The cases were renamed together with the UI twice — in #307 (`"pacing"`/`"simple"`) and in #388
+> (`"gauge"` → `"balance"`); stored values migrate through `BarStyle.legacyRawValues`, which now covers
+> all three. `"mixed"` is **deliberately absent** from `BarStyle.legacyRawValues`: that table maps a raw
+> value to **one** style, whereas `"mixed"` decomposes into **different** values on the two surfaces, so
+> its migration is carried by a separate `BarStyle.legacySurfaceStyles(for:)` that returns a pair.
 >
-> **Один бар стоїть поза цією матрицею — кредитний** ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)).
-> Він завжди малюється на шкалі **вікна** (Progress), хай яким є `dropdownStyle`, бо його вікно —
-> календарний місяць, а не ліміт-вікно. Дев'ять пар лишаються чинними для пейсингових барів; мокап,
-> у якому кредитний бар намальовано стрічкою Pressure або Balance, хибний **за будь-яких** налаштувань.
-> У рендері це видно з того, що всі гілки читають `effectiveScale`, а не `barStyle.scale`.
+> **One bar sits outside this matrix — the credit bar**
+> ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)). It is always drawn on the **window** scale
+> (Progress), whatever `dropdownStyle` says, because its window is a calendar month, not a limit
+> window. The nine pairs still stand for the pacing bars; a mockup in which the credit bar is drawn
+> with a Pressure or Balance strip is false **under any** settings. In the renderer you can see this
+> from the fact that every branch reads `effectiveScale`, not `barStyle.scale`.
 
-### Що малює `.progress` (**Progress**)
+### What `.progress` draws (**Progress**)
 
-1. Сірий трек на всю ширину, радіус 2.25 — **той самий**, що й у стрічки над ним
-2. **Кольорова капсула над проміжком `gapStart..gapEnd`** — не заливка від нуля
-3. Тік-лінійка під баром: частки **вікна**, `k / subdivisions` (лише при `subdivisions >= 2`)
-4. Маркер часу на `timeFraction`
+1. A gray full-width track, radius 2.25 — **the same** as the strip above it
+2. **A color capsule over the span `gapStart..gapEnd`** — not a fill from zero
+3. A tick ruler under the bar: fractions of the **window**, `k / subdivisions` (only when
+   `subdivisions >= 2`)
+4. A time marker at `timeFraction`
 
 `gapStart = min(usage, time)`, `gapEnd = max(usage, time)`.
 
-**Ліва межа капсули — дані, а не origin стрічки** ([#323](https://github.com/artem-from-ua/cc-timer/issues/323)).
-Усе, що ліворуч від капсули, читається як «уже витрачено», тож капсула не має починатися лівіше
-за `gapStart` **за жодних** `usage`/`time`. Мінімальна ширина пігулки (`minStripWidth`, 3.5 pt при
-`barHeight` 6) розтягується тому **праворуч**, а прив'язка лівого краю до краю треку в Progress не
-застосовується — обидва в `PopupBarView.stripRect(pinsStart:)`.
+**The capsule's left edge is data, not the strip's origin**
+([#323](https://github.com/artem-from-ua/cc-timer/issues/323)). Everything to the left of the capsule
+reads as "already spent", so the capsule must not start any further left than `gapStart` for **any**
+`usage`/`time`. The minimum pill width (`minStripWidth`, 3.5 pt at `barHeight` 6) therefore stretches
+**to the right**, and pinning the left edge to the edge of the track is not applied in Progress — both
+live in `PopupBarView.stripRect(pinsStart:)`.
 
-Це **не** окремий кейс нульового спенду: floor спрацьовує на будь-якому гапі, вужчому за 3.5 pt,
-тобто щоразу, коли витрати йдуть майже точно за темпом. При `u = 0.40, t = 0.405` стара геометрія
-починала колір на пункт лівіше за `usage`. На `usage = 0` це просто найпомітніше, бо там лівий
-край ще й потрапляв у band-прив'язку до `minX` і пігулка вилазила з-під маркера часу. Інваріант
-перевіряє [`scripts/check-strip-geometry.py`](../../scripts/check-strip-geometry.py) на сітці
-1001×1001: до фіксу — 19 910 уражених станів (до 4.75 pt), після — нуль.
+This is **not** a special case for zero spend: the floor kicks in on any gap narrower than 3.5 pt,
+which is to say every time spending tracks the pace almost exactly. At `u = 0.40, t = 0.405` the old
+geometry started the color a point to the left of `usage`. At `usage = 0` it is simply most visible,
+because there the left edge also fell into the band snap to `minX` and the pill crept out from under
+the time marker. The invariant is checked by
+[`scripts/check-strip-geometry.py`](../../scripts/check-strip-geometry.py) on a 1001×1001 grid: 19,910
+affected states before the fix (up to 4.75 pt), zero after.
 
-### Що малює `.pressure` (**Pressure**)
+### What `.pressure` draws (**Pressure**)
 
-Стрічка від **лівого краю** довжиною `BarLayout.pressureLength`, без маркера. Це **рівно права
-половина шкали Balance** ([ADR-0101](../adr/0101-pressure-is-the-gauge-ahead-half.md)):
+A strip from the **left edge** of length `BarLayout.pressureLength`, with no marker. This is
+**exactly the right half of the Balance scale**
+([ADR-0101](../adr/0101-pressure-is-the-gauge-ahead-half.md)):
 
 ```
 r      = (u − t) / (1 − t)
 length = max(0, balanceOffset) = clamp(r, 0, 1)
 ```
 
-Жодного коефіцієнта: `pressureScaleCoefficient` (`k = 1.25`) видалено з коду.
+No coefficient at all: `pressureScaleCoefficient` (`k = 1.25`) has been removed from the code.
 
-У попапі під нею **немає тіків узагалі** ([ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md)) —
-орієнтир несе сама риска нуля, підписана `0` під ⌥.
+In the popup there are **no ticks under it whatsoever**
+([ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md)) — the reference point is
+carried by the zero tick itself, labeled `0` under ⌥.
 
-У меню-барі — **риска нуля** (`drawZeroTick`), та сама, що в Balance, лише на іншій позиції
-([ADR-0096](../adr/0096-zero-tick-on-pressure.md)). Вона стоїть **не** на лівому краї треку, а в
-**центрі нульової пігулки**: вироджену стрічку floor-ить до мінімальної пігулки, чий лівий кінчик
-`PopupBarView.pillRect` притискає до `rect.minX`, тож її центр — на півпігулки всередину. Позиція
-читається з `pillRect`, а не рахується окремо, тож тримається пігулки за будь-якої зміни
-inset-геометрії (`minStripWidth` — єдина ручка). Метрики й тон — як у Balance (1.5 × 10 pt, під треком,
-нейтральний `centreTick`, притлумлений `zeroTickAlpha` = 0.55).
+In the menu bar there is a **zero tick** (`drawZeroTick`), the same one Balance has, only at a
+different position ([ADR-0096](../adr/0096-zero-tick-on-pressure.md)). It sits **not** on the track's
+left edge but at the **center of the zero pill**: a degenerate strip is floored to the minimum pill,
+whose left tip `PopupBarView.pillRect` pins to `rect.minX`, so its center is half a pill further in.
+The position is read from `pillRect` rather than computed separately, so it stays with the pill under
+any change to the inset geometry (`minStripWidth` is the only knob). Metrics and tone are as in
+Balance (1.5 × 10 pt, under the track, neutral `centreTick`, dimmed by `zeroTickAlpha` = 0.55).
 
-Це **не** `gapEnd − gapStart` і **не** модуль різниці. Ширина сама кодує severity, сталими
-позиціями в будь-який момент вікна:
+This is **not** `gapEnd − gapStart` and **not** the absolute difference. The width itself encodes
+severity, at fixed positions at any point in the window:
 
-| колір | ширина |
+| color | width |
 |---|---|
-| blue | `0 %` |
-| green | `0 %` |
-| yellow | `0 – 16 %` |
-| orange | `16 – 100 %` |
-| red | `100 %` |
+| blue | `0%` |
+| green | `0%` |
+| yellow | `0 – 16%` |
+| orange | `16 – 100%` |
+| red | `100%` |
 
-Наслідки, які видно в мокапі:
+Consequences you can see in a mockup:
 
-- **нуль — це «рівно за планом»** (`u == t`), і він же дістається **всьому** спокійному боці:
-  і зеленому, і синьому. Разом із floor'ом мінімальної пігулки це **54 %** простору станів, які
-  малюють однакову крапку **на сірому треку**;
-- **16 % — межа жовтого й помаранчевого**, і це рівно `aheadThreshold`: намальована довжина є тим
-  самим числом, яке порівнює модель, без перерахунку;
-- **розриву перед червоним немає** — шкала доходить до 100 % неперервно (доданок `(k − 1)` лишав
-  верхні 20 % бару недосяжними, тож бар туди стрибав);
-- при `u ≥ 1` (вичерпано) стрічка **завжди повна**, за будь-якого `t`;
-- стрічка **не відскакує**: коли витрати спиняються, вона спадає до нуля й лишається там;
-- **половина жовтої смуги тоне у floor'і** (діапазон `0 – 16 %` проти пігулки `8.1 %`). У реальних
-  станах запас лишається — при `t = 30 %, u = 38 %` жовтий малює 3.9 pt проти floor'а 2.75 pt.
+- **zero means "exactly on pace"** (`u == t`), and it also goes to the **entire** calm side — green and
+  blue alike. Together with the minimum-pill floor that is **54%** of the state space drawing the same
+  dot **on a gray track**;
+- **16% is the yellow/orange boundary**, and it is exactly `aheadThreshold`: the drawn length is the
+  same number the model compares, with no reconversion;
+- **there is no gap before red** — the scale runs continuously to 100% (the `(k − 1)` term left the top
+  20% of the bar unreachable, so the bar jumped over it);
+- at `u ≥ 1` (exhausted) the strip is **always full**, for any `t`;
+- the strip **does not bounce back**: when spending stops, it falls to zero and stays there;
+- **half of the yellow band drowns in the floor** (the `0 – 16%` range against a pill of `8.1%`). In
+  real states there is headroom left — at `t = 30%, u = 38%` yellow draws 3.9 pt against a floor of
+  2.75 pt.
 
-Маркер часу тут **неможливий**: на цьому треку він стояв би на нулі завжди.
+A time marker is **impossible** here: on this track it would always sit at zero.
 
-### Що малює `.balance` (**Balance**)
+### What `.balance` draws (**Balance**)
 
-Нуль **посередині** бару ([ADR-0079](../adr/0079-centred-zero-gauge-scale.md), #326). Той самий
-чисельник і знаменник, що в Pressure; змінюється те, звідки міряти:
+Zero is **in the middle** of the bar ([ADR-0079](../adr/0079-centred-zero-gauge-scale.md), #326). The
+same numerator and denominator as in Pressure; what changes is where you measure from:
 
 ```
 r      = (u − t) / (1 − t)
 offset = clamp(r, −1, +1)           // симетрично: обидві половини беруть сирий r (ADR-0101)
 ```
 
-1. Сірий трек на всю ширину — як і скрізь.
-2. **Кольорова капсула від центру** до `0.5 + offset/2`: **праворуч** при `u > t`, **ліворуч** при
-   `u < t`. Це не заливка від краю і не `gapEnd − gapStart`.
-3. **Центральна риска** — у **кожному** стані, включно з idle. У меню-барі це `centreTickWidth` =
-   **1.5 pt** (не 5!) × `centreTickHeight` = **10 pt** нейтральним `centreTick` (власна роль; дефолт —
-   **тон calm-заливки**: `labelColor` через `bright()`, тобто біле на темному барі й чорне на
-   світлому), додатково притлумленим множником `zeroTickAlpha` = **0.55**, намальована **під** треком:
-   видно лише кінчики зверху й знизу
-   ([ADR-0089](../adr/0089-gauge-centre-tick-calm-tone.md), [ADR-0096](../adr/0096-zero-tick-on-pressure.md)).
-   У попапі окремої риски немає — її роль виконує єдиний тік лінійки на **0.5**.
-   **Це не лише Balance-елемент**: ту саму риску малює й Pressure, на своєму нулі — див. розділ Pressure.
-4. Маркера часу немає — як і в Pressure.
+1. A gray full-width track — as everywhere else.
+2. **A color capsule from the center** to `0.5 + offset/2`: **to the right** when `u > t`, **to the
+   left** when `u < t`. This is not a fill from the edge and not `gapEnd − gapStart`.
+3. **A centre tick** — in **every** state, idle included. In the menu bar that is `centreTickWidth` =
+   **1.5 pt** (not 5!) × `centreTickHeight` = **10 pt** in the neutral `centreTick` (its own role;
+   the default is the **tone of the calm fill**: `labelColor` via `bright()`, i.e. white on a dark bar
+   and black on a light one), further dimmed by the `zeroTickAlpha` = **0.55** multiplier, drawn
+   **under** the track: only the tips show above and below
+   ([ADR-0089](../adr/0089-gauge-centre-tick-calm-tone.md),
+   [ADR-0096](../adr/0096-zero-tick-on-pressure.md)).
+   In the popup there is no separate tick — its role is played by the single ruler tick at **0.5**.
+   **This is not a Balance-only element**: Pressure draws the same tick, at its own zero — see the
+   Pressure section.
+4. There is no time marker — same as Pressure.
 
-Наслідки, які видно в мокапі:
+Consequences you can see in a mockup:
 
-- **Центр — це «рівно за планом»** (`u == t`) — і це той самий нуль, що в Pressure: `t` **і є** нуль
-  обох шкал ([ADR-0101](../adr/0101-pressure-is-the-gauge-ahead-half.md)). Вироджена стрічка
-  floor-иться до **центрованої** пігулки;
-- **бік читається окремо від довжини**: та сама довжина означає протилежні стани залежно від
-  напрямку. Під гасінням («Colors tell me» у глушильному режимі, або Pressure — там безумовно) колір
-  спокійного діапазону однаковий з обох боків — лишається лише напрямок від риски;
-- ліва половина **повна** при `u ≤ 2t − 1` (запас більший за час, що лишився). Неможливо до
-  `t = 50 %`, звичайно наприкінці вікна;
-- при `u ≥ 1` **повна права половина**, за будь-якого `t`;
-- бік випередження **тотожний Pressure за побудовою**: `pressureLength ≡ max(0, balanceOffset)`, тобто
-  одна й та сама величина, а не дві, що збігаються з поправкою (раніше різниця була `0.20`). Мокап,
-  де перемикання Pressure ↔ Balance зрушило праву половину, хибний;
-- **стрічка завжди перекриває нуль на пів-ширини пігулки** — у той бік, куди йде
-  (`stripRect(anchoredAt:)`, обидві поверхні). Інакше вона лише *починається* в `scaleX(0.5)`, а її
-  заокруглений торець від цієї точки відвертає, тоді як риска на тому самому x **центрована** —
-  і колір видимо відступає від риски, дзеркально з кожного боку. З перекриттям стрічка читається
-  як така, що **виростає з** нуля, а не починається біля нього. Вироджений проліт це правило
-  покриває само собою: він стає рівно центрованою пігулкою;
-- **навколо нуля є мертва зона** — наслідок `minStripWidth`, а не окреме правило. На меню-барі
-  половина шкали — 15.62 pt, а мінімальна пігулка — 2.75 pt, тож усе з `|offset| ≲ 0.176` малюється
-  однаковою центрованою пігулкою (виміряно на стубі `balance-sweep`: при `offset = 0.0914` «чиста»
-  стрічка — 1.38 pt, і
-  `stripRect` розширює її симетрично від центру). Мокап, у якому малий лід намальовано помітно
-  зміщеною короткою стрічкою, хибний: вона буде відцентрована. У попапі бар значно ширший, тож
-  зона там відповідно вужча.
+- **The center means "exactly on pace"** (`u == t`) — and it is the same zero Pressure has: `t` **is**
+  the zero of both scales ([ADR-0101](../adr/0101-pressure-is-the-gauge-ahead-half.md)). A degenerate
+  strip is floored to a **centered** pill;
+- **the side reads independently of the length**: the same length means opposite states depending on
+  the direction. Under muting ("Colors tell me" in a muting mode, or Pressure — where it is
+  unconditional) the calm-range color is the same on both sides — all that is left is the direction
+  from the tick;
+- the left half is **full** when `u ≤ 2t − 1` (headroom greater than the time remaining). Impossible
+  before `t = 50%`, routine at the end of a window;
+- at `u ≥ 1` the **right half is full**, for any `t`;
+- the ahead side is **identical to Pressure by construction**: `pressureLength ≡ max(0,
+  balanceOffset)`, i.e. one and the same quantity, not two that agree up to a correction (the
+  difference used to be `0.20`). A mockup in which switching Pressure ↔ Balance shifted the right half
+  is false;
+- **the strip always overlaps zero by half a pill width** — toward the side it is heading
+  (`stripRect(anchoredAt:)`, both surfaces). Otherwise it merely *starts* at `scaleX(0.5)`, and its
+  rounded cap turns away from that point, while the tick at that same x is **centered** — so the color
+  visibly backs away from the tick, mirrored on either side. With the overlap the strip reads as
+  something that **grows out of** zero rather than starting next to it. The degenerate span is covered
+  by this rule on its own: it becomes an exactly centered pill;
+- **there is a dead zone around zero** — a consequence of `minStripWidth`, not a separate rule. On the
+  menu bar half the scale is 15.62 pt while the minimum pill is 2.75 pt, so everything with
+  `|offset| ≲ 0.176` draws as the same centered pill (measured on the `balance-sweep` stub: at
+  `offset = 0.0914` the "clean" strip is 1.38 pt, and
+  `stripRect` expands it symmetrically from the center). A mockup in which a small lead is drawn as a
+  noticeably offset short strip is false: it will be centered. In the popup the bar is much wider, so
+  the zone there is correspondingly narrower.
 
-### Що малює кредитний бар («Extra usage»)
+### What the credit bar draws ("Extra usage")
 
-**Progress-анатомія завжди**, плюс власна лінійка замість тіків
+**Progress anatomy always**, plus its own ruler instead of ticks
 ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)):
 
-1. Сірий трек, кольорова капсула над `gapStart..gapEnd`, маркер часу на `timeFraction` — пункти
-   1, 2 і 4 з `.progress` без змін.
-2. **Тіків немає** — жодних. Ані часток вікна, ані 20 %, ані центру: місяць має 28–31 день, рівний
-   поділ не потрапляє в жодну реальну межу.
-3. **Два підписи на краях треку** — перший і останній день календарного місяця (`Jan 1` ліворуч,
-   `Jan 31` праворуч), 9 pt, тоном `dimmedLabel` — **тим самим чорнилом, що рядок сум над баром**.
-   Притиснуті до країв треку (не до країв підписів-зубців, яких немає) і опущені на
-   `boundaryCaptionDrop` нижче лінії тіків.
+1. A gray track, a color capsule over `gapStart..gapEnd`, a time marker at `timeFraction` — items 1, 2
+   and 4 from `.progress`, unchanged.
+2. **No ticks** — none at all. Not window fractions, not 20%, not the center: a month has 28–31 days,
+   and no even division lands on a real boundary.
+3. **Two captions at the edges of the track** — the first and last day of the calendar month (`Jan 1`
+   on the left, `Jan 31` on the right), 9 pt, in the `dimmedLabel` tone — **the same ink as the
+   amounts line above the bar**. Pinned to the edges of the track (not to the edges of tick captions,
+   which do not exist) and dropped `boundaryCaptionDrop` below the tick line.
 
-Наслідки, які видно в мокапі:
+Consequences you can see in a mockup:
 
-- бар **не реагує** на Style дропдауна: перемикання Pressure ↔ Balance ↔ Progress рухає токенні
-  бари й лишає цей на місці;
-- **вікно** береться в UTC (там скидається місячний ліміт — воно й визначає геометрію бару), а самі
-  межі **рендеряться в зоні читача**, як і `resetLine` у тому ж рядку: інстант — точка, спільна для
-  всіх. Тому на схід від UTC серпень читається як `Aug 1 … Sep 1`, на захід — `Jul 31 … Aug 31`;
-- при **безлімітному** капі немає ні бару, ні підписів (`bar == nil` ⟹ `monthBounds == nil`);
-- підписи — частина ⌥-половини лінійки: без ⌥ їх немає, як і тіків.
+- the bar **does not react** to the dropdown's Style: switching Pressure ↔ Balance ↔ Progress moves the
+  token bars and leaves this one where it is;
+- the **window** is taken in UTC (that is where the monthly limit resets — and it is what defines the
+  bar's geometry), while the boundaries themselves are **rendered in the reader's zone**, like the
+  `resetLine` on the same row: an instant is a point common to everyone. So east of UTC August reads as
+  `Aug 1 … Sep 1`, west of it as `Jul 31 … Aug 31`;
+- with an **unlimited** cap there is no bar and no captions (`bar == nil` ⟹ `monthBounds == nil`);
+- the captions are part of the ⌥ half of the ruler: without ⌥ they are absent, just like the ticks.
 
-### Нульова стрічка — це пігулка, а не порожнеча
+### A zero-length strip is a pill, not emptiness
 
-У Pressure-барі стрічка — **єдина** мітка бару, тож навіть при довжині рівно 0 вона малюється як
-пігулка мінімальної ширини (`minStripWidth`, 2.75 pt на меню-барі) — `PopupBarView.pillRect`.
-Порожній трек означав би «даних немає», а не «нуль». Так поводяться **обидві** поверхні: меню-бар
-через `fillZone(floorEmptyToPill:)`, попап — через фолбек на `pillRect`, коли проліт вироджений
-([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md); до нього попап лишав порожній трек).
+In a Pressure bar the strip is the **only** mark on the bar, so even at a length of exactly 0 it is
+drawn as a pill of minimum width (`minStripWidth`, 2.75 pt on the menu bar) — `PopupBarView.pillRect`.
+An empty track would read as "no data", not as "zero". **Both** surfaces behave this way: the menu bar
+through `fillZone(floorEmptyToPill:)`, the popup through a fallback to `pillRect` when the span is
+degenerate ([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md); before it, the popup left an
+empty track).
 
-Стан `usage == time == 0` — не артефакт округлення, а регулярний кадр: після кожного ресету
-5-годинного вікна `PollingEngine.applyIdleGrace`/`suppress` ([ADR-0041](../adr/0041-idle-grace-on-reset-boundary.md),
-[ADR-0045](../adr/0045-honest-reset-boundary-grace.md)) тримають «ready»-кадр із `0 %` і
-`resets_at = now + 5h`, доки не зайде перша трата. У Progress цього floor'а на **пейсинг**-барі
-**немає**: там порожній gap означає «точно за темпом», і позицію вже показує маркер. На
-**idle**-барі floor діє в усіх трьох стилях — idle малює пігулку й під Progress
-([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)), просто маркер її накриває.
+The state `usage == time == 0` is not a rounding artifact but a regular frame: after every reset of
+the 5-hour window `PollingEngine.applyIdleGrace`/`suppress`
+([ADR-0041](../adr/0041-idle-grace-on-reset-boundary.md),
+[ADR-0045](../adr/0045-honest-reset-boundary-grace.md)) hold a "ready" frame with `0%` and
+`resets_at = now + 5h` until the first spend arrives. In Progress this floor is **absent** on the
+**pacing** bar: there an empty gap means "exactly on pace", and the marker already shows the position.
+On the **idle** bar the floor applies in all three styles — idle draws a pill under Progress too
+([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)), the marker just covers it.
 
-### Що малює idle-бар
+### What the idle bar draws
 
-**Однаково в усіх трьох стилях** ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)) — idle є
-нуль на обох шкалах, тож усі три стилі малюють нуль:
+**The same in all three styles** ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)) — idle
+is zero on both scales, so all three styles draw zero:
 
-- **Спільна основа** — сірий трек + **мінімальна пігулка на нулі**, **зелена** (`ready to start`) або
-  сіра (`blocked`). Та сама форма, що в будь-якої нульової стрічки. Без зон. До
-  [#381](https://github.com/artem-from-ua/cc-timer/issues/381) «ready» була синьою при тижневому
-  запасі — синього idle тепер немає на жодній поверхні, і тижневий стан на цю пігулку не впливає
-  ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)).
-- **Progress** додає **маркер часу на нулі** (вікно щойно перекотилося) — він накриває пігулку, тож
-  Progress-idle читається як «трек + маркер зліва».
-- **Pressure** лишає саму пігулку.
+- **The shared base** — a gray track + a **minimum pill at zero**, **green** (`ready to start`) or gray
+  (`blocked`). The same shape any zero-length strip has. No zones. Before
+  [#381](https://github.com/artem-from-ua/cc-timer/issues/381) "ready" was blue when the weekly
+  headroom was large — there is no blue idle on any surface now, and the weekly state does not affect
+  this pill ([ADR-0105](../adr/0105-color-advice-governs-pacing-bars-only.md)).
+- **Progress** adds a **time marker at zero** (the window has just rolled over) — it covers the pill, so
+  Progress idle reads as "track + marker on the left".
+- **Pressure** leaves the pill by itself.
 
-**Суцільної заливки на всю ширину немає в жодному стилі.** До
-[ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md) її малював Progress, і вона читалася як
-Pressure на повному тиску — найгучніша позначка найспокійнішого стану.
+**There is no full-width solid fill in any style.** Before
+[ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md) Progress drew one, and it read as Pressure
+at full pressure — the loudest mark for the calmest state.
 
-Тік-лінійка є в обох (у Pressure тіків немає — лише риска нуля, ADR-0098). На menu bar під гасінням
-idle бере спільний `calmWhite`, не власний тьмяніший тон — і рівно на тій самій альфі (`bright()`),
-тож не світиться яскравіше за сусідні спокійні бари. **Коли саме глушиться** — просте правило з
+The tick ruler is present in both (Pressure has no ticks — only the zero tick, ADR-0098). On the menu
+bar, under muting, idle takes the shared `calmWhite` rather than a dimmer tone of its own — and at
+exactly the same alpha (`bright()`), so it does not glow brighter than the calm bars beside it. **When
+exactly it gets muted** is a simple rule from
 [#381](https://github.com/artem-from-ua/cc-timer/issues/381): `barStyle == .pressure ||
-colorsTell.mutesCalm`. Тобто під **Pressure — завжди**, а під Progress/Balance — у будь-якому з двох
-глушильних режимів «Colors tell me» (`Slow down`, `Slow down or speed up`). Винятків більше немає:
-колишній «синій idle лишається синім під `Yellow + Green`»
-([#343](https://github.com/artem-from-ua/cc-timer/issues/343)) зник разом із синім.
+colorsTell.mutesCalm`. That is: under **Pressure always**, and under Progress/Balance in either of the
+two muting "Colors tell me" modes (`Slow down`, `Slow down or speed up`). There are no exceptions left:
+the former "blue idle stays blue under `Yellow + Green`"
+([#343](https://github.com/artem-from-ua/cc-timer/issues/343)) went away along with blue.
 
-**У попапі під Pressure спокійна пігулка нульової довжини світиться сильніше.** Стрічка, що
-схлопнулася в нуль, не має ширини, щоб нести колір, тож замість ambient-ореолу (радіус 21 pt, alpha
-0.35) вона отримує **потрійний** прохід — радіуси 40 / 22 / 10 pt, alpha 1.0 кожен, від широкого до
-вузького, щоб світло накопичувалося в центрі й спадало назовні
-([PopupViewController.swift:561](../../Sources/TokenPace/PopupViewController.swift#L561)). Лише для
-спокійних станів: у попередження стрічка має власну довжину й підсвічувати її нема потреби.
+**In the popup under Pressure a calm zero-length pill glows harder.** A strip collapsed to zero has no
+width to carry the color, so instead of the ambient halo (radius 21 pt, alpha 0.35) it gets a **triple**
+pass — radii 40 / 22 / 10 pt, alpha 1.0 each, from wide to narrow, so the light accumulates at the
+center and falls off outward
+([PopupViewController.swift:561](../../Sources/TokenPace/PopupViewController.swift#L561)). Calm states
+only: in a warning the strip has a length of its own and there is nothing to boost.
 
-### Маркер часу видає стиль — не забувай його
+### The time marker gives the style away — don't forget it
 
-**Бар без маркера — це Pressure (`.pressure`) або Balance (`.balance`), але точно не Progress
-(`.progress`).** Найчастіша помилка в мокапах: підписати рендер «Progress», намалювавши лише
-кольорову смугу. Маркер — не декоративна деталь, а те, що відрізняє один стиль від іншого.
+**A bar with no marker is Pressure (`.pressure`) or Balance (`.balance`), but definitely not Progress
+(`.progress`).** The most common mistake in mockups: labeling a render "Progress" while drawing only a
+color band. The marker is not decorative detail — it is what tells one style from another.
 
-І він **не єдина** відмінність: разом із маркером змінюється шкала. Бар без маркера міряється
-проти часу, що лишився, тож мокап, у якому «Pressure» намальовано з довжиною `gapEnd − gapStart`,
-хибний навіть без жодного маркера ([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md)).
+And it is **not the only** difference: the scale changes along with the marker. A bar without a marker
+is measured against the time remaining, so a mockup in which "Pressure" is drawn with a length of
+`gapEnd − gapStart` is false even without any marker at all
+([ADR-0076](../adr/0076-pressure-scale-for-marker-less-bar.md)).
 
-Правило **однобічне**, і саме так воно назване в Kit: маркер має позицію **лише** на шкалі вікна,
-тобто `showsTimeMarker == (scale == .window)`. Зворотне вже не діє — шкал три, і дві з них без
-маркера. Тому мокап без маркера ще треба довести до кінця: `Pressure` міряє від **лівого краю**,
-`Balance` — **зі знаком від центру**, і сплутати їх легко (див. `BarScale`,
-[ADR-0079](../adr/0079-centred-zero-gauge-scale.md)).
+The rule is **one-way**, and that is exactly how it is named in Kit: a marker has a position **only** on
+the window scale, i.e. `showsTimeMarker == (scale == .window)`. The converse no longer holds — there are
+three scales, and two of them have no marker. So a mockup without a marker still has to be taken all
+the way: `Pressure` measures from the **left edge**, `Balance` **signed from the center**, and the two
+are easy to confuse (see `BarScale`, [ADR-0079](../adr/0079-centred-zero-gauge-scale.md)).
 
-Per-surface пари прапорців тут більше немає, і зникали вони двома кроками: до #326 шкалу кодували
-`menuBarUsesPressureScale` / `popupUsesPressureScale`, до #329 — `menuBarScale` / `popupScale` та
-`menuBarShowsTimeMarker` / `popupShowsTimeMarker`. Тепер у `BarStyle` по **одній** `scale` і одному
-`showsTimeMarker` ([ADR-0080](../adr/0080-per-surface-bar-style.md)): тип описує подачу однієї
-поверхні, а яку саме — знає той, хто його читає.
+The per-surface flag pairs are gone from here, and they disappeared in two steps: before #326 the scale
+was encoded by `menuBarUsesPressureScale` / `popupUsesPressureScale`, before #329 by `menuBarScale` /
+`popupScale` and `menuBarShowsTimeMarker` / `popupShowsTimeMarker`. Now `BarStyle` has **one** `scale`
+and one `showsTimeMarker` ([ADR-0080](../adr/0080-per-surface-bar-style.md)): the type describes one
+surface's presentation, and which surface that is, is known by whoever reads it.
 
-Перед публікацією мокапа з барами:
+Before publishing a mockup with bars:
 
-- маркер на `timeFraction` є в **кожному** барі `.progress` — і в меню-барі теж (5 × 9 pt, а
-  не лише 7 × 14 попапа), тобто `BarStyle.showsTimeMarker == (self == .progress)`. Поверхня на це
-  не впливає: маркер визначає **стиль тієї поверхні**, а не те, менюбар це чи попап. Тож «маркер
-  лише в попапі» — не властивість типу, а конкретна пара `(menuBarStyle: .pressure,
-  dropdownStyle: .progress)`, яку користувач може задати (і саме її дає міграція старого `.mixed`);
-- **дві поверхні можна малювати різними стилями** — і це не помилка мокапа, а доступний стан
-  (дев'ять пар, #329). Помилка — мовчки припустити, що вони однакові, і підписати мокап одним
-  словом «Style»; підписуй кожну поверхню окремо;
-- у барі **без** маркера довжина — `pressureLength`, а тіків у попапі немає взагалі (лише підписана
-  під ⌥ риска нуля). Чотири тіки під 5h-баром без маркера (частки вікна) — та сама помилка, що й
-  маркер під Pressure;
-- маркер стоїть на **своїй** частці, не на краю смуги: при `usage > time` він **зліва**
-  від gap, при `usage < time` — **справа**. Обидва бари з маркером ліворуч означають, що
-  геометрія скопійована, а не порахована;
-- усі x проходять через інсет `scaleX`, включно з маркером.
+- a marker at `timeFraction` is present on **every** `.progress` bar — in the menu bar too (5 × 9 pt,
+  not just the popup's 7 × 14), i.e. `BarStyle.showsTimeMarker == (self == .progress)`. The surface has
+  no say in it: the marker is determined by **that surface's style**, not by whether it is the menu bar
+  or the popup. So "marker in the popup only" is not a property of the type but the specific pair
+  `(menuBarStyle: .pressure, dropdownStyle: .progress)`, which the user can set (and which is exactly
+  what migrating the old `.mixed` produces);
+- **the two surfaces may be drawn in different styles** — and that is not a mockup error but an
+  available state (nine pairs, #329). The error is silently assuming they are the same and labeling the
+  mockup with a single word "Style"; label each surface separately;
+- in a bar **without** a marker the length is `pressureLength`, and there are no ticks in the popup at
+  all (only the zero tick, labeled under ⌥). Four ticks under a marker-less 5h bar (window fractions)
+  is the same mistake as a marker under Pressure;
+- the marker stands at **its own** fraction, not at the edge of the band: at `usage > time` it is
+  **left** of the gap, at `usage < time` **right** of it. Both bars with the marker on the left means
+  the geometry was copied, not computed;
+- every x goes through the `scaleX` inset, the marker included.
 
-Швидка перевірка: якщо на малюнку два бари й обидва маркери з одного боку — майже напевно
-помилка.
+A quick check: if the picture has two bars and both markers are on the same side, it is almost
+certainly wrong.
 
-### Чого не малює ніхто
+### What nobody draws
 
-**Заливки від нуля до `usageFraction`.** Рівень не малюється в жодному стилі — це свідоме
-рішення ([ADR-0062](../adr/0062-configurable-bar-presentation.md)). Якщо на малюнку смуга
-починається з лівого краю й закінчується на «скільки спожито» — малюнок неправильний.
+**A fill from zero to `usageFraction`.** The level is not drawn in any style — that is a deliberate
+decision ([ADR-0062](../adr/0062-configurable-bar-presentation.md)). If the picture has a band starting
+at the left edge and ending at "how much has been spent", the picture is wrong.
 
-Схожа на заливку — але не вона: **будь-який** `.pressure`-бар, де стрічка теж лівоприв'язана, хоч її
-довжина це `pressureLength` (gap проти часу, що лишився), а не рівень. Лівоприв'язана смуга сама по
-собі **не** означає заливку рівнем: збігається лише початок, не кінець.
+Similar to a fill but not one: **any** `.pressure` bar, where the strip is also left-anchored even
+though its length is `pressureLength` (the gap against the time remaining), not the level. A
+left-anchored band does **not** by itself mean a level fill: only the start matches, not the end.
 
-Раніше тут як приклад стояв **кредитний** рядок при `.pressure` — цього стану більше не існує:
-кредитний бар завжди Progress ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)), тож лівоприв'язаної
-кредитної стрічки не буває взагалі.
+The **credit** row under `.pressure` used to stand here as an example — that state no longer exists: the
+credit bar is always Progress ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)), so a left-anchored
+credit strip does not occur at all.
 
-## Колір обчислюється, не обирається
+## Color is computed, not chosen
 
 ```swift
 // PacingModel.severity
@@ -441,136 +462,136 @@ if remainingSeconds <= 1200 { return .ahead }     // 20-хв кінець-overri
 return (usage - time) < 0.16 * (1 - time) ? .calm : .ahead
 ```
 
-**Порядок гілок критичний.** Обидва 20-хвилинні override'и лежать **після** виходу зі
-спокійної гілки — тож при `usage <= time` вони недосяжні. Стан «97% спожито, 97% часу, 9
-хвилин до ресету» лишається **зеленим**.
+**The order of the branches is critical.** Both 20-minute overrides sit **after** the exit from the calm
+branch — so at `usage <= time` they are unreachable. The state "97% spent, 97% of the time, 9 minutes to
+reset" stays **green**.
 
-Швидка перевірка перед малюванням:
+A quick check before drawing:
 
-| Умова | Колір |
+| Condition | Color |
 |---|---|
-| `usage >= 1` | червоний |
-| `usage > time`, `usage − time >= 0.16 × (1 − time)` | помаранчевий |
-| `usage > time`, менше порога | жовтий |
-| `usage <= time`, відставання ≤ порога | зелений |
-| `usage <= time`, відставання > порога | синій (лише базові 5h/7d) |
+| `usage >= 1` | red |
+| `usage > time`, `usage − time >= 0.16 × (1 − time)` | orange |
+| `usage > time`, below the threshold | yellow |
+| `usage <= time`, behind by ≤ the threshold | green |
+| `usage <= time`, behind by > the threshold | blue (base 5h/7d only) |
 
-## Стверджуєш щось про поведінку — процитуй рядок коду
+## Claiming something about behavior — quote the line of code
 
-Правило ширше за тексти й кольори: **будь-яке** твердження про те, що застосунок робить, підпирається
-іменем функції з номером рядка, а не переказом. Не «схоже, що воно робить X», а формтер/властивість
-із файлу — усе інше є здогадом, який виглядає як факт.
+The rule is broader than texts and colors: **any** claim about what the app does is backed by a function
+name with a line number, not by a retelling. Not "it looks like it does X", but the formatter or
+property from the file — everything else is a guess that looks like a fact.
 
-Два способи помилитися, обидва траплялися:
+Two ways to get it wrong, both of which have happened:
 
-- **Порядок гілок вирішує так само, як їхній вміст.** У `PacingModel.severity` вище обидва
-  20-хвилинні override'и лежать **після** виходу зі спокійної гілки, тож при `usage <= time` вони
-  недосяжні. Прочитати їх окремо від порядку — отримати неіснуючий стан.
-- **Назва властивості не є доказом.** Вона буває кон'юнкцією з живими даними, а не прапорцем:
-  саме так `showAwaitingInMenuBar` виглядав перемикачем «іконка ввімкнена», а насправді залежав ще й
-  від того, чи хтось чекає вводу **цієї секунди** — через що ширина віджета стрибала десятки разів на
-  день. Тому слот тепер резервується з опції, а властивість зветься `reservesAwaitingSlot`
-  ([ADR-0073](../adr/0073-awaiting-icon-reserved-slot-and-slide.md),
-  [#283](https://github.com/artem-from-ua/tokenpace/issues/283)). Стара назва в коді **не існує** —
-  якщо вона трапилася в чиємусь розборі, розбір писався з пам'яті.
+- **The order of the branches decides as much as their contents.** In `PacingModel.severity` above, both
+  20-minute overrides sit **after** the exit from the calm branch, so at `usage <= time` they are
+  unreachable. Read them apart from the order and you get a state that does not exist.
+- **A property's name is not proof.** It can be a conjunction with live data rather than a flag: that is
+  exactly how `showAwaitingInMenuBar` looked like an "icon enabled" toggle while in fact it also
+  depended on whether anyone was waiting for input **that very second** — which made the widget's width
+  jump dozens of times a day. That is why the slot is now reserved from the option and the property is
+  called `reservesAwaitingSlot` ([ADR-0073](../adr/0073-awaiting-icon-reserved-slot-and-slide.md),
+  [#283](https://github.com/artem-from-ua/tokenpace/issues/283)). The old name **does not exist** in the
+  code — if it turned up in somebody's analysis, that analysis was written from memory.
 
-## Тексти — цитуй формтер
+## Texts — quote the formatter
 
-| Що | Де | Правило |
+| What | Where | Rule |
 |---|---|---|
-| Статус ліміту | `PopupViewController.statusText` | — |
-| Статус кредитів | `creditsStatusText:1914` | `usage >= 1` → завжди `"limit reached"`, ніколи не «ahead» |
-| Суми кредитів | `creditsAmountText:1922` | `"€10.8 of €15"` — **обидві суми, без відсотка**. Права половина — `CompactMoney.capText`: цілий cap губить дріб (`€15`, не `€15.0`), бо це константа з білінгу. Ліва тримає ладдер (`€12.0` при спенді рівно 12), окрім двох випадків: **нуль** — незайманий спенд це `€0`; **суб-центова сума** — ненульовий спенд, дрібніший за найменшу показувану одиницю, це `<€0.01` (не `€0.00`, що збрехало б про відсутність витрат, і не округлення догори, що завищило б суму). Під ⌥ обидві точні: `"€10.77 of €15.00"` |
-| Без capу | `creditsSpentOnlyText` | `"€10.8 spent"` — без бару й вердикту; під ⌥ `"€10.77 spent"` |
-| Рядок stand-by, попап (7d, ⌥) | `PopupViewController.standByText` | `"stand by 2d for green"` — скільки не витрачати, щоб бар позеленів. Тривалість — `ResetClock.rounded(duration:)`, **той самий** банд-формат, що й ресет (`45m` · `3h` · `2d`). Значення й пороги — `PacingModel.displayableStandBySecondsForGreen` |
-| Рядок ресету, попап | `ResetClock.resetLine` | `"15d"` · `"5d on Friday"` · `"20h at 03:00"`. Під **⌥** — з префіксом `"resets in"` (`verbose: true`): `"resets in 20h at 03:00"` |
-| Відсоток витраченого, попап | `PopupViewController.usedText` | `"20%"`; під **⌥** — `"20% used"`. Обидві половини рядка деталей набувають слів разом із `resetText` |
-| Лейбл ресету, меню-бар | `ResetClock.timeToReset` | **одна одиниця на будь-якій відстані** — `"45m"` · `"5h"` · `"4d"` · `"<1m"`. Годинника (`20:40`) і комбінованого `1h30m` **немає** ([ADR-0074](../adr/0074-one-reset-format-on-both-surfaces.md)) |
+| Limit status | `PopupViewController.statusText` | — |
+| Credits status | `creditsStatusText:1914` | `usage >= 1` → always `"limit reached"`, never "ahead" |
+| Credit amounts | `creditsAmountText:1922` | `"€10.8 of €15"` — **both amounts, no percentage**. The right half is `CompactMoney.capText`: a whole cap loses the fraction (`€15`, not `€15.0`), because it is a constant from billing. The left half keeps the ladder (`€12.0` at a spend of exactly 12), with two exceptions: **zero** — untouched spend is `€0`; **a sub-cent amount** — a non-zero spend smaller than the smallest displayable unit is `<€0.01` (not `€0.00`, which would lie about there being no spend, and not rounding up, which would overstate the amount). Under ⌥ both are exact: `"€10.77 of €15.00"` |
+| No cap | `creditsSpentOnlyText` | `"€10.8 spent"` — no bar and no verdict; under ⌥ `"€10.77 spent"` |
+| Stand-by line, popup (7d, ⌥) | `PopupViewController.standByText` | `"stand by 2d for green"` — how long not to spend for the bar to turn green. The duration is `ResetClock.rounded(duration:)`, **the same** band format as the reset (`45m` · `3h` · `2d`). Values and thresholds come from `PacingModel.displayableStandBySecondsForGreen` |
+| Reset line, popup | `ResetClock.resetLine` | `"15d"` · `"5d on Friday"` · `"20h at 03:00"`. Under **⌥** — with the prefix `"resets in"` (`verbose: true`): `"resets in 20h at 03:00"` |
+| Percentage spent, popup | `PopupViewController.usedText` | `"20%"`; under **⌥** — `"20% used"`. Both halves of the detail line take on words together with `resetText` |
+| Reset label, menu bar | `ResetClock.timeToReset` | **one unit at any distance** — `"45m"` · `"5h"` · `"4d"` · `"<1m"`. There is no clock time (`20:40`) and no combined `1h30m` ([ADR-0074](../adr/0074-one-reset-format-on-both-surfaces.md)) |
 
-## Ієрархія чорнила в попапі
+## The ink hierarchy in the popup
 
-| Лінія | Вміст | Роль |
+| Line | Content | Role |
 |---|---|---|
-| Верхня | назва ліміту **і статусне слово** | `.label` — повний |
-| Нижня | відсоток **і** рядок ресету | `.dimmedLabel` |
-| Під баром — **лише кредитний рядок** | підписи країв місяця (`Jan 1` / `Jan 31`), 9 pt | `.dimmedLabel` — те саме чорнило, що й рядок сум |
+| Top | the limit's name **and the status word** | `.label` — full |
+| Bottom | the percentage **and** the reset line | `.dimmedLabel` |
+| Under the bar — **the credit row only** | the month boundary captions (`Jan 1` / `Jan 31`), 9 pt | `.dimmedLabel` — the same ink as the amounts line |
 
-`dimmedLabel` = `tertiaryLabelColor.blended(0.5, of: .secondaryLabelColor)` — слабший за
-вторинний.
+`dimmedLabel` = `tertiaryLabelColor.blended(0.5, of: .secondaryLabelColor)` — weaker than secondary.
 
-Третя лінія бере **той самий** тон, що й друга, навмисно ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)):
-підписи належать до вторинного ярусу рядка, а не до якогось третього. Проміжний відтінок між
-`dimmedLabel` і тоном треку зробив би з них окремий рівень ієрархії, якого в цьому рядку немає.
+The third line takes **the same** tone as the second one deliberately
+([ADR-0092](../adr/0092-extra-usage-own-ruler.md)): the captions belong to the row's secondary tier, not
+to some third one. An intermediate shade between `dimmedLabel` and the track's tone would make them a
+separate level of hierarchy, which this row does not have.
 
-Поділ іде по **лініях**, не по осі «назва ↔ значення»: вердикт стоїть у повному чорнилі
-разом із назвою, і це навмисно — він найдієвіший елемент рядка.
+The split runs along **lines**, not along a "name ↔ value" axis: the verdict stands in full ink together
+with the name, and that is deliberate — it is the most actionable element of the row.
 
-## Неможливі комбінації
+## Impossible combinations
 
-Перевіряй перед тим, як малювати стан.
+Check before you draw a state.
 
-| Комбінація | Чому неможлива |
+| Combination | Why it is impossible |
 |---|---|
-| **Синій 5h при 7d ∈ {yellow, orange, red}** | weekly-capacity gate ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md)): `blueAllowed == false`, тож бік «позаду» лишається зеленим за будь-якого запасу. Стосується і пейсингового бару, і idle-пігулки |
-| **Синій на per-model / scoped рядку** — за будь-якого стану тижня | Вони є зрізами того самого 7-денного ліміту, про який говорить синій, тож порада була б адресована сама собі: `blueAllowed == false` **безумовно** ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)). Правило живе в моделі, тож стосується не лише пікселя — до #426 воно було лише в рендері, і журнал устиг записати 2 214 таких синіх, яких на екрані не було |
-| Рядок `stand by …` на **5-годинному** рядку | Гейт `index == PopupViewController.sevenDayRowIndex`: сигнал існує **лише** на 7d. Пʼятигодинне вікно ресетиться щонайменше двічі за добу й виправляється саме, тож ціна паузи там не змінює жодного рішення |
-| Рядок `stand by …` на **не-помаранчевому** 7d | `standBySecondsForGreen` віддає `nil` за будь-якої severity, крім `.ahead`. На зеленому/синьому чекати нічого, на жовтому лід у межах норми, а червоне (`usage >= 1`) лікує **тільки** ресет: витрати вперлися в стелю, і час їх уже не наздожене |
-| Рядок `stand by …` **без** затиснутого ⌥ | Рядок будується лише під `optionHeld`. У спокої секція 7d — це два рядки + бар, як і будь-яка інша |
-| `stand by` **менше ніж 20 хв** | Відсічено `PacingModel.standByFloorSeconds`. Стан майже недосяжний: він існує лише в останні ~2 год вікна (залишок < 125 хв) **і** у смузі витрат завширшки соті частки pp (при залишку 120 хв — `u ∈ [99.0000 %, 99.0079 %]`). Мінімальне помаранчеве очікування дорівнює самому `0.16·(1−t)·D`, а на середині тижня це вже ≈13 год. Поріг — запобіжник від «stand by 3m», не робочий фільтр |
-| `stand by`, що добігає **впритул до ресету** | Відсічено ще раніше — перевіркою `remainingSeconds − standBy > pacingOrangeOverrideSeconds` усередині розрахунку: зелений, що настав би в останні 20 хв вікна, там усе одно був би помаранчевим. Окремого «10-хвилинного» правила **немає й не треба** — воно вкладене в це й не відкинуло б жодного випадку |
-| **Синя idle-пігулка** — за будь-якого стану тижня | Із [#381](https://github.com/artem-from-ua/cc-timer/issues/381) синього idle немає ніде: пігулка зелена (або біла під гасінням), сіра лишається лише для `isBlocked`. Тижневий gate до неї більше не входить — полів `LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom` не існує |
-| Pause-гліф **і** символ валюти разом | Гарантія [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md): маркер кредитів занулюється, поки `blockedPause`. Донедавна пара **була** досяжна — при `spend_limit_reached` іконку вмикав `isActive` (`enabled \|\| spendLimitReached`), а блокування давав `!creditsCanCover` (`enabled && !spendLimitReached`); стара мотивація тут плутала «кредити активні» з «кредити покривають» |
-| Вичерпаний ліміт **без жодного** з них | Зворотний бік того самого: при `mainWindowExhausted` стани вичерпні — або `creditsCanCover` (символ валюти), або `isBlocked` (pause-гліф). Порожнього варіанту не буває |
-| Смужки під pause-гліфом або під символом валюти | Обидві відповіді «не на підписці» дають `MenuBarMode.iconOnlyReset` — кейс без поля смужок ([ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)), тож намалювати їх нічим. **Без винятків з [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md):** stale-фаза, що тримала діагностичні смужки біля ⚠️, скасована |
-| **Відлік поруч зі смужками** | `MenuBarMode.expanded` не має поля для числа ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)) — пара нерепрезентовна, а не просто недосяжна. Число живе лише в `iconOnlyReset` (гліф + відлік, без смужок) |
-| Pause-гліф або символ валюти поруч із ⚠️ | `exhaustedUnknownReset` малює ⚠️ **самотнім** ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)): гліф стверджував би стан поруч зі знаком, який від даних відмовляється. Єдине місце, де `isBlocked` істинний, а паузи немає |
-| Червона смужка на 100 % | Вичерпане 5h/7d вікно виводить на безсмужковий стан **до** побудови смужок; зі зламаним `resets_at` — на `exhaustedUnknownReset`, теж без смужок |
-| 100% кредитів + «well ahead of pace» | `creditsStatusText` при `usage >= 1` повертає `"limit reached"` |
-| 100% кредитів без червоного бейджа ресету | Це стан блокування — бейдж є |
-| Idle 5-hour + другий рядок | `if !row.sessionIdle` — детальної лінії немає |
-| Настінний годинник (`20:40`) у **меню-барі** | Формат один на будь-якій відстані ([ADR-0074](../adr/0074-one-reset-format-on-both-surfaces.md)). Годинник буває **лише** в попапі, як кваліфікатор `resetLine` (`5h at 20:40`) |
-| Комбінований лейбл (`1h30m`, `4h41m`) де завгодно | `relativeRounded` віддає **одну** одиницю; `relativeString` видалено разом із порогом 90 хв |
-| Idle-бар `.pressure` + маркер часу | Маркера немає в жодному Pressure-барі; під `.progress` idle маркер **є**, на нулі ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)) |
-| ⚠️ при **відсутньому** тижневому ресеті | ⚠️ означає рівно «дані суперечать самі собі» ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)). Порожній `seven_day.resets_at` при `utilization == 0` — не суперечність, а правда: тижневого вікна ще немає, доки не витрачено перший токен. Цей стан малює **символ «немає даних»** (`MenuBarMode.weeklyResetUnknown`, [ADR-0107](../adr/0107-weekly-reset-reconstructed-from-the-last-known-one.md)) |
-| Будь-який рядок ліміту при `weeklyResetUnknown` | `PopupLayout.make` віддає `rows: []` — ховаються **всі**, разом із per-model і кредитами. Частково малювати не можна: Fable/Opus/Sonnet успадковують тижневу дату, а `elapsedFraction` при непарсибельній повертає `1.0`, тож кожен рядок намалював би маркер біля **правого** краю ([ADR-0107](../adr/0107-weekly-reset-reconstructed-from-the-last-known-one.md)) |
-| Червоний банер при `weeklyResetUnknown` | Це не збій полінгу: запит повернув `200` і коректне тіло. Банер малюється вторинним кольором із символом «немає даних», а не через `FailureReason` — `.serverProblem` показав би «Usage API unavailable» і відправив користувача перевіряти мережу замість того, щоб почати працювати |
-| `weeklyResetUnknown` при **ненульовому** 7d-`utilization` | Обидві поверхні вимагають `resetsAt.isEmpty && utilization == 0`. Порожня дата поруч із реальним використанням — інший стан: числа відомі, навіть коли годинник ні, тож бари лишаються, зникає лише відлік |
-| Idle-бар із суцільною заливкою на всю ширину | Idle малює нуль в усіх трьох стилях — трек + пігулка ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)); заливка на всю ширину читається як Pressure на повному тиску |
-| Кольорова idle-пігулка під **Pressure** у menu bar | Під Pressure спокійний бік глушиться **безумовно** (`barStyle == .pressure \|\| colorsTell.mutesCalm`, [#381](https://github.com/artem-from-ua/cc-timer/issues/381)), тож там пігулка завжди біла — сам рядок «Colors tell me» під цим стилем навіть не показується в Settings |
-| `usage > time` + зелений/синій | Це гілка `.ahead` — жовтий або помаранчевий |
-| `usage <= time` + помаранчевий через «20 хв» | Override недосяжний зі спокійної гілки |
-| Спокійне 7d вікно, що вичерпається до ресету | `rate = usage/time <= 1` ⟹ проєкція ≤ 1 |
-| Повний кредитний бар поруч з idle 5-hour | Кредити витрачаються лише коли токенний ліміт вичерпано — тоді 5h не idle |
-| Жирний текст у рядку ліміту | Обидві половини — `NSFont.systemFont`, «neither half is bold» |
-| Бар без маркера + будь-які тіки | Немає маркера ⟹ не шкала вікна ⟹ **тіків немає взагалі**: обидва безмаркерні стилі позначені лише своєю **рискою нуля** (`0` у Pressure, `0.5` у Balance), підписаною під ⌥ ([ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md)). Зворотне **не** діє: маркер є і в кредитному барі, а тіків там нуль |
-| Меню-барний Pressure **без** риски нуля, або з рискою на самому лівому краї треку | Риска є в кожному Pressure- і Balance-барі меню-бару, у **центрі нульової пігулки** — не на `rect.minX` ([ADR-0096](../adr/0096-zero-tick-on-pressure.md)) |
-| Риска нуля в кольорі pacing, завширшки як маркер, або **над** треком | 1.5 pt (менш ніж третина від 5 pt маркера), нейтральний `centreTick` під `zeroTickAlpha`, **під** треком — інакше це маркер Progress (0089, 0096) |
-| Меню-барний Progress із рискою нуля | Її має лише шкала без маркера: у Progress позицію вже несе маркер часу (0096) |
-| Кредитний бар стрічкою Pressure або Balance | Він завжди на шкалі вікна, хай яким є `dropdownStyle` ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)) — перемикач стилю його не рухає |
-| Кредитний бар із тіками — хоч частками вікна, хоч на 0.5 | `tickFractions` віддає для нього порожній список: лінійка кредитів — це два підписи, а не зубці (0092) |
-| Кредитний бар без маркера часу | Шкала вікна ⟹ маркер завжди є, як у будь-якому Progress-барі |
-| Кредитний бар із капом і підписами країв **без ⌥** | Підписи — ⌥-половина лінійки: у спокої їх немає. З капом і затиснутим ⌥ вони є завжди; без капа немає ні бару, ні підписів |
-| Підписи місяця, що завжди збігаються з локальною датою | Вони в UTC (там ресет ліміту), тож на межі місяця розходяться з місцевим календарем на кілька годин — на відміну від `resetLine` поруч, який локальний (0092) |
-| Бар без маркера, де намальована стрічка вужча за пігулку | Значення `0 < length < 8.1 %` цілком **досяжні** (жовтий діапазон іде від нуля), але малювач їх не малює: усе, що вужче за `minStripWidth` (2.75 pt / 34 pt ≈ 8.1 %), floor-иться до мінімальної пігулки. Тож на екрані є або пігулка, або стрічка ≥ 8.1 % — проміжного розміру не буває |
-| Вичерпаний (`100 %`) Pressure-бар, заповнений частково | `u ≥ 1` ⟹ `pressureLength == 1` за будь-якого `t` — червоний завжди повний |
-| Pressure-стрічка нульової ширини без пігулки | Нуль floor-иться до пігулки на **обох** поверхнях (0076); порожній трек не буває |
-| Pressure-бар при `usage == time` зі **стрічкою** (будь-якої довжини понад пігулку) | `u == t` — це **нуль** шкали, тож малюється мінімальна пігулка. Те саме для будь-якого `u ≤ t`: увесь спокійний бік — крапка ([ADR-0101](../adr/0101-pressure-is-the-gauge-ahead-half.md)) |
-| Balance-бар із маркером часу | Маркер має позицію лише на шкалі вікна; Balance — центрована шкала ([ADR-0079](../adr/0079-centred-zero-gauge-scale.md)) |
-| Balance-бар **без** центральної риски — у будь-якому стані, включно з idle | Риска малюється завжди: без неї напрямку немає від чого відлічувати |
-| «Стиль застосунку» як одна величина: мокап, де меню-бар і попап **зобов'язані** збігатися | Поверхні незалежні з #329 — `menuBarStyle` / `dropdownStyle`, дев'ять доступних пар ([ADR-0080](../adr/0080-per-surface-bar-style.md)). Різні стилі на двох поверхнях — **валідний** стан (саме його дає міграція старого `.mixed`), тож підписувати рендер одним «Bar style» не можна |
-| Пресет (Chill / Work harder! / Control freak), що дає поверхням **різні** стилі | Кожен пресет ставить один стиль на обидві (Pressure / Balance / Progress відповідно); мішана пара — це завжди **Custom** |
-| Центральна риска Balance завширшки як маркер (5 pt) чи в кольорі pacing | `centreTickWidth` = 1.5 pt, нейтральний `centreTick` **у тоні calm-заливки** (`labelColor` через `bright()`), **під** треком — інакше це маркер Progress ([ADR-0089](../adr/0089-gauge-centre-tick-calm-tone.md)) |
-| Balance-стрічка, що не торкається центральної риски (смужка треку між ними) | Край на нулі перекриває його на пів-ширини пігулки — у той бік, куди йде стрічка; діє на будь-якій довжині, не лише на floor-пігулці (#326) |
-| Balance-стрічка, що перетинає центр | Стрічка росте **від** центру в один бік; перетнути власний нуль вона не може |
-| Balance при `usage == time` зі стрічкою лівіше/правіше центру | Нічия — це рівно центр (`balanceOffset == 0`), тобто центрована пігулка |
-| Balance idle із пігулкою біля лівого краю | Нуль цієї шкали — центр, тож пігулка там ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)) |
-| Стрічка меню-бару у формі капсули (радіус = пів-висоти) | Стрічка бере радіус **треку** — `barCorner` 1.5 pt, не `min(w,h)/2` = 2.5 pt: дві форми в одному барі мають один кут (#326). У **попапі** стрічка навпаки капсульна — там бар 6 pt і це справді пігулка |
-| Жовта стрічка, що лежить на суцільному сірому треку | Під жовтою (і **тільки** жовтою) стрічкою з треку вирізається прозорий проміжок — 1.5 pt у попапі, 1.25 pt у меню-барі з кожного боку, тим самим радіусом, що в стрічки. У меню-барі вирізу немає, коли жовтий гаситься («Colors tell me» у глушильному режимі, або Pressure — там безумовно): він уже приглушений у `calmWhite` (#326) |
-| Та сама `(u, t)` з різним кольором у різних стилях | `BarStyle` — render-only; severity рахується до вибору стилю |
+| **Blue 5h while 7d ∈ {yellow, orange, red}** | The weekly-capacity gate ([ADR-0081](../adr/0081-weekly-capacity-gate-for-blue.md)): `blueAllowed == false`, so the "behind" side stays green no matter how much headroom there is. Applies to both the pacing bar and the idle pill |
+| **Blue on a per-model / scoped row** — whatever the weekly state | They are slices of the very 7-day limit blue talks about, so the advice would be addressed to itself: `blueAllowed == false` **unconditionally** ([ADR-0115](../adr/0115-no-blue-on-per-model-windows.md)). The rule lives in the model, so it is not just about the pixel — before #426 it lived only in the renderer, and the journal managed to record 2,214 such blues that were never on screen |
+| A `stand by …` line on the **5-hour** row | The gate is `index == PopupViewController.sevenDayRowIndex`: the signal exists **only** on 7d. A five-hour window resets at least twice a day and fixes itself, so the cost of a pause there changes no decision |
+| A `stand by …` line on a **non-orange** 7d | `standBySecondsForGreen` returns `nil` for every severity except `.ahead`. On green or blue there is nothing to wait for, on yellow the lead is within norms, and red (`usage >= 1`) is cured **only** by the reset: spending has hit the ceiling, and time will not catch up with it |
+| A `stand by …` line **without** ⌥ held | The line is built only under `optionHeld`. At rest the 7d section is two lines + a bar, like any other |
+| `stand by` **shorter than 20 min** | Cut off by `PacingModel.standByFloorSeconds`. The state is almost unreachable: it exists only in the last ~2 hours of a window (remaining < 125 min) **and** within a spending band hundredths of a pp wide (at 120 min remaining — `u ∈ [99.0000%, 99.0079%]`). The minimum orange wait equals `0.16·(1−t)·D` itself, and mid-week that is already ≈13 hours. The threshold is a guard against "stand by 3m", not a working filter |
+| `stand by` that runs **right up to the reset** | Cut off even earlier — by the `remainingSeconds − standBy > pacingOrangeOverrideSeconds` check inside the calculation: a green that would arrive in the last 20 minutes of a window would be orange there anyway. There is **no separate "10-minute" rule and no need for one** — it is nested inside this one and would not have rejected a single case |
+| **A blue idle pill** — whatever the weekly state | Since [#381](https://github.com/artem-from-ua/cc-timer/issues/381) there is no blue idle anywhere: the pill is green (or white under muting), and gray is left only for `isBlocked`. The weekly gate no longer enters into it — the fields `LimitRow.weeklyHeadroom` / `BarView.weeklyHeadroom` do not exist |
+| The pause glyph **and** the currency symbol together | Guaranteed by [ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md): the credits marker is zeroed out while `blockedPause`. Until recently the pair **was** reachable — at `spend_limit_reached` the icon was turned on by `isActive` (`enabled \|\| spendLimitReached`) while the block came from `!creditsCanCover` (`enabled && !spendLimitReached`); the old rationale here confused "credits are active" with "credits cover it" |
+| An exhausted limit with **neither** of them | The flip side of the same thing: at `mainWindowExhausted` the states are exhaustive — either `creditsCanCover` (the currency symbol) or `isBlocked` (the pause glyph). There is no empty variant |
+| Bars under the pause glyph or under the currency symbol | Both "not on a subscription" answers produce `MenuBarMode.iconOnlyReset` — a case with no field for bars ([ADR-0090](../adr/0090-menu-bar-answers-can-we-work.md)), so there is nothing to draw them from. **With no exceptions from [ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md):** the stale phase that used to hold diagnostic bars next to ⚠️ has been cancelled |
+| **A countdown next to bars** | `MenuBarMode.expanded` has no field for the number ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)) — the pair is unrepresentable, not merely unreachable. The number lives only in `iconOnlyReset` (glyph + countdown, no bars) |
+| The pause glyph or the currency symbol next to ⚠️ | `exhaustedUnknownReset` draws ⚠️ **alone** ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)): a glyph would assert a state right next to a sign that disclaims the data. The one place where `isBlocked` is true and there is no pause |
+| A red bar at 100% | An exhausted 5h/7d window routes to a bar-less state **before** the bars are built; with a broken `resets_at` it routes to `exhaustedUnknownReset`, also bar-less |
+| 100% of credits + "well ahead of pace" | `creditsStatusText` at `usage >= 1` returns `"limit reached"` |
+| 100% of credits without the red reset badge | That is the blocked state — the badge is there |
+| Idle 5-hour + a second line | `if !row.sessionIdle` — there is no detail line |
+| A wall clock (`20:40`) in the **menu bar** | There is one format at any distance ([ADR-0074](../adr/0074-one-reset-format-on-both-surfaces.md)). A clock appears **only** in the popup, as a qualifier on `resetLine` (`5h at 20:40`) |
+| A combined label (`1h30m`, `4h41m`) anywhere | `relativeRounded` returns **one** unit; `relativeString` was removed along with the 90-minute threshold |
+| A `.pressure` idle bar + a time marker | There is no marker in any Pressure bar; under `.progress` idle **does** have a marker, at zero ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)) |
+| ⚠️ with a **missing** weekly reset | ⚠️ means exactly "the data contradicts itself" ([ADR-0091](../adr/0091-countdown-only-where-work-is-not-running.md)). An empty `seven_day.resets_at` at `utilization == 0` is not a contradiction but the truth: there is no weekly window yet until the first token is spent. That state draws the **"no data" symbol** (`MenuBarMode.weeklyResetUnknown`, [ADR-0107](../adr/0107-weekly-reset-reconstructed-from-the-last-known-one.md)) |
+| Any limit row at `weeklyResetUnknown` | `PopupLayout.make` returns `rows: []` — **all** of them are hidden, per-model and credits included. Drawing them partially is not allowed: Fable/Opus/Sonnet inherit the weekly date, and `elapsedFraction` returns `1.0` when it is unparsable, so every row would draw its marker near the **right** edge ([ADR-0107](../adr/0107-weekly-reset-reconstructed-from-the-last-known-one.md)) |
+| A red banner at `weeklyResetUnknown` | This is not a polling failure: the request returned `200` and a well-formed body. The banner is drawn in the secondary color with the "no data" symbol rather than through `FailureReason` — `.serverProblem` would say "Usage API unavailable" and send the user off to check the network instead of getting to work |
+| `weeklyResetUnknown` at a **non-zero** 7d `utilization` | Both surfaces require `resetsAt.isEmpty && utilization == 0`. An empty date next to real usage is a different state: the numbers are known even when the clock is not, so the bars stay and only the countdown disappears |
+| An idle bar with a full-width solid fill | Idle draws zero in all three styles — track + pill ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)); a full-width fill reads as Pressure at full pressure |
+| A colored idle pill under **Pressure** in the menu bar | Under Pressure the calm side is muted **unconditionally** (`barStyle == .pressure \|\| colorsTell.mutesCalm`, [#381](https://github.com/artem-from-ua/cc-timer/issues/381)), so the pill there is always white — the "Colors tell me" row is not even shown in Settings under this style |
+| `usage > time` + green/blue | That is the `.ahead` branch — yellow or orange |
+| `usage <= time` + orange via the "20 min" rule | The override is unreachable from the calm branch |
+| A calm 7d window that will be exhausted before the reset | `rate = usage/time <= 1` ⟹ the projection is ≤ 1 |
+| A full credit bar next to an idle 5-hour | Credits are only spent once the token limit is exhausted — and then 5h is not idle |
+| Bold text in a limit row | Both halves are `NSFont.systemFont`, "neither half is bold" |
+| A marker-less bar + any ticks | No marker ⟹ not the window scale ⟹ **no ticks at all**: both marker-less styles are marked only by their own **zero tick** (`0` in Pressure, `0.5` in Balance), labeled under ⌥ ([ADR-0098](../adr/0098-ruler-split-identify-always-explain-on-option.md)). The converse does **not** hold: the credit bar has a marker too, and zero ticks |
+| Menu-bar Pressure **without** a zero tick, or with the tick at the very left edge of the track | The tick is present in every Pressure and Balance bar of the menu bar, at the **center of the zero pill** — not at `rect.minX` ([ADR-0096](../adr/0096-zero-tick-on-pressure.md)) |
+| A zero tick in a pacing color, as wide as the marker, or **above** the track | 1.5 pt (less than a third of the marker's 5 pt), the neutral `centreTick` under `zeroTickAlpha`, **under** the track — otherwise it is a Progress marker (0089, 0096) |
+| Menu-bar Progress with a zero tick | Only a marker-less scale has one: in Progress the position is already carried by the time marker (0096) |
+| The credit bar with a Pressure or Balance strip | It is always on the window scale, whatever `dropdownStyle` says ([ADR-0092](../adr/0092-extra-usage-own-ruler.md)) — the style switch does not move it |
+| The credit bar with ticks — window fractions or at 0.5 | `tickFractions` returns an empty list for it: the credits ruler is two captions, not ticks (0092) |
+| The credit bar without a time marker | The window scale ⟹ the marker is always there, as in any Progress bar |
+| The credit bar with a cap and boundary captions **without ⌥** | The captions are the ⌥ half of the ruler: at rest they are absent. With a cap and ⌥ held they are always there; without a cap there is neither bar nor captions |
+| Month captions that always agree with the local date | They are in UTC (that is where the limit resets), so at a month boundary they diverge from the local calendar by a few hours — unlike the `resetLine` next to them, which is local (0092) |
+| A marker-less bar where the drawn strip is narrower than the pill | Values of `0 < length < 8.1%` are entirely **reachable** (the yellow range starts at zero), but the renderer does not draw them: anything narrower than `minStripWidth` (2.75 pt / 34 pt ≈ 8.1%) is floored to the minimum pill. So on screen there is either a pill or a strip ≥ 8.1% — nothing in between |
+| An exhausted (`100%`) Pressure bar filled only partially | `u ≥ 1` ⟹ `pressureLength == 1` for any `t` — red is always full |
+| A zero-width Pressure strip with no pill | Zero is floored to a pill on **both** surfaces (0076); an empty track does not occur |
+| A Pressure bar at `usage == time` with a **strip** (of any length beyond the pill) | `u == t` is the **zero** of the scale, so the minimum pill is drawn. The same for any `u ≤ t`: the entire calm side is a dot ([ADR-0101](../adr/0101-pressure-is-the-gauge-ahead-half.md)) |
+| A Balance bar with a time marker | A marker has a position only on the window scale; Balance is a centered scale ([ADR-0079](../adr/0079-centred-zero-gauge-scale.md)) |
+| A Balance bar **without** the centre tick — in any state, idle included | The tick is always drawn: without it there is nothing to measure the direction from |
+| "The app's style" as a single value: a mockup where the menu bar and the popup are **required** to match | The surfaces have been independent since #329 — `menuBarStyle` / `dropdownStyle`, nine available pairs ([ADR-0080](../adr/0080-per-surface-bar-style.md)). Different styles on the two surfaces are a **valid** state (it is exactly what migrating the old `.mixed` produces), so labeling a render with a single "Bar style" is not allowed |
+| A preset (Chill / Work harder! / Control freak) that gives the surfaces **different** styles | Each preset sets one style on both (Pressure / Balance / Progress respectively); a mixed pair is always **Custom** |
+| A Balance centre tick as wide as the marker (5 pt), or in a pacing color | `centreTickWidth` = 1.5 pt, the neutral `centreTick` **in the tone of the calm fill** (`labelColor` via `bright()`), **under** the track — otherwise it is a Progress marker ([ADR-0089](../adr/0089-gauge-centre-tick-calm-tone.md)) |
+| A Balance strip that does not touch the centre tick (a sliver of track between them) | The edge at zero overlaps it by half a pill width — toward the side the strip is heading; this holds at any length, not just on the floored pill (#326) |
+| A Balance strip that crosses the center | The strip grows **from** the center in one direction; it cannot cross its own zero |
+| Balance at `usage == time` with the strip left or right of center | A tie is exactly the center (`balanceOffset == 0`), i.e. a centered pill |
+| Balance idle with the pill near the left edge | The zero of this scale is the center, so that is where the pill is ([ADR-0078](../adr/0078-idle-drawn-as-zero-in-both-styles.md)) |
+| A menu-bar strip shaped like a capsule (radius = half the height) | The strip takes the **track's** radius — `barCorner` 1.5 pt, not `min(w,h)/2` = 2.5 pt: two shapes in one bar share one corner (#326). In the **popup** the strip is capsule-shaped on the contrary — the bar there is 6 pt and it really is a pill |
+| A yellow strip lying on a solid gray track | Under a yellow strip (and **only** a yellow one) a transparent gap is cut out of the track — 1.5 pt in the popup, 1.25 pt in the menu bar on each side, with the same radius the strip has. In the menu bar there is no cut-out when yellow is muted ("Colors tell me" in a muting mode, or Pressure — where it is unconditional): it is already dimmed into `calmWhite` (#326) |
+| The same `(u, t)` in a different color in different styles | `BarStyle` is render-only; severity is computed before the style is chosen |
 
-## Як перевірити стан арифметично
+## How to check a state arithmetically
 
-Швидкий скрипт замість здогаду:
+A quick script instead of a guess:
 
 ```python
 def severity(u, t):
@@ -582,42 +603,42 @@ print(severity(0.78, 0.72))   # ORANGE — не зелений
 print(severity(0.88, 0.93))   # green/blue
 ```
 
-Для ширин — виміряти тим самим шрифтом:
+For widths — measure with the same font:
 
 ```swift
 let f = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
 (s as NSString).size(withAttributes: [.font: f]).width
 ```
 
-## Кожне посилання — гіперпосилання
+## Every mention is a hyperlink
 
-Стосується всіх артефактів і документів, не лише тих, що містять рендери. **Голий
-`#283` у тексті — це робота, перекладена на читача**: щоб перейти, він має скопіювати
-номер, згадати репозиторій і зібрати URL руками.
+This applies to all artifacts and documents, not only the ones containing renders. **A bare `#283` in
+the text is work handed off to the reader**: to follow it, they have to copy the number, remember the
+repository and assemble the URL by hand.
 
-Гіперпосиланнями мають бути:
+These must be hyperlinks:
 
-| Що згадується | Куди веде |
+| What is mentioned | Where it points |
 |---|---|
-| Тікет чи PR — `#283` | `https://github.com/artem-from-ua/tokenpace/issues/283` (GitHub редіректить `/issues/` на `/pull/` за потреби) |
-| Коміт — `5ee4820` | `…/commit/5ee4820` |
-| Файл у репозиторії | `…/blob/main/Sources/TokenPace/StatusItemView.swift` |
-| Рядок коду | той самий URL + `#L936` |
-| Документ проєкту | відносний шлях, якщо артефакт лежить у репо; повний URL — якщо ні |
-| ADR | `…/blob/main/docs/adr/0044-dynamic-pacing-threshold.md` |
-| Інший артефакт | його `claude.ai/code/artifact/…` URL |
+| An issue or PR — `#283` | `https://github.com/artem-from-ua/tokenpace/issues/283` (GitHub redirects `/issues/` to `/pull/` when needed) |
+| A commit — `5ee4820` | `…/commit/5ee4820` |
+| A file in the repository | `…/blob/main/Sources/TokenPace/StatusItemView.swift` |
+| A line of code | the same URL + `#L936` |
+| A project document | a relative path if the artifact lives in the repo; a full URL if it does not |
+| An ADR | `…/blob/main/docs/adr/0044-dynamic-pacing-threshold.md` |
+| Another artifact | its `claude.ai/code/artifact/…` URL |
 
-### Один виняток: closing-keyword у тілі PR
+### One exception: the closing keyword in a PR body
 
-**`Closes #337` у тілі pull request пишеться голим номером, без посилання.** GitHub тригерить
-автозакриття лише на голий `#NNN` після ключового слова; у markdown-посиланні
-(`Закриває [#337](…/issues/337)`) номер для нього невидимий, тож issue лишається відкритою — і
-дізнаєшся про це вже після мержу.
+**`Closes #337` in a pull request body is written as a bare number, without a link.** GitHub triggers
+auto-closing only on a bare `#NNN` after the keyword; inside a markdown link
+(`Closes [#337](…/issues/337)`) the number is invisible to it, so the issue stays open — and you find
+out after the merge.
 
-Виняток вузький — рівно **один рядок** із ключовим словом (`Closes` / `Fixes` / `Resolves`). Усі
-інші згадки того самого тікета — у тому ж тілі PR, у коментарях, комітах і доках — лишаються
-гіперпосиланнями за правилом вище: воно про читабельність згадок, а цей рядок є службовою
-директивою для GitHub, яку читач і так не клікає.
+The exception is narrow — exactly **one line** with a keyword (`Closes` / `Fixes` / `Resolves`). Every
+other mention of the same issue — in the same PR body, in comments, commits and docs — stays a hyperlink
+under the rule above: that rule is about the readability of mentions, while this line is a service
+directive for GitHub that the reader does not click anyway.
 
 ```markdown
 Closes #337                                    ← голий, інакше не спрацює
@@ -625,13 +646,13 @@ Closes #337                                    ← голий, інакше не
 Реалізовано як у [#337](…/issues/337): …       ← посилання, як і скрізь
 ```
 
-(Виявлено після [PR #338](https://github.com/artem-from-ua/tokenpace/pull/338): «Закриває
-[#337](…)» не закрило нічого — issue довелося закривати руками.)
+(Found out after [PR #338](https://github.com/artem-from-ua/tokenpace/pull/338): "Закриває [#337](…)"
+closed nothing — the issue had to be closed by hand.)
 
-### Перевірка перед публікацією
+### The check before publishing
 
-Голі згадки легко пропустити — особливо ті, що стоять одразу після тега (`<div>#283`),
-бо вони не потрапляють у наївний пошук «пробіл + решітка».
+Bare mentions are easy to miss — especially the ones sitting immediately after a tag (`<div>#283`),
+because they do not turn up in a naive search for "space + hash".
 
 ```python
 import re
@@ -643,5 +664,5 @@ bare = [m.group() for i, p in enumerate(parts) if i % 2 == 0
 print(bare or "усі згадки клікабельні")
 ```
 
-І звірити, що номер у `href` збігається з видимим текстом — заміна регексом легко
-розсинхронізує їх, і посилання поведе не туди, мовчки.
+And check that the number in the `href` matches the visible text — a regex replacement desynchronizes
+them easily, and the link then leads somewhere else, silently.

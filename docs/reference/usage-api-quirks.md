@@ -1,224 +1,240 @@
-# Особливості Claude usage API
+# Claude usage API quirks
 
-Виміряні властивості `GET /api/oauth/usage`, які впливають на те, що застосунок може й чого не може
-показати. Не здогади й не документація Anthropic — заміри на живих відповідях і на власному журналі.
+Measured properties of `GET /api/oauth/usage` that affect what the app can and can't show. Not
+guesses, not Anthropic's documentation — measurements taken from live responses and from our own
+journal.
 
-> Пов'язане: [ADR-0103](../adr/0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md)
-> — **рішення** обійти квантування 7d, і [design/weekly-interpolation.md](../design/weekly-interpolation.md)
-> — **як саме** воно рахується; [ADR-0067](../adr/0067-local-usage-journal.md) — журнал, з якого взято
-> статистику; [ADR-0008](../adr/0008-usageclient-pure-backoff-and-transport-seam.md) — транспорт;
-> [architecture/data-flow.md](architecture/data-flow.md) — куди ці значення течуть далі.
+> Related: [ADR-0103](../adr/0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md) —
+> the **decision** to work around 7d quantization, and
+> [design/weekly-interpolation.md](../design/weekly-interpolation.md) — **exactly how** it's computed;
+> [ADR-0067](../adr/0067-local-usage-journal.md) — the journal the statistics are drawn from;
+> [ADR-0008](../adr/0008-usageclient-pure-backoff-and-transport-seam.md) — the transport;
+> [architecture/data-flow.md](architecture/data-flow.md) — where these values flow next.
 
-## `utilization` токенних вікон квантоване до цілого відсотка
+## Token windows' `utilization` is quantized to a whole percent
 
-**Сервер віддає `utilization` для `five_hour` і `seven_day` округленим до цілого.** Це не похибка в
-межах ±1 п.п. — значення точне, але має **крок 1 відсотковий пункт**, і проміжних станів не існує.
+**The server returns `utilization` for `five_hour` and `seven_day` rounded to an integer.** This
+isn't error within ±1 pp — the value is exact, but it has a **step of 1 percentage point**, and no
+intermediate states exist.
 
-### Докази
+### Evidence
 
-| Джерело | Обсяг | Результат |
+| Source | Volume | Result |
 |---|---|---|
-| `usage-journal-2026-08.jsonl` | 6204 записи | 80 унікальних `util`, **жодного нецілого** |
-| Збережені live-відповіді (5 шт.) | 8 замірів вікон | `18.0`, `72.0`, `16.0`, `66.0`, `22.0`, `67.0`, `21.0` — усі цілі |
+| `usage-journal-2026-08.jsonl` | 6,204 records | 80 unique `util` values, **none fractional** |
+| Saved live responses (5) | 8 window measurements | `18.0`, `72.0`, `16.0`, `66.0`, `22.0`, `67.0`, `21.0` — all whole numbers |
 
-Округлення відбувається **на сервері, не в нас**: у тому самому записі журналу сусідні поля
-зберігаються з повною точністю —
+The rounding happens **on the server, not on our side**: in that same journal record, the neighboring
+fields keep full precision —
 
 ```json
 {"gap": 8.20887208101216, "timePct": 0.9620887208101216, "util": 88, "sev": "green"}
 ```
 
-`gap` і `timePct` мають 15 знаків, `util` — рівно `88`. Якби округляв журнал, дробів не було б і
-поруч.
+`gap` and `timePct` carry 15 digits; `util` is exactly `88`. If the journal were doing the rounding,
+there wouldn't be fractions sitting right next to it.
 
-### Сервер уміє віддавати дроби — просто не для цих вікон
+### The server can return fractions — just not for these windows
 
-У тих самих відповідях `extra_usage.utilization` приходить як `71.8` і навіть
-`97.9090909090909`. Тобто тип `Double` у ``UsageWindow/utilization`` не декоративний, і поле
-**кредитів квантування не має**. Обмеження стосується саме токенних вікон.
+In those same responses, `extra_usage.utilization` comes back as `71.8` and even
+`97.9090909090909`. So the `Double` type on ``UsageWindow/utilization`` isn't decorative, and the
+field itself **has no quantization built in**. The limitation applies specifically to the token
+windows.
 
-## Скільки коштує один крок — і чому 5h та 7d незрівнянні
+## How much one step costs — and why 5h and 7d aren't comparable
 
-Крок 1 п.п. — це `windowDurationSeconds / 100` реальної роботи:
+A step of 1 pp is `windowDurationSeconds / 100` of real work:
 
-| Вікно | Довжина | Крок 1 п.п. |
+| Window | Length | Step of 1 pp |
 |---|---|---|
-| `five_hour` | 5 год | **3 хв** |
-| `seven_day` | 7 днів | **1 год 40 хв** |
+| `five_hour` | 5 h | **3 min** |
+| `seven_day` | 7 days | **1 h 40 min** |
 
-Різниця — **33.6 раза**. Та сама «похибка в один відсоток» на пʼятигодинному вікні непомітна, а на
-семиденному ховає майже дві години роботи.
+The ratio is **33.6x**. The same "one-percent error" is invisible on the five-hour window, but on
+the seven-day one it hides nearly two hours of work.
 
-### Виміряний наслідок: 7d стоїть на місці, потім стрибає
+### Measured consequence: 7d sits still, then jumps
 
-За 3983 послідовними парами записів семиденного вікна:
+Across 3,983 consecutive pairs of seven-day-window records:
 
-- **96.4 %** — `util` **не змінився взагалі**;
-- 140 разів зріс, із них **137 — рівно на 1 п.п.** (3 рази на 2).
+- **96.4%** — `util` **didn't change at all**;
+- it rose 140 times, of which **137 were exactly 1 pp** (3 times, 2 pp).
 
-Тобто показник тижня годинами стоїть, а тоді стрибає на 1 год 40 хв роботи одразу. **Самé поле
-плавного руху не містить** — його доводиться реконструювати з іншого лічильника (нижче).
+So the weekly figure sits still for hours, then jumps by 1 h 40 min of work all at once. **The field
+itself carries no smooth motion** — that has to be reconstructed from another counter (below).
 
-## Обхід: тижневий темп реконструюється з 5-годинного лічильника
+## Workaround: weekly pace is reconstructed from the five-hour counter
 
-> **Реалізовано** для всіх споживачів —
+> **Implemented** for every consumer —
 > [#386](https://github.com/artem-from-ua/tokenpace/issues/386) /
-> [PR #390](https://github.com/artem-from-ua/tokenpace/pull/390), версія 0.104.0. Рішення —
-> [ADR-0103](../adr/0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md), алгоритм —
-> [design/weekly-interpolation.md](../design/weekly-interpolation.md). У самій issue лишився аудит
-> споживачів: які місця постраждали, які ні.
+> [PR #390](https://github.com/artem-from-ua/tokenpace/pull/390), version 0.104.0. The decision is
+> [ADR-0103](../adr/0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md); the
+> algorithm is [design/weekly-interpolation.md](../design/weekly-interpolation.md). The issue itself
+> still holds the consumer audit: which spots were affected, which weren't.
 
-Квантування 7d не є непереборним. `h5_util` має крок **3 хв** замість 101 хв, а обидва лічильники
-міряють ті самі витрати — тож тижневу шкалу можна читати **через пʼятигодинну**.
+7d quantization isn't insurmountable. `h5_util` has a step of **3 min** instead of 101 min, and both
+counters measure the same spend — so the weekly scale can be read **through the five-hour one**.
 
-**Наскільки краще — залежить від кадансу полінгу, а не від тарифу.** При активному полінгу (193 с)
-приріст `h5` за пол ≈1 п.п., що дає тижневий крок ≈10 хв — тобто вдесятеро. При рідкому (900 с)
-приріст ≈5 п.п. і крок ≈50 хв — тобто лише вдвічі. Описувати фічу слід за нижньою межею.
+**How much better depends on the polling cadence, not on the plan.** At an active poll cadence
+(193 s), `h5` grows ≈1 pp per poll, which gives a weekly step of ≈10 min — a tenfold improvement. At
+a sparse cadence (900 s), the growth is ≈5 pp and the step is ≈50 min — only a twofold improvement.
+The feature should be described by its lower bound.
 
-Перекладний коефіцієнт — це вже задокументоване
-**N ≈ 9.8** (див. [users-and-goals § «The ratio between the windows' quotas»](users-and-goals.md#the-ratio-between-the-windows-quotas-n--computed-not-hardcoded)):
-скільки пунктів 5-годинної шкали припадає на один пункт тижневої.
+The conversion factor is already documented as
+**N ≈ 9.8** (see [users-and-goals § "The ratio between the windows' quotas"](users-and-goals.md#the-ratio-between-the-windows-quotas-n--computed-not-hardcoded)):
+how many points of the five-hour scale correspond to one point of the weekly one.
 
-**Незалежна перевірка на серпневому журналі** (інший ряд, інший метод — сума додатних приростів
-замість МНК): приріст `h5` 1396 пп проти `d7` 143 пп → **N = 9.76**. Збіг із 9.8 до другого знака
-означає, що співвідношення справжнє, а не артефакт одного заміру.
+**Independent check on the August journal** (a different series, a different method — sum of
+positive increments instead of least squares): `h5` grew by 1,396 pp against `d7`'s 143 pp →
+**N = 9.76**. Agreement with 9.8 to the second decimal place means the ratio is real, not an artifact
+of a single measurement.
 
-| Шлях | Крок тижневої шкали |
+| Path | Weekly-scale step |
 |---|---|
-| прямо з `d7_util` | 1 пп = **101 хв** роботи |
-| через `h5_util` / N, активний полінг (193 с) | ≈**10 хв** |
-| через `h5_util` / N, рідкий полінг (900 с) | ≈**50 хв** |
+| directly from `d7_util` | 1 pp = **101 min** of work |
+| via `h5_util` / N, active polling (193 s) | ≈**10 min** |
+| via `h5_util` / N, sparse polling (900 s) | ≈**50 min** |
 
-У застосунку `N` не хардкодиться — `WeeklyRatio` оцінює його медіаною по ковзному вікну з ряду
-самого користувача, бо це властивість тарифу й чинних промо
+In the app, `N` isn't hardcoded — `WeeklyRatio` estimates it as a median over a sliding window of the
+user's own series, since it's a property of the plan and any active promotions
 ([ADR-0103](../adr/0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md)).
 
-### Скільки руху ховає тижнева шкала
+### How much motion the weekly scale hides
 
-За 3986 записами серпня:
+Across 3,986 August records:
 
-- **747** кроків `h5_util` угору сталися, поки `d7_util` **стояв нерухомо**;
-- лише **106** кроків видно обом лічильникам.
+- **747** upward steps of `h5_util` happened while `d7_util` **stayed motionless**;
+- only **106** steps are visible to both counters.
 
-Тобто **~88 % руху витрат тижнева шкала не показує взагалі**. Медіанна серія нерухомості `d7` —
-16 записів поспіль, максимальна — 366.
+That means **~88% of spend motion the weekly scale doesn't show at all**. The median run of `d7`
+staying still is 16 consecutive records; the maximum is 366.
 
-### Застереження, без яких реконструкція бреше
+### Caveats without which the reconstruction lies
 
-Кожне з них враховано в реалізації — перелік лишається як пояснення **чому** вона влаштована саме
-так, і як чекліст для будь-якої майбутньої роботи з цими рядами.
+Each of these is already accounted for in the implementation — the list stays here to explain
+**why** it's built the way it is, and as a checklist for any future work with these series.
 
-- **`h5_util` не накопичувальний** — він обнуляється на кожному з ~33.6 ресетів за тиждень. Брати
-  можна лише **додатні прирости**; падіння означає ресет, а не повернення квоти.
-- **N — властивість тарифу, а не константа.** Він залежить від плану, міксу моделей і чинних акцій
-  Anthropic, тож рахується **з ряду користувача**, а не хардкодиться (`WeeklyRatio`, медіана по
-  ковзному вікну). Промо не має жодного поля в payload: `tier` не змінювався всі 4 327 записів, поки
-  діяла акція «+50 % weekly limit» — тож зсув `N` є **єдиним** спостережуваним слідом, і на цьому
-  стоїть [#389](https://github.com/artem-from-ua/tokenpace/issues/389).
-- **Потрібна історія.** N виводиться з накопичених сум; на холодному старті тиків замало, тож до
-  накопичення застосунок віддає сире значення, а не шум.
-- **Це оцінка, не вимір.** Точність упирається в довірчий інтервал N (8.9–10.8) і ширину кошика, тож
-  похідні величини не подаються як точні до хвилини — вони точні до ~10 %.
-- **scoped-моделі ламають єдиний N** — Opus / Sonnet / Fable мають власні тижневі вікна, але не мають
-  пʼятигодинних, тож для них реконструкція **не застосовується** взагалі.
+- **`h5_util` isn't cumulative** — it resets on each of ~33.6 resets per week. Only **positive
+  increments** can be taken; a drop means a reset, not quota returning.
+- **N is a property of the plan, not a constant.** It depends on the plan tier, the model mix, and
+  any active Anthropic promotions, so it's computed **from the user's own series** rather than
+  hardcoded (`WeeklyRatio`, median over a sliding window). Promotions carry no field of their own in
+  the payload: `tier` didn't change across all 4,327 records while the "+50% weekly limit" promotion
+  was active — so a shift in `N` is the **only** observable trace of it, and that's what
+  [#389](https://github.com/artem-from-ua/tokenpace/issues/389) rests on.
+- **History is required.** N is derived from accumulated sums; on a cold start there aren't enough
+  ticks yet, so until accumulation happens the app returns the raw value instead of noise.
+- **This is an estimate, not a measurement.** Accuracy is bounded by N's confidence interval
+  (8.9–10.8) and the bucket width, so derived quantities aren't presented as accurate to the minute —
+  they're accurate to ~10%.
+- **Scoped models break a single N** — Opus / Sonnet / Fable have their own weekly windows but no
+  five-hour ones, so the reconstruction **doesn't apply** to them at all.
 
-## Що з цього випливає для UI
+## What this means for the UI
 
-> **Реконструкцію реалізовано** ([#386](https://github.com/artem-from-ua/tokenpace/issues/386),
-> [ADR-0103](../adr/0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md), алгоритм —
-> [design/weekly-interpolation.md](../design/weekly-interpolation.md)). Застосунок віддає в UI
-> **реконструйоване** тижневе значення, тож обмеження нижче поділені на два стани: що вірно для
-> **сирого** `util` і що змінилося після реконструкції.
+> **The reconstruction is implemented** ([#386](https://github.com/artem-from-ua/tokenpace/issues/386),
+> [ADR-0103](../adr/0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md), algorithm —
+> [design/weekly-interpolation.md](../design/weekly-interpolation.md)). The app hands the UI the
+> **reconstructed** weekly value, so the constraints below split into two states: what's true for
+> the **raw** `util`, and what changed after reconstruction.
 
-### Лишається вірним і після реконструкції
+### Still true after reconstruction
 
-- **Не обіцяти точності, якої немає в даних.** Реконструкція розміщує значення **всередині кошика**
-  шириною 1 п.п. — вона не додає вимірювань, а розподіляє відомий приріст. Похибка обмежена шириною
-  кошика й довірчим інтервалом `N`, тож похідна від тижневого `util` лишається **оцінкою**.
-- **Виграш пропорційний кадансу полінгу, а не тарифу.** При активному полінгу (193 с) тижневий крок
-  ≈10 хв, при рідкому (900 с) ≈50 хв — тобто «вдвічі краще», а не «вдесятеро». Саме так фічу слід
-  описувати ([ADR-0103](../adr/0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md)).
-- **Крок — властивість *обраного джерела*, не самої величини.** Це головний урок і він не застарів:
-  «поріг менший за крок» діагностує не безглуздий поріг, а надто грубий лічильник. Перш ніж прибирати
-  поріг як мертвий — перевір, чи не варто уточнити джерело.
-- **Пʼятигодинне вікно таких обмежень майже не має.** 3 хв — дрібніше за будь-який поріг, яким ми
-  оперуємо, тож там квантування можна не враховувати.
-- **Scoped-моделі (Opus / Sonnet / Fable) лишаються сирими** — вони мають власні тижневі вікна, але
-  **не мають** пʼятигодинних, тож єдиний `N` для них некоректний за побудовою. Наслідок видимий:
-  тижневий бар повзе, а рядки моделей стрибають. Свідоме рішення, не недогляд.
+- **Don't promise precision the data doesn't have.** The reconstruction places the value **inside the
+  bucket**, which is 1 pp wide — it doesn't add measurements, it distributes a known increment. The
+  error is bounded by the bucket width and N's confidence interval, so anything derived from the
+  weekly `util` remains an **estimate**.
+- **The gain is proportional to the polling cadence, not the plan.** At an active poll cadence
+  (193 s) the weekly step is ≈10 min; at a sparse one (900 s) it's ≈50 min — "twice as good," not
+  "ten times as good." That's exactly how the feature should be described
+  ([ADR-0103](../adr/0103-weekly-utilization-reconstructed-from-the-five-hour-counter.md)).
+- **The step is a property of the *chosen source*, not of the quantity itself.** This is the main
+  lesson and it hasn't aged: "a threshold smaller than the step" diagnoses not a nonsensical
+  threshold but a counter that's too coarse. Before removing a threshold as dead, check whether the
+  source needs sharpening instead.
+- **The five-hour window has almost none of these constraints.** At 3 min, its step is finer than any
+  threshold we work with, so quantization can be ignored there.
+- **Scoped models (Opus / Sonnet / Fable) remain raw** — they have their own weekly windows but
+  **not** five-hour ones, so a single `N` is incorrect for them by construction. The consequence is
+  visible: the weekly bar creeps while the model rows jump. A deliberate decision, not an oversight.
 
-### Стосується лише сирого `util`
+### Applies only to the raw `util`
 
-- **Дрібні стани на 7d недосяжні.** На сирому значенні мінімальний ненульовий лід — той самий
-  1 п.п., тобто 101 хв, і стану «випередження на 15 хвилин» **не існувало**. Після реконструкції
-  значення потрапляє всередину кошика, тож такі стани **досяжні** — саме тому стуб
-  [`standby-floor`](../guides/ui-verification.md) перебудовано з дробового `99.5536 %` на **цілий
-  `utilization = 99`**, який сервер справді віддає.
-- **Пороги, менші за крок, ловлять порожнечу.** Було вірним для сирого значення: `standByFloorSeconds`
-  (20 хв) не міг спрацювати, бо всі значення були 0 або ≥ 101 хв. Тепер поріг **живий** — але вижив
-  вузько: сканування простору `(u, ресет)` дає придушений stand-by у **18 із 10 064** комбінацій, усі
-  при `u` в межах 99.15–99.40 %.
+- **Fine-grained 7d states were unreachable.** On the raw value, the smallest nonzero lead was the
+  same 1 pp, i.e. 101 min, and a state like "15 minutes ahead" **didn't exist**. After
+  reconstruction, the value lands inside the bucket, so such states **are** reachable — which is
+  exactly why the [`standby-floor`](../guides/ui-verification.md) stub was rebuilt from a fractional
+  `99.5536%` to the **integer `utilization = 99`** that the server actually returns.
+- **Thresholds smaller than the step were catching nothing.** True for the raw value:
+  `standByFloorSeconds` (20 min) could never fire, because every value was either 0 or ≥ 101 min. The
+  threshold is now **alive** — but only barely: scanning the `(u, reset)` space finds the stand-by
+  suppressed in **18 of 10,064** combinations, all with `u` between 99.15% and 99.40%.
 
-  Причина не та, що передбачав [ADR-0102](../adr/0102-stand-by-line-for-the-seven-day-bar.md)
-  («крок стане ~10 хв»): `standBy` і час до ресету ростуть **разом**, тож 20-хвилинний
-  `pacingOrangeOverrideSeconds` зʼїдає всі кадри з малим лідом, і лишається сама ця смуга.
+  The cause isn't what [ADR-0102](../adr/0102-stand-by-line-for-the-seven-day-bar.md) anticipated
+  ("the step will become ~10 min"): `standBy` and the time to reset grow **together**, so the
+  20-minute `pacingOrangeOverrideSeconds` eats every frame with a small lead, and only this narrow
+  band survives.
 
-## Щотижня API на 4–6 годин перестає віддавати `seven_day.resets_at`
+## Every week, the API stops returning `seven_day.resets_at` for 4-6 hours
 
-У момент тижневого ресету зникають **обидва** джерела дати одночасно: сам обʼєкт приходить `null`, і
-запис `weekly_all` у `limits[]` теж без власного `resets_at`. Стан тримається, доки перша витрата
-токенів не матеріалізує нову 5-годинну сесію — тобто сервер, схоже, створює тижневе вікно **ліниво**,
-за тим самим принципом, що й пʼятигодинне ([ADR-0027](../adr/0027-session-idle-no-phantom-reset.md)).
+At the moment of the weekly reset, **both** date sources vanish at once: the object itself comes back
+`null`, and the `weekly_all` entry in `limits[]` also has no `resets_at` of its own. This state holds
+until the first token spend materializes a new five-hour session — meaning the server appears to
+create the weekly window **lazily**, on the same principle as the five-hour one
+([ADR-0027](../adr/0027-session-idle-no-phantom-reset.md)).
 
-Тіло під час затемнення (форма, відтворена в стубах `weekly-reset-blackout` / `weekly-reset-unknown`):
+The payload during the blackout (the shape reproduced in the `weekly-reset-blackout` /
+`weekly-reset-unknown` stubs):
 
 ```jsonc
 {"five_hour": {"utilization": 0.0, "resets_at": null},
  "seven_day": null,
  "limits": [{"kind": "weekly_all", "percent": 0, "severity": "normal",
-             "scope": null, "is_active": true}]}   // ← без resets_at
+             "scope": null, "is_active": true}]}   // ← no resets_at
 ```
 
-Заміри на двох незалежних журналах (серпень 2026):
+Measurements from two independent journals (August 2026):
 
-| Ряд | Записів `d7` | Епізодів | Тривалість | Частка записів |
+| Series | `d7` records | Episodes | Duration | Share of records |
 |---|---:|---:|---|---:|
-| Max 5x | 5 029 | 3 | 264, 253, 306 хв | 4.0 % |
-| Pro | 862 | 2 | 611, 54 хв | 6.5 % |
+| Max 5x | 5,029 | 3 | 264, 253, 306 min | 4.0% |
+| Pro | 862 | 2 | 611, 54 min | 6.5% |
 
-### Сітка ресетів стабільна, але **різна на різних тарифах**
+### The reset grid is stable, but **different across plans**
 
-| Ряд | День тижня | Час | Інтервали |
+| Series | Day of week | Time | Intervals |
 |---|---|---|---|
-| Max 5x | вівторок | 07:00:00 UTC (джитер ±1 с) | рівно 7 днів |
-| Pro | середа | 21:00:00 UTC (джитер ±1 с) | рівно 7 днів |
+| Max 5x | Tuesday | 07:00:00 UTC (±1 s jitter) | exactly 7 days |
+| Pro | Wednesday | 21:00:00 UTC (±1 s jitter) | exactly 7 days |
 
-Саме ця регулярність робить реконструкцію можливою: «останній справжній ресет + N тижнів» відтворює
-ту саму сітку з похибкою **±0.25 с** (замір на всіх пʼяти епізодах обох рядів). Але сітку **не можна
-хардкодити** — вона властивість тарифу, і вгадування дня тижня зламалося б на Pro.
+This regularity is exactly what makes reconstruction possible: "last real reset + N weeks"
+reproduces the same grid to within **±0.25 s** (measured across all five episodes in both series).
+But the grid **can't be hardcoded** — it's a property of the plan, and guessing the day of the week
+would break on Pro.
 
-> ⚠️ Сітка не є непорушною: [#389](https://github.com/artem-from-ua/tokenpace/issues/389) документує
-> зсуви `resets_at` **назад** (−10.33 год і −1.00 год у Pro-ряді). Реконструкція від якоря це
-> переживає — перший же справжній ресет її перезаписує, — але прогноз у наступне затемнення буде
-> хибним на величину зсуву.
+> ⚠️ The grid isn't immutable: [#389](https://github.com/artem-from-ua/tokenpace/issues/389)
+> documents `resets_at` shifting **backward** (−10.33 h and −1.00 h in the Pro series). Anchor-based
+> reconstruction survives this — the very next real reset overwrites it — but the forecast for the
+> next blackout will be wrong by the amount of the shift.
 
-### 10-хвилинна сітка в даних — **наша**, не серверна
+### The 10-minute grid in the data is **ours**, not the server's
 
-Найлегша пастка при читанні журналу. Справжній `resets_at` **завжди** має дробові секунди
-(`06:59:59.764448+00:00`); значення, що лягають рівно на 10-хвилинну межу без дробової частини, —
-це старий локальний фолбек `ResetClock.nextReset` (`now + 7d`, округлене вгору `ceilTo10Minutes`).
+The easiest trap when reading the journal. A genuine `resets_at` **always** has fractional seconds
+(`06:59:59.764448+00:00`); values that land exactly on a 10-minute boundary with no fractional part
+are the old local fallback `ResetClock.nextReset` (`now + 7d`, rounded up by `ceilTo10Minutes`).
 
-Ця відмінність — надійна ознака: на 5 029 + 862 записах перетину немає жодного. Але перевіряти її
-треба по **сирому рядку**: `ResetClock.parse` дробову частину відкидає, тож після парсингу справжній
-ресет виглядає як синтезований.
+This distinction is a reliable signal: across 5,029 + 862 records, there's no overlap at all. But it
+has to be checked against the **raw line**: `ResetClock.parse` discards the fractional part, so after
+parsing, a genuine reset looks synthesized.
 
-> #389 приписує цей дрейф серверу («сервер сам повзе датою вперед по ~10 хвилин на пол», 35 із 37
-> змін на Max) — це хибно, і після [ADR-0107](../adr/0107-weekly-reset-reconstructed-from-the-last-known-one.md)
-> джерело шуму зникло разом із фолбеком.
+> #389 attributes this drift to the server ("the server itself drifts the date forward by ~10 minutes
+> per poll," 35 of 37 changes on Max) — that's wrong, and after
+> [ADR-0107](../adr/0107-weekly-reset-reconstructed-from-the-last-known-one.md) the source of the
+> noise disappeared along with the fallback.
 
-## Як перевірити наново
+## How to re-verify
 
-Журнал накопичується сам, тож заміри відтворюються:
+The journal accumulates on its own, so the measurements are reproducible:
 
 ```sh
 python3 - <<'PY'
@@ -241,5 +257,5 @@ print('без зміни:', same, 'стрибки:', collections.Counter(jumps))
 PY
 ```
 
-Сирі відповіді лежать поза репозиторієм (`~/.tokenpace-usage-payloads/`) — вони містять приватні
-дані й у git не потрапляють.
+Raw responses live outside the repository (`~/.tokenpace-usage-payloads/`) — they contain private
+data and never make it into git.

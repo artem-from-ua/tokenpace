@@ -1,54 +1,55 @@
-# Performance — гейти періодичних завдань
+# Performance — periodic-task gates
 
-TokenPace крутить п'ять періодичних завдань. Цей документ — одна зведена таблиця: **що саме кожне з
-них зупиняє, сповільнює або взагалі не помічає**. Він відповідає на питання «чи прокидається
-застосунок на замкненому Mac», «чи зжере він трафік на роздачі», «чи розрядить батарею» — без читання
-п'яти різних файлів.
+TokenPace runs five periodic tasks. This document is one summary table: **exactly what stops, slows
+down, or plain doesn't notice each of them**. It answers "does the app wake up on a locked Mac,"
+"will it eat bandwidth on a metered connection," "will it drain the battery" — without reading five
+different files.
 
-Це довідка про **фактичний стан коду**, не про задум. Де код розходиться з проєктним документом, це
-позначено явно.
+This is a reference to the **actual state of the code**, not the intent. Where the code diverges from
+the design docs, that's called out explicitly.
 
-Суміжні документи: каденції й потік даних — [architecture/data-flow.md](architecture/data-flow.md);
-система оновлень — [architecture/update-system.md](architecture/update-system.md); статус сервісів
-і архіватор — [architecture/services-and-config.md](architecture/services-and-config.md).
+Related documents: cadences and data flow — [architecture/data-flow.md](architecture/data-flow.md);
+the update system — [architecture/update-system.md](architecture/update-system.md); service status
+and the archiver — [architecture/services-and-config.md](architecture/services-and-config.md).
 
-## Зведена таблиця
+## Summary table
 
-| Гейт | Usage API | Статуси сервісів | Awaiting-input | Резервне копіювання | Авто-інсталяція оновлень |
+| Gate | Usage API | Service statuses | Awaiting-input | Backup | Auto-install updates |
 |---|---|---|---|---|---|
-| **Screen lock / скрінсейвер / display sleep** | ✅ повна зупинка, gated `pausePollingWhenScreenLocked` (default on) | ✅ непрямо | ✅ **безумовно** — стрім і таймер знімаються ([#275](https://github.com/artem-from-ua/tokenpace/issues/275)) | ✅ непрямо | ✅ непрямо |
-| **System sleep / wake** | ✅ безумовно | ✅ непрямо | ✅ безумовно (backstop за екранним гейтом) | ✅ непрямо | ✅ непрямо |
-| **On-battery** | ❌ | ❌ | ❌ | ✅ **defer** до підключення до мережі ([#306](https://github.com/artem-from-ua/tokenpace/issues/306)) | ✅ **defer** до підключення до мережі |
+| **Screen lock / screensaver / display sleep** | ✅ full stop, gated by `pausePollingWhenScreenLocked` (default on) | ✅ indirect | ✅ **unconditional** — the stream and the timer are torn down ([#275](https://github.com/artem-from-ua/tokenpace/issues/275)) | ✅ indirect | ✅ indirect |
+| **System sleep / wake** | ✅ unconditional | ✅ indirect | ✅ unconditional (backstop behind the screen gate) | ✅ indirect | ✅ indirect |
+| **On-battery** | ❌ | ❌ | ❌ | ✅ **defer** until plugged in ([#306](https://github.com/artem-from-ua/tokenpace/issues/306)) | ✅ **defer** until plugged in |
 | **Low Power Mode** | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Metered network** | ❌ | ❌ | ❌ (мережі не торкається) | ❌ (пише локально) | ✅ **defer** до безлімітного зʼєднання |
-| **Вільне місце на диску** | ❌ | ❌ | ❌ | ✅ **блок** із попередженням, якщо після копіювання лишиться < 5 ГБ ([#306](https://github.com/artem-from-ua/tokenpace/issues/306)) | ✅ **defer**, якщо після завантаження лишиться < 5 ГБ |
-| **claude CLI running** | ✅ як каденція: 180 с → 15 хв | ✅ непрямо (розтягується разом) | ❌ **свідомо** (#275) — без `claude` у деревах ніхто не пише, FSEvents і так мовчить; замість гейта сканер відсіює мертві сесії за pid | ❌ | ❌ |
-| **429 / `Retry-After`** | ✅ hold до вказаного часу | ✅ непрямо + власний floor 5 хв | н/д | н/д | н/д |
-| **Feature toggle** | н/д (завжди ввімкнено) | н/д | `awaitingInputEnabled` (default **off**) | `archiveEnabled` + заданий `archiveDestination` | `automaticUpdateChecks` + `installUpdatesAutomatically` (обидва default **on**, opt-out) |
-| **Власна каденція** | 180 с; 15 хв коли `claude` не запущено; floor 60 с | `max(5 хв, usageInterval)`; при проблемі floor 60 с | FSEvents 0.75 с + safety timer 45 с | раз на 24 год | перевірка раз на 12 год |
+| **Metered network** | ❌ | ❌ | ❌ (doesn't touch the network) | ❌ (writes locally) | ✅ **defer** until an unmetered connection |
+| **Free disk space** | ❌ | ❌ | ❌ | ✅ **block** with a warning if less than 5 GB would remain after copying ([#306](https://github.com/artem-from-ua/tokenpace/issues/306)) | ✅ **defer** if less than 5 GB would remain after downloading |
+| **claude CLI running** | ✅ as cadence: 180 s → 15 min | ✅ indirect (stretches along with it) | ❌ **deliberately** (#275) — with no `claude` in the process tree nothing is writing, so FSEvents is already silent; instead of a gate, the scanner filters out dead sessions by pid | ❌ | ❌ |
+| **429 / `Retry-After`** | ✅ hold until the given time | ✅ indirect + its own 5-minute floor | n/a | n/a | n/a |
+| **Feature toggle** | n/a (always on) | n/a | `awaitingInputEnabled` (default **off**) | `archiveEnabled` + a set `archiveDestination` | `automaticUpdateChecks` + `installUpdatesAutomatically` (both default **on**, opt-out) |
+| **Own cadence** | 180 s; 15 min when `claude` isn't running; 60 s floor | `max(5 min, usageInterval)`; 60 s floor on trouble | FSEvents 0.75 s + 45 s safety timer | once per 24 h | check once per 12 h |
 
-Позначки: ✅ — гейт діє; ✅ непрямо — власного таймера немає, завдання успадковує паузу від
-usage-циклу; ❌ — гейт відсутній у коді; **defer** — не пропуск, а відкладення до наступного
-heartbeat, коли умови покращаться; **блок** — те саме відкладення, але користувачеві **показують
-причину** (умова сама не мине).
+Legend: ✅ — the gate is active; ✅ indirect — no timer of its own, the task inherits the pause from
+the usage cycle; ❌ — no gate in the code; **defer** — not a skip but a postponement to the next
+heartbeat, once conditions improve; **block** — the same postponement, but the user **is shown the
+reason** (the condition won't clear on its own).
 
-## Чому половина колонок каже «непрямо»
+## Why half the columns say "indirect"
 
-Лише два завдання мають власний рушій: usage-полл (`AsyncStream`-цикл) і awaiting-input (FSEvents +
-`Timer`). Решта три — статуси, резервне копіювання, перевірка оновлень — **не мають своїх таймерів**.
-Вони висять на usage-heartbeat: кожен успішний тік `apply(_:)` по черзі питає їх «чи час?».
+Only two tasks have their own engine: the usage poll (the `AsyncStream` loop) and awaiting-input
+(FSEvents + `Timer`). The other three — statuses, backup, update checks — **have no timers of their
+own**. They hang off the usage heartbeat: every successful `apply(_:)` tick asks them in turn "is it
+time?"
 
 ```plantuml
 @startuml
 skinparam componentStyle rectangle
 skinparam defaultTextAlignment center
 
-component "PollingEngine\n(AsyncStream-цикл)" as engine
+component "PollingEngine\n(AsyncStream loop)" as engine
 component "AppDelegate.apply(_:)" as apply
 component "pollStatusIfDue" as status
 component "pollUpdateIfDue" as update
 component "pollArchiveIfDue" as archive
-component "AwaitingInputWatcher\n(FSEvents + Timer 45 с)" as watcher
+component "AwaitingInputWatcher\n(FSEvents + Timer 45 s)" as watcher
 
 component "ScreenLockObserver\nWorkspaceSleepWake" as park
 component "UpdateInstallPlan" as instplan
@@ -60,148 +61,157 @@ apply -down-> status
 apply -down-> update
 apply -down-> archive
 update -down-> instplan : battery / metered / disk
-archive -down-> spaceplan : disk (блок)
+archive -down-> spaceplan : disk (block)
 
-park -down-> watcher : стан екрана\n(окремий, негейтований колбек)
+park -down-> watcher : screen state\n(separate, ungated callback)
 
 note bottom of watcher
-  Власний рушій, але той самий
-  park-механізм (#275)
+  Own engine, but the same
+  park mechanism (#275)
 end note
 
 note right of archive
-  Батарея — тихий defer
-  просто в pollArchiveIfDue,
-  без чистого типу (#306)
+  Battery is a silent defer
+  right in pollArchiveIfDue,
+  no clean type (#306)
 end note
 @enduml
 ```
 
-![Гейти періодичних завдань — хто на чому висить](https://www.plantuml.com/plantuml/svg/NPJVQXD15CRlzoaEzIR19efQXLv80wrG45hOIcu4cMmcoPBPsMLtDZ5tYSNgdIZYSwILq3QjyHLcNi4dyPlPJPha8c7EcTyvt_cpkmUPOgdA8-5b_L0cB6KH1N6Kn99BvQkHu9JoG37P5NmDQVCEouKwunzLGuHT6O6c07yyzRnLFEsSnaA4idiakw7axsMbaOrauAkKiwXcBlIDdkkxwWwnZBX3rcCRINB81UyonUiiISIeyc6_O9srZYQGyHLJUNRSESovWp9dRrFlaZRoFL2vixUfHXhqmi4QnWh7Hdb35YhqTYoJN3MP2deyHOTl_AC1xZDwJ6TXn5DwiKTcKjGzBAYD2Vb1ohby6mVzarR6qu5DqepJVfQmWFk2ywJ9-aKH67r_FRJiHQ9J8Ku5auuAOISmDcejolTjpXNe51pfsSnKQyT3MNjTReBsgPvPUNf2zI5Ay4h_4dDB06LNV98h3C4hN4kWNC2civptfdCvtU9ovLvs0f4MKtYqHgWbuZZmDaxjCEjxPUY3wB8f15c0AlfIt-c5dbUtsYoN0SvCp2SzrNz8p_JSZErHJx5A6mLpfk_neDxk4jmp_Hk_M_0BVUL0t12UuWL4BcqyP6IC9bgnKd54SMUrTIBz0zJKJCemCpRdvglvvN9FSJKZbnWt4zXE5L6swXgicVbi5S5VwtkgF7hsQg-AfRJ9wfMgQTZjAIkw72b4lqCI_TbEp3VwD_vfLMwGpDQ05xaexI_k5suI2z9NjFqMx5h6DdXDvWkY7OXXB5moH9-ZekTFNwvLT80JFYp_0G00)
+![Periodic-task gates — what hangs off what](https://www.plantuml.com/plantuml/svg/NLDHYzim37xFhn2tbvRrkh7jDhY7SHrtWuD13tAZBuFXE6fYujZ6LjhbtqzsabxIbs19dpv9dvI7GC9Jr-eiDCeuuKKBqhRE6ZIKKwyHF4eIfj8uWvHu59scL_n7Ewqgqp8Q97_GPzab7svUhDRAL4-cKWR_cDKkz4Rcv94vjBLkVGCY0ARmF6_dt2Dgh0JXLZYd-zNV-m6Rh3dKSOcS17NX-VZOOGA5P5-ZVhkI-TvGNRAlKJilQtMQmSJWMBHt5efuhcVZEZe8aZLwdkvd_dJYU83tyAfQzF3b3iBGzda0BSJ9fKSqlwnizaL0VueS1-kRu8J4N2EwWsY67bZrPfuwZc9uKArVj309fTXsR2nQ7RhF8-S5c2eaP1QPuRQqPtFxVLm4tCCsnFBm0RPdRY4R_HCixO1HSRlxZbY3R71DW57_fNEKU-cSn1s25_Sq2HSf1F5LzTnBY_p0ab-b2aqsfhuLdORYf0Y0LQ5Ps_NLZECc61II_gdPU9i1usqJRg0pyV1Aa2nk8HA5iTnTOObi2_PuMIV0_cn6sJPGT0HK8mJH8eTIsHPbBOmABQpUVVfsjsOjIuXi8wTNLKsHSb82uCSuiUBRWw1qt2F_SAdS05S6hazrmq5ZGMfa0QXtoFK-V_mwg_V0B_xH_mC0)
 
-Наслідок: усе, що паркує usage-цикл, автоматично паркує ще три завдання. І навпаки — якщо колись
-відвʼязати статуси або архіватор у власний таймер, разом зникнуть усі park-гейти, які вони зараз
-успадковують безкоштовно.
+Consequence: everything that parks the usage cycle automatically parks three more tasks. And the
+reverse — if statuses or the archiver were ever detached onto their own timer, every park gate they
+currently inherit for free would disappear along with it.
 
-**Awaiting-input має власні тригери, але той самий park-механізм** (#275). Він не залежить від
-usage-heartbeat — його будять FSEvents і 45-секундний safety-таймер — проте стан екрана знімає і
-стрім, і таймер. Підключений він не через `.sleep`/`.wake` (той сигнал сам гейтований опцією
-`pausePollingWhenScreenLocked`), а через окремий **негейтований** колбек `ScreenLockObserver`, тож
-пауза діє незалежно від того чекбокса. Деталі — [awaiting-input-refresh.md](../design/awaiting-input-refresh.md).
+**Awaiting-input has its own triggers, but the same park mechanism** (#275). It doesn't depend on the
+usage heartbeat — FSEvents and a 45-second safety timer wake it — yet screen state tears down both
+the stream and the timer. It's wired up not through `.sleep`/`.wake` (that signal is itself gated by
+the `pausePollingWhenScreenLocked` option), but through a separate **ungated** `ScreenLockObserver`
+callback, so the pause applies regardless of that checkbox. Details —
+[awaiting-input-refresh.md](../design/awaiting-input-refresh.md).
 
-## Гейти по одному
+## Gates one by one
 
-### Screen lock / скрінсейвер / display sleep
+### Screen lock / screensaver / display sleep
 
 `ScreenLockObserver` ([`PollingShell.swift:105-170`](../../Sources/TokenPace/PollingShell.swift))
-слухає три пари подій: `com.apple.screenIsLocked` / `screenIsUnlocked`, `screensaver.didstart` /
-`willstop`, `NSWorkspace.screensDidSleep` / `screensDidWake`. Будь-яка з них емітить `.sleep` або
-`.wake` у `SignalHub`; цикл на `.sleep` іде в `waitWhileAsleep()` — жодного мережевого запиту.
+listens for three pairs of events: `com.apple.screenIsLocked` / `screenIsUnlocked`,
+`screensaver.didstart` / `willstop`, `NSWorkspace.screensDidSleep` / `screensDidWake`. Any of them
+emits `.sleep` or `.wake` on `SignalHub`; the loop goes into `waitWhileAsleep()` on `.sleep` — no
+network request at all.
 
-Gated опцією `pausePollingWhenScreenLocked` (default **on**), яка читається **у мить події**, не
-кешується — тож перемикач у Settings → General діє негайно. Див. [ADR-0032](../adr/0032-simplified-polling-cadence.md), рішення D5.
+Gated by the `pausePollingWhenScreenLocked` option (default **on**), which is read **at the moment of
+the event**, not cached — so the toggle in Settings → General takes effect immediately. See
+[ADR-0032](../adr/0032-simplified-polling-cadence.md), decision D5.
 
 ### System sleep / wake
 
-`WorkspaceSleepWake` ([`PollingShell.swift:54-80`](../../Sources/TokenPace/PollingShell.swift)) —
-той самий park-шлях, але **безумовний**: опція його не вимикає. Логіка проста: під час сну машини
-мережі однаково немає.
+`WorkspaceSleepWake` ([`PollingShell.swift:54-80`](../../Sources/TokenPace/PollingShell.swift)) — the
+same park path, but **unconditional**: the option doesn't disable it. The logic is simple: while the
+machine is asleep, there's no network either way.
 
-Прокидання **не гарантує негайний полл**. `wakeRearmInterval` фетчить лише якщо кеш устиг застаріти
-(минув повний інтервал з останнього успіху) — інакше короткий сон не спричиняє зайвий запит.
+Waking up **doesn't guarantee an immediate poll**. `wakeRearmInterval` only fetches if the cache has
+gone stale (a full interval has passed since the last success) — otherwise a short sleep doesn't
+trigger an extra request.
 
-### On-battery, metered network, вільне місце
+### On-battery, metered network, free disk space
 
-Гейти середовища має **авто-інсталяція оновлень** (усі три) і **резервне копіювання** (два з трьох —
-батарея й вільне місце; мережі воно не торкається, бо пише локально).
+The gates on environment conditions belong to **auto-install updates** (all three) and **backup**
+(two of the three — battery and free space; it doesn't touch the network, since it writes locally).
 
-#### Оновлення
+#### Updates
 
-Три гейти живуть у чистому
-[`UpdateInstallPlan.decide`](../../Sources/TokenPaceKit/UpdateInstallPlan.swift) і застосовуються в
-такому порядку (перший спрацьований виграє):
+Three gates live in the pure
+[`UpdateInstallPlan.decide`](../../Sources/TokenPaceKit/UpdateInstallPlan.swift) and apply in this
+order (the first one triggered wins):
 
-1. вільне місце — після завантаження має лишитись ≥ 5 ГБ, інакше `deferInsufficientSpace`;
-2. AC power — на батареї `deferOnBattery`;
-3. безлімітна мережа — на metered-зʼєднанні `deferMeteredNetwork`.
+1. free space — at least 5 GB must remain after downloading, otherwise `deferInsufficientSpace`;
+2. AC power — on battery, `deferOnBattery`;
+3. unmetered network — on a metered connection, `deferMeteredNetwork`.
 
-Порядок навмисний: повний диск — найтвердіший фізичний блокер, немає сенсу відкладати «до розетки»,
-якщо завантаження однаково не влізе.
+The order is deliberate: a full disk is the hardest physical blocker, so there's no point deferring
+"until plugged in" if the download won't fit anyway.
 
-Це **defer, не skip**: стан не персиститься, рішення переоцінюється на кожному heartbeat, тож
-оновлення встановиться саме щойно умови покращаться. Користувачу причина показується реченням
-«Update pending because …» — і одразу **всі** закриті гейти, а не лише перший, щоб людину не посилали
-спершу ввімкнути живлення, а потім окремо виявляти metered-мережу.
+This is **defer, not skip**: the state isn't persisted, the decision is re-evaluated on every
+heartbeat, so the update installs the moment conditions improve. The reason is shown to the user in
+the sentence "Update pending because …" — and **all** closed gates at once, not just the first one,
+so the user isn't sent to turn on power first and then discover the metered network separately.
 
-Джерела фактів: `PowerSource.isOnACPower` (IOKit,
+Sources of truth: `PowerSource.isOnACPower` (IOKit,
 [`SystemConditions.swift:19`](../../Sources/TokenPace/SystemConditions.swift)),
 `NetworkMonitor.isMetered` (`NWPath.isExpensive || isConstrained`,
 [`PollingShell.swift:191-204`](../../Sources/TokenPace/PollingShell.swift)),
 `DiskSpace.availableBytes` (`volumeAvailableCapacityForImportantUsage`).
 
-**Важливо:** ці два монітори живуть у polling-шарі, але поллінг ними **не** гейтиться — вони лише
-живлять рішення інсталятора. Коментар у коді фіксує це прямо: «Used only to *defer* an auto-install
-download onto an unmetered link, never to gate…».
+**Important:** these two monitors live in the polling layer, but polling itself is **not** gated by
+them — they only feed the installer's decision. A comment in the code states this directly: "Used
+only to *defer* an auto-install download onto an unmetered link, never to gate…"
 
-Ручний «Install now» обходить power/metered (користувач попросив явно), але **не** free-space —
-жоден намір не робить безпечним заповнення диска.
+A manual "Install now" bypasses power/metered (the user asked explicitly), but **not** free space —
+no amount of intent makes filling up the disk safe.
 
-#### Резервне копіювання ([#306](https://github.com/artem-from-ua/tokenpace/issues/306))
+#### Backup ([#306](https://github.com/artem-from-ua/tokenpace/issues/306))
 
-Два гейти з різною семантикою — і це головне, що варто про них знати.
+Two gates with different semantics — and that's the main thing worth knowing about them.
 
-**Батарея — тихий defer.** `guard PowerSource.isOnACPower` у `pollArchiveIfDue`
-([`App.swift`](../../Sources/TokenPace/App.swift)), **після** перевірки каденції: інакше відʼєднаний
-Mac писав би в лог щополу (180 с), а не лише коли синк реально настав. Маркер `lastArchiveSync` не
-рухається, стан не персиститься — щойно шнур на місці, наступний heartbeat синкає сам. Обґрунтування
-те саме, що й для оновлень, лише сильніше: оновлення качає ~10 МБ, а перший синк архіву копіює **всю**
-теку сесій (сотні МБ і більше).
+**Battery is a silent defer.** `guard PowerSource.isOnACPower` in `pollArchiveIfDue`
+([`App.swift`](../../Sources/TokenPace/App.swift)), **after** the cadence check: otherwise an
+unplugged Mac would write to the log on every poll (180 s), not only when a sync was actually due.
+The `lastArchiveSync` marker doesn't move, the state isn't persisted — the moment the cord is back,
+the next heartbeat syncs on its own. The reasoning is the same as for updates, only stronger: an
+update downloads ~10 MB, while the first archive sync copies the **entire** sessions folder (hundreds
+of MB or more).
 
-**Вільне місце — блок із попередженням.** Живе в чистому
-[`ArchiveSpacePlan.verdict`](../../Sources/TokenPaceKit/ArchiveSpacePlan.swift): якщо після копіювання
-лишиться < 5 ГБ (той самий поріг, що й `UpdateInstallPlan.minFreeBytesAfterDownload` — одна обіцянка
-замість двох чисел), `LogArchiver.sync` кидає `insufficientSpace` **до того, як щось записати**. На
-відміну від батареї це не тихо: повний диск сам не розсмокчеться, тож у Settings зʼявляється ⚠-рядок.
+**Free space is a block with a warning.** Lives in the pure
+[`ArchiveSpacePlan.verdict`](../../Sources/TokenPaceKit/ArchiveSpacePlan.swift): if less than 5 GB
+would remain after copying (the same threshold as
+`UpdateInstallPlan.minFreeBytesAfterDownload` — one promise instead of two numbers),
+`LogArchiver.sync` throws `insufficientSpace` **before writing anything**. Unlike the battery case,
+this isn't silent: a full disk won't resolve itself, so a warning line appears in Settings.
 
-Щоб гейт судив **прогін цілком**, `sync` спершу сканує всі три корені в сукупний план і аж тоді
-важить — інакше він міг би скопіювати два корені й відмовити на третьому, лишивши архів
-напівоновленим. План на **нуль** байтів завжди проходить: нічого копіювати — нічим і заповнити диск.
+For the gate to judge the **whole run**, `sync` first scans all three roots into a combined plan and
+only then weighs it — otherwise it could copy two roots and fail on the third, leaving the archive
+half-updated. A plan for **zero** bytes always passes: nothing to copy means nothing to fill the disk
+with.
 
-Вільне місце міряється **на томі призначення** (`forVolumeContaining:` архівної теки), а не на
-системному: архів зазвичай на зовнішньому диску. Нечитабельний том читається як `.max` — fail-open,
-як `?? .max` в оновленнях: збій діагностики не має вимикати бекап назавжди.
+Free space is measured **on the destination volume** (`forVolumeContaining:` of the archive folder),
+not the system one: the archive is usually on an external disk. An unreadable volume reads as `.max`
+— fail-open, same as `?? .max` in updates: a diagnostic failure shouldn't disable backup forever.
 
-Ручний «Archive Now» обходить **батарею** (користувач попросив явно), але **не** місце — та сама межа,
-що й в оновленнях.
+A manual "Archive Now" bypasses **battery** (the user asked explicitly), but **not** space — the same
+limit as in updates.
 
 ### claude CLI running
 
 `ProcessClaudeActivityProbe` ([`PollingShell.swift:237-271`](../../Sources/TokenPace/PollingShell.swift))
-через `sysctl(KERN_PROC_ALL)` шукає процес з точним іменем `claude` (CLI, не Desktop). Немає
-процесу → usage-каденція 15 хв замість 180 с. Це **не зупинка**: ліміти тікають незалежно від того,
-чи ти зараз працюєш, тож дані все одно оновлюються, просто рідше.
+uses `sysctl(KERN_PROC_ALL)` to look for a process named exactly `claude` (the CLI, not Desktop). No
+process → the usage cadence becomes 15 min instead of 180 s. This is **not a stop**: limits keep
+ticking regardless of whether you're actively working, so data still updates, just less often.
 
 ### 429 / `Retry-After`
 
-Сервер попросив зачекати — чекаємо рівно стільки, без власної ескалації. Ручний refresh скидає hold.
-Статус-полл захищений окремим floor'ом 5 хв, тож 429-thrash на usage не б'є сторонню status-сторінку.
+The server asked us to wait — we wait exactly that long, with no escalation of our own. A manual
+refresh clears the hold. The status poll is protected by its own separate 5-minute floor, so
+429-thrash on usage doesn't hit the third-party status page.
 
-## Відсутні гейти
+## Missing gates
 
-Свідомо або поки що не реалізовані — жодним із пʼяти завдань:
+Deliberately absent, or not yet implemented, in any of the five tasks:
 
-- **Low Power Mode** — `ProcessInfo.isLowPowerModeEnabled` у коді відсутній повністю. Найочевидніший
-  кандидат: у цьому режимі користувач прямо просить економити, а usage-полл кожні 3 хв — помітний
-  постійний фон.
-- **Thermal pressure** — `ProcessInfo.thermalState` не використовується.
-- **User-idle (HID)** — часу без вводу ніде не міряємо. Єдиний проксі «користувача немає» — стан
-  екрана (і, для каденції usage-полла, наявність процесу `claude`).
-- **On-battery / metered для поллінгу** — дані вже зібрані (див. вище), але до каденції не
-  підключені. Дешевий важіль, якщо колись постане питання економії трафіку на роздачі.
+- **Low Power Mode** — `ProcessInfo.isLowPowerModeEnabled` is entirely absent from the code. The most
+  obvious candidate: in this mode the user is explicitly asking to save power, and a usage poll every
+  3 min is a noticeable constant background presence.
+- **Thermal pressure** — `ProcessInfo.thermalState` isn't used.
+- **User-idle (HID)** — time without input isn't measured anywhere. The only proxy for "user isn't
+  there" is screen state (and, for the usage-poll cadence, whether a `claude` process exists).
+- **On-battery / metered for polling** — the data is already collected (see above), but isn't wired
+  into the cadence. A cheap lever if bandwidth economy on a metered connection ever becomes a
+  question.
 
-## Розходження коду з документацією
+## Where the code diverges from the docs
 
-Дрібніше: docstring [`UpdateInstallPlan`](../../Sources/TokenPaceKit/UpdateInstallPlan.swift) називає
-`autoInstallEnabled` «default-OFF via `PersistedConfig`», хоча фактично ключ
-`installUpdatesAutomatically` читається як `?? true` — тобто **opt-out**, а не opt-in. Коментар
-застарів; поведінка правильна, помилковий лише опис.
+Minor: the docstring on [`UpdateInstallPlan`](../../Sources/TokenPaceKit/UpdateInstallPlan.swift)
+calls `autoInstallEnabled` "default-OFF via `PersistedConfig`," even though the
+`installUpdatesAutomatically` key is actually read as `?? true` — i.e., **opt-out**, not opt-in. The
+comment is stale; the behavior is correct, only the description is wrong.

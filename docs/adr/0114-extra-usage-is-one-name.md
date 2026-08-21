@@ -66,7 +66,7 @@ accessibility-лейбли.
   замість двох, які тільки виглядали синхронними.
 - **Регресію ловити нічим.** Тестів на ці рядки не було й немає: `Tests/` покриває лише
   `TokenPaceKit`, а Settings і попап живуть у виконуваному таргеті без тестів. Захист поки що —
-  правило в [conventions.md](../reference/conventions.md#регістр-user-facing-рядків--sentence-case-і-одна-назва-на-одну-річ)
+  правило в [conventions.md](../reference/conventions.md#case-of-user-facing-strings--sentence-case-and-one-name-per-thing)
   і те, що ім'я тепер має одне джерело. Підняти `extraUsageTitle` в Kit і закрити тестом —
   очевидний наступний крок, свідомо не зроблений тут, щоб не тягнути рефактор у текстову зміну.
 - **`Extra Usage Credit` лишається в коментарях і докстрінгах** там, де йдеться про біллінговий
