@@ -54,7 +54,7 @@
 при виводі backing store на фізичну панель. Тому:
 
 - **Джерело істини — Digital Color Meter** або око мейнтейнера на живому барі. Це та сама причина,
-  через яку [ui-verification.md](../guides/ui-verification.md#тестування-кольорів-menu-bar-віджета-swatch-режим--піпетка)
+  через яку [ui-verification.md](../guides/ui-verification.md#testing-menu-bar-widget-colors-swatch-mode--color-picker)
   забороняє міряти кольори по скріншотах.
 - **Порожній результат у скріншоті ≠ проблеми немає.** У згаданій сесії аналіз PNG тричі «доводив»,
   що все чітко, поки мейнтейнер бачив розмиття наживо.

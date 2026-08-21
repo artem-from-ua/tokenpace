@@ -76,7 +76,7 @@ store**.
 ## Кольори: жоден скріншот не дає достовірних RGB — міряй Digital Color Meter
 
 **Перед будь-якою звіркою або калібруванням кольору відкрий
-[ui-verification.md § «Тестування кольорів menu-bar віджета»](docs/guides/ui-verification.md#тестування-кольорів-menu-bar-віджета-swatch-режим--піпетка)** —
+[ui-verification.md § «Testing menu-bar widget colors»](docs/guides/ui-verification.md#testing-menu-bar-widget-colors-swatch-mode--color-picker)** —
 метод, цільові значення, swatch-режим.
 
 - **Будь-який скріншот — наш, надісланий, з будь-якого джерела — НЕ є джерелом кольору.** macOS

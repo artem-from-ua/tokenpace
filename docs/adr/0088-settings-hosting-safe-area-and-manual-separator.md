@@ -88,7 +88,7 @@ sidebar, і в detail).
   інсет доведеться давати явно.
 - Автоматична риска (`.automatic`) для цього вікна непридатна за конструкцією; будь-який майбутній
   перегляд має або зберегти ручний драйвер, або довести заміром, що `.automatic` забіндився.
-- Сценарій верифікації — [ui-verification.md](../guides/ui-verification.md#скрол-detail-панелі-риска-тулбара-мінімальна-висота-346);
+- Сценарій верифікації — [ui-verification.md](../guides/ui-verification.md#detail-pane-scrolling-toolbar-rule-minimum-height-346);
   метод діагностики таких багів —
   [agent-workflow.md § «Діагностика layout-багів у вікнах»](../guides/agent-workflow.md#діагностика-layout-багів-у-вікнах).
 
