@@ -85,18 +85,13 @@ struct GeneralPane: View {
             // controls answer "how does TokenPace live on this Mac", and this one answers "what does the
             // dropdown say" — a different question deserves its own card. Appearance › Dropdown points
             // here so it is findable from where it is missed (#476).
+            // No `SettingsHint` under the row: the label names the caption verbatim, and the caption says
+            // what it does. A line explaining that ⌥ still works without it would be telling the reader
+            // something the switch's own wording already implies.
             Section("Dropdown") {
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle("Show «hold ⌥ Option» hint in dropdown", isOn: Binding(
-                        get: { model.showOptionHint },
-                        set: { model.setShowOptionHint($0) }))
-                    // States the consequence rather than repeating the label. Turning this off leaves the
-                    // menu with no on-screen sign that ⌥ does anything — which is exactly what someone who
-                    // knows the shortcut wants, and a dead end for anyone else, so it is worth saying
-                    // plainly before they choose.
-                    SettingsHint(text: "The dropdown's actions — *Settings*, *Quit* — are always available "
-                        + "by holding ⌥ Option. Without this hint, nothing on screen says so.")
-                }
+                Toggle("Show «hold ⌥ Option» hint in dropdown", isOn: Binding(
+                    get: { model.showOptionHint },
+                    set: { model.setShowOptionHint($0) }))
             }
         }
         .formStyle(.grouped)
