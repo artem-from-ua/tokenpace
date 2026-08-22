@@ -61,6 +61,13 @@ enum StubScenario: String, CaseIterable {
     case edgeExtremes = "edge-extremes"
     case calmDegraded = "calm-degraded"
     case allGreen = "all-green"
+    // GitHub provider (#454). The first three isolate its own section; the fourth is the one that
+    // only exists because there are two providers — the interesting bugs live in the interaction,
+    // not in either provider alone.
+    case githubGreen = "github-green"
+    case githubDegraded = "github-degraded"
+    case githubOutage = "github-outage"
+    case githubClaudeDown = "github-claude-down"
     case creditsActive = "credits-active"
     case creditsLimitReached = "credits-limit-reached"
     case creditsNoLimit = "credits-no-limit"
@@ -191,6 +198,10 @@ enum StubScenario: String, CaseIterable {
         case .edgeExtremes:        return "Pacing · edge extremes (5h 0 %, 7d 100 %)"
         case .calmDegraded:        return "Calm bars + degraded dot"
         case .allGreen:            return "All services green (⌥ reveals)"
+        case .githubGreen:         return "GitHub — all green"
+        case .githubDegraded:      return "GitHub — Actions degraded"
+        case .githubOutage:        return "GitHub — Git operations down"
+        case .githubClaudeDown:    return "GitHub green, Claude down"
         case .creditsActive:       return "Credits · active (paced)"
         case .creditsLimitReached: return "Credits · limit reached (red)"
         case .creditsNoLimit:      return "Credits · no limit (neutral)"
@@ -377,6 +388,18 @@ enum StubScenario: String, CaseIterable {
             return "Calm bars + every service operational (all green): the popup shows no status rows by "
                  + "default; hold ⌥ Option to reveal the four green rows (API, Code, Web/Desktop, Cowork). "
                  + "Most stubs are all-operational too — this one names the ⌥ reveal as its subject."
+        case .githubGreen:
+            return "GitHub monitored and healthy: the section shows its header dot and no rows — the "
+                 + "state that would otherwise be an empty section (#454)."
+        case .githubDegraded:
+            return "GitHub with Actions degraded: one row under the GitHub header, the header dot "
+                 + "yellow, Claude untouched."
+        case .githubOutage:
+            return "GitHub with Git operations down and API requests degraded: worst-of-5 puts the "
+                 + "header dot red; the menu-bar dot follows worst-of-all."
+        case .githubClaudeDown:
+            return "Both providers at once, in opposite states — GitHub green while Claude Code is "
+                 + "down. Proves the sections and their dots are independent (#454)."
         case .creditsActive:
             return "Credits ¤ icon (#144): enabled €15 limit, €10.77 spent (~72 %) → paced icon "
                  + "colour. 7-day pinned at 100 % so the icon shows — and since credits cover the "
@@ -545,6 +568,10 @@ enum StubScenario: String, CaseIterable {
         case .edgeExtremes:        return StubUsageTransport(mode: .pacing(.edgeExtremes), now: now)
         case .calmDegraded:        return StubUsageTransport(mode: .calmDegraded, now: now)
         case .allGreen:            return StubUsageTransport(mode: .allGreen, now: now)
+        case .githubGreen:         return StubUsageTransport(mode: .githubGreen, now: now)
+        case .githubDegraded:      return StubUsageTransport(mode: .githubDegraded, now: now)
+        case .githubOutage:        return StubUsageTransport(mode: .githubOutage, now: now)
+        case .githubClaudeDown:    return StubUsageTransport(mode: .githubClaudeDown, now: now)
         case .creditsActive:       return StubUsageTransport(mode: .credits(.active), now: now)
         case .creditsLimitReached: return StubUsageTransport(mode: .credits(.limitReached), now: now)
         case .creditsNoLimit:      return StubUsageTransport(mode: .credits(.noLimit), now: now)

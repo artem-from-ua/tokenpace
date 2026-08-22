@@ -297,6 +297,13 @@ public struct StatusHealth: Sendable, Equatable {
     /// GitHub's status page — the link target for `Development services` rows.
     public static let githubPageURL = URL(string: "https://www.githubstatus.com")!
 
+    /// GitHub's summary endpoint — the same Statuspage v2 shape Claude's page serves, which is what
+    /// lets `StatusSummary` decode both without a second decoder.
+    ///
+    /// Declared here beside the page it belongs to rather than in `StatusClient`: the client is being
+    /// made endpoint-agnostic in #455, so the URL is a property of the *provider*, not of the client.
+    public static let githubEndpoint = URL(string: "https://www.githubstatus.com/api/v2/summary.json")!
+
     /// The status page a logical service belongs to. Per **provider**, not per app: the popup turns
     /// the status word into a link, and a GitHub row pointing at Anthropic's page would be a dead end.
     public static func pageURL(for id: ServiceID) -> URL {
