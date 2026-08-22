@@ -2322,8 +2322,6 @@ final class PopupViewController: NSViewController {
             for incident in incidents {
                 addIncidentRow(incident, now: now, to: githubStack)
             }
-            // Same rule as Claude's plate: the control appears beside the incident it follows.
-            addSubscribeRowIfNeeded(layout, to: githubStack)
         } else if optionHeld {
             addServiceStatusRow(
                 label: "No ongoing incidents",
@@ -2342,6 +2340,14 @@ final class PopupViewController: NSViewController {
                     pageURL: StatusHealth.githubPageURL,
                     to: githubStack)
             }
+        }
+
+        // Outside the ⌥ branches, exactly as Claude's plate places it: the control is an offer about
+        // the trouble itself, not a detail of the incident dimension, so hiding it behind ⌥ would
+        // make the two plates behave differently for the same state. Shown whenever this plate has an
+        // incident of its own — the control sits beside its cause.
+        if !incidents.isEmpty {
+            addSubscribeRowIfNeeded(layout, to: githubStack)
         }
     }
 
