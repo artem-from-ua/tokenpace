@@ -292,9 +292,9 @@ final class SettingsModel {
 
     // MARK: GitHub provider (#454)
 
-    /// Whether GitHub's `Development services` group is monitored. Off by default — a provider added
-    /// on upgrade waits to be asked.
-    var githubDevelopmentServicesEnabled = false
+    /// Whether GitHub's `Development services` group is monitored. On by default, like every other
+    /// monitoring flag; the value here is only a placeholder until `resync()` reads the stored one.
+    var githubDevelopmentServicesEnabled = true
 
     /// What the GitHub page currently describes — the value its callback carries.
     var githubMonitoring: GitHubMonitoring {

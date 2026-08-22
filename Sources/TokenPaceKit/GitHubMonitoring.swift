@@ -24,14 +24,23 @@ public struct GitHubMonitoring: Sendable, Equatable, Codable {
     /// `Issues`, `Pull Requests`, `Actions`, aggregated worst-of-5.
     public var developmentServicesEnabled: Bool
 
-    public init(developmentServicesEnabled: Bool = false) {
+    public init(developmentServicesEnabled: Bool = true) {
         self.developmentServicesEnabled = developmentServicesEnabled
     }
 
-    /// The first-run default: **off**. Unlike every other monitoring flag in the app, which is
-    /// opt-out, a provider added to an existing install is opt-in — not everyone using TokenPace
-    /// works against GitHub, and switching on a new status dot in someone's menu bar without being
-    /// asked is a behaviour change, not a feature.
+    /// The default: **on**, like every other monitoring flag in the app.
+    ///
+    /// It shipped opt-in first, on the reasoning that a provider appearing on upgrade should wait to
+    /// be asked. In practice the people running TokenPace are running it beside `gh` and a browser
+    /// full of pull requests, so the provider that has to be discovered in Settings is the one that
+    /// never gets turned on — and a monitor nobody enabled reports nothing, which is the same as not
+    /// shipping it.
+    ///
+    /// The cost is named rather than waved away: an existing install gains a plate in the dropdown
+    /// and, during a GitHub incident, a dot in the menu bar without having asked for either. That is
+    /// a behaviour change, and it belongs in the release notes. An explicit `false` already in
+    /// `UserDefaults` still wins — this default only decides what an **absent** key means, so nobody
+    /// who has turned it off gets it back.
     public static let `default` = GitHubMonitoring()
 
     /// Whether this provider contributes anything at all.
