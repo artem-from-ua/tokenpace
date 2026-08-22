@@ -2219,12 +2219,6 @@ final class PopupViewController: NSViewController {
     /// redundant line in a menu this small is not free.
     private var showsOptionHint: Bool { optionHintEnabled && !optionHeld }
 
-    /// A section header's leading half: the provider's status dot beside its title stack.
-    ///
-    /// `.centerY` on purpose — the title stack inside is `.firstBaseline`, which is right for text
-    /// meeting text but would drop a fixed-size dot onto the baseline. The gap is the rows' own
-    /// (`statusDotGap - statusDotNudge`) with the same nudge inset, so the header's dot lands on the
-    /// identical vertical line as every dot below it.
     /// The dot a provider's section header should draw, or `nil` for none (#454).
     ///
     /// **Only `operational`.** The header dot exists to answer the calm state, where the rows below
@@ -2239,27 +2233,27 @@ final class PopupViewController: NSViewController {
         aggregate == .operational ? .operational : nil
     }
 
+    /// A section header's leading half: the provider's status dot, when there is one, beside its
+    /// title stack (#454).
     private static func headerRow(dot: GlowDotView?, title: NSView) -> NSStackView {
-        // A `nil` dot still occupies its column: a spacer of the dot's own diameter keeps the title
-        // in one place across the cold start, so the first poll changes a colour rather than the
-        // layout.
-        let leading: NSView
-        if let dot {
-            leading = dot
-        } else {
-            let spacer = NSView()
-            spacer.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                spacer.widthAnchor.constraint(equalToConstant: Metrics.statusDotDiameter),
-                spacer.heightAnchor.constraint(equalToConstant: Metrics.statusDotDiameter),
-            ])
-            leading = spacer
-        }
-        let row = NSStackView(views: [leading, title])
+        // No dot, no column: the title goes flush left rather than sitting behind a reserved gap.
+        //
+        // The service rows do reserve that column — their names line up under one another whatever
+        // each row's dot is doing. A header is not one of a set, it is the thing the set hangs from,
+        // so an empty indent under it reads as a missing mark rather than as alignment. The dot is
+        // also rare here (calm state only), which would make the reserved gap the common case.
+        let row = NSStackView(views: dot.map { [$0, title] } ?? [title])
         row.orientation = .horizontal
+        // `.centerY` because the title stack inside is `.firstBaseline` — right for text meeting
+        // text, but it would drop a fixed-size dot onto the baseline instead of the optical centre.
         row.alignment = .centerY
-        row.spacing = Metrics.statusDotGap - Metrics.statusDotNudge
-        row.edgeInsets = NSEdgeInsets(top: 0, left: Metrics.statusDotNudge, bottom: 0, right: 0)
+        if dot != nil {
+            // The rows' own gap and nudge, so a header dot lands on the same vertical line as the
+            // dots below it. Both are skipped without a dot: the nudge exists to move the dot alone,
+            // and applied to a lone title it would push the name half a point off the left edge.
+            row.spacing = Metrics.statusDotGap - Metrics.statusDotNudge
+            row.edgeInsets = NSEdgeInsets(top: 0, left: Metrics.statusDotNudge, bottom: 0, right: 0)
+        }
         return row
     }
 
@@ -2552,6 +2546,10 @@ final class PopupViewController: NSViewController {
                     }
                 }
             }
+            // One subscribe row for the app, not one per provider (#454). Following an episode
+            // means "tell me when the current trouble is over", and that question does not split by
+            // whose status page the incident came from — `currentSubscriptionState` accordingly reads
+            // both providers' incidents.
             if let subscribeRow = addSubscribeRowIfNeeded(layout) { lastRow = subscribeRow }
             if let lastRow { stack.setCustomSpacing(Metrics.sectionSpacing, after: lastRow) }
         }
@@ -3601,7 +3599,7 @@ final class PopupViewController: NSViewController {
     /// deliberately absent when nothing is wrong — there is nothing to be notified about, and a dead
     /// control is worse than none.
     @discardableResult
-    private func addSubscribeRowIfNeeded(_ layout: PopupLayout) -> NSView? {
+    private func addSubscribeRowIfNeeded(_ layout: PopupLayout, to target: NSStackView? = nil) -> NSView? {
         guard let state = layout.subscription else { return nil }
         let row = SubscribeRowView(
             symbolName: Self.subscribeSymbol(state),
@@ -3609,8 +3607,9 @@ final class PopupViewController: NSViewController {
             filled: state == .subscribed)
         row.onClick = { [weak self] in self?.onToggleSubscription?() }
         row.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(row)
-        row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        let host = target ?? stack
+        host.addArrangedSubview(row)
+        row.widthAnchor.constraint(equalTo: host.widthAnchor).isActive = true
         return row
     }
 

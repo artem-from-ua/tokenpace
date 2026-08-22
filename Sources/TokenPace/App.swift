@@ -1457,8 +1457,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// What the popup's single subscribe row should show right now, or `nil` to omit it.
     private func currentSubscriptionState() -> EpisodeSubscriptionState? {
+        // Both providers (#454). The subscription is one thing for the whole app — following an
+        // episode means "tell me when this is over", and that question does not change with whose
+        // page the incident is on. Narrowing this to Claude would leave a GitHub incident delivering
+        // banners with no way to opt into or out of them.
         EpisodeEvaluator.rowState(
-            incidents: lastClaudeIncidents,
+            incidents: lastVisibleIncidents,
             subscription: PersistedConfig.episodeSubscription)
     }
 
