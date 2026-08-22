@@ -97,6 +97,22 @@ the method, the target values, the swatch mode.
   (`sizingOptions`/`safeAreaRegions`), not the SwiftUI modifiers —
   [ADR-0088](docs/adr/0088-settings-hosting-safe-area-and-manual-separator.md).
 
+## ADRs — read the guide before creating or changing one
+
+**Before creating, superseding, or editing ANY file under `docs/adr/` — including a one-line
+frontmatter change on someone else's ADR — open
+[docs/guides/writing-adrs.md](docs/guides/writing-adrs.md)**: the numbering and the filename shape,
+the required frontmatter keys, the body's sections, the form of a supersession postscript, and
+exactly what the index row may contain. Start a new record from
+[docs/adr/TEMPLATE.md](docs/adr/TEMPLATE.md).
+
+Most of that lived nowhere until recently — it was habit, recoverable only by opening a neighboring
+file, and habit drifts. It produced a status the lifecycle never had (`proposed`), keys left empty
+in some files and absent in others, five different openings for the same postscript, and an index
+whose Title column stopped being a title: the average row passed 1 kB and the worst reached 5.2 kB,
+every word of it duplicating a postscript that said it better. **The index row is the H1 verbatim
+plus one of five statuses — nothing else.**
+
 ## 🚫 Prohibitions that must not be violated (the full text lives here, not in the guide)
 
 These rules used to live only in [agent-workflow.md](docs/guides/agent-workflow.md). **That is
