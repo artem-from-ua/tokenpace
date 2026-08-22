@@ -462,34 +462,27 @@ never from memory.
   emoji spam.
 - **Respect the reader.** A geek doesn't need to be told what a menu bar or a reset is.
 - **Structure** (flexible): a short feature heading → 1–2 sentences of substance → where needed, a
-  compact list of specifics → the section about updating and installing (below).
+  compact list of specifics. The notes end there.
 
-**The updating section (at the end of the notes):**
-
-- **Recommend turning on auto-updates** in the app (Settings → About → "Check for updates periodically"
-  + "Install updates automatically").
-- **Leave a short description of manual installation** for anyone installing for the first time or who
-  prefers doing it by hand (download the zip → unpack → drag into Applications → launch from
-  Launchpad). The full instructions are below.
-- **Don't add explanations of why the user would want this.** "So that future releases arrive on their
-  own, without downloading them by hand" — that's exactly the tail that got cut from `v0.76.0`. The name
-  of the option says everything; the phrase explains to an adult what they've just read. Give the step,
-  not the motivation for it.
+**🚫 No updating or installing section.** The notes carry what changed and nothing else — no
+auto-update recommendation, no Settings → About path, no download/unpack/drag steps, no
+launch-at-login note. Every release used to end with that block and it was cut by hand each time:
+whoever already runs TokenPace has auto-updates deciding this for them, and whoever is installing for
+the first time is reading the README, not a release. Do not reintroduce it in a shortened form
+either — one line of "turn on auto-updates" is the same block with fewer words.
 
 An example of the right tone: "The widget no longer nags you with the reset time when everything is
 calm anyway — it shows it only when it's time to pay attention." An example of the wrong one (too dry):
 "Implemented a mechanism for conditionally hiding the countdown element according to the state matrix."
 
-## Instructions for users (in the release body)
+## What never goes in the release body
 
-> 1. Download `TokenPace-X.Y.Z.zip` and unpack it (double-click).
-> 2. Drag **TokenPace.app** into the **Applications** folder.
-> 3. Launch it from **Launchpad** or Finder. There will be no Dock icon — the app
->    lives in the menu bar (`LSUIElement`).
->
-> **Launch-at-login** only works for a copy in `/Applications`, launched from there.
+**Installation instructions.** Download / unpack / drag into `Applications` / launch from Launchpad,
+and the note that launch-at-login only works for a copy in `/Applications` — all of it lives in the
+README, where somebody installing for the first time actually looks. See the "no updating or
+installing section" rule above.
 
-**Don't mention notarization or Gatekeeper in the release body.** Every build is notarized — that is an
+**Notarization or Gatekeeper.** Every build is notarized — that is an
 invariant property of the process, not news about a particular version, and it dictates no action to
 the reader. The technical notarization check stays as step 3 above; it just doesn't make it into the
 text for the user.
