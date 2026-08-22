@@ -2318,17 +2318,16 @@ final class PopupViewController: NSViewController {
         // rendering both providers' incidents under one header would attribute GitHub's outage to
         // Claude, which is precisely what the two plates exist to prevent.
         let incidents = layout.githubIncidents
-        if optionHeld, !incidents.isEmpty {
+        //
+        // With ⌥ held and no incident this plate stays **empty**. Claude's says "No ongoing
+        // incidents" in that spot, but only because its section is on screen at all *because*
+        // something is wrong — there a blank dimension would read as a glitch. This plate is always
+        // on screen, so a calm provider under ⌥ has nothing to report and says nothing; the header's
+        // green dot already answers it.
+        if optionHeld {
             for incident in incidents {
                 addIncidentRow(incident, now: now, to: githubStack)
             }
-        } else if optionHeld {
-            addServiceStatusRow(
-                label: "No ongoing incidents",
-                status: .operational,
-                age: layout.githubStatusAge.flatMap { $0 > 0 ? $0 : nil },
-                showsStatusWord: false,
-                to: githubStack)
         } else {
             // Only what is broken, plus what just recovered — the same rule Claude's rows follow.
             for component in status.checks(of: .github).flatMap(\.components)
