@@ -233,7 +233,8 @@ Layout edits alone cannot fix this: the source is elsewhere.
 uneconomical.
 
 - **The cost of the search ≠ the verdict on the task.** "I spent five attempts" describes the agent,
-  not the bug.
+  not the bug. Don't present your own fatigue as a technical conclusion, and don't ask to close a
+  defect's issue when the maintainer can see it.
 - **The barely noticeable is more irritating than the obvious.** The eye doesn't know *what* changed,
   only that the element isn't holding still — worse than an honest one-point shift. Small amplitude
   raises annoyance, it doesn't lower priority.

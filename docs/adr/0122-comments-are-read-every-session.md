@@ -115,14 +115,23 @@ twice, and repairing one end silently breaks the other. `releasing.md` was corre
 `BarStyle.displayName`; `AppearancePanes.swift` went on claiming the titles are grepped out of
 itself. Grep for the counterpart before committing the fix.
 
-### 8. Any path or command written in prose must be executable
+### 8. Don't state a count you would have to maintain
+
+"18 named roles" above an enum breaks the next time a case is added, and it buys nothing — the enum
+is right there, and anyone who needs the number counts it. A trim found that comment saying 18 while
+the enum held 20, in both the code and the doc that mirrored it. Write "named roles".
+
+The test is whether the claim can be kept true for free. A measurement nobody can re-derive is worth
+its maintenance; a number the reader can see for themselves is not.
+
+### 9. Any path or command written in prose must be executable
 
 `releasing.md` carried a `grep` recipe against `Sources/TokenPace/Settings/UIPanes.swift`, a file
 that had not existed for months. Nothing failed until someone tried to cut a release. A path, a
 filename, a shell snippet or an env var in documentation is an assertion about the tree, and
 assertions rot silently. Run them.
 
-### 9. Audit a large trim by filtering, not by reading
+### 10. Audit a large trim by filtering, not by reading
 
 Seventy of the pass's 748 hunks were audited by nine reviewers at high effort: **0 critical losses,
 6 minor, 64 clean**. Reviewing all 748 that way costs roughly ten times the edit. It is also
@@ -140,14 +149,14 @@ Cheapest step first:
    alone: fact or narration?
 3. **Expensive, and only now.** The remainder goes to a high-effort reviewer with the file open.
 
-### 10. Sample deliberately, and state what the sample was
+### 11. Sample deliberately, and state what the sample was
 
 The first audit drew one hunk per file, reported 0 critical losses, and its own reviewer then
 observed the sample was favourable: the files it happened to hit were the ones with ADR coverage.
 The second was widened on that advice — documentation, the pure-logic layer, two to three hunks per
 file. An audit that does not describe its selection is not evidence.
 
-### 11. `docs/adr/` is exempt
+### 12. `docs/adr/` is exempt
 
 History is the product in an ADR. A record states what was decided at a date, and a supersession
 postscript is the intended home for exactly the content rules 2 and 3 remove from code. ADRs are

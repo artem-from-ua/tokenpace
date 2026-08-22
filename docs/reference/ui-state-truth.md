@@ -197,7 +197,8 @@ which is to say every time spending tracks the pace almost exactly. At `usage = 
 visible, because there the left edge also falls into the strip snap to `minX` and the pill would
 otherwise creep out from under the time marker. The invariant is checked by
 [`scripts/check-strip-geometry.py`](../../scripts/check-strip-geometry.py) on a 1001×1001 grid: zero
-affected states.
+affected states, against 19,910 (drifting up to 4.75 pt) before the floor was introduced — the scale
+is why this is an invariant and not a rounding detail.
 
 ### What `.pressure` draws (**Pressure**)
 

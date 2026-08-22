@@ -158,8 +158,10 @@ extension SettingsToolbarController: NSToolbarDelegate {
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         switch identifier {
         case ItemID.nav:
-            // One item for the pair, with the segmented control as its view (see the type doc for
-            // why two separate items or a plain-button view don't work). No min/max sizes: the
+            // One item for the pair, with the segmented control as its view. Two separate items give
+            // the 8 pt dead zone the type doc measures; a plain-button view is no alternative either
+            // — an `NSButton` outside the toolbar's own generation never draws the hover plate at
+            // all (probed). No min/max sizes: the
             // control self-sizes to the system's 80×40 and the toolbar wraps it in the same 76×52
             // slot System Settings' pair occupies.
             let item = NSToolbarItem(itemIdentifier: identifier)

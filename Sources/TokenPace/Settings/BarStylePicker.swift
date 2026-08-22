@@ -175,7 +175,14 @@ struct BarStylePicker: View {
         .onHover { inside in
             if inside { hovered = style } else if hovered == style { hovered = nil }
         }
+        // The caption naming the style lives in a sibling view, so the button needs its own name.
+        // In the live AX tree these tiles report `missing value` for `name` anyway — so do the five
+        // `SegmentedControl` buttons on this pane, so it is how a plain SwiftUI button exposes
+        // itself, not a defect here. The label stays: it is the correct declaration, and making
+        // plain buttons expose names is a pane-wide fix.
         .accessibilityLabel(Text(title))
+        // `.isSelected` is what makes VoiceOver announce the current choice; without it all three
+        // tiles read identically and the state is simply absent.
         .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
     }
 
