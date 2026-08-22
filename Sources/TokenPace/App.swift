@@ -671,6 +671,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if settingsWC == nil {
             let wc = SettingsWindowController()
             wc.onProviderMonitoringChange = { [weak self] config in self?.providerMonitoringChanged(config) }
+            wc.onGitHubMonitoringChange = { [weak self] _ in self?.gitHubMonitoringChanged() }
             wc.onCheckForUpdatesNow = { [weak self] in self?.performUpdateCheck(userInitiated: true) }
             wc.onInstallUpdateNow = { [weak self] in self?.installUpdateNow() }
             wc.onColorAdviceChange = { [weak self] mode in
@@ -1643,6 +1644,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let (.none, .some(github)):         return github
         case (.none, .none):                     return nil
         }
+    }
+
+    /// The GitHub provider's switch changed in Settings (#454): poll **now** rather than at the next
+    /// tick.
+    ///
+    /// Without this the flip would sit invisible for up to the five-minute politeness floor, which
+    /// reads as a switch that does nothing. Clearing `lastGitHubSuccess` is what makes the poll due:
+    /// the cadence gate measures from the last success, and a recent one would otherwise hold the
+    /// fetch back. Turning the provider *off* takes the same path — the poll sees the disabled config
+    /// and clears the plate on the spot.
+    private func gitHubMonitoringChanged() {
+        lastGitHubSuccess = nil
+        githubBackoff = githubBackoff.reset()
+        pollGitHubIfDue()
     }
 
     /// The GitHub status source's heartbeat (#454) — the same shape as Claude's, on its own

@@ -2118,6 +2118,17 @@ final class PopupViewController: NSViewController {
         collapse.priority = .required
         githubCardHeight = collapse
 
+        // The plate's inner padding, held **below** `required` on purpose. A zero-height card and a
+        // pair of required paddings are a direct contradiction — AppKit would break one of them and
+        // which one is not ours to choose. At 999 the collapse wins cleanly while the provider is
+        // off, and these still pin the content exactly when it is on.
+        let githubStackTop = githubStack.topAnchor.constraint(
+            equalTo: githubCard.topAnchor, constant: Metrics.topPadding)
+        let githubStackBottom = githubCard.bottomAnchor.constraint(
+            equalTo: githubStack.bottomAnchor, constant: Metrics.bottomPadding)
+        githubStackTop.priority = .defaultHigh
+        githubStackBottom.priority = .defaultHigh
+
         NSLayoutConstraint.activate([
             // Card inset from the container. Top uses the trimmed `cardTopInset` to offset NSMenu's own
             // vertical padding above our item view, so the visible top gap matches the sides.
@@ -2133,13 +2144,12 @@ final class PopupViewController: NSViewController {
             // The GitHub plate: same insets as Claude's, stacked directly beneath it.
             githubCard.leadingAnchor.constraint(equalTo: card.leadingAnchor),
             githubCard.trailingAnchor.constraint(equalTo: card.trailingAnchor),
-            githubStack.topAnchor.constraint(equalTo: githubCard.topAnchor, constant: Metrics.topPadding),
+            githubStackTop,
             githubStack.leadingAnchor.constraint(
                 equalTo: githubCard.leadingAnchor, constant: Metrics.hPadding),
             githubCard.trailingAnchor.constraint(
                 equalTo: githubStack.trailingAnchor, constant: Metrics.hPadding),
-            githubCard.bottomAnchor.constraint(
-                equalTo: githubStack.bottomAnchor, constant: Metrics.bottomPadding),
+            githubStackBottom,
             container.widthAnchor.constraint(equalToConstant: Metrics.width),
             githubTop,
             // Aligned to the widget's **text**, not to the box: the caption's right edge lands under the
@@ -2280,12 +2290,17 @@ final class PopupViewController: NSViewController {
         githubStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
         guard let status = layout.serviceStatus, status.monitors(.github) else {
+            // Both views, not just the card: `githubStack` is a sibling subview pinned to the card,
+            // so hiding the card alone leaves the stack holding the geometry open and the popup ends
+            // in a blank band where the plate would be.
             githubCardView?.isHidden = true
+            githubStack.isHidden = true
             githubTopConstraint?.constant = 0
             githubCardHeight.map { $0.isActive = true }
             return
         }
         githubCardView?.isHidden = false
+        githubStack.isHidden = false
         githubCardHeight.map { $0.isActive = false }
         githubTopConstraint?.constant = Metrics.plateGap
 

@@ -139,6 +139,12 @@ final class SettingsWindowController: NSWindowController {
         get { model.onProviderMonitoringChange } set { model.onProviderMonitoringChange = newValue }
     }
 
+    /// The GitHub provider's switch changed (#454) — its own forwarder, so flipping it kicks that
+    /// provider's poll without re-resolving Claude's status.
+    var onGitHubMonitoringChange: ((GitHubMonitoring) -> Void)? {
+        get { model.onGitHubMonitoringChange } set { model.onGitHubMonitoringChange = newValue }
+    }
+
     /// Called when the user clicks "Check now" (#37) — runs an immediate update check.
     var onCheckForUpdatesNow: (() -> Void)? {
         get { model.onCheckForUpdatesNow } set { model.onCheckForUpdatesNow = newValue }
