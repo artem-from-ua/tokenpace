@@ -2225,6 +2225,20 @@ final class PopupViewController: NSViewController {
     /// meeting text but would drop a fixed-size dot onto the baseline. The gap is the rows' own
     /// (`statusDotGap - statusDotNudge`) with the same nudge inset, so the header's dot lands on the
     /// identical vertical line as every dot below it.
+    /// The dot a provider's section header should draw, or `nil` for none (#454).
+    ///
+    /// **Only `operational`.** The header dot exists to answer the calm state, where the rows below
+    /// are hidden and the section would otherwise be a name with nothing under it. The moment
+    /// anything is wrong the rows appear, each with its own dot naming the service — and a header dot
+    /// above them would restate, less precisely, what those rows already say. `unknown` is not an
+    /// exception: it too puts rows on screen, so the same reasoning applies.
+    ///
+    /// `nil` input (no status poll has landed yet) also yields no dot: before the first poll there is
+    /// nothing to report, which is a different statement from "healthy".
+    private static func headerDot(for aggregate: ServiceStatus?) -> ServiceStatus? {
+        aggregate == .operational ? .operational : nil
+    }
+
     private static func headerRow(dot: GlowDotView?, title: NSView) -> NSStackView {
         // A `nil` dot still occupies its column: a spacer of the dot's own diameter keeps the title
         // in one place across the cold start, so the first poll changes a colour rather than the
@@ -2298,8 +2312,8 @@ final class PopupViewController: NSViewController {
         leading.alignment = .firstBaseline
         leading.spacing = 4
 
-        let dot = makeStatusDot(
-            status: status.aggregate(of: .github) ?? .unknown, animatorKey: "provider-github")
+        let dot = Self.headerDot(for: status.aggregate(of: .github))
+            .map { makeStatusDot(status: $0, animatorKey: "provider-github") }
         let headerRow = addSplitRow(
             leadingView: Self.headerRow(dot: dot, title: leading), rightView: NSView(),
             to: githubStack)
@@ -2394,10 +2408,7 @@ final class PopupViewController: NSViewController {
         // between polls, and answers a question nobody asks twice — so at rest the header is the bare
         // "Claude" mark and ⌥ restores "Claude ･ Max (5x)". `brandTitleLabel` already renders the mark
         // alone for a nil plan, so this is a gate on the argument, not a second code path.
-        // The dot appears once a status poll has landed and Claude is actually monitored; before
-        // that there is nothing honest to colour, and `unknown` grey would claim we looked and
-        // could not tell (#454).
-        let claudeDot = layout.serviceStatus?.aggregate(of: .claude)
+        let claudeDot = Self.headerDot(for: layout.serviceStatus?.aggregate(of: .claude))
         let brand = Self.brandTitleLabel(
             title: Self.claudeCodeSectionTitle,
             color: Self.claudeBrandColor,
