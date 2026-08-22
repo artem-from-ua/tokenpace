@@ -65,9 +65,10 @@ final class PopupBarView: NSView {
         }
     }
 
-    // The idle "ready" fill is green whatever the week is doing (ADR-0105), so the bar takes no
-    // weekly verdict of its own. Which rows may render blue is decided by `BarLayout.blueAllowed`
-    // (ADR-0115) — never by a view-side flag keyed on row index, which the model cannot see.
+    // The idle "ready" fill is green whatever the week is doing, so the bar takes no weekly verdict
+    // of its own (ADR-0105). Which rows may render blue is decided by `BarLayout.blueAllowed`
+    // (ADR-0115) — never by a view-side flag keyed on row index, because the model cannot see one
+    // and would record a blue the popup is painting green.
 
     /// Bar presentation style for **this surface** (#224, per-surface since #329) — fed from
     /// `PersistedConfig.dropdownStyle` and pushed in from `PopupViewController.addBar`.

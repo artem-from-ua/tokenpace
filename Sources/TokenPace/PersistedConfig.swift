@@ -649,7 +649,7 @@ enum PersistedConfig {
             // reached yet — otherwise it would be waiting to re-seed the two keys on a later launch.
             Key.legacyBarStyle,
             // Retired keys, still swept so a Reset also clears them for anyone who never launched the
-            // retiring build (see each `Key.retired…` for what it used to mean).
+            // retiring build (see each `Key.retired…` for what it means).
             Key.retiredCustomAppearanceValues,
             Key.retiredShowTicks,
             Key.retiredFarBehindInterval,
@@ -657,8 +657,8 @@ enum PersistedConfig {
             Key.retiredShowExtraUsage,
             Key.retiredAwaitingInputInMenuBar,
             Key.retiredResetCountdownModeMenuBar,
-            // The pre-#227 pair the retired pause key once inherited from — swept here too, since the
-            // migration that used to clear them retired along with it.
+            // The pre-#227 pair the retired pause key inherited from — swept here too, since the
+            // migration that cleared them retired along with it.
             Key.legacyHideBarsWhenBlocked,
             Key.legacyShowBlockedPause,
         ] {
@@ -667,13 +667,13 @@ enum PersistedConfig {
     }
 
     /// Sweep away the pause-related keys retired by ADR-0090 — the unified `pauseHidesBars` and the two
-    /// pre-#227 booleans it once inherited from (`hideBarsWhenBlocked`, `showBlockedPause`).
+    /// pre-#227 booleans it inherited from (`hideBarsWhenBlocked`, `showBlockedPause`).
     ///
     /// Nothing reads any of them any more: hiding the bars while blocked is the only behaviour, so the
     /// choice they encoded no longer exists. This is the same shape as ``retireFarBehindIntervalIfNeeded()``
     /// — an unconditional `removeObject`, idempotent by construction, kept so an upgrading install does
-    /// not carry dead values forever. It also inherits the legacy pair's only cleaner: the migration that
-    /// used to sweep them is gone with the key it fed.
+    /// not carry dead values forever. It is also the legacy pair's only remaining cleaner: no migration
+    /// reads them any more, so nothing else clears them.
     static func retirePauseKeysIfNeeded() {
         defaults.removeObject(forKey: Key.retiredPauseHidesBars)
         defaults.removeObject(forKey: Key.legacyHideBarsWhenBlocked)
@@ -703,8 +703,8 @@ enum PersistedConfig {
     /// the one remaining behaviour. Idempotent; runs on every launch and does nothing once the key is gone.
     ///
     /// Worth knowing when reading a `defaults export` afterwards: this is visible to *everyone*, not
-    /// just to whoever changed the setting. On the shipped default (`smart`) a countdown used to appear
-    /// beside the bars whenever a window ran well ahead of pace; it no longer does.
+    /// just to whoever changed the setting. On the shipped default (`smart`) no countdown appears beside
+    /// the bars, even when a window runs well ahead of pace.
     static func retireResetCountdownModeIfNeeded() {
         defaults.removeObject(forKey: Key.retiredResetCountdownModeMenuBar)
     }
@@ -728,9 +728,9 @@ enum PersistedConfig {
     /// one answers "when", so an explicit choice maps onto the two endpoints:
     ///
     /// - `true` (rows were always shown) → ``PopupSectionVisibility/always``
-    /// - `false` (rows were hidden) → ``PopupSectionVisibility/onceUsed``. This used to land on
-    ///   `.optionOnly` (hidden, but ⌥ Option retrieved them); #381 deleted that case, and the legacy
-    ///   raw now resolves through ``PopupSectionVisibility/legacyRawValues`` like every other one.
+    /// - `false` (rows were hidden) → ``PopupSectionVisibility/onceUsed``. `.optionOnly` (hidden, but
+    ///   ⌥ Option retrieved them) is gone since #381, and the legacy raw now resolves through
+    ///   ``PopupSectionVisibility/legacyRawValues`` like every other one.
     ///
     /// Runs on every launch and is idempotent: it does nothing once the new key exists (the legacy key is
     /// cleared either way). Only an **explicit** legacy value migrates — someone who never touched the
@@ -778,7 +778,7 @@ enum PersistedConfig {
             return
         }
         if let legacyShow = defaults.object(forKey: Key.legacyShowModelSpecificLimits) as? Bool {
-            // `false` used to land on the retired `.optionOnly` (#374, removed outright in #381).
+            // `.optionOnly` (#374) is gone, removed outright in #381, so `false` no longer maps to it.
             // `.whenItNeedsAttention` is this row's default and the nearest reading of the old intent:
             // the user had the group switched off, so it should stay folded — but it now comes back on
             // its own when a row turns orange, instead of only under ⌥.

@@ -39,9 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `NSMenuItem.isHidden` is flipped live by `updateTroubleshootVisibility(_:)`, driven by
     /// `optionPollTimer` — the native `isAlternate` swap does not work in a status-item menu.
     ///
-    /// It used to be the *only* ⌥-gated item, beside an always-visible "Settings…". Since #475 every
-    /// action item is gated the same way and this one is no longer special — what remains particular to
-    /// it is only that it was first.
+    /// Every action item is ⌥-gated the same way (#475); this one is not special — what remains
+    /// particular to it is only that it was first.
     private var troubleshootItem: NSMenuItem?
 
     /// The "Settings…" item. ⌥-gated since #475 (ADR-0020 §3 had it always visible); hidden and revealed
@@ -940,9 +939,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateTroubleshootVisibility(_ optionHeld: Bool) {
         guard optionHeld != lastOptionHeld else { return }
         lastOptionHeld = optionHeld
-        // The guard above no longer binds `troubleshootItem` (#475): it used to double as "the menu has
-        // been built", but the popup's caption now has to follow ⌥ even in the moments that optional was
-        // nil, and every item below is optional-chained anyway.
+        // The guard above is not scoped to `troubleshootItem` (#475): the popup's caption must follow ⌥
+        // even in the moments that optional is nil, and every item below is optional-chained anyway.
         troubleshootItem?.isHidden = !optionHeld
         // ⌥-gated since #475 — see the menu-build comment. The separator goes with them: a divider above
         // a hidden Quit would be a line under nothing.
@@ -2559,8 +2557,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // have gone off screen. ADR-0070.
         colorAnimator.beginFrame()
         // Roll any window whose reset boundary has already passed forward to its next window *before*
-        // formatting, so a countdown never computes `remaining <= 0` (which used to surface the removed
-        // `.resetNow` state). The exact `resetTimer` normally fires the roll-forward at the boundary
+        // formatting, so a countdown never computes `remaining <= 0` — there is no `.resetNow` state to
+        // surface that. The exact `resetTimer` normally fires the roll-forward at the boundary
         // (`fireOptimisticReset`), but a render driven by another timer (the 30 s `ageTimer`, a poll
         // tick) can land in the sub-second gap before it fires — so we apply the same pure overlay here
         // on every render. It is a no-op when nothing has crossed a boundary, and the next authoritative
