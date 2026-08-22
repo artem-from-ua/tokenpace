@@ -340,3 +340,26 @@ run** — they are all for diagnostics, screenshots or walking a UI flow.
   existing one, follows [writing-adrs.md](../guides/writing-adrs.md) — the numbering, the
   frontmatter, the postscript, and the one-row index entry it must produce.
 - A new convention or tool → update this file.
+
+### Comments and docs are written in the present tense
+
+**A comment states what holds now and what the next editor must not break — not what the code used
+to do.** The past tense arrives honestly: a comment written *during* a change explains it as "this
+used to be X", which is commit-message language. The commit passes; the sentence stays, and it
+becomes a third copy of a fact already held by git history and, usually, by an ADR. Copies drift —
+that is how the ADR index came to spell one status eleven ways
+([#488](https://github.com/artem-from-ua/tokenpace/pull/488)).
+
+When you catch yourself writing *used to* / *previously* / *was removed*, **rewrite the sentence in
+the present tense**:
+
+- A fact survives → keep the fact, drop the history. "Both used to start at x=0, so a 9-pt dot and a
+  15-pt glyph had centres 3 pt apart" → "Starting both at x=0 would leave a 9-pt dot and a 15-pt
+  glyph with centres 3 pt apart." Same length, and it now warns instead of reminiscing.
+- Nothing survives → drop the sentence. A rejected alternative belongs in the ADR that rejected it.
+- **A decision an ADR records is linked, never retold.** The ADR is the record; the comment points
+  at it.
+
+The one thing worth keeping in any tense is the case where **the obvious move is wrong and the code
+cannot show it** — `setButtonType(.momentaryPushIn)`, because `.momentaryChange` restores the image
+on mouse-up and silently wipes the checkmark. That is a warning, not a memory.
