@@ -15,13 +15,6 @@ current design, because the reasoning is worth as much as the outcome.
 - **`draft`** — not decided yet. It describes a direction, not a commitment.
 - **`rejected`** — a draft that did not take off, kept with a one-line reason.
 
-Every number in the Status column links to the record that replaced it, so a lineage can be
-followed forward without searching the table.
-
-Some ADRs are in Ukrainian: [0002](0002-ukrainian-documentation.md) is the decision that made them
-so, kept in the original as an immutable record, and
-[0116](0116-english-as-documentation-language.md) is the one that reversed it.
-
 | # | Title | Status |
 |---|---|---|
 | [0001](0001-swift-stack.md) | Swift as the project's only language | accepted |
