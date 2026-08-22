@@ -2269,9 +2269,12 @@ final class PopupViewController: NSViewController {
         // cadence, so Claude's "2m ago" says nothing about it. Same slot and same styling as Claude's,
         // so the two headers read as one pattern.
         let leading = NSStackView(views: [header])
-        if optionHeld, let age = layout.githubStatusAge, age > 0 {
+        // Word-for-word the tail Claude's header carries — the separator dot, the verb, the same
+        // duration format — because it answers the same question about a different provider. `age`
+        // here is GitHub's own poll, which is the whole reason it is a separate number.
+        if optionHeld, let age = layout.githubStatusAge {
             let label = NSTextField(
-                labelWithString: Self.separatorPrefix + Self.ageText(age))
+                labelWithString: Self.separatorPrefix + "updated \(Self.ageText(age))")
             label.font = .systemFont(ofSize: Metrics.textSize)
             label.textColor = Self.dimmedLabelColor
             leading.addArrangedSubview(label)
