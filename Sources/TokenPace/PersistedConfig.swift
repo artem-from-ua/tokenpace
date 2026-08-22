@@ -434,17 +434,9 @@ enum PersistedConfig {
     /// Whether a preview is currently shadowing the store.
     static var isPreviewingAppearance: Bool { appearancePreview != nil }
 
-    /// The Appearance values **as stored**, ignoring any preview.
-    ///
-    /// This is what "my setup" means while a preview is up: the row that names the saved configuration
-    /// has to describe the store, not the preset being tried on, or it would claim to be whatever the
-    /// user is currently previewing.
     /// Read one Appearance field through the overlay: the previewed value when a preview is up, the
-    /// stored one otherwise.
-    ///
-    /// Every getter below is one call to this, which is what keeps "does this honour the preview?" from
-    /// being a per-property judgement call — a getter that forgot would silently exclude its surface
-    /// from previews.
+    /// stored one otherwise. Every getter below is one call to this, so "does this honour the preview?"
+    /// is never a per-property judgement call.
     private static func previewOr<T>(
         _ field: KeyPath<AppearancePresetValues, T>, _ stored: @autoclosure () -> T
     ) -> T {
@@ -613,12 +605,10 @@ enum PersistedConfig {
         return stored.foldedForCredits
     }
 
-    /// Revert every setting the **Appearance** pane owns to its factory default — the menu-bar widget
-    /// toggles, the wallpaper-brightness theme, the reset-countdown mode, and the dropdown's per-model
-    /// toggle. Done by **removing** each key (not writing an explicit default), so each property's getter
-    /// falls back to its own default and the two never drift apart. Only these keys are cleared — never
-    /// the whole domain (which would also wipe unrelated panes' settings). The caller re-syncs the model
-    /// and re-applies the values to the widget.
+    /// Revert every setting the **Appearance** pane owns to its factory default. Done by **removing**
+    /// each key (not writing an explicit default), so each property's getter falls back to its own
+    /// default and the two never drift apart. Only these keys are cleared — never the whole domain. The
+    /// caller re-syncs the model and re-applies the values to the widget.
     static func resetAppearanceToDefaults() {
         for key in [
             Key.colorsTell,
@@ -669,11 +659,8 @@ enum PersistedConfig {
     /// Sweep away the pause-related keys retired by ADR-0090 — the unified `pauseHidesBars` and the two
     /// pre-#227 booleans it inherited from (`hideBarsWhenBlocked`, `showBlockedPause`).
     ///
-    /// Nothing reads any of them any more: hiding the bars while blocked is the only behaviour, so the
-    /// choice they encoded no longer exists. This is the same shape as ``retireFarBehindIntervalIfNeeded()``
-    /// — an unconditional `removeObject`, idempotent by construction, kept so an upgrading install does
-    /// not carry dead values forever. It is also the legacy pair's only remaining cleaner: no migration
-    /// reads them any more, so nothing else clears them.
+    /// Nothing reads any of them any more: hiding the bars while blocked is the only behaviour. An
+    /// unconditional `removeObject`, idempotent by construction; no migration clears them otherwise.
     static func retirePauseKeysIfNeeded() {
         defaults.removeObject(forKey: Key.retiredPauseHidesBars)
         defaults.removeObject(forKey: Key.legacyHideBarsWhenBlocked)
@@ -682,76 +669,41 @@ enum PersistedConfig {
 
     /// Retire the "Far behind pace interval" key. The option is gone: the green→blue width is the fixed
     /// shipped ×2 (`PacingModel.farBehindWidthMultiplier`), and whether blue applies at all is now
-    /// decided by the data (`PacingModel.weeklyHasHeadroom`) rather than by a preference.
+    /// decided by the data (`PacingModel.weeklyHasHeadroom`) rather than by a preference. No successor to
+    /// seed — this simply clears the key. Idempotent; runs on every launch.
     ///
-    /// There is **no successor to seed** — unlike the pause/bar-style migrations, the stored value maps
-    /// onto nothing, so this simply clears it (the `clearLegacyPauseKeys` shape). Idempotent; runs on
-    /// every launch and does nothing once the key is gone.
-    ///
-    /// Note for anyone reading a `defaults export` afterwards: users who had picked
-    /// *"Less blue, please!"* (the retired `off`) will start seeing the far-behind blue again in the
-    /// dropdown. On the menu bar the shipped calm default still mutes it to white.
+    /// Users who had picked *"Less blue, please!"* (the retired `off`) start seeing the far-behind blue
+    /// again in the dropdown. On the menu bar the shipped calm default still mutes it to white.
     static func retireFarBehindIntervalIfNeeded() {
         defaults.removeObject(forKey: Key.retiredFarBehindInterval)
     }
 
     /// Retire the "Show reset countdown" key (ADR-0091). The option is gone: a countdown now appears
-    /// exactly where there are no bars — blocked, or paying — and nowhere else, so none of its three
-    /// values has anything left to select.
+    /// exactly where there are no bars — blocked, or paying — and nowhere else. No successor to seed,
+    /// like ``retireFarBehindIntervalIfNeeded()``. Idempotent; runs on every launch.
     ///
-    /// **No successor to seed**, like ``retireFarBehindIntervalIfNeeded()``: every stored value maps onto
-    /// the one remaining behaviour. Idempotent; runs on every launch and does nothing once the key is gone.
-    ///
-    /// Worth knowing when reading a `defaults export` afterwards: this is visible to *everyone*, not
-    /// just to whoever changed the setting. On the shipped default (`smart`) no countdown appears beside
-    /// the bars, even when a window runs well ahead of pace.
+    /// Visible to everyone, not just whoever changed the setting: on the shipped default (`smart`) no
+    /// countdown appears beside the bars, even when a window runs well ahead of pace.
     static func retireResetCountdownModeIfNeeded() {
         defaults.removeObject(forKey: Key.retiredResetCountdownModeMenuBar)
     }
 
-    /// Drop the retired stash of the user's own Appearance setup.
-    ///
-    /// It existed so the old "Custom" radio could restore what a preset had overwritten. Preset rows
-    /// preview rather than apply now, so the stored configuration is never overwritten behind the
-    /// user's back and there is nothing to stash — "My setup" reads the live keys. Removing the blob
-    /// keeps it from sitting in the plist forever on machines that once wrote it.
-    ///
-    /// Deliberately **not** a value migration: folding the stash into the live keys would silently
-    /// change how the widget looks on upgrade, which is the opposite of what the user asked for the
-    /// last time they touched these settings.
+    /// Drop the retired stash of the user's own Appearance setup. Preset rows preview rather than apply
+    /// now, so the stored configuration is never overwritten and there is nothing to stash — "My setup"
+    /// reads the live keys. Deliberately **not** a value migration: folding the stash into the live keys
+    /// would silently change how the widget looks on upgrade.
     static func retireCustomAppearanceValuesIfNeeded() {
         defaults.removeObject(forKey: Key.retiredCustomAppearanceValues)
     }
 
-    /// One-time upgrade of the boolean "Show model & service limits" opt-out to the tri-state
-    /// ``modelLimitsVisibility`` (#211). The old key answered "show the per-model rows or not"; the new
-    /// one answers "when", so an explicit choice maps onto the two endpoints:
-    ///
-    /// - `true` (rows were always shown) → ``PopupSectionVisibility/always``
-    /// - `false` (rows were hidden) → ``PopupSectionVisibility/onceUsed``. `.optionOnly` (hidden, but
-    ///   ⌥ Option retrieved them) is gone since #381, and the legacy raw now resolves through
-    ///   ``PopupSectionVisibility/legacyRawValues`` like every other one.
-    ///
-    /// Runs on every launch and is idempotent: it does nothing once the new key exists (the legacy key is
-    /// cleared either way). Only an **explicit** legacy value migrates — someone who never touched the
-    /// old toggle gets the new ``PopupSectionVisibility/whenItNeedsAttention`` default from the
-    /// getter's preset fallback.
-    ///
-    /// There is no counterpart for the Extra-usage section: it had no popup-side setting before, so
-    /// everyone starts on the preset default.
     /// One-time upgrade of the boolean "hide the calm **7-day** bar" opt-out (#94) to the tri-state
-    /// ``hideTop5hBar`` (ADR-0086). The old key could only ever hide the 7-day bar, so an explicit
-    /// choice maps onto two of the three cases — `true` → `.sevenDay`, `false` → `.never` — each
-    /// preserving exactly what the user was looking at. The mapping itself lives in
-    /// `TopBarHiding.migrated(fromLegacyHide:)` so it is unit-testable from the Kit and shared with the
+    /// ``hideTop5hBar`` (ADR-0086): `true` → `.sevenDay`, `false` → `.never`. The mapping lives in
+    /// `TopBarHiding.migrated(fromLegacyHide:)`, unit-testable from the Kit and shared with the
     /// exported-config decode.
     ///
-    /// Runs on every launch and is idempotent: it does nothing once the new key exists (the legacy key is
-    /// cleared either way). Only an **explicit** legacy value migrates. Someone who never touched the old
-    /// toggle has nothing stored, so they pick up the new ``TopBarHiding/untilItNeedsAttention``
-    /// default from the getter's preset
-    /// fallback — a deliberate shift of the out-of-the-box look (the 7-day bar now stays and the 5-hour
-    /// one steps aside while calm), the same way ADR-0080 moved the factory bar style.
+    /// Idempotent: does nothing once the new key exists (the legacy key is cleared either way). Only an
+    /// **explicit** legacy value migrates — someone who never touched the old toggle picks up the new
+    /// ``TopBarHiding/untilItNeedsAttention`` default from the getter's preset fallback.
     static func migrateTopBarHidingIfNeeded() {
         // Already migrated (or new key explicitly set) → nothing to do. Both the #381 key and its
         // pre-#381 predecessor count as "set": `migrateAppearanceKeysIfNeeded()` moves the latter onto
@@ -789,25 +741,13 @@ enum PersistedConfig {
 
     /// Move all seven Appearance keys onto their #381 names — the surface-prefixed
     /// `menuBar.*` / `dropdown.*` form — carrying each stored **value** through its type's
-    /// `legacyRawValues` on the way.
-    ///
-    /// One migration for seven keys rather than seven migrations: they move together, in one release, so
-    /// a single event describes it and a single pass is atomic. Per key: if the new key is absent and the
-    /// old one is present, read the old raw, resolve it through the type (so `aboveZero` → `onceUsed`,
-    /// `yellowGreen` → `slowDownOrSpeedUp`, `fiveHour` → `untilItNeedsAttention`), write the new key,
-    /// delete the old one, log it.
-    ///
-    /// **An absent old key is left absent** — the value then keeps tracking the preset default, exactly
-    /// as the sibling legacy migrations do.
+    /// `legacyRawValues` on the way. Per key: if the new key is absent and the old one is present, read
+    /// the old raw, resolve it through the type (so `aboveZero` → `onceUsed`, `yellowGreen` →
+    /// `slowDownOrSpeedUp`, `fiveHour` → `untilItNeedsAttention`), write the new key, delete the old one,
+    /// log it. An absent old key is left absent — the value keeps tracking the preset default.
     ///
     /// **Idempotent by construction, no marker key.** Each key's rewrite is guarded on "new key absent"
-    /// and consumes the old key, so completion is self-evident from the old key being gone. That is why
-    /// #381 could fold in the two marker-keyed *value* rewrites this replaces —
-    /// `.nonCalm` → `.aboveZero` for Extra usage, and `.optionOnly` → `.aboveZero` for both rows (#374).
-    /// Both now happen through `PopupSectionVisibility.legacyRawValues` while the key itself moves:
-    /// `optionOnly` and `nonCalm` both resolve to `.onceUsed` there, and neither raw survives as a case,
-    /// so there is nothing left for a later import to reintroduce. Their markers are retired
-    /// (`Key.retired…Migrated`) and only swept by an Appearance reset.
+    /// and consumes the old key, so completion is self-evident from the old key being gone.
     ///
     /// Reads raw strings rather than the typed getters: a getter resolves an unrecognised raw to the
     /// preset default, which would hide the very value being migrated.
@@ -926,18 +866,11 @@ enum PersistedConfig {
     /// | `"simple"` / `"pressure"` | `.pressure` | `.pressure` |
     /// | `"gauge"` / `"balance"` | `.balance` | `.balance` |
     ///
-    /// **Why it is not optional.** Both getters resolve an unrecognised raw to the preset default,
-    /// silently — and after #329 *every* stored `barStyle` is unrecognised, since the key itself is
-    /// gone. Without this pass each user's deliberate choice would be replaced by whatever the
-    /// default preset says, with no error and no trace. Splitting `"mixed"` across the two surfaces
-    /// rather than collapsing it to one style is what keeps that upgrade visually invisible.
-    ///
-    /// **A user who never set the key is not migrated at all** — nothing is written, both getters
-    /// fall back to `.workHarder`, and that user sees the new default (Balance). That is intended: the
-    /// default moved, and only people who never expressed a preference follow it.
-    ///
-    /// Runs on every launch and is idempotent: once either new key exists the legacy key is cleared
-    /// and the pass does nothing, and an absent legacy key stays absent.
+    /// Not optional: both getters resolve an unrecognised raw to the preset default silently, and every
+    /// stored `barStyle` is unrecognised since the key itself is gone — without this pass each user's
+    /// deliberate choice is silently replaced by the default. A user who never set the key is not
+    /// migrated at all — both getters fall back to `.workHarder`. Idempotent: once either new key exists
+    /// the legacy key is cleared and the pass does nothing.
     static func migrateBarStyleIfNeeded() {
         // Already migrated (or a new key explicitly set) → drop the stale legacy value and stop.
         // Either generation of either key counts as "already split": `migrateAppearanceKeysIfNeeded()`
@@ -966,12 +899,11 @@ enum PersistedConfig {
             """)
     }
 
-    /// Write every **Appearance**-pane key from a named preset's fixed value set (#215, #224) — the
-    /// general form of `resetAppearanceToDefaults()`. Unlike reset (which *removes* keys so getters fall
-    /// back to their defaults), this writes explicit values, because a preset can differ from the
-    /// factory defaults (e.g. `.controlFreak` turns calm off; `.chill` opts into `.pressure` bars while
-    /// the default `.workHarder` preset uses `.balance`). The caller re-syncs the model and re-applies the
-    /// values to the widget.
+    /// Write every **Appearance**-pane key from a named preset's fixed value set (#215, #224). Unlike
+    /// reset (which *removes* keys so getters fall back to their defaults), this writes explicit values,
+    /// because a preset can differ from the factory defaults (e.g. `.controlFreak` turns calm off;
+    /// `.chill` opts into `.pressure` bars while `.workHarder` uses `.balance`). The caller re-syncs the
+    /// model and re-applies the values to the widget.
     static func apply(_ preset: AppearancePreset) { applyValues(preset.values) }
 
     /// Write every Appearance key from an arbitrary value set — the general form of ``apply(_:)``.
@@ -1034,20 +966,15 @@ enum PersistedConfig {
     }
 
     /// Whether the dropdown draws the "hold ⌥ Option for more" caption where the action items sit while
-    /// ⌥ is up (#475). **Default-on** (opt-out): `object(forKey:) as? Bool ?? true` reads an absent key
-    /// as `true` and keeps an explicit `false` the user chose, the same shape as
-    /// ``pausePollingWhenScreenLocked``.
+    /// ⌥ is up (#475). **Default-on** (opt-out), the same shape as ``pausePollingWhenScreenLocked``. On
+    /// by default because it is the **only** thing announcing that the menu has actions at all — with it
+    /// off, `Settings…` and `Quit` are reachable solely by holding ⌥, a dead end for someone who doesn't
+    /// know the shortcut.
     ///
-    /// On by default because it is the **only** thing announcing that the menu has actions at all. With
-    /// it off, `Settings…` and `Quit` are reachable solely by holding ⌥ — which is a fine trade for
-    /// someone who already knows the shortcut and a dead end for someone who does not. Hence an opt-out
-    /// that person takes deliberately, never a default.
-    ///
-    /// Its control sits on **Appearance › Dropdown** — where someone looks for it — yet it is
-    /// deliberately **not** an ``AppearancePresetValues`` member, making it the one switch on that pane a
-    /// preset does not rewrite and Copy config does not carry. That is the point: it records what its
-    /// owner has already learned, not what the dropdown should look like, and restoring it onto a second
-    /// Mac would restore the wrong thing. Read live on each menu open, so a change needs no restart.
+    /// Its control sits on **Appearance › Dropdown**, yet it is deliberately **not** an
+    /// ``AppearancePresetValues`` member — the one switch on that pane a preset does not rewrite and Copy
+    /// config does not carry, because it records what its owner has already learned, not what the
+    /// dropdown should look like. Read live on each menu open, so a change needs no restart.
     static var showOptionHint: Bool {
         get { defaults.object(forKey: Key.showOptionHint) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.showOptionHint) }
@@ -1078,15 +1005,12 @@ enum PersistedConfig {
     /// exchange rate plus the accumulation since the last observed weekly bump.
     ///
     /// Persisted rather than held in memory because the ratio window takes **~20 h of active work**
-    /// to fill (measured: 5 segments in 1.9 h, 15 in 20.2 h). An in-memory-only estimate would reset
-    /// on every relaunch — and with 61 polling gaps observed over 13 days, that is often — so the
-    /// feature would spend much of its life cold. That is the same reasoning as
-    /// ``episodeSubscription``: a small record whose value is precisely that it survives a restart.
+    /// to fill (measured: 5 segments in 1.9 h, 15 in 20.2 h) — an in-memory-only estimate would reset on
+    /// every relaunch and spend much of its life cold, with 61 polling gaps observed over 13 days.
     ///
-    /// A JSON blob for the same reason ``monitoredServices`` is one, and a decode failure degrades
-    /// to a fresh estimator (the reconstruction reseeds and warms up again) rather than corrupting
-    /// anything. **Not** stored in the usage journal: that is default-off, and reading it back would
-    /// mean parsing 4.6 MB at launch to recover ~15 numbers.
+    /// A JSON blob for the same reason ``monitoredServices`` is one; a decode failure degrades to a
+    /// fresh estimator rather than corrupting anything. **Not** stored in the usage journal: that is
+    /// default-off, and reading it back would mean parsing 4.6 MB at launch to recover ~15 numbers.
     ///
     /// What survives a long break is decided by ``WeeklyInterpolator/resumed(at:)``, not here: the
     /// ratio always, the accumulation only if the break was short.
@@ -1123,15 +1047,13 @@ enum PersistedConfig {
     /// The last `seven_day.resets_at` the **server** sent — the anchor the decoder rolls forward
     /// while the API withholds one (ADR-0107).
     ///
-    /// Persisted because the blackout it covers lasts 4-6 hours and the app restarts inside it: the
-    /// journal shows five polling gaps within one 2026-08-04 blackout, the longest 104 minutes. An
-    /// in-memory-only anchor would be gone exactly when it is needed, and the app would fall back to
-    /// the honest but useless "reset time unknown".
+    /// Persisted because the blackout it covers lasts 4-6 hours and the app restarts inside it (five
+    /// polling gaps observed within one 2026-08-04 blackout, the longest 104 minutes) — an in-memory-only
+    /// anchor would be gone exactly when it is needed.
     ///
-    /// Stored as the **ISO-8601 string**, not an epoch number or a JSON blob: it round-trips through
-    /// the same ``ResetClock/parse(_:)`` / `isoString` pair as every other date in the app, and it
-    /// stays readable in `defaults read` — which matters for a value worth inspecting mid-blackout.
-    /// There is no structure here to justify a blob.
+    /// Stored as the **ISO-8601 string**, not an epoch number or a JSON blob: it round-trips through the
+    /// same ``ResetClock/parse(_:)`` / `isoString` pair as every other date in the app, and stays
+    /// readable in `defaults read`.
     static var lastSevenDayReset: Date? {
         get {
             defaults.string(forKey: Key.lastSevenDayReset).flatMap(ResetClock.parse)

@@ -27,59 +27,39 @@ final class SettingsWindowController: NSWindowController {
 
     /// The window's pinned content width, readable from outside the controller.
     ///
-    /// `Metrics` itself stays private — this is the one number anything else needs, and it needs it for
-    /// one reason: the preview parks beside this window, so it has to know how much of the screen the
-    /// pair will take (`SettingsPreviewWindowController.Metrics.pairWidth`). Exposed as a single
-    /// constant rather than by opening the whole enum, so the rest of the geometry stays this type's
-    /// own business.
+    /// `Metrics` itself stays private — this is the one number the preview needs, to know how much of
+    /// the screen the pair will take (`SettingsPreviewWindowController.Metrics.pairWidth`). Exposed as a
+    /// single constant rather than by opening the whole enum.
     nonisolated static let pinnedContentWidth: CGFloat = 792
 
     private enum Metrics {
         /// Fixed window content width. Pinned min == max: only the **height** resizes (ADR-0069).
         ///
-        /// **Was 857** — System Settings' own width, measured (#156), when the sidebar was 275. The
-        /// sidebar has since been narrowed to 210 (`SidebarIconMetrics.sidebarWidth`), and this width
-        /// tracks it exactly — 857 − (275 − 210) = 792 — so the **detail column keeps the width its
-        /// panes were laid out against**. Giving the detail column the reclaimed space instead would
-        /// reflow every pane; the split is tuned to this width, which is why it is not draggable.
+        /// Tracks System Settings' own width (measured, #156) minus how much the sidebar has been
+        /// narrowed (`SidebarIconMetrics.sidebarWidth`): 857 − (275 − 210) = 792, so the **detail
+        /// column keeps the width its panes were laid out against**. The split is tuned to this width,
+        /// which is why it is not draggable — change one of the two and the other must follow.
         ///
-        /// Change one of the two and the other must follow, or the detail column silently resizes.
-        ///
-        /// The number itself lives on ``SettingsWindowController/pinnedContentWidth``, which the
-        /// preview reads to work out how wide the pair is; this alias keeps the rest of the file
-        /// reading as `Metrics.contentWidth` while there is still only one copy of the value.
+        /// Alias for ``SettingsWindowController/pinnedContentWidth``, so the rest of the file reads as
+        /// `Metrics.contentWidth` while there is still only one copy of the value.
         static let contentWidth: CGFloat = SettingsWindowController.pinnedContentWidth
-        /// Content height the window **opens at** — a default since ADR-0069, a hard size before it.
-        /// It was hand-bumped every time the Appearance pane grew an option: 480 → 520 (#199) → 560
-        /// (#211) → 600 (#215) → 636 (the "Work harder" toggle) → 684 → 776 (#224 — "Bar style", the
-        /// "Far behind pace interval" section, "Show ticks on bars"), trimmed to 720 (#224 — the Calm
-        /// and Work-harder toggles merged into one segmented row), then 732 for the "Show reset
-        /// countdown" row's Smart-explanation line (#224). The window is height-resizable now and the
-        /// grouped `Form` scrolls, so a new option no longer *requires* a bump — bump this only to
-        /// keep the opening size comfortable.
+        /// Content height the window **opens at** (ADR-0069). The window is height-resizable and the
+        /// grouped `Form` scrolls, so bump this only to keep the opening size comfortable — it is not
+        /// required for a new option to fit.
         static let defaultContentHeight: CGFloat = 732
         /// Smallest content height the user can drag to. Matches ``SettingsRootView``'s own floor
         /// (passed to it explicitly below, so the two cannot drift).
-        ///
-        /// **Was 480** — the app's first fixed window height, kept as the floor by ADR-0069 because it
-        /// was already there, not because anything measured it, and taller than the system's own.
         ///
         /// 470 is System Settings' minimum, read off the window server (`CGWindowListCopyWindowInfo`)
         /// with that window dragged to its floor: **857 × 470**. The number is a *frame* height and is
         /// used here as a *content* height on purpose — both windows are `.fullSizeContentView`, so the
         /// title bar overlays the content instead of adding to it, and the two are the same measurement.
-        /// (Deriving it from a screenshot first gave 443, because that subtracted a title bar which does
-        /// not exist here; the live window measured 792 × 440 for a 440 content height, which is what
-        /// proves the identity.)
         ///
-        /// **Raised from 470 to 560 for the Legend page** (#261). Matching System Settings' own floor
-        /// was right while every pane was a list of controls, which degrades gracefully: squeeze it and
-        /// you scroll a row at a time. Legend is diagrams — a bar with captions pointing into it — and a
-        /// window short enough to cut one in half turns the page from a reference into a puzzle. 560 is
-        /// the height at which its tallest section (the two bar anatomies with their headings) is whole
-        /// with the form's own padding, so a reader who drags the window down still meets complete
-        /// figures. Every other pane keeps scrolling exactly as it did; the floor only stops them
-        /// getting shorter than the one page that cannot take it.
+        /// **560, not 470** (#261): the Legend page is diagrams — a bar with captions pointing into it
+        /// — and a window short enough to cut one in half turns the page from a reference into a
+        /// puzzle. 560 is the height at which its tallest section is whole with the form's own padding.
+        /// Every other pane keeps scrolling exactly as it did; the floor only stops them getting
+        /// shorter than the one page that cannot take it.
         static let minContentHeight: CGFloat = 560
     }
 
@@ -452,12 +432,9 @@ final class SettingsWindowController: NSWindowController {
         }
     }
 
-    /// The `NSTableView` a SwiftUI `List` is built on, somewhere below `root`.
-    ///
-    /// SwiftUI gives no way to ask "is this point on a row", but the table underneath it does, and
-    /// finding the table is a short walk. Returns `nil` if the structure ever changes, and the caller
-    /// then simply does nothing — the pop is an extra, so failing to find the table costs the
-    /// click-the-current-row shortcut and breaks nothing else.
+    /// The `NSTableView` a SwiftUI `List` is built on, somewhere below `root`. Returns `nil` if the
+    /// structure ever changes — the pop is an extra, so failing to find the table costs only the
+    /// click-the-current-row shortcut.
     private static func enclosedTableView(in root: NSView) -> NSTableView? {
         if let table = root as? NSTableView { return table }
         for child in root.subviews {
@@ -728,13 +705,13 @@ final class SettingsWindowController: NSWindowController {
     /// at zero width puts the left edge at the screen's centre, after which growing to 857 pushes the
     /// right half off-screen. That was ADR-0035's off-screen bug. So: size first, position second, and
     /// in the restore path set both at once with `setFrame`, where no intermediate size exists at all.
+
     /// Re-assert the size bounds. They express the intent (fixed width, floored height) and stop most
     /// programmatic resizes, but they are **not** what enforces it — see `windowWillResize`.
     ///
-    /// Re-applied rather than set once because `NSHostingController`, hosting a SwiftUI tree,
-    /// overwrites *every* size bound — `contentMinSize`/`contentMaxSize` and the frame-level
-    /// `minSize`/`maxSize` alike — during its first layout pass, some time after the window is shown,
-    /// leaving `0×0` … `∞×∞`. Measured on this window, not assumed.
+    /// Re-applied rather than set once: `NSHostingController` overwrites *every* size bound —
+    /// `contentMinSize`/`contentMaxSize` and the frame-level `minSize`/`maxSize` alike — during its
+    /// first layout pass, leaving `0×0` … `∞×∞`. Measured on this window, not assumed.
     private func pinSizeBounds() {
         guard let window else { return }
         window.contentMinSize = NSSize(width: Metrics.contentWidth, height: Metrics.minContentHeight)

@@ -12,9 +12,6 @@ import TokenPaceKit
 /// Gated the same way as its menu item: only reachable when the `devToolsEnabled` defaults key is set
 /// and ⌥ Option is held to reveal the entry (ADR-0053).
 ///
-/// The window once also hosted a live colour tuner and a second popup preview; both were removed in
-/// ADR-0106 once the colours they existed to dial in had settled into `ColorRole.defaultColor`.
-///
 /// Modelled on ``TroubleshootWindowController``: programmatic AppKit + Auto Layout, `.floating` level,
 /// `isReleasedWhenClosed = false` so re-opening reuses the instance.
 @MainActor
@@ -70,8 +67,7 @@ final class DevToolsWindowController: NSWindowController {
     // MARK: - Content
 
     /// One vertical stack pinned on all four edges. The controls sit in a single column, so a stack
-    /// carries the layout with no per-view anchors — and, unlike the hand-built constraint set this
-    /// replaced, it cannot leave the content view unconstrained when a row is added or removed.
+    /// carries the layout with no per-view anchors.
     private func buildContent() {
         guard let window else { return }
 

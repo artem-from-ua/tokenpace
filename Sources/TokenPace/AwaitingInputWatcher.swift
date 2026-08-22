@@ -22,11 +22,11 @@ import TokenPaceKit
 /// while parked. On each (re)start we run one catch-up scan, so events missed while parked are
 /// reconciled immediately rather than at the next safety tick.
 ///
-/// There is deliberately **no "Claude is running" term**, though an earlier draft of the design note
-/// specified one: with no `claude` alive nothing writes to the watched trees, so FSEvents is already
-/// silent and the residual cost is one ~0.18 ms scan per safety tick. Sessions left behind by a
-/// killed `claude` are filtered by ``TokenPaceKit/AwaitingInputScanner``'s liveness check instead,
-/// which fixes the actual user-visible bug (a hand that never goes down) rather than the cost.
+/// There is deliberately **no "Claude is running" term**: with no `claude` alive nothing writes to
+/// the watched trees, so FSEvents is already silent and the residual cost is one ~0.18 ms scan per
+/// safety tick. Sessions left behind by a killed `claude` are filtered by
+/// ``TokenPaceKit/AwaitingInputScanner``'s liveness check instead, which fixes the actual
+/// user-visible bug (a hand that never goes down) rather than the cost.
 ///
 /// **Quiet by default.** No per-event / per-tick logging on the steady-state path. We log only when
 /// the count actually changes, when the stream starts/stops, or on an error the user could act on.
