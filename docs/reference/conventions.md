@@ -357,9 +357,21 @@ the present tense**:
   15-pt glyph had centres 3 pt apart" → "Starting both at x=0 would leave a 9-pt dot and a 15-pt
   glyph with centres 3 pt apart." Same length, and it now warns instead of reminiscing.
 - Nothing survives → drop the sentence. A rejected alternative belongs in the ADR that rejected it.
-- **A decision an ADR records is linked, never retold.** The ADR is the record; the comment points
-  at it.
 
-The one thing worth keeping in any tense is the case where **the obvious move is wrong and the code
-cannot show it** — `setButtonType(.momentaryPushIn)`, because `.momentaryChange` restores the image
-on mouse-up and silently wipes the checkmark. That is a warning, not a memory.
+### An ADR reference is a footnote, not the explanation
+
+**Write the reason so it stands on its own; the `ADR-NNNN` after it is where to read more, never
+what makes the sentence mean something.** "Centred on the dot's axis (ADR-0094)" tells the next
+editor nothing they can act on. "A 9 pt dot and a 15 pt glyph put their centres 3 pt apart, enough
+to read as a misaligned column" is checkable against the code, and stays true whatever the ADR
+corpus does next.
+
+That last part is the point. ADRs get superseded, often in pieces — 0027 by six later records, 0009
+and 0020 in part, 0013 and 0086 in full — and **nothing warns a comment that its citation moved**.
+This codebase already carries 45 references to fully superseded ADRs and over a hundred to
+partially superseded ones. A comment leaning on the link is wrong the moment that happens and gives
+no sign; a comment carrying its own reason merely loses a convenience.
+
+The one thing always worth writing is the case where **the obvious move is wrong and the code cannot
+show it** — `setButtonType(.momentaryPushIn)`, because `.momentaryChange` restores the image on
+mouse-up and silently wipes the checkmark. That is a warning, not a memory.

@@ -187,17 +187,20 @@ text in force is this one**.
   — **stop and tell the maintainer**, instead of merging with "docs later" in mind. A separate docs
   PR after the merge breaks atomicity: `main` keeps a commit where code and docs disagree, and
   nothing signals it. Proceeding without docs takes the maintainer's explicit word in this session.
-- **Write comments and docs in the present tense — no archaeology.** A comment says what holds
-  *now* and what the next editor must not break. It does not narrate what the code used to do, what
-  a constant was before, or which issue changed it — that is what git history and the ADRs are for,
-  and a third copy of the same fact is a copy that drifts. Especially never retell a decision an ADR
-  already records: **link the ADR instead** ([#489](https://github.com/artem-from-ua/tokenpace/issues/489)).
-  The test when you catch yourself writing "used to" / "previously" / "was removed": **rewrite the
-  sentence in the present tense.** If a fact survives, keep the fact and drop the history —
-  "both used to start at x=0, so their centres sat 3 pt apart" becomes "starting both at x=0 would
-  leave their centres 3 pt apart". If nothing survives, drop the sentence. The rare keeper is the
-  case where the obvious move is wrong and the code cannot show it (`.momentaryChange` restores the
-  image on mouse-up and wipes the checkmark) — that is a warning, not a memory.
+- **A comment describes the current behavior — only that.** Not what the code used to do, not what
+  a constant was before, not which issue changed it. When you catch yourself writing "used to" /
+  "previously" / "was removed", **rewrite the sentence in the present tense**: if a fact survives,
+  keep the fact and drop the history ("both used to start at x=0, so their centres sat 3 pt apart"
+  → "starting both at x=0 would leave their centres 3 pt apart" — same length, and it warns instead
+  of reminiscing); if nothing survives, drop the sentence.
+- **State the reason so it stands without a citation.** An ADR reference is a footnote, never the
+  explanation itself — a comment that says only "see ADR-0081" is unreadable the day 0081 is
+  partially superseded, and nothing signals that day: 45 references in this codebase already point
+  at fully superseded records ([#489](https://github.com/artem-from-ua/tokenpace/issues/489)). Give
+  the reason in physical terms the code can be checked against — a 9 pt dot and a 15 pt glyph put
+  their centres 3 pt apart whatever any ADR later says. Then a stale link costs convenience, not
+  meaning. The one thing always worth writing is the case where the obvious move is wrong and the
+  code cannot show it (`.momentaryChange` restores the image on mouse-up and wipes the checkmark).
 - **Don't assert from memory** facts about external APIs/tools — verify them (curl/--help/docs).
 - **`gh release create` runs only after the maintainer's explicit go-ahead.** A direct instruction to publish this release — "релізь", "make release", "publish the release" or equivalent — is required each time. Building, notarizing, tagging and drafting release notes may proceed without it, but the actual `gh release create` waits for that explicit word. This is separate from and additional to the `RELEASE_NOTES_APPROVED=1` notes-approval gate (that gate guards the notes; this rule guards the act of publishing).
 
